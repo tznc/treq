@@ -13,6 +13,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use gpui_kit::component::{
@@ -407,19 +408,21 @@ impl RemoteView {
           )
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.sessions.request != request {
-          return;
-        }
-        match result {
-          Ok(list) => view.sessions.list = Some(list),
-          Err(error) => {
-            view.sessions.error = Some(error);
-            view.sessions.list = Some(Vec::new());
+      this
+        .update(cx, |view, cx| {
+          if view.sessions.request != request {
+            return;
           }
-        }
-        cx.notify();
-      });
+          match result {
+            Ok(list) => view.sessions.list = Some(list),
+            Err(error) => {
+              view.sessions.error = Some(error);
+              view.sessions.list = Some(Vec::new());
+            }
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -506,31 +509,33 @@ impl RemoteView {
       let (identities, aliases) = cx
         .background_spawn(async move { (host.ssh_identities(), host.ssh_aliases()) })
         .await;
-      let _ = this.update_in(cx, |view, window, cx| {
-        let Some(form) = view.setup.as_mut().and_then(|s| s.form.as_mut()) else {
-          return;
-        };
-        if form.key_reference.is_empty() {
-          form.key_reference = default_key(&identities).unwrap_or_default();
-        }
-        let options: Vec<SelectOption> = identities
-          .iter()
-          .map(|identity| SelectOption {
-            value: identity.reference.clone(),
-            label: format!("{} ({})", identity.label, identity.algorithm),
-          })
-          .collect();
-        let selected = form.key_reference.clone();
-        form.identities = identities;
-        form.aliases = aliases;
-        form.key.update(cx, |key, cx| {
-          key.set_items(options, window, cx);
-          if !selected.is_empty() {
-            key.set_selected_value(&selected, window, cx);
+      this
+        .update_in(cx, |view, window, cx| {
+          let Some(form) = view.setup.as_mut().and_then(|s| s.form.as_mut()) else {
+            return;
+          };
+          if form.key_reference.is_empty() {
+            form.key_reference = default_key(&identities).unwrap_or_default();
           }
-        });
-        cx.notify();
-      });
+          let options: Vec<SelectOption> = identities
+            .iter()
+            .map(|identity| SelectOption {
+              value: identity.reference.clone(),
+              label: format!("{} ({})", identity.label, identity.algorithm),
+            })
+            .collect();
+          let selected = form.key_reference.clone();
+          form.identities = identities;
+          form.aliases = aliases;
+          form.key.update(cx, |key, cx| {
+            key.set_items(options, window, cx);
+            if !selected.is_empty() {
+              key.set_selected_value(&selected, window, cx);
+            }
+          });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -554,16 +559,18 @@ impl RemoteView {
       let result = cx
         .background_spawn(async move { host.probe_host_key(&hostname, port) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if let Some(form) = view.form() {
-          form.probing = false;
-          match result {
-            Ok(fingerprint) => form.trust = Some(fingerprint),
-            Err(error) => form.probe_error = error,
+      this
+        .update(cx, |view, cx| {
+          if let Some(form) = view.form() {
+            form.probing = false;
+            match result {
+              Ok(fingerprint) => form.trust = Some(fingerprint),
+              Err(error) => form.probe_error = error,
+            }
           }
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -586,31 +593,33 @@ impl RemoteView {
       let result = cx
         .background_spawn(async move { host.resolve_alias(&alias) })
         .await;
-      let _ = this.update_in(cx, |view, window, cx| {
-        if let Some(form) = view.form() {
-          form.resolving = false;
-          match result {
-            Ok(resolved) => {
-              let (hostname, port, username) = (
-                form.hostname.clone(),
-                form.port.clone(),
-                form.username.clone(),
-              );
-              hostname.update(cx, |input, cx| {
-                input.set_value(resolved.hostname, window, cx)
-              });
-              port.update(cx, |input, cx| {
-                input.set_value(resolved.port.to_string(), window, cx)
-              });
-              if let Some(name) = resolved.username.filter(|name| !name.is_empty()) {
-                username.update(cx, |input, cx| input.set_value(name, window, cx));
+      this
+        .update_in(cx, |view, window, cx| {
+          if let Some(form) = view.form() {
+            form.resolving = false;
+            match result {
+              Ok(resolved) => {
+                let (hostname, port, username) = (
+                  form.hostname.clone(),
+                  form.port.clone(),
+                  form.username.clone(),
+                );
+                hostname.update(cx, |input, cx| {
+                  input.set_value(resolved.hostname, window, cx)
+                });
+                port.update(cx, |input, cx| {
+                  input.set_value(resolved.port.to_string(), window, cx)
+                });
+                if let Some(name) = resolved.username.filter(|name| !name.is_empty()) {
+                  username.update(cx, |input, cx| input.set_value(name, window, cx));
+                }
               }
+              Err(error) => form.resolve_error = error,
             }
-            Err(error) => form.resolve_error = error,
           }
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -678,7 +687,9 @@ impl RemoteView {
     move |id| {
       let (view, id) = (view.clone(), id.to_string());
       Box::new(move |_, _, cx| {
-        let _ = view.update(cx, |view, cx| view.pressed(&id, cx));
+        view
+          .update(cx, |view, cx| view.pressed(&id, cx))
+          .ignore_closed();
       })
     }
   }

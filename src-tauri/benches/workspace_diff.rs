@@ -1,5 +1,6 @@
 #![allow(
   clippy::unwrap_used,
+  clippy::let_underscore_must_use,
   clippy::expect_used,
   clippy::string_slice,
   reason = "test code"
@@ -238,6 +239,35 @@ fn bench_file_hunks_batch(c: &mut Criterion) {
           std::hint::black_box(Some(*workspace_id)),
           paths.clone(),
           "git",
+          None,
+        )
+        .expect("list_file_hunks_batch failed");
+      },
+      BatchSize::PerIteration,
+    );
+  });
+
+  // As the Changes tab reads after a reload: from the diff's trees.
+  group.bench_function("32_of_500_edits_in_2000_files_from_trees", |b| {
+    let paths: Vec<String> = (0..32)
+      .map(|index| format!("src/module_{}/file_{index}.rs", index % 40))
+      .collect();
+    b.iter_batched_ref(
+      || {
+        let (repo, workspace_id) = setup_workspace_diff_2000_files_500_edits();
+        let token = treq_lib::core::workspaces::workspace_cli_diff(&repo.repo_path, workspace_id)
+          .expect("workspace_diff failed")
+          .working_copy_token
+          .expect("a token");
+        (repo, workspace_id, token)
+      },
+      |(repo, workspace_id, token)| {
+        treq_lib::core::list_file_hunks_batch(
+          std::hint::black_box(&repo.repo_path),
+          std::hint::black_box(Some(*workspace_id)),
+          paths.clone(),
+          "git",
+          Some(token),
         )
         .expect("list_file_hunks_batch failed");
       },

@@ -5,6 +5,7 @@
 //! does too: a line is parsed from a fresh state, and its spans are cached
 //! by language and text because a diff redraws on every hover.
 
+use crate::result_ext::ResultExt;
 use std::{
   cell::RefCell,
   collections::HashMap,
@@ -21,14 +22,15 @@ use tauri_plugin_gpui::gpui::{
 
 static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_newlines);
 
-/// The cache holds at most this many lines, which a long review session
-/// reaches without holding much memory.
-const CACHE_MAX: usize = 20_000;
+/// The cache holds at most about this many bytes of lines and spans, which
+/// a long review session reaches without holding much memory. A count
+/// would let a few thousand minified lines hold gigabytes.
+const CACHE_MAX_BYTES: usize = 16 << 20;
 
-/// Lines longer than this (minified code) are drawn plain, as VS Code
-/// stops tokenizing at 20,000 characters: syntect takes seconds on a
-/// 200 KB line, on the main thread.
-const LONG_LINE: usize = 20_000;
+/// Lines longer than this (minified code) are drawn plain: syntect takes
+/// 23 ms on 5,000 characters of JavaScript and 92 ms on 20,000, on the
+/// main thread, and a line this long is not read for its colors.
+const LONG_LINE: usize = 2_000;
 
 /// What Prism would call a span, reduced to what the two themes color.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +73,13 @@ struct Line {
 }
 
 impl Line {
+  /// What the cache holds for the line: its text, its spans and the map's
+  /// entry.
+  fn weight(&self) -> usize {
+    const ENTRY: usize = 64;
+    ENTRY + self.text.len() + self.spans.len() * std::mem::size_of::<(Range<usize>, Token)>()
+  }
+
   fn is(&self, language: &str, text: &str) -> bool {
     self.language == language && self.text.as_ref() == text
   }
@@ -99,12 +108,14 @@ impl Hasher for Prehashed {
 type Lines = HashMap<u64, Line, BuildHasherDefault<Prehashed>>;
 
 /// Lines by a hash of their language and text, so a hit allocates nothing.
-/// Lines go into `current`; once it holds half of [`CACHE_MAX`] it becomes
-/// `previous`, and a line found there moves back. A full cache so drops
-/// only lines not drawn for a while, never the ones on screen.
+/// Lines go into `current`; once it weighs half of [`CACHE_MAX_BYTES`] it
+/// becomes `previous`, and a line found there moves back. A full cache so
+/// drops only lines not drawn for a while, never the ones on screen.
 #[derive(Default)]
 struct Cache {
   current: Lines,
+  /// The bytes `current` holds, by [`Line::weight`].
+  weight: usize,
   previous: Lines,
   hasher: RandomState,
 }
@@ -131,10 +142,14 @@ impl Cache {
   }
 
   fn insert(&mut self, key: u64, line: Line) {
-    if self.current.len() >= CACHE_MAX / 2 {
+    if self.weight >= CACHE_MAX_BYTES / 2 {
       self.previous = std::mem::take(&mut self.current);
+      self.weight = 0;
     }
-    self.current.insert(key, line);
+    self.weight += line.weight();
+    if let Some(replaced) = self.current.insert(key, line) {
+      self.weight -= replaced.weight();
+    }
   }
 }
 
@@ -263,7 +278,7 @@ fn parse(language: &str, syntax: &SyntaxReference, line: &str) -> Vec<(Range<usi
   let mut cursor = 0;
   for (index, op) in ops {
     push(cursor..index, &scopes);
-    let _ = scopes.apply(&op);
+    scopes.apply(&op).best_effort();
     cursor = index;
   }
   push(cursor..text.len(), &scopes);
@@ -504,7 +519,8 @@ mod tests {
     };
     cache.insert(0, line("kept"));
     cache.insert(1, line("dropped"));
-    for i in 2..2 * CACHE_MAX as u64 {
+    let count = 2 * CACHE_MAX_BYTES as u64 / line("other").weight() as u64;
+    for i in 2..count {
       cache.insert(i, line("other"));
       if i % 1000 == 0 {
         assert!(cache.get(0, "rs", "kept", |_| ()).is_some());
@@ -515,7 +531,42 @@ mod tests {
     // Another text or language with the same hash is not taken for the line.
     assert!(cache.get(0, "rs", "collides", |_| ()).is_none());
     assert!(cache.get(0, "ts", "kept", |_| ()).is_none());
-    assert!(cache.current.len() + cache.previous.len() <= CACHE_MAX);
+    let held: usize = [&cache.current, &cache.previous]
+      .into_iter()
+      .flat_map(|lines| lines.values())
+      .map(Line::weight)
+      .sum();
+    assert!(held <= CACHE_MAX_BYTES, "{held} bytes held");
+  }
+
+  #[test]
+  fn long_lines_weigh_what_they_hold() {
+    let mut cache = Cache::default();
+    let spans: Spans = Rc::new(vec![(0..1, Token::Keyword); 3_000]);
+    let line = Line {
+      language: "js",
+      text: "x".repeat(LONG_LINE).into(),
+      spans,
+    };
+    let weight = line.weight();
+    assert!(weight > 3_000 * 24 + LONG_LINE);
+    for key in 0..(CACHE_MAX_BYTES / weight * 4) as u64 {
+      cache.insert(key, line.clone());
+    }
+    assert!(cache.current.len() + cache.previous.len() < CACHE_MAX_BYTES / weight + 2);
+  }
+
+  /// `cargo test highlight::tests::first_draw_of_a_long_line -- --ignored --nocapture`
+  #[test]
+  #[ignore = "measurement"]
+  fn first_draw_of_a_long_line_cost() {
+    for chars in [1_000usize, 1_900, 2_100, 5_000, 20_000] {
+      let line: String = "var a=function(b){return b+1},c=\"s\";".repeat(chars / 35 + 1);
+      let line = &line[..chars];
+      let started = std::time::Instant::now();
+      let n = spans("js", line).len();
+      println!("{chars} chars: {:?}, {n} spans", started.elapsed());
+    }
   }
 
   #[test]

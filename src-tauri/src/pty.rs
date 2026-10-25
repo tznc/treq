@@ -1,4 +1,5 @@
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -493,16 +494,16 @@ impl PtyManager {
     let mut reader = match pair.master.try_clone_reader() {
       Ok(value) => value,
       Err(error) => {
-        let _ = child.kill();
-        let _ = child.wait();
+        child.kill().best_effort();
+        child.wait().best_effort();
         return Err(error.to_string());
       }
     };
     let writer = match pair.master.take_writer() {
       Ok(value) => value,
       Err(error) => {
-        let _ = child.kill();
-        let _ = child.wait();
+        child.kill().best_effort();
+        child.wait().best_effort();
         return Err(error.to_string());
       }
     };
@@ -579,7 +580,7 @@ impl PtyManager {
             if cfg!(windows) && data.contains(CURSOR_POS_QUERY) {
               let mut sessions = reader_sessions.lock_or_recover();
               if let Some(session) = sessions.get_mut(&reader_session_id) {
-                let _ = session.write(b"\x1b[1;1R");
+                session.write(b"\x1b[1;1R").best_effort();
               }
               drop(sessions);
               data = data.replace(CURSOR_POS_QUERY, "");
@@ -654,7 +655,7 @@ impl PtyManager {
         }
       };
       if let Some(mut session) = removed {
-        let _ = session.shutdown();
+        session.shutdown().best_effort();
       }
     });
 
@@ -663,8 +664,9 @@ impl PtyManager {
       let initial_session_id = session_id;
       thread::spawn(move || {
         thread::sleep(std::time::Duration::from_millis(100));
-        let _ =
-          manager.write_to_generation(&initial_session_id, generation, &format!("{command}\n"));
+        manager
+          .write_to_generation(&initial_session_id, generation, &format!("{command}\n"))
+          .ignore_closed();
       });
     }
 
@@ -727,7 +729,7 @@ impl PtyManager {
       sessions.drain().map(|(_, session)| session).collect()
     };
     for mut session in drained {
-      let _ = session.shutdown();
+      session.shutdown().best_effort();
     }
   }
 
@@ -753,7 +755,7 @@ impl PtyManager {
         .collect()
     };
     for mut session in drained {
-      let _ = session.shutdown();
+      session.shutdown().best_effort();
     }
   }
 
@@ -780,7 +782,7 @@ impl PtyManager {
       }
     };
     if let Some(mut session) = stale {
-      let _ = session.shutdown();
+      session.shutdown().best_effort();
     }
     false
   }

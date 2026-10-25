@@ -3,6 +3,7 @@
 //! every invalidation, runs the [`Effect`]s the model asks for, and hands
 //! the shell what to draw ([`Presentation`]) whenever that changes.
 
+use crate::result_ext::ResultExt;
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use futures::StreamExt;
@@ -434,7 +435,9 @@ impl WindowController {
     let host = self.host.clone();
     cx.spawn(async move |this, cx| {
       let value = cx.background_spawn(async move { f(&*host) }).await;
-      let _ = this.update(cx, |this, cx| then(this, value, cx));
+      this
+        .update(cx, |this, cx| then(this, value, cx))
+        .ignore_closed();
     })
     .detach();
   }
@@ -879,11 +882,11 @@ impl WindowController {
     cx.background_spawn(async move {
       let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         read_first(&*host, &main, supporting, &known, |stage| {
-          let _ = send.unbounded_send(Some(stage));
+          send.unbounded_send(Some(stage)).ignore_closed();
         })
       }));
       if read.is_err() {
-        let _ = send.unbounded_send(None);
+        send.unbounded_send(None).ignore_closed();
       }
     })
     .detach();
@@ -892,7 +895,9 @@ impl WindowController {
       while let Some(stage) = stages.next().await {
         match stage {
           Some(stage) => {
-            let _ = this.update(cx, |this, cx| this.apply_stage(stage, cx));
+            this
+              .update(cx, |this, cx| this.apply_stage(stage, cx))
+              .ignore_closed();
           }
           None => {
             log::error!("reading the window's repositories panicked");
@@ -900,7 +905,9 @@ impl WindowController {
           }
         }
       }
-      let _ = this.update(cx, |this, cx| this.read_done(panicked, cx));
+      this
+        .update(cx, |this, cx| this.read_done(panicked, cx))
+        .ignore_closed();
     })
     .detach();
   }

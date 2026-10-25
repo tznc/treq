@@ -1,7 +1,8 @@
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -175,7 +176,7 @@ fn shell_path_from_command(command: &mut Command, timeout: std::time::Duration) 
       .take(1024 * 1024)
       .read_to_end(&mut bytes)
       .map(|_| bytes);
-    let _ = sender.send(result);
+    sender.send(result).ignore_closed();
   });
   let start = Instant::now();
   loop {
@@ -188,8 +189,8 @@ fn shell_path_from_command(command: &mut Command, timeout: std::time::Duration) 
       }
       Ok(None) if start.elapsed() < timeout => std::thread::sleep(Duration::from_millis(10)),
       _ => {
-        let _ = child.kill();
-        let _ = child.wait();
+        child.kill().best_effort();
+        child.wait().best_effort();
         return None;
       }
     }
@@ -215,25 +216,70 @@ pub fn get_exe_dir() -> Option<String> {
   }
 }
 
-/// Detect binary path using `which` (Unix) or `where` (Windows) with extended PATH
+/// Detect binary path on the extended PATH, as `which` (Unix) or `where`
+/// (Windows) would, without starting a process.
 pub fn detect_binary(name: &str) -> Option<String> {
-  if cfg!(windows) {
-    // `where` is the Windows equivalent of `which` and uses the inherited PATH.
-    return first_output_line(Command::new("where").arg(name));
-  }
-
   detect_binary_in(name, get_extended_path())
 }
 
 /// Finds `name` on `search_path` (a PATH-style list) and nowhere else, with
-/// the same `which` (Unix) or `where` (Windows) lookup as [`detect_binary`].
+/// the same lookup as [`detect_binary`].
 pub fn detect_binary_in(name: &str, search_path: impl AsRef<OsStr>) -> Option<String> {
-  // The lookup `which` does, without a process: the first-run checklist
-  // asks for six tools at once.
-  #[cfg(unix)]
-  return executable_in(name, search_path.as_ref());
-  #[cfg(not(unix))]
-  first_output_line(Command::new("where").arg(name).env("PATH", search_path))
+  // The lookup `which` and `where` do, without a process: the first-run
+  // checklist asks for six tools at once, and a process each costs tens of
+  // milliseconds on Windows.
+  executable_in(name, search_path.as_ref())
+}
+
+/// The first file called `name` in a directory of `search_path`, with one of
+/// the `pathext` extensions (`.EXE;.CMD`) added unless `name` has one already.
+/// Windows runs a file by its extension, so `git` finds `git.exe`.
+#[cfg_attr(unix, allow(dead_code, reason = "the Unix lookup checks permissions"))]
+fn executable_with_extensions(
+  name: &str,
+  search_path: &OsStr,
+  pathext: &str,
+  is_file: impl Fn(&Path) -> bool,
+) -> Option<String> {
+  if name.is_empty() {
+    return None;
+  }
+  let extensions: Vec<&str> = pathext.split(';').filter(|e| !e.is_empty()).collect();
+  let has_extension = extensions.iter().any(|ext| {
+    name.len() > ext.len()
+      && name.as_bytes()[name.len() - ext.len()..].eq_ignore_ascii_case(ext.as_bytes())
+  });
+  let candidates = |base: &Path| -> Vec<PathBuf> {
+    let name = base.as_os_str().to_string_lossy().into_owned();
+    let mut candidates = Vec::new();
+    if has_extension {
+      candidates.push(PathBuf::from(&name));
+    }
+    candidates.extend(
+      extensions
+        .iter()
+        .map(|ext| PathBuf::from(format!("{name}{ext}"))),
+    );
+    candidates
+  };
+  let found = if name.contains(['/', '\\']) {
+    candidates(Path::new(name)).into_iter().find(|c| is_file(c))
+  } else {
+    env::split_paths(search_path)
+      .filter(|dir| !dir.as_os_str().is_empty())
+      .find_map(|dir| {
+        candidates(&dir.join(name))
+          .into_iter()
+          .find(|candidate| is_file(candidate))
+      })
+  };
+  found.map(|path| path.to_string_lossy().into_owned())
+}
+
+#[cfg(not(unix))]
+fn executable_in(name: &str, search_path: &OsStr) -> Option<String> {
+  let pathext = env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+  executable_with_extensions(name, search_path, &pathext, Path::is_file)
 }
 
 /// The first executable file called `name` in a directory of `search_path`.
@@ -256,17 +302,6 @@ fn executable_in(name: &str, search_path: &OsStr) -> Option<String> {
     .map(|dir| dir.join(name))
     .find(|candidate| is_executable(candidate))
     .map(|path| path.to_string_lossy().into_owned())
-}
-
-/// The first line a successful lookup printed: the binary's path.
-fn first_output_line(command: &mut Command) -> Option<String> {
-  let output = command.output().ok()?;
-  if !output.status.success() {
-    return None;
-  }
-  let stdout = String::from_utf8(output.stdout).ok()?;
-  let path = stdout.lines().next()?.trim();
-  (!path.is_empty()).then(|| path.to_string())
 }
 
 /// [`detect_binary`] for binaries that are not in the startup cache, such as
@@ -292,7 +327,7 @@ pub fn detect_binary_cached(name: &str) -> Option<String> {
 
 /// Initialize binary paths cache with detected paths
 pub fn init_binary_paths_cache(paths: HashMap<String, String>) {
-  let _ = BINARY_PATHS_CACHE.set(paths);
+  BINARY_PATHS_CACHE.set(paths).best_effort();
 }
 
 /// Get cached binary path for a given binary name
@@ -329,7 +364,7 @@ static EDITOR_APPS_CACHE: OnceLock<HashMap<String, bool>> = OnceLock::new();
 
 /// Initialize editor apps cache
 pub fn init_editor_apps_cache(apps: HashMap<String, bool>) {
-  let _ = EDITOR_APPS_CACHE.set(apps);
+  EDITOR_APPS_CACHE.set(apps).best_effort();
 }
 
 /// Get a cached editor-apps snapshot if initialized.
@@ -339,6 +374,35 @@ pub fn get_editor_apps_cache() -> Option<HashMap<String, bool>> {
 
 #[cfg(test)]
 mod tests {
+  #[test]
+  fn finds_a_windows_tool_by_its_extension_without_a_process() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let (first, second) = (dir.path().join("a"), dir.path().join("b"));
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    std::fs::write(second.join("git.exe"), "").unwrap();
+    std::fs::write(second.join("npm.cmd"), "").unwrap();
+    std::fs::write(first.join("git.cmd"), "").unwrap();
+    let path = env::join_paths([&first, &second]).unwrap();
+    let find =
+      |name: &str| executable_with_extensions(name, &path, ".com;.exe;.cmd", Path::is_file);
+    // The earlier directory wins, and the extension is added in PATHEXT order.
+    assert_eq!(
+      find("git"),
+      Some(first.join("git.cmd").to_string_lossy().into_owned())
+    );
+    assert_eq!(
+      find("npm"),
+      Some(second.join("npm.cmd").to_string_lossy().into_owned())
+    );
+    assert_eq!(
+      find("git.exe"),
+      Some(second.join("git.exe").to_string_lossy().into_owned())
+    );
+    assert_eq!(find("node"), None);
+    assert_eq!(find(""), None);
+  }
+
   use super::*;
 
   #[cfg(unix)]

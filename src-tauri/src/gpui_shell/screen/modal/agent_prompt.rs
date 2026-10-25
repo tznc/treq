@@ -6,6 +6,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::time::Duration;
 
 use gpui_kit::base::TestSupportExt as _;
@@ -203,10 +204,12 @@ macro_rules! read {
             $read
           })
           .await;
-        let _ = this.update(cx, |$view, $cx2| {
-          $apply;
-          $cx2.notify();
-        });
+        this
+          .update(cx, |$view, $cx2| {
+            $apply;
+            $cx2.notify();
+          })
+          .ignore_closed();
       })
       .detach();
   }};
@@ -286,7 +289,28 @@ impl AgentPromptView {
       self,
       cx,
       |host, route| task_settings(host.as_ref(), &route.repo_path),
-      |view, settings, _cx| view.settings = Some(settings)
+      |view, settings, cx| {
+        let environment = settings.environment.is_some();
+        view.settings = Some(settings);
+        if environment {
+          view.load_environment_status(cx);
+        }
+      }
+    );
+  }
+
+  /// Whether the repository's devcontainer runs (a `docker ps`), read after
+  /// the settings so the default agent shows without waiting for it.
+  fn load_environment_status(&mut self, cx: &mut Context<Self>) {
+    read!(
+      self,
+      cx,
+      |host, route| host.devcontainer_status(&route.repo_path),
+      |view, status, _cx| {
+        if let Some(env) = view.settings.as_mut().and_then(|s| s.environment.as_mut()) {
+          env.status = Some(status);
+        }
+      }
     );
   }
 
@@ -524,13 +548,15 @@ impl AgentPromptView {
         .background_spawn(async move { host.search_files(&repo, workspace_id, &path, &search, 4) })
         .await
         .unwrap_or_default();
-      let _ = this.update(cx, |view, cx| {
-        if let Some(mention) = view.mention.as_mut().filter(|m| m.query == query) {
-          mention.results = results;
-          mention.index = 0;
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if let Some(mention) = view.mention.as_mut().filter(|m| m.query == query) {
+            mention.results = results;
+            mention.index = 0;
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     }));
   }
 
@@ -636,10 +662,12 @@ impl AgentPromptView {
           .collect::<Vec<_>>()
           .join(" ")
       );
-      let _ = this.update(cx, |view, cx| {
-        view.insert = Some(insertion);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.insert = Some(insertion);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }

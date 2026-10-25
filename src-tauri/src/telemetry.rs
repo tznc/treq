@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -96,7 +97,7 @@ pub fn cleanup_old_logs(dir: &Path, max_age: Duration) {
       continue;
     };
     if modified < cutoff {
-      let _ = std::fs::remove_file(entry.path());
+      std::fs::remove_file(entry.path()).best_effort();
     }
   }
 }
@@ -146,7 +147,7 @@ where
 
     use std::io::Write;
     let mut writer = self.writer.clone();
-    let _ = writeln!(writer, "{}", line);
+    writeln!(writer, "{}", line).best_effort();
   }
 }
 

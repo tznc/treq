@@ -1,4 +1,5 @@
 use crate::jj;
+use crate::result_ext::ResultExt;
 use gix::bstr::{BStr, ByteSlice};
 use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit};
 use gix::refs::Target;
@@ -370,7 +371,7 @@ fn checkout_detached(
     let path = entry.path(&previous);
     if !kept.contains(path) {
       if let Ok(relative) = path.to_path() {
-        let _ = fs::remove_file(checkout.join(relative));
+        fs::remove_file(checkout.join(relative)).best_effort();
       }
     }
   }

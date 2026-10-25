@@ -5,9 +5,11 @@
 //! disk for a local one, and has nothing of what only a local checkout
 //! has (pull requests, supporting repositories).
 
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
   path::{Path, PathBuf},
+  sync::{Arc, Mutex},
   time::Duration,
 };
 
@@ -241,6 +243,25 @@ fn take_just_initialized(repo: &str) -> bool {
   }
 }
 
+/// When this process last initialized each repository for a window.
+static PREPARED: std::sync::Mutex<Vec<(String, std::time::Instant)>> =
+  std::sync::Mutex::new(Vec::new());
+
+/// How long a repository's init and rebase pass count for further windows.
+const PREPARED_FOR: Duration = Duration::from_secs(60);
+
+fn note_prepared(repo: &str) {
+  let mut prepared = PREPARED.lock_or_recover();
+  prepared.retain(|(path, at)| path != repo && at.elapsed() < PREPARED_FOR);
+  prepared.push((repo.to_string(), std::time::Instant::now()));
+}
+
+fn prepared_recently(repo: &str) -> bool {
+  let mut prepared = PREPARED.lock_or_recover();
+  prepared.retain(|(_, at)| at.elapsed() < PREPARED_FOR);
+  prepared.iter().any(|(path, _)| path == repo)
+}
+
 /// The branch an `InspectRepository` answer shows.
 fn repo_branch(inspection: RepositoryInspection) -> RepoBranch {
   RepoBranch {
@@ -402,13 +423,19 @@ impl WindowHost for Backend {
   }
 
   fn prepare_repo(&self, main_repo: &str) {
-    if !take_just_initialized(main_repo) {
-      if let Err(err) = core::init_deferring_rebase(main_repo) {
-        log::error!("Failed to init repo: {err}");
+    // Another window prepared this repo moments ago: the init and the
+    // rebase pass would repeat its work, and the poll keeps the state fresh.
+    let skip = take_just_initialized(main_repo) | prepared_recently(main_repo);
+    if !skip {
+      match core::init_deferring_rebase(main_repo) {
+        Ok(true) => note_prepared(main_repo),
+        Ok(false) => {}
+        Err(err) => log::error!("Failed to init repo: {err}"),
       }
     }
     self.set_window_repo_path(main_repo);
     crate::pr_status::global().watch_repo(main_repo);
+    crate::unwatch_unshown_repos(self.app());
   }
 
   fn set_supporting_paths(&self, paths: Vec<String>) {
@@ -422,6 +449,8 @@ impl WindowHost for Backend {
       }
       map.insert(self.label().to_string(), paths);
     }
+    drop(map);
+    crate::unwatch_unshown_repos(self.app());
   }
 
   fn pick_folder(&self) -> Option<String> {
@@ -450,14 +479,18 @@ impl WindowHost for Backend {
       return;
     }
     note_just_initialized(path);
+    note_prepared(path);
     let label = crate::open_new_window::new_repo_window_label();
     let title = crate::open_new_window::new_repo_window_title(path);
     let (app, path) = (self.app().clone(), path.to_string());
-    let _ = self.app().run_on_main_thread(move || {
-      if let Err(err) = crate::gpui_shell::open_window(&app, &label, Some(path), &title) {
-        log::error!("failed to open repo window: {err}");
-      }
-    });
+    self
+      .app()
+      .run_on_main_thread(move || {
+        if let Err(err) = crate::gpui_shell::open_window(&app, &label, Some(path), &title) {
+          log::error!("failed to open repo window: {err}");
+        }
+      })
+      .ignore_closed();
   }
 
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String> {
@@ -488,17 +521,32 @@ impl WindowHost for Backend {
     }
     let (tx, changes) = unbounded();
     let mut gitignore = GitignoreFilter::new(Path::new(path));
-    let mut watcher = notify_debouncer_full::new_debouncer(
+    let watcher: Arc<Mutex<Option<CheckoutWatcher>>> = Arc::default();
+    let weak = Arc::downgrade(&watcher);
+    let debouncer = notify_debouncer_full::new_debouncer(
       WATCH_SETTLE,
       None,
       move |result: notify_debouncer_full::DebounceEventResult| match result {
         Ok(events) => {
-          if events
-            .iter()
-            .flat_map(|e| e.paths.iter())
-            .any(|p| !is_ignored(p) && !gitignore.ignores(p))
-          {
-            let _ = tx.unbounded_send(());
+          let mut changed = false;
+          for path in events.iter().flat_map(|e| e.paths.iter()) {
+            if is_ignored(path) || gitignore.ignores(path) {
+              continue;
+            }
+            changed = true;
+            // inotify watches one directory each: a directory created or
+            // moved in needs its own.
+            #[cfg(target_os = "linux")]
+            if path.is_dir() {
+              if let Some(watcher) = weak.upgrade() {
+                if let Some(watcher) = watcher.lock_or_recover().as_mut() {
+                  watcher.watch_tree(path);
+                }
+              }
+            }
+          }
+          if changed {
+            tx.unbounded_send(()).ignore_closed();
           }
         }
         Err(errors) => log::warn!("File watch errors: {errors:?}"),
@@ -506,10 +554,18 @@ impl WindowHost for Backend {
     )
     .map_err(|err| log::warn!("Failed to create a file watcher: {err}"))
     .ok()?;
-    watcher
-      .watch(Path::new(path), notify::RecursiveMode::Recursive)
-      .map_err(|err| log::warn!("Failed to watch {path}: {err}"))
-      .ok()?;
+    #[cfg(not(target_os = "linux"))]
+    drop(weak);
+    let mut checkout = CheckoutWatcher {
+      debouncer,
+      watched: HashSet::new(),
+    };
+    checkout.watch_tree(Path::new(path));
+    if checkout.watched.is_empty() {
+      log::warn!("Failed to watch {path}");
+      return None;
+    }
+    *watcher.lock_or_recover() = Some(checkout);
     Some(FileWatch {
       changes,
       _watcher: Box::new(watcher),
@@ -762,6 +818,68 @@ fn is_ignored(path: &Path) -> bool {
     .is_some_and(|p| p.ends_with(".swp") || p.ends_with('~'))
 }
 
+type CheckoutDebouncer = notify_debouncer_full::Debouncer<
+  notify::RecommendedWatcher,
+  notify_debouncer_full::RecommendedCache,
+>;
+
+/// A checkout's file watcher. Linux's inotify costs a kernel watch per
+/// directory, so there each directory outside ignored trees (`node_modules`,
+/// `target`, gitignored output) is watched on its own instead of the whole
+/// tree recursively; elsewhere the platform watches the tree in one call.
+struct CheckoutWatcher {
+  debouncer: CheckoutDebouncer,
+  watched: HashSet<PathBuf>,
+}
+
+impl CheckoutWatcher {
+  /// Watches `root` and, on Linux, every watchable directory beneath it.
+  fn watch_tree(&mut self, root: &Path) {
+    #[cfg(target_os = "linux")]
+    for dir in watchable_dirs(root) {
+      if !self.watched.contains(&dir) {
+        match self
+          .debouncer
+          .watch(&dir, notify::RecursiveMode::NonRecursive)
+        {
+          Ok(()) => {
+            self.watched.insert(dir);
+          }
+          Err(err) => log::warn!("Failed to watch {}: {err}", dir.display()),
+        }
+      }
+    }
+    #[cfg(not(target_os = "linux"))]
+    if self
+      .debouncer
+      .watch(root, notify::RecursiveMode::Recursive)
+      .map_err(|err| log::warn!("Failed to watch {}: {err}", root.display()))
+      .is_ok()
+    {
+      self.watched.insert(root.to_path_buf());
+    }
+  }
+}
+
+/// `root` and the directories beneath it that a file change can matter in:
+/// not `.git`, `.jj`, `node_modules`, `target` or anything gitignored.
+#[cfg(target_os = "linux")]
+fn watchable_dirs(root: &Path) -> Vec<PathBuf> {
+  ignore::WalkBuilder::new(root)
+    .standard_filters(false)
+    .git_ignore(true)
+    .git_global(true)
+    .git_exclude(true)
+    .require_git(false)
+    .hidden(false)
+    .filter_entry(|entry| !is_ignored(entry.path()))
+    .build()
+    .filter_map(Result::ok)
+    .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_dir()))
+    .map(ignore::DirEntry::into_path)
+    .collect()
+}
+
 /// Applies the checkout's gitignore rules, so `dist/`, `.next/` and other
 /// ignored output stop triggering reloads of the Changes tab. Rules come from
 /// every `.gitignore` between the changed path and the root, plus
@@ -838,6 +956,67 @@ impl GitignoreFilter {
 #[cfg(test)]
 mod watch_tests {
   use super::*;
+
+  #[test]
+  fn a_repo_prepared_moments_ago_is_not_prepared_again() {
+    let repo = "/tmp/prepared-recently-test";
+    assert!(!prepared_recently(repo));
+    note_prepared(repo);
+    assert!(prepared_recently(repo));
+    assert!(!prepared_recently("/tmp/some-other-repo"));
+  }
+
+  /// inotify watches a checkout with `node_modules` and `target` trees:
+  /// directories watched recursively vs. per non-ignored directory.
+  #[cfg(target_os = "linux")]
+  #[test]
+  #[ignore = "measurement"]
+  fn watch_count_with_ignored_trees() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    for i in 0..20 {
+      std::fs::create_dir_all(root.join(format!("src/m{i}/inner"))).unwrap();
+    }
+    for i in 0..500 {
+      std::fs::create_dir_all(root.join(format!("node_modules/p{i}/lib"))).unwrap();
+      std::fs::create_dir_all(root.join(format!("target/debug/d{i}"))).unwrap();
+    }
+    let all = walkdir_count(&root);
+    println!(
+      "recursive: {all} watches, per directory: {}",
+      watchable_dirs(&root).len()
+    );
+  }
+
+  #[cfg(target_os = "linux")]
+  fn walkdir_count(dir: &Path) -> usize {
+    1 + std::fs::read_dir(dir)
+      .unwrap()
+      .filter_map(Result::ok)
+      .filter(|e| e.path().is_dir())
+      .map(|e| walkdir_count(&e.path()))
+      .sum::<usize>()
+  }
+
+  #[cfg(target_os = "linux")]
+  #[test]
+  fn watchable_dirs_skip_ignored_trees() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    for sub in [
+      "src/ui",
+      "node_modules/dep",
+      "target/debug",
+      "dist/js",
+      ".git/refs",
+    ] {
+      std::fs::create_dir_all(root.join(sub)).unwrap();
+    }
+    std::fs::write(root.join(".gitignore"), "dist/\n").unwrap();
+    let mut dirs = watchable_dirs(&root);
+    dirs.sort();
+    assert_eq!(dirs, [root.clone(), root.join("src"), root.join("src/ui")]);
+  }
 
   #[test]
   fn gitignore_filter_follows_nested_rules() {

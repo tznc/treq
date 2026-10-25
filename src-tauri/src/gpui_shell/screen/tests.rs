@@ -144,6 +144,8 @@ struct FakeHost {
   account_deletion: Option<crate::core::supabase::ApiError>,
   /// `None` fails the read, as when it never answers.
   queue: Mutex<Option<(bool, Vec<merge_queue_data::QueueEntry>)>>,
+  /// The merged-history size each queue read asked for.
+  queue_history: Mutex<Vec<usize>>,
   /// What the agent launches read and did: each new session's start data
   /// by pane id, the `treq send` attachments, the prompt dialog's tasks
   /// (and whether starting fails), and the sessions started.
@@ -710,12 +712,23 @@ impl changes_data::ChangesHost for FakeHost {
     _: &str,
     _: Option<i64>,
     paths: Vec<String>,
+    token: Option<&str>,
   ) -> Result<crate::core::WorkspaceFileHunksBatch, String> {
     self.record(format!("read hunks {paths:?}"));
-    let working = self.working().ok_or("no changes")?;
-    let token = self.hunks_token.lock().unwrap().clone();
+    if let Some(token) = token {
+      self.record(format!("hunks at {token}"));
+    }
+    // Borrowed, not cloned: a batch of a large changeset would copy it all.
+    let edited = self.edited.lock().unwrap();
+    let working = edited
+      .as_ref()
+      .or(self.working.as_ref())
+      .ok_or("no changes")?;
+    // As the backend: the diff `token` names, unless a test moved the disk.
+    let read_at = self.hunks_token.lock().unwrap().clone();
     Ok(crate::core::WorkspaceFileHunksBatch {
-      snapshot_token: token
+      snapshot_token: read_at
+        .or_else(|| token.map(str::to_string))
         .or_else(|| working.working_copy_token.clone())
         .unwrap_or_default(),
       files: paths
@@ -1026,6 +1039,7 @@ impl terminal_data::TerminalHost for FakeHost {
     Ok(terminal_data::Prepared {
       command: format!("{} --start", start.agent),
       skill_write_warning: None,
+      file_paths: vec![format!("/tmp/treq-agent-prompt-{}.txt", start.agent)],
     })
   }
 
@@ -1056,6 +1070,10 @@ impl terminal_data::TerminalHost for FakeHost {
   ) -> Result<(), String> {
     self.record(format!("chat message {session_id} {text:?}"));
     Ok(())
+  }
+
+  fn remove_session_files(&self, paths: &[String]) {
+    self.record(format!("remove files {paths:?}"));
   }
 
   fn read_send_asset(&self, path: &str) -> Result<String, String> {
@@ -1455,14 +1473,27 @@ impl merge_queue_data::MergeQueueHost for FakeHost {
   fn merge_queue(
     &self,
     full_name: &str,
+    history: usize,
   ) -> Result<(bool, Vec<merge_queue_data::QueueEntry>), String> {
     self.record(format!("read queue {full_name}"));
-    self
+    self.queue_history.lock().unwrap().push(history);
+    let (enabled, mut entries) = self
       .queue
       .lock()
       .unwrap()
       .clone()
-      .ok_or_else(|| "unread".to_string())
+      .ok_or_else(|| "unread".to_string())?;
+    // Like the RPC: every queued entry, the newest `history` merged ones.
+    let mut merged = 0;
+    entries.sort_by_key(|e| std::cmp::Reverse(e.position));
+    entries.retain(|e| {
+      e.status != "merged" || {
+        merged += 1;
+        merged <= history
+      }
+    });
+    entries.sort_by_key(|e| e.position);
+    Ok((enabled, entries))
   }
 
   fn dequeue(&self, full_name: &str, branches: &[String]) -> Result<(), String> {
@@ -1513,6 +1544,18 @@ impl remote_data::RemoteHost for FakeHost {
   }
 }
 
+/// The window's root over the screen, as the shell embeds it: cached, so a
+/// test sees what a frame the screen did not ask for would show.
+struct Framed {
+  screen: Entity<Screen>,
+}
+
+impl Render for Framed {
+  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    div().size_full().child(Screen::element(&self.screen))
+  }
+}
+
 impl Harness {
   fn new(cx: &mut TestAppContext, snapshot: ScreenSnapshot) -> Self {
     Self::with_host(cx, snapshot, Arc::new(FakeHost::default()))
@@ -1530,7 +1573,10 @@ impl Harness {
       let shown = shown.clone();
       Rc::new(move |request, _| shown.borrow_mut().push(request))
     };
-    let (screen, cx) = cx.add_window_view(|_, cx| Screen::new(snapshot, sink, popups, host, cx));
+    let (root, cx) = cx.add_window_view(|_, cx| Framed {
+      screen: cx.new(|cx| Screen::new(snapshot, sink, popups, host, cx)),
+    });
+    let screen = root.read_with(cx, |root, _| root.screen.clone());
     let cx = cx.clone();
     Self {
       cx,
@@ -5097,6 +5143,110 @@ fn hunks_read_from_a_newer_diff_are_read_again(cx: &mut TestAppContext) {
   );
 }
 
+/// `tokened_changes_host` whose diff names each file's content.
+fn content_id_changes_host() -> FakeHost {
+  let mut host = tokened_changes_host();
+  if let Some(working) = host.working.as_mut() {
+    for file in &mut working.uncommitted_files {
+      file.content_id = Some(format!("{}@1", file.path));
+    }
+  }
+  host
+}
+
+#[gpui::test]
+fn a_one_file_edit_reads_only_that_files_hunks(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, content_id_changes_host(), changes_route());
+  h.drawn("changes-diff-viewer");
+  let b_rs = |h: &mut Harness| {
+    h.screen.read_with(&h.cx, |screen, cx| {
+      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+      let changes = workspace.changes().expect("changes").read(cx);
+      Arc::as_ptr(&changes.hunks["b.rs"].hunks)
+    })
+  };
+  let before = b_rs(&mut h);
+  let hunks = count_calls(&host, "read hunks");
+
+  let mut edited = host.working.clone().expect("working");
+  edited.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+b".into(), "+e".into()];
+  edited.uncommitted_files[0].content_id = Some("a.rs@2".into());
+  edited.working_copy_token = Some("t2".into());
+  *host.edited.lock().unwrap() = Some(edited);
+  bump_changes_revision(&mut h);
+
+  let reads: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("read hunks"))
+    .skip(hunks)
+    .collect();
+  assert_eq!(reads, ["read hunks [\"a.rs\"]"], "b.rs kept its id");
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+  assert_eq!(b_rs(&mut h), before, "b.rs keeps its hunks");
+
+  // Both read at t2 now: the same diff again reads nothing.
+  let hunks = count_calls(&host, "read hunks");
+  bump_changes_revision(&mut h);
+  assert_eq!(count_calls(&host, "read hunks"), hunks);
+}
+
+#[gpui::test]
+fn hunks_are_read_from_the_listed_diff(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, tokened_changes_host(), changes_route());
+  h.drawn("changes-diff-viewer");
+  let reads = count_calls(&host, "read hunks");
+  assert!(reads > 0);
+  assert_eq!(
+    count_calls(&host, "hunks at t1"),
+    reads,
+    "every batch names t1"
+  );
+}
+
+#[gpui::test]
+fn hunks_read_at_another_diff_keep_no_content_id(cx: &mut TestAppContext) {
+  let host = content_id_changes_host();
+  *host.hunks_token.lock().unwrap() = Some("t2".into());
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.drawn("changes-diff-viewer");
+  let hunks = count_calls(&host, "read hunks");
+  // Another token, same ids: the ids can't vouch for hunks read elsewhere.
+  let mut edited = host.working.clone().expect("working");
+  edited.working_copy_token = Some("t3".into());
+  *host.edited.lock().unwrap() = Some(edited);
+  bump_changes_revision(&mut h);
+  let reads: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("read hunks"))
+    .skip(hunks)
+    .collect();
+  assert_eq!(reads.concat().matches(".rs").count(), 2, "{reads:?}");
+}
+
+#[gpui::test]
+fn a_review_recheck_reads_only_files_whose_content_changed(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, content_id_changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  let hunks = count_calls(&host, "read hunks");
+  let mut edited = host.working.clone().expect("working");
+  edited.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+b".into(), "+e".into()];
+  edited.uncommitted_files[0].content_id = Some("a.rs@2".into());
+  edited.working_copy_token = Some("t2".into());
+  *host.edited.lock().unwrap() = Some(edited);
+  bump_changes_revision(&mut h);
+
+  let reads: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("read hunks"))
+    .skip(hunks)
+    .collect();
+  assert_eq!(reads, ["read hunks [\"a.rs\"]"]);
+  assert!(h.drawn("stale-banner"));
+}
+
 #[gpui::test]
 fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
@@ -6188,6 +6338,12 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
   assert!(!h.drawn("terminal-column-agent"));
   assert!(host.calls().contains(&format!("close {}", agent_pty())));
   assert!(h.sent().contains(&field("terminal.closeSession", 3.into())));
+  // The session's prompt and skill files go with it.
+  let removed = host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("remove files") && c.contains("treq-agent-prompt-"));
+  assert!(removed, "{:?}", host.calls());
   // Closing the last terminal hides the pane, chip included.
   assert!(!h.drawn("terminal-pane-controls"));
 }
@@ -7683,6 +7839,8 @@ fn remote_session(
     workspace: "root".into(),
     label: label.into(),
     running,
+    title: None,
+    idle_secs: None,
   }
 }
 
@@ -8281,6 +8439,7 @@ mod code_files_large;
 mod commit_diffs;
 mod commits_large;
 mod conflicts;
+mod diff_extremes;
 mod file_browser;
 mod fuzz;
 mod github;

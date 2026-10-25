@@ -6,6 +6,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
   sync::Arc,
@@ -290,31 +291,33 @@ impl OpenWorkspacesDialog {
         let remotes = cx
           .background_spawn(async move { data::remotes(&*host, &route.repos) })
           .await;
-        let _ = this.update(cx, |view, cx| {
-          let github = remotes
-            .iter()
-            .find(|(path, _)| *path == view.route.repo_path)
-            .map(|(_, name)| name.clone());
-          match &github {
-            Some(name) => cache(cx).remote_names.insert(
-              view.route.repo_path.clone(),
-              Instant::now(),
-              name.clone(),
-            ),
-            None => {
-              cache(cx).remote_names.take(&view.route.repo_path);
+        this
+          .update(cx, |view, cx| {
+            let github = remotes
+              .iter()
+              .find(|(path, _)| *path == view.route.repo_path)
+              .map(|(_, name)| name.clone());
+            match &github {
+              Some(name) => cache(cx).remote_names.insert(
+                view.route.repo_path.clone(),
+                Instant::now(),
+                name.clone(),
+              ),
+              None => {
+                cache(cx).remote_names.take(&view.route.repo_path);
+              }
             }
-          }
-          // Already listed from a remembered remote unless it changed.
-          let listed = view.prs.generation > 0 && view.github == github;
-          view.github = github;
-          view.remotes = Some(remotes);
-          if !listed {
-            view.load_prs(cx);
-          }
-          view.check_lines(cx);
-          cx.notify();
-        });
+            // Already listed from a remembered remote unless it changed.
+            let listed = view.prs.generation > 0 && view.github == github;
+            view.github = github;
+            view.remotes = Some(remotes);
+            if !listed {
+              view.load_prs(cx);
+            }
+            view.check_lines(cx);
+            cx.notify();
+          })
+          .ignore_closed();
       }
     })
     .detach();
@@ -345,26 +348,30 @@ impl OpenWorkspacesDialog {
           }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        let (pattern, default, branches) = settings;
-        if let Some(pattern) = pattern {
-          view.pattern = pattern;
-        }
-        view.default_branch = default;
-        view.branches = branches;
-        view.open_branches = open;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          let (pattern, default, branches) = settings;
+          if let Some(pattern) = pattern {
+            view.pattern = pattern;
+          }
+          view.default_branch = default;
+          view.branches = branches;
+          view.open_branches = open;
+          cx.notify();
+        })
+        .ignore_closed();
       cx.background_spawn(async move {
         for repo in &route.repos {
           host.fetch(repo);
         }
       })
       .await;
-      let _ = this.update(cx, |view, cx| {
-        view.fetched = true;
-        view.check_lines(cx);
-      });
+      this
+        .update(cx, |view, cx| {
+          view.fetched = true;
+          view.check_lines(cx);
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -402,14 +409,16 @@ impl OpenWorkspacesDialog {
           }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if let Ok(read) = &result {
-          cache(cx).open_prs.insert(key, Instant::now(), read.clone());
-        }
-        if view.prs.settle(generation, result) {
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if let Ok(read) = &result {
+            cache(cx).open_prs.insert(key, Instant::now(), read.clone());
+          }
+          if view.prs.settle(generation, result) {
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -443,28 +452,30 @@ impl OpenWorkspacesDialog {
           })
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if let Ok((items, viewer)) = &result {
-          let cache = cache(cx);
-          cache
-            .linear_issues
-            .insert((key.clone(), None), Instant::now(), items.clone());
-          if let Some(viewer) = viewer {
+      this
+        .update(cx, |view, cx| {
+          if let Ok((items, viewer)) = &result {
+            let cache = cache(cx);
             cache
-              .linear_viewer
-              .insert(key, Instant::now(), viewer.clone());
+              .linear_issues
+              .insert((key.clone(), None), Instant::now(), items.clone());
+            if let Some(viewer) = viewer {
+              cache
+                .linear_viewer
+                .insert(key, Instant::now(), viewer.clone());
+            }
           }
-        }
-        view.issues.loading = false;
-        match result {
-          Ok((items, viewer)) => {
-            view.issues.items = items;
-            view.issues.viewer = viewer.map(|v| v.id);
+          view.issues.loading = false;
+          match result {
+            Ok((items, viewer)) => {
+              view.issues.items = items;
+              view.issues.viewer = viewer.map(|v| v.id);
+            }
+            Err(err) => view.issues.error = Some(err),
           }
-          Err(err) => view.issues.error = Some(err),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -503,7 +514,9 @@ impl OpenWorkspacesDialog {
     }
     self._search = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| view.load_prs(cx));
+      this
+        .update(cx, |view, cx| view.load_prs(cx))
+        .ignore_closed();
     }));
   }
 
@@ -513,7 +526,9 @@ impl OpenWorkspacesDialog {
     cx.notify();
     self._check = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| view.check_lines(cx));
+      this
+        .update(cx, |view, cx| view.check_lines(cx))
+        .ignore_closed();
     }));
   }
 
@@ -548,13 +563,15 @@ impl OpenWorkspacesDialog {
             .collect::<Vec<_>>()
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.checks.extend(checked);
-        view.checking = false;
-        // Lines typed while checking.
-        view.check_lines(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.checks.extend(checked);
+          view.checking = false;
+          // Lines typed while checking.
+          view.check_lines(cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -688,7 +705,9 @@ impl OpenWorkspacesDialog {
       let results = cx
         .background_spawn(async move { plan.run(&*host, targets) })
         .await;
-      let _ = this.update(cx, |view, cx| view.opened(results, cx));
+      this
+        .update(cx, |view, cx| view.opened(results, cx))
+        .ignore_closed();
     })
     .detach();
   }

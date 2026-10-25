@@ -13,8 +13,9 @@ mod rows;
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use crate::result_ext::ResultExt;
 use std::{
-  collections::{HashMap, HashSet},
+  collections::{HashMap, HashSet, VecDeque},
   rc::Rc,
   time::Duration,
 };
@@ -53,6 +54,8 @@ use crate::{
 
 /// `REMOVE_ANIMATION_MS`: how long a removed commit stays, its buttons
 /// disabled, before it leaves the list.
+/// Diffs of collapsed commits kept, so opening one again draws at once.
+const CLOSED_DIFFS: usize = 4;
 const REMOVE_DELAY: Duration = Duration::from_millis(220);
 const RESOLVE_DOCS_PATH: &str = "/docs/concepts/commit-management#resolve-commit-conflicts-inplace";
 const RESOLVE_HELP: &str = "Treq opens short-lived resolve directories for each conflicted \
@@ -176,6 +179,9 @@ pub struct CommitsView {
   pub(super) hide_tentative: bool,
   pub(super) expanded: HashSet<String>,
   pub(super) diffs: HashMap<String, DiffState>,
+  /// Collapsed commits whose diff is still in `diffs`, the oldest first: a
+  /// diff can hold thousands of lines, so only the last few stay.
+  closed: VecDeque<String>,
   shifting: bool,
   /// The commit whose "Move commit" menu is open.
   pub(super) move_menu: Option<String>,
@@ -230,6 +236,7 @@ impl CommitsView {
       hide_tentative: false,
       expanded: HashSet::new(),
       diffs: HashMap::new(),
+      closed: VecDeque::new(),
       shifting: false,
       move_menu: None,
       selection: None,
@@ -288,6 +295,7 @@ impl CommitsView {
       self.unconfirmed.clear();
       self.expanded.clear();
       self.diffs.clear();
+      self.closed.clear();
       self.selection = None;
       self.comment = None;
       self.dialog = None;
@@ -339,12 +347,14 @@ impl CommitsView {
       let value = cx
         .background_spawn(async move { work(host.as_ref(), &parent) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -451,15 +461,32 @@ impl CommitsView {
   }
 
   pub(super) fn toggle(&mut self, commit_id: &str, cx: &mut Context<Self>) {
-    if !self.expanded.remove(commit_id) {
+    if self.expanded.remove(commit_id) {
+      self.keep_closed(commit_id);
+    } else {
       self.expand(commit_id, cx);
     }
     cx.notify();
   }
 
+  /// Remembers that `commit_id` closed with its diff read, and drops the
+  /// diffs of the commits closed longest ago. Opening one again reads it
+  /// from [`CommitDiffs`] or the backend.
+  fn keep_closed(&mut self, commit_id: &str) {
+    self.closed.push_back(commit_id.to_string());
+    while self.closed.len() > CLOSED_DIFFS {
+      if let Some(old) = self.closed.pop_front() {
+        if !self.expanded.contains(&old) {
+          self.diffs.remove(&old);
+        }
+      }
+    }
+  }
+
   /// `fetchAndExpand`.
   fn expand(&mut self, commit_id: &str, cx: &mut Context<Self>) {
     self.expanded.insert(commit_id.to_string());
+    self.closed.retain(|closed| closed != commit_id);
     if self.diffs.contains_key(commit_id) {
       return;
     }
@@ -494,7 +521,10 @@ impl CommitsView {
       },
       move |view, result, _| {
         view.layout_gen += 1;
-        let state = view.diffs.entry(id).or_default();
+        // A diff dropped while it read is not kept.
+        let Some(state) = view.diffs.get_mut(&id) else {
+          return;
+        };
         state.loading = false;
         match result {
           Ok(diff) => state.diff = Some(diff),
@@ -533,10 +563,12 @@ impl CommitsView {
         Ok(diff) if has_content(&diff) => diff,
         _ => return,
       };
-      let _ = this.update(cx, |_, cx| {
-        let now = cx.background_executor().now();
-        cx.default_global::<CommitDiffs>().0.insert(key, now, diff);
-      });
+      this
+        .update(cx, |_, cx| {
+          let now = cx.background_executor().now();
+          cx.default_global::<CommitDiffs>().0.insert(key, now, diff);
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -598,12 +630,14 @@ impl CommitsView {
     self.removing.insert(commit_id.clone());
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(REMOVE_DELAY).await;
-      let _ = this.update(cx, |view, cx| {
-        if view.removing.remove(&commit_id) {
-          view.removed.insert(commit_id);
-        }
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.removing.remove(&commit_id) {
+            view.removed.insert(commit_id);
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -2139,16 +2173,20 @@ impl CommitsView {
       let view = view.clone();
       NativeMenuItem::item(label, move |cx| {
         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-        let _ = view.update(cx, |view, _| {
-          view.toast(ToastTone::Success, &format!("{what} copied"), "")
-        });
+        view
+          .update(cx, |view, _| {
+            view.toast(ToastTone::Success, &format!("{what} copied"), "")
+          })
+          .ignore_closed();
       })
       .icon(MenuIcon::Copy)
     };
     let run = |label: &str, f: fn(&mut Self, JjLogCommit, &mut Context<Self>)| {
       let (view, commit) = (view.clone(), commit.clone());
       NativeMenuItem::item(label, move |cx| {
-        let _ = view.update(cx, |view, cx| f(view, commit.clone(), cx));
+        view
+          .update(cx, |view, cx| f(view, commit.clone(), cx))
+          .ignore_closed();
       })
     };
     let own = matches!(kind, Kind::Own { .. });
@@ -2229,7 +2267,9 @@ impl CommitsView {
   ) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static {
     let (c, view) = (commit.clone(), cx.entity().downgrade());
     move |_, _, cx| {
-      let _ = view.update(cx, |view, cx| f(view, c.clone(), cx));
+      view
+        .update(cx, |view, cx| f(view, c.clone(), cx))
+        .ignore_closed();
     }
   }
 

@@ -19,7 +19,8 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use crate::result_ext::ResultExt;
+use std::{collections::HashMap, rc::Rc, sync::Arc, time::Duration};
 
 use serde::Deserialize;
 use serde_json::json;
@@ -33,7 +34,7 @@ use super::{
   code_data::diff_stats,
   merge_queue_data::{
     bar_widths, history_page, max_change, partition, status_label, tip_title, with_local_stats,
-    MergeQueueHost, QueueEntry, QueueStack, HISTORY_PAGE,
+    MergeQueueHost, QueueEntry, QueueStack, HISTORY_PAGE, HISTORY_SLACK,
   },
   ActionSink, ScreenAction,
 };
@@ -73,6 +74,13 @@ struct Queue {
   dequeuing: bool,
 }
 
+/// The queue's stacks, split once per change of the entries or the stats
+/// instead of cloned and rebuilt on every render.
+struct Stacks {
+  active: Vec<QueueStack>,
+  history: Vec<QueueStack>,
+}
+
 /// What the tab read from the backend.
 #[derive(Debug, Clone, Default)]
 struct Local {
@@ -99,6 +107,8 @@ pub struct MergeQueueView {
   tips: Tooltips,
   local: Local,
   queue: Queue,
+  /// `queue` and `local` as stacks; `None` until the next render needs them.
+  stacks: Option<Rc<Stacks>>,
   /// The account's plan carries Pro.
   pro: bool,
   poll: Option<Task<()>>,
@@ -131,6 +141,7 @@ impl MergeQueueView {
       tips: Tooltips::new(popups, dark),
       local: Local::default(),
       queue: Queue::default(),
+      stacks: None,
       pro: account_data::account(cx).is_pro(),
       poll: None,
       read_for: None,
@@ -161,6 +172,7 @@ impl MergeQueueView {
         loading: full_name.is_some(),
         ..Queue::default()
       };
+      self.stacks = None;
     }
     let Some(full_name) = full_name else {
       self.poll = None;
@@ -170,23 +182,35 @@ impl MergeQueueView {
     self.poll = Some(cx.spawn(async move |this, cx| loop {
       let name = full_name.clone();
       let host = host.clone();
+      let Ok(history) = this.update(cx, |view, _| view.history_fetch()) else {
+        return;
+      };
       let read = cx
-        .background_spawn(async move { host.merge_queue(&name) })
+        .background_spawn(async move { host.merge_queue(&name, history) })
         .await;
       let kept = this.update(cx, |view, cx| {
         if view.queue.full_name.as_deref() != Some(full_name.as_str()) {
           return;
         }
-        view.queue.loading = false;
+        let was_loading = std::mem::replace(&mut view.queue.loading, false);
+        let mut changed = was_loading;
         match read {
           Ok((enabled, entries)) => {
+            changed |= view.queue.enabled != Some(enabled);
             view.queue.enabled = Some(enabled);
-            view.queue.entries = entries;
+            if view.queue.entries != entries {
+              view.queue.entries = entries;
+              view.stacks = None;
+              changed = true;
+            }
           }
           Err(error) => log::warn!("reading the merge queue failed: {error}"),
         }
-        view.load(cx);
-        cx.notify();
+        // An unchanged queue neither rereads the workspaces nor repaints.
+        if changed {
+          view.load(cx);
+          cx.notify();
+        }
       });
       if kept.is_err() {
         return;
@@ -203,15 +227,31 @@ impl MergeQueueView {
     if self.route != route {
       if self.route.repo_path != route.repo_path {
         self.local = Local::default();
+        self.stacks = None;
       }
-      let renamed = self.route.full_name != route.full_name;
+      let reread = self.route.full_name != route.full_name
+        || self.history_fetch_for(&self.route) != self.history_fetch_for(&route);
       self.route = route;
-      if renamed {
+      if reread {
         self.read_queue(cx);
       }
       self.load(cx);
     }
     cx.notify();
+  }
+
+  /// Merged entries to read: the shown history, plus [`HISTORY_SLACK`].
+  fn history_fetch_for(&self, route: &Route) -> usize {
+    let shown = if route.show_merged_history {
+      route.history_limit
+    } else {
+      0
+    };
+    shown + HISTORY_SLACK
+  }
+
+  fn history_fetch(&self) -> usize {
+    self.history_fetch_for(&self.route)
   }
 
   fn branches(&self) -> Vec<String> {
@@ -268,12 +308,15 @@ impl MergeQueueView {
           }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.read_for.as_ref() == Some(&key) {
-          view.local = local;
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.read_for.as_ref() == Some(&key) {
+            view.local = local;
+            view.stacks = None;
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -311,14 +354,16 @@ impl MergeQueueView {
       let result = cx
         .background_spawn(async move { host.dequeue(&full_name, &branches) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.queue.dequeuing = false;
-        if let Err(error) = result {
-          log::warn!("removing from the merge queue failed: {error}");
-        }
-        view.read_queue(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.queue.dequeuing = false;
+          if let Err(error) = result {
+            log::warn!("removing from the merge queue failed: {error}");
+          }
+          view.read_queue(cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -335,10 +380,12 @@ impl MergeQueueView {
       cx.background_executor()
         .timer(Duration::from_millis(1500))
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.copied = false;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.copied = false;
+          cx.notify();
+        })
+        .ignore_closed();
     }));
     cx.notify();
   }
@@ -640,14 +687,23 @@ impl MergeQueueView {
         .py_12()
         .child(ui::spinner("merge-queue-loading", 20., p.muted_foreground));
     }
-    let entries = with_local_stats(&self.queue.entries, &self.local.stats);
-    let (active, history) = partition(&entries);
+    let stacks = match &self.stacks {
+      Some(stacks) => stacks.clone(),
+      None => {
+        let entries = with_local_stats(&self.queue.entries, &self.local.stats);
+        let (active, history) = partition(&entries);
+        let stacks = Rc::new(Stacks { active, history });
+        self.stacks = Some(stacks.clone());
+        stacks
+      }
+    };
+    let (active, history) = (&stacks.active, &stacks.history);
     let limit = if self.route.show_merged_history {
       self.route.history_limit
     } else {
       0
     };
-    let (visible, more) = history_page(&history, limit);
+    let (visible, more) = history_page(history, limit);
     let target = active
       .first()
       .map(|s| s.target_branch.clone())

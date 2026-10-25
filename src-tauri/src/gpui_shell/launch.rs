@@ -7,6 +7,7 @@
 //! ([`NativeEvent::AgentSessionStarted`]), since React still routes the
 //! selection.
 
+use crate::result_ext::ResultExt;
 use tauri::{AppHandle, Manager};
 
 use super::native::{Backend, NativeEvent, ToastTone};
@@ -193,18 +194,6 @@ impl LaunchHost for Backend {
   }
 }
 
-/// The shell windows whose main repository is `repo`.
-fn windows_showing(app: &AppHandle, repo: &str) -> Vec<String> {
-  let state = app.state::<AppState>();
-  let normalized = crate::agent_dispatch::normalize_repo_path(repo);
-  let windows = state.window_repo_paths.lock_or_recover();
-  windows
-    .iter()
-    .filter(|(_, path)| crate::agent_dispatch::normalize_repo_path(path) == normalized)
-    .map(|(label, _)| label.clone())
-    .collect()
-}
-
 /// The repositories window `label` shows: its main one, then supporting.
 fn window_repos(app: &AppHandle, label: &str) -> Vec<String> {
   let state = app.state::<AppState>();
@@ -227,9 +216,12 @@ fn window_repos(app: &AppHandle, label: &str) -> Vec<String> {
 }
 
 /// `handleAutoReviewEvent`: starts the review the backend found due, in
-/// each window whose main repository it is.
+/// one window showing its repository (the focused one, as for deep links), so
+/// a repo open in several windows gets one review per operation.
 pub fn auto_review(app: &AppHandle, event: crate::auto_review::AutoReviewEvent) {
-  for label in windows_showing(app, &event.repo_path) {
+  if let Some(label) =
+    crate::agent_runtime::find_target_window_label_for_repo(app, &event.repo_path)
+  {
     let backend = Backend::new(app.clone(), label);
     let event = event.clone();
     std::thread::spawn(move || {
@@ -320,11 +312,13 @@ fn open_window_for(app: &AppHandle, repo: &str) {
   let label = crate::open_new_window::new_repo_window_label();
   let title = crate::open_new_window::new_repo_window_title(repo);
   let (app_for_window, repo) = (app.clone(), repo.to_string());
-  let _ = app.run_on_main_thread(move || {
-    if let Err(err) = super::open_window(&app_for_window, &label, Some(repo), &title) {
-      log::error!("failed to open a window for an agent deep link: {err}");
-    }
-  });
+  app
+    .run_on_main_thread(move || {
+      if let Err(err) = super::open_window(&app_for_window, &label, Some(repo), &title) {
+        log::error!("failed to open a window for an agent deep link: {err}");
+      }
+    })
+    .ignore_closed();
 }
 
 /// Starts the deep links queued for `repo` once window `label` shows it.
@@ -356,7 +350,7 @@ pub fn treq_send(app: &AppHandle, request: &crate::send_dispatch::SendDispatchRe
   };
   if launch::add_send_asset(asset) {
     super::defer_main(app, |_| {
-      let _ = tauri_plugin_gpui::with_app(|cx| cx.refresh_windows());
+      tauri_plugin_gpui::with_app(|cx| cx.refresh_windows()).ignore_closed();
     });
   }
 }

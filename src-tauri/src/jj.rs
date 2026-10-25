@@ -3,6 +3,7 @@
   reason = "slices hex commit/change ids and git ref names at ASCII separators"
 )]
 
+use crate::result_ext::ResultExt;
 use chrono::TimeZone;
 use futures::StreamExt as _;
 use futures::TryStreamExt as _;
@@ -172,6 +173,7 @@ use gix::refs::Target;
 use imara_diff::intern::InternedInput;
 use imara_diff::sink::Counter;
 use imara_diff::{diff, Algorithm, UnifiedDiffBuilder};
+use jj_lib::backend::{TreeId, TreeValue};
 use jj_lib::commit::Commit;
 use jj_lib::config::{ConfigLayer, ConfigSource, StackedConfig};
 use jj_lib::conflict_labels::ConflictLabels;
@@ -185,7 +187,7 @@ use jj_lib::git;
 use jj_lib::gitignore::GitIgnoreFile;
 use jj_lib::lock::FileLock;
 use jj_lib::matchers::{Matcher, NothingMatcher, PrefixMatcher};
-use jj_lib::merge::{Diff, Merge};
+use jj_lib::merge::{Diff, Merge, MergedTreeValue};
 use jj_lib::merged_tree::MergedTree;
 use jj_lib::merged_tree_builder::MergedTreeBuilder;
 use jj_lib::object_id::{HexPrefix, ObjectId};
@@ -204,6 +206,7 @@ use jj_lib::rewrite::{
   RewriteRefsOptions,
 };
 use jj_lib::settings::UserSettings;
+use jj_lib::store::Store;
 use jj_lib::str_util::StringExpression;
 use jj_lib::tree_merge::MergeOptions;
 use jj_lib::working_copy::{SnapshotOptions, WorkingCopyFreshness};
@@ -213,6 +216,7 @@ use jj_lib::workspace::{
 use jj_lib::workspace_store::{SimpleWorkspaceStore, WorkspaceStore as _};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1089,7 +1093,7 @@ fn build_log_commits(
       )
     })
     .collect();
-  let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
+  local_db::cache_commit_rows(cache_repo_path, &misses).warn_on_err("cache commit rows");
   built
 }
 
@@ -1335,6 +1339,9 @@ pub struct JjDiffHunk {
   pub id: String,
   pub header: String,
   pub lines: Vec<String>,
+  /// Always empty now: the header and lines are the hunk's text. Kept so
+  /// that a peer that still requires the field can read it.
+  #[serde(default)]
   pub patch: String,
   #[serde(default)]
   pub conflict_style: ConflictStyle,
@@ -1350,6 +1357,11 @@ pub struct JjFileChange {
   pub previous_path: Option<String>,
   pub changed_line_count: usize,
   pub diff_deferred: bool,
+  /// Names the file's two sides in a working-copy diff (with the marker
+  /// style, from `workspace_diff`): equal ids mean equal hunks, so a reread
+  /// keeps the hunks of files whose id held. `None` when unknown.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub content_id: Option<String>,
 }
 
 /// File content lines for context expansion
@@ -1743,10 +1755,12 @@ pub fn ensure_jj_initialized(db: &crate::db::Database, repo_path: &str) -> Resul
       return Ok(true); // Flag valid, .jj exists
     }
     // Flag stale — .jj was deleted. Clear flag, fall through to reinit
-    let _ = db.set_repo_setting(repo_path, flag_key, "false");
+    db.set_repo_setting(repo_path, flag_key, "false")
+      .warn_on_err("set repo setting");
   } else if is_jj_workspace(repo_path) {
     // Double-check filesystem in case flag got out of sync
-    let _ = db.set_repo_setting(repo_path, flag_key, "true");
+    db.set_repo_setting(repo_path, flag_key, "true")
+      .warn_on_err("set repo setting");
     ensure_treq_dirs_ignored(repo_path)?;
     return Ok(true);
   }
@@ -1757,7 +1771,7 @@ pub fn ensure_jj_initialized(db: &crate::db::Database, repo_path: &str) -> Resul
   }
 
   // Cache git user config so subsequent commits don't shell out
-  let _ = cache_git_user_config(db, repo_path);
+  cache_git_user_config(db, repo_path).warn_on_err("cache git user config");
 
   // Initialize jj
   init_jj_for_git_repo(repo_path)?;
@@ -1925,7 +1939,7 @@ pub fn create_workspace(
   let settings = create_user_settings(repo_path)?;
 
   // Import colocated git refs (HEAD + branches/remotes) so external commits are visible for parent resolution.
-  let _ = jj_util_import_git_refs(repo_path);
+  jj_util_import_git_refs(repo_path).warn_on_err("jj util import git refs");
 
   // Load parent workspace and repo (re-loaded after the git import so it sees fresh refs).
   let parent_workspace = Workspace::load(
@@ -1992,7 +2006,10 @@ pub fn create_workspace(
         name: RefName::new(&name),
         remote: RemoteName::new(&remote),
       };
-      let _ = import_tx.repo_mut().track_remote_bookmark(sym);
+      import_tx
+        .repo_mut()
+        .track_remote_bookmark(sym)
+        .warn_on_err("track remote bookmark");
     }
 
     if import_tx.repo().has_changes() {
@@ -2189,7 +2206,9 @@ pub fn create_workspace(
         name: RefName::new(branch_name),
         remote: RemoteName::new("origin"),
       };
-      let _ = tx.repo_mut().track_remote_bookmark(sym);
+      tx.repo_mut()
+        .track_remote_bookmark(sym)
+        .warn_on_err("track remote bookmark");
     }
   }
 
@@ -2198,7 +2217,7 @@ pub fn create_workspace(
     .map_err(|e| JjError::GitWorkspaceError(format!("Failed to rebase descendants: {}", e)))?;
 
   // Export to git refs (colocated repo)
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let _committed_repo = block_on(tx.commit("create_workspace"))
     .map_err(|e| JjError::GitWorkspaceError(format!("Failed to commit transaction: {}", e)))?;
@@ -2340,7 +2359,7 @@ pub fn create_resolve_workspace(
       e
     ))
   })?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let committed = block_on(tx.commit("create_resolve_workspace")).map_err(|e| {
     JjError::GitWorkspaceError(format!("Failed to commit resolve workspace tx: {}", e))
   })?;
@@ -2573,7 +2592,7 @@ pub fn jj_resolve_conflict_sides(workspace_path: &str, sides: &[u8]) -> Result<(
     };
     let abs = Path::new(workspace_path).join(path.as_internal_file_string());
     if let Some(parent) = abs.parent() {
-      let _ = fs::create_dir_all(parent);
+      fs::create_dir_all(parent).warn_on_err("create dir all");
     }
     fs::write(&abs, resolved_text.as_bytes()).map_err(|e| {
       JjError::IoError(format!(
@@ -3022,6 +3041,7 @@ pub fn get_workspace_branch(workspace_path: &str) -> Result<String, JjError> {
 pub fn remove_workspace_directory_only(workspace_path: &str) -> Result<(), JjError> {
   let workspace_dir = Path::new(workspace_path);
   if workspace_dir.exists() {
+    local_db::release_connections_under(workspace_dir);
     fs::remove_dir_all(workspace_dir).map_err(|e| JjError::IoError(e.to_string()))?;
   }
   Ok(())
@@ -3065,7 +3085,8 @@ pub fn forget_workspace(repo_path: &str, workspace_path: &str) -> Result<(), JjE
       // With nothing rebased no WC commit moved, so every other working copy is current; reconciling
       // would only load each workspace to find that out.
       if rebased > 0 {
-        let _ = reconcile_all_workspaces_after_rewrite(repo_path, Some(workspace_name));
+        reconcile_all_workspaces_after_rewrite(repo_path, Some(workspace_name))
+          .warn_on_err("reconcile all workspaces after rewrite");
       }
     }
   }
@@ -3196,13 +3217,14 @@ pub fn squash_commit_to_workspace(
   tx.repo_mut().record_abandoned_commit(&commit);
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   block_on(tx.commit("move commit to workspace"))
     .map_err(|e| JjError::IoError(format!("Failed to commit move: {}", e)))?;
 
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, Some(target_name.as_str()));
+  reconcile_all_workspaces_after_rewrite(&repo_path, Some(target_name.as_str()))
+    .warn_on_err("reconcile all workspaces after rewrite");
   update_stale_workspace(target_workspace_path)
     .map_err(|e| JjError::IoError(format!("Failed to update target working copy: {e}")))
 }
@@ -3434,7 +3456,8 @@ pub fn jj_abandon(workspace_path: &str, change_id: &str) -> Result<String, JjErr
   // rebase_descendants() may have rewritten WC commits of every workspace; reconcile all.
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, None);
+  reconcile_all_workspaces_after_rewrite(&repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   Ok(op_hex)
 }
@@ -3462,7 +3485,7 @@ pub fn jj_undo_operation(workspace_path: &str, operation_id: &str) -> Result<Str
 
   let mut tx = loaded.repo.start_transaction();
   tx.repo_mut().set_view(restored_view);
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let new_repo = block_on(tx.commit(format!("undo: restore to operation {}", parent.id().hex())))
     .map_err(|e| JjError::IoError(format!("Failed to commit undo: {}", e)))?;
   update_workspace_after_history_edit(&mut loaded, &new_repo, None, CheckoutMode::Immediate)?;
@@ -3627,7 +3650,8 @@ pub fn jj_revert_commit(workspace_path: &str, change_id: &str) -> Result<String,
   // rebase_descendants() may have rewritten WC commits of every workspace; reconcile all.
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, None);
+  reconcile_all_workspaces_after_rewrite(&repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   Ok(String::new())
 }
@@ -3665,7 +3689,8 @@ pub fn jj_describe(
   // rebase_descendants() may have rewritten WC commits of every workspace; reconcile all.
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, None);
+  reconcile_all_workspaces_after_rewrite(&repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   Ok(String::new())
 }
@@ -3982,7 +4007,8 @@ fn apply_lineage_timestamp_plan(
 
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, None);
+  reconcile_all_workspaces_after_rewrite(&repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
   Ok(())
 }
 
@@ -4342,23 +4368,27 @@ pub fn jj_get_changed_files(workspace_path: &str) -> Result<Vec<JjFileChange>, J
       builder.set_tree(new_tree.clone());
       match block_on(builder.write(tx.repo_mut())) {
         Ok(rewritten_wc) => {
-          let _ = block_on(tx.repo_mut().edit(workspace_name, &rewritten_wc));
-          let _ = block_on(tx.repo_mut().rebase_descendants());
+          block_on(tx.repo_mut().edit(workspace_name, &rewritten_wc))
+            .warn_on_err("edit rewritten working copy");
+          block_on(tx.repo_mut().rebase_descendants()).warn_on_err("rebase descendants");
           match block_on(tx.commit("snapshot working copy")) {
             Ok(final_repo) => {
-              let _ = block_on(locked_ws.finish(final_repo.op_id().clone()));
+              block_on(locked_ws.finish(final_repo.op_id().clone()))
+                .warn_on_err("finish working copy update");
             }
             Err(_) => {
-              let _ = block_on(locked_ws.finish(repo.op_id().clone()));
+              block_on(locked_ws.finish(repo.op_id().clone()))
+                .warn_on_err("finish working copy update");
             }
           }
         }
         Err(_) => {
-          let _ = block_on(locked_ws.finish(repo.op_id().clone()));
+          block_on(locked_ws.finish(repo.op_id().clone()))
+            .warn_on_err("finish working copy update");
         }
       }
     } else {
-      let _ = block_on(locked_ws.finish(repo.op_id().clone()));
+      block_on(locked_ws.finish(repo.op_id().clone())).warn_on_err("finish working copy update");
     }
 
     Ok(tree_changes(&repo, &wc_commit, &new_tree))
@@ -4383,6 +4413,9 @@ fn tree_changes(repo: &ReadonlyRepo, wc_commit: &Commit, tree: &MergedTree) -> V
       .diff_stream(tree, &diff_matcher)
       .collect::<Vec<_>>(),
   );
+  // Hunks are read against all parents merged; with one parent that is the
+  // tree diffed here, so its values name what the hunks are read between.
+  let content_ids = wc_commit.parent_ids().len() <= 1;
 
   let mut changes = Vec::new();
   for entry in diff_entries {
@@ -4397,15 +4430,40 @@ fn tree_changes(repo: &ReadonlyRepo, wc_commit: &Commit, tree: &MergedTree) -> V
     } else {
       "M"
     };
+    let content_id = content_ids.then(|| {
+      format!(
+        "{}>{}",
+        tree_value_id(&values.before),
+        tree_value_id(&values.after)
+      )
+    });
     changes.push(JjFileChange {
       path: file_path,
       status: status.to_string(),
       previous_path: None,
       changed_line_count: 0,
       diff_deferred: false,
+      content_id,
     });
   }
   changes
+}
+
+/// Names one side of a path in a tree diff by its object ids.
+fn tree_value_id(value: &MergedTreeValue) -> String {
+  value
+    .iter()
+    .map(|term| match term {
+      None => "-".to_string(),
+      Some(TreeValue::File { id, executable, .. }) => {
+        format!("{}{}", if *executable { "x" } else { "f" }, id.hex())
+      }
+      Some(TreeValue::Symlink(id)) => format!("l{}", id.hex()),
+      Some(TreeValue::Tree(id)) => format!("t{}", id.hex()),
+      Some(TreeValue::GitSubmodule(id)) => format!("s{}", id.hex()),
+    })
+    .collect::<Vec<_>>()
+    .join(",")
 }
 
 /// [`jj_is_working_copy_empty`] from a snapshot the caller already took, so
@@ -4587,7 +4645,7 @@ pub fn jj_get_file_hunks_batch(
       .iter()
       .map(|file_path| {
         file_hunks_between(
-          &loaded,
+          loaded.repo.store(),
           &parent_tree,
           &tree,
           file_path,
@@ -4600,8 +4658,71 @@ pub fn jj_get_file_hunks_batch(
   })
 }
 
+/// [`jj_get_file_hunks_batch`] for the diff `token` (a
+/// [`working_copy_token`]) names: its trees are read from the store by id,
+/// with no lock or snapshot, so the hunks show the state the token was read
+/// at. `None` when the store has no such trees.
+pub fn jj_get_file_hunks_at(
+  workspace_path: &str,
+  token: &str,
+  file_paths: &[String],
+  conflict_marker_style: &str,
+) -> Result<Option<FileHunksBatch>, JjError> {
+  let repo_path_opt = derive_repo_path_from_workspace(workspace_path);
+  let settings = create_user_settings(repo_path_opt.as_deref().unwrap_or(workspace_path))?;
+  // The store is all a read by id needs: no operation or view is loaded.
+  let workspace = Workspace::load(
+    &settings,
+    Path::new(workspace_path),
+    &StoreFactories::default(),
+    &default_working_copy_factories(),
+  )
+  .map_err(|e| JjError::IoError(format!("Failed to load workspace: {}", e)))?;
+  let store = workspace.repo_loader().store();
+  let Some((parent_tree, tree)) = working_copy_token_trees(store, token) else {
+    return Ok(None);
+  };
+  // A token from another repository, or trees since collected.
+  if block_on(parent_tree.trees()).is_err() || block_on(tree.trees()).is_err() {
+    return Ok(None);
+  }
+  let merge_options = MergeOptions::from_settings(&settings)
+    .map_err(|e| JjError::IoError(format!("Failed to load merge options: {}", e)))?;
+  let style = parse_conflict_marker_style(conflict_marker_style);
+  let hunks = file_paths
+    .iter()
+    .map(|file_path| {
+      file_hunks_between(store, &parent_tree, &tree, file_path, style, &merge_options)
+    })
+    .collect();
+  Ok(Some((token.to_string(), hunks)))
+}
+
+/// The two trees a [`working_copy_token`] names; `None` when it is not one.
+fn working_copy_token_trees(store: &Arc<Store>, token: &str) -> Option<(MergedTree, MergedTree)> {
+  let tree = |hex: &str| {
+    let ids = hex
+      .split(',')
+      .map(TreeId::try_from_hex)
+      .collect::<Option<Vec<_>>>()?;
+    // A merge has one more side than bases.
+    if ids.len() % 2 == 0 {
+      return None;
+    }
+    let ids = Merge::from_vec(ids);
+    Some(MergedTree::new(
+      store.clone(),
+      ids,
+      ConflictLabels::unlabeled(),
+    ))
+  };
+  let (parent, wc) = token.split_once("..")?;
+  Some((tree(parent)?, tree(wc)?))
+}
+
 /// Names a working-copy diff by its two trees: reads with the same token
-/// list the same files with the same hunks.
+/// list the same files with the same hunks. [`jj_get_file_hunks_at`]
+/// reads the trees back from it.
 fn working_copy_token(parent_tree: &MergedTree, tree: &MergedTree) -> String {
   let hex = |tree: &MergedTree| {
     tree
@@ -4616,7 +4737,7 @@ fn working_copy_token(parent_tree: &MergedTree, tree: &MergedTree) -> String {
 
 /// One file's hunks between the working copy's parent tree and its tree.
 fn file_hunks_between(
-  loaded: &LoadedWorkspaceRepo,
+  store: &Arc<Store>,
   parent_tree: &MergedTree,
   tree: &MergedTree,
   file_path: &str,
@@ -4634,14 +4755,14 @@ fn file_hunks_between(
     .map_err(|e| JjError::IoError(format!("Failed to read working path value: {}", e)))?;
   let labels = ConflictLabels::unlabeled();
   let before_materialized = block_on(jj_lib::conflicts::materialize_tree_value(
-    loaded.repo.store(),
+    store,
     target_repo_path.as_ref(),
     before,
     &labels,
   ))
   .map_err(|e| JjError::IoError(format!("Failed to materialize parent value: {}", e)))?;
   let after_materialized = block_on(jj_lib::conflicts::materialize_tree_value(
-    loaded.repo.store(),
+    store,
     target_repo_path.as_ref(),
     after,
     &labels,
@@ -4690,9 +4811,9 @@ fn parse_git_diff_hunks(diff: &str) -> Result<Vec<JjDiffHunk>, JjError> {
       if let Some((header, lines)) = current_hunk.take() {
         hunks.push(JjDiffHunk {
           id: format!("hunk-{}", hunk_index),
-          header: header.clone(),
-          lines: lines.clone(),
-          patch: format!("{}\n{}", header, lines.join("\n")),
+          header,
+          lines,
+          patch: String::new(),
           conflict_style: ConflictStyle::Unknown,
           conflict_regions: Vec::new(),
         });
@@ -4702,14 +4823,9 @@ fn parse_git_diff_hunks(diff: &str) -> Result<Vec<JjDiffHunk>, JjError> {
       // Start new hunk
       current_hunk = Some((line.to_string(), Vec::new()));
     } else if let Some((_, ref mut lines)) = current_hunk {
-      // Skip diff metadata lines (be specific to avoid filtering conflict markers)
-      if !line.starts_with("diff --git")
-        && !line.starts_with("index ")
-        && !line.starts_with("--- ")
-        && !line.starts_with("+++ ")
-      {
-        lines.push(line.to_string());
-      }
+      // The input is hunks only (no file headers), so a line such as
+      // `--- end` is a removed `-- end`, not metadata.
+      lines.push(line.to_string());
     }
   }
 
@@ -4717,9 +4833,9 @@ fn parse_git_diff_hunks(diff: &str) -> Result<Vec<JjDiffHunk>, JjError> {
   if let Some((header, lines)) = current_hunk {
     hunks.push(JjDiffHunk {
       id: format!("hunk-{}", hunk_index),
-      header: header.clone(),
-      lines: lines.clone(),
-      patch: format!("{}\n{}", header, lines.join("\n")),
+      header,
+      lines,
+      patch: String::new(),
       conflict_style: ConflictStyle::Unknown,
       conflict_regions: Vec::new(),
     });
@@ -5154,7 +5270,7 @@ pub fn jj_stash_working_copy(
   })?;
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants after stash: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("stash working copy"))
     .map_err(|e| JjError::IoError(format!("Failed to commit stash transaction: {}", e)))?;
@@ -5256,7 +5372,7 @@ pub fn jj_stash_commit(
   tx.repo_mut().record_abandoned_commit(&commit);
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants after stash: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("stash commit"))
     .map_err(|e| JjError::IoError(format!("Failed to commit stash-commit transaction: {}", e)))?;
@@ -5264,7 +5380,8 @@ pub fn jj_stash_commit(
 
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, None);
+  reconcile_all_workspaces_after_rewrite(&repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   let change_id_hex = HexPrefix::from_id(stash_commit.change_id()).reverse_hex()[..12].to_string();
   let short_commit_id = short_commit_id(&stash_commit);
@@ -5514,7 +5631,7 @@ pub fn jj_delete_bookmark(workspace_path: &str, bookmark_name: &str) -> Result<(
   let mut tx = loaded.repo.start_transaction();
   tx.repo_mut()
     .set_local_bookmark_target(RefName::new(bookmark_name), RefTarget::absent());
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   block_on(tx.commit("delete bookmark")).map_err(|e| {
     JjError::IoError(format!(
       "Failed to delete bookmark '{}': {}",
@@ -5618,7 +5735,7 @@ pub fn jj_edit_bookmark(repo_path: &str, bookmark_name: &str) -> Result<String, 
     .map_err(|e| JjError::IoError(format!("Failed to move working copy: {}", e)))?;
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let new_repo = block_on(tx.commit("edit bookmark"))
     .map_err(|e| JjError::IoError(format!("Failed to commit bookmark edit: {}", e)))?;
   update_workspace_after_history_edit(
@@ -5704,7 +5821,7 @@ pub fn jj_reset_bookmark_to_remote(
   set_local_bookmark_target(tx.repo_mut(), branch_name, remote_commit.id().clone());
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let new_repo = block_on(tx.commit(format!("reset {branch_name} to origin")))
     .map_err(|e| JjError::IoError(format!("Failed to commit reset: {}", e)))?;
   update_workspace_after_history_edit(
@@ -5819,7 +5936,7 @@ pub fn jj_commit(workspace_path: &str, message: &str) -> Result<String, JjError>
             .map_err(|e| JjError::IoError(format!("Failed to repair home wc checkout: {}", e)))?;
             block_on(rtx.repo_mut().rebase_descendants())
               .map_err(|e| JjError::IoError(format!("Failed to rebase after wc repair: {}", e)))?;
-            let _ = git::export_refs(rtx.repo_mut());
+            git::export_refs(rtx.repo_mut()).warn_on_err("export refs");
             let _ = block_on(rtx.commit("repair home wc"))
               .map_err(|e| JjError::IoError(format!("Failed to commit wc repair: {}", e)))?;
             workspace = Workspace::load(
@@ -5948,7 +6065,7 @@ pub fn jj_commit(workspace_path: &str, message: &str) -> Result<String, JjError>
   }
 
   // Keep colocated git refs aligned with jj refs to avoid stale/conflicted bookmark revsets.
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   // Commit the transaction and finalize working copy
   let new_repo = block_on(tx.commit("commit_workspace"))
@@ -5958,8 +6075,8 @@ pub fn jj_commit(workspace_path: &str, message: &str) -> Result<String, JjError>
 
   // Reconcile sibling workspaces after rebase_descendants rewrites WCs (mirrors update_workspace_after_history_edit).
   let reconcile_repo_path = repo_path_opt.as_deref().unwrap_or(workspace_path);
-  let _ =
-    reconcile_all_workspaces_after_rewrite(reconcile_repo_path, Some(workspace_name.as_str()));
+  reconcile_all_workspaces_after_rewrite(reconcile_repo_path, Some(workspace_name.as_str()))
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   // For home repos, keep Git HEAD symbolic to the active branch (avoid detached HEAD after jj commit).
   if repo_path_opt.is_none() {
@@ -6392,7 +6509,7 @@ pub fn jj_split(
   }
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let new_repo = block_on(tx.commit("split working copy"))
     .map_err(|e| JjError::IoError(format!("Failed to commit split transaction: {}", e)))?;
   // No old tree: the snapshot already moved tree_state, so a check would hit ConcurrentCheckout.
@@ -6587,7 +6704,7 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
     ))
   })?;
 
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("rebase workspace bookmark lineage"))
     .map_err(|e| JjError::IoError(format!("Failed to commit rebase transaction: {}", e)))?;
@@ -7075,12 +7192,13 @@ pub fn jj_rebase_with_revset(
   if commits.is_empty() {
     // Nothing to rebase — still reconcile on-disk WC state so sibling workspaces stay consistent.
     let current_repo = Arc::clone(&loaded.repo);
-    let _ = update_workspace_after_history_edit(
+    update_workspace_after_history_edit(
       &mut loaded,
       &current_repo,
       old_wc_commit.as_ref(),
       CheckoutMode::Immediate,
-    );
+    )
+    .warn_on_err("update workspace after history edit");
     return Ok(JjRebaseResult {
       success: true,
       message: "Nothing to rebase (empty revision set)".to_string(),
@@ -7112,7 +7230,7 @@ pub fn jj_rebase_with_revset(
   .map_err(|e| JjError::IoError(format!("Failed to rebase revset roots: {}", e)))?;
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let new_repo = block_on(tx.commit("rebase revset roots"))
     .map_err(|e| JjError::IoError(format!("Failed to commit rebase transaction: {}", e)))?;
   update_workspace_after_history_edit(
@@ -7240,7 +7358,7 @@ pub fn jj_resolve_bookmark_conflict_losslessly(
 
   tx.repo_mut()
     .set_local_bookmark_target(RefName::new(bookmark_name), RefTarget::normal(tip_id));
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let new_repo = block_on(tx.commit("resolve bookmark conflict losslessly"))
     .map_err(|e| JjError::IoError(format!("Failed to commit bookmark resolution: {e}")))?;
   update_workspace_after_history_edit(
@@ -7717,7 +7835,29 @@ fn git_subprocess_options(settings: &UserSettings) -> Result<git::GitSubprocessO
     .to_subprocess_options();
   options.executable_path =
     PathBuf::from(binary_paths::resolve_remote_git().map_err(JjError::IoError)?);
+  disable_auto_maintenance(&mut options.environment);
   Ok(options)
+}
+
+/// Keeps `git fetch` and `git push` from spawning `git maintenance run --auto`
+/// (and a possible auto-gc that can stall a big repo) after every call. Passed
+/// through `GIT_CONFIG_COUNT` so any config the caller's environment already
+/// injects stays in force.
+fn disable_auto_maintenance(environment: &mut HashMap<OsString, OsString>) {
+  let existing = std::env::var("GIT_CONFIG_COUNT")
+    .ok()
+    .and_then(|count| count.parse::<usize>().ok())
+    .unwrap_or(0);
+  let settings = [("maintenance.auto", "false"), ("gc.auto", "0")];
+  for (offset, (key, value)) in settings.into_iter().enumerate() {
+    let index = existing + offset;
+    environment.insert(format!("GIT_CONFIG_KEY_{index}").into(), key.into());
+    environment.insert(format!("GIT_CONFIG_VALUE_{index}").into(), value.into());
+  }
+  environment.insert(
+    "GIT_CONFIG_COUNT".into(),
+    (existing + settings.len()).to_string().into(),
+  );
 }
 
 /// Branch status indicating whether a branch exists locally and/or remotely
@@ -8805,13 +8945,14 @@ pub fn jj_drop_autosave_ancestors(workspace_path: &str) -> Result<Vec<String>, J
   }
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase after dropping autosaves: {e}")))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   block_on(tx.commit("drop autosave commits"))
     .map_err(|e| JjError::IoError(format!("Failed to commit autosave drop: {e}")))?;
 
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, None);
+  reconcile_all_workspaces_after_rewrite(&repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   Ok(dropped_ids)
 }
@@ -9027,7 +9168,7 @@ fn build_wc_log_commit(
     &cached,
     &mut misses,
   );
-  let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
+  local_db::cache_commit_rows(cache_repo_path, &misses).warn_on_err("cache commit rows");
   row
 }
 
@@ -9164,14 +9305,16 @@ fn update_workspace_after_history_edit(
   if matches!(checkout_mode, CheckoutMode::Deferred) {
     loaded.repo = Arc::clone(new_repo);
     // In deferred mode still reconcile sibling workspaces; skip the loaded workspace (caller owns checkout).
-    let _ = reconcile_all_workspaces_after_rewrite(&repo_path, Some(&primary_workspace_name));
+    reconcile_all_workspaces_after_rewrite(&repo_path, Some(&primary_workspace_name))
+      .warn_on_err("reconcile all workspaces after rewrite");
     return Ok(());
   }
 
   let workspace_name = loaded.workspace.workspace_name().to_owned();
   let Some(new_wc_commit_id) = new_repo.view().get_wc_commit_id(&workspace_name).cloned() else {
     // Primary workspace has no WC commit — still reconcile siblings.
-    let _ = reconcile_all_workspaces_after_rewrite(&repo_path, Some(&primary_workspace_name));
+    reconcile_all_workspaces_after_rewrite(&repo_path, Some(&primary_workspace_name))
+      .warn_on_err("reconcile all workspaces after rewrite");
     return Ok(());
   };
   let new_wc_commit = new_repo
@@ -9191,7 +9334,8 @@ fn update_workspace_after_history_edit(
   }
 
   // Reconcile every other workspace whose WC commit was rewritten by rebase_descendants.
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, Some(&primary_workspace_name));
+  reconcile_all_workspaces_after_rewrite(&repo_path, Some(&primary_workspace_name))
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   Ok(())
 }
@@ -9257,6 +9401,29 @@ fn get_commit_copy_records(
   Ok(copy_records)
 }
 
+/// Past this many changed paths a diff skips rename and copy tracking: gix's
+/// rewrite tracker pairs added files with removed ones, which takes seconds
+/// for thousands of paths (1.3 s for 10,000), and a diff this large is
+/// nearly always too large to render, as each path changes a line or more.
+const COPY_TRACKING_MAX_ENTRIES: usize = TOO_LARGE_COMMIT_DIFF_THRESHOLD / 2;
+
+/// Whether the diff from `from_tree` to `to_tree` lists more paths than
+/// [`COPY_TRACKING_MAX_ENTRIES`], counted without reading any file.
+fn too_many_paths_to_track_copies(
+  from_tree: &MergedTree,
+  to_tree: &MergedTree,
+  matcher: &PrefixMatcher,
+  limit: usize,
+) -> bool {
+  let counted = block_on(
+    from_tree
+      .diff_stream(to_tree, matcher)
+      .take(limit + 1)
+      .count(),
+  );
+  counted > limit
+}
+
 fn get_copy_records_between(
   store: &jj_lib::store::Store,
   root: &jj_lib::backend::CommitId,
@@ -9302,6 +9469,7 @@ fn build_file_change(
     previous_path,
     changed_line_count,
     diff_deferred,
+    content_id: None,
   }
 }
 
@@ -9391,13 +9559,27 @@ fn merge_diff_between_revisions_in(
   let from_tree = from_commit.tree();
   let to_tree = to_commit.tree();
 
+  let key = MergeDiffKey {
+    repo: loaded.workspace.repo_path().to_path_buf(),
+    from: from_commit.id().clone(),
+    to: to_commit.id().clone(),
+    style: _conflict_marker_style.to_string(),
+  };
+  if let Some(diff) = merge_diff_cache().get(&key) {
+    return Ok(diff);
+  }
   let matcher = repo_root_matcher();
-  let copy_records = get_copy_records_between(
-    loaded.repo.store(),
-    from_commit.id(),
-    to_commit.id(),
-    &matcher,
-  )?;
+  let copy_records =
+    if too_many_paths_to_track_copies(&from_tree, &to_tree, &matcher, COPY_TRACKING_MAX_ENTRIES) {
+      CopyRecords::default()
+    } else {
+      get_copy_records_between(
+        loaded.repo.store(),
+        from_commit.id(),
+        to_commit.id(),
+        &matcher,
+      )?
+    };
   let conflict_labels = Diff::new(from_tree.labels(), to_tree.labels());
   let diff_stream = materialized_diff_stream(
     loaded.repo.store(),
@@ -9455,7 +9637,7 @@ fn merge_diff_between_revisions_in(
     }
   });
 
-  Ok(JjRevisionDiff {
+  let diff = JjRevisionDiff {
     committed_files,
     hunks_by_file,
     uncommitted_files: Vec::new(),
@@ -9463,6 +9645,68 @@ fn merge_diff_between_revisions_in(
     too_large_to_render: false,
     render_block_reason: None,
     working_copy_token: None,
+  };
+  merge_diff_cache().put(key, &diff);
+  Ok(diff)
+}
+
+/// What a merge diff was read from: commit ids name their trees, so the
+/// same key always yields the same diff.
+#[derive(Clone, PartialEq, Eq)]
+struct MergeDiffKey {
+  repo: PathBuf,
+  from: jj_lib::backend::CommitId,
+  to: jj_lib::backend::CommitId,
+  style: String,
+}
+
+/// The last few merge diffs: a Changes reload that moved only the working
+/// copy re-reads the committed part from here, not from the store.
+struct MergeDiffCache {
+  entries: std::sync::Mutex<Vec<(MergeDiffKey, Arc<JjRevisionDiff>)>>,
+}
+
+impl MergeDiffCache {
+  const CAPACITY: usize = 3;
+  /// Diffs with more text than this are not kept.
+  const MAX_BYTES: usize = 64 << 20;
+
+  fn get(&self, key: &MergeDiffKey) -> Option<JjRevisionDiff> {
+    let mut entries = self.entries.lock().ok()?;
+    let at = entries.iter().position(|(k, _)| k == key)?;
+    // Most recently used last.
+    let hit = entries.remove(at);
+    let diff = hit.1.clone();
+    entries.push(hit);
+    drop(entries);
+    Some((*diff).clone())
+  }
+
+  fn put(&self, key: MergeDiffKey, diff: &JjRevisionDiff) {
+    let bytes: usize = diff
+      .hunks_by_file
+      .iter()
+      .flat_map(|f| &f.hunks)
+      .map(|h| h.lines.iter().map(String::len).sum::<usize>())
+      .sum();
+    if bytes > Self::MAX_BYTES {
+      return;
+    }
+    let Ok(mut entries) = self.entries.lock() else {
+      return;
+    };
+    entries.retain(|(k, _)| *k != key);
+    if entries.len() >= Self::CAPACITY {
+      entries.remove(0);
+    }
+    entries.push((key, Arc::new(diff.clone())));
+  }
+}
+
+fn merge_diff_cache() -> &'static MergeDiffCache {
+  static CACHE: std::sync::OnceLock<MergeDiffCache> = std::sync::OnceLock::new();
+  CACHE.get_or_init(|| MergeDiffCache {
+    entries: std::sync::Mutex::new(Vec::new()),
   })
 }
 
@@ -9480,9 +9724,18 @@ pub fn jj_get_commit_diff(
   let parent_tree = block_on(commit.parent_tree(loaded.repo.as_ref()))
     .map_err(|e| JjError::IoError(format!("Failed to read parent tree: {}", e)))?;
   let commit_tree = commit.tree();
-  let copy_records = get_commit_copy_records(loaded.repo.store(), &commit)?;
-  let conflict_labels = Diff::new(parent_tree.labels(), commit_tree.labels());
   let matcher = repo_root_matcher();
+  let copy_records = if too_many_paths_to_track_copies(
+    &parent_tree,
+    &commit_tree,
+    &matcher,
+    COPY_TRACKING_MAX_ENTRIES,
+  ) {
+    CopyRecords::default()
+  } else {
+    get_commit_copy_records(loaded.repo.store(), &commit)?
+  };
+  let conflict_labels = Diff::new(parent_tree.labels(), commit_tree.labels());
   let diff_stream = materialized_diff_stream(
     loaded.repo.store(),
     parent_tree.diff_stream_with_copies(&commit_tree, &matcher, &copy_records),
@@ -9584,9 +9837,19 @@ pub fn jj_get_commit_file_diff(
   let parent_tree = block_on(commit.parent_tree(loaded.repo.as_ref()))
     .map_err(|e| JjError::IoError(format!("Failed to read parent tree: {}", e)))?;
   let commit_tree = commit.tree();
-  let copy_records = get_commit_copy_records(loaded.repo.store(), &commit)?;
-  let conflict_labels = Diff::new(parent_tree.labels(), commit_tree.labels());
   let matcher = repo_root_matcher();
+  // As the commit's file list tracked them.
+  let copy_records = if too_many_paths_to_track_copies(
+    &parent_tree,
+    &commit_tree,
+    &matcher,
+    COPY_TRACKING_MAX_ENTRIES,
+  ) {
+    CopyRecords::default()
+  } else {
+    get_commit_copy_records(loaded.repo.store(), &commit)?
+  };
+  let conflict_labels = Diff::new(parent_tree.labels(), commit_tree.labels());
   let diff_stream = materialized_diff_stream(
     loaded.repo.store(),
     parent_tree.diff_stream_with_copies(&commit_tree, &matcher, &copy_records),
@@ -9733,7 +9996,7 @@ pub fn jj_new_with_parents(
     .map_err(|e| JjError::IoError(format!("Failed to move working copy: {}", e)))?;
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("new commit"))
     .map_err(|e| JjError::IoError(format!("Failed to commit transaction: {}", e)))?;
@@ -9799,7 +10062,7 @@ pub fn jj_create_merge_commit(
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants after merge: {}", e)))?;
 
   set_local_bookmark_target(tx.repo_mut(), target_branch, merge_commit.id().clone());
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("create merge commit"))
     .map_err(|e| JjError::IoError(format!("Failed to commit merge transaction: {}", e)))?;
@@ -9954,7 +10217,7 @@ pub fn jj_rebase_merge_commit(
     ))
   })?;
   set_local_bookmark_target(tx.repo_mut(), target_branch, merge_commit.id().clone());
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("rebase merge workspace"))
     .map_err(|e| JjError::IoError(format!("Failed to commit rebase transaction: {}", e)))?;
@@ -10016,7 +10279,7 @@ pub fn jj_squash_merge_commit(
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants after squash: {}", e)))?;
   set_local_bookmark_target(tx.repo_mut(), target_branch, squashed_commit.id().clone());
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("squash merge workspace"))
     .map_err(|e| JjError::IoError(format!("Failed to commit squash transaction: {}", e)))?;
@@ -10076,9 +10339,42 @@ fn import_remaining_git_refs(loaded: &mut LoadedWorkspaceRepo) -> Result<(), JjE
 #[cfg(test)]
 mod tests {
   use super::*;
+  use std::ffi::OsStr;
   use std::fs;
   use std::process::Command;
   use tempfile::TempDir;
+
+  #[test]
+  fn text_hunks_keep_lines_that_look_like_file_headers() {
+    let hunks = build_text_hunks("-- users\nkeep\n---\n", "++ accounts\nkeep\n");
+    let lines: Vec<&str> = hunks
+      .iter()
+      .flat_map(|h| h.lines.iter().map(String::as_str))
+      .collect();
+    assert!(lines.contains(&"--- users"), "{lines:?}");
+    assert!(lines.contains(&"----"), "{lines:?}");
+    assert!(lines.contains(&"+++ accounts"), "{lines:?}");
+    assert_eq!(count_changed_lines(&hunks), 3);
+  }
+
+  #[test]
+  fn git_subprocess_environment_turns_off_auto_maintenance() {
+    let mut environment = HashMap::new();
+    disable_auto_maintenance(&mut environment);
+    let get = |key: &str| environment.get(OsStr::new(key)).and_then(|v| v.to_str());
+    let count: usize = get("GIT_CONFIG_COUNT").unwrap().parse().unwrap();
+    // Entries below an inherited `GIT_CONFIG_COUNT` belong to the caller.
+    let configured: Vec<_> = (0..count)
+      .filter_map(|i| {
+        Some((
+          get(&format!("GIT_CONFIG_KEY_{i}"))?,
+          get(&format!("GIT_CONFIG_VALUE_{i}"))?,
+        ))
+      })
+      .collect();
+    assert!(configured.contains(&("maintenance.auto", "false")));
+    assert!(configured.contains(&("gc.auto", "0")));
+  }
 
   #[test]
   fn shared_read_serves_callers_that_pile_up_with_one_more_run() {

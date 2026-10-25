@@ -16,11 +16,13 @@ pub(super) mod threads;
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
   rc::Rc,
   sync::Arc,
+  time::{Duration, Instant},
 };
 
 use gpui_kit::base::TestSupportExt as _;
@@ -36,14 +38,17 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   changes_data::{
     body, check_message, commit_label, conflict_lines, conflicts, context_ranges, deleted_sides,
-    diff_summary, discarded, full_path, hunks_hash, pending_label, review_prompt, section_label,
-    select_all_label, split_path, stashed, total_lines, visible_committed, Body, BodyInput,
-    ChangedFile, ChangesHost, CommitAction, Conflict, ContextReads, EditorApps, FileHunks, Host,
-    List, Snapshot, Staging, BATCH, FIRST_BATCH, HOME_ENDPOINT, LARGE_CHANGESET_LINES,
+    diff_summary, discarded, draws_hunks, full_path, hunks_hash, pending_label, review_prompt,
+    section_label, select_all_label, split_path, stashed, total_lines, visible_committed_at, Body,
+    BodyInput, ChangedFile, ChangesHost, CommitAction, Conflict, ContextReads, EditorApps,
+    FileHunks, Host, List, Snapshot, Staging, BATCH, FIRST_BATCH, HOME_ENDPOINT,
+    LARGE_CHANGESET_LINES,
   },
   code::Parent,
   commits_data::{line_kind, line_numbers, LineKind},
-  highlight, ActionSink, ScreenAction,
+  highlight,
+  rows::Rows as ListRows,
+  ActionSink, ScreenAction,
 };
 use crate::{
   conflict_markers::{ConflictLineKind, ConflictLineRole},
@@ -56,6 +61,10 @@ use crate::{
   },
   jj::{JjDiffHunk, JjFileChange},
 };
+
+/// Hunk batches landing closer together than this redraw once: a frame of
+/// a large changeset costs more than a batch takes to read.
+const BATCH_REDRAW: Duration = Duration::from_millis(100);
 
 /// Opacity of a viewed file's name in the file lists.
 const VIEWED_OPACITY: f32 = 0.5;
@@ -106,6 +115,36 @@ enum Section {
   Changes,
 }
 
+/// One row of the sidebar's virtual list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SideRow {
+  Filter,
+  ConflictsHeader,
+  /// By index into [`SideData::conflicted`].
+  Conflict(usize),
+  Header(List),
+  /// By index into the list's files in [`SideData`].
+  File(List, usize),
+  CommittedHeader,
+  /// By index into [`SideData::committed`].
+  Committed(usize),
+  /// Nothing changed, nothing committed.
+  Empty,
+}
+
+/// What the sidebar's rows read, by index into the snapshot's files.
+#[derive(Default)]
+struct SideData {
+  conflicted: Vec<String>,
+  staged: Vec<usize>,
+  unstaged: Vec<usize>,
+  /// Into the snapshot's committed files.
+  committed: Vec<usize>,
+  /// The row that shows the file buttons, by index into the snapshot's files.
+  last_staged: Option<usize>,
+  last_changed: Option<usize>,
+}
+
 pub struct ChangesView {
   host: Host,
   react: ActionSink,
@@ -123,6 +162,10 @@ pub struct ChangesView {
   /// The working-copy diff every file in `hunks` was read from, once all
   /// were read from the same one.
   hunks_token: Option<String>,
+  /// When a hunk batch last redrew, and whether a redraw of the batches
+  /// since is waiting on a timer.
+  batch_drawn: Option<Instant>,
+  batch_flush: bool,
   generation: u64,
   /// Bumped when the snapshot, the hunks, the lines read around them or
   /// the parent change: what the diff's rows are laid out from.
@@ -160,6 +203,9 @@ pub struct ChangesView {
   editors: EditorApps,
   /// The diff's rows and the list drawing them.
   diff: rows::DiffRows,
+  /// The sidebar's rows and the list drawing them.
+  side: ListRows<SideRow>,
+  side_data: SideData,
   pub(super) scroll_to: Option<String>,
   /// The button a dropdown opens below, by key.
   anchors: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
@@ -225,6 +271,8 @@ impl ChangesView {
       reload: false,
       hunks: HashMap::new(),
       hunks_token: None,
+      batch_drawn: None,
+      batch_flush: false,
       generation: 0,
       layout_gen: 0,
       staging: Staging::default(),
@@ -251,6 +299,8 @@ impl ChangesView {
       pr_state: None,
       editors,
       diff: rows::DiffRows::default(),
+      side: ListRows::default(),
+      side_data: SideData::default(),
       scroll_to: None,
       anchors: Rc::default(),
       review: review::Review::default(),
@@ -388,11 +438,13 @@ impl ChangesView {
       let value = cx
         .background_spawn(async move { work(host.as_ref(), &parent) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key && apply(view, value, cx) {
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key && apply(view, value, cx) {
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -490,19 +542,37 @@ impl ChangesView {
     let Some(snapshot) = &self.snapshot else {
       return Vec::new();
     };
+    self
+      .visible_committed_at()
+      .into_iter()
+      .filter_map(|ix| snapshot.committed.get(ix).cloned())
+      .collect()
+  }
+
+  /// [`Self::visible_committed`], by index into the snapshot's committed
+  /// files.
+  fn visible_committed_at(&self) -> Vec<usize> {
+    let Some(snapshot) = &self.snapshot else {
+      return Vec::new();
+    };
     if self.options.show_committed == Some(false) {
       return Vec::new();
     }
-    let always: HashSet<String> = snapshot
-      .files
-      .iter()
-      .map(|f| f.path.clone())
-      .chain(self.conflicted())
-      .collect();
-    visible_committed(&snapshot.committed, self.show_committed(), &always)
+    let show = self.show_committed();
+    // Only a filtered list needs the files that stay in it.
+    let always: HashSet<String> = if show {
+      HashSet::new()
+    } else {
+      snapshot
+        .files
+        .iter()
+        .map(|f| f.path.clone())
+        .chain(self.conflicted())
+        .collect()
+    };
+    visible_committed_at(&snapshot.committed, show, &always)
       .into_iter()
-      .filter(|f| !self.hides(&f.path))
-      .cloned()
+      .filter(|&ix| !self.hides(&snapshot.committed[ix].path))
       .collect()
   }
 
@@ -518,6 +588,8 @@ impl ChangesView {
     }
     self.loading = true;
     let show = self.show_committed();
+    // What shows now, so the read compares against it off the main thread.
+    let shown = self.snapshot.clone();
     self.run_changed(
       move |host, parent| {
         // The generated-file rules don't depend on the diff: read both at once.
@@ -533,7 +605,7 @@ impl ChangesView {
               .map(|files| Snapshot::from_home(&files)),
           };
           let rules = super::joined(rules);
-          snapshot.map(|s| s.with_generated(&rules))
+          snapshot.map(|s| s.with_generated(&rules).sharing_hunks(shown.as_ref()))
         })
       },
       |view, result, cx| {
@@ -590,6 +662,7 @@ impl ChangesView {
     let paths: Vec<String> = snapshot
       .files
       .iter()
+      .filter(|f| draws_hunks(&f.path, &f.status))
       .map(|f| f.path.clone())
       .filter(|p| !snapshot.generated.contains(p) || self.loaded_generated.contains(p))
       .collect();
@@ -646,7 +719,8 @@ impl ChangesView {
   }
 
   /// `loadAllFileHunks`: the first files, then the rest in batches, each
-  /// shown as it arrives. What was read before stays until replaced.
+  /// shown as it arrives. What was read before stays until replaced, and
+  /// files whose content id held are not read again.
   fn load_hunks(&mut self, paths: Vec<String>, token: Option<String>, cx: &mut Context<Self>) {
     self.generation += 1;
     self.hunks_token = None;
@@ -663,6 +737,18 @@ impl ChangesView {
     if self.hunks.len() != before || kept != before {
       self.layout_gen += 1;
     }
+    let ids = self.snapshot.as_ref().map(|s| &s.content_ids);
+    let paths: Vec<String> = paths
+      .into_iter()
+      .filter(|path| {
+        let shown = self
+          .hunks
+          .get(path)
+          .filter(|d| !d.loading && d.error.is_none());
+        let id = ids.and_then(|ids| ids.get(path));
+        id.is_none() || shown.and_then(|d| d.content_id.as_ref()) != id
+      })
+      .collect();
     let mut batches: Vec<Vec<String>> = Vec::new();
     let (first, rest) = paths.split_at(paths.len().min(FIRST_BATCH));
     if !first.is_empty() {
@@ -683,9 +769,22 @@ impl ChangesView {
   ) {
     if batches.is_empty() {
       self.hunks_token = token;
+      // No file needed reading: what a Reload prunes is already known.
+      self.prune_comments(cx);
       return;
     }
     let batch = batches.remove(0);
+    // Read from the listed diff's trees, and named by its file ids.
+    let (trees, ids) = match &self.snapshot {
+      Some(s) => {
+        let ids: HashMap<String, String> = batch
+          .iter()
+          .filter_map(|p| Some((p.clone(), s.content_ids.get(p)?.clone())))
+          .collect();
+        (s.token.clone(), ids)
+      }
+      None => (None, HashMap::new()),
+    };
     // What the batch's files show now, so the read compares against it off
     // the main thread.
     let shown: HashMap<String, (Arc<Vec<JjDiffHunk>>, Option<String>)> = batch
@@ -695,9 +794,15 @@ impl ChangesView {
         Some((path.clone(), (d.hunks.clone(), d.error.clone())))
       })
       .collect();
+    let read_from = trees.clone();
     self.run_changed(
       move |host, parent| {
-        let read = host.file_hunks(&parent.repo_path, parent.workspace_id(), batch)?;
+        let read = host.file_hunks(
+          &parent.repo_path,
+          parent.workspace_id(),
+          batch,
+          read_from.as_deref(),
+        )?;
         // A refresh reads every file again; one that reads the same keeps
         // its hunks, so its rows and marks are not redone.
         let files: Vec<_> = read
@@ -712,6 +817,7 @@ impl ChangesView {
               hunks: same.clone().unwrap_or_else(|| file.hunks.into()),
               loading: false,
               error: file.error,
+              content_id: None,
             };
             (file.path, same.is_some(), data)
           })
@@ -726,17 +832,22 @@ impl ChangesView {
         let mut changed = HashSet::new();
         match result {
           Ok((snapshot_token, files)) => {
+            // Read at another diff than listed: the ids don't name them.
+            let listed = trees.as_ref() == Some(&snapshot_token);
             if token.as_ref() != Some(&snapshot_token) {
               token = None;
             }
-            for (path, same, data) in files {
+            for (path, same, mut data) in files {
+              if listed && data.error.is_none() {
+                data.content_id = ids.get(&path).cloned();
+              }
               // Still showing the hunks it read the same as.
-              let kept = same
-                && view
-                  .hunks
-                  .get(&path)
-                  .is_some_and(|d| !d.loading && Arc::ptr_eq(&d.hunks, &data.hunks));
-              if kept {
+              if let Some(shown) = view
+                .hunks
+                .get_mut(&path)
+                .filter(|d| same && !d.loading && Arc::ptr_eq(&d.hunks, &data.hunks))
+              {
+                shown.content_id = data.content_id;
                 continue;
               }
               view.layout_gen += 1;
@@ -754,11 +865,41 @@ impl ChangesView {
         if batches.is_empty() {
           view.prune_comments(cx);
         }
+        let last = batches.is_empty();
         view.load_batches(generation, batches, token, cx);
-        !changed.is_empty() || marks != (view.viewed.len(), view.review.comments.len())
+        let drawn = !changed.is_empty() || marks != (view.viewed.len(), view.review.comments.len());
+        drawn && (last || view.batch_redraw_due(cx))
       },
       cx,
     );
+  }
+
+  /// Whether a batch landing now redraws. One landing within
+  /// [`BATCH_REDRAW`] of a redraw waits, and a timer draws what landed.
+  fn batch_redraw_due(&mut self, cx: &mut Context<Self>) -> bool {
+    let now = Instant::now();
+    let since = self.batch_drawn.map(|at| now.duration_since(at));
+    // Laying out many files takes long: leave the thread time between.
+    let every = BATCH_REDRAW.max(self.diff.layout_cost * 4);
+    if since.is_none_or(|since| since >= every) {
+      self.batch_drawn = Some(now);
+      return true;
+    }
+    if !std::mem::replace(&mut self.batch_flush, true) {
+      let wait = every.saturating_sub(since.unwrap_or_default());
+      cx.spawn(async move |this, cx| {
+        cx.background_executor().timer(wait).await;
+        this
+          .update(cx, |view, cx| {
+            view.batch_flush = false;
+            view.batch_drawn = Some(Instant::now());
+            cx.notify();
+          })
+          .ignore_closed();
+      })
+      .detach();
+    }
+    false
   }
 
   fn load_pr(&mut self, cx: &mut Context<Self>) {
@@ -793,6 +934,9 @@ impl ChangesView {
   /// Viewed files whose diff changed since are viewed no longer. `read`
   /// limits the check to the files whose hunks were just replaced.
   fn unmark_stale(&mut self, read: Option<&HashSet<String>>, cx: &mut Context<Self>) {
+    if self.viewed.is_empty() {
+      return;
+    }
     // Committed files can be marked viewed too, so they stay listed.
     let listed: HashSet<String> = self
       .snapshot
@@ -1087,54 +1231,58 @@ impl ChangesView {
         })
         .await;
       let pushing = committed.is_ok() && action == CommitAction::Push;
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() != key {
-          return;
-        }
-        if !pushing {
-          view.pending = None;
-        }
-        if split {
-          view.staging.staged.clear();
-        }
-        match committed {
-          Ok(result) => {
-            view.toast(ToastTone::Success, "Commit created", result.trim());
-            view.committed_collapsed = true;
-            if action == CommitAction::Pr {
-              view.send_react(
-                ScreenAction::Press {
-                  id: "workspace.createPr".into(),
-                },
-                cx,
-              );
-            }
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() != key {
+            return;
           }
-          Err(err) => view.toast(ToastTone::Error, "Commit failed", err),
-        }
-        Self::changed(view.host.as_ref(), &view.parent);
-        view.load(cx);
-        cx.notify();
-      });
+          if !pushing {
+            view.pending = None;
+          }
+          if split {
+            view.staging.staged.clear();
+          }
+          match committed {
+            Ok(result) => {
+              view.toast(ToastTone::Success, "Commit created", result.trim());
+              view.committed_collapsed = true;
+              if action == CommitAction::Pr {
+                view.send_react(
+                  ScreenAction::Press {
+                    id: "workspace.createPr".into(),
+                  },
+                  cx,
+                );
+              }
+            }
+            Err(err) => view.toast(ToastTone::Error, "Commit failed", err),
+          }
+          Self::changed(view.host.as_ref(), &view.parent);
+          view.load(cx);
+          cx.notify();
+        })
+        .ignore_closed();
       if !pushing {
         return;
       }
       let pushed = cx
         .background_spawn(async move { host.push_remote(&parent.repo_path, parent.workspace_id()) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() != key {
-          return;
-        }
-        view.pending = None;
-        match pushed {
-          Ok(_) => view.toast(ToastTone::Success, "Pushed to remote", ""),
-          Err(err) => view.toast(ToastTone::Error, "Failed to push", err),
-        }
-        Self::changed(view.host.as_ref(), &view.parent);
-        view.load(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() != key {
+            return;
+          }
+          view.pending = None;
+          match pushed {
+            Ok(_) => view.toast(ToastTone::Success, "Pushed to remote", ""),
+            Err(err) => view.toast(ToastTone::Error, "Failed to push", err),
+          }
+          Self::changed(view.host.as_ref(), &view.parent);
+          view.load(cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -1343,7 +1491,9 @@ impl ChangesView {
       if on {
         let (view, path) = (cx.entity().downgrade(), path.to_string());
         items.push(NativeMenuItem::item(label, move |cx| {
-          let _ = view.update(cx, |view, _| view.open_in(scheme, &path));
+          view
+            .update(cx, |view, _| view.open_in(scheme, &path))
+            .ignore_closed();
         }));
       }
     }
@@ -1362,7 +1512,9 @@ impl ChangesView {
     let copy = |text: String, title: String| {
       let entity = entity.clone();
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| view.copy(text.clone(), title.clone(), cx));
+        entity
+          .update(cx, |view, cx| view.copy(text.clone(), title.clone(), cx))
+          .ignore_closed();
       }
     };
     let mut open = vec![{
@@ -1415,7 +1567,9 @@ impl ChangesView {
           .map(|target| {
             let (entity, paths) = (entity.clone(), paths.clone());
             NativeMenuItem::item(target.label.clone(), move |cx| {
-              let _ = entity.update(cx, |view, cx| view.move_files(paths.clone(), &target, cx));
+              entity
+                .update(cx, |view, cx| view.move_files(paths.clone(), &target, cx))
+                .ignore_closed();
             })
           })
           .collect(),
@@ -1448,7 +1602,9 @@ impl ChangesView {
       let (entity, path) = (cx.entity().downgrade(), path.to_string());
       items.push(
         NativeMenuItem::item(label, move |cx| {
-          let _ = entity.update(cx, |view, cx| view.discard_files(&path, cx));
+          entity
+            .update(cx, |view, cx| view.discard_files(&path, cx))
+            .ignore_closed();
         })
         .destructive(),
       );
@@ -1477,17 +1633,19 @@ impl ChangesView {
     let action = |action: CommitAction| {
       let entity = entity.clone();
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| {
-          let message = view.message.trim().to_string();
-          if message.is_empty() {
-            view.message_error = Some("Enter a commit message.");
-            cx.notify();
-            return;
-          }
-          view.message.clear();
-          view.message_input = None;
-          view.commit(action, message, cx);
-        });
+        entity
+          .update(cx, |view, cx| {
+            let message = view.message.trim().to_string();
+            if message.is_empty() {
+              view.message_error = Some("Enter a commit message.");
+              cx.notify();
+              return;
+            }
+            view.message.clear();
+            view.message_input = None;
+            view.commit(action, message, cx);
+          })
+          .ignore_closed();
       }
     };
     let mut items = vec![NativeMenuItem::item(
@@ -1569,6 +1727,9 @@ impl Render for ChangesView {
     self.ensure_search_input(window, cx);
     // The rows first: the threads and the find index follow their revision.
     self.sync_rows(window);
+    if !self.read_only() {
+      self.sync_side(window);
+    }
     self.place_threads();
     self.index_matches();
     self.reveal_match(window, cx);
@@ -1645,75 +1806,120 @@ impl Render for ChangesView {
 }
 
 impl ChangesView {
-  fn sidebar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let mut list = div()
-      .id("changes-sidebar-scroll")
-      .flex_1()
-      .overflow_y_scroll()
-      .px_4()
-      .pb_4();
-    match &self.snapshot {
-      None => {
-        list = list.child(
-          div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(ui::spinner("changes-sidebar-spin", 24., p.muted_foreground)),
-        );
-      }
-      Some(_) => {
-        list = list.children(self.filter_row(p, cx));
-        let conflicted = self.conflicted();
-        if !conflicted.is_empty() {
-          list = list.child(self.conflicts_section(&conflicted, p, cx));
-        }
-        let files = self.listed();
-        let committed = match self.options.show_committed {
-          Some(false) => 0,
-          _ => self.snapshot.as_ref().map_or(0, |s| s.committed.len()),
-        };
-        if files.is_empty() && committed == 0 {
-          list = list.child(
-            div()
-              .size_full()
-              .flex()
-              .flex_col()
-              .items_center()
-              .justify_center()
-              .py_12()
-              .child(ui::icon(
-                theme::ICON_CIRCLE_CHECK,
-                48.,
-                p.muted_foreground.opacity(0.4),
-              ))
-              .child(
-                div()
-                  .mt_3()
-                  .text_color(p.muted_foreground)
-                  .child("No changes"),
-              ),
-          );
-        } else if !files.is_empty() {
-          let staged: Vec<ChangedFile> = self
-            .staging
-            .staged_list(&files)
-            .into_iter()
-            .cloned()
-            .collect();
-          if !staged.is_empty() {
-            list = list.child(self.files_section(List::Selected, &staged, p, cx));
-          }
-          let unstaged: Vec<ChangedFile> =
-            self.staging.unstaged(&files).into_iter().cloned().collect();
-          list = list.child(self.files_section(List::Changes, &unstaged, p, cx));
-        }
-        if committed > 0 {
-          list = list.child(self.committed_section(p, cx));
-        }
+  /// What the sidebar's rows stand for now, and the data they read.
+  fn layout_side(&self) -> (Vec<SideRow>, SideData) {
+    let Some(snapshot) = self.snapshot.as_ref() else {
+      return Default::default();
+    };
+    let mut data = SideData::default();
+    let mut rows = Vec::new();
+    if self.filter_shown() {
+      rows.push(SideRow::Filter);
+    }
+    data.conflicted = self.conflicted();
+    if !data.conflicted.is_empty() {
+      rows.push(SideRow::ConflictsHeader);
+      if !self.collapsed_sections.contains(&Section::Conflicts) {
+        rows.extend((0..data.conflicted.len()).map(SideRow::Conflict));
       }
     }
+    let mut listed = Vec::new();
+    for (ix, file) in snapshot.files.iter().enumerate() {
+      if self.hides(&file.path) {
+        continue;
+      }
+      listed.push(ix);
+      if self.staging.staged.contains(&file.path) {
+        data.staged.push(ix);
+      } else {
+        data.unstaged.push(ix);
+      }
+    }
+    let committed = match self.options.show_committed {
+      Some(false) => 0,
+      _ => snapshot.committed.len(),
+    };
+    if listed.is_empty() && committed == 0 {
+      rows.push(SideRow::Empty);
+    } else if !listed.is_empty() {
+      if !data.staged.is_empty() {
+        rows.push(SideRow::Header(List::Selected));
+        if !self.collapsed_sections.contains(&Section::Selected) {
+          rows.extend((0..data.staged.len()).map(|k| SideRow::File(List::Selected, k)));
+        }
+      }
+      rows.push(SideRow::Header(List::Changes));
+      if !self.collapsed_sections.contains(&Section::Changes) {
+        rows.extend((0..data.unstaged.len()).map(|k| SideRow::File(List::Changes, k)));
+      }
+    }
+    if committed > 0 {
+      rows.push(SideRow::CommittedHeader);
+      if !self.committed_collapsed {
+        data.committed = self.visible_committed_at();
+        rows.extend((0..data.committed.len()).map(SideRow::Committed));
+      }
+    }
+    data.last_staged = self
+      .staging
+      .staged_anchor
+      .and_then(|k| data.staged.get(k))
+      .copied();
+    data.last_changed = self.staging.anchor.and_then(|k| listed.get(k)).copied();
+    (rows, data)
+  }
+
+  /// Tells the sidebar's list which rows changed.
+  fn sync_side(&mut self, window: &Window) {
+    let (rows, data) = self.layout_side();
+    self.side_data = data;
+    self.side.sync(window, rows, |a, b| a == b);
+  }
+
+  fn sidebar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let scroll = div()
+      .id("changes-sidebar-scroll")
+      .flex_1()
+      .min_h_0()
+      .px_4()
+      .pb_4();
+    let list = if self.snapshot.is_none() {
+      scroll.overflow_y_scroll().child(
+        div()
+          .size_full()
+          .flex()
+          .items_center()
+          .justify_center()
+          .child(ui::spinner("changes-sidebar-spin", 24., p.muted_foreground)),
+      )
+    } else if self.side.get(self.side.len().wrapping_sub(1)) == Some(&SideRow::Empty) {
+      // Nothing to scroll: the empty state fills what the rows leave.
+      #[allow(
+        clippy::needless_collect,
+        reason = "the rows borrow self, which side_row needs mutably"
+      )]
+      let rows: Vec<SideRow> = (0..self.side.len())
+        .filter_map(|ix| self.side.get(ix).copied())
+        .collect();
+      scroll
+        .overflow_y_scroll()
+        .children(rows.into_iter().map(|row| self.side_row(row, p, cx)))
+    } else {
+      // Only the rows on screen are built, however many files changed.
+      scroll.child(
+        gpui::list(
+          self.side.list.clone(),
+          cx.processor(|this, ix, _, cx| {
+            let p = theme::palette(this.dark);
+            match this.side.get(ix).copied() {
+              Some(row) => this.side_row(row, &p, cx),
+              None => div().into_any_element(),
+            }
+          }),
+        )
+        .size_full(),
+      )
+    };
     div()
       .w(zpx(240.))
       .flex_none()
@@ -1727,14 +1933,86 @@ impl ChangesView {
       .child(list)
   }
 
+  /// One row of the sidebar.
+  fn side_row(&mut self, row: SideRow, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+    match row {
+      SideRow::Filter => self
+        .filter_row(p, cx)
+        .map_or_else(|| div().into_any_element(), IntoElement::into_any_element),
+      SideRow::ConflictsHeader => {
+        let count = self.side_data.conflicted.len();
+        self.conflicts_header(count, p, cx).into_any_element()
+      }
+      SideRow::Conflict(i) => self.conflict_list_row(i, p, cx).into_any_element(),
+      SideRow::Header(list) => {
+        let count = match list {
+          List::Selected => self.side_data.staged.len(),
+          List::Changes => self.side_data.unstaged.len(),
+        };
+        self.files_header(list, count, p, cx).into_any_element()
+      }
+      SideRow::File(list, k) => {
+        let (ids, selected, last) = match list {
+          List::Selected => (
+            &self.side_data.staged,
+            &self.staging.selected_staged,
+            self.side_data.last_staged,
+          ),
+          List::Changes => (
+            &self.side_data.unstaged,
+            &self.staging.selected,
+            self.side_data.last_changed,
+          ),
+        };
+        let Some(&ix) = ids.get(k) else {
+          return div().into_any_element();
+        };
+        let Some(file) = self.snapshot.as_ref().and_then(|s| s.files.get(ix)) else {
+          return div().into_any_element();
+        };
+        let (selected, last) = (selected.contains(&file.path), last == Some(ix));
+        let file = file.clone();
+        div()
+          .when(k == 0, |this| this.pt_2())
+          .child(self.file_row(list, &file, selected, last, p, cx))
+          .into_any_element()
+      }
+      SideRow::CommittedHeader => self.committed_header(p, cx).into_any_element(),
+      SideRow::Committed(i) => self.committed_row(i, p, cx).into_any_element(),
+      SideRow::Empty => div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .py_12()
+        .child(ui::icon(
+          theme::ICON_CIRCLE_CHECK,
+          48.,
+          p.muted_foreground.opacity(0.4),
+        ))
+        .child(
+          div()
+            .mt_3()
+            .text_color(p.muted_foreground)
+            .child("No changes"),
+        )
+        .into_any_element(),
+    }
+  }
+
   /// The row above the file lists whose filter menu picks what they show:
   /// generated files and the committed group, when either applies.
-  fn filter_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+  fn filter_shown(&self) -> bool {
     let generated = self
       .snapshot
       .as_ref()
       .is_some_and(|s| !s.generated.is_empty());
-    if !generated && self.options.show_committed.is_none() {
+    generated || self.options.show_committed.is_some()
+  }
+
+  fn filter_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    if !self.filter_shown() {
       return None;
     }
     let filtering = self.hide_generated || self.options.show_committed == Some(false);
@@ -1756,13 +2034,17 @@ impl ChangesView {
     .on_click(cx.listener(|view, _, _, cx| view.filter_menu(cx)))
     .test_support()
     .child(self.anchor("changes-filter".into()));
-    Some(div().mt_3().flex().justify_end().child(self.tips.wrap(
-      "changes-filter-tip",
-      Side::Bottom,
-      Some(TooltipContent::Text("Filter changes".into())),
-      filter,
-      cx,
-    )))
+    Some(
+      div()
+        .pt_3()
+        .child(div().flex().justify_end().child(self.tips.wrap(
+          "changes-filter-tip",
+          Side::Bottom,
+          Some(TooltipContent::Text("Filter changes".into())),
+          filter,
+          cx,
+        ))),
+    )
   }
 
   /// The filter button's menu: one checkbox item per kind of file shown.
@@ -1779,7 +2061,9 @@ impl ChangesView {
       let entity = cx.entity().downgrade();
       items.push(
         NativeMenuItem::item("Generated files", move |cx| {
-          let _ = entity.update(cx, |view, cx| view.toggle_hide_generated(cx));
+          entity
+            .update(cx, |view, cx| view.toggle_hide_generated(cx))
+            .ignore_closed();
         })
         .check(!self.hide_generated),
       );
@@ -1788,10 +2072,12 @@ impl ChangesView {
       let entity = cx.entity().downgrade();
       items.push(
         NativeMenuItem::item("Committed", move |cx| {
-          let _ = entity.update(cx, |view, cx| {
-            let show = view.options.show_committed.unwrap_or(show);
-            view.field("changes.showCommitted", (!show).into(), cx);
-          });
+          entity
+            .update(cx, |view, cx| {
+              let show = view.options.show_committed.unwrap_or(show);
+              view.field("changes.showCommitted", (!show).into(), cx);
+            })
+            .ignore_closed();
         })
         .check(show),
       );
@@ -1934,12 +2220,7 @@ impl ChangesView {
       .on_click(cx.listener(move |view, _, _, cx| on_toggle(view, cx)))
   }
 
-  fn conflicts_section(
-    &mut self,
-    files: &[String],
-    p: &Palette,
-    cx: &mut Context<Self>,
-  ) -> impl IntoElement {
+  fn conflicts_header(&mut self, count: usize, p: &Palette, cx: &mut Context<Self>) -> Div {
     let collapsed = self.collapsed_sections.contains(&Section::Conflicts);
     let header = self.section_header(
       "conflicts-section-toggle",
@@ -1950,84 +2231,82 @@ impl ChangesView {
       cx,
       |view, cx| view.toggle_section(Section::Conflicts, cx),
     );
-    let mut rows = div().mt_2().overflow_hidden();
-    if !collapsed {
-      for path in files {
-        let active = self.active.as_deref() == Some(path.as_str());
-        let (name, dir) = split_path(path);
-        let hover = p.accent.opacity(0.3);
-        let file = path.clone();
-        rows = rows.child(
+    div().pt_4().child(
+      div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .text_color(p.muted_foreground)
+        .child(
           div()
-            .id(SharedString::from(format!("conflict-row-{path}")))
-            .debug_selector({
-              let id = format!("conflict-row-{path}");
-              move || id
-            })
-            .py_1()
             .flex()
             .items_center()
-            .gap_1()
-            .cursor_pointer()
-            .when(active, |this| this.bg(p.selected()))
-            .when(!active, |this| this.hover(move |s| s.bg(hover)))
-            .child(
-              div()
-                .ml_1()
-                .flex_1()
-                .flex()
-                .items_center()
-                .gap_2()
-                .min_w_0()
-                .child(
-                  div()
-                    .flex_none()
-                    .font_weight(FontWeight::MEDIUM)
-                    .truncate()
-                    .child(name),
-                )
-                .when_some(dir, |this, dir| {
-                  this.child(
-                    ui::text(div(), TextSize::Xs)
-                      .truncate()
-                      .text_color(p.muted_foreground.opacity(0.6))
-                      .child(dir),
-                  )
-                }),
-            )
-            .child(div().mr_1().child(ui::Dot::new(Tone::Danger, p)))
-            .on_click(cx.listener(move |view, _, _, cx| view.show_file(&file, cx))),
-        );
-      }
-    }
-    div()
-      .mt_4()
-      .child(
-        div()
-          .flex()
-          .items_center()
-          .justify_between()
-          .text_color(p.muted_foreground)
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .gap_2()
-              .child(header)
-              .child(ui::Dot::new(Tone::Danger, p)),
-          )
-          .child(ui::Count::new(files.len(), p)),
-      )
-      .when(!collapsed, |this| this.child(rows))
+            .gap_2()
+            .child(header)
+            .child(ui::Dot::new(Tone::Danger, p)),
+        )
+        .child(ui::Count::new(count, p)),
+    )
   }
 
-  fn files_section(
+  /// The `i`th conflicted file's row.
+  fn conflict_list_row(&mut self, i: usize, p: &Palette, cx: &mut Context<Self>) -> Div {
+    let Some(path) = self.side_data.conflicted.get(i) else {
+      return div();
+    };
+    let active = self.active.as_deref() == Some(path.as_str());
+    let (name, dir) = split_path(path);
+    let hover = p.accent.opacity(0.3);
+    let file = path.clone();
+    let row = div()
+      .id(SharedString::from(format!("conflict-row-{path}")))
+      .debug_selector({
+        let id = format!("conflict-row-{path}");
+        move || id
+      })
+      .py_1()
+      .flex()
+      .items_center()
+      .gap_1()
+      .cursor_pointer()
+      .when(active, |this| this.bg(p.selected()))
+      .when(!active, |this| this.hover(move |s| s.bg(hover)))
+      .child(
+        div()
+          .ml_1()
+          .flex_1()
+          .flex()
+          .items_center()
+          .gap_2()
+          .min_w_0()
+          .child(
+            div()
+              .flex_none()
+              .font_weight(FontWeight::MEDIUM)
+              .truncate()
+              .child(name),
+          )
+          .when_some(dir, |this, dir| {
+            this.child(
+              ui::text(div(), TextSize::Xs)
+                .truncate()
+                .text_color(p.muted_foreground.opacity(0.6))
+                .child(dir),
+            )
+          }),
+      )
+      .child(div().mr_1().child(ui::Dot::new(Tone::Danger, p)))
+      .on_click(cx.listener(move |view, _, _, cx| view.show_file(&file, cx)));
+    div().when(i == 0, |this| this.pt_2()).child(row)
+  }
+
+  fn files_header(
     &mut self,
     list: List,
-    files: &[ChangedFile],
+    count: usize,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> impl IntoElement {
+  ) -> Stateful<Div> {
     let staged = list == List::Selected;
     let section = if staged {
       Section::Selected
@@ -2035,10 +2314,10 @@ impl ChangesView {
       Section::Changes
     };
     let collapsed = self.collapsed_sections.contains(&section);
-    let selected = if staged {
-      self.staging.selected_staged.clone()
+    let selected_len = if staged {
+      self.staging.selected_staged.len()
     } else {
-      self.staging.selected.clone()
+      self.staging.selected.len()
     };
     let header = self.section_header(
       if staged {
@@ -2059,7 +2338,7 @@ impl ChangesView {
     let muted = p.muted_foreground;
     let hover = p.foreground.opacity(0.1);
     let mut buttons = div().flex().items_center().gap_1();
-    if !files.is_empty() {
+    if count > 0 {
       // `onStashAll` is left out for a remote repository.
       if !staged && !self.parent.remote {
         let stash = header_button("stash-all-changes", theme::ICON_ARCHIVE, muted, hover).on_click(
@@ -2103,7 +2382,7 @@ impl ChangesView {
         cx,
       ));
       if !staged {
-        let label = select_all_label(selected.len(), files.len());
+        let label = select_all_label(selected_len, count);
         let select = header_button("select-all-changes", theme::ICON_PLUS, muted, hover).on_click(
           cx.listener(|view, _, _, cx| {
             cx.stop_propagation();
@@ -2120,9 +2399,9 @@ impl ChangesView {
           cx,
         ));
       }
-      if !selected.is_empty() {
+      if selected_len > 0 {
         let primary = p.primary;
-        let n = selected.len();
+        let n = selected_len;
         let arrow = div()
           .id(if staged {
             "move-selected-files"
@@ -2169,35 +2448,14 @@ impl ChangesView {
         ));
       }
     }
-    buttons = buttons.child(div().ml_1().child(ui::Count::new(files.len(), p)));
-    let last = if staged {
-      self
-        .staging
-        .staged_anchor
-        .and_then(|i| files.get(i))
-        .map(|f| f.path.clone())
-    } else {
-      self
-        .staging
-        .anchor
-        .and_then(|i| self.listed().get(i).cloned())
-        .map(|f| f.path)
-    };
-    let mut rows = div().mt_2().overflow_hidden();
-    if !collapsed {
-      for file in files {
-        let is_selected = selected.contains(&file.path);
-        let is_last = last.as_deref() == Some(file.path.as_str());
-        rows = rows.child(self.file_row(list, file, is_selected, is_last, p, cx));
-      }
-    }
+    buttons = buttons.child(div().ml_1().child(ui::Count::new(count, p)));
     div()
       .id(if staged {
         "selected-section"
       } else {
         "changes-section"
       })
-      .mt_4()
+      .pt_4()
       .child(
         div()
           .id(if staged {
@@ -2216,7 +2474,110 @@ impl ChangesView {
           .child(buttons)
           .on_click(cx.listener(move |view, _, _, cx| view.deselect(list, cx))),
       )
-      .when(!collapsed && !files.is_empty(), |this| this.child(rows))
+  }
+
+  fn committed_header(&mut self, p: &Palette, cx: &mut Context<Self>) -> Div {
+    let collapsed = self.committed_collapsed;
+    let total = self.snapshot.as_ref().map_or(0, |s| s.committed.len());
+    let muted = p.muted_foreground;
+    let fg = p.foreground;
+    let header = div()
+      .id("committed-section-toggle")
+      .debug_selector(|| "committed-section-toggle".into())
+      .flex()
+      .items_center()
+      .gap_1()
+      .cursor_pointer()
+      .hover(move |s| s.text_color(fg))
+      .child(ui::icon(
+        if collapsed {
+          theme::ICON_CHEVRON_RIGHT
+        } else {
+          theme::ICON_CHEVRON_DOWN
+        },
+        12.,
+        muted,
+      ))
+      .child("Committed")
+      .child(div().ml_1().child(ui::Count::new(total, p)))
+      .on_click(cx.listener(|view, _, _, cx| {
+        view.committed_collapsed = !view.committed_collapsed;
+        cx.notify();
+      }));
+    div().pt_4().child(
+      div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .w_full()
+        .text_color(muted)
+        .child(header),
+    )
+  }
+
+  /// The `i`th committed file's row.
+  fn committed_row(&mut self, i: usize, p: &Palette, cx: &mut Context<Self>) -> Div {
+    let muted = p.muted_foreground;
+    let Some(file) = self
+      .side_data
+      .committed
+      .get(i)
+      .and_then(|&ix| self.snapshot.as_ref()?.committed.get(ix))
+      .cloned()
+    else {
+      return div();
+    };
+    let (name, dir) = split_path(&file.path);
+    let active = self.active.as_deref() == Some(file.path.as_str());
+    let dimmed = self.viewed.contains_key(&file.path);
+    let hover = p.accent.opacity(0.2);
+    let path = file.path.clone();
+    let menu = file.path.clone();
+    let row = div()
+      .id(SharedString::from(format!("committed-row-{}", file.path)))
+      .py_1()
+      .flex()
+      .items_center()
+      .gap_1()
+      .cursor_pointer()
+      .border_l_2()
+      .border_color(gpui::transparent_black())
+      .hover(move |s| s.bg(hover))
+      .child(
+        div()
+          .ml_1()
+          .flex_1()
+          .flex()
+          .items_center()
+          .gap_2()
+          .min_w_0()
+          .child(
+            div()
+              .font_weight(FontWeight::MEDIUM)
+              .truncate()
+              .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
+              .when(active, |this| this.text_color(p.primary))
+              .child(name),
+          )
+          .when_some(dir, |this, dir| {
+            this.child(
+              ui::text(div(), TextSize::Xs)
+                .flex_1()
+                .truncate()
+                .text_color(p.muted_foreground.opacity(0.6))
+                .child(dir),
+            )
+          }),
+      )
+      .child(div().text_color(muted).child(file.status))
+      .on_mouse_down(
+        MouseButton::Right,
+        cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
+          view.file_menu(&menu, false, e.position, cx);
+        }),
+      )
+      .on_click(cx.listener(move |view, _, _, cx| view.show_file(&path, cx)));
+    div().when(i == 0, |this| this.pt_2()).child(row)
   }
 
   /// `el` with a tooltip of `text` above it.
@@ -2392,106 +2753,6 @@ impl ChangesView {
         let m = e.modifiers();
         view.click_file(list, &click, m.shift, m.platform || m.control, cx);
       }))
-  }
-
-  fn committed_section(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let collapsed = self.committed_collapsed;
-    let total = self.snapshot.as_ref().map_or(0, |s| s.committed.len());
-    let visible = self.visible_committed();
-    let muted = p.muted_foreground;
-    let fg = p.foreground;
-    let header = div()
-      .id("committed-section-toggle")
-      .debug_selector(|| "committed-section-toggle".into())
-      .flex()
-      .items_center()
-      .gap_1()
-      .cursor_pointer()
-      .hover(move |s| s.text_color(fg))
-      .child(ui::icon(
-        if collapsed {
-          theme::ICON_CHEVRON_RIGHT
-        } else {
-          theme::ICON_CHEVRON_DOWN
-        },
-        12.,
-        muted,
-      ))
-      .child("Committed")
-      .child(div().ml_1().child(ui::Count::new(total, p)))
-      .on_click(cx.listener(|view, _, _, cx| {
-        view.committed_collapsed = !view.committed_collapsed;
-        cx.notify();
-      }));
-    let mut rows = div().mt_2().overflow_hidden();
-    if !collapsed {
-      for file in &visible {
-        let (name, dir) = split_path(&file.path);
-        let active = self.active.as_deref() == Some(file.path.as_str());
-        let dimmed = self.viewed.contains_key(&file.path);
-        let hover = p.accent.opacity(0.2);
-        let path = file.path.clone();
-        let menu = file.path.clone();
-        rows = rows.child(
-          div()
-            .id(SharedString::from(format!("committed-row-{}", file.path)))
-            .py_1()
-            .flex()
-            .items_center()
-            .gap_1()
-            .cursor_pointer()
-            .border_l_2()
-            .border_color(gpui::transparent_black())
-            .hover(move |s| s.bg(hover))
-            .child(
-              div()
-                .ml_1()
-                .flex_1()
-                .flex()
-                .items_center()
-                .gap_2()
-                .min_w_0()
-                .child(
-                  div()
-                    .font_weight(FontWeight::MEDIUM)
-                    .truncate()
-                    .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
-                    .when(active, |this| this.text_color(p.primary))
-                    .child(name),
-                )
-                .when_some(dir, |this, dir| {
-                  this.child(
-                    ui::text(div(), TextSize::Xs)
-                      .flex_1()
-                      .truncate()
-                      .text_color(p.muted_foreground.opacity(0.6))
-                      .child(dir),
-                  )
-                }),
-            )
-            .child(div().text_color(muted).child(file.status.clone()))
-            .on_mouse_down(
-              MouseButton::Right,
-              cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
-                view.file_menu(&menu, false, e.position, cx);
-              }),
-            )
-            .on_click(cx.listener(move |view, _, _, cx| view.show_file(&path, cx))),
-        );
-      }
-    }
-    div()
-      .mt_4()
-      .child(
-        div()
-          .flex()
-          .items_center()
-          .justify_between()
-          .w_full()
-          .text_color(muted)
-          .child(header),
-      )
-      .when(!collapsed && !visible.is_empty(), |this| this.child(rows))
   }
 
   /// `ReviewActionBar`: for now, "Start Review" on workspaces.

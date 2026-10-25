@@ -12,6 +12,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -77,6 +78,8 @@ const IDLE_POLL: Duration = Duration::from_millis(500);
 /// lately have their headers read ahead, and the pause between them.
 const IDLE_RECENT: Duration = Duration::from_secs(3);
 const IDLE_STAGGER: Duration = Duration::from_secs(1);
+/// How long after a workspace's last change its file index is read again.
+const REINDEX_AFTER: Duration = Duration::from_millis(1500);
 
 /// How many workspaces shown lately keep their header's last read.
 const RECENT: usize = 3;
@@ -347,6 +350,10 @@ pub struct WorkspaceView {
   branches: prefetch::Lru<String, Vec<String>>,
   /// The workspace whose file index was last asked to be built.
   indexed: Option<RouteKey>,
+  /// The route's `changes_revision` the file index was last asked to read.
+  indexed_revision: u64,
+  /// The file index's pending re-read, replaced by the next change.
+  _reindex: Task<()>,
   dark: bool,
   popups: PopupSink,
   /// The element whose tooltip is pending or shown (`true`).
@@ -374,7 +381,9 @@ impl WorkspaceView {
     let sink: ActionSink = Rc::new(move |action, cx| {
       let view = view.clone();
       cx.defer(move |cx| {
-        let _ = view.update(cx, |view, cx| view.handle(action, cx));
+        view
+          .update(cx, |view, cx| view.handle(action, cx))
+          .ignore_closed();
       });
     });
     let children: ActionSink = {
@@ -385,7 +394,9 @@ impl WorkspaceView {
         }
         let view = view.clone();
         cx.defer(move |cx| {
-          let _ = view.update(cx, |view, cx| view.launch(action, cx));
+          view
+            .update(cx, |view, cx| view.launch(action, cx))
+            .ignore_closed();
         });
       })
     };
@@ -432,6 +443,8 @@ impl WorkspaceView {
       target_hover: prefetch::Intent::default(),
       branches: prefetch::Lru::new(1),
       indexed: None,
+      indexed_revision: 0,
+      _reindex: Task::ready(()),
       dark,
       popups,
       tooltip: None,
@@ -452,6 +465,7 @@ impl WorkspaceView {
     }
     let moved = self.route.key() != route.key();
     let stale = moved || self.route.revision != route.revision;
+    let changed = self.route.changes_revision != route.changes_revision;
     let left = std::mem::replace(&mut self.route, route);
     self.dark = dark;
     if moved {
@@ -479,6 +493,8 @@ impl WorkspaceView {
       self.pending = Pending::None;
       self.busy = actions::Busy::default();
       self.warm_file_index(cx);
+    } else if changed {
+      self.warm_file_index(cx);
     }
     if stale {
       self.load(cx);
@@ -490,25 +506,38 @@ impl WorkspaceView {
   }
 
   /// Builds the shown workspace's file index off the main thread, once it
-  /// knows the workspace, so "Jump to File" searches it at once.
+  /// knows the workspace, so "Jump to File" searches it at once. The files
+  /// the workspace's changes add or remove are read again a moment after
+  /// the last change, so the index follows what an agent creates.
   fn warm_file_index(&mut self, cx: &mut Context<Self>) {
     let key = self.route.key();
-    if self.route.remote_chrome.is_some() || self.indexed.as_ref() == Some(&key) {
+    let first = self.indexed.as_ref() != Some(&key);
+    let revision = self.route.changes_revision;
+    if self.route.remote_chrome.is_some() || (!first && self.indexed_revision == revision) {
       return;
     }
     let Some(parent) = self.parent() else {
       return;
     };
     self.indexed = Some(key);
+    self.indexed_revision = revision;
     let host: Arc<dyn super::code_data::CodeHost> = self.code_host.clone();
-    cx.background_spawn(async move {
+    let warm = async move {
       host.warm_file_index(
         &parent.repo_path,
         parent.workspace_id(),
         &parent.working_directory(),
       );
-    })
-    .detach();
+    };
+    if first {
+      cx.background_spawn(warm).detach();
+    } else {
+      let executor = cx.background_executor().clone();
+      self._reindex = cx.background_spawn(async move {
+        executor.timer(REINDEX_AFTER).await;
+        warm.await;
+      });
+    }
   }
 
   /// Reads ahead what showing `route`'s workspace would read, so a switch
@@ -544,13 +573,15 @@ impl WorkspaceView {
     let revision = route.revision;
     cx.spawn(async move |this, cx| {
       let loaded = cx.background_spawn(async move { host.load(&route) }).await;
-      let _ = this.update(cx, |view, cx| {
-        view.prefetching.remove(&key);
-        if view.route.key() != key {
-          let now = cx.background_executor().now();
-          view.headers.insert(key, now, (revision, loaded));
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          view.prefetching.remove(&key);
+          if view.route.key() != key {
+            let now = cx.background_executor().now();
+            view.headers.insert(key, now, (revision, loaded));
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -721,10 +752,12 @@ impl WorkspaceView {
           return;
         };
         let names = branches.into_iter().map(|b| b.name).collect();
-        let _ = this.update(cx, |view, cx| {
-          let now = cx.background_executor().now();
-          view.branches.insert(repo, now, names);
-        });
+        this
+          .update(cx, |view, cx| {
+            let now = cx.background_executor().now();
+            view.branches.insert(repo, now, names);
+          })
+          .ignore_closed();
       })
       .detach();
     });
@@ -742,18 +775,20 @@ impl WorkspaceView {
     cx.spawn(async move |this, cx| {
       let key = route.key();
       let loaded = cx.background_spawn(async move { host.load(&route) }).await;
-      let _ = this.update(cx, |view, cx| {
-        view.loading = false;
-        if view.route.key() == key {
-          view.loaded = Some(loaded);
-          view.read_pr(cx);
-          view.warm_file_index(cx);
-          view.rebuild(cx);
-        }
-        if std::mem::take(&mut view.reload) {
-          view.load(cx);
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          view.loading = false;
+          if view.route.key() == key {
+            view.loaded = Some(loaded);
+            view.read_pr(cx);
+            view.warm_file_index(cx);
+            view.rebuild(cx);
+          }
+          if std::mem::take(&mut view.reload) {
+            view.load(cx);
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -776,12 +811,14 @@ impl WorkspaceView {
       let pr = cx
         .background_spawn(async move { host.pr_cache(&repo, &branch) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.route.key() == key && view.pr != pr {
-          view.pr = pr;
-          view.rebuild(cx);
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.route.key() == key && view.pr != pr {
+            view.pr = pr;
+            view.rebuild(cx);
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -949,25 +986,27 @@ impl WorkspaceView {
     let repo_path = self.route.repo_path.clone();
     cx.spawn(async move |this, cx| {
       let outcome = cx.background_spawn(async move { work(&*host) }).await;
-      let _ = this.update(cx, |view, cx| {
-        view.pending = Pending::None;
-        view.host.notify(NativeEvent::Toast {
-          title: outcome.title,
-          description: outcome.description,
-          tone: match (outcome.ok, outcome.warning) {
-            (false, _) => ToastTone::Error,
-            (true, true) => ToastTone::Warning,
-            (true, false) => ToastTone::Success,
-          },
-          action: None,
-        });
-        // The window reads again on this and bumps the route's revision,
-        // which reloads the header (`set_route`).
-        view
-          .host
-          .notify(NativeEvent::WorkspaceChanged { repo_path });
-        view.rebuild(cx);
-      });
+      this
+        .update(cx, |view, cx| {
+          view.pending = Pending::None;
+          view.host.notify(NativeEvent::Toast {
+            title: outcome.title,
+            description: outcome.description,
+            tone: match (outcome.ok, outcome.warning) {
+              (false, _) => ToastTone::Error,
+              (true, true) => ToastTone::Warning,
+              (true, false) => ToastTone::Success,
+            },
+            action: None,
+          });
+          // The window reads again on this and bumps the route's revision,
+          // which reloads the header (`set_route`).
+          view
+            .host
+            .notify(NativeEvent::WorkspaceChanged { repo_path });
+          view.rebuild(cx);
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -1028,14 +1067,16 @@ impl WorkspaceView {
     self.tooltip = Some((key.clone(), false));
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(TOOLTIP_DELAY).await;
-      let _ = this.update(cx, |this, cx| {
-        if let Some((k, shown)) = this.tooltip.as_mut() {
-          if *k == key && !*shown {
-            *shown = true;
-            cx.notify();
+      this
+        .update(cx, |this, cx| {
+          if let Some((k, shown)) = this.tooltip.as_mut() {
+            if *k == key && !*shown {
+              *shown = true;
+              cx.notify();
+            }
           }
-        }
-      });
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -1130,30 +1171,6 @@ impl WorkspaceView {
 
     if !h.home {
       left = left.child(mono_title(&h.branch).debug_selector(|| "workspace-branch".into()));
-      if let Some(linear) = &h.linear {
-        let url = linear.url.clone();
-        let sink = self.sink.clone();
-        left = left.child(
-          ui::text(div(), TextSize::Xs)
-            .id("workspace-linear")
-            .debug_selector(|| "workspace-linear".into())
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_1()
-            .px_2()
-            .py_0p5()
-            .rounded_full()
-            .bg(p.muted)
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(p.muted_foreground)
-            .cursor_pointer()
-            .hover(|s| s.bg(p.muted.opacity(0.8)))
-            .child(ui::icon(theme::ICON_ZAP, 12., p.muted_foreground))
-            .child(linear.key.clone())
-            .on_click(move |_, _, cx| sink(ScreenAction::OpenUrl { url: url.clone() }, cx)),
-        );
-      }
       if let Some(target) = &h.target {
         let label = target.branch.clone().unwrap_or_else(|| "Select...".into());
         let button = Button::new("workspace-target", p)
@@ -1319,6 +1336,29 @@ impl WorkspaceView {
         button,
         cx,
       ));
+    }
+    // The Linear issue sits with the GitHub checks and pull request.
+    if let Some(linear) = h.linear.as_ref().filter(|_| !h.home) {
+      let url = linear.url.clone();
+      let sink = self.sink.clone();
+      right = right.child(
+        ui::text(div(), TextSize::Xs)
+          .id("workspace-linear")
+          .debug_selector(|| "workspace-linear".into())
+          .flex()
+          .flex_none()
+          .items_center()
+          .px_2()
+          .py_0p5()
+          .rounded_full()
+          .bg(p.muted)
+          .font_weight(FontWeight::MEDIUM)
+          .text_color(p.muted_foreground)
+          .cursor_pointer()
+          .hover(|s| s.bg(p.muted.opacity(0.8)))
+          .child(linear.key.clone())
+          .on_click(move |_, _, cx| sink(ScreenAction::OpenUrl { url: url.clone() }, cx)),
+      );
     }
     if let Some(checks) = &h.checks {
       right = right.child(
@@ -1757,7 +1797,7 @@ async fn in_front(this: &WeakEntity<WorkspaceView>, cx: &mut gpui::AsyncWindowCo
       cx.observe_window_activation(window, move |_, window, _| {
         if window.is_window_active() {
           if let Some(tx) = tx.take() {
-            let _ = tx.send(());
+            tx.send(()).ignore_closed();
           }
         }
       })
@@ -1766,7 +1806,7 @@ async fn in_front(this: &WeakEntity<WorkspaceView>, cx: &mut gpui::AsyncWindowCo
     return;
   };
   if let Some(_watch) = watch {
-    let _ = rx.await;
+    rx.await.ignore_closed();
   }
 }
 
@@ -1959,11 +1999,13 @@ impl WorkspaceView {
           host.launch_session(&request, false)
         })
         .await;
-      let _ = this.update(cx, |view, _| match (result, done) {
-        (Ok(_), Some((title, description))) => view.toast(ToastTone::Success, title, description),
-        (Ok(_), None) => {}
-        (Err(err), _) => view.toast(ToastTone::Error, failed, err),
-      });
+      this
+        .update(cx, |view, _| match (result, done) {
+          (Ok(_), Some((title, description))) => view.toast(ToastTone::Success, title, description),
+          (Ok(_), None) => {}
+          (Err(err), _) => view.toast(ToastTone::Error, failed, err),
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -2051,7 +2093,9 @@ impl WorkspaceView {
       let place = cx
         .background_spawn(async move { terminal_place(&*host, repo, workspace_id, home) })
         .await;
-      let _ = pane.update(cx, |pane, cx| pane.set_place(place, cx));
+      pane
+        .update(cx, |pane, cx| pane.set_place(place, cx))
+        .ignore_closed();
     });
   }
 

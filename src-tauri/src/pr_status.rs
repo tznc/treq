@@ -10,6 +10,7 @@
 
 use crate::github::{PrCiStatus, PrInfo};
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -240,6 +241,16 @@ impl PrStatusManager {
   pub fn unwatch_repo(&self, repo_path: &str) {
     let mut watched = self.inner.watched.lock_or_recover();
     watched.remove(repo_path);
+  }
+
+  /// Stops watching every repo `keep` rejects, so a repo no window shows any
+  /// more costs no `gh` calls.
+  pub fn retain_watched(&self, keep: impl Fn(&str) -> bool) {
+    self
+      .inner
+      .watched
+      .lock_or_recover()
+      .retain(|repo| keep(repo));
   }
 
   /// Synchronously refresh one repo (tests + post-create-PR invalidation).
@@ -754,10 +765,12 @@ pub fn set_app_handle(app: tauri::AppHandle) {
     {
       return;
     }
-    let _ = app.emit(
-      "pr-statuses-updated",
-      serde_json::json!({ "repo_path": repo_path, "stacks_moved": stacks_moved }),
-    );
+    app
+      .emit(
+        "pr-statuses-updated",
+        serde_json::json!({ "repo_path": repo_path, "stacks_moved": stacks_moved }),
+      )
+      .ignore_closed();
   }));
   global().ensure_started();
 }
@@ -1216,6 +1229,19 @@ mod tests {
     assert!(mgr.is_watching("/tmp/repo"));
     mgr.unwatch_repo("/tmp/repo");
     assert!(!mgr.is_watching("/tmp/repo"));
+    mgr.shutdown();
+  }
+
+  #[test]
+  fn retain_watched_drops_repos_no_window_shows() {
+    let fetch: PrFetchFn = Arc::new(|_, _| Ok(None));
+    let (mgr, _) = manager_with(fetch, vec!["feat".into()]);
+
+    mgr.watch_repo("/tmp/shown");
+    mgr.watch_repo("/tmp/closed");
+    mgr.retain_watched(|repo| repo == "/tmp/shown");
+    assert!(mgr.is_watching("/tmp/shown"));
+    assert!(!mgr.is_watching("/tmp/closed"));
     mgr.shutdown();
   }
 

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, AnyElement, Context, FontWeight, SharedString, Window,
+  self, div, prelude::*, AnyElement, Context, Focusable as _, FontWeight, SharedString, Window,
 };
 
 use super::{help, toast, SettingsView, Tab};
@@ -122,6 +122,12 @@ pub struct UsageReport {
   pub repository_count: u64,
   pub workspace_count: u64,
   pub disk_used_bytes: u64,
+}
+
+thread_local! {
+  /// The repositories the Integrations tab last read, shown while it reads
+  /// them again.
+  static LAST_GITHUB: std::cell::RefCell<Option<Vec<GithubRepo>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
@@ -305,6 +311,8 @@ struct Linear {
   path: String,
   key: Option<String>,
   editing: bool,
+  /// The key field takes focus on its next draw, once it opens.
+  focus: bool,
   draft: String,
   saving: bool,
 }
@@ -663,6 +671,7 @@ impl SettingsView {
       path: path.clone(),
       key: None,
       editing: false,
+      focus: false,
       draft: String::new(),
       saving: false,
     });
@@ -771,6 +780,7 @@ impl SettingsView {
       self.account.farewell = false;
     } else {
       self.account.github = None;
+      LAST_GITHUB.with(|last| *last.borrow_mut() = None);
       self.account.cloud_read = false;
     }
     self.sync_avatar(cx);
@@ -787,28 +797,46 @@ impl SettingsView {
     }
   }
 
+  /// Reads the GitHub repositories. Those read last time show meanwhile,
+  /// so reopening the tab has no spinner.
   fn load_github(&mut self, cx: &mut Context<Self>) {
-    self.account.github = Some(GithubRoute {
-      loading: true,
-      ..GithubRoute::default()
+    let last = LAST_GITHUB.with(|last| last.borrow().clone());
+    self.account.github = Some(match last.clone() {
+      Some(repositories) => GithubRoute {
+        loading: false,
+        failed: false,
+        repositories,
+      },
+      None => GithubRoute {
+        loading: true,
+        ..GithubRoute::default()
+      },
     });
     self.spawn(
       cx,
       |host| host.github_repositories(),
-      |view, result, _| {
+      move |view, result, _| {
         view.account.github = Some(match result {
-          Ok(repositories) => GithubRoute {
-            loading: false,
-            failed: false,
-            repositories: repositories
+          Ok(repositories) => {
+            let repositories: Vec<GithubRepo> = repositories
               .into_iter()
               .map(|r| GithubRepo {
                 id: r.id,
                 full_name: r.full_name,
                 private: r.private,
               })
-              .collect(),
-          },
+              .collect();
+            LAST_GITHUB.with(|last| *last.borrow_mut() = Some(repositories.clone()));
+            GithubRoute {
+              loading: false,
+              failed: false,
+              repositories,
+            }
+          }
+          Err(error) if last.is_some() => {
+            log::warn!("reading the GitHub repositories failed: {error}");
+            return;
+          }
           Err(error) => {
             log::warn!("reading the GitHub repositories failed: {error}");
             GithubRoute {
@@ -972,7 +1000,14 @@ impl SettingsView {
       "linear.apiKey.edit" => {
         if let Some(linear) = &mut self.account.linear {
           linear.editing = true;
+          linear.focus = true;
           linear.draft = linear.key.clone().unwrap_or_default();
+        }
+      }
+      "linear.apiKey.cancel" => {
+        if let Some(linear) = &mut self.account.linear {
+          linear.editing = false;
+          linear.draft.clear();
         }
       }
       "linear.apiKey.save" => self.save_linear_key(cx),
@@ -1960,10 +1995,13 @@ impl SettingsView {
         .into_any_element();
     }
     let key_control: AnyElement = if linear.editing {
-      let input =
-        self
-          .controls
-          .password("linear.apiKey", &linear.draft, "linear_api_...", window, cx);
+      let input = self
+        .controls
+        .password("linear.apiKey", &linear.draft, "lin_api_...", window, cx);
+      if let Some(state) = self.account.linear.as_mut().filter(|l| l.focus) {
+        state.focus = false;
+        input.read(cx).focus_handle(cx).focus(window, cx);
+      }
       div()
         .flex()
         .flex_none()
@@ -1974,6 +2012,14 @@ impl SettingsView {
           false,
           linear.saving,
         )))
+        .child(
+          Button::new("linear-api-key-cancel", p)
+            .size(Size::Sm)
+            .variant(Variant::Ghost)
+            .disabled(linear.saving)
+            .label("Cancel")
+            .on_click(self.press("linear.apiKey.cancel")),
+        )
         .child(
           Button::new("linear-api-key-save", p)
             .size(Size::Sm)
@@ -2014,7 +2060,7 @@ impl SettingsView {
     });
     div()
       .child(section_header(
-        theme::ICON_ZAP,
+        theme::ICON_LINEAR,
         "Linear",
         "Issue tracker integration",
         p,

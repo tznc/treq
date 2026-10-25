@@ -53,6 +53,15 @@ pub fn prompt_history(repo_path: &str) -> Result<Vec<PromptHistoryEntry>, String
   local_db::get_prompt_history(repo_path)
 }
 
+/// Up to `limit` prompts sent in the repo after the newest `offset`.
+pub fn prompt_history_page(
+  repo_path: &str,
+  limit: usize,
+  offset: usize,
+) -> Result<Vec<PromptHistoryEntry>, String> {
+  local_db::get_prompt_history_page(repo_path, limit, offset)
+}
+
 /// The prompt a workspace was started with, when it has one.
 pub fn workspace_starting_prompt(
   repo_path: &str,

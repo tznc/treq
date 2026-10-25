@@ -60,6 +60,20 @@ pub fn describe(raw: &str) -> Problem {
       Some(Fix::ReviewHostKey),
     );
   }
+  // Before the SSH key check: a Git remote that refuses the host's
+  // credentials says "Authentication failed" or "Permission denied" too.
+  if has("push failed")
+    && (has("could not read username")
+      || has("authentication failed for")
+      || has("permission denied")
+      || has("repository not found")
+      || has("403"))
+  {
+    return Problem::new(
+      "The host couldn't sign in to the Git remote. Sign in there from a shell in this workspace (for GitHub: gh auth login, then gh auth setup-git), then push again.",
+      None,
+    );
+  }
   if has("authentication failed") || has("permission denied (publickey") {
     return Problem::new(
       "The host refused this device's key. Add the device's public key to ~/.ssh/authorized_keys on the host.",
@@ -81,6 +95,34 @@ pub fn describe(raw: &str) -> Problem {
   if has("treq: command not found") || has("treq: not found") || (has("exit=some(127)")) {
     return Problem::new(
       "treq isn't installed on this host, or isn't on the PATH for SSH sessions.",
+      None,
+    );
+  }
+  // A treq from before `file list`: clap wants `--path`, or names the action.
+  if has("unknown file action 'list'")
+    || (has("required arguments were not provided") && has("--path"))
+  {
+    return Problem::new(
+      "Browsing files needs a newer treq on this host. Update treq there, then try again.",
+      None,
+    );
+  }
+  // A treq from before `git pr`: clap refuses `--title`, or names the action.
+  if has("unknown git action 'pr") || (has("--title") && has("wasn't expected")) {
+    return Problem::new(
+      "Pull requests need a newer treq on this host. Update treq there, then try again.",
+      None,
+    );
+  }
+  if has("gh cli not found") {
+    return Problem::new(
+      "Pull requests use the GitHub CLI on this host, and it isn't installed. Install gh there and run gh auth login.",
+      None,
+    );
+  }
+  if has("gh auth login") || has("not logged into any github hosts") {
+    return Problem::new(
+      "The GitHub CLI on this host isn't signed in. Run gh auth login there, then try again.",
       None,
     );
   }
@@ -207,6 +249,37 @@ mod tests {
     assert!(problem
       .message
       .starts_with("This repository has no Git remote"));
+  }
+
+  #[test]
+  fn github_cli_problems_say_what_to_do_on_the_host() {
+    assert!(describe("treq_command_failed: gh CLI not found")
+      .message
+      .contains("Install gh"));
+    assert!(describe(
+      "gh pr view failed: To get started with GitHub CLI, please run:  gh auth login"
+    )
+    .message
+    .contains("isn't signed in"));
+    assert!(describe("unknown git action 'pr-create'")
+      .message
+      .starts_with("Pull requests need a newer treq"));
+  }
+
+  #[test]
+  fn a_push_the_remote_refuses_says_to_sign_in_on_the_host() {
+    for raw in [
+      "git_command_failed: Push failed: IO error: Failed to push bookmark: Git process failed: External git program failed:\nfatal: could not read Username for 'https://github.com': No such device or address",
+      "git_command_failed: Push failed: remote: Permission to tznc/x.git denied.\nfatal: unable to access: The requested URL returned error: 403",
+      "git_command_failed: Push failed: git@github.com: Permission denied (publickey).",
+    ] {
+      let problem = describe(raw);
+      assert!(
+        problem.message.starts_with("The host couldn't sign in to the Git remote"),
+        "{raw}"
+      );
+      assert_eq!(problem.fix, None);
+    }
   }
 
   #[test]

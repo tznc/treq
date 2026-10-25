@@ -2,6 +2,7 @@ use crate::core::checks_logs::{
   infer_level, job_log_relative_path, make_log_line, now_timestamp, LogWriter,
 };
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -293,16 +294,18 @@ fn execute_job_steps(
       let step_name = step.name.clone();
       let job_id = job_id.to_string();
       std::sync::Arc::new(move |stream, message| {
-        let _ = writer.write_line(&make_log_line(
-          now_timestamp(),
-          run_id,
-          &job_id,
-          step_index as i64,
-          &step_name,
-          stream,
-          infer_level(message),
-          message,
-        ));
+        writer
+          .write_line(&make_log_line(
+            now_timestamp(),
+            run_id,
+            &job_id,
+            step_index as i64,
+            &step_name,
+            stream,
+            infer_level(message),
+            message,
+          ))
+          .best_effort();
       })
     };
     let outcome = crate::core::shell_step::run(
@@ -317,20 +320,22 @@ fn execute_job_steps(
     .map_err(|e| format!("Failed to run step '{}': {}", step.name, e))?;
 
     if matches!(outcome, crate::core::shell_step::StepOutcome::TimedOut) {
-      let _ = writer.write_line(&make_log_line(
-        now_timestamp(),
-        run_id,
-        job_id,
-        step_index as i64,
-        &step.name,
-        "stderr",
-        "error",
-        &format!(
-          "Step timed out after {} seconds and was terminated.",
-          STEP_TIMEOUT_SECS
-        ),
-      ));
-      let _ = writer.flush();
+      writer
+        .write_line(&make_log_line(
+          now_timestamp(),
+          run_id,
+          job_id,
+          step_index as i64,
+          &step.name,
+          "stderr",
+          "error",
+          &format!(
+            "Step timed out after {} seconds and was terminated.",
+            STEP_TIMEOUT_SECS
+          ),
+        ))
+        .best_effort();
+      writer.flush().best_effort();
       step_results.push(StepResult {
         name: step.name.clone(),
         success: false,
@@ -468,7 +473,7 @@ fn maybe_autosave_on_pass(repo_path: &str, workspace_path: &str) {
   }
   let paths: Vec<String> = changes.into_iter().map(|change| change.path).collect();
   let message = crate::jj::autosave_commit_message(&paths);
-  let _ = crate::jj::jj_commit(workspace_path, &message);
+  crate::jj::jj_commit(workspace_path, &message).warn_on_err("jj commit");
 }
 
 fn store_job_result(

@@ -13,6 +13,7 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::lock_ext::LockExt as _;
+use crate::result_ext::ResultExt;
 use std::{
   cell::Cell,
   rc::Rc,
@@ -385,6 +386,29 @@ pub struct TerminalView {
   pub remote: RemoteState,
   _exit: Option<Listening>,
   _tasks: Vec<Task<()>>,
+  /// Temporary files of this session (an agent's prompt, settings and
+  /// skills, and images pasted in), deleted when the terminal closes.
+  session_files: Vec<String>,
+}
+
+/// Deletes a session's temporary files off the main thread.
+fn remove_files(host: Host, files: Vec<String>) {
+  #[cfg(test)]
+  host.remove_session_files(&files);
+  #[cfg(not(test))]
+  std::thread::spawn(move || host.remove_session_files(&files));
+}
+
+impl Drop for TerminalView {
+  fn drop(&mut self) {
+    if let Start::Agent { start, .. } = &self.start {
+      self.host.end_chat(&start.repo_path, start.session_id);
+    }
+    if self.session_files.is_empty() {
+      return;
+    }
+    remove_files(self.host.clone(), std::mem::take(&mut self.session_files));
+  }
 }
 
 fn now_millis() -> u128 {
@@ -438,6 +462,7 @@ impl TerminalView {
       remote: RemoteState::default(),
       _exit: None,
       _tasks: Vec::new(),
+      session_files: Vec::new(),
     }
   }
 
@@ -459,12 +484,14 @@ impl TerminalView {
     self._exit = Some(self.host.listen_exit(
       &self.pty,
       Box::new(move |status| {
-        let _ = tx.unbounded_send(status);
+        tx.unbounded_send(status).ignore_closed();
       }),
     ));
     self._tasks.push(cx.spawn(async move |this, cx| {
       if let Some(status) = rx.next().await {
-        let _ = this.update(cx, |view, cx| view.on_remote_exit(status, cx));
+        this
+          .update(cx, |view, cx| view.on_remote_exit(status, cx))
+          .ignore_closed();
       }
     }));
   }
@@ -485,18 +512,20 @@ impl TerminalView {
       .spawn(async move { host.remote_running(&target) });
     self._tasks.push(cx.spawn(async move |this, cx| {
       let running = task.await;
-      let _ = this.update(cx, |view, cx| {
-        if view.remote.stopping {
-          return;
-        }
-        match running {
-          Some(false) => {
-            view.remote.ended = Some(status);
-            cx.notify();
+      this
+        .update(cx, |view, cx| {
+          if view.remote.stopping {
+            return;
           }
-          _ => view.lost(None, cx),
-        }
-      });
+          match running {
+            Some(false) => {
+              view.remote.ended = Some(status);
+              cx.notify();
+            }
+            _ => view.lost(None, cx),
+          }
+        })
+        .ignore_closed();
     }));
   }
 
@@ -523,7 +552,7 @@ impl TerminalView {
     };
     let next = terminal_data::remote_pty_id(target, now_millis());
     let previous = std::mem::replace(&mut self.pty, next);
-    let _ = self.host.close_pty(&previous);
+    self.host.close_pty(&previous).ignore_closed();
     terminal_data::detach(&previous);
     rekey_kept(&previous, &self.pty);
     self.live = None;
@@ -550,14 +579,16 @@ impl TerminalView {
       .spawn(async move { host.remote_stop(&target) });
     self._tasks.push(cx.spawn(async move |this, cx| {
       let result = task.await;
-      let _ = this.update(cx, |view, cx| {
-        view.remote.stopping = false;
-        match result {
-          Ok(()) => (view.on_event)(TermEvent::Close, cx),
-          Err(error) => view.status = Status::Failed(error),
-        }
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.remote.stopping = false;
+          match result {
+            Ok(()) => (view.on_event)(TermEvent::Close, cx),
+            Err(error) => view.status = Status::Failed(error),
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     }));
   }
 
@@ -604,7 +635,10 @@ impl TerminalView {
         // A resize while the PTY starts reaches it once it runs; otherwise
         // the program draws for a size the grid isn't.
         if self.status == Status::Ready && self.pty_size != Some((cols, rows)) {
-          let _ = self.host.resize_pty(&self.pty, rows as u16, cols as u16);
+          self
+            .host
+            .resize_pty(&self.pty, rows as u16, cols as u16)
+            .ignore_closed();
           self.pty_size = Some((cols, rows));
         }
       }
@@ -680,11 +714,13 @@ impl TerminalView {
         self.chat_due = true;
         cx.spawn(async move |this, cx| {
           cx.background_executor().timer(CHAT_THROTTLE).await;
-          let _ = this.update(cx, |view, _| {
-            if std::mem::take(&mut view.chat_due) {
-              view.record_chat();
-            }
-          });
+          this
+            .update(cx, |view, _| {
+              if std::mem::take(&mut view.chat_due) {
+                view.record_chat();
+              }
+            })
+            .ignore_closed();
         })
         .detach();
       }
@@ -712,12 +748,14 @@ impl TerminalView {
         }
         wait = IDLE_AFTER - since;
       }
-      let _ = this.update(cx, |view, cx| {
-        view.streaming = false;
-        view.chat_due = false;
-        view.record_chat();
-        (view.on_event)(TermEvent::Idle, cx);
-      });
+      this
+        .update(cx, |view, cx| {
+          view.streaming = false;
+          view.chat_due = false;
+          view.record_chat();
+          (view.on_event)(TermEvent::Idle, cx);
+        })
+        .ignore_closed();
     })
   }
 
@@ -748,15 +786,17 @@ impl TerminalView {
     }
     let task = cx.background_executor().spawn(async move {
       if host.pty_exists(&pty) {
-        let _ = host.resize_pty(&pty, rows as u16, cols as u16);
-        return Ok(None);
+        host
+          .resize_pty(&pty, rows as u16, cols as u16)
+          .ignore_closed();
+        return Ok((None, Vec::new()));
       }
-      let (spawn, warning) = match &start {
+      let (spawn, warning, files) = match &start {
         Start::Remote { target } => {
           host
             .remote_attach(&pty, target, cols as u16, rows as u16)
             .map_err(|e| (false, e))?;
-          return Ok(None);
+          return Ok((None, Vec::new()));
         }
         Start::Shell { dir } => (
           Spawn {
@@ -766,6 +806,7 @@ impl TerminalView {
             ..Spawn::default()
           },
           None,
+          Vec::new(),
         ),
         Start::Agent {
           start,
@@ -786,49 +827,56 @@ impl TerminalView {
               auto_command: Some(prepared.command),
             },
             prepared.skill_write_warning,
+            prepared.file_paths,
           )
         }
       };
       host.spawn_pty(&spawn).map_err(|e| (false, e))?;
-      let _ = host.resize_pty(&pty, rows as u16, cols as u16);
-      Ok(warning)
+      host
+        .resize_pty(&pty, rows as u16, cols as u16)
+        .ignore_closed();
+      Ok((warning, files))
     });
     self._tasks.push(cx.spawn(async move |this, cx| {
-      let result: Result<Option<String>, (bool, String)> = task.await;
-      let _ = this.update(cx, |view, cx| {
-        view.pty_size = Some((cols, rows));
-        if let (Err((false, error)), Some(_)) = (&result, view.remote_target()) {
-          view.lost(Some(error.clone()), cx);
-          return;
-        }
-        view.status = match result {
-          Ok(warning) => {
-            if let Some(description) = warning {
-              (view.on_event)(
-                TermEvent::Toast {
-                  title: "Could not write Treq skills".into(),
-                  description,
-                },
-                cx,
-              );
-            }
-            Status::Ready
+      let result: Result<(Option<String>, Vec<String>), (bool, String)> = task.await;
+      this
+        .update(cx, |view, cx| {
+          view.pty_size = Some((cols, rows));
+          if let (Err((false, error)), Some(_)) = (&result, view.remote_target()) {
+            view.lost(Some(error.clone()), cx);
+            return;
           }
-          Err((true, error)) => Status::AgentFailed(error),
-          Err((false, error)) if error.contains("Session not found") => Status::Failed(
-            "Terminal session is still initializing. Please wait a moment and try again.".into(),
-          ),
-          Err((false, error)) => Status::Failed(error),
-        };
-        cx.notify();
-      });
+          view.status = match result {
+            Ok((warning, files)) => {
+              view.session_files.extend(files);
+              if let Some(description) = warning {
+                (view.on_event)(
+                  TermEvent::Toast {
+                    title: "Could not write Treq skills".into(),
+                    description,
+                  },
+                  cx,
+                );
+              }
+              Status::Ready
+            }
+            Err((true, error)) => Status::AgentFailed(error),
+            Err((false, error)) if error.contains("Session not found") => Status::Failed(
+              "Terminal session is still initializing. Please wait a moment and try again.".into(),
+            ),
+            Err((false, error)) => Status::Failed(error),
+          };
+          cx.notify();
+        })
+        .ignore_closed();
     }));
   }
 
   /// "Try again": closes the PTY and starts over.
   fn retry(&mut self, cx: &mut Context<Self>) {
-    let _ = self.host.close_pty(&self.pty);
+    self.host.close_pty(&self.pty).ignore_closed();
     terminal_data::detach(&self.pty);
+    remove_files(self.host.clone(), std::mem::take(&mut self.session_files));
     self.live = None;
     self._tasks.clear();
     self.status = Status::Preparing;
@@ -924,6 +972,7 @@ impl TerminalView {
     let paste = (m.platform && k.key == "v") || (m.control && m.shift && k.key == "v");
     if paste {
       let item = cx.read_from_clipboard();
+      let mut pasted = Vec::new();
       // A copied image goes in as the path of a file holding it: Claude Code
       // and Codex attach a pasted image path, and nothing else reaches them
       // through a PTY. A remote host can't read a local file.
@@ -938,10 +987,12 @@ impl TerminalView {
         self
           .host
           .write_pasted_image(&image.bytes)
+          .inspect(|path| pasted.push(path.clone()))
           .map(|path| shell_quote(&path))
           .inspect_err(|e| tracing::warn!("failed to save pasted image: {e}"))
           .ok()
       });
+      self.session_files.extend(pasted);
       if let Some(text) = text {
         let bracketed = self.with_emulator(|e| e.bracketed_paste()).unwrap_or(false);
         let bytes = paste_bytes(&text, bracketed);
@@ -1024,9 +1075,10 @@ impl TerminalView {
       ctrl: modifiers.control,
     };
     if let Some(bytes) = self.with_emulator(|e| e.encode_mouse(mouse)).flatten() {
-      let _ = self
+      self
         .host
-        .write_pty(&self.pty, &String::from_utf8_lossy(&bytes));
+        .write_pty(&self.pty, &String::from_utf8_lossy(&bytes))
+        .ignore_closed();
     }
     true
   }
@@ -1135,7 +1187,7 @@ impl TerminalView {
       )
       .unwrap_or_default();
       let data = String::from_utf8_lossy(&bytes).repeat(lines.unsigned_abs() as usize);
-      let _ = self.host.write_pty(&self.pty, &data);
+      self.host.write_pty(&self.pty, &data).ignore_closed();
     } else {
       self.with_emulator(|e| e.scroll(lines));
     }
@@ -1909,15 +1961,21 @@ impl TerminalPane {
     }
     self.environment_repo = Some(repo.clone());
     let host = self.host.clone();
-    let task = cx
-      .background_executor()
-      .spawn(async move { code_data::task_settings(&*host, &repo).environment });
+    let task = cx.background_executor().spawn(async move {
+      let mut environment = code_data::task_settings(&*host, &repo).environment;
+      if let Some(environment) = environment.as_mut() {
+        environment.status = Some(host.devcontainer_status(&repo));
+      }
+      environment
+    });
     self._environment_task = Some(cx.spawn(async move |this, cx| {
       let environment = task.await;
-      let _ = this.update(cx, |pane, cx| {
-        pane.environment = environment;
-        cx.notify();
-      });
+      this
+        .update(cx, |pane, cx| {
+          pane.environment = environment;
+          cx.notify();
+        })
+        .ignore_closed();
     }));
   }
 
@@ -1962,18 +2020,20 @@ impl TerminalPane {
       .spawn(async move { host.devcontainer_up(&repo) });
     self._environment_task = Some(cx.spawn(async move |this, cx| {
       let result = task.await;
-      let _ = this.update(cx, |pane, cx| {
-        pane.starting_devcontainer = false;
-        match result {
-          Ok(status) => {
-            if let Some(environment) = pane.environment.as_mut() {
-              environment.status = Some(status);
+      this
+        .update(cx, |pane, cx| {
+          pane.starting_devcontainer = false;
+          match result {
+            Ok(status) => {
+              if let Some(environment) = pane.environment.as_mut() {
+                environment.status = Some(status);
+              }
             }
+            Err(error) => pane.toast("Devcontainer did not start", error, ToastTone::Error),
           }
-          Err(error) => pane.toast("Devcontainer did not start", error, ToastTone::Error),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     }));
     cx.notify();
   }
@@ -2384,21 +2444,23 @@ impl TerminalPane {
     // A newer read for the same session replaces (and drops) the older one.
     let task = cx.spawn(async move |this, cx| {
       let session = read.await;
-      let _ = this.update(cx, |pane, cx| {
-        pane.opening.remove(&pane_id);
-        let Some((kind, pty, start)) = session else {
-          return;
-        };
-        if !pane.columns.iter().any(|c| c.id == id) {
-          pane.push_column(id.clone(), pty, kind, start, cx);
-          pane.publish(cx);
-        }
-        // Another session may have become the active one meanwhile.
-        if pane.route.active_session_id == Some(pane_id) {
-          pane.focus_next = Some(id);
-        }
-        cx.notify();
-      });
+      this
+        .update(cx, |pane, cx| {
+          pane.opening.remove(&pane_id);
+          let Some((kind, pty, start)) = session else {
+            return;
+          };
+          if !pane.columns.iter().any(|c| c.id == id) {
+            pane.push_column(id.clone(), pty, kind, start, cx);
+            pane.publish(cx);
+          }
+          // Another session may have become the active one meanwhile.
+          if pane.route.active_session_id == Some(pane_id) {
+            pane.focus_next = Some(id);
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     });
     self.opening.insert(pane_id, task);
   }
@@ -3684,7 +3746,9 @@ fn paint_run(
     };
     *line = Arc::new(snapped);
   }
-  let _ = line.paint(origin, px(height), gpui::TextAlign::Left, None, window, cx);
+  line
+    .paint(origin, px(height), gpui::TextAlign::Left, None, window, cx)
+    .best_effort();
 }
 
 /// The session's column and what its terminal starts, read from the
@@ -3911,15 +3975,19 @@ impl Render for TerminalPane {
               let (moved, released) = (pane.clone(), pane);
               window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
                 if phase == gpui::DispatchPhase::Bubble {
-                  let _ = moved.update(cx, |pane, cx| pane.on_drag(e, cx));
+                  moved
+                    .update(cx, |pane, cx| pane.on_drag(e, cx))
+                    .ignore_closed();
                 }
               });
               window.on_mouse_event(move |_: &gpui::MouseUpEvent, phase, _, cx| {
                 if phase == gpui::DispatchPhase::Bubble {
-                  let _ = released.update(cx, |pane, cx| {
-                    pane.drag = None;
-                    cx.notify();
-                  });
+                  released
+                    .update(cx, |pane, cx| {
+                      pane.drag = None;
+                      cx.notify();
+                    })
+                    .ignore_closed();
                 }
               });
             },

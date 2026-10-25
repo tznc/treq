@@ -5,6 +5,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{sync::Arc, time::Duration};
 
 use gpui::{AnyElement, Task};
@@ -59,6 +60,37 @@ pub(in crate::gpui_shell::screen) struct PrMode {
   hashed: HashSet<String>,
   replies: HashMap<String, Reply>,
   poll: Option<Task<()>>,
+  /// What `drafts` were last placed from, so a poll that read the same
+  /// places nothing.
+  placed: Option<Placed>,
+  /// Bumped per placement; only the latest one lands.
+  place_gen: u64,
+}
+
+/// The inputs of a placement of the drafts.
+struct Placed {
+  read: bool,
+  rows: Vec<AgentReviewComment>,
+  hunks: HashMap<String, Arc<Vec<JjDiffHunk>>>,
+}
+
+impl Placed {
+  fn is_from(
+    &self,
+    read: bool,
+    rows: &[AgentReviewComment],
+    hunks: &HashMap<String, Arc<Vec<JjDiffHunk>>>,
+  ) -> bool {
+    self.read == read
+      && self.rows == rows
+      && self.hunks.len() == hunks.len()
+      && hunks.iter().all(|(path, new)| {
+        self
+          .hunks
+          .get(path)
+          .is_some_and(|old| Arc::ptr_eq(old, new))
+      })
+  }
 }
 
 impl PrMode {
@@ -73,6 +105,8 @@ impl PrMode {
       hashed: HashSet::new(),
       replies: HashMap::new(),
       poll: None,
+      placed: None,
+      place_gen: 0,
     }
   }
 
@@ -131,6 +165,23 @@ impl ChangesView {
     apply: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
     cx: &mut Context<Self>,
   ) {
+    self.run_pr_changed(
+      work,
+      |view, value, cx| {
+        apply(view, value, cx);
+        true
+      },
+      cx,
+    );
+  }
+
+  /// [`Self::run_pr`], redrawing only when `apply` says what shows changed.
+  fn run_pr_changed<T: Send + 'static>(
+    &self,
+    work: impl FnOnce(&dyn PrReviewHost, &PrTarget) -> T + Send + 'static,
+    apply: impl FnOnce(&mut Self, T, &mut Context<Self>) -> bool + 'static,
+    cx: &mut Context<Self>,
+  ) {
     let Some(pr) = &self.pr else {
       return;
     };
@@ -142,12 +193,13 @@ impl ChangesView {
           async move { work(host.as_ref(), &target) }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.pr.as_ref().is_some_and(|p| p.target == target) {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.pr.as_ref().is_some_and(|p| p.target == target) && apply(view, value, cx) {
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -181,49 +233,61 @@ impl ChangesView {
   }
 
   pub(super) fn read_pr_diff(&mut self, cx: &mut Context<Self>) {
-    self.run_pr(
-      |host, t| host.pr_diff(&t.full_name, t.number),
+    // What shows now, so the read compares against it off the main thread.
+    let (shown_hunks, shown_snapshot) = (self.hunks.clone(), self.snapshot.clone());
+    self.run_pr_changed(
+      move |host, t| {
+        let diff = host.pr_diff(&t.full_name, t.number)?;
+        let parsed = pr_review_data::parse_unified_diff(&diff);
+        // The poll reads the diff again; a file that reads the same keeps
+        // its hunks, so its rows and placed drafts are not redone.
+        let hunks: HashMap<String, FileHunks> = parsed
+          .hunks
+          .into_iter()
+          .map(|(path, hunks)| {
+            let same = shown_hunks
+              .get(&path)
+              .filter(|d| !d.loading && *d.hunks == hunks)
+              .map(|d| d.hunks.clone());
+            let data = FileHunks {
+              hunks: same.unwrap_or_else(|| hunks.into()),
+              ..FileHunks::default()
+            };
+            (path, data)
+          })
+          .collect();
+        let snapshot = Snapshot {
+          files: parsed.files,
+          ..Snapshot::default()
+        }
+        .with_generated(&GeneratedFiles::default());
+        let unchanged = shown_hunks == hunks && shown_snapshot.as_ref() == Some(&snapshot);
+        Ok::<_, String>((snapshot, hunks, unchanged))
+      },
       |view, result, cx| match result {
-        Ok(diff) => {
-          let parsed = pr_review_data::parse_unified_diff(&diff);
-          let hunks: HashMap<String, FileHunks> = parsed
-            .hunks
-            .into_iter()
-            .map(|(path, hunks)| {
-              (
-                path,
-                FileHunks {
-                  hunks: hunks.into(),
-                  ..FileHunks::default()
-                },
-              )
-            })
-            .collect();
-          let listed: HashSet<String> = parsed.files.iter().map(|f| f.path.clone()).collect();
+        Ok((snapshot, hunks, unchanged)) => {
+          let listed: HashSet<&String> = snapshot.files.iter().map(|f| &f.path).collect();
+          let viewed = view.viewed.len();
           view.viewed.retain(|p, _| listed.contains(p));
-          let snapshot = Snapshot {
-            files: parsed.files,
-            ..Snapshot::default()
-          }
-          .with_generated(&GeneratedFiles::default());
-          // The poll reads the diff again; an unchanged one keeps its rows.
-          if view.hunks != hunks || view.snapshot.as_ref() != Some(&snapshot) {
+          let mut changed = view.viewed.len() != viewed;
+          if !unchanged {
             view.hunks = hunks;
             view.hunks_token = None;
             view.snapshot = Some(snapshot);
             view.layout_gen += 1;
+            changed = true;
           }
           if let Some(pr) = view.pr.as_mut() {
-            pr.error = None;
+            changed |= pr.error.take().is_some() || !pr.read;
             pr.read = true;
           }
           view.place_drafts(cx);
+          changed
         }
-        Err(err) => {
-          if let Some(pr) = view.pr.as_mut() {
-            pr.error = Some(err);
-          }
-        }
+        Err(err) => match view.pr.as_mut() {
+          Some(pr) => pr.error.replace(err.clone()).as_ref() != Some(&err),
+          None => false,
+        },
       },
       cx,
     );
@@ -241,38 +305,83 @@ impl ChangesView {
   }
 
   pub(in crate::gpui_shell::screen) fn read_drafts(&mut self, cx: &mut Context<Self>) {
-    self.run_pr(
+    self.run_pr_changed(
       |host, t| host.drafts(&t.repo_path, t.number),
       |view, result, cx| match result {
         Ok(rows) => {
           if let Some(pr) = view.pr.as_mut() {
             pr.rows = rows;
           }
+          // A poll that read the same places nothing and draws nothing; a
+          // placement that finds other drafts redraws.
           view.place_drafts(cx);
+          false
         }
-        Err(err) => log::warn!("Failed to read review drafts: {err}"),
+        Err(err) => {
+          log::warn!("Failed to read review drafts: {err}");
+          false
+        }
       },
       cx,
     );
   }
 
-  /// The drafts on the diff as it is now, shown as the tab's comments. The
-  /// agent writes drafts without a line hash, so they get one on first sight.
+  /// The drafts on the diff as it is now, shown as the tab's comments,
+  /// placed off the main thread. A placement from the same rows and hunks
+  /// is not redone.
   fn place_drafts(&mut self, cx: &mut Context<Self>) {
-    let hunks: HashMap<String, Vec<JjDiffHunk>> = self
+    let hunks: HashMap<String, Arc<Vec<JjDiffHunk>>> = self
       .hunks
       .iter()
-      .map(|(p, d)| (p.clone(), d.hunks.to_vec()))
+      .map(|(p, d)| (p.clone(), d.hunks.clone()))
       .collect();
     let Some(pr) = self.pr.as_mut() else {
       return;
     };
-    pr.drafts = if pr.read {
-      pr_review_data::drafts(&pr.rows, &hunks)
-    } else {
-      Vec::new()
+    if pr
+      .placed
+      .as_ref()
+      .is_some_and(|placed| placed.is_from(pr.read, &pr.rows, &hunks))
+    {
+      return;
+    }
+    pr.place_gen += 1;
+    let generation = pr.place_gen;
+    let (read, rows) = (pr.read, pr.rows.clone());
+    pr.placed = Some(Placed {
+      read,
+      rows: rows.clone(),
+      hunks: hunks.clone(),
+    });
+    if !read {
+      self.drafts_placed(generation, Vec::new(), cx);
+      return;
+    }
+    cx.spawn(async move |this, cx| {
+      let drafts = cx
+        .background_spawn(async move { pr_review_data::drafts(&rows, &hunks) })
+        .await;
+      this
+        .update(cx, |view, cx| view.drafts_placed(generation, drafts, cx))
+        .ignore_closed();
+    })
+    .detach();
+  }
+
+  /// Shows the placed `drafts`, unless a newer placement was asked for. The
+  /// agent writes drafts without a line hash, so they get one on first sight.
+  fn drafts_placed(&mut self, generation: u64, drafts: Vec<Draft>, cx: &mut Context<Self>) {
+    let Some(pr) = self.pr.as_mut() else {
+      return;
     };
-    self.review.comments = pr.drafts.iter().map(|d| d.comment.clone()).collect();
+    if pr.place_gen != generation {
+      return;
+    }
+    if pr.drafts != drafts {
+      pr.drafts = drafts;
+      self.review.comments = pr.drafts.iter().map(|d| d.comment.clone()).collect();
+      cx.notify();
+    }
     let unhashed: Vec<(String, String, Option<String>)> = pr
       .drafts
       .iter()
@@ -314,10 +423,10 @@ impl ChangesView {
     reason = "the probe is a constant JSON shape of the comment type"
   )]
   pub(super) fn submit_pr_draft(&mut self, draft: Pending, text: String, cx: &mut Context<Self>) {
-    let hunks: HashMap<String, Vec<JjDiffHunk>> = self
+    let hunks: HashMap<String, Arc<Vec<JjDiffHunk>>> = self
       .hunks
       .iter()
-      .map(|(p, d)| (p.clone(), d.hunks.to_vec()))
+      .map(|(p, d)| (p.clone(), d.hunks.clone()))
       .collect();
     let probe: AgentReviewComment = serde_json::from_value(json!({
       "id": "",

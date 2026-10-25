@@ -5,17 +5,18 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{ops::Range, time::Duration};
 
 use super::*;
 use crate::gpui_shell::screen::{
   changes_review::{
     commented_text, comments_under, count_label, is_outdated, line_has_comment, line_location,
-    outdated_label, outdated_markdown, parse_suggestion, pending_for_line, pending_for_selection,
-    review_markdown, stale_names, suggestion_block, ConflictNote, LineComment, Pending, Side,
-    Stored, FILE_HUNK,
+    number_and_side, outdated_label, outdated_markdown, parse_suggestion, pending_for_line,
+    pending_for_selection, review_markdown, stale_names, suggestion_block, ConflictNote,
+    LineComment, Pending, Side, Stored, FILE_HUNK,
   },
-  commits_data::{line_number, selection, LineRef},
+  commits_data::{selection, LineRef},
 };
 use gpui::{MouseDownEvent, MouseMoveEvent, Task};
 
@@ -66,6 +67,9 @@ pub(in crate::gpui_shell::screen) struct Review {
   /// checkout, which must not wait behind the stale banner.
   pub apply_next: bool,
   pub comments: Vec<LineComment>,
+  /// Whether each comment is outdated, as of the layout it was worked out
+  /// at: by id, with the lines it covers.
+  outdated: RefCell<HashMap<String, (u64, u32, u32, bool)>>,
   /// Where the comment box is open.
   pub draft: Option<Pending>,
   pub draft_text: String,
@@ -180,26 +184,28 @@ impl ChangesView {
     }
     self.review.save = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(SAVE_DELAY).await;
-      let _ = this.update(cx, |view, cx| {
-        let (comments, summary, notes) = stored.to_save();
-        view.run(
-          move |host, parent| {
-            host.save_review(
-              &parent.repo_path,
-              id,
-              &comments,
-              summary.as_deref(),
-              notes.as_deref(),
-            )
-          },
-          |_, result, _| {
-            if let Err(err) = result {
-              log::warn!("Failed to save pending review: {err}");
-            }
-          },
-          cx,
-        );
-      });
+      this
+        .update(cx, |view, cx| {
+          let (comments, summary, notes) = stored.to_save();
+          view.run(
+            move |host, parent| {
+              host.save_review(
+                &parent.repo_path,
+                id,
+                &comments,
+                summary.as_deref(),
+                notes.as_deref(),
+              )
+            },
+            |_, result, _| {
+              if let Err(err) = result {
+                log::warn!("Failed to save pending review: {err}");
+              }
+            },
+            cx,
+          );
+        })
+        .ignore_closed();
     }));
   }
 
@@ -537,10 +543,12 @@ impl ChangesView {
     self.review.copied = true;
     self.review.copied_reset = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(COPIED_FOR).await;
-      let _ = this.update(cx, |view, cx| {
-        view.review.copied = false;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.review.copied = false;
+          cx.notify();
+        })
+        .ignore_closed();
     }));
     cx.notify();
   }
@@ -620,9 +628,31 @@ impl ChangesView {
   /// diffs are read aside, and files whose diff changed (an agent edited
   /// them) wait behind the stale banner like added or removed ones.
   pub(super) fn recheck(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
-    let paths: Vec<String> = snapshot.files.iter().map(|f| f.path.clone()).collect();
+    // A file whose content id held shows the hunks it would read.
+    let paths: Vec<String> = snapshot
+      .files
+      .iter()
+      .filter(|f| draws_hunks(&f.path, &f.status))
+      .map(|f| &f.path)
+      .filter(|path| {
+        let id = snapshot.content_ids.get(*path);
+        id.is_none() || self.hunks.get(*path).and_then(|d| d.content_id.as_ref()) != id
+      })
+      .cloned()
+      .collect();
+    if paths.is_empty() {
+      return;
+    }
+    let token = snapshot.token.clone();
     self.run(
-      move |host, parent| host.file_hunks(&parent.repo_path, parent.workspace_id(), paths),
+      move |host, parent| {
+        host.file_hunks(
+          &parent.repo_path,
+          parent.workspace_id(),
+          paths,
+          token.as_deref(),
+        )
+      },
       move |view, result, cx| {
         let read = match result {
           Ok(read) => read,
@@ -734,7 +764,9 @@ impl ChangesView {
     let add = {
       let (entity, target) = (entity.clone(), target.clone());
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| view.open_draft(target.clone(), cx));
+        entity
+          .update(cx, |view, cx| view.open_draft(target.clone(), cx))
+          .ignore_closed();
       }
     };
     let location = line_location(&target);
@@ -742,9 +774,11 @@ impl ChangesView {
     let copy = |text: String, description: &'static str| {
       let entity = entity.clone();
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| {
-          view.copy(text.clone(), description.into(), cx)
-        });
+        entity
+          .update(cx, |view, cx| {
+            view.copy(text.clone(), description.into(), cx)
+          })
+          .ignore_closed();
       }
     };
     let items = vec![
@@ -850,6 +884,26 @@ impl ChangesView {
 
   // Drawing.
 
+  /// [`is_outdated`] for `comment` against `hunks`, worked out once per
+  /// layout: it reads the hunk's lines, and every row it could sit under
+  /// asks.
+  fn is_outdated_in(&self, comment: &LineComment, hunks: &[JjDiffHunk]) -> bool {
+    let known = (self.layout_gen, comment.start_line, comment.end_line);
+    let cached = self.review.outdated.borrow().get(&comment.id).copied();
+    if let Some((generation, start, end, outdated)) = cached {
+      if (generation, start, end) == known {
+        return outdated;
+      }
+    }
+    let outdated = is_outdated(comment, Some(hunks));
+    self
+      .review
+      .outdated
+      .borrow_mut()
+      .insert(comment.id.clone(), (known.0, known.1, known.2, outdated));
+    outdated
+  }
+
   /// `HunkDiffLine`'s row.
   #[allow(
     clippy::too_many_arguments,
@@ -861,6 +915,7 @@ impl ChangesView {
     hunks: &[JjDiffHunk],
     h: usize,
     l: usize,
+    numbers: (Option<u32>, Option<u32>),
     changed: &[Range<usize>],
     language: Option<&'static str>,
     conflicted: bool,
@@ -869,7 +924,7 @@ impl ChangesView {
   ) -> Stateful<Div> {
     let hunk = &hunks[h];
     let line = &hunk.lines[l];
-    let (old, new) = line_number(hunk, l);
+    let (old, new) = numbers;
     let selected = self
       .review
       .selection
@@ -907,7 +962,13 @@ impl ChangesView {
       .selection
       .as_ref()
       .is_some_and(|s| s.lines.len() > 1);
-    let has_comment = line_has_comment(&self.review.comments, path, hunk, l, hunks);
+    let has_comment = line_has_comment(
+      &self.review.comments,
+      path,
+      hunk,
+      number_and_side(numbers, l),
+      &|c| self.is_outdated_in(c, hunks),
+    );
     let border = p.border.opacity(0.4);
     let gutter_hover = p.muted.opacity(0.5);
     let text = line.get(1..).filter(|t| !t.is_empty()).unwrap_or(" ");
@@ -1053,17 +1114,28 @@ impl ChangesView {
   }
 
   /// What follows a diff line: its comments and the comment box.
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   pub(super) fn line_extras(
     &self,
     path: &str,
     hunks: &[JjDiffHunk],
     h: usize,
     l: usize,
+    numbers: (Option<u32>, Option<u32>),
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> Vec<gpui::AnyElement> {
     let mut out = Vec::new();
-    let under = comments_under(&self.review.comments, path, &hunks[h], l, hunks);
+    let under = comments_under(
+      &self.review.comments,
+      path,
+      &hunks[h],
+      number_and_side(numbers, l),
+      &|c| self.is_outdated_in(c, hunks),
+    );
     if !under.is_empty() {
       let mut list = div()
         .bg(p.muted.opacity(0.6))
@@ -1080,7 +1152,7 @@ impl ChangesView {
       }
       out.push(list.into_any_element());
     }
-    out.extend(self.line_threads(path, hunks, h, l, p, cx));
+    out.extend(self.line_threads(path, hunks, h, l, numbers, p, cx));
     let here = self
       .review
       .draft

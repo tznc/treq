@@ -33,7 +33,7 @@ gui = [
   "dep:tauri-plugin-single-instance",
 ]
 # Desktop repo windows open in a GPUI shell, which draws the workspace sidebar.
-gpui-shell = ["gui", "dep:tauri-plugin-gpui", "dep:gpui-kit", "dep:treq-ui", "dep:syntect", "dep:two-face", "dep:alacritty_terminal", "dep:image", "dep:emojis"]
+gpui-shell = ["gui", "dep:gtk", "dep:tauri-plugin-gpui", "dep:gpui-kit", "dep:treq-ui", "dep:syntect", "dep:two-face", "dep:alacritty_terminal", "dep:image", "dep:emojis"]
 # Linked into another Tauri app as a library (mobile-gpui): leaves out the
 # mobile entry point, whose JNI symbols would clash with the host app's.
 embed = []
@@ -62,6 +62,7 @@ redundant_clone = "warn"
 manual_let_else = "warn"
 needless_collect = "warn"
 implicit_clone = "warn"
+let_underscore_must_use = "warn"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
@@ -70,8 +71,9 @@ tauri-build = { version = "2", features = [], optional = true }
 libc = "0.2"
 
 # Asks GDK whether a compositor draws transparent GPUI popups (gpui_shell::popup).
+# Optional behind `gpui-shell` so the headless CLI build links no GTK.
 [target.'cfg(target_os = "linux")'.dependencies]
-gtk = "0.18"
+gtk = { version = "0.18", optional = true }
 
 # Desktop-only crates. `tauri-plugin-cli` has no Android/iOS support, and the
 # `treq` command-line entry point it backs only exists on desktop, so mobile
@@ -138,7 +140,7 @@ tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["registry", "env-filter"] }
 
 async-trait = "0.1.92"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "http2"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "io-util", "net", "sync"] }
 russh = "0.63.1"
 # WebSocket transport for managed SSH through the `remote-ssh-relay` Edge
@@ -158,6 +160,7 @@ criterion = { version = "0.8.2", features = ["html_reports"] }
 getrandom = "0.4"
 rand_core = "0.10"
 wiremock = "0.6"
+flate2 = "1"
 
 # Headless GPUI tests for the GPUI shell. The same gpui-pre that
 # tauri-plugin-gpui renders with, plus its test platform.

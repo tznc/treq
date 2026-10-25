@@ -2,6 +2,7 @@
 //! typed name with a dry run first.
 
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{sync::Arc, time::Duration};
 
 use gpui_kit::component::input::{InputEvent, InputState};
@@ -132,10 +133,12 @@ impl RenameDialog {
     let (host, route) = (self.host.clone(), self.route.clone());
     self._check = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| {
-        view.running = true;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.running = true;
+          cx.notify();
+        })
+        .ignore_closed();
       let checked = cx
         .background_spawn({
           let name = name.clone();
@@ -154,11 +157,13 @@ impl RenameDialog {
           message,
         },
       };
-      let _ = this.update(cx, |view, cx| {
-        view.running = false;
-        view.checked = Some(checked);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.running = false;
+          view.checked = Some(checked);
+          cx.notify();
+        })
+        .ignore_closed();
     }));
   }
 
@@ -197,32 +202,34 @@ impl RenameDialog {
           async move { host.rename_workspace(&route.repo_path, route.workspace_id, &next, false) }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.pending = false;
-        match result {
-          Ok(result) if !result.success => view.error = result.message,
-          Ok(_) => {
-            view.error.clear();
-            view.toast(
-              ToastTone::Success,
-              &format!("Renamed to {next}"),
-              String::new(),
-            );
-            WorkspaceHost::notify(
-              &*view.host,
-              NativeEvent::WorkspaceChanged {
-                repo_path: route.repo_path.clone(),
-              },
-            );
-            view.close(cx);
+      this
+        .update(cx, |view, cx| {
+          view.pending = false;
+          match result {
+            Ok(result) if !result.success => view.error = result.message,
+            Ok(_) => {
+              view.error.clear();
+              view.toast(
+                ToastTone::Success,
+                &format!("Renamed to {next}"),
+                String::new(),
+              );
+              WorkspaceHost::notify(
+                &*view.host,
+                NativeEvent::WorkspaceChanged {
+                  repo_path: route.repo_path.clone(),
+                },
+              );
+              view.close(cx);
+            }
+            Err(err) => {
+              view.toast(ToastTone::Error, "Failed to rename workspace", err.clone());
+              view.error = err;
+            }
           }
-          Err(err) => {
-            view.toast(ToastTone::Error, "Failed to rename workspace", err.clone());
-            view.error = err;
-          }
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }

@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use chrono::Utc;
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
@@ -58,14 +59,18 @@ impl Database {
     )?;
 
     // Migration: Add model column if it doesn't exist
-    let _ = self
+    self
       .conn
-      .execute("ALTER TABLE sessions ADD COLUMN model TEXT", []);
+      .execute("ALTER TABLE sessions ADD COLUMN model TEXT", [])
+      .best_effort();
 
-    let _ = self.conn.execute(
-      "DELETE FROM sessions WHERE type IS NULL OR type <> 'session'",
-      [],
-    );
+    self
+      .conn
+      .execute(
+        "DELETE FROM sessions WHERE type IS NULL OR type <> 'session'",
+        [],
+      )
+      .warn_on_err("delete legacy sessions");
 
     self.conn.execute(
       "CREATE TABLE IF NOT EXISTS git_cache (
@@ -184,10 +189,13 @@ impl Database {
     }
 
     // Migration: Add content_hash column if it doesn't exist
-    let _ = self.conn.execute(
-      "ALTER TABLE file_views ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''",
-      [],
-    );
+    self
+      .conn
+      .execute(
+        "ALTER TABLE file_views ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''",
+        [],
+      )
+      .best_effort();
 
     self.conn.execute(
       "CREATE INDEX IF NOT EXISTS idx_file_views_workspace ON file_views(workspace_path)",
@@ -196,10 +204,13 @@ impl Database {
 
     // Migration: Rename repo_path setting to last_opened_repo_path
     if let Ok(Some(repo_path_val)) = self.get_setting("repo_path") {
-      let _ = self.set_setting("last_opened_repo_path", &repo_path_val);
-      let _ = self
+      self
+        .set_setting("last_opened_repo_path", &repo_path_val)
+        .warn_on_err("set setting");
+      self
         .conn
-        .execute("DELETE FROM settings WHERE key = 'repo_path'", []);
+        .execute("DELETE FROM settings WHERE key = 'repo_path'", [])
+        .warn_on_err("delete old repo_path setting");
     }
 
     Ok(())

@@ -14,6 +14,7 @@
 //! No public network port is opened; everything here is local filesystem and
 //! process-table state, reachable only through the allow-listed CLI surface.
 
+use crate::result_ext::ResultExt;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::fs::OpenOptions;
@@ -87,7 +88,7 @@ fn write_record(repo_path: &str, record: &AgentRecord) -> Result<(), String> {
 }
 
 fn remove_record(repo_path: &str, workspace: &str) {
-  let _ = fs::remove_file(record_path(repo_path, workspace));
+  fs::remove_file(record_path(repo_path, workspace)).best_effort();
 }
 
 /// A process is considered alive when signal 0 can be delivered to its pid.
@@ -280,7 +281,7 @@ type KeeperPid = (u32, Option<String>);
 fn setup_agent_stdin(fifo_path: &Path) -> Result<(fs::File, Option<KeeperPid>), String> {
   use std::os::unix::ffi::OsStrExt;
   if fifo_path.exists() {
-    let _ = fs::remove_file(fifo_path);
+    fs::remove_file(fifo_path).best_effort();
   }
   let c_path = std::ffi::CString::new(fifo_path.as_os_str().as_bytes())
     .map_err(|_| "filesystem_error: Invalid agent stdin path".to_string())?;
@@ -422,7 +423,7 @@ pub fn stop_agent(repo_path: &str, workspace: &str) -> Result<AgentStatusResult,
     kill_process(keeper_pid, record.keeper_start.as_deref());
   }
   if let Some(stdin_path) = &record.stdin_path {
-    let _ = fs::remove_file(stdin_path);
+    fs::remove_file(stdin_path).best_effort();
   }
   remove_record(repo_path, workspace);
   Ok(AgentStatusResult {

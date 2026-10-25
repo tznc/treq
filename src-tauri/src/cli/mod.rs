@@ -4,6 +4,7 @@
   reason = "the CLI writes to the terminal"
 )]
 
+use crate::result_ext::ResultExt;
 use args::{Matches, SubcommandMatches};
 use serde::Serialize;
 use std::path::Path;
@@ -135,7 +136,7 @@ fn write_json_error(out: &mut dyn std::io::Write, code: &str, message: &str) {
     },
   };
   if let Ok(json) = serde_json::to_string(&body) {
-    let _ = writeln!(out, "{json}");
+    writeln!(out, "{json}").best_effort();
   }
 }
 
@@ -152,7 +153,7 @@ pub(super) fn run_structured_command(
   let format = match OutputFormat::parse(get_arg_value(matches, "format").as_deref()) {
     Ok(format) => format,
     Err(error) => {
-      let _ = writeln!(err, "Error: {error}");
+      writeln!(err, "Error: {error}").best_effort();
       return false;
     }
   };
@@ -162,7 +163,7 @@ pub(super) fn run_structured_command(
       match format {
         OutputFormat::Json => write_json_error(out, classify_cli_error(&error), &error),
         OutputFormat::Human => {
-          let _ = writeln!(err, "Error: {error}");
+          writeln!(err, "Error: {error}").best_effort();
         }
       }
       false
@@ -481,6 +482,23 @@ pub(crate) fn parse_remote_command_request(
       snapshot_id: require_target("snapshot id")?,
     }),
     ("changes", "list") => Ok(TreqCommandRequest::ListChanges { repo, workspace }),
+    ("changes", "review") => Ok(TreqCommandRequest::ReviewLoad {
+      repo,
+      workspace: require_workspace()?,
+      scope: core::remote::ReviewScope::parse(&require_target("review scope")?)?,
+    }),
+    ("changes", "review-save") => Ok(TreqCommandRequest::ReviewSave {
+      repo,
+      workspace: require_workspace()?,
+      scope: core::remote::ReviewScope::parse(&require_target("review scope")?)?,
+      review: serde_json::from_str(&require_value("review JSON")?)
+        .map_err(|e| format!("invalid_arguments: --value must be a review: {e}"))?,
+    }),
+    ("changes", "review-clear") => Ok(TreqCommandRequest::ReviewClear {
+      repo,
+      workspace: require_workspace()?,
+      scope: core::remote::ReviewScope::parse(&require_target("review scope")?)?,
+    }),
     ("changes", "workspace-diff") => Ok(TreqCommandRequest::WorkspaceDiff {
       repo,
       workspace: require_workspace()?,
@@ -502,10 +520,24 @@ pub(crate) fn parse_remote_command_request(
       query: value.unwrap_or_default(),
       limit: optional_usize(matches, "limit")?,
     }),
+    ("file", "list") => Ok(TreqCommandRequest::ListFiles {
+      repo,
+      workspace,
+      path: path.unwrap_or_default(),
+    }),
     ("changes", "diff") => Ok(TreqCommandRequest::DiffFile {
       repo,
       workspace,
       path: path.ok_or_else(|| "--path is required".to_string())?,
+    }),
+    ("changes", "diff-files") => Ok(TreqCommandRequest::DiffFiles {
+      repo,
+      workspace,
+      paths: serde_json::from_str(
+        &get_arg_value(matches, "paths").ok_or_else(|| "--paths is required".to_string())?,
+      )
+      .map_err(|e| format!("invalid_arguments: --paths must be a JSON list of paths: {e}"))?,
+      token: get_arg_value(matches, "token"),
     }),
     ("file", "read") => Ok(TreqCommandRequest::ReadFile {
       repo,
@@ -612,6 +644,18 @@ pub(crate) fn parse_remote_command_request(
       workspace,
       idempotency_key: require_idempotency_key(idempotency_key)?,
     }),
+    ("git", "pr") => Ok(TreqCommandRequest::WorkspacePullRequest {
+      repo,
+      workspace: require_workspace()?,
+    }),
+    ("git", "pr-create") => Ok(TreqCommandRequest::CreatePullRequest {
+      repo,
+      workspace: require_workspace()?,
+      title: get_arg_value(matches, "title").ok_or("--title is required")?,
+      body: value.unwrap_or_default(),
+      draft: get_arg_value(matches, "draft").as_deref() == Some("true"),
+      idempotency_key: require_idempotency_key(idempotency_key)?,
+    }),
     ("agent-remote", "start") => Ok(TreqCommandRequest::AgentStart {
       repo,
       workspace: require_workspace()?,
@@ -651,10 +695,25 @@ pub(crate) fn parse_remote_command_request(
       })
     }
     ("pty-remote", "list") => Ok(TreqCommandRequest::PtyList { repo, workspace }),
+    ("pty-remote", "paste") => Ok(TreqCommandRequest::PtyPaste {
+      repo,
+      workspace: require_workspace()?,
+      label: require_target("session label")?,
+      text: require_value("text to paste")?,
+      submit: get_arg_value(matches, "submit").as_deref() == Some("true"),
+      idempotency_key: require_idempotency_key(idempotency_key)?,
+    }),
     ("pty-remote", "stop") => Ok(TreqCommandRequest::PtyStop {
       repo,
       workspace: require_workspace()?,
       label: require_target("session label")?,
+    }),
+    ("pty-remote", "rename") => Ok(TreqCommandRequest::PtyRename {
+      repo,
+      workspace: require_workspace()?,
+      label: require_target("session label")?,
+      // An empty or missing value clears the title.
+      title: value.clone().unwrap_or_default(),
     }),
     ("pty-remote", "attach-command") => {
       let payload = core::remote::parse_pty_launch_payload(&require_value("pty launch payload")?)?;

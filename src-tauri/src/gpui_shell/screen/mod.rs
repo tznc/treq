@@ -7,6 +7,7 @@
 //! navigating) goes back as [`ScreenAction`]s; what it changed itself goes
 //! as native events (`native::NativeEvent`), so the model's data follows.
 
+use crate::result_ext::ResultExt;
 use std::{rc::Rc, sync::Arc};
 
 use serde::{Deserialize, Serialize};
@@ -61,7 +62,7 @@ mod onboarding;
 mod open_workspaces;
 mod open_workspaces_data;
 mod reactions;
-mod rows;
+pub(in crate::gpui_shell) mod rows;
 pub(super) use onboarding::open_repo_at;
 mod onboarding_remote;
 mod pr_review;
@@ -226,7 +227,13 @@ pub struct Screen {
   _file_picker: Option<gpui::Subscription>,
   /// The open confirmation (the palette's Delete Workspace).
   confirm: Option<confirm::Pending<Self>>,
+  /// Draws the screen again each minute, for its relative times ("3
+  /// minutes ago", "Today"), which a cached screen would otherwise keep.
+  _clock: gpui::Task<()>,
 }
+
+/// How often the screen's relative times are drawn again.
+const CLOCK: std::time::Duration = std::time::Duration::from_secs(60);
 
 impl Screen {
   pub fn new(
@@ -253,6 +260,12 @@ impl Screen {
         }
       });
     });
+    let clock = cx.spawn(async move |this, cx| loop {
+      cx.background_executor().timer(CLOCK).await;
+      if this.update(cx, |_, cx| cx.notify()).is_err() {
+        break;
+      }
+    });
     Self {
       snapshot,
       sink,
@@ -277,6 +290,7 @@ impl Screen {
       file_picker: None,
       _file_picker: None,
       confirm: None,
+      _clock: clock,
     }
   }
 
@@ -326,6 +340,16 @@ impl Screen {
 
   pub fn snapshot(&self) -> &ScreenSnapshot {
     &self.snapshot
+  }
+
+  /// The screen as the shell lays it out, cached: a frame another view
+  /// asks for (the sidebar's hover or spinning status dot) reuses the last
+  /// drawing instead of rendering the whole screen again. The screen and
+  /// the views inside it notify themselves for everything they draw.
+  pub fn element(this: &Entity<Self>) -> impl IntoElement {
+    this
+      .clone()
+      .cached(gpui::StyleRefinement::default().size_full())
   }
 
   /// Whether the screen may run `action` itself ([`Screen::run`]).
@@ -379,15 +403,17 @@ impl Screen {
         return;
       };
       let workspace = workspace_ops::Removed::of(&workspace);
-      let _ = this.update(cx, |screen, cx| {
-        let question = workspace_ops::delete_question(&workspace);
-        confirm::ask(
-          &mut screen.confirm,
-          question,
-          move |screen, cx| screen.delete_confirmed(workspace, cx),
-          cx,
-        );
-      });
+      this
+        .update(cx, |screen, cx| {
+          let question = workspace_ops::delete_question(&workspace);
+          confirm::ask(
+            &mut screen.confirm,
+            question,
+            move |screen, cx| screen.delete_confirmed(workspace, cx),
+            cx,
+          );
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -400,7 +426,9 @@ impl Screen {
         .background_spawn(async move { workspace_ops::delete(&*host, &workspace) })
         .await;
       if gone {
-        let _ = this.update(cx, |screen, cx| screen.close_terminals(path, cx));
+        this
+          .update(cx, |screen, cx| screen.close_terminals(path, cx))
+          .ignore_closed();
       }
     })
     .detach();

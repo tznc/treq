@@ -12,6 +12,7 @@ mod review;
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -426,12 +427,14 @@ impl FileBrowserView {
       let value = cx
         .background_spawn(async move { work(host.as_ref()) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -622,7 +625,7 @@ impl FileBrowserView {
       self.run(
         move |host| {
           host
-            .file_hunks(&repo, workspace_id, vec![rel.clone()])
+            .file_hunks(&repo, workspace_id, vec![rel.clone()], None)
             .map(|batch| {
               batch
                 .files
@@ -722,12 +725,14 @@ impl FileBrowserView {
       let Ok(Some(content)) = read else {
         return;
       };
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          let now = cx.background_executor().now();
-          view.prefetched.insert(path, now, content);
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key {
+            let now = cx.background_executor().now();
+            view.prefetched.insert(path, now, content);
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -768,12 +773,14 @@ impl FileBrowserView {
     }
     self._copied_reset = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(COPIED_FOR).await;
-      let _ = this.update(cx, |view, cx| {
-        view.copied = false;
-        view.copied_path = false;
-        view.copied_review = false;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.copied = false;
+          view.copied_path = false;
+          view.copied_review = false;
+          cx.notify();
+        })
+        .ignore_closed();
     }));
     cx.notify();
   }
@@ -974,17 +981,19 @@ impl FileBrowserView {
     let (comments, summary) = review_to_save(&self.comments, &self.summary);
     self._save = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(SAVE_DELAY).await;
-      let _ = this.update(cx, |view, cx| {
-        view.run(
-          move |host| host.save_browser_review(&repo, id, &comments, summary.as_deref()),
-          |_, result, _| {
-            if let Err(err) = result {
-              log::warn!("Failed to save file browser review: {err}");
-            }
-          },
-          cx,
-        );
-      });
+      this
+        .update(cx, |view, cx| {
+          view.run(
+            move |host| host.save_browser_review(&repo, id, &comments, summary.as_deref()),
+            |_, result, _| {
+              if let Err(err) = result {
+                log::warn!("Failed to save file browser review: {err}");
+              }
+            },
+            cx,
+          );
+        })
+        .ignore_closed();
     }));
   }
 
@@ -1171,12 +1180,14 @@ impl FileBrowserView {
     self.search.query = query.clone();
     self.search.debounce = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(SEARCH_DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| {
-        view.search.applied = query;
-        view.search.current = 0;
-        view.index_matches();
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.search.applied = query;
+          view.search.current = 0;
+          view.index_matches();
+          cx.notify();
+        })
+        .ignore_closed();
     }));
     cx.notify();
   }
@@ -1260,9 +1271,11 @@ impl FileBrowserView {
     let copy = |text: String, title: String| {
       let entity = entity.clone();
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| {
-          view.copy_toast(text.clone(), title.clone(), cx)
-        });
+        entity
+          .update(cx, |view, cx| {
+            view.copy_toast(text.clone(), title.clone(), cx)
+          })
+          .ignore_closed();
       }
     };
     let mut open = vec![{

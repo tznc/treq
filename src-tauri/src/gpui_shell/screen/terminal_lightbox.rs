@@ -5,6 +5,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   cell::Cell,
   collections::{HashMap, HashSet},
@@ -210,17 +211,23 @@ impl Lightbox {
         continue;
       }
       let host = self.host.clone();
-      let read = cx
-        .background_executor()
-        .spawn(async move { host.read_send_asset(&path).unwrap_or_default() });
+      // The file is read and split into lines off the main thread.
+      let read = cx.background_executor().spawn(async move {
+        let text = host.read_send_asset(&path).unwrap_or_default();
+        text_lines(&text)
+          .into_iter()
+          .map(str::to_string)
+          .collect::<Vec<_>>()
+      });
       let path = asset.path.clone();
       cx.spawn(async move |this, cx| {
-        let text = read.await;
-        let _ = this.update(cx, |view, cx| {
-          let lines = text_lines(&text).into_iter().map(str::to_string).collect();
-          view.texts.insert(path, Rc::new(lines));
-          cx.notify();
-        });
+        let lines = read.await;
+        this
+          .update(cx, |view, cx| {
+            view.texts.insert(path, Rc::new(lines));
+            cx.notify();
+          })
+          .ignore_closed();
       })
       .detach();
     }
@@ -330,38 +337,40 @@ impl Lightbox {
     });
     cx.spawn(async move |this, cx| {
       let annotated = annotate.await;
-      let _ = this.update(cx, |view, cx| {
-        let annotated = match annotated {
-          Some(Ok(path)) => Some(path),
-          Some(Err(error)) => {
-            view.toast(
-              "Could not attach highlighted image",
-              error,
-              ToastTone::Error,
-              cx,
-            );
-            None
-          }
-          None => None,
-        };
-        let prompt = review_prompt(&Review {
-          title: &asset.title,
-          path: &asset.path,
-          general: &view.general_text,
-          highlights: &highlights,
-          lines: view.lines.get(&asset.id).map_or(&[], Vec::as_slice),
-          annotated: annotated.as_deref(),
-        });
-        cx.emit(LightboxEvent::SendReview(prompt));
-        view.general_text.clear();
-        view.highlights.insert(asset.id.clone(), Vec::new());
-        view.lines.insert(asset.id.clone(), Vec::new());
-        view.active_highlight = None;
-        view.pending = None;
-        view.sending = false;
-        view.clear_general = true;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          let annotated = match annotated {
+            Some(Ok(path)) => Some(path),
+            Some(Err(error)) => {
+              view.toast(
+                "Could not attach highlighted image",
+                error,
+                ToastTone::Error,
+                cx,
+              );
+              None
+            }
+            None => None,
+          };
+          let prompt = review_prompt(&Review {
+            title: &asset.title,
+            path: &asset.path,
+            general: &view.general_text,
+            highlights: &highlights,
+            lines: view.lines.get(&asset.id).map_or(&[], Vec::as_slice),
+            annotated: annotated.as_deref(),
+          });
+          cx.emit(LightboxEvent::SendReview(prompt));
+          view.general_text.clear();
+          view.highlights.insert(asset.id.clone(), Vec::new());
+          view.lines.insert(asset.id.clone(), Vec::new());
+          view.active_highlight = None;
+          view.pending = None;
+          view.sending = false;
+          view.clear_general = true;
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }

@@ -8,6 +8,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use gpui_kit::base::TestSupportExt as _;
@@ -280,20 +281,22 @@ impl WorkspaceDialog {
           }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        let (commits, files, workspaces, branches) = loaded;
-        view.commits_ahead = commits;
-        view.changed_files = files;
-        if let Some(source_id) = view.source_id() {
-          view.target_workspace_id = workspaces.iter().find(|w| w.id != source_id).map(|w| w.id);
-        }
-        view.workspaces = workspaces;
-        if let Some(branches) = branches {
-          view.branches = branches;
-        }
-        view.data_loading = false;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          let (commits, files, workspaces, branches) = loaded;
+          view.commits_ahead = commits;
+          view.changed_files = files;
+          if let Some(source_id) = view.source_id() {
+            view.target_workspace_id = workspaces.iter().find(|w| w.id != source_id).map(|w| w.id);
+          }
+          view.workspaces = workspaces;
+          if let Some(branches) = branches {
+            view.branches = branches;
+          }
+          view.data_loading = false;
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
 
@@ -317,15 +320,17 @@ impl WorkspaceDialog {
           )
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.default_branch = default_branch;
-        view.gitignore_suggestions = suggestions;
-        view.branch_pattern = pattern
-          .filter(|p| !p.is_empty())
-          .unwrap_or_else(|| DEFAULT_PATTERN.into());
-        view.derive_branch(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.default_branch = default_branch;
+          view.gitignore_suggestions = suggestions;
+          view.branch_pattern = pattern
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| DEFAULT_PATTERN.into());
+          view.derive_branch(cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -354,22 +359,26 @@ impl WorkspaceDialog {
     let (host, repo) = (self.host.clone(), self.route.repo_path.clone());
     self._check = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| {
-        view.checking_branch = true;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.checking_branch = true;
+          cx.notify();
+        })
+        .ignore_closed();
       let status = cx
         .background_spawn({
           let name = name.clone();
           async move { host.branch_status(&repo, &name).ok() }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.checking_branch = false;
-        // A new name has no result until its check resolves.
-        view.branch_check = status.map(|s| (name, s));
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.checking_branch = false;
+          // A new name has no result until its check resolves.
+          view.branch_check = status.map(|s| (name, s));
+          cx.notify();
+        })
+        .ignore_closed();
     }));
   }
 
@@ -512,7 +521,7 @@ impl WorkspaceDialog {
             let path = path.clone();
             async move {
               host
-                .file_hunks(&repo, id, vec![path])
+                .file_hunks(&repo, id, vec![path], None)
                 .ok()
                 .and_then(|batch| batch.files.into_iter().next())
                 .filter(|file| file.error.is_none())
@@ -521,16 +530,18 @@ impl WorkspaceDialog {
             }
           })
           .await;
-        let _ = this.update(cx, |view, cx| {
-          view.hunks.insert(
-            path,
-            Hunks {
-              hunks,
-              loading: false,
-            },
-          );
-          cx.notify();
-        });
+        this
+          .update(cx, |view, cx| {
+            view.hunks.insert(
+              path,
+              Hunks {
+                hunks,
+                loading: false,
+              },
+            );
+            cx.notify();
+          })
+          .ignore_closed();
       })
       .detach();
     }
@@ -647,23 +658,25 @@ impl WorkspaceDialog {
       let submitted = cx
         .background_spawn(async move { data::submit(&*host, &form) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.loading = false;
-        match submitted {
-          Submitted::Done(id) => {
-            view.dismissed = true;
-            (view.sink)(
-              ScreenAction::Field {
-                field: "workspaceDialog.created".into(),
-                value: id.into(),
-              },
-              cx,
-            );
+      this
+        .update(cx, |view, cx| {
+          view.loading = false;
+          match submitted {
+            Submitted::Done(id) => {
+              view.dismissed = true;
+              (view.sink)(
+                ScreenAction::Field {
+                  field: "workspaceDialog.created".into(),
+                  value: id.into(),
+                },
+                cx,
+              );
+            }
+            Submitted::Failed(message) => view.error = message,
           }
-          Submitted::Failed(message) => view.error = message,
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }

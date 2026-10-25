@@ -3,6 +3,7 @@
 //! stacked on the line above. [`plan`] says what each line would do;
 //! [`run`] does it, in line order, so a stacked line's base exists first.
 
+use crate::result_ext::ResultExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
@@ -395,7 +396,8 @@ pub fn run(
 ) -> Result<Vec<NewWorkspaceRow>, String> {
   workspaces::sync_workspaces(repo_path)?;
   // Remote branches named in the text must be visible before they open.
-  let _ = jj::jj_git_fetch_unless_recent(repo_path, workspaces::RECENT_FETCH);
+  jj::jj_git_fetch_unless_recent(repo_path, workspaces::RECENT_FETCH)
+    .warn_on_err("jj git fetch unless recent");
   let mut rows = plan(repo_path, text, stack_on)?;
   let default = super::get_repo_default_branch(repo_path)?;
   let copy_files = included_copy_files(repo_path);

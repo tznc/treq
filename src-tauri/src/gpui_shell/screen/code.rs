@@ -11,6 +11,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use crate::result_ext::ResultExt;
 use std::{
   cell::{Cell, RefCell},
   collections::HashMap,
@@ -294,7 +295,9 @@ impl EntryRows {
       return 0..ENTRIES_ALL;
     };
     let pitch = f32::from(pitch).max(1.);
-    let from = f32::from(-scroll.offset().y - top);
+    // A scroll past the end draws where layout clamps it, not a frame later.
+    let offset = (-scroll.offset().y).min(scroll.max_offset().y);
+    let from = f32::from(offset - top);
     let to = from + f32::from(scroll.bounds().size.height);
     let first = ((from / pitch).floor().max(0.) as usize).saturating_sub(ENTRIES_OVERSCAN);
     let last = ((to / pitch).ceil().max(0.) as usize + ENTRIES_OVERSCAN).min(count);
@@ -418,7 +421,9 @@ impl CodeView {
           (parent, read)
         })
         .await;
-      let _ = this.update(cx, |view, cx| view.apply(read.0, read.1, cx));
+      this
+        .update(cx, |view, cx| view.apply(read.0, read.1, cx))
+        .ignore_closed();
     })
     .detach();
   }
@@ -439,10 +444,12 @@ impl CodeView {
           (parent, read)
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        let now = cx.background_executor().now();
-        view.prefetched.insert(read.0.key(), now, read);
-      });
+      this
+        .update(cx, |view, cx| {
+          let now = cx.background_executor().now();
+          view.prefetched.insert(read.0.key(), now, read);
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -480,20 +487,50 @@ impl CodeView {
     };
     // A read again that found what shows already (a revalidation) draws
     // nothing new.
+    let mut settings = read.settings;
+    // The container's status is read next; what was read last shows meanwhile.
+    if let (Some(new), Some(old)) = (
+      settings.environment.as_mut(),
+      self.settings.as_ref().and_then(|s| s.environment.as_ref()),
+    ) {
+      new.status = old.status.clone();
+    }
     let unchanged = !moved
       && !(self.history_loading && self.history_limit > HISTORY_PAGE)
       && self.overview.as_ref() == Some(&read.overview)
       && self.history.as_deref() == read.history.as_ref().ok()
       && self.history_error.is_none()
       && self.stack == read.stack
-      && self.settings.as_ref() == Some(&read.settings);
+      && self.settings.as_ref() == Some(&settings);
     self.overview = Some(read.overview);
     self.set_history(read.history);
     self.stack = read.stack;
-    self.settings = Some(read.settings);
+    let environment = settings.environment.is_some();
+    self.settings = Some(settings);
     if !unchanged {
       cx.notify();
     }
+    if environment {
+      self.read_environment_status(cx);
+    }
+  }
+
+  /// Reads whether the repository's devcontainer runs (a `docker ps`), apart
+  /// from the settings so those show without waiting for it.
+  fn read_environment_status(&mut self, cx: &mut Context<Self>) {
+    self.read(
+      |host, parent| host.devcontainer_status(&parent.repo_path),
+      |view, status, cx| {
+        let Some(env) = view.settings.as_mut().and_then(|s| s.environment.as_mut()) else {
+          return;
+        };
+        if env.status.as_ref() != Some(&status) {
+          env.status = Some(status);
+          cx.notify();
+        }
+      },
+      cx,
+    );
   }
 
   /// Runs `read` off the main thread, then `apply`s it unless the tab moved
@@ -510,12 +547,14 @@ impl CodeView {
       let value = cx
         .background_spawn(async move { read(host.as_ref(), &parent) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -664,13 +703,15 @@ impl CodeView {
         })
         .await
         .unwrap_or_default();
-      let _ = this.update(cx, |view, cx| {
-        if let Some(mention) = view.mention.as_mut().filter(|m| m.query == query) {
-          mention.results = results;
-          mention.index = 0;
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if let Some(mention) = view.mention.as_mut().filter(|m| m.query == query) {
+            mention.results = results;
+            mention.index = 0;
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     }));
   }
 
@@ -773,10 +814,12 @@ impl CodeView {
           .collect::<Vec<_>>()
           .join(" ")
       );
-      let _ = this.update(cx, |view, cx| {
-        view.insert = Some(insertion);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.insert = Some(insertion);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -941,27 +984,29 @@ impl CodeView {
           })))
         })
         .await;
-      let _ = this.update_in(cx, |view, window, cx| {
-        view.submitting = false;
-        match result {
-          Ok(session) => {
-            if save_default {
-              view.save_default = false;
-              if let Some(settings) = view.settings.as_mut() {
-                settings.agent = agent;
-                settings.from_repo = true;
+      this
+        .update_in(cx, |view, window, cx| {
+          view.submitting = false;
+          match result {
+            Ok(session) => {
+              if save_default {
+                view.save_default = false;
+                if let Some(settings) = view.settings.as_mut() {
+                  settings.agent = agent;
+                  settings.from_repo = true;
+                }
+              }
+              let _ = session;
+              if view.parent.key() == key {
+                view.show_save_default = false;
+                view.set_task_text(String::new(), 0, window, cx);
               }
             }
-            let _ = session;
-            if view.parent.key() == key {
-              view.show_save_default = false;
-              view.set_task_text(String::new(), 0, window, cx);
-            }
+            Err(err) => view.toast(ToastTone::Error, "Failed to create task", err),
           }
-          Err(err) => view.toast(ToastTone::Error, "Failed to create task", err),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -2162,11 +2207,14 @@ impl CodeView {
   }
 
   /// Records row `i`'s pitch (any row but the first) and, from the first row drawn (`first`),
-  /// where row 0 sits in the scrolled content.
-  fn measure_entry_row(&self, i: usize, first: usize) -> impl IntoElement {
+  /// where row 0 sits in the scrolled content. A new measure draws the view again, which
+  /// nothing else would while the screen is cached.
+  fn measure_entry_row(&self, i: usize, first: usize, cx: &Context<Self>) -> impl IntoElement {
     let (rows, scroll) = (self.entry_rows.clone(), self.scroll.clone());
+    let view = cx.weak_entity();
     gpui::canvas(
-      move |b, _, _| {
+      move |b, _, cx| {
+        let before = (rows.pitch.get(), rows.top.get());
         if i > 0 {
           rows.pitch.set(Some(b.size.height));
         }
@@ -2177,6 +2225,11 @@ impl CodeView {
           };
           let top = b.top() - above - scroll.bounds().top() - scroll.offset().y;
           rows.top.set(Some(top));
+        }
+        if (rows.pitch.get(), rows.top.get()) != before {
+          if let Some(view) = view.upgrade() {
+            cx.defer(move |cx| view.update(cx, |_, cx| cx.notify()));
+          }
         }
       },
       |_, _, _, _| {},
@@ -2246,7 +2299,7 @@ impl CodeView {
               |this| {
                 this
                   .relative()
-                  .child(self.measure_entry_row(i, shown.start))
+                  .child(self.measure_entry_row(i, shown.start, cx))
               },
             )
             .flex()

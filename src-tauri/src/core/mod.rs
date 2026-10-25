@@ -13,6 +13,8 @@ pub mod changes;
 pub mod checks;
 pub mod checks_logs;
 pub mod cloud;
+#[cfg(test)]
+mod cloud_perf;
 pub mod commits;
 pub mod context_menu;
 pub mod control_plane;
@@ -47,6 +49,7 @@ pub mod remote_ssh_transport;
 pub mod remote_ssh_ws_stream;
 pub mod repo;
 pub mod resolve;
+pub mod review;
 pub mod review_drafts;
 pub mod running_checks;
 pub mod session_secrets;
