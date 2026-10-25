@@ -3594,6 +3594,7 @@ fn undo_target_operation(
 /// The commit is removed from history and its changes are folded back into the
 /// working copy, exactly reversing the act of committing. Returns the operation
 /// id.
+// home-head-test: undo_commit
 pub fn jj_undo_commit(
   workspace_path: &str,
   target_branch: &str,
