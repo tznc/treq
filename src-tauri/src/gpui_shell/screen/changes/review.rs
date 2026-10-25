@@ -1073,6 +1073,12 @@ impl ChangesView {
                     let id = format!("add-comment-{path}-{h}-{l}");
                     move || id
                   })
+                  .role(gpui::Role::Button)
+                  .aria_label(format!(
+                    "Add comment on {path} line {}",
+                    new.or(old).unwrap_or_default()
+                  ))
+                  .test_support()
                   .p_0p5()
                   .rounded(radius::SM)
                   .bg(p.primary)
