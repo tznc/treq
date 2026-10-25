@@ -47,7 +47,7 @@ export const FAQ_ITEMS = [
   {
     question: 'What is free, and what do I pay for?',
     answer:
-      "The desktop app is free and open source, and runs everything on your machine. GitHub works through your local gh CLI and Linear through a personal API key, for any repository. You pay for the features that run on Treq's servers: the Treq GitHub App, Linear OAuth, a managed cloud workspace, and the merge queue in private alpha.",
+      "The desktop app is free and open source, and runs everything on your machine. GitHub works through your local gh CLI and Linear through a personal API key, for any repository. You pay for the features that run on Treq's servers: the Treq GitHub App, Linear OAuth, and a managed cloud workspace.",
   },
   {
     question: 'How does the Pro trial work?',
