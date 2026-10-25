@@ -1036,6 +1036,7 @@ impl terminal_data::TerminalHost for FakeHost {
     Ok(terminal_data::Prepared {
       command: format!("{} --start", start.agent),
       skill_write_warning: None,
+      file_paths: vec![format!("/tmp/treq-agent-prompt-{}.txt", start.agent)],
     })
   }
 
@@ -1066,6 +1067,10 @@ impl terminal_data::TerminalHost for FakeHost {
   ) -> Result<(), String> {
     self.record(format!("chat message {session_id} {text:?}"));
     Ok(())
+  }
+
+  fn remove_session_files(&self, paths: &[String]) {
+    self.record(format!("remove files {paths:?}"));
   }
 
   fn read_send_asset(&self, path: &str) -> Result<String, String> {
@@ -6174,6 +6179,12 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
   assert!(!h.drawn("terminal-column-agent"));
   assert!(host.calls().contains(&format!("close {}", agent_pty())));
   assert!(h.sent().contains(&field("terminal.closeSession", 3.into())));
+  // The session's prompt and skill files go with it.
+  let removed = host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("remove files") && c.contains("treq-agent-prompt-"));
+  assert!(removed, "{:?}", host.calls());
   // Closing the last terminal hides the pane, chip included.
   assert!(!h.drawn("terminal-pane-controls"));
 }
