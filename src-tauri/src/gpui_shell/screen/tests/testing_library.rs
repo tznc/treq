@@ -509,36 +509,54 @@ fn setup_status(status: &str) -> crate::core::SetupScriptStatus {
     configured: true,
     status: status.into(),
     run_id: Some(4),
-    script: Some("npm ci\n\nnpm run build".into()),
   }
 }
 
 #[gpui::test]
-fn code_tab_alerts_on_the_setup_script_with_its_output_hidden(cx: &mut TestAppContext) {
+fn code_tab_alerts_on_a_failed_setup_script_and_opens_its_logs(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    setup_status: Some(setup_status("failed")),
+    logs_preview: true,
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("code-setup"));
+  h.click("code-setup-logs");
+  h.cx.run_until_parked();
+  assert!(
+    h.sent().contains(&ScreenAction::Field {
+      field: "workspace.openLogs".into(),
+      value: "setup-script".into(),
+    }),
+    "{:?}",
+    h.sent()
+  );
+}
+
+#[gpui::test]
+fn code_tab_offers_setup_logs_only_once_the_script_has_run(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    setup_status: Some(crate::core::SetupScriptStatus {
+      run_id: None,
+      ..setup_status("pending")
+    }),
+    logs_preview: true,
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("code-setup"));
+  assert!(!h.drawn("code-setup-logs"));
+}
+
+#[gpui::test]
+fn code_tab_offers_no_setup_logs_without_the_logs_preview(cx: &mut TestAppContext) {
   let host = FakeHost {
     setup_status: Some(setup_status("failed")),
     ..code_host()
   };
-  let (mut h, host) = workspace_harness(cx, host, code_route());
+  let (mut h, _) = workspace_harness(cx, host, code_route());
   assert!(h.drawn("code-setup"));
-  assert!(
-    !h.drawn("code-setup-output"),
-    "output starts hidden, even after a failure"
-  );
-
-  h.click("code-setup-toggle");
-  assert!(h.drawn("code-setup-output"));
-  assert!(h.drawn("code-setup-command-0"));
-  assert!(h.drawn("code-setup-command-1"));
-  assert!(
-    !h.drawn("code-setup-command-2"),
-    "blank lines are not commands"
-  );
-  assert!(h.drawn("code-setup-logs"));
-  assert!(host.calls().contains(&"read setup logs 4".to_string()));
-
-  h.click("code-setup-toggle");
-  assert!(!h.drawn("code-setup-output"));
+  assert!(!h.drawn("code-setup-logs"));
 }
 
 #[gpui::test]

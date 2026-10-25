@@ -55,8 +55,10 @@ struct FakeHost {
   merge_notes: Vec<String>,
   /// What the Code tab reads.
   overview: code_data::Overview,
-  /// The workspace setup script's status the Code tab reads.
+  /// The workspace setup script's status the Code tab reads, and whether
+  /// the Logs preview is on.
   setup_status: Option<crate::core::SetupScriptStatus>,
+  logs_preview: bool,
   history: Option<crate::jj::JjLogResult>,
   workspaces: Vec<crate::local_db::Workspace>,
   files: Vec<String>,
@@ -817,12 +819,8 @@ impl code_data::CodeHost for FakeHost {
     self.setup_status.clone()
   }
 
-  fn setup_logs(&self, _: &str, run_id: i64) -> Result<Vec<super::github_data::LogLine>, String> {
-    self.record(format!("read setup logs {run_id}"));
-    Ok(vec![super::github_data::LogLine {
-      stream: "stderr".into(),
-      body: "lockfile out of date".into(),
-    }])
+  fn logs_enabled(&self) -> bool {
+    self.logs_preview
   }
 
   fn run_setup(
@@ -6789,6 +6787,23 @@ fn logs_tab_lists_the_check_logs(cx: &mut TestAppContext) {
     host
       .calls()
       .contains(&"read check logs None None Some([])".to_string()),
+    "{:?}",
+    host.calls()
+  );
+}
+
+#[gpui::test]
+fn logs_tab_opens_on_the_setup_scripts_logs(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(Some("setup-script")));
+  assert!(h.drawn("repo-logs-output"));
+  assert!(
+    h.drawn("check-workflow-filter"),
+    "the filter shows what is picked"
+  );
+  assert!(
+    host
+      .calls()
+      .contains(&r#"read check logs None None Some(["__setup__"])"#.to_string()),
     "{:?}",
     host.calls()
   );

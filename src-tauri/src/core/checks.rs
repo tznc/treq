@@ -505,9 +505,8 @@ fn store_job_result(
 /// Synthetic workflow filename used to store the setup script's runs in the
 /// same `workflow_runs`/`workflow_job_results` tables as regular checks, so
 /// it gets run history and browsable logs for free.
-const SETUP_SCRIPT_FILENAME: &str = "__setup__";
-/// Job id the setup script's log is stored under.
-pub const SETUP_SCRIPT_JOB_ID: &str = "setup";
+pub const SETUP_SCRIPT_FILENAME: &str = "__setup__";
+const SETUP_SCRIPT_JOB_ID: &str = "setup";
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SetupScriptStatus {
@@ -516,8 +515,6 @@ pub struct SetupScriptStatus {
   /// "not_configured" | "pending" | "running" | "passed" | "failed"
   pub status: String,
   pub run_id: Option<i64>,
-  /// The configured setup commands, shown alongside the run's output.
-  pub script: Option<String>,
 }
 
 /// Blocks running checks in a workspace until its setup script has finished
@@ -612,14 +609,18 @@ pub fn get_setup_script_status_sync(
   repo_path: &str,
   workspace_id: i64,
 ) -> Result<SetupScriptStatus, String> {
-  let Some(script) = configured_setup_script(repo_path)? else {
+  let config = crate::repo_config::parse_config(repo_path)?;
+  if config
+    .setup_script
+    .filter(|s| !s.trim().is_empty())
+    .is_none()
+  {
     return Ok(SetupScriptStatus {
       configured: false,
       status: "not_configured".to_string(),
       run_id: None,
-      script: None,
     });
-  };
+  }
 
   let runs =
     crate::local_db::list_workflow_runs(repo_path, workspace_id, SETUP_SCRIPT_FILENAME, 1)?;
@@ -632,7 +633,6 @@ pub fn get_setup_script_status_sync(
     configured: true,
     status,
     run_id,
-    script: Some(script),
   })
 }
 
@@ -995,16 +995,6 @@ mod tests {
     let status = get_setup_script_status_sync(&repo, 0).unwrap();
     assert!(status.configured);
     assert_eq!(status.status, "pending");
-  }
-
-  #[test]
-  fn test_setup_status_includes_configured_script() {
-    let dir = TempDir::new().unwrap();
-    let repo = write_config(&dir, "setup_script: \"npm ci\\nnpm run build\"\n");
-    crate::local_db::init_local_db(&repo).unwrap();
-
-    let status = get_setup_script_status_sync(&repo, 0).unwrap();
-    assert_eq!(status.script.as_deref(), Some("npm ci\nnpm run build"));
   }
 
   #[test]

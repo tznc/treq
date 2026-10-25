@@ -1,5 +1,5 @@
-// TREQ-45: an alert on the Code tab shows the workspace setup script, with
-// its commands and its latest run's output behind Show output.
+// TREQ-45: an alert on the Code tab shows the workspace setup script's
+// state; View logs opens the Logs tab on the setup script's run.
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -28,28 +28,28 @@ test("setup-output: Code tab setup alert", async ({ page, context }) => {
     await settle(page, 3000);
     await page.keyboard.press("Escape");
     await openTab(page, "Code");
-    const show = page.getByRole("button", { name: "Show output" });
-    await expect(show).toBeVisible({ timeout: 30_000 });
+    const viewLogs = page.getByRole("button", { name: "View logs" });
+    await expect(viewLogs).toBeVisible({ timeout: 30_000 });
     await settle(page, 1000);
     await capture(page, {
       name: "25-setup-output-01-alert",
-      title: "Code tab: failed setup script alert, output hidden",
+      title: "Code tab: failed setup script alert",
       expectations: [
         "A red alert near the top of the Code tab reads 'Workspace setup script failed' / 'Checks can still run.'",
-        "Its actions are 'Show output' and 'Re-run setup script'; no commands or output are shown yet",
+        "Its actions are 'View logs' and 'Re-run setup script'; no script output shows on the Code tab",
       ],
     });
 
-    await show.click();
-    await expect(page.getByRole("button", { name: "Hide output" })).toBeVisible();
-    await settle(page, 1000);
+    await viewLogs.click();
+    await expect(page.getByRole("tab", { name: /^Logs/, selected: true })).toBeVisible();
+    // Log lines are drawn text, not observable elements: let them load.
+    await settle(page, 3000);
     await capture(page, {
-      name: "25-setup-output-02-expanded",
-      title: "Code tab: setup alert with output shown",
+      name: "25-setup-output-02-logs",
+      title: "Logs tab: the setup script's run",
       expectations: [
-        "Inside the alert, a Commands block lists '$ echo installing deps', the stderr echo and '$ exit 1'",
-        "An Output block shows 'installing deps' and '[stderr] error: lockfile out of date'",
-        "The actions now read 'Hide output' and 'Re-run setup script'",
+        "The Logs tab is selected, and its check filter reads 'Setup script'",
+        "The log lines are the setup script's: 'installing deps' and the stderr 'error: lockfile out of date'",
       ],
     });
   } finally {

@@ -28,7 +28,6 @@ pub struct Alert {
   title: SharedString,
   message: Option<SharedString>,
   severity: Severity,
-  content: Option<AnyElement>,
   actions: Vec<AnyElement>,
   palette: Palette,
 }
@@ -44,7 +43,6 @@ impl Alert {
       title: title.into(),
       message: None,
       severity: Severity::default(),
-      content: None,
       actions: Vec::new(),
       palette: *palette,
     }
@@ -57,12 +55,6 @@ impl Alert {
 
   pub fn severity(mut self, severity: Severity) -> Self {
     self.severity = severity;
-    self
-  }
-
-  /// Detail under the message, such as a log the alert is about.
-  pub fn content(mut self, content: impl IntoElement) -> Self {
-    self.content = Some(content.into_any_element());
     self
   }
 
@@ -127,7 +119,6 @@ impl RenderOnce for Alert {
                 .child(message),
             )
           })
-          .when_some(self.content, |el, content| el.child(div().mt_2().child(content)))
           .when(!self.actions.is_empty(), |el| {
             el.child(
               div()
@@ -161,7 +152,5 @@ mod tests {
       .actions([div(), div()])
       .action(div());
     assert_eq!(two.actions.len(), 3);
-    assert!(two.content.is_none());
-    assert!(Alert::new("setup", "Setup failed", &p).content(div()).content.is_some());
   }
 }

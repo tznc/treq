@@ -375,6 +375,11 @@ impl Model {
           self.view.tab = tab;
         }
       }
+      "workspace.openLogs" => {
+        if let Some(source) = value.as_str().filter(|_| data.flags.logs) {
+          self.open_logs(source);
+        }
+      }
       "workspace.viewFullPrompt" => {
         if let Some(id) = value.as_i64() {
           self.view_full_prompt(id);
@@ -1284,6 +1289,25 @@ mod tests {
     assert_eq!(model.selected, Some(1));
     model.screen_action(&field("terminal.shortcut", "k".into()), &data);
     assert!(model.dialogs.palette);
+  }
+
+  #[test]
+  fn workspace_open_logs_starts_the_logs_tab_on_its_source() {
+    let (mut model, mut data) = (model(), data());
+    data.flags.logs = true;
+    let key = model.view.logs_key;
+    model.screen_action(&field("workspace.openLogs", "setup-script".into()), &data);
+    assert_eq!(model.view.tab, Tab::Logs);
+    assert_eq!(model.view.logs_source, "setup-script");
+    assert_eq!(model.view.logs_key, key + 1);
+  }
+
+  #[test]
+  fn workspace_open_logs_does_nothing_without_the_logs_preview() {
+    let (mut model, data) = (model(), data());
+    let tab = model.view.tab;
+    model.screen_action(&field("workspace.openLogs", "setup-script".into()), &data);
+    assert_eq!(model.view.tab, tab);
   }
 
   #[test]

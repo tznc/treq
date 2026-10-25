@@ -801,7 +801,6 @@ fn treq() -> TreqChecks {
       configured: true,
       status: "passed".into(),
       run_id: None,
-      script: Some("echo setup".into()),
     }),
   }
 }
