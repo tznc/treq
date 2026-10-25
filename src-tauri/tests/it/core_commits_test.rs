@@ -1323,3 +1323,72 @@ fn test_stacked_working_copy_row_tracks_edits_and_caches_in_the_repo() {
     "the diff stat cache is the repository's, not one inside the workspace"
   );
 }
+
+/// Past 5,000 changed paths a commit diff skips rename tracking, which is
+/// quadratic in the paths: a rename shows as a deletion and an addition.
+#[test]
+fn test_commit_diff_of_over_five_thousand_paths_skips_rename_tracking() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/commit-diff-many-paths",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("Failed to create workspace");
+  let dir = repo.workspaces_dir().join(&workspace.workspace_path);
+  let dir = dir.to_str().unwrap();
+  let text = "one\ntwo\nthree\nfour\nfive\n";
+  TestRepo::write_workspace_file(dir, "old.txt", text).expect("Failed to write file");
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Add old")
+    .expect("Failed to commit");
+
+  let diff_of = |message: &str| {
+    let log = treq_lib::core::list_commits(&repo.repo_path, Some(workspace.id), false, None, None)
+      .expect("Failed to list commits");
+    let commit = log
+      .commits
+      .iter()
+      .find(|commit| commit.description == message)
+      .expect("Should find the commit");
+    treq_lib::core::get_commit_diff_with_conflict_style(
+      &repo.repo_path,
+      Some(workspace.id),
+      &commit.change_id,
+      "git",
+    )
+    .expect("Failed to get commit diff")
+  };
+  let status_of = |diff: &treq_lib::jj::JjRevisionDiff, path: &str| {
+    diff
+      .committed_files
+      .iter()
+      .find(|f| f.path == path)
+      .map(|f| f.status.clone())
+  };
+
+  std::fs::remove_file(std::path::Path::new(dir).join("old.txt")).expect("Failed to remove");
+  TestRepo::write_workspace_file(dir, "new.txt", text).expect("Failed to write file");
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Rename")
+    .expect("Failed to commit");
+  let renamed = diff_of("Rename");
+  assert_eq!(status_of(&renamed, "new.txt").as_deref(), Some("R"));
+
+  std::fs::rename(
+    std::path::Path::new(dir).join("new.txt"),
+    std::path::Path::new(dir).join("newer.txt"),
+  )
+  .expect("Failed to rename");
+  for i in 0..5_000 {
+    TestRepo::write_workspace_file(dir, &format!("many/f{i}.txt"), "").expect("Failed to write");
+  }
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Rename among many")
+    .expect("Failed to commit");
+  let many = diff_of("Rename among many");
+  assert!(many.committed_files.len() > 5_000);
+  assert_eq!(status_of(&many, "newer.txt").as_deref(), Some("A"));
+  assert_eq!(status_of(&many, "new.txt").as_deref(), Some("D"));
+}

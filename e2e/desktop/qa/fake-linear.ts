@@ -113,13 +113,27 @@ const comments = [
   },
 ];
 
+/** Comments by what they are on. */
+const commentsOn: Record<string, object[]> = {
+  "issue-142": comments,
+  "d-retries": [
+    {
+      id: "c-3",
+      body: "Cap the backoff at ten minutes.",
+      user: teammate,
+      createdAt: "2026-10-21T14:20:00.000Z",
+      quotedText: "exponential backoff",
+    },
+  ],
+};
+
 function answer(query: string, variables: Record<string, unknown>): object | null {
   const id = variables.id as string | undefined;
   // Most specific first: `issue(id:` with comments before `issue(`, and
   // `issues(` / `projects(` before their singular forms.
   if (query.includes("comments(")) {
     const entity = query.match(/\b(issue|project|document)\(id/)?.[1] ?? "issue";
-    return { [entity]: { comments: { nodes: id === "issue-142" ? comments : [] } } };
+    return { [entity]: { comments: { nodes: commentsOn[id ?? ""] ?? [] } } };
   }
   if (query.includes("documents(")) return { project: { documents: { nodes: documents[id ?? ""] ?? [] } } };
   if (query.includes("viewer")) return { viewer };

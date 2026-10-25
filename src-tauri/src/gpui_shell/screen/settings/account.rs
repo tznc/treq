@@ -123,6 +123,12 @@ pub struct UsageReport {
   pub disk_used_bytes: u64,
 }
 
+thread_local! {
+  /// The repositories the Integrations tab last read, shown while it reads
+  /// them again.
+  static LAST_GITHUB: std::cell::RefCell<Option<Vec<GithubRepo>>> = const { std::cell::RefCell::new(None) };
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct GithubRoute {
@@ -748,6 +754,7 @@ impl SettingsView {
       self.account.callback_error = None;
     } else {
       self.account.github = None;
+      LAST_GITHUB.with(|last| *last.borrow_mut() = None);
       self.account.cloud_read = false;
     }
     self.sync_avatar(cx);
@@ -764,28 +771,46 @@ impl SettingsView {
     }
   }
 
+  /// Reads the GitHub repositories. Those read last time show meanwhile,
+  /// so reopening the tab has no spinner.
   fn load_github(&mut self, cx: &mut Context<Self>) {
-    self.account.github = Some(GithubRoute {
-      loading: true,
-      ..GithubRoute::default()
+    let last = LAST_GITHUB.with(|last| last.borrow().clone());
+    self.account.github = Some(match last.clone() {
+      Some(repositories) => GithubRoute {
+        loading: false,
+        failed: false,
+        repositories,
+      },
+      None => GithubRoute {
+        loading: true,
+        ..GithubRoute::default()
+      },
     });
     self.spawn(
       cx,
       |host| host.github_repositories(),
-      |view, result, _| {
+      move |view, result, _| {
         view.account.github = Some(match result {
-          Ok(repositories) => GithubRoute {
-            loading: false,
-            failed: false,
-            repositories: repositories
+          Ok(repositories) => {
+            let repositories: Vec<GithubRepo> = repositories
               .into_iter()
               .map(|r| GithubRepo {
                 id: r.id,
                 full_name: r.full_name,
                 private: r.private,
               })
-              .collect(),
-          },
+              .collect();
+            LAST_GITHUB.with(|last| *last.borrow_mut() = Some(repositories.clone()));
+            GithubRoute {
+              loading: false,
+              failed: false,
+              repositories,
+            }
+          }
+          Err(error) if last.is_some() => {
+            log::warn!("reading the GitHub repositories failed: {error}");
+            return;
+          }
           Err(error) => {
             log::warn!("reading the GitHub repositories failed: {error}");
             GithubRoute {

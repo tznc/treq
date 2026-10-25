@@ -102,9 +102,13 @@ fn bench_lines(c: &mut Criterion) {
   // What each drawn row asks: its gutter icon and the cards under it.
   group.bench_function("comments_visible_rows", |b| {
     b.iter(|| {
+      let outdated = |c: &diff::LineComment| diff::is_outdated(c, Some(&hunks));
       for l in 0..VISIBLE {
-        black_box(diff::line_has_comment(&comments, &file, &hunk, l, &hunks));
-        black_box(diff::comments_under(&comments, &file, &hunk, l, &hunks));
+        let at = diff::line_at(&hunk, l);
+        black_box(diff::line_has_comment(
+          &comments, &file, &hunk, at, &outdated,
+        ));
+        black_box(diff::comments_under(&comments, &file, &hunk, at, &outdated));
       }
     })
   });

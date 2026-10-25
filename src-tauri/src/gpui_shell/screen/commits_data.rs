@@ -7,7 +7,9 @@ use std::sync::{Arc, LazyLock};
 use regex::Regex;
 
 use super::code_data::CodeHost;
-pub use crate::core::review::{line_label, line_number, line_numbers, selection, LineRef};
+pub use crate::core::review::{
+  line_label, line_number, line_numbers, numbered, selection, LineRef,
+};
 use crate::{
   core::{self, ResolveConflictsSession},
   gpui_shell::{native::Backend, remote_repo::unsupported},

@@ -33,7 +33,7 @@ pub fn line_number(hunk: &JjDiffHunk, l: usize) -> (Option<u32>, Option<u32>) {
   numbered(hunk).nth(l).unwrap_or((None, None))
 }
 
-fn numbered(hunk: &JjDiffHunk) -> impl Iterator<Item = (Option<u32>, Option<u32>)> + '_ {
+pub fn numbered(hunk: &JjDiffHunk) -> impl Iterator<Item = (Option<u32>, Option<u32>)> + '_ {
   let (mut old, mut new) = hunk_starts(&hunk.header);
   hunk.lines.iter().map(move |line| {
     if line.starts_with('+') {
@@ -287,7 +287,7 @@ pub fn is_outdated(comment: &LineComment, hunks: Option<&[JjDiffHunk]>) -> bool 
   let Some(hunk) = hunks.iter().find(|h| h.id == comment.hunk_id) else {
     return true;
   };
-  !line_numbers(hunk).into_iter().enumerate().any(|(l, n)| {
+  !numbered(hunk).enumerate().any(|(l, n)| {
     let (number, side) = number_and_side(n, l);
     (comment.start_line..=comment.end_line).contains(&number)
       && comment.line_side.is_none_or(|s| s == side)
@@ -299,10 +299,9 @@ pub fn comments_under<'a>(
   comments: &'a [LineComment],
   path: &str,
   hunk: &JjDiffHunk,
-  l: usize,
-  hunks: &[JjDiffHunk],
+  (number, side): (u32, Side),
+  outdated: &dyn Fn(&LineComment) -> bool,
 ) -> Vec<&'a LineComment> {
-  let (number, side) = line_at(hunk, l);
   let on_line: Vec<&LineComment> = comments
     .iter()
     .filter(|c| {
@@ -310,7 +309,7 @@ pub fn comments_under<'a>(
         && c.hunk_id == hunk.id
         && (c.start_line..=c.end_line).contains(&number)
         && c.line_side.is_none_or(|s| s == side)
-        && !is_outdated(c, Some(hunks))
+        && !outdated(c)
     })
     .collect();
   match on_line.first() {
@@ -324,16 +323,15 @@ pub fn line_has_comment(
   comments: &[LineComment],
   path: &str,
   hunk: &JjDiffHunk,
-  l: usize,
-  hunks: &[JjDiffHunk],
+  (number, side): (u32, Side),
+  outdated: &dyn Fn(&LineComment) -> bool,
 ) -> bool {
-  let (number, side) = line_at(hunk, l);
   comments.iter().any(|c| {
     c.file_path == path
       && c.hunk_id == hunk.id
       && (c.start_line..=c.end_line).contains(&number)
       && c.line_side.is_none_or(|s| s == side)
-      && !is_outdated(c, Some(hunks))
+      && !outdated(c)
   })
 }
 
@@ -662,12 +660,20 @@ mod tests {
   fn a_comment_shows_under_its_last_line() {
     let hunks = [hunk("h", "@@ -1,1 +1,3 @@", &[" a", "+b", "+c"])];
     let comments = [comment("h", 1, 3, Side::New)];
-    assert!(comments_under(&comments, "a.rs", &hunks[0], 0, &hunks).is_empty());
+    let at = |l| line_at(&hunks[0], l);
+    let outdated = |c: &LineComment| is_outdated(c, Some(&hunks));
+    assert!(comments_under(&comments, "a.rs", &hunks[0], at(0), &outdated).is_empty());
     assert_eq!(
-      comments_under(&comments, "a.rs", &hunks[0], 2, &hunks).len(),
+      comments_under(&comments, "a.rs", &hunks[0], at(2), &outdated).len(),
       1
     );
-    assert!(line_has_comment(&comments, "a.rs", &hunks[0], 1, &hunks));
+    assert!(line_has_comment(
+      &comments,
+      "a.rs",
+      &hunks[0],
+      at(1),
+      &outdated
+    ));
   }
 
   #[test]

@@ -12,7 +12,7 @@ use super::*;
 use crate::{
   github::{GhReviewComment, GhReviewThread},
   gpui_shell::screen::{
-    changes_review::{count_label, line_at, Pending, Quote, Side},
+    changes_review::{count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
       agent_by_line, comment_date, original_text, place_threads, preview, suggestion_diff, Placed,
       RowKind,
@@ -279,17 +279,22 @@ impl ChangesView {
     })
   }
 
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   pub(super) fn line_threads(
     &self,
     path: &str,
     hunks: &[JjDiffHunk],
     h: usize,
     l: usize,
+    numbers: (Option<u32>, Option<u32>),
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> Vec<AnyElement> {
     let hunk = &hunks[h];
-    let (number, side) = line_at(hunk, l);
+    let (number, side) = number_and_side(numbers, l);
     let mut out = Vec::new();
     if let Some(comments) = self
       .threads

@@ -33,7 +33,7 @@ gui = [
   "dep:tauri-plugin-single-instance",
 ]
 # Desktop repo windows open in a GPUI shell, which draws the workspace sidebar.
-gpui-shell = ["gui", "dep:tauri-plugin-gpui", "dep:gpui-kit", "dep:treq-ui", "dep:syntect", "dep:two-face", "dep:alacritty_terminal", "dep:image", "dep:emojis"]
+gpui-shell = ["gui", "dep:gtk", "dep:tauri-plugin-gpui", "dep:gpui-kit", "dep:treq-ui", "dep:syntect", "dep:two-face", "dep:alacritty_terminal", "dep:image", "dep:emojis"]
 # Linked into another Tauri app as a library (mobile-gpui): leaves out the
 # mobile entry point, whose JNI symbols would clash with the host app's.
 embed = []
@@ -71,8 +71,9 @@ tauri-build = { version = "2", features = [], optional = true }
 libc = "0.2"
 
 # Asks GDK whether a compositor draws transparent GPUI popups (gpui_shell::popup).
+# Optional behind `gpui-shell` so the headless CLI build links no GTK.
 [target.'cfg(target_os = "linux")'.dependencies]
-gtk = "0.18"
+gtk = { version = "0.18", optional = true }
 
 # Desktop-only crates. `tauri-plugin-cli` has no Android/iOS support, and the
 # `treq` command-line entry point it backs only exists on desktop, so mobile

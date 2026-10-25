@@ -12,11 +12,11 @@ use super::*;
 use crate::gpui_shell::screen::{
   changes_review::{
     commented_text, comments_under, count_label, is_outdated, line_has_comment, line_location,
-    outdated_label, outdated_markdown, parse_suggestion, pending_for_line, pending_for_selection,
-    review_markdown, stale_names, suggestion_block, ConflictNote, LineComment, Pending, Side,
-    Stored, FILE_HUNK,
+    number_and_side, outdated_label, outdated_markdown, parse_suggestion, pending_for_line,
+    pending_for_selection, review_markdown, stale_names, suggestion_block, ConflictNote,
+    LineComment, Pending, Side, Stored, FILE_HUNK,
   },
-  commits_data::{line_number, selection, LineRef},
+  commits_data::{selection, LineRef},
 };
 use gpui::{MouseDownEvent, MouseMoveEvent, Task};
 
@@ -67,6 +67,9 @@ pub(in crate::gpui_shell::screen) struct Review {
   /// checkout, which must not wait behind the stale banner.
   pub apply_next: bool,
   pub comments: Vec<LineComment>,
+  /// Whether each comment is outdated, as of the layout it was worked out
+  /// at: by id, with the lines it covers.
+  outdated: RefCell<HashMap<String, (u64, u32, u32, bool)>>,
   /// Where the comment box is open.
   pub draft: Option<Pending>,
   pub draft_text: String,
@@ -629,6 +632,7 @@ impl ChangesView {
     let paths: Vec<String> = snapshot
       .files
       .iter()
+      .filter(|f| draws_hunks(&f.path, &f.status))
       .map(|f| &f.path)
       .filter(|path| {
         let id = snapshot.content_ids.get(*path);
@@ -880,6 +884,26 @@ impl ChangesView {
 
   // Drawing.
 
+  /// [`is_outdated`] for `comment` against `hunks`, worked out once per
+  /// layout: it reads the hunk's lines, and every row it could sit under
+  /// asks.
+  fn is_outdated_in(&self, comment: &LineComment, hunks: &[JjDiffHunk]) -> bool {
+    let known = (self.layout_gen, comment.start_line, comment.end_line);
+    let cached = self.review.outdated.borrow().get(&comment.id).copied();
+    if let Some((generation, start, end, outdated)) = cached {
+      if (generation, start, end) == known {
+        return outdated;
+      }
+    }
+    let outdated = is_outdated(comment, Some(hunks));
+    self
+      .review
+      .outdated
+      .borrow_mut()
+      .insert(comment.id.clone(), (known.0, known.1, known.2, outdated));
+    outdated
+  }
+
   /// `HunkDiffLine`'s row.
   #[allow(
     clippy::too_many_arguments,
@@ -891,6 +915,7 @@ impl ChangesView {
     hunks: &[JjDiffHunk],
     h: usize,
     l: usize,
+    numbers: (Option<u32>, Option<u32>),
     changed: &[Range<usize>],
     language: Option<&'static str>,
     conflicted: bool,
@@ -899,7 +924,7 @@ impl ChangesView {
   ) -> Stateful<Div> {
     let hunk = &hunks[h];
     let line = &hunk.lines[l];
-    let (old, new) = line_number(hunk, l);
+    let (old, new) = numbers;
     let selected = self
       .review
       .selection
@@ -937,7 +962,13 @@ impl ChangesView {
       .selection
       .as_ref()
       .is_some_and(|s| s.lines.len() > 1);
-    let has_comment = line_has_comment(&self.review.comments, path, hunk, l, hunks);
+    let has_comment = line_has_comment(
+      &self.review.comments,
+      path,
+      hunk,
+      number_and_side(numbers, l),
+      &|c| self.is_outdated_in(c, hunks),
+    );
     let border = p.border.opacity(0.4);
     let gutter_hover = p.muted.opacity(0.5);
     let text = line.get(1..).filter(|t| !t.is_empty()).unwrap_or(" ");
@@ -1083,17 +1114,28 @@ impl ChangesView {
   }
 
   /// What follows a diff line: its comments and the comment box.
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   pub(super) fn line_extras(
     &self,
     path: &str,
     hunks: &[JjDiffHunk],
     h: usize,
     l: usize,
+    numbers: (Option<u32>, Option<u32>),
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> Vec<gpui::AnyElement> {
     let mut out = Vec::new();
-    let under = comments_under(&self.review.comments, path, &hunks[h], l, hunks);
+    let under = comments_under(
+      &self.review.comments,
+      path,
+      &hunks[h],
+      number_and_side(numbers, l),
+      &|c| self.is_outdated_in(c, hunks),
+    );
     if !under.is_empty() {
       let mut list = div()
         .bg(p.muted.opacity(0.6))
@@ -1110,7 +1152,7 @@ impl ChangesView {
       }
       out.push(list.into_any_element());
     }
-    out.extend(self.line_threads(path, hunks, h, l, p, cx));
+    out.extend(self.line_threads(path, hunks, h, l, numbers, p, cx));
     let here = self
       .review
       .draft
