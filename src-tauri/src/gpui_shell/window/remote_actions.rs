@@ -49,7 +49,7 @@ impl Model {
   }
 
   /// The remote presses; `None` for any other.
-  #[allow(
+  #[expect(
     clippy::string_slice,
     reason = "slices after a checked starts_with() of an ASCII prefix"
   )]

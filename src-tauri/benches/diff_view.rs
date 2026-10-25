@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::string_slice, reason = "bench code")]
+#![expect(clippy::expect_used, clippy::string_slice, reason = "bench code")]
 
 //! The Changes tab's per-row and per-frame helpers on a large diff: line
 //! numbers, comment and thread placement, intraline marks and syntax

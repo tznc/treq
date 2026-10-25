@@ -37,7 +37,7 @@ pub struct CloudState {
 }
 
 /// The session's tokens, in the app database.
-#[cfg_attr(not(feature = "gpui-shell"), allow(dead_code))]
+#[cfg_attr(not(feature = "gpui-shell"), expect(dead_code, reason = "only the GPUI shell calls this"))]
 struct DbStore(AppHandle);
 
 impl SessionStore for DbStore {
@@ -64,7 +64,7 @@ impl SessionStore for DbStore {
 }
 
 /// The keychain, falling back to the app database where there is none.
-#[cfg_attr(not(feature = "gpui-shell"), allow(dead_code))]
+#[cfg_attr(not(feature = "gpui-shell"), expect(dead_code, reason = "only the GPUI shell calls this"))]
 fn session_store(app: &AppHandle) -> Arc<dyn SessionStore> {
   let db = DbStore(app.clone());
   #[cfg(desktop)]
@@ -152,7 +152,7 @@ impl CloudEffects for AppEffects {
 
 /// Restores the session and keeps it fresh. Call once from setup, after the
 /// app and remote states.
-#[cfg_attr(not(feature = "gpui-shell"), allow(dead_code))]
+#[cfg_attr(not(feature = "gpui-shell"), expect(dead_code, reason = "only the GPUI shell calls this"))]
 pub fn start(app: &AppHandle) {
   let effects = Arc::new(AppEffects {
     app: app.clone(),
@@ -191,7 +191,7 @@ pub fn handle_auth_callback(app: &AppHandle, url: &str) {
 
 /// A window came to the front: reread the plan, as a purchase on the
 /// website may have changed it.
-#[cfg_attr(not(feature = "gpui-shell"), allow(dead_code))]
+#[cfg_attr(not(feature = "gpui-shell"), expect(dead_code, reason = "only the GPUI shell calls this"))]
 pub fn window_focused(app: &AppHandle) {
   if let Some(cloud) = owned_cloud(app) {
     tauri::async_runtime::spawn(async move { cloud.refresh_subscription().await });

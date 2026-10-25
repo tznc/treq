@@ -4,7 +4,7 @@
 //! picked out inside the red and green rows.
 
 // Lists of ranges here are mark lists, often of one mark.
-#![allow(
+#![expect(
   clippy::single_range_in_vec_init,
   reason = "ranges here are mark lists, often of one mark"
 )]

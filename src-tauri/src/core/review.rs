@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{jj::JjDiffHunk, local_db::PendingReview};
 
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 static HUNK_HEADER: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@").expect("hunk header regex")
 });
@@ -577,7 +577,7 @@ pub struct Suggestion {
 }
 
 /// The first ```` ```suggestion ```` block of `text`, as GitHub reads it.
-#[allow(
+#[expect(
   clippy::string_slice,
   reason = "offsets come from finding ASCII fence markers and newlines"
 )]

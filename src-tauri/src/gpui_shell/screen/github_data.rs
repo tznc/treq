@@ -166,7 +166,7 @@ pub trait GithubHost: WorkspaceHost {
   /// Adds (`on`) or removes the user's `content` reaction on a comment.
   fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String>;
   fn create_issue(&self, repo: &str, title: &str, body: &str) -> Result<u64, String>;
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]
@@ -603,7 +603,7 @@ fn conventional_type(word: &str) -> Option<&'static str> {
   })
 }
 
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 fn humanize(slug: &str) -> String {
   static SEPARATORS: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"[-_]+").expect("regex"));
@@ -642,7 +642,7 @@ pub fn compare_pr_url(
 }
 
 /// `deriveConventionalPrTitle`.
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 pub fn conventional_pr_title(title: &str, branch: &str) -> String {
   let fallback = if title.is_empty() { branch } else { title };
   static CONVENTIONAL: LazyLock<regex::Regex> =

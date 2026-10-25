@@ -179,7 +179,7 @@ fn read_stack(host: &dyn CodeHost, parent: &Parent) -> Option<Vec<StackRow>> {
   let stack = workspace_stack(&workspaces, current.id, &parent.default_branch)?;
   // Each row's commits are an independent read: read them all at once.
   Some(std::thread::scope(|scope| {
-    #[allow(
+    #[expect(
       clippy::needless_collect,
       reason = "every read starts before the first is joined"
     )]
@@ -1242,7 +1242,7 @@ fn prepared_markdown(text: &str) -> SharedString {
   if let Some(hit) = PREPARED.with(|p| p.borrow().get(text).cloned()) {
     return hit;
   }
-  #[allow(clippy::expect_used, reason = "constant pattern")]
+  #[expect(clippy::expect_used, reason = "constant pattern")]
   static HTML_COMMENT: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("regex"));
   let prepared: SharedString =

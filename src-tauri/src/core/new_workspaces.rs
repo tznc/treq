@@ -19,22 +19,22 @@ const LINK_LINE: &str = "Paste the branch name; links open from the desktop app"
 /// A title's branch until the repository sets its own pattern.
 pub const DEFAULT_BRANCH_PATTERN: &str = "treq/{name}";
 
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 static WHITESPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("regex"));
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 static DASH_RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new("-+").expect("regex"));
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 static TRAILING_DASH_LETTER: LazyLock<Regex> =
   LazyLock::new(|| Regex::new("-[a-z]$").expect("regex"));
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 static TRAILING_SEPARATOR_LETTER: LazyLock<Regex> =
   LazyLock::new(|| Regex::new(r"[/.\-][a-z]$").expect("regex"));
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 static TRAILING_SEPARATORS: LazyLock<Regex> =
   LazyLock::new(|| Regex::new(r"[/.\-]+$").expect("regex"));
 
 /// `sanitizeForBranchName`.
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 fn sanitize_for_branch_name(text: &str) -> String {
   let lower: String = text
     .to_lowercase()
@@ -54,7 +54,7 @@ fn sanitize_for_branch_name(text: &str) -> String {
 }
 
 /// `cleanBranchNameTrailing`.
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 fn clean_branch_name_trailing(name: &str) -> String {
   let single = &*TRAILING_SEPARATOR_LETTER;
   let separators = &*TRAILING_SEPARATORS;

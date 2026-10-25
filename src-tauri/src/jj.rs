@@ -1,4 +1,4 @@
-#![allow(
+#![expect(
   clippy::string_slice,
   reason = "slices hex commit/change ids and git ref names at ASCII separators"
 )]

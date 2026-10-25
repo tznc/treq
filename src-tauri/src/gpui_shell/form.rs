@@ -244,7 +244,7 @@ impl Controls {
   }
 
   /// `ui/slider.tsx`. Each move is a `Field`; the release is a `Commit`.
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]

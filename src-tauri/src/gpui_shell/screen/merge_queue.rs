@@ -877,7 +877,7 @@ impl MergeQueueView {
     card.child(list)
   }
 
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]

@@ -652,7 +652,7 @@ impl TerminalScreen {
     });
   }
 
-  #[allow(clippy::too_many_arguments)]
+  #[expect(clippy::too_many_arguments, reason = "the screen needs its target, PTY spec and GPUI handles")]
   fn new(
     target: Target,
     workspace: Workspace,

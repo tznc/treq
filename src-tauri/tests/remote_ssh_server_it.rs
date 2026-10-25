@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::string_slice, reason = "test code")]
+#![expect(clippy::expect_used, clippy::string_slice, reason = "test code")]
 //! Real-`sshd` counterpart to `core::remote_ssh_transport`'s `mod tests`.
 //!
 //! Every test in that module runs against an in-process mock
@@ -74,7 +74,7 @@
 //! - `TREQ_SSH_IT_WORKSPACE_DIR`: directory created on the server for PTY
 //!   working-directory tests.
 
-#![allow(
+#![expect(
   clippy::unwrap_used,
   clippy::let_underscore_must_use,
   clippy::print_stderr,
@@ -850,7 +850,7 @@ async fn spawn_ws_to_tcp_bridge(sshd_host: String, sshd_port: u16) -> String {
       };
       let sshd_host = sshd_host.clone();
       tokio::spawn(async move {
-        #[allow(
+        #[expect(
           clippy::result_large_err,
           reason = "the callback signature is fixed by tungstenite's handshake callback"
         )]

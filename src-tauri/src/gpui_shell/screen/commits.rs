@@ -1748,7 +1748,7 @@ impl CommitsView {
 }
 
 impl CommitsView {
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]

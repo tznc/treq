@@ -165,7 +165,7 @@ pub struct ParsedDiff {
 }
 
 /// `parseUnifiedDiff`: `gh pr diff` output as changed files and hunks.
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 pub fn parse_unified_diff(diff: &str) -> ParsedDiff {
   let mut out = ParsedDiff::default();
   let mut file: Option<ChangedFile> = None;

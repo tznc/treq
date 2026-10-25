@@ -910,7 +910,7 @@ impl Sidebar {
   }
 
   /// A square header button with a tooltip below it.
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]
@@ -952,7 +952,7 @@ impl Sidebar {
   }
 
   /// A small action button inside a row, with a tooltip.
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]

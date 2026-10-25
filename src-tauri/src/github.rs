@@ -1012,7 +1012,7 @@ pub struct GhDraftReviewComment {
 
 /// Submit a PR review (`APPROVE`, `REQUEST_CHANGES` or `COMMENT`) with its
 /// inline comments in one REST call.
-#[allow(
+#[expect(
   clippy::too_many_arguments,
   reason = "flat argument list kept to match callers"
 )]
@@ -1307,7 +1307,7 @@ pub fn gh_retarget_open_prs_impl(
     .collect()
 }
 
-#[allow(
+#[expect(
   clippy::too_many_arguments,
   reason = "flat argument list kept to match callers"
 )]

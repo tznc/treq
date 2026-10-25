@@ -133,7 +133,7 @@ where
   }
 }
 
-#[allow(clippy::expect_used, reason = "ring supports the default TLS versions")]
+#[expect(clippy::expect_used, reason = "ring supports the default TLS versions")]
 fn tls_connector() -> Connector {
   // Built explicitly with ring so this does not depend on which rustls
   // crypto provider happens to be installed process-wide.
@@ -198,7 +198,7 @@ mod tests {
     let server = tokio::spawn(async move {
       let (tcp, _) = listener.accept().await.unwrap();
       let mut auth_tx = Some(auth_tx);
-      #[allow(
+      #[expect(
         clippy::result_large_err,
         reason = "the callback signature is fixed by tungstenite's handshake callback"
       )]

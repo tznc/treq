@@ -234,7 +234,7 @@ pub fn detect_binary_in(name: &str, search_path: impl AsRef<OsStr>) -> Option<St
 /// The first file called `name` in a directory of `search_path`, with one of
 /// the `pathext` extensions (`.EXE;.CMD`) added unless `name` has one already.
 /// Windows runs a file by its extension, so `git` finds `git.exe`.
-#[cfg_attr(unix, allow(dead_code, reason = "the Unix lookup checks permissions"))]
+#[cfg_attr(unix, expect(dead_code, reason = "the Unix lookup checks permissions"))]
 fn executable_with_extensions(
   name: &str,
   search_path: &OsStr,

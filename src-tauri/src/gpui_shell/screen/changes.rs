@@ -1894,7 +1894,7 @@ impl ChangesView {
       )
     } else if self.side.get(self.side.len().wrapping_sub(1)) == Some(&SideRow::Empty) {
       // Nothing to scroll: the empty state fills what the rows leave.
-      #[allow(
+      #[expect(
         clippy::needless_collect,
         reason = "the rows borrow self, which side_row needs mutably"
       )]
@@ -2183,7 +2183,7 @@ impl ChangesView {
       .child(div().flex().w_full().child(main).child(menu))
   }
 
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]
@@ -2597,7 +2597,7 @@ impl ChangesView {
     )
   }
 
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]
@@ -3037,7 +3037,7 @@ impl ChangesView {
     .into_any_element()
   }
 
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]

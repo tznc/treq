@@ -238,7 +238,7 @@ pub fn start_agent(
   // Captured while `child` is still unreaped, so the pid cannot have been
   // recycled yet.
   let pid_start = process_start_token(pid);
-  #[allow(
+  #[expect(
     clippy::mem_forget,
     reason = "the agent must outlive this call; its pid is tracked in the record"
   )]
@@ -311,7 +311,7 @@ fn setup_agent_stdin(fifo_path: &Path) -> Result<(fs::File, Option<KeeperPid>), 
     .map_err(|e| format!("filesystem_error: Failed to start stdin keeper: {e}"))?;
   let keeper_pid = keeper.id();
   let keeper_start = process_start_token(keeper_pid);
-  #[allow(
+  #[expect(
     clippy::mem_forget,
     reason = "the keeper must outlive this call; its pid is tracked in the record"
   )]
@@ -650,7 +650,7 @@ mod tests {
       keeper_start: keeper.and_then(|(_, start)| start),
     };
     write_record(repo_path, &record).unwrap();
-    #[allow(
+    #[expect(
       clippy::mem_forget,
       reason = "the test tracks the process by pid in the record, as production does"
     )]

@@ -905,7 +905,7 @@ impl ChangesView {
   }
 
   /// `HunkDiffLine`'s row.
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]
@@ -1114,7 +1114,7 @@ impl ChangesView {
   }
 
   /// What follows a diff line: its comments and the comment box.
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]

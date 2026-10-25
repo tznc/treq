@@ -21,7 +21,7 @@ pub fn mark(step: &str) {
     .ok()
     .and_then(|mut last| last.replace(now))
     .unwrap_or(start);
-  #[allow(clippy::print_stderr, reason = "the trace is its output")]
+  #[expect(clippy::print_stderr, reason = "the trace is its output")]
   {
     eprintln!(
       "[startup] {:>7.1} ms  (+{:>6.1})  {step}",

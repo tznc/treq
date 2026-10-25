@@ -1,4 +1,4 @@
-#![allow(
+#![expect(
   clippy::print_stdout,
   clippy::print_stderr,
   reason = "the CLI writes to the terminal"

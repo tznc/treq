@@ -42,7 +42,7 @@ struct Package {
 }
 
 /// The `dev` or `prod` environment of `package.json`.
-#[allow(
+#[expect(
   clippy::expect_used,
   reason = "package.json is embedded at build time and checked by tests"
 )]
