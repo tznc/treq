@@ -219,6 +219,8 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+pub mod oplog;
 use std::sync::Arc;
 
 use crate::binary_paths;
@@ -2807,7 +2809,11 @@ impl WorkspacePaths {
   }
 
   fn get(&self, workspace_name: &jj_lib::ref_name::WorkspaceName) -> Option<PathBuf> {
-    self.0.get(workspace_name.as_str()).cloned()
+    self.get_by_name(workspace_name.as_str())
+  }
+
+  fn get_by_name(&self, workspace_name: &str) -> Option<PathBuf> {
+    self.0.get(workspace_name).cloned()
   }
 }
 

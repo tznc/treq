@@ -208,7 +208,10 @@ pub fn init_deferring_rebase(repo_path: &str) -> Result<bool, InitError> {
     return Ok(false);
   };
   let repo_path = repo_path.to_string();
-  std::thread::spawn(move || rebase_workspaces(&repo_path, &conflict_style));
+  std::thread::spawn(move || {
+    rebase_workspaces(&repo_path, &conflict_style);
+    prune_operation_log_daily(&repo_path);
+  });
   Ok(true)
 }
 
@@ -308,5 +311,44 @@ fn rebase_workspaces(repo_path: &str, conflict_style: &str) {
     if let Ok(operation_id) = jj::current_operation_id(repo_path) {
       record_rebase_pass(repo_path, operation_id);
     }
+  }
+}
+
+const PRUNE_STAMP: &str = "op-prune-stamp";
+const PRUNE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+static PRUNING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Prunes the jj operation log of `repo_path` when the last attempt, across
+/// windows and launches, is more than a day old. Runs on the caller's
+/// (background) thread; a failure only logs, and the stamp is written first so
+/// a failing repo is retried tomorrow rather than on every launch.
+fn prune_operation_log_daily(repo_path: &str) {
+  let stamp = Path::new(repo_path).join(".treq").join(PRUNE_STAMP);
+  let recent = std::fs::metadata(&stamp)
+    .and_then(|m| m.modified())
+    .ok()
+    .and_then(|modified| modified.elapsed().ok())
+    .is_some_and(|age| age < PRUNE_INTERVAL);
+  if recent {
+    return;
+  }
+  {
+    let Ok(mut running) = PRUNING.lock() else {
+      return;
+    };
+    if running.iter().any(|path| path == repo_path) {
+      return;
+    }
+    running.push(repo_path.to_string());
+  }
+  std::fs::write(&stamp, b"").warn_on_err("write op prune stamp");
+  let cutoff = std::time::SystemTime::now() - jj::oplog::OPERATION_RETENTION;
+  match jj::oplog::prune_operation_log(repo_path, cutoff, jj::oplog::MIN_PRUNABLE_OPERATIONS) {
+    Ok(outcome) => tracing::info!("jj operation log prune for {repo_path}: {outcome:?}"),
+    Err(err) => tracing::warn!("jj operation log prune for {repo_path} failed: {err}"),
+  }
+  if let Ok(mut running) = PRUNING.lock() {
+    running.retain(|path| path != repo_path);
   }
 }
