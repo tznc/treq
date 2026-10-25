@@ -175,7 +175,11 @@ fn undo_commit() {
   let (repo, main) = home_on_feature();
   let tip = change_id(&repo, "@-");
   jj::jj_undo_commit(&repo.repo_path, &main, &tip).expect("undo commit");
-  assert!(assert_git_head_follows_wc_parent(&repo, Some("feature")).is_empty());
+  // The undone commit's file comes back as an uncommitted change.
+  assert_eq!(
+    assert_git_head_follows_wc_parent(&repo, Some("feature")),
+    vec!["f2.txt".to_string()]
+  );
 }
 
 #[test]
