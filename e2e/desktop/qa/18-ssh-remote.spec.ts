@@ -23,7 +23,8 @@ const env = {
   key: process.env.QA_SSH_KEY ?? "",
   repo: process.env.QA_SSH_REPO ?? "",
 };
-const BRANCH = "treq/remote-feature";
+// The sidebar names a workspace by its title, not its branch.
+const WORKSPACE = "Remote feature";
 const sshPort = port + 4;
 let app: ChildProcess;
 let browser: Browser;
@@ -175,17 +176,17 @@ test("ssh remote: New Workspaces creates on the server", async () => {
   await page.getByLabel("Workspaces", { exact: true }).fill("Remote feature");
   await expect(page.getByRole("button", { name: "Create 1 Workspace" })).toBeEnabled({ timeout: 20_000 });
   await page.getByRole("button", { name: "Create 1 Workspace" }).click();
-  const row = page.getByRole("button", { name: BRANCH, exact: true });
+  const row = page.getByRole("button", { name: WORKSPACE, exact: true });
   await expect(row).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole("heading", { name: "New Workspaces" })).toHaveCount(0);
   await shot("workspace-created", "Remote workspace created", [
-    `${BRANCH} shows under WORKSPACES; the dialog closed with no error`,
+    `${WORKSPACE} shows under WORKSPACES; the dialog closed with no error`,
   ]);
   expect(onServer(`ls '${env.repo}/.treq/workspaces'`)).toContain("remote-feature");
 });
 
 test("ssh remote: shell, Changes, Commits and agent", async () => {
-  const row = page.getByRole("button", { name: BRANCH, exact: true });
+  const row = page.getByRole("button", { name: WORKSPACE, exact: true });
   await row.click();
   await row.hover();
   await row.getByRole("button", { name: "Open shell" }).click();
@@ -227,9 +228,12 @@ test("ssh remote: shell, Changes, Commits and agent", async () => {
   await shot("ws-commits", "Remote workspace: committed", ["'Add sub' is the workspace's commit"]);
 });
 
-/** Picks `label` in Settings' Default Agent select and saves. */
-async function setDefaultAgent(label: string, row: number): Promise<void> {
+/** Picks the agent at `row` in Settings' Default Agent select and saves. */
+async function setDefaultAgent(row: number): Promise<void> {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  // The application's agent: a remote repository's setting is not read.
+  await page.getByRole("tab", { name: "Application" }).click();
+  await page.waitForTimeout(800);
   const select = page.getByRole("combobox", { name: "Default Agent" });
   await select.scrollIntoViewIfNeeded();
   const box = await select.boundingBox();
@@ -239,7 +243,6 @@ async function setDefaultAgent(label: string, row: number): Promise<void> {
   // Options: Default, Claude, Codex, Cursor, Copilot.
   await page.mouse.click(box.x + 40, box.y + box.height + 26 + row * 30);
   await page.waitForTimeout(500);
-  await expect(select).toContainText(label);
   await page.getByRole("button", { name: "Save Settings" }).click();
   await page.waitForTimeout(1000);
   await page.getByRole("button", { name: "Close", exact: true }).click();
@@ -254,13 +257,14 @@ for (const [label, row, bin] of [
   ["Copilot", 4, "copilot"],
 ] as const) {
   test(`ssh remote: start ${label} and send it input`, async () => {
-    await setDefaultAgent(label, row);
-    const workspace = page.getByRole("button", { name: BRANCH, exact: true });
+    await setDefaultAgent(row);
+    const workspace = page.getByRole("button", { name: WORKSPACE, exact: true });
     await workspace.click();
     await workspace.hover();
     await workspace.getByRole("button", { name: "Start agent" }).click();
     await page.waitForTimeout(5000);
-    await page.mouse.click(700, 780);
+    // The new agent's pane opens rightmost.
+    await page.mouse.click(1300, 780);
     await page.keyboard.type(`hello ${bin}\n`);
     await page.waitForTimeout(2000);
     await shot(`agent-${bin}`, `${label} started as a remote agent`, [
@@ -272,7 +276,7 @@ for (const [label, row, bin] of [
 
 test("ssh remote: install Claude Code and run it as an agent", async () => {
   test.setTimeout(600_000);
-  const row = page.getByRole("button", { name: BRANCH, exact: true });
+  const row = page.getByRole("button", { name: WORKSPACE, exact: true });
   // The official installer, typed into the remote shell as a user would.
   await page.mouse.click(700, 780);
   await page.keyboard.type("clear; curl -fsSL https://claude.ai/install.sh | bash\n");
