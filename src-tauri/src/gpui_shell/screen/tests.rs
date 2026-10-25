@@ -620,6 +620,11 @@ impl code_data::CodeHost for FakeHost {
     Ok(())
   }
 
+  /// A local host: the file index is in memory, so searches run at once.
+  fn file_search_delay(&self, _: &str) -> std::time::Duration {
+    std::time::Duration::ZERO
+  }
+
   fn warm_file_index(&self, _: &str, workspace_id: Option<i64>, _: &str) {
     self.record(format!("read file index {workspace_id:?}"));
   }
@@ -4051,6 +4056,17 @@ fn clicking_empty_space_blurs_the_focused_input(cx: &mut TestAppContext) {
   // Clicking an input focuses it again.
   h.click("task-input");
   assert!(focused(&mut h));
+}
+
+#[gpui::test]
+fn code_tab_searches_mentions_without_waiting_when_the_host_is_local(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  h.click("task-input");
+  h.cx.simulate_input("look at @log");
+  // No clock advance: a zero `file_search_delay` skips the debounce timer.
+  h.cx.run_until_parked();
+  assert!(h.drawn("task-mention-0"));
+  assert!(host.calls().contains(&r#"read files "log""#.to_string()));
 }
 
 #[gpui::test]
