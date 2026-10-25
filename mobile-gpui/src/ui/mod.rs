@@ -6,6 +6,7 @@
 mod hold;
 mod home;
 mod load;
+mod review;
 mod screens;
 pub mod sheet;
 mod terminal_view;
