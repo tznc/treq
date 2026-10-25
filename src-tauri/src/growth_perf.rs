@@ -34,6 +34,10 @@ fn env_n(k: &str, d: usize) -> usize {
   std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
 }
 
+fn mark(s: &str) {
+  let _ = fs::metadata(format!("/__MARK_{s}"));
+}
+
 fn median(mut v: Vec<f64>) -> f64 {
   v.sort_by(|a, b| a.partial_cmp(b).unwrap());
   v[v.len() / 2]
@@ -87,6 +91,8 @@ fn oplog_grow() {
       let st = t.elapsed().as_secs_f64() * 1e3;
       let git_now: u64 = git_dirs.iter().map(|d| dir_stats(d).0).sum();
       let idx = dir_stats(&Path::new(&repo.repo_path).join(".jj/repo/index"));
+      let objs = dir_stats(&Path::new(&repo.repo_path).join(".git/objects")).1;
+      eprintln!("  loose-ish files in .git/objects: {objs}");
       eprintln!("  git+store grew {} KiB ({} B/op), index {} KiB in {} files", (git_now - before_git) / 1024, (git_now - before_git) / i as u64, idx.0 / 1024, idx.1);
       eprintln!("ops~{i}: op_store {} KiB in {f} files, heads {heads}, snapshot-with-edit p50 {snap:.1} ms, clean read p50 {:.1} ms, list_workspace_statuses {st:.1} ms", b / 1024, median(clean));
     }
@@ -127,14 +133,17 @@ fn many_workspaces() {
   let (b, f) = dir_stats(&Path::new(&repo.repo_path).join(".jj/repo"));
   eprintln!("op/repo store {} KiB in {f} files", b / 1024);
   for round in 0..3 {
+    mark(&format!("list_workspaces_{round}"));
     let t = Instant::now();
     crate::core::list_workspaces(&repo.repo_path).unwrap();
+    mark(&format!("list_statuses_{round}"));
     let a = t.elapsed().as_secs_f64() * 1e3;
     let t = Instant::now();
     crate::core::list_workspace_statuses(&repo.repo_path).unwrap();
     let b = t.elapsed().as_secs_f64() * 1e3;
     eprintln!("round {round}: list_workspaces {a:.1} ms, list_workspace_statuses {b:.1} ms");
   }
+  mark("have_changes");
   let t = Instant::now();
   let all = crate::core::list_workspaces(&repo.repo_path).unwrap();
   let r = crate::core::workspaces_have_changes(&repo.repo_path, &all);
@@ -155,11 +164,15 @@ fn agent_chat_record_cost() {
   let r = &repo.repo_path;
   ac::register_agent_chat(r, 1, "pty", "chat", "claude", None, None).unwrap();
   let mut samples = Vec::new();
-  for i in 0..1500usize {
+  let mut small = String::new();
+  for i in 0..1000usize {
     ac::record_user_message(r, 1, &screen(i), &format!("user message {i}")).unwrap();
     let t = Instant::now();
     ac::record_screen(r, 1, &screen(i + 100_000)).unwrap();
     samples.push(t.elapsed().as_secs_f64() * 1e3);
+    if i == 99 {
+      small = fs::read_to_string(Path::new(r).join(".treq/agent-chats/1.json")).unwrap();
+    }
     if (i + 1) % 300 == 0 || i == 0 {
       let size = fs::metadata(Path::new(r).join(".treq/agent-chats/1.json")).unwrap().len();
       let from = samples.len().saturating_sub(10);
@@ -168,7 +181,7 @@ fn agent_chat_record_cost() {
   }
   // many chat files: the logs explorer's list
   let dir = Path::new(r).join(".treq/agent-chats");
-  let src = fs::read_to_string(dir.join("1.json")).unwrap();
+  let src = small;
   let big_n = env_n("CHATS", 300);
   for id in 2..=big_n {
     fs::write(dir.join(format!("{id}.json")), src.replace("\"session_id\":1", &format!("\"session_id\":{id}"))).unwrap();
@@ -287,4 +300,18 @@ fn ops_per_action() {
   crate::core::workspaces_have_changes(&r, &all);
   report("edit then poll + has_changes", c);
   std::mem::forget(repo);
+}
+
+/// One `list_workspace_statuses` on a repo left by `many_workspaces` (for callgrind:
+/// `--toggle-collect='*probe_statuses_inner*'`).
+#[test]
+#[ignore]
+fn probe_statuses() {
+  let repo = std::env::var("GROWTH_REPO").unwrap();
+  probe_statuses_inner(&repo);
+}
+
+#[inline(never)]
+fn probe_statuses_inner(repo: &str) {
+  crate::core::list_workspace_statuses(repo).unwrap();
 }
