@@ -3,6 +3,7 @@
 //! [`Root`] owns the stack and the app-wide [`AppModel`] (sign-in and
 //! connection state). Screens push and pop pages through [`nav`].
 
+mod delete_account;
 mod hold;
 mod home;
 mod load;
@@ -53,6 +54,8 @@ pub struct AppModel {
   pub user: Option<String>,
   pub auth_busy: bool,
   pub auth_error: Option<String>,
+  /// What Home says after signing out on purpose, such as a deleted account.
+  pub auth_notice: Option<String>,
   /// The machine the screens act on, if any.
   pub connection: Option<Connection>,
   /// Each machine's state this session, by machine id
@@ -364,6 +367,9 @@ impl Root {
   fn handle(&mut self, event: AppEvent, _window: &mut Window, cx: &mut Context<Self>) {
     match event {
       AppEvent::Auth(user) => self.model.update(cx, |m, cx| {
+        if user.is_some() {
+          m.auth_notice = None;
+        }
         m.user = user;
         cx.notify();
       }),
