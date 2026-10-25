@@ -11,7 +11,7 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
-use std::sync::Arc;
+use std::{rc::Rc, sync::Arc};
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{
@@ -19,12 +19,12 @@ use gpui_kit::component::input::{
 };
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, Context, Entity, FocusHandle, KeyDownEvent, ScrollHandle,
-  SharedString, Subscription, Task, Window,
+  self, div, list, prelude::*, px, Context, Entity, FocusHandle, KeyDownEvent, ListOffset,
+  ListSizingBehavior, SharedString, Subscription, Task, Window,
 };
 
 use super::{
-  screen::{ActionSink, ScreenAction},
+  screen::{rows::Rows, ActionSink, ScreenAction},
   theme::{self, Palette},
   ui::{self, TextSize},
 };
@@ -107,6 +107,21 @@ pub(super) enum Body {
 /// `BranchSwitcher`'s groups.
 const BRANCH_GROUPS: [&str; 3] = ["Current Branch", "Local Branches", "Remote Branches"];
 
+/// What the list shows for the body and search, which hovering and
+/// selecting leave as they are.
+struct Listing {
+  entries: Vec<cmdk::Entry>,
+  /// The entries shown for the search, in order.
+  order: Vec<usize>,
+}
+
+/// One row of the virtual list: an entry, or the heading of a group.
+#[derive(Clone, Copy, PartialEq)]
+enum Item {
+  Heading(usize),
+  Entry(usize),
+}
+
 /// The open dialog: its search, selection and what it read.
 pub struct Overlay {
   view: OverlayView,
@@ -121,10 +136,16 @@ pub struct Overlay {
   /// The selected entry (cmdk's `value`), as an index into [`Self::entries`].
   pub(super) selected: Option<usize>,
   pub(super) body: Body,
-  scroll: ScrollHandle,
+  /// The list's rows, of which only those on screen are drawn.
+  items: Rows<Item>,
+  /// Set when the rows no longer stand for the same entries, so none keeps
+  /// the height it measured.
+  items_changed: bool,
   /// Where each entry's row (and, for the first of a group, its heading) sit
-  /// among the list's children, from the last render.
+  /// among the list's items, from the last render.
   rows: Vec<(usize, usize)>,
+  /// [`Self::listing`], until the body or the search changes.
+  listing: Option<Rc<Listing>>,
   _load: Option<Task<()>>,
 }
 
@@ -161,8 +182,10 @@ impl Overlay {
       search: String::new(),
       selected: None,
       body,
-      scroll: ScrollHandle::new(),
+      items: Rows::default(),
+      items_changed: false,
       rows: Vec::new(),
+      listing: None,
       _load: None,
     };
     this.load(cx);
@@ -243,6 +266,7 @@ impl Overlay {
           this
             .update(cx, |this, cx| {
               this.body = Body::Workspaces(Some(rows));
+              this.changed();
               this.select_first();
               cx.notify();
             })
@@ -255,6 +279,7 @@ impl Overlay {
           error: None,
           switching: false,
         };
+        self.changed();
         self._load = Some(cx.spawn(async move |this, cx| {
           let read = cx
             .background_spawn(async move { host.branches(&repo_path) })
@@ -273,6 +298,7 @@ impl Overlay {
                   switching: false,
                 },
               };
+              this.changed();
               this.select_first();
               cx.notify();
             })
@@ -298,6 +324,7 @@ impl Overlay {
       *commands = palette::commands(route, checks.as_ref(), pr.as_ref());
       self.selected = selected.and_then(|id| commands.iter().position(|c| c.id == id));
     }
+    self.changed();
     if self.selected.is_none() {
       self.select_first();
     }
@@ -356,29 +383,52 @@ impl Overlay {
     cmdk::visible(&self.entries(), &self.search)
   }
 
-  fn select_first(&mut self) {
+  /// What the body or the search changed: the entries and their order are
+  /// made again, and the rows measured again.
+  fn changed(&mut self) {
+    self.listing = None;
+    self.items_changed = true;
+  }
+
+  /// The entries and their order for the search, made once until they change
+  /// rather than for every frame a hover draws.
+  fn listing(&mut self) -> Rc<Listing> {
+    if let Some(listing) = &self.listing {
+      return listing.clone();
+    }
     let entries = self.entries();
-    self.selected = cmdk::first(&entries, &cmdk::visible(&entries, &self.search));
+    let order = cmdk::visible(&entries, &self.search);
+    let listing = Rc::new(Listing { entries, order });
+    self.listing = Some(listing.clone());
+    listing
+  }
+
+  fn select_first(&mut self) {
+    let listing = self.listing();
+    self.selected = cmdk::first(&listing.entries, &listing.order);
   }
 
   pub(super) fn set_search(&mut self, search: String, cx: &mut Context<Self>) {
     if self.search != search {
       self.search = search;
+      self.changed();
       self.select_first();
-      self.scroll.set_offset(gpui::point(px(0.), px(0.)));
+      self.items.list.scroll_to(ListOffset {
+        item_ix: 0,
+        offset_in_item: px(0.),
+      });
       cx.notify();
     }
   }
 
   /// Moves the selection as cmdk does for a key, and scrolls it into view.
   pub(super) fn step(&mut self, step: cmdk::Move, cx: &mut Context<Self>) {
-    let entries = self.entries();
-    let order = cmdk::visible(&entries, &self.search);
-    let next = cmdk::moved(&entries, &order, self.selected, step);
+    let listing = self.listing();
+    let next = cmdk::moved(&listing.entries, &listing.order, self.selected, step);
     if next != self.selected {
       self.selected = next;
-      if let Some(&(_, child)) = next.and_then(|n| self.rows.iter().find(|(e, _)| *e == n)) {
-        self.scroll.scroll_to_item(child);
+      if let Some(&(_, item)) = next.and_then(|n| self.rows.iter().find(|(e, _)| *e == n)) {
+        self.items.list.scroll_to_reveal_item(item);
       }
       cx.notify();
     }
@@ -479,6 +529,7 @@ impl Overlay {
       *switching = on;
       *error = failed;
     }
+    self.changed();
     if let Some(input) = &self.input {
       input.update(cx, |input, cx| input.set_disabled(on, cx));
     }
@@ -742,10 +793,9 @@ impl Overlay {
     }
   }
 
-  /// The `Command.List`'s children: rows, group headings and messages.
-  fn list(&mut self, p: &Palette, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
-    let entries = self.entries();
-    let order = cmdk::visible(&entries, &self.search);
+  /// The `Command.List`'s messages, which sit above its rows.
+  fn messages(&mut self, p: &Palette) -> Vec<gpui::AnyElement> {
+    let listing = self.listing();
     let mut children: Vec<gpui::AnyElement> = Vec::new();
     let empty = |p: &Palette, text| message(p, text).into_any_element();
     if let Body::Branches {
@@ -770,7 +820,7 @@ impl Overlay {
       }
     }
     let loaded = !matches!(self.body, Body::Workspaces(None));
-    if order.is_empty() && loaded {
+    if listing.order.is_empty() && loaded {
       children.push(empty(
         p,
         match self.body {
@@ -780,44 +830,60 @@ impl Overlay {
         },
       ));
     }
+    children
+  }
+
+  /// The `Command.List`'s rows and group headings, as a virtual list that
+  /// draws only those on screen.
+  fn list(&mut self, window: &Window, cx: &mut Context<Self>) -> gpui::List {
+    let listing = self.listing();
+    let mut items = Vec::new();
     self.rows.clear();
     let mut group = None;
-    for index in order {
-      let entry = &entries[index];
+    for &index in &listing.order {
+      let entry = &listing.entries[index];
       if entry.group != group {
         group = entry.group;
         if let Some(g) = group {
-          self.rows.push((index, children.len()));
-          children.push(
-            ui::text(div(), TextSize::Xs)
-              .px_3()
-              .py_2()
-              .mt_2()
-              .font_weight(gpui::FontWeight::SEMIBOLD)
-              .text_color(p.muted_foreground)
-              .child(BRANCH_GROUPS[g].to_uppercase())
-              .into_any_element(),
-          );
-          let selected = self.selected == Some(index);
-          children.push(
-            self
-              .row(p, index, selected, cx)
-              .test_support()
-              .into_any_element(),
-          );
+          self.rows.push((index, items.len()));
+          items.push(Item::Heading(g));
+          items.push(Item::Entry(index));
           continue;
         }
       }
-      self.rows.push((index, children.len()));
-      let selected = self.selected == Some(index);
-      children.push(
-        self
-          .row(p, index, selected, cx)
-          .test_support()
-          .into_any_element(),
-      );
+      self.rows.push((index, items.len()));
+      items.push(Item::Entry(index));
     }
-    children
+    let changed = std::mem::take(&mut self.items_changed);
+    self.items.sync(window, items, |a, b| !changed && a == b);
+    list(
+      self.items.list.clone(),
+      cx.processor(|this, ix, _, cx| this.item(ix, cx)),
+    )
+    .with_sizing_behavior(ListSizingBehavior::Infer)
+  }
+
+  /// The list's row `ix`.
+  fn item(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
+    let p = theme::palette(self.dark);
+    match self.items.get(ix).copied() {
+      Some(Item::Heading(g)) => ui::text(div(), TextSize::Xs)
+        .px_3()
+        .py_2()
+        .mt_2()
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(p.muted_foreground)
+        .child(BRANCH_GROUPS[g].to_uppercase())
+        .into_any_element(),
+      Some(Item::Entry(index)) => {
+        let selected = self.selected == Some(index);
+        self
+          .row(&p, index, selected, cx)
+          .test_support()
+          .into_any_element()
+      }
+      None => div().into_any_element(),
+    }
   }
 }
 
@@ -853,7 +919,8 @@ impl Render for Overlay {
           ..
         }
       );
-      let list = self.list(&p, cx);
+      let messages = self.messages(&p);
+      let list = self.list(window, cx);
       let (hints, right): (&[(&str, &str)], _) = match self.body {
         Body::Branches { .. } => (
           &[("↑↓", "Navigate"), ("↵", "Switch"), ("Esc", "Close")],
@@ -914,10 +981,11 @@ impl Render for Overlay {
               div()
                 .id("overlay-list")
                 .max_h(zpx(if palette { 300. } else { 400. }))
-                .overflow_y_scroll()
-                .track_scroll(&self.scroll)
+                .flex()
+                .flex_col()
                 .py_2()
-                .children(list),
+                .children(messages)
+                .child(list.flex_1().min_h_0()),
             )
             .child(footer(&p, hints, right)),
         )
