@@ -14,7 +14,6 @@ fn row(id: i64, title: &str, depth: u32) -> SidebarRow {
     conflicted: false,
     status: None,
     pr: None,
-    queue: None,
     archiving: false,
     exiting: false,
   }
@@ -176,7 +175,7 @@ fn parses_snapshot_from_react() {
       "workspaces": [
         {"id": 7, "title": "feat-a", "depth": 1, "selected": true,
          "conflicted": true, "status": {"color": "yellow", "spin": true},
-         "pr": "draft", "queue": "testing", "archiving": false, "exiting": false},
+         "pr": "draft", "archiving": false, "exiting": false},
         {"id": 8, "title": "feat-b", "depth": 2, "selected": false,
          "status": null, "pr": null}
       ]
@@ -198,10 +197,9 @@ fn parses_snapshot_from_react() {
   );
   assert!(rows[0].conflicted);
   assert_eq!(rows[0].pr, Some(PrState::Draft));
-  assert_eq!(rows[0].queue.as_deref(), Some("testing"));
   assert_eq!(rows[0].name, None, "rows from before titles have none");
   // Optional row fields default when React leaves them out.
-  assert!(!rows[1].conflicted && !rows[1].archiving && rows[1].queue.is_none());
+  assert!(!rows[1].conflicted && !rows[1].archiving);
 }
 
 #[test]
@@ -263,16 +261,6 @@ fn indents_rows_like_the_react_sidebar() {
   assert_eq!(row_indent(3), 28.);
   assert_eq!(guide_left(2), 8.);
   assert_eq!(guide_left(4), 20.);
-}
-
-#[test]
-fn labels_merge_queue_states_like_the_react_sidebar() {
-  let palette = theme::palette(false);
-  assert_eq!(queue_dot("queued", &palette).2, "In merge queue");
-  assert!(queue_dot("testing", &palette).1);
-  assert!(queue_dot("merging", &palette).1);
-  assert_eq!(queue_dot("failed", &palette).2, "Failed in merge queue");
-  assert_eq!(queue_dot("dequeued", &palette).2, "dequeued");
 }
 
 #[gpui::test]
@@ -463,18 +451,15 @@ fn archiving_workspace_ignores_clicks(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn shows_status_and_queue_dots(cx: &mut TestAppContext) {
+fn shows_status_dots(cx: &mut TestAppContext) {
   let mut dirty = row(7, "feat-a", 0);
   dirty.status = Some(RowStatus {
     color: StatusColor::Yellow,
     spin: false,
   });
-  dirty.queue = Some("queued".into());
   let mut h = Harness::new(cx, snapshot(vec![dirty, row(8, "clean", 0)]));
   assert!(h.bounds("status-7").is_some());
-  assert!(h.bounds("queue-7").is_some());
   assert!(h.bounds("status-8").is_none());
-  assert!(h.bounds("queue-8").is_none());
 }
 
 #[gpui::test]

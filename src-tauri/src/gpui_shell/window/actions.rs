@@ -336,7 +336,7 @@ impl Model {
         github.tab = match arg {
           "issues" => GithubTab::Issues,
           "prs" => GithubTab::Prs,
-          // The merge queue tab is behind its feature flag.
+          // Any other tab name is ignored.
           _ => return done(),
         };
         github.filter = "open".into();

@@ -124,8 +124,6 @@ fn view(model: &Model, data: &Data) -> Value {
         "filter": github.filter,
         "selected": github.selected,
         "creating": github.creating,
-        // The `mergeQueue` feature flag is off.
-        "mergeQueue": null,
         "runningChecks": [],
       }),
     },
@@ -181,7 +179,6 @@ fn workspace_view(model: &Model, data: &Data) -> Value {
     "runningChecks": [],
     "runningWorkflows": [],
     "setupRerunning": false,
-    "mergeQueue": null,
     "revision": data.revision,
     "scrollToCommit": view.scroll_to_commit.as_ref().filter(|_| view.tab == Tab::Commits),
     "showCommitted": committed_toggle.then_some(view.show_committed),

@@ -12602,7 +12602,6 @@ dependencies = [
  "clap",
  "criterion",
  "emojis",
- "flate2",
  "futures",
  "getrandom 0.4.3",
  "gix",

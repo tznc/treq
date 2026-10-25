@@ -3,9 +3,6 @@
 // its checks popover and its review screen, and the new-PR form; then the
 // Linear view with no API key.
 //
-// The Merge Queue tab never shows: the GPUI window's route sets
-// `mergeQueue` to null (window/snapshots.rs, the feature flag is off).
-//
 // List rows and the view's own tabs are not observable; they are clicked
 // at their place in the 1400x900 window.
 import { expect, test, type Page } from "@playwright/test";

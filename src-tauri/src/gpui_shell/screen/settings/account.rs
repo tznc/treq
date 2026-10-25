@@ -297,12 +297,6 @@ struct Linear {
   saving: bool,
 }
 
-impl AccountRoute {
-  pub fn is_pro(&self) -> bool {
-    is_pro(self.subscription.as_ref())
-  }
-}
-
 /// `isProSubscription`: statuses that still carry Pro.
 fn is_pro(subscription: Option<&Subscription>) -> bool {
   subscription.is_some_and(|s| {

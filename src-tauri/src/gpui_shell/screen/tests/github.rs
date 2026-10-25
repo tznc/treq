@@ -311,7 +311,6 @@ fn route(tab: &str, selected: Option<u64>, creating: bool) -> ScreenSnapshot {
     "filter": "open",
     "selected": selected,
     "creating": creating,
-    "mergeQueue": {"pro": false},
     "runningChecks": [],
   }))
   .expect("route")
@@ -405,7 +404,6 @@ fn github_lists_issues_and_hands_moves_to_react(cx: &mut TestAppContext) {
   h.click("github-issue-2");
   h.click("github-filter-closed");
   h.click("github-tab-prs");
-  h.click("github-tab-merge-queue");
   h.click("github-new");
   assert_eq!(
     h.sent(),
@@ -413,7 +411,6 @@ fn github_lists_issues_and_hands_moves_to_react(cx: &mut TestAppContext) {
       press("github.select:2"),
       press("github.filter:closed"),
       press("github.tab:prs"),
-      press("github.tab:merge-queue"),
       press("github.new"),
     ]
   );

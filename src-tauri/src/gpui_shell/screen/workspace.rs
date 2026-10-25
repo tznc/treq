@@ -106,7 +106,6 @@ pub struct Header {
   pub status_loading: bool,
   pub sync: Option<Sync>,
   pub checks: Option<Checks>,
-  pub merge_queue: Option<MergeQueue>,
   pub merge: Option<Merge>,
   pub details: bool,
   pub more: Option<Disabled>,
@@ -204,14 +203,6 @@ pub struct Checks {
   pub count: String,
   /// The accessible name, naming each source ("Checks: Treq 3/3, GitHub 4/4").
   pub name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct MergeQueue {
-  pub label: String,
-  pub secondary: bool,
-  pub disabled: bool,
-  pub tooltip: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -1394,26 +1385,6 @@ impl WorkspaceView {
     }
     if let Some(sync) = &h.sync {
       right = right.child(self.sync(sync, p, cx));
-    }
-    if let Some(queue) = &h.merge_queue {
-      let button = Button::new("workspace-merge-queue", p)
-        .variant(if queue.secondary {
-          Variant::Secondary
-        } else {
-          Variant::Outline
-        })
-        .size(Size::Sm)
-        .gap_1()
-        .disabled(queue.disabled)
-        .icon(theme::ICON_MERGE, 16.)
-        .label(queue.label.clone())
-        .on_click(self.press("workspace.mergeQueue"));
-      right = right.child(self.with_tooltip(
-        "workspace-merge-queue",
-        Some(TooltipContent::Text(queue.tooltip.clone().into())),
-        button,
-        cx,
-      ));
     }
     if let Some(merge) = &h.merge {
       let green = ui::Tone::Success.color(p);

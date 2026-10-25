@@ -157,7 +157,6 @@ pub enum ToastTone {
   Success,
   Warning,
   Error,
-  Info,
 }
 
 fn package_json() -> serde_json::Value {

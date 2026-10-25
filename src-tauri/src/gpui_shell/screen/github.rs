@@ -5,8 +5,8 @@
 //! (see [`github_data`]). React keeps the place in the URL, so moving
 //! around (a tab, a state filter, an item, the create form, leaving for a
 //! workspace or the PR review) is handed back as a `github.*` press and
-//! comes back as the next [`Route`]. The Merge Queue tab and the PR review
-//! page are still React's: GPUI hands their routes back and React draws them.
+//! comes back as the next [`Route`]. The PR review page is drawn by its
+//! own view: GPUI hands its route back.
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
@@ -1174,32 +1174,20 @@ impl GithubView {
 
   fn view_tabs(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let view = cx.weak_entity();
-    let merge_queue = self.route.merge_queue.as_ref();
     let selected = match self.route.tab {
       Tab::Issues => 0,
       Tab::Prs => 1,
     };
-    let mut tabs = vec![
+    let tabs = vec![
       ui::Tab::new("github-tab-issues", "Issues"),
       ui::Tab::new("github-tab-prs", "Pull Requests"),
     ];
-    if merge_queue.is_some() {
-      let mut tab = ui::Tab::new("github-tab-merge-queue", "Merge Queue");
-      if merge_queue.is_some_and(|mq| !mq.pro) {
-        tab = tab.badge("PRO", ui::Tone::Neutral);
-      }
-      tabs.push(tab);
-    }
     div().flex().items_center().gap_2().child(
       ui::Tabs::new("github-tabs", p)
         .tabs(tabs)
         .selected(selected)
         .on_select(move |ix, _, cx| {
-          let press = [
-            "github.tab:issues",
-            "github.tab:prs",
-            "github.tab:merge-queue",
-          ][ix];
+          let press = ["github.tab:issues", "github.tab:prs"][ix];
           view.update(cx, |view, cx| view.press(press, cx)).ok();
         }),
     )
