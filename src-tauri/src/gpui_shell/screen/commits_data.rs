@@ -584,7 +584,7 @@ impl Default for ShiftForm {
 
 impl ShiftForm {
   /// The shift to apply, or `None` while the form can't be submitted.
-  #[allow(clippy::expect_used, reason = "constant pattern")]
+  #[expect(clippy::expect_used, reason = "constant pattern")]
   pub fn shift(&self) -> Option<TimeShift> {
     if self.to_day {
       static DAY: LazyLock<Regex> =

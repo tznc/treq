@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 import BrowserOnly from "@docusaurus/BrowserOnly";
 
 /** Permanent redirect from /login to /sign-in (preserves query string). */

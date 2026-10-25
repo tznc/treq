@@ -279,7 +279,7 @@ impl ChangesView {
     })
   }
 
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]
@@ -370,7 +370,7 @@ impl ChangesView {
   }
 
   /// `GithubCommentCard`.
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]
@@ -470,7 +470,7 @@ impl ChangesView {
   }
 
   /// `GithubCommentBody`: author, date and text, with a Quote button.
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]

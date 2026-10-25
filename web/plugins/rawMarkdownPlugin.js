@@ -7,6 +7,10 @@ const CONTENT_SOURCES = [
   {contentPath: 'learn', routeBasePath: 'learn'},
 ];
 
+/**
+ * @param {string} raw
+ * @returns {string}
+ */
 function normalizeMarkdown(raw) {
   return raw
     .replace(/^---[\s\S]*?---\n?/, '')
@@ -17,6 +21,14 @@ function normalizeMarkdown(raw) {
     .trim();
 }
 
+/** @typedef {{contentPath: string, routeBasePath: string}} ContentSource */
+/** @typedef {{sourcePath: string, outputPath: string, content: string}} MarkdownPage */
+
+/**
+ * @param {ContentSource} source
+ * @param {string} relativePath
+ * @returns {string}
+ */
 function markdownOutputPath({contentPath, routeBasePath}, relativePath) {
   const parsed = path.parse(relativePath);
   const withoutExtension = path.posix.join(parsed.dir, parsed.name);
@@ -25,13 +37,20 @@ function markdownOutputPath({contentPath, routeBasePath}, relativePath) {
   return `${path.posix.join(...outputSegments)}.md`;
 }
 
+/**
+ * @param {string} siteDir
+ * @param {ContentSource[]} [sources]
+ * @returns {MarkdownPage[]}
+ */
 function collectMarkdownPages(siteDir, sources = CONTENT_SOURCES) {
+  /** @type {MarkdownPage[]} */
   const pages = [];
 
   for (const source of sources) {
     const rootDir = path.join(siteDir, source.contentPath);
     if (!fs.existsSync(rootDir)) continue;
 
+    /** @param {string} dir */
     function processDir(dir) {
       const entries = fs.readdirSync(dir, {withFileTypes: true});
       for (const entry of entries) {
@@ -59,7 +78,10 @@ function collectMarkdownPages(siteDir, sources = CONTENT_SOURCES) {
   return pages;
 }
 
-/** @type {import('@docusaurus/types').PluginModule} */
+/**
+ * @param {import('@docusaurus/types').LoadContext} context
+ * @returns {import('@docusaurus/types').Plugin<MarkdownPage[]>}
+ */
 function rawMarkdownPlugin(context) {
   return {
     name: 'raw-markdown-plugin',

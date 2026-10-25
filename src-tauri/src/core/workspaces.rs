@@ -787,7 +787,7 @@ pub fn validate_branch_name(name: &str) -> Result<(), String> {
 /// `symlinked_dirs` are paths relative to the repo root (e.g. `node_modules`). Each
 /// existing path is linked into the new workspace instead of being copied, so large
 /// dependency trees are shared with the home working copy.
-#[allow(
+#[expect(
   clippy::too_many_arguments,
   reason = "flat argument list kept to match callers"
 )]
@@ -3426,7 +3426,7 @@ pub fn sync_after_remote_merge(
 
 /// Merge the workspace's PR on GitHub, then sync the target branch and the
 /// stack locally. Nothing local changes when GitHub refuses the merge.
-#[allow(
+#[expect(
   clippy::too_many_arguments,
   reason = "flat argument list kept to match callers"
 )]

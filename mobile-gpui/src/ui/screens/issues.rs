@@ -2,7 +2,6 @@
 //! what's loaded, and the sheet that writes one. GitHub is reached with the
 //! host's `gh`, so the host's sign-in is the one used.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui_kit::component::Disableable as _;
@@ -22,11 +21,11 @@ use treq_lib::{
 };
 use treq_ui::{Dot, Tone};
 
-use super::{issue, mutation_message, on_epoch, workspaces::repo_name};
+use super::{issue, mutation_message, on_epoch};
 use crate::{
   errors,
   remote::{self, IdempotencyKeys, Mutation},
-  ui::{load, nav, sheet, widgets, Load, Location},
+  ui::{load, sheet, widgets, Load},
 };
 
 /// `gh issue close --reason` values with their action labels, as the
@@ -138,32 +137,6 @@ fn list_request(repo: &str, state: Filter, after: Option<String>) -> TreqCommand
 /// What an issue page calls after it changed an issue.
 pub type OnChanged = Rc<dyn Fn(&mut App)>;
 
-pub fn open(repo: String, cx: &mut App) {
-  let screen: Rc<RefCell<Option<WeakEntity<IssuesScreen>>>> = Default::default();
-  let menu_screen = screen.clone();
-  nav::push_with(
-    format!("Issues · {}", repo_name(&repo)),
-    nav::Header {
-      on_title: None,
-      more: Some(Rc::new(move |_, cx| {
-        if let Some(screen) = menu_screen.borrow().as_ref() {
-          screen.update(cx, |screen, cx| screen.menu(cx)).ok();
-        }
-      })),
-    },
-    Location {
-      repo: Some(repo.clone()),
-      workspace: None,
-    },
-    cx,
-    move |window, cx| {
-      let entity = cx.new(|cx| IssuesScreen::new(repo, window, cx));
-      *screen.borrow_mut() = Some(entity.downgrade());
-      entity
-    },
-  );
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Filter {
   Open,
@@ -209,7 +182,7 @@ pub struct IssuesScreen {
 }
 
 impl IssuesScreen {
-  fn new(repo: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+  pub(super) fn new(repo: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
     on_epoch(cx, |this, cx| this.reload(cx));
     let query = cx.new(|cx| InputState::new(window, cx).placeholder("Search loaded issues"));
     cx.subscribe(&query, |_, _, event: &InputEvent, cx| {
@@ -323,7 +296,7 @@ impl IssuesScreen {
     cx.notify();
   }
 
-  fn menu(&mut self, cx: &mut Context<Self>) {
+  pub(super) fn menu(&mut self, cx: &mut Context<Self>) {
     let this = cx.weak_entity();
     let new = this.clone();
     sheet::menu(

@@ -8,7 +8,13 @@
 )]
 
 // The app side of dispatch (listener, responses) is unused by the headless CLI.
-#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+#[cfg_attr(
+  not(feature = "gui"),
+  expect(
+    dead_code,
+    reason = "the headless CLI does not use the app side of dispatch"
+  )
+)]
 mod agent_dispatch;
 #[cfg(feature = "gui")]
 mod agent_runtime;
@@ -89,7 +95,6 @@ extern crate self as treq_lib;
 
 /// The real-repository fixture the integration tests use (`tests/common`).
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "test fixture")]
 mod test_repo;
 
 #[cfg(feature = "gui")]
@@ -534,11 +539,11 @@ where
 
 #[cfg(feature = "gui")]
 #[cfg_attr(all(mobile, not(feature = "embed")), tauri::mobile_entry_point)]
-#[allow(
+#[expect(
   clippy::exit,
   reason = "a CLI invocation hands its exit code to the shell, and `tauri::generate_context!` expands to an exit"
 )]
-#[allow(
+#[expect(
   clippy::expect_used,
   reason = "a Tauri build failure at startup is unrecoverable"
 )]
@@ -1129,7 +1134,7 @@ pub fn run() {
 
 /// Without the desktop app, `treq` is only the command-line interface.
 #[cfg(not(feature = "gui"))]
-#[allow(clippy::exit, reason = "the CLI hands its exit code to the shell")]
+#[expect(clippy::exit, reason = "the CLI hands its exit code to the shell")]
 pub fn run() {
   telemetry::install_panic_hook();
   let code = cli::args::run(std::env::args_os());

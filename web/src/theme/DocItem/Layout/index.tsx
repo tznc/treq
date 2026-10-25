@@ -1,4 +1,4 @@
-import React from 'react';
+import type React from 'react';
 import DocItemLayout from '@theme-original/DocItem/Layout';
 import type {Props} from '@theme/DocItem/Layout';
 import Head from '@docusaurus/Head';

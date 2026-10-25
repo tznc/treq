@@ -487,11 +487,11 @@ pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
 pub use crate::core::new_workspaces::apply_branch_name_pattern;
 
 /// `taskBranchSlug`: lowercase ASCII words joined by `-`, cut on a word.
-#[allow(
+#[expect(
   clippy::string_slice,
   reason = "the slug holds only [a-z0-9-], so every byte is a char boundary"
 )]
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 fn task_branch_slug(prompt: &str) -> String {
   const MAX: usize = 48;
   static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new("[a-z0-9]+").expect("regex"));
@@ -540,7 +540,7 @@ pub fn replace_range(text: &str, start: usize, end: usize, insertion: &str) -> S
 
 /// The `@` being typed before `cursor` (a byte offset): its offset and the
 /// query after it, if it starts the text or follows whitespace.
-#[allow(
+#[expect(
   clippy::string_slice,
   reason = "offsets come from char_indices() and a checked get(..cursor)"
 )]
@@ -581,7 +581,7 @@ pub fn insert_at(text: &str, cursor: usize, insertion: &str) -> (String, usize) 
 /// `looksLikeMarkdown`: block syntax at a line start, or inline emphasis,
 /// code or a link.
 pub fn looks_like_markdown(text: &str) -> bool {
-  #[allow(clippy::expect_used, reason = "constant patterns")]
+  #[expect(clippy::expect_used, reason = "constant patterns")]
   static PATTERNS: LazyLock<RegexSet> = LazyLock::new(|| {
     RegexSet::new([
       r"(?m)^#{1,6}\s",
@@ -602,7 +602,7 @@ pub fn looks_like_markdown(text: &str) -> bool {
 /// GitHub emoji shortcodes (`:robot:`) as emoji, outside code. Unknown
 /// shortcodes stay as typed.
 pub fn emojify(text: &str) -> String {
-  #[allow(clippy::expect_used, reason = "constant pattern")]
+  #[expect(clippy::expect_used, reason = "constant pattern")]
   static SHORTCODE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r":([a-z0-9_+-]+):").expect("regex"));
   let mut fenced = false;

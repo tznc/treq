@@ -441,7 +441,7 @@ impl IdempotencyStore {
   /// result or a verification-confirmed "already applied" outcome),
   /// `Ok(None)` when the caller should now execute the mutation, and
   /// `Err` for a conflict or an unresolved ambiguity.
-  #[allow(
+  #[expect(
     clippy::expect_used,
     reason = "`recover` is taken once and a resolved claim is never Stale again"
   )]

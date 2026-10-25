@@ -1,8 +1,7 @@
-#![allow(
+#![expect(
   clippy::unwrap_used,
   clippy::let_underscore_must_use,
   clippy::expect_used,
-  clippy::string_slice,
   reason = "test code"
 )]
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};

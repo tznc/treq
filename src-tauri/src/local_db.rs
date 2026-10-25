@@ -1306,7 +1306,7 @@ pub fn add_workspace(
 /// [`add_workspace`] that also sets what a creation knows (whether the branch
 /// is missing on the remote, the target branch) in the same transaction, and
 /// returns the row. Each separate write is a commit with its own fsyncs.
-#[allow(
+#[expect(
   clippy::too_many_arguments,
   reason = "the columns of one insert, as add_workspace takes them"
 )]
@@ -2360,7 +2360,7 @@ fn agent_review_comment_from_row(row: &Row<'_>) -> rusqlite::Result<AgentReviewC
 }
 
 /// Insert one local review comment. Returns the stored row.
-#[allow(
+#[expect(
   clippy::too_many_arguments,
   reason = "flat argument list kept to match callers"
 )]
@@ -2591,7 +2591,7 @@ pub fn get_prompt_history_page(
 }
 
 /// Persist a newly created stash entry.
-#[allow(
+#[expect(
   clippy::too_many_arguments,
   reason = "flat argument list kept to match callers"
 )]
@@ -5052,7 +5052,7 @@ pub fn create_workflow_run(
   Ok(conn.last_insert_rowid())
 }
 
-#[allow(
+#[expect(
   clippy::too_many_arguments,
   reason = "flat argument list kept to match callers"
 )]

@@ -268,7 +268,7 @@ impl RemotePtyManager {
   /// background task with each output chunk (never logged by this module);
   /// `on_exit` is invoked exactly once when the remote process/channel ends,
   /// with the exit status if one was observed.
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]
@@ -296,7 +296,7 @@ impl RemotePtyManager {
   /// here. Never accepts a frontend-supplied raw string directly: callers
   /// must obtain `command` from a `TreqCommandRequest::PtyAttachCommand`
   /// round trip, not construct it themselves.
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]

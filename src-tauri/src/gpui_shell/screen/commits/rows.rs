@@ -657,7 +657,7 @@ impl CommitsView {
 
   /// `HunkView`'s line: its numbers, the comment button, the sign and the
   /// highlighted text.
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "the row needs its commit, file, hunk and position"
   )]

@@ -637,7 +637,7 @@ impl RemoteView {
     let hostname = form.hostname.read(cx).value().trim().to_string();
     let display = form.display_name.read(cx).value().trim().to_string();
     let alias = form.alias.read(cx).value().trim().to_string();
-    #[allow(
+    #[expect(
       clippy::redundant_clone,
       reason = "`hostname` is read again below; json! hides the use"
     )]

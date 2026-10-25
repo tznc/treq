@@ -562,7 +562,7 @@ pub fn shell_pty_id(dir: &str, millis: u128) -> String {
 /// `consumePtyEcho`: drops the echo of what the user typed from an output
 /// chunk, so local echo isn't taken for the process working. Returns the
 /// echo still pending and the output the process wrote.
-#[allow(
+#[expect(
   clippy::string_slice,
   reason = "offsets are char_indices() positions plus char lengths"
 )]

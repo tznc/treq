@@ -72,7 +72,7 @@ impl Utf8StreamDecoder {
 }
 
 /// Strip ANSI escape sequences from a string.
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 pub fn strip_ansi_codes(s: &str) -> String {
   // Match CSI sequences (including private modes like ?1h), OSC sequences, and charset designations
   static ANSI_RE: OnceLock<Regex> = OnceLock::new();
@@ -375,7 +375,7 @@ pub struct PtyManager {
 }
 
 impl PtyManager {
-  #[allow(
+  #[expect(
     clippy::new_without_default,
     reason = "constructed once at startup; a Default impl would add nothing"
   )]
@@ -387,7 +387,7 @@ impl PtyManager {
     }
   }
 
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]
@@ -424,7 +424,7 @@ impl PtyManager {
     result
   }
 
-  #[allow(
+  #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"
   )]
@@ -740,7 +740,7 @@ impl PtyManager {
   pub fn close_all_for_window(&self, window_label: &str) {
     let drained: Vec<PtySession> = {
       let mut sessions = self.sessions.lock_or_recover();
-      #[allow(
+      #[expect(
         clippy::needless_collect,
         reason = "ends the shared borrow before removing"
       )]

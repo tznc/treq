@@ -413,7 +413,7 @@ mod tests {
     let mut perms = fs::metadata(&cwd_path).expect("metadata").permissions();
     // Restore write access so the tempdir can clean itself up; this is test
     // teardown, not a security-relevant permission change.
-    #[allow(
+    #[expect(
       clippy::permissions_set_readonly_false,
       reason = "test teardown restores write access so the tempdir can clean up"
     )]
