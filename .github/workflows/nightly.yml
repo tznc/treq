@@ -179,6 +179,9 @@ jobs:
     if: needs.check.outputs.should_run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    # The signing secrets live in the prod environment, as for the desktop
+    # release job.
+    environment: prod
     env:
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_RELEASE_LTO: "thin"
@@ -282,6 +285,9 @@ jobs:
     if: needs.check.outputs.should_run == 'true'
     runs-on: macos-15
     timeout-minutes: 90
+    # The signing secrets live in the prod environment, as for the desktop
+    # release job.
+    environment: prod
     env:
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_RELEASE_LTO: "thin"
@@ -326,6 +332,8 @@ jobs:
         env:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # An empty team fails `ios init`; unset it for the unsigned build.
+          [ -n "$APPLE_DEVELOPMENT_TEAM" ] || unset APPLE_DEVELOPMENT_TEAM
           command -v xcodegen >/dev/null || brew install xcodegen
           npm install --no-audit --no-fund
           npm run tauri -- ios init --ci
