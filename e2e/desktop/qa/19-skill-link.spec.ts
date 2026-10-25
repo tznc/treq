@@ -111,6 +111,20 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
       "Registry skills that are not installed follow with no label and an Install… button",
     ],
   });
+  mark("The install level select on an installed skill, open");
+  const level = page.getByRole("combobox", { name: "Install level" }).first();
+  await level.click();
+  await settle(page, 1200);
+  await capture(page, {
+    name: "19-skill-link-level-open",
+    title: "The install level dropdown, open",
+    expectations: [
+      "The Install level select is compact: the same height as the Customise button",
+      "Its menu lists Application (selected) and Repository under the select, inside the window",
+    ],
+  });
+  await page.keyboard.press("Escape");
+  await settle(page, 600);
   mark("Filter chips narrow the list, like VS Code's extension filters");
   await chip(page, "Installed").click();
   await settle(page, 1500);

@@ -16,7 +16,7 @@ use gpui_kit::component::{
   searchable_list::SearchableListItem,
   select::{Select, SelectEvent, SelectState},
   slider::{Slider, SliderEvent, SliderState},
-  IndexPath,
+  IndexPath, Sizable,
 };
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
@@ -323,6 +323,31 @@ pub fn select_field(
         .accessibility_label(name)
         .disabled(disabled)
         .h(zpx(FIELD_HEIGHT)),
+    )
+}
+
+const SMALL_FIELD_HEIGHT: f32 = 32.;
+
+/// `select_field` at a small button's height, for a control inside a row.
+pub fn small_select_field(
+  id: impl Into<SharedString>,
+  name: impl Into<SharedString>,
+  state: &Entity<SelectState<Options>>,
+  disabled: bool,
+) -> impl IntoElement {
+  let id: SharedString = id.into();
+  let selector = id.to_string();
+  div()
+    .id(id.clone())
+    .debug_selector(move || selector)
+    .w_full()
+    .child(
+      Select::new(state)
+        .id(id)
+        .accessibility_label(name)
+        .disabled(disabled)
+        .small()
+        .h(zpx(SMALL_FIELD_HEIGHT)),
     )
 }
 

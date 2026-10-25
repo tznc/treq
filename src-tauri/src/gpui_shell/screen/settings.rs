@@ -2549,7 +2549,7 @@ impl SettingsView {
                       .font_weight(FontWeight::MEDIUM)
                       .child("Install level"),
                   )
-                  .child(div().w(zpx(128.)).child(form::select_field(
+                  .child(div().w(zpx(120.)).child(form::small_select_field(
                     format!("skill-level-{id}"),
                     "Install level",
                     &level,
