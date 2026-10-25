@@ -12344,7 +12344,7 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
- "vt100",
+ "vt100 0.18.1",
  "webpki-roots 1.0.9",
 ]
 
@@ -12375,7 +12375,7 @@ dependencies = [
  "treq-ui",
  "url",
  "uuid",
- "vt100",
+ "vt100 0.16.2",
 ]
 
 [[package]]

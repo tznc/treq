@@ -356,6 +356,18 @@ test("ssh remote: install Claude Code and run it as an agent", async () => {
 });
 
 test("ssh remote: dropped connection reattaches on its own", async () => {
+  // A shell of its own: the agent steps before stop each other's terminals,
+  // and an agent missing from the host exits at once.
+  for (const stop of await page.getByRole("button", { name: "Stop", exact: true }).all()) await stop.click();
+  const workspace = page.getByRole("button", { name: WORKSPACE, exact: true });
+  await workspace.click();
+  await workspace.hover();
+  await workspace.getByRole("button", { name: "Open shell" }).click();
+  await page.waitForTimeout(4000);
+  await page.mouse.click(700, 780);
+  await page.keyboard.type("echo before-drop-$((40+2))\n");
+  await page.waitForTimeout(2000);
+  expect(terminalStatus().daemon?.sessions).toBeGreaterThanOrEqual(1);
   // Detached, so killing this command's own connection does not stop it
   // half way through.
   onServer(`setsid sh -c "sleep 1; pkill -f 'sshd: .*@'" </dev/null >/dev/null 2>&1 &`);
@@ -367,7 +379,7 @@ test("ssh remote: dropped connection reattaches on its own", async () => {
   expect(status.tmux_sessions).toBe(0);
   await shot("reattached", "After the server drops every SSH connection", [
     "Every remote terminal reattached on its own, with no Reattach/Close overlay",
-    "The shell and agent show their earlier output: the treq daemon kept the sessions on the server",
+    "The shell still shows 'before-drop-42' from before the drop: the treq daemon kept the session on the server",
   ]);
   await page.getByRole("button", { name: "Refresh" }).click();
   await page.getByRole("tab", { name: "Changes" }).click();
@@ -423,7 +435,7 @@ test("ssh remote: switching the machine to tmux keeps its terminals in tmux", as
   ]);
   await page.keyboard.press("Escape");
   await page.getByRole("listitem", { name: env.repo }).first().click();
-  const row = page.getByRole("button", { name: ROW, exact: true });
+  const row = page.getByRole("button", { name: WORKSPACE, exact: true });
   await expect(row).toBeVisible({ timeout: 60_000 });
   await row.click();
   await row.hover();

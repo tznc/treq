@@ -347,7 +347,7 @@ fn running_info(name: String, workspace: &str, label: &str) -> PtySessionInfo {
 /// dynamic component exactly as `core::remote_pty`'s direct-launch path
 /// does. No code path here lets a caller-supplied string reach the shell
 /// unquoted.
-#[allow(
+#[expect(
   clippy::too_many_arguments,
   reason = "flat argument list kept to match callers"
 )]
@@ -774,7 +774,7 @@ pub fn resize_session(
 /// mobile/desktop client does not need to know in advance whether the
 /// session is running: tmux through `new-session -A`, the daemon through
 /// `treq pty-remote attach`, which starts the session when it is missing.
-#[allow(
+#[expect(
   clippy::too_many_arguments,
   reason = "flat argument list kept to match callers"
 )]
@@ -816,7 +816,7 @@ pub fn build_attach_command(
   }
 }
 
-#[allow(
+#[expect(
   clippy::too_many_arguments,
   reason = "flat argument list kept to match callers"
 )]
@@ -888,7 +888,7 @@ pub fn run_daemon() -> Result<(), String> {
 /// daemon is unavailable; Treq supports Linux and macOS hosts.
 #[cfg(unix)]
 mod daemon {
-  use super::*;
+  use super::{build_launch_program, DaemonStatus, ListedSession, PtyLaunchSpec};
   use crate::core::pty_daemon::{self, DaemonPaths, Request, StartSpec};
 
   pub(super) fn paths() -> Result<DaemonPaths, String> {
@@ -1348,7 +1348,9 @@ mod tests {
       let listed = filter_sessions(names.clone(), &repo_scope(repo_path), Some("3"), 0);
       assert_eq!(listed.len(), 1);
       assert_eq!(listed[0].label, "shell");
-      assert!(filter_sessions(names, &repo_scope(other.path().to_str().unwrap()), None, 0).is_empty());
+      assert!(
+        filter_sessions(names, &repo_scope(other.path().to_str().unwrap()), None, 0).is_empty()
+      );
 
       std::thread::sleep(std::time::Duration::from_millis(300));
       let command = format!("printf 'a\\nb' > {}", out.display());
@@ -1377,7 +1379,15 @@ mod tests {
       let repo = tempfile::tempdir().unwrap();
       let repo_path = repo.path().to_str().unwrap();
       let name = session_name(repo_path, "3", "claude-1");
-      daemon::start(&served.paths, &name, repo_path, &PtyLaunchSpec::Shell, 80, 24).unwrap();
+      daemon::start(
+        &served.paths,
+        &name,
+        repo_path,
+        &PtyLaunchSpec::Shell,
+        80,
+        24,
+      )
+      .unwrap();
       daemon::rename(&served.paths, &name, Some("Fix login")).unwrap();
       let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
       let session = loop {
@@ -1391,7 +1401,10 @@ mod tests {
         if listed[0].idle_secs.is_some() {
           break listed[0].clone();
         }
-        assert!(std::time::Instant::now() < deadline, "the shell printed nothing");
+        assert!(
+          std::time::Instant::now() < deadline,
+          "the shell printed nothing"
+        );
         std::thread::sleep(std::time::Duration::from_millis(50));
       };
       assert_eq!(session.title.as_deref(), Some("Fix login"));
