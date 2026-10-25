@@ -209,6 +209,17 @@ pub fn comment_on_pr(repo: &str, number: u64, body: &str) -> Result<(), String> 
   github::gh_create_pr_comment_impl(&gh, repo, number, body, &path)
 }
 
+/// Replaces PR `number`'s title and/or body; a `None` field stays.
+pub fn edit_pr(
+  repo: &str,
+  number: u64,
+  title: Option<&str>,
+  body: Option<&str>,
+) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_edit_pr_impl(&gh, repo, number, title, body, &path)
+}
+
 pub fn close_pr(repo: &str, number: u64) -> Result<(), String> {
   let (gh, path) = gh()?;
   github::gh_close_pr_impl(&gh, repo, number, &path)

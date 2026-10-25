@@ -25,7 +25,7 @@ impl Render for Counted {
   }
 }
 
-fn counted(
+pub(super) fn counted(
   cx: &mut TestAppContext,
   host: FakeHost,
   snapshot: ScreenSnapshot,

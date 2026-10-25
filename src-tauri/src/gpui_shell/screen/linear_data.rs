@@ -90,6 +90,24 @@ pub trait LinearHost: ChangesHost {
   ) -> Result<Vec<AgentReviewComment>, String>;
   /// Replaces the reviewed passage in Linear with the comment's suggestion.
   fn linear_apply_suggestion(&self, repo_path: &str, comment_id: &str) -> Result<(), String>;
+  /// Creates an issue in the team `team_id`; returns it as Linear saved it.
+  fn linear_create_issue(
+    &self,
+    repo_path: &str,
+    team_id: &str,
+    title: &str,
+    description: &str,
+  ) -> Result<LinearIssue, String>;
+  /// Replaces an issue's title and description.
+  fn linear_update_issue(
+    &self,
+    repo_path: &str,
+    issue_id: &str,
+    title: &str,
+    description: &str,
+  ) -> Result<LinearIssue, String>;
+  /// Moves an issue to Linear's trash, where it can be restored for 30 days.
+  fn linear_delete_issue(&self, repo_path: &str, issue_id: &str) -> Result<(), String>;
 }
 
 impl Backend {
@@ -172,6 +190,43 @@ impl LinearHost for Backend {
     crate::gpui_shell::block_on(crate::linear::linear_apply_review_suggestion_impl(
       &client, repo_path, comment_id,
     ))
+  }
+
+  fn linear_create_issue(
+    &self,
+    repo_path: &str,
+    team_id: &str,
+    title: &str,
+    description: &str,
+  ) -> Result<LinearIssue, String> {
+    let client = self.linear_client(repo_path)?;
+    crate::gpui_shell::block_on(crate::linear::linear_create_issue_impl(
+      &client,
+      team_id,
+      title,
+      description,
+    ))
+  }
+
+  fn linear_update_issue(
+    &self,
+    repo_path: &str,
+    issue_id: &str,
+    title: &str,
+    description: &str,
+  ) -> Result<LinearIssue, String> {
+    let client = self.linear_client(repo_path)?;
+    crate::gpui_shell::block_on(crate::linear::linear_update_issue_impl(
+      &client,
+      issue_id,
+      title,
+      description,
+    ))
+  }
+
+  fn linear_delete_issue(&self, repo_path: &str, issue_id: &str) -> Result<(), String> {
+    let client = self.linear_client(repo_path)?;
+    crate::gpui_shell::block_on(crate::linear::linear_delete_issue_impl(&client, issue_id))
   }
 }
 

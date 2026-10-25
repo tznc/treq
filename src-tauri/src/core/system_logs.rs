@@ -33,6 +33,19 @@ pub fn query_system_logs(log_dir: &Path, query: &LogQuery) -> Result<Vec<LogReco
     .filter(|s| !s.is_empty())
     .map(str::to_lowercase);
 
+  // What a line must contain to be worth parsing. JSON escapes quotes,
+  // backslashes and control characters, so a search with any of them is
+  // only checked on the parsed body.
+  let level_tokens: Vec<String> = if levels.is_empty() || levels.contains(&"INFO") {
+    // DEBUG, TRACE and the rest show as INFO, so no token says "INFO".
+    Vec::new()
+  } else {
+    levels.iter().map(|l| format!("\"{l}\"")).collect()
+  };
+  let raw_search = search
+    .as_deref()
+    .filter(|s| s.is_ascii() && !s.chars().any(|c| c == '"' || c == '\\' || c.is_control()));
+
   let mut records = Vec::new();
   // Newest file first, newest line first, so we can stop at `limit`.
   'files: for path in log_files(log_dir).iter().rev() {
@@ -40,6 +53,15 @@ pub fn query_system_logs(log_dir: &Path, query: &LogQuery) -> Result<Vec<LogReco
       continue;
     };
     for line in content.lines().rev() {
+      // Parsing is the cost, so a line that cannot match is not parsed.
+      if !level_tokens.is_empty() && !level_tokens.iter().any(|t| line.contains(t.as_str())) {
+        continue;
+      }
+      if let Some(search) = raw_search {
+        if line.is_ascii() && !contains_ignore_ascii_case(line, search) {
+          continue;
+        }
+      }
       let Some(record) = parse_line(line) else {
         continue;
       };
@@ -59,6 +81,15 @@ pub fn query_system_logs(log_dir: &Path, query: &LogQuery) -> Result<Vec<LogReco
   }
   records.reverse();
   Ok(records)
+}
+
+/// Whether `haystack` holds `needle`, a lowercase ASCII string, in any case.
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+  let needle = needle.as_bytes();
+  haystack
+    .as_bytes()
+    .windows(needle.len())
+    .any(|w| w.eq_ignore_ascii_case(needle))
 }
 
 /// Log files in `log_dir`, oldest first (the date suffix sorts by name).
@@ -187,6 +218,40 @@ mod tests {
   }
 
   #[test]
+  fn raw_line_prefilter_keeps_escaped_and_non_ascii_matches() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+      dir.path().join("treq.2026-10-14"),
+      format!(
+        "{}\n{}\n{}\n{}\n",
+        line(1, "ERROR", "said \"Hello World\"\nbye"),
+        line(2, "WARN", "plain Warn"),
+        line(3, "DEBUG", "Ünïcode Straße"),
+        line(4, "INFO", "other"),
+      ),
+    )
+    .unwrap();
+    let search = |text: &str, levels: Option<Vec<String>>| {
+      let query = LogQuery {
+        search: Some(text.into()),
+        levels,
+        ..Default::default()
+      };
+      query_system_logs(dir.path(), &query).unwrap().len()
+    };
+    // A quote in the search is escaped in the raw line.
+    assert_eq!(search("\"hello world\"", None), 1);
+    assert_eq!(search("WARN", None), 1);
+    assert_eq!(search("straße", None), 1);
+    assert_eq!(search("nothing like it", None), 0);
+    let errors = || Some(vec!["error".to_string()]);
+    assert_eq!(search("hello", errors()), 1);
+    assert_eq!(search("warn", errors()), 0);
+    // DEBUG shows as INFO, so the INFO filter keeps it.
+    assert_eq!(search("straße", Some(vec!["info".into()])), 1);
+  }
+
+  #[test]
   fn filters_by_level_and_search() {
     let dir = tempfile::tempdir().unwrap();
     write_logs(dir.path());
@@ -213,5 +278,64 @@ mod tests {
     let records =
       query_system_logs(Path::new("/nonexistent/treq-logs"), &LogQuery::default()).unwrap();
     assert!(records.is_empty());
+  }
+
+  /// Round 7 measurement: `cargo test --lib logs_perf_system -- --ignored --nocapture`.
+  #[test]
+  #[ignore = "perf measurement"]
+  fn logs_perf_system() {
+    use std::io::Write;
+    use std::time::Instant;
+    let dir = tempfile::tempdir().unwrap();
+    for day in 0..7u64 {
+      let mut f = std::io::BufWriter::new(
+        std::fs::File::create(dir.path().join(format!("treq.2026-10-{:02}", 10 + day))).unwrap(),
+      );
+      for i in 0..150_000u64 {
+        let l = if i % 5000 == 0 {
+          "ERROR"
+        } else if i % 50 == 0 {
+          "WARN"
+        } else {
+          "INFO"
+        };
+        writeln!(
+          f,
+          "{}",
+          line(
+            day * 1_000_000 + i,
+            l,
+            &format!("request {i} handled by worker thread pool with a typical message length ok")
+          )
+        )
+        .unwrap();
+      }
+    }
+    let bytes: u64 = std::fs::read_dir(dir.path())
+      .unwrap()
+      .flatten()
+      .map(|e| e.metadata().unwrap().len())
+      .sum();
+    println!("7 files, {} MB", bytes / 1_000_000);
+    let run = |label: &str, q: LogQuery| {
+      let t = Instant::now();
+      let r = query_system_logs(dir.path(), &q).unwrap();
+      println!("{label}: {:?} rows={}", t.elapsed(), r.len());
+    };
+    run("default", LogQuery::default());
+    run(
+      "errors only",
+      LogQuery {
+        levels: Some(vec!["error".into()]),
+        ..Default::default()
+      },
+    );
+    run(
+      "search rare (miss)",
+      LogQuery {
+        search: Some("zzzznotfound".into()),
+        ..Default::default()
+      },
+    );
   }
 }

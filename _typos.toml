@@ -1,0 +1,36 @@
+# typos: spell-check code, comments and docs. Run locally with `typos`.
+
+[files]
+extend-exclude = [
+  "*.lock",
+  "package-lock.json",
+  # Generated catalogs, key fixtures and applied migrations.
+  "web/src/data/skills.json",
+  "web/static/skills/catalog.json",
+  "crates/treq-ui/styleguide/manifest.json",
+  "src-tauri/tests/fixtures/",
+  "supabase/migrations/",
+]
+
+[default]
+extend-ignore-re = [
+  # Base64-ish keys and tokens.
+  "sb_publishable_[A-Za-z0-9_]+",
+]
+
+[default.extend-words]
+# Both spellings are standard.
+unparseable = "unparseable"
+# Plural of PNG ("PNGs").
+PN = "PN"
+# Azure Kubernetes Service.
+AKS = "AKS"
+# three.js material property.
+metalness = "metalness"
+# Paket (.NET package manager) lockfile.
+paket = "paket"
+# Tests that feed deliberate typos or wrong input.
+teh = "teh"
+abd = "abd"
+# "ATTACHed" (SQL ATTACH).
+Hed = "Hed"
