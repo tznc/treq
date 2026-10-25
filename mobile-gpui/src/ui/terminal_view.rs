@@ -91,6 +91,12 @@ impl TerminalView {
     }
   }
 
+  /// How many lines the view is scrolled back (measurement tests).
+  #[cfg(test)]
+  pub(crate) fn scrollback_offset(&self) -> usize {
+    self.parser.screen().scrollback()
+  }
+
   /// Whether the program asked for application cursor keys (DECCKM),
   /// which changes what the arrow keys send.
   pub fn application_cursor(&self) -> bool {

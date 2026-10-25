@@ -309,6 +309,50 @@ impl Render for Variant {
   }
 }
 
+/// The production row in a `uniform_list`: only the rows on screen are built.
+struct Virtual {
+  n: usize,
+}
+
+impl Render for Virtual {
+  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    use gpui_kit::component::h_flex;
+    use gpui_kit::prelude::*;
+    let n = self.n;
+    div().size_full().child(
+      gpui_kit::uniform_list(
+        "rows",
+        n,
+        cx.processor(move |_this, range: std::ops::Range<usize>, _window, cx| {
+          range
+            .map(|i| {
+              super::widgets::row_full(
+                gpui_kit::SharedString::from(format!("r{i}")),
+                None,
+                format!("Workspace number {i}"),
+                Some(format!("feature/branch-{i}").into()),
+                Some(h_flex().gap_2().child("3").into_any_element()),
+                cx,
+              )
+            })
+            .collect::<Vec<_>>()
+        }),
+      )
+      .size_full(),
+    )
+  }
+}
+
+#[gpui_kit::test]
+#[ignore]
+fn mobile_render_virtual_list(cx: &mut TestAppContext) {
+  for n in rows_env(&[20, 100, 400, 2000]) {
+    let (window, _) = mount(cx, |_, cx| cx.new(|_| Virtual { n }));
+    draw(cx, window);
+    measure(&format!("uniform_list of production rows, n={n}"), frames(), || draw(cx, window));
+  }
+}
+
 #[gpui_kit::test]
 #[ignore]
 fn mobile_render_row_variants(cx: &mut TestAppContext) {
@@ -346,11 +390,66 @@ fn mobile_render_workspaces_list(cx: &mut TestAppContext) {
 }
 
 /// The page behind a cached boundary, when only the host changed.
+/// A page with a spinner over it (a sheet's Create button while it runs,
+/// the refresh button while loading): every animation frame redraws the
+/// window, so the page below re-renders unless it sits behind a cache.
+struct SpinnerOverPage {
+  page: AnyView,
+  cached: bool,
+  spinner: Entity<SpinnerSheet>,
+}
+
+struct SpinnerSheet;
+
+impl Render for SpinnerSheet {
+  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    div().absolute().bottom_0().child(gpui_kit::component::spinner::Spinner::new())
+  }
+}
+
+impl Render for SpinnerOverPage {
+  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    let page = if self.cached {
+      self.page.clone().cached(StyleRefinement::default().size_full()).into_any_element()
+    } else {
+      self.page.clone().into_any_element()
+    };
+    div().size_full().child(page).child(self.spinner.clone())
+  }
+}
+
+#[gpui_kit::test]
+#[ignore]
+fn mobile_render_spinner_over_page(cx: &mut TestAppContext) {
+  for cached in [false, true] {
+    if std::env::var("CACHED").is_ok_and(|v| (v == "1") != cached) {
+      continue;
+    }
+    let list = summaries(rows_env(&[100])[0]);
+    let (window, _host) = mount(cx, |window, cx| {
+      let page = cx.new(|cx| WorkspacesScreen::for_test(list, window, cx));
+      let spinner = cx.new(|_| SpinnerSheet);
+      cx.new(|_| SpinnerOverPage { page: page.into(), cached, spinner })
+    });
+    draw(cx, window);
+    measure(&format!("spinner animation frame over n-row page, cached={cached}"), frames(), || {
+      cx.update_window(window, |_, window, cx| {
+        window.simulate_next_frame(cx);
+        window.draw(cx).clear(cx);
+      })
+      .unwrap();
+    });
+  }
+}
+
 #[gpui_kit::test]
 #[ignore]
 fn mobile_render_cached_boundary(cx: &mut TestAppContext) {
   for cached in [false, true] {
-    let list = summaries(100);
+    if std::env::var("CACHED").is_ok_and(|v| (v == "1") != cached) {
+      continue;
+    }
+    let list = summaries(rows_env(&[100])[0]);
     let (window, host) = mount(cx, |window, cx| {
       let screen = cx.new(|cx| WorkspacesScreen::for_test(list, window, cx));
       cx.new(|_| Host {
@@ -395,10 +494,57 @@ fn hunk(lines: usize) -> JjDiffHunk {
   }
 }
 
+/// The diff body as one styled text per hunk (colors as highlight runs)
+/// instead of one `div` per line, to see what the per-line divs cost.
+struct DiffAsText {
+  hunks: Vec<JjDiffHunk>,
+}
+
+impl Render for DiffAsText {
+  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    use gpui_kit::component::{v_flex, ActiveTheme as _};
+    use gpui_kit::prelude::*;
+    use gpui_kit::{HighlightStyle, StyledText};
+    let theme = cx.theme();
+    let (add, del) = (theme.success, theme.danger);
+    div().size_full().child(
+      v_flex().id("diff").size_full().overflow_y_scroll().children(self.hunks.iter().map(|hunk| {
+        let mut text = String::new();
+        let mut runs = Vec::new();
+        for line in &hunk.lines {
+          let start = text.len();
+          text.push_str(line);
+          text.push('\n');
+          let color = match super::screens::diff::line_kind(line) {
+            super::screens::diff::LineKind::Added => Some(add),
+            super::screens::diff::LineKind::Removed => Some(del),
+            super::screens::diff::LineKind::Context => None,
+          };
+          if let Some(color) = color {
+            runs.push((start..text.len() - 1, HighlightStyle { color: Some(color), ..Default::default() }));
+          }
+        }
+        div().px_2().whitespace_nowrap().child(StyledText::new(text).with_highlights(runs))
+      })),
+    )
+  }
+}
+
+#[gpui_kit::test]
+#[ignore]
+fn mobile_render_diff_as_text(cx: &mut TestAppContext) {
+  for n in rows_env(&[200, 2000, 10000]) {
+    let hunks: Vec<JjDiffHunk> = (0..n / 100).map(|_| hunk(100)).collect();
+    let (window, _) = mount(cx, |_, cx| cx.new(|_| DiffAsText { hunks }));
+    draw(cx, window);
+    measure(&format!("diff as one text per hunk, {n} lines"), frames().min(50), || draw(cx, window));
+  }
+}
+
 #[gpui_kit::test]
 #[ignore]
 fn mobile_render_diff_screen(cx: &mut TestAppContext) {
-  for n in [200usize, 2000, 10000] {
+  for n in rows_env(&[200, 2000, 10000]) {
     let hunks: Vec<JjDiffHunk> = (0..n / 100).map(|_| hunk(100)).collect();
     let (window, _) = mount(cx, |_, cx| cx.new(|_| DiffScreen::for_test(hunks)));
     draw(cx, window);
@@ -551,8 +697,8 @@ fn mobile_render_micro_scrollback_memory() {
     let mut parser = vt100::Parser::new(40, cols, 5000);
     let a0 = LIVE.load(Relaxed);
     for chunk in 0..6000 {
-      parser.process(&colored_screen(1, cols as usize, chunk));
-      parser.process(b"\r\n");
+      let line: String = (0..cols as usize).map(|c| (b'a' + ((c + chunk) % 26) as u8) as char).collect();
+      parser.process(format!("\x1b[3{}m{line}\x1b[0m\r\n", 1 + chunk % 7).as_bytes());
     }
     println!(
       "vt100 5000-line scrollback at {cols} cols: {} KB live",
@@ -563,3 +709,69 @@ fn mobile_render_micro_scrollback_memory() {
 
 #[allow(dead_code)]
 fn _unused(_: Size<Pixels>, _: &mut Context<Host>) {}
+
+/// Touch drags reach the terminal as pixel scroll deltas; each is rounded
+/// to whole lines on its own.
+#[gpui_kit::test]
+#[ignore]
+fn mobile_render_terminal_slow_drag_scrolls_nothing(cx: &mut TestAppContext) {
+  use gpui_kit::{point, ScrollDelta};
+  let (tx, rx) = mpsc::unbounded();
+  let (window, view) = mount(cx, |window, cx| {
+    cx.new(|cx| TerminalView::new("t".into(), (51, 40), rx, |_, _, _| {}, window, cx))
+  });
+  let lines: String = (0..300).map(|i| format!("line {i}\r\n")).collect();
+  feed(&tx, lines.into_bytes());
+  cx.run_until_parked();
+  draw(cx, window);
+  for per_event_px in [3.0f32, 6.0, 8.0, 9.0, 17.0] {
+    cx.update_window(window, |_, w, cx| {
+      view.update(cx, |v, _| assert_eq!(v.scrollback_offset(), 0));
+      for _ in 0..20 {
+        w.dispatch_event(
+          gpui_kit::PlatformInput::ScrollWheel(gpui_kit::ScrollWheelEvent {
+            position: point(px(200.), px(300.)),
+            delta: ScrollDelta::Pixels(point(px(0.), px(per_event_px))),
+            ..Default::default()
+          }),
+          cx,
+        );
+      }
+    })
+    .unwrap();
+    let offset = cx.update_window(window, |_, _, cx| view.read(cx).scrollback_offset()).unwrap();
+    println!(
+      "20 touch-move events of {per_event_px} px (= {:.0} px total, {:.1} lines): scrolled back {offset} lines",
+      20.0 * per_event_px,
+      20.0 * per_event_px / 17.0
+    );
+    cx.update_window(window, |_, w, cx| {
+      view.update(cx, |v, cx| v.write(Vec::new(), cx));
+      let _ = w;
+    })
+    .unwrap();
+    // `write` returns to the live screen only when scrolled back.
+  }
+}
+
+/// `Root::save_snapshot` runs on the UI thread on every page push/pop.
+#[test]
+#[ignore]
+fn mobile_render_micro_snapshot_write() {
+  use treq_lib::core::remote_records::{self as records, SessionEndpoint, SessionSnapshot, SnapshotWorkspace};
+  let dir = std::env::temp_dir().join(format!("treq-perf-{}", std::process::id()));
+  std::fs::create_dir_all(&dir).unwrap();
+  let db = treq_lib::db::Database::new(dir.join("treq.db")).unwrap();
+  db.init().unwrap();
+  let snapshot = SessionSnapshot {
+    endpoint: SessionEndpoint::Managed,
+    repo_path: Some("/home/dev/src/treq".into()),
+    workspace: Some(SnapshotWorkspace { id: "12".into(), name: "ws-12".into() }),
+  };
+  let n = 300;
+  let start = Instant::now();
+  for _ in 0..n {
+    records::save_session_snapshot(&db, Some(&snapshot));
+  }
+  println!("save_session_snapshot: {:.0} us/write (tmpfs-or-disk of this machine, WAL+NORMAL)", start.elapsed().as_secs_f64() * 1e6 / n as f64);
+}
