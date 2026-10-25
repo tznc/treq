@@ -742,12 +742,12 @@ impl LinearView {
   }
 }
 
-/// Where a text's comments go: under it (an issue, as in Linear) or in a
-/// column beside it.
+/// Where a text's comments go, as in Linear: an issue's under it, a
+/// document's or project's under the paragraph each quotes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CommentPlacement {
   Below,
-  Beside,
+  Inline,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2086,7 +2086,7 @@ impl LinearView {
           .pt_4()
           .border_t_1()
           .border_color(p.border)
-          .child(self.commented(target, CommentPlacement::Beside, p, cx)),
+          .child(self.commented(target, CommentPlacement::Inline, p, cx)),
       )
   }
 
@@ -2151,7 +2151,7 @@ impl LinearView {
           .capture_key_down(keys)
           .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
           .child(div().flex().flex_col().child(title(doc.title)))
-          .child(self.commented(target, CommentPlacement::Beside, p, cx)),
+          .child(self.commented(target, CommentPlacement::Inline, p, cx)),
       )
       .into_any_element(),
     )
@@ -2160,7 +2160,8 @@ impl LinearView {
 
 impl LinearView {
   /// `LinearCommentedContent`: the text, highlighted where comments
-  /// anchor, beside its comments and the agent's findings.
+  /// anchor, with its comments and the agent's findings: under it, or (as
+  /// Linear shows a document's) each under the paragraph it quotes.
   fn commented(
     &self,
     target: Target,
@@ -2168,7 +2169,7 @@ impl LinearView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let below = placement == CommentPlacement::Below;
+    let inline = placement == CommentPlacement::Inline;
     let of = target.of.clone();
     let fetch = self.comments.get(&of).cloned().unwrap_or_default();
     let comments = fetch.data.clone().unwrap_or_default();
@@ -2180,14 +2181,8 @@ impl LinearView {
       .filter(|c| c.status != "resolved")
       .cloned()
       .collect();
-    let on_file = |file: &str| -> Vec<AgentReviewComment> {
-      open
-        .iter()
-        .filter(|c| c.file_path == file)
-        .cloned()
-        .collect()
-    };
-    let body_comments = on_file(BODY_FILE);
+    let body_comments: Vec<&AgentReviewComment> =
+      open.iter().filter(|c| c.file_path == BODY_FILE).collect();
     let mut anchors: Vec<Anchor> = comments
       .iter()
       .map(|c| Anchor {
@@ -2206,7 +2201,7 @@ impl LinearView {
           color: data::agent_mark(self.dark),
         }),
     );
-    let highlighted = data::highlight_quoted(&target.shown, &anchors);
+    let shown = target.shown.clone();
     let key = format!("{}-{}", of.target_type(), of.id());
     let starting = self.starting.contains(&of);
     let review_button = {
@@ -2230,31 +2225,57 @@ impl LinearView {
         cx.listener(move |view, _: &ClickEvent, _, cx| view.start_review(target.clone(), cx)),
       )
     };
-    let left = div()
-      .flex_1()
-      .min_w_0()
-      .child(
+    let toolbar = div()
+      .flex()
+      .items_center()
+      .justify_end()
+      .gap_2()
+      .when(!open.is_empty(), |this| {
+        this.child(
+          ui::text(div(), TextSize::Xs)
+            .text_color(p.muted_foreground)
+            .child(agent_count_label(open.len())),
+        )
+      })
+      .child(review_button);
+
+    // Inline, each comment goes under the paragraph it quotes; the rest,
+    // and every comment of an issue, go under the text.
+    let blocks = if inline {
+      data::paragraphs(&shown)
+    } else {
+      vec![shown]
+    };
+    let mut at_block: HashMap<usize, Vec<&LinearComment>> = HashMap::new();
+    let mut unanchored: Vec<&LinearComment> = Vec::new();
+    for comment in &comments {
+      match data::quoted_block(&blocks, comment.quoted_text.as_deref()).filter(|_| inline) {
+        Some(ix) => at_block.entry(ix).or_default().push(comment),
+        None => unanchored.push(comment),
+      }
+    }
+    let text = div()
+      .flex()
+      .flex_col()
+      .gap_3()
+      .children(blocks.iter().enumerate().map(|(ix, block)| {
+        let anchored = at_block.remove(&ix).unwrap_or_default();
         div()
           .flex()
-          .items_center()
-          .justify_end()
+          .flex_col()
           .gap_2()
-          .mb_2()
-          .when(!open.is_empty(), |this| {
-            this.child(
-              ui::text(div(), TextSize::Xs)
-                .text_color(p.muted_foreground)
-                .child(agent_count_label(open.len())),
-            )
-          })
-          .child(review_button),
-      )
-      .child(markdown(
-        format!("linear-md-{key}"),
-        &highlighted,
-        13.,
-        self.dark,
-      ));
+          .child(markdown(
+            format!("linear-md-{key}-{ix}"),
+            &data::highlight_quoted(block, &anchors),
+            13.,
+            self.dark,
+          ))
+          .children(anchored.into_iter().map(|c| {
+            div()
+              .ml_4()
+              .child(self.comment_card(&of, &open, c, false, p, cx))
+          }))
+      }));
 
     let heading = |text: &'static str| {
       ui::text(div(), TextSize::Xs)
@@ -2262,120 +2283,142 @@ impl LinearView {
         .text_color(p.muted_foreground)
         .child(text)
     };
-    let mut column = div()
-      .debug_selector(|| "linear-comments-column".into())
-      .flex()
-      .flex_col()
-      .gap_4()
-      .border_color(p.border)
-      .when(below, |this| this.w_full().border_t_1().pt_4())
-      .when(!below, |this| {
-        this.flex_none().w(zpx(320.)).border_l_1().pl_4()
-      });
-    if !body_comments.is_empty() {
-      column = column.child(
-        div()
-          .debug_selector(|| "linear-agent-review-body".into())
-          .flex()
-          .flex_col()
-          .gap_3()
-          .child(heading("AGENT REVIEW"))
-          .children(
-            body_comments
-              .iter()
-              .map(|c| self.agent_card(&of, c, "Description".into(), p, cx)),
-          ),
-      );
-    }
-    column = column
-      .child(heading("COMMENTS"))
-      .when(fetch.is_loading(), |this| {
-        this.child(ui::spinner(
-          format!("linear-comments-loading-{key}"),
-          16.,
-          p.muted_foreground,
-        ))
-      })
-      .when(fetch.failed(), |this| {
-        this.child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.destructive)
-            .child("Failed to load comments"),
-        )
-      })
-      .when(
-        !fetch.is_loading() && !fetch.failed() && comments.is_empty(),
-        |this| {
+    // An issue always says it has none; a document or project without
+    // comments shows only its text.
+    let empty = !fetch.is_loading() && !fetch.failed() && comments.is_empty();
+    let show_comments = !inline || fetch.is_loading() || fetch.failed() || !unanchored.is_empty();
+    let below = (show_comments || !body_comments.is_empty()).then(|| {
+      div()
+        .debug_selector(|| "linear-comments-column".into())
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap_4()
+        .border_t_1()
+        .border_color(p.border)
+        .pt_4()
+        .when(!body_comments.is_empty(), |this| {
           this.child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child("No comments"),
-          )
-        },
-      );
-    let quote_border = ui::Tone::Warning.border(p);
-    for comment in &comments {
-      let author = comment
-        .user
-        .as_ref()
-        .map_or_else(|| "Unknown".to_string(), |u| u.name.clone());
-      let selector = format!("linear-comment-{}", comment.id);
-      let on_comment = on_file(&comment_file(&comment.id));
-      column = column.child(
-        div()
-          .debug_selector(move || selector)
-          .flex()
-          .flex_col()
-          .gap_1p5()
-          .p_3()
-          .rounded(radius::MD)
-          .bg(p.muted.opacity(0.3))
-          .when_some(comment.quoted_text.clone(), |this, quote| {
-            this.child(
-              ui::text(div(), TextSize::Xs)
-                .text_color(p.muted_foreground)
-                .italic()
-                .border_l_2()
-                .border_color(quote_border)
-                .pl_2()
-                .child(quote),
-            )
-          })
-          .child(
-            ui::text(div(), TextSize::Xs)
+            div()
+              .debug_selector(|| "linear-agent-review-body".into())
               .flex()
-              .items_center()
-              .gap_2()
-              .text_color(p.muted_foreground)
-              .child(
-                div()
-                  .font_weight(FontWeight::MEDIUM)
-                  .text_color(p.foreground)
-                  .child(author.clone()),
-              )
-              .child(time::locale(&comment.created_at)),
+              .flex_col()
+              .gap_3()
+              .child(heading("AGENT REVIEW"))
+              .children(
+                body_comments
+                  .iter()
+                  .map(|c| self.agent_card(&of, c, "Description".into(), p, cx)),
+              ),
           )
-          .child(markdown(
-            format!("linear-comment-md-{}", comment.id),
-            &comment.body,
-            13.,
-            self.dark,
-          ))
-          .children(
-            on_comment
-              .iter()
-              .map(|c| self.agent_card(&of, c, format!("Comment by {author}"), p, cx)),
-          ),
-      );
-    }
+        })
+        .when(show_comments, |this| {
+          this
+            .child(heading("COMMENTS"))
+            .when(fetch.is_loading(), |this| {
+              this.child(ui::spinner(
+                format!("linear-comments-loading-{key}"),
+                16.,
+                p.muted_foreground,
+              ))
+            })
+            .when(fetch.failed(), |this| {
+              this.child(
+                ui::text(div(), TextSize::Sm)
+                  .text_color(p.destructive)
+                  .child("Failed to load comments"),
+              )
+            })
+            .when(empty, |this| {
+              this.child(
+                ui::text(div(), TextSize::Sm)
+                  .text_color(p.muted_foreground)
+                  .child("No comments"),
+              )
+            })
+            .children(
+              unanchored
+                .iter()
+                .map(|c| self.comment_card(&of, &open, c, true, p, cx)),
+            )
+        })
+    });
     div()
       .debug_selector(|| "linear-commented-content".into())
       .flex()
-      .gap_6()
-      .when(below, |this| this.flex_col())
-      .when(!below, |this| this.items_start())
-      .child(left)
-      .child(column)
+      .flex_col()
+      .gap_4()
+      .child(toolbar)
+      .child(text)
+      .children(below)
+  }
+
+  /// A Linear comment's bubble: its quote (when `quote` and it has one),
+  /// author, time and body, then the agent's findings on it.
+  fn comment_card(
+    &self,
+    of: &Commented,
+    open: &[AgentReviewComment],
+    comment: &LinearComment,
+    quote: bool,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Div {
+    let author = comment
+      .user
+      .as_ref()
+      .map_or_else(|| "Unknown".to_string(), |u| u.name.clone());
+    let selector = format!("linear-comment-{}", comment.id);
+    let file = comment_file(&comment.id);
+    let quote_border = ui::Tone::Warning.border(p);
+    div()
+      .debug_selector(move || selector)
+      .flex()
+      .flex_col()
+      .gap_1p5()
+      .p_3()
+      .rounded(radius::MD)
+      .bg(p.muted.opacity(0.3))
+      .when_some(
+        comment.quoted_text.clone().filter(|_| quote),
+        |this, quote| {
+          this.child(
+            ui::text(div(), TextSize::Xs)
+              .text_color(p.muted_foreground)
+              .italic()
+              .border_l_2()
+              .border_color(quote_border)
+              .pl_2()
+              .child(quote),
+          )
+        },
+      )
+      .child(
+        ui::text(div(), TextSize::Xs)
+          .flex()
+          .items_center()
+          .gap_2()
+          .text_color(p.muted_foreground)
+          .child(
+            div()
+              .font_weight(FontWeight::MEDIUM)
+              .text_color(p.foreground)
+              .child(author.clone()),
+          )
+          .child(time::locale(&comment.created_at)),
+      )
+      .child(markdown(
+        format!("linear-comment-md-{}", comment.id),
+        &comment.body,
+        13.,
+        self.dark,
+      ))
+      .children(
+        open
+          .iter()
+          .filter(|c| c.file_path == file)
+          .map(|c| self.agent_card(of, c, format!("Comment by {author}"), p, cx)),
+      )
   }
 
   /// `AgentReviewCommentCard` with `applyLabel="Apply to Linear"` and no

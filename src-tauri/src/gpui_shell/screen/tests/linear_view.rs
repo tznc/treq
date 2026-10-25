@@ -560,3 +560,33 @@ fn linear_capitalizes_project_states() {
   assert_eq!(linear::capitalize("in progress"), "In Progress");
   assert_eq!(linear::capitalize(""), "");
 }
+
+#[gpui::test]
+fn linear_document_comments_show_at_the_paragraph_they_quote(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.linear.documents[0].content = Some("First part.\n\nSecond part.\n\nThird part.".into());
+  host
+    .linear
+    .comments
+    .push(("d1".into(), comment("c2", Some("Second part"))));
+  host
+    .linear
+    .comments
+    .push(("d1".into(), comment("c3", None)));
+  let (mut h, _) = linear_harness(cx, host);
+  h.click("linear-section-projects");
+  // A project without comments shows only its text.
+  assert!(h.drawn("linear-project-detail"));
+  assert!(!h.drawn("linear-comments-column"));
+
+  h.click("linear-document-item-d1");
+  assert!(h.drawn("linear-comment-c2"));
+  assert!(h.drawn("linear-comment-c3"));
+  let bounds = |h: &mut Harness, selector| h.cx.debug_bounds(selector).expect(selector);
+  let quoted = bounds(&mut h, "linear-comment-c2");
+  let column = bounds(&mut h, "linear-comments-column");
+  let unquoted = bounds(&mut h, "linear-comment-c3");
+  // The quoting comment sits in the text, above the comments under it.
+  assert!(quoted.bottom() <= column.top(), "{quoted:?} {column:?}");
+  assert!(column.contains(&unquoted.center()));
+}

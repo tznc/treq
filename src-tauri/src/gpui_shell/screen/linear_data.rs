@@ -545,6 +545,37 @@ pub fn highlight_quoted(content: &str, anchors: &[Anchor]) -> String {
   result
 }
 
+/// The markdown's blocks: runs of lines between blank lines, a fenced code
+/// block kept whole, so a comment can show under the one it quotes.
+pub fn paragraphs(content: &str) -> Vec<String> {
+  let mut blocks = Vec::new();
+  let mut block: Vec<&str> = Vec::new();
+  let mut fenced = false;
+  for line in content.lines() {
+    if line.trim_start().starts_with("```") {
+      fenced = !fenced;
+    }
+    if line.trim().is_empty() && !fenced {
+      if !block.is_empty() {
+        blocks.push(block.join("\n"));
+        block.clear();
+      }
+    } else {
+      block.push(line);
+    }
+  }
+  if !block.is_empty() {
+    blocks.push(block.join("\n"));
+  }
+  blocks
+}
+
+/// The first of `blocks` that holds `quote`, where its comment shows.
+pub fn quoted_block(blocks: &[String], quote: Option<&str>) -> Option<usize> {
+  let quote = quote.map(str::trim).filter(|q| !q.is_empty())?;
+  blocks.iter().position(|b| b.contains(quote))
+}
+
 /// Linear's own anchors: `bg-yellow-200/70 dark:bg-yellow-500/30`.
 pub fn comment_mark(dark: bool) -> &'static str {
   if dark {
@@ -618,6 +649,24 @@ pub fn agent_count_label(n: usize) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn paragraphs_keep_fenced_code_whole() {
+    let text = "# Title\n\nFirst line\nsecond line\n\n```\na\n\nb\n```\n\n\nLast";
+    assert_eq!(
+      paragraphs(text),
+      [
+        "# Title",
+        "First line\nsecond line",
+        "```\na\n\nb\n```",
+        "Last"
+      ]
+    );
+    let blocks = paragraphs(text);
+    assert_eq!(quoted_block(&blocks, Some(" second line ")), Some(1));
+    assert_eq!(quoted_block(&blocks, Some("missing")), None);
+    assert_eq!(quoted_block(&blocks, None), None);
+  }
 
   pub(crate) fn issue(id: &str, state: (&str, &str)) -> LinearIssue {
     serde_json::from_value(serde_json::json!({
