@@ -84,6 +84,34 @@ pub fn describe(raw: &str) -> Problem {
       None,
     );
   }
+  // A treq from before `file list`: clap wants `--path`, or names the action.
+  if has("unknown file action 'list'")
+    || (has("required arguments were not provided") && has("--path"))
+  {
+    return Problem::new(
+      "Browsing files needs a newer treq on this host. Update treq there, then try again.",
+      None,
+    );
+  }
+  // A treq from before `git pr`: clap refuses `--title`, or names the action.
+  if has("unknown git action 'pr") || (has("--title") && has("wasn't expected")) {
+    return Problem::new(
+      "Pull requests need a newer treq on this host. Update treq there, then try again.",
+      None,
+    );
+  }
+  if has("gh cli not found") {
+    return Problem::new(
+      "Pull requests use the GitHub CLI on this host, and it isn't installed. Install gh there and run gh auth login.",
+      None,
+    );
+  }
+  if has("gh auth login") || has("not logged into any github hosts") {
+    return Problem::new(
+      "The GitHub CLI on this host isn't signed in. Run gh auth login there, then try again.",
+      None,
+    );
+  }
   if has("no git remote named") {
     return Problem::new(
       "This repository has no Git remote to push to. Add one on the host (git remote add origin …), then push again.",
@@ -207,6 +235,21 @@ mod tests {
     assert!(problem
       .message
       .starts_with("This repository has no Git remote"));
+  }
+
+  #[test]
+  fn github_cli_problems_say_what_to_do_on_the_host() {
+    assert!(describe("treq_command_failed: gh CLI not found")
+      .message
+      .contains("Install gh"));
+    assert!(describe(
+      "gh pr view failed: To get started with GitHub CLI, please run:  gh auth login"
+    )
+    .message
+    .contains("isn't signed in"));
+    assert!(describe("unknown git action 'pr-create'")
+      .message
+      .starts_with("Pull requests need a newer treq"));
   }
 
   #[test]
