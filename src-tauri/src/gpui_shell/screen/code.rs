@@ -29,9 +29,9 @@ use gpui_kit::component::{
 };
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, prelude::*, px, relative, rems, Animation, AnimationExt as _, App,
-  Context, Div, Entity, FontWeight, Hsla, Pixels, Role, ScrollHandle, SharedString, Stateful,
-  Subscription, Task, Window,
+  self, anchored, deferred, div, prelude::*, px, relative, rems, Animation, AnimationExt as _,
+  AnyElement, App, Context, Div, Entity, FontWeight, Hsla, Pixels, Role, ScrollHandle,
+  SharedString, Stateful, Subscription, Task, Window,
 };
 
 use super::{
@@ -47,7 +47,10 @@ use super::{
   prefetch, ActionSink, ScreenAction,
 };
 use crate::{
-  core::WorkspaceEntry,
+  core::{
+    pr_sync::{self, SyncState},
+    WorkspaceEntry,
+  },
   gpui_shell::{
     form,
     native::{NativeEvent, ToastTone},
@@ -58,7 +61,7 @@ use crate::{
     ui::{self, Button, Size, TextSize, Variant},
   },
   jj::{JjLogCommit, JjLogResult},
-  local_db::Workspace,
+  local_db::{PrSyncRecord, Workspace},
 };
 
 /// `useDebounce(mentionQuery, 150)`.
@@ -138,6 +141,20 @@ struct Read {
   history: Result<JjLogResult, String>,
   stack: Option<Vec<StackRow>>,
   settings: TaskSettings,
+  pr_sync: PrSyncRead,
+}
+
+/// The workspace's PR sync record, and when its read started: reads land out
+/// of order, and only one that started later may replace what shows.
+type PrSyncRead = (u64, Option<PrSyncRecord>);
+
+fn read_pr_sync(host: &dyn CodeHost, parent: &Parent) -> PrSyncRead {
+  static STARTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+  let started = STARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+  let record = parent
+    .workspace_id()
+    .and_then(|id| host.pr_sync(&parent.repo_path, id));
+  (started, record)
 }
 
 impl Read {
@@ -150,11 +167,13 @@ impl Read {
       let history = scope.spawn(|| read_history(host, parent, limit));
       let stack = scope.spawn(|| read_stack(host, parent));
       let settings = task_settings(host, &parent.repo_path);
+      let pr_sync = read_pr_sync(host, parent);
       Read {
         overview: Overview::or_unavailable(super::joined(overview)),
         history: super::joined(history),
         stack: super::joined(stack),
         settings,
+        pr_sync,
       }
     })
   }
@@ -213,6 +232,18 @@ pub enum Menu {
   Plan,
   Agent,
   Environment,
+  /// The title editor's Save options.
+  SaveTitle,
+  /// The description editor's Save options.
+  SaveDescription,
+}
+
+/// Which side of a local draft the title and description card shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AboutTab {
+  #[default]
+  Draft,
+  GitHub,
 }
 
 /// `mentionQuery` and its results.
@@ -262,6 +293,14 @@ pub struct CodeView {
   /// The description being edited, and its editor.
   pub(super) description_draft: Option<Entity<TextareaState>>,
   saving_description: bool,
+  /// The PR text last copied into the workspace, as the latest-started
+  /// read found it; [`Self::pr_sync`] checks the shown workspace against it.
+  pr_sync: PrSyncRead,
+  resyncing: bool,
+  /// The card's tab while a local draft differs from the pull request, and
+  /// the PR's title and body as the GitHub tab last read them.
+  about_tab: AboutTab,
+  pr_text: Option<(String, String)>,
   syncing_submodule: bool,
   starting_devcontainer: bool,
   pub(super) picker: Option<Entity<FilePicker>>,
@@ -350,6 +389,10 @@ impl CodeView {
       saving_title: false,
       description_draft: None,
       saving_description: false,
+      pr_sync: (0, None),
+      resyncing: false,
+      about_tab: AboutTab::Draft,
+      pr_text: None,
       syncing_submodule: false,
       starting_devcontainer: false,
       picker: None,
@@ -378,6 +421,14 @@ impl CodeView {
     let reread = current.key() != parent.key()
       || current.revision != parent.revision
       || current.default_branch != parent.default_branch;
+    // A new title or description (an edit, or the PR's text synced in)
+    // can start or stop following the pull request.
+    let text = |p: &Parent| {
+      p.workspace
+        .as_ref()
+        .map(|w| (w.title.clone(), w.description.clone()))
+    };
+    let resync = !reread && text(current) != text(&parent);
     if parent.key() != self.parent.key() {
       // Another workspace: keep drawing this one until the new one is read,
       // then swap them in one frame (`apply`), so the tab never draws empty.
@@ -400,6 +451,8 @@ impl CodeView {
     }
     if reread {
       self.load(cx);
+    } else if resync {
+      self.read(read_pr_sync, |view, read, _| view.take_pr_sync(read), cx);
     }
   }
 
@@ -476,6 +529,8 @@ impl CodeView {
         self.show_save_default = false;
         self.title_draft = None;
         self.description_draft = None;
+        self.about_tab = AboutTab::Draft;
+        self.pr_text = None;
         self.menu = None;
         self.history = None;
         self.history_error = None;
@@ -501,12 +556,14 @@ impl CodeView {
       && self.history.as_deref() == read.history.as_ref().ok()
       && self.history_error.is_none()
       && self.stack == read.stack
-      && self.settings.as_ref() == Some(&settings);
+      && self.settings.as_ref() == Some(&settings)
+      && self.pr_sync.1 == read.pr_sync.1;
     self.overview = Some(read.overview);
     self.set_history(read.history);
     self.stack = read.stack;
     let environment = settings.environment.is_some();
     self.settings = Some(settings);
+    self.take_pr_sync(read.pr_sync);
     if !unchanged {
       cx.notify();
     }
@@ -1031,35 +1088,169 @@ impl CodeView {
     cx.notify();
   }
 
-  fn save_title(&mut self, cx: &mut Context<Self>) {
-    let (Some(draft), Some(ws)) = (&self.title_draft, &self.parent.workspace) else {
+  /// Saves the title being edited; on a workspace that follows its pull
+  /// request, to the PR too unless `draft` keeps it local until a push.
+  fn save_title(&mut self, draft: bool, cx: &mut Context<Self>) {
+    let (Some(editor), Some(ws)) = (&self.title_draft, &self.parent.workspace) else {
       return;
     };
-    let text = draft.read(cx).value().trim().to_string();
+    let text = editor.read(cx).value().trim().to_string();
     if text.is_empty() || self.saving_title {
       return;
     }
-    let id = ws.id;
+    let (id, to_pr) = (ws.id, !draft && self.pr_sync.1.is_some());
     self.saving_title = true;
+    self.menu = None;
     self.read(
-      move |host, parent| host.set_title(&parent.repo_path, id, &text),
+      move |host, parent| {
+        host.set_title(&parent.repo_path, id, &text)?;
+        Ok(
+          to_pr
+            .then(|| host.push_to_pr(&parent.repo_path, id).err())
+            .flatten(),
+        )
+      },
       |view, result, _| {
         view.saving_title = false;
-        match result {
-          Ok(()) => {
-            view.title_draft = None;
-            tell(
-              view.host.as_ref(),
-              NativeEvent::WorkspaceChanged {
-                repo_path: view.parent.repo_path.clone(),
-              },
-            );
-          }
-          Err(err) => view.toast(ToastTone::Error, "Failed to save title", err),
+        if view.saved("title", result) {
+          view.title_draft = None;
         }
       },
       cx,
     );
+  }
+
+  /// Reports a save: `Ok(Some(err))` saved it here but not to the PR, so it
+  /// stays a local draft. Returns whether the edit landed.
+  fn saved(&self, what: &str, result: Result<Option<String>, String>) -> bool {
+    match result {
+      Ok(pr_error) => {
+        tell(
+          self.host.as_ref(),
+          NativeEvent::WorkspaceChanged {
+            repo_path: self.parent.repo_path.clone(),
+          },
+        );
+        if let Some(err) = pr_error {
+          self.toast(
+            ToastTone::Error,
+            "Saved as a local draft",
+            format!("The pull request wasn't updated: {err}"),
+          );
+        }
+        true
+      }
+      Err(err) => {
+        self.toast(ToastTone::Error, &format!("Failed to save {what}"), err);
+        false
+      }
+    }
+  }
+
+  fn resync_from_pr(&mut self, cx: &mut Context<Self>) {
+    let Some(ws) = &self.parent.workspace else {
+      return;
+    };
+    if self.resyncing {
+      return;
+    }
+    let id = ws.id;
+    self.resyncing = true;
+    self.read(
+      move |host, parent| host.resync_from_pr(&parent.repo_path, id),
+      |view, result, _| {
+        view.resyncing = false;
+        match result {
+          Ok(()) => tell(
+            view.host.as_ref(),
+            NativeEvent::WorkspaceChanged {
+              repo_path: view.parent.repo_path.clone(),
+            },
+          ),
+          Err(err) => view.toast(
+            ToastTone::Error,
+            "Failed to resync from the pull request",
+            err,
+          ),
+        }
+      },
+      cx,
+    );
+  }
+
+  /// Keeps `read` unless a read that started later already landed.
+  fn take_pr_sync(&mut self, read: PrSyncRead) {
+    if read.0 >= self.pr_sync.0 {
+      self.pr_sync = read;
+    }
+  }
+
+  /// Which of the shown workspace's fields still follow its pull request.
+  fn pr_sync(&self) -> Option<SyncState> {
+    let workspace = self.parent.workspace.as_ref()?;
+    Some(pr_sync::state(workspace, self.pr_sync.1.as_ref()?))
+  }
+
+  /// The card's footer on a workspace opened from a pull request: a check
+  /// while title and description match the PR, else that a local draft
+  /// waits for the next push, with Sync to take the PR's text back.
+  fn pr_footer(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+    let sync = self.pr_sync()?;
+    let note = |id: &'static str, text: String| {
+      ui::text(div(), TextSize::Xs)
+        .id(id)
+        .debug_selector(move || id.into())
+        .role(Role::Label)
+        .aria_label(SharedString::from(text.clone()))
+        .test_support()
+        .text_color(p.muted_foreground)
+        .child(text)
+    };
+    let footer = div()
+      .flex()
+      .flex_wrap()
+      .items_center()
+      .justify_between()
+      .gap_2()
+      .pt_3()
+      .border_t_1()
+      .border_color(p.border);
+    if sync.title && sync.description {
+      return Some(
+        footer
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .gap_1p5()
+              .child(ui::icon(theme::ICON_CHECK, 14., p.success))
+              .child(note(
+                "workspace-description-synced",
+                format!("Synced with PR #{}", sync.pr_number),
+              )),
+          )
+          .into_any_element(),
+      );
+    }
+    Some(
+      footer
+        .child(note(
+          "workspace-pr-draft",
+          format!(
+            "Local draft, sent to PR #{} on your next push",
+            sync.pr_number
+          ),
+        ))
+        .child(
+          Button::new("workspace-description-resync", p)
+            .variant(Variant::Warning)
+            .size(Size::Sm)
+            .disabled(self.resyncing)
+            .label("Sync")
+            .on_click(cx.listener(|view, _, _, cx| view.resync_from_pr(cx))),
+        )
+        .into_any_element(),
+    )
   }
 
   fn edit_description(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -1073,32 +1264,78 @@ impl CodeView {
     cx.notify();
   }
 
-  fn save_description(&mut self, cx: &mut Context<Self>) {
-    let (Some(draft), Some(ws)) = (&self.description_draft, &self.parent.workspace) else {
+  /// Saves the description being edited, as [`Self::save_title`] does.
+  fn save_description(&mut self, draft: bool, cx: &mut Context<Self>) {
+    let (Some(editor), Some(ws)) = (&self.description_draft, &self.parent.workspace) else {
       return;
     };
-    let text = draft.read(cx).value().to_string();
-    let id = ws.id;
+    let text = editor.read(cx).value().to_string();
+    let (id, to_pr) = (ws.id, !draft && self.pr_sync.1.is_some());
     self.saving_description = true;
+    self.menu = None;
     self.read(
-      move |host, parent| host.set_description(&parent.repo_path, id, &text),
+      move |host, parent| {
+        host.set_description(&parent.repo_path, id, &text)?;
+        Ok(
+          to_pr
+            .then(|| host.push_to_pr(&parent.repo_path, id).err())
+            .flatten(),
+        )
+      },
       |view, result, _| {
         view.saving_description = false;
-        match result {
-          Ok(()) => {
-            view.description_draft = None;
-            tell(
-              view.host.as_ref(),
-              NativeEvent::WorkspaceChanged {
-                repo_path: view.parent.repo_path.clone(),
-              },
-            );
-          }
-          Err(err) => view.toast(ToastTone::Error, "Failed to save description", err),
+        if view.saved("description", result) {
+          view.description_draft = None;
         }
       },
       cx,
     );
+  }
+
+  /// An editor's Save: on a workspace that follows its pull request, a split
+  /// button whose menu saves a local draft instead.
+  fn save_button(
+    &self,
+    id: &'static str,
+    menu: Menu,
+    disabled: bool,
+    p: &Palette,
+    save: fn(&mut Self, bool, &mut Context<Self>),
+    cx: &mut Context<Self>,
+  ) -> AnyElement {
+    if self.pr_sync.1.is_none() {
+      return Button::new(id, p)
+        .size(Size::Sm)
+        .disabled(disabled)
+        .label("Save")
+        .on_click(cx.listener(move |view, _, _, cx| save(view, false, cx)))
+        .into_any_element();
+    }
+    let open = self.menu == Some(menu) && !disabled;
+    let draft_id = SharedString::from(format!("{id}-draft"));
+    let panel = menu_panel("workspace-save-menu", p)
+      .top(zpx(32.))
+      .right_0()
+      .w(zpx(240.))
+      .child(
+        ui::MenuItem::new(draft_id, "Save as local draft", p)
+          .description("Keep it here; it goes to the pull request on your next push")
+          .on_click(cx.listener(move |view, _, _, cx| save(view, true, cx))),
+      );
+    div()
+      .relative()
+      .child(
+        ui::SplitButton::new(id, "Save", p)
+          .menu_label("More save options")
+          .disabled(disabled)
+          .open(open)
+          .on_click(cx.listener(move |view, _, _, cx| save(view, false, cx)))
+          .on_menu(cx.listener(move |view, _, _, cx| view.toggle_menu(menu, cx))),
+      )
+      .when(open, |this| {
+        this.child(deferred(self.close_menu_on_outside(panel, cx)).with_priority(1))
+      })
+      .into_any_element()
   }
 
   fn sync_submodule(&mut self, path: String, enabled: bool, cx: &mut Context<Self>) {
@@ -1282,8 +1519,7 @@ impl Render for CodeView {
           .when(self.overview.is_none(), |this| this.child(skeleton(&p)))
           .children(self.conflicts(&p))
           .child(self.task_card(&p, window, cx))
-          .children(self.title(&p, cx))
-          .children(self.description(&p, window, cx))
+          .children(self.about(&p, window, cx))
           .children(self.stack_panel(&p, cx))
           .child(self.go_to_file(&p))
           .child(self.files(&p, cx))
@@ -1791,6 +2027,113 @@ impl CodeView {
 
   /// The workspace's full title, wrapped rather than truncated, with an
   /// inline editor behind its pencil.
+  /// The workspace's title and description in one card, with the pull
+  /// request's sync state in its footer. While a local draft differs from
+  /// the PR, tabs switch between the draft and what GitHub has.
+  fn about(
+    &mut self,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Option<impl IntoElement> {
+    let draft = self
+      .pr_sync()
+      .is_some_and(|sync| !(sync.title && sync.description));
+    if !draft {
+      // The next draft opens on itself.
+      self.about_tab = AboutTab::Draft;
+    }
+    let card = section(p)
+      .debug_selector(|| "workspace-about".into())
+      .px_4()
+      .py_3()
+      .flex()
+      .flex_col()
+      .gap_3()
+      .when(draft, |card| card.child(self.about_tabs(p, cx)));
+    let card = if draft && self.about_tab == AboutTab::GitHub {
+      card.child(self.github_text(p))
+    } else {
+      card
+        .child(self.title(p, cx)?)
+        .children(self.description(p, window, cx))
+    };
+    Some(card.children(self.pr_footer(p, cx)))
+  }
+
+  fn about_tabs(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let view = cx.weak_entity();
+    ui::Tabs::new("workspace-about-tabs", p)
+      .style(ui::TabsStyle::Underline)
+      .tab(ui::Tab::new("workspace-about-tab-draft", "Local draft"))
+      .tab(ui::Tab::new("workspace-about-tab-github", "GitHub"))
+      .selected(match self.about_tab {
+        AboutTab::Draft => 0,
+        AboutTab::GitHub => 1,
+      })
+      .on_select(move |ix, _, cx| {
+        let tab = [AboutTab::Draft, AboutTab::GitHub][ix];
+        view
+          .update(cx, |view, cx| view.select_about_tab(tab, cx))
+          .ignore_closed();
+      })
+  }
+
+  /// Shows `tab`; the GitHub tab reads the PR's text again on the way.
+  fn select_about_tab(&mut self, tab: AboutTab, cx: &mut Context<Self>) {
+    self.about_tab = tab;
+    cx.notify();
+    if tab == AboutTab::GitHub {
+      self.read(
+        |host, parent| {
+          parent
+            .workspace
+            .as_ref()
+            .and_then(|ws| host.pr_text(&parent.repo_path, ws))
+        },
+        |view, text, _| view.pr_text = text,
+        cx,
+      );
+    }
+  }
+
+  /// The pull request's title and body as GitHub has them, read-only.
+  fn github_text(&self, p: &Palette) -> impl IntoElement {
+    let panel = div()
+      .debug_selector(|| "workspace-about-github".into())
+      .flex()
+      .flex_col()
+      .gap_3();
+    let Some((title, body)) = self.pr_text.clone() else {
+      return panel.child(
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child("Reading the pull request…"),
+      );
+    };
+    panel
+      .child(
+        ui::text(div(), TextSize::Xl)
+          .font_weight(FontWeight::SEMIBOLD)
+          .text_color(p.foreground)
+          .whitespace_normal()
+          .child(title),
+      )
+      .child(if body.is_empty() {
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child("No description")
+          .into_any_element()
+      } else if looks_like_markdown(&body) {
+        markdown("workspace-about-github-md", &body, 14., self.dark).into_any_element()
+      } else {
+        ui::text(div(), TextSize::Sm)
+          .whitespace_normal()
+          .child(body)
+          .into_any_element()
+      })
+  }
+
   fn title(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     let title = display_title(self.parent.workspace.as_ref()?);
     let heading = |el: Div| {
@@ -1841,7 +2184,7 @@ impl CodeView {
             .gap_2()
             .capture_action(cx.listener(|view, action: &Enter, _, cx| {
               if action.secondary {
-                view.save_title(cx);
+                view.save_title(false, cx);
                 cx.stop_propagation();
               }
             }))
@@ -1871,13 +2214,14 @@ impl CodeView {
                       cx.notify();
                     })),
                 )
-                .child(
-                  Button::new("workspace-title-save", p)
-                    .size(Size::Sm)
-                    .disabled(saving || empty)
-                    .label("Save")
-                    .on_click(cx.listener(|view, _, _, cx| view.save_title(cx))),
-                ),
+                .child(self.save_button(
+                  "workspace-title-save",
+                  Menu::SaveTitle,
+                  saving || empty,
+                  p,
+                  Self::save_title,
+                  cx,
+                )),
             ),
         )
         .into_any_element(),
@@ -1891,11 +2235,9 @@ impl CodeView {
     cx: &mut Context<Self>,
   ) -> Option<impl IntoElement> {
     let text = self.parent.workspace.as_ref().and_then(description)?;
-    let card = section(p)
+    let card = div()
       .debug_selector(|| "workspace-description".into())
-      .relative()
-      .px_4()
-      .py_3();
+      .relative();
     let Some(draft) = self.description_draft.clone() else {
       let shown = if looks_like_markdown(&text) {
         div()
@@ -1912,13 +2254,13 @@ impl CodeView {
       return Some(
         card
           .child(
-            div().absolute().top_2().right_2().child(
+            div().absolute().top_0().right_0().child(
               Button::new("workspace-description-edit", p)
                 .aria_label("Edit description")
                 .variant(Variant::Ghost)
                 .size(Size::Icon)
-                .w(zpx(28.))
-                .h(zpx(28.))
+                .w(zpx(20.))
+                .h(zpx(20.))
                 .child(ui::icon(theme::ICON_PENCIL, 16., p.muted_foreground))
                 .on_click(cx.listener(move |view, _, window, cx| {
                   view.edit_description(text.clone(), window, cx)
@@ -1941,7 +2283,7 @@ impl CodeView {
             .gap_2()
             .capture_action(cx.listener(|view, action: &Enter, _, cx| {
               if action.secondary {
-                view.save_description(cx);
+                view.save_description(false, cx);
                 cx.stop_propagation();
               }
             }))
@@ -1971,13 +2313,14 @@ impl CodeView {
                       cx.notify();
                     })),
                 )
-                .child(
-                  Button::new("workspace-description-save", p)
-                    .size(Size::Sm)
-                    .disabled(saving)
-                    .label("Save")
-                    .on_click(cx.listener(|view, _, _, cx| view.save_description(cx))),
-                ),
+                .child(self.save_button(
+                  "workspace-description-save",
+                  Menu::SaveDescription,
+                  saving,
+                  p,
+                  Self::save_description,
+                  cx,
+                )),
             ),
         )
         .into_any_element(),

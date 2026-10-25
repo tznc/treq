@@ -970,6 +970,7 @@ fn new_pr_fake() -> Fake {
     base_ref_name: String::new(),
     merge_state_status: None,
     is_draft: false,
+    body: String::new(),
   };
   Fake {
     workspaces: vec![
