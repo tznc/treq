@@ -248,6 +248,17 @@ pub mod nav {
       == Some(view)
   }
 
+  /// Retitles the page showing `view` (a renamed terminal).
+  pub fn set_title(view: EntityId, title: impl Into<SharedString>, cx: &mut App) {
+    let title = title.into();
+    update(cx, move |root, cx| {
+      if let Some(page) = root.stack.iter_mut().find(|p| p.view.entity_id() == view) {
+        page.title = title;
+        cx.notify();
+      }
+    });
+  }
+
   pub fn pop(cx: &mut App) {
     update(cx, |root, cx| {
       if root.stack.len() > 1 {
