@@ -6,6 +6,8 @@
 mod hold;
 mod home;
 mod load;
+#[cfg(test)]
+mod perf;
 mod screens;
 pub mod sheet;
 mod terminal_view;

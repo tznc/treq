@@ -91,6 +91,24 @@ impl DiffScreen {
     this
   }
 
+  /// A screen showing `hunks`, without the host reads (measurement tests).
+  #[cfg(test)]
+  pub(crate) fn for_test(hunks: Vec<JjDiffHunk>) -> Self {
+    Self {
+      target: Target {
+        repo: "/r".into(),
+        id: "1".into(),
+        name: "w".into(),
+      },
+      path: "src/a.rs".into(),
+      hunks: Load::Ready(hunks),
+      content: Load::Idle,
+      show_content: false,
+      fixed: true,
+      scroll: ScrollHandle::new(),
+    }
+  }
+
   fn reload(&mut self, cx: &mut Context<Self>) {
     if self.fixed {
       return;

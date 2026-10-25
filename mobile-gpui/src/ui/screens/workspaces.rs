@@ -253,6 +253,34 @@ impl WorkspacesScreen {
     self.fetch(false, cx);
   }
 
+  /// A screen showing `list`, without the host reads (measurement tests).
+  #[cfg(test)]
+  pub(crate) fn for_test(
+    list: Vec<WorkspaceSummary>,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Self {
+    let query = cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces"));
+    Self {
+      repo: "/r".into(),
+      list: Load::Ready(list),
+      query,
+      selection: None,
+      pending: HashSet::new(),
+      message: None,
+      refresh_error: None,
+      marker: None,
+      scroll: ScrollHandle::new(),
+      _poll: Task::ready(()),
+    }
+  }
+
+  #[cfg(test)]
+  pub(crate) fn set_selecting(&mut self, ids: impl IntoIterator<Item = i64>, cx: &mut Context<Self>) {
+    self.selection = Some(ids.into_iter().collect());
+    cx.notify();
+  }
+
   fn fetch(&mut self, join: bool, cx: &mut Context<Self>) {
     if self.list.ready().is_none() {
       self.list = Load::Loading;
