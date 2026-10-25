@@ -4,7 +4,9 @@
 # keystore from the environment:
 #
 #   ANDROID_KEYSTORE_BASE64  ANDROID_KEYSTORE_PASSWORD
-#   ANDROID_KEY_ALIAS        ANDROID_KEY_PASSWORD
+#   ANDROID_KEY_ALIAS
+#
+# The key password is the keystore password (PKCS12 keystores have one).
 #
 #   mobile-gpui/scripts/android-signing.sh
 set -euo pipefail
@@ -14,14 +16,14 @@ ANDROID=$APP/gen/android
 GRADLE=$ANDROID/app/build.gradle.kts
 
 : "${ANDROID_KEYSTORE_BASE64:?}" "${ANDROID_KEYSTORE_PASSWORD:?}"
-: "${ANDROID_KEY_ALIAS:?}" "${ANDROID_KEY_PASSWORD:?}"
+: "${ANDROID_KEY_ALIAS:?}"
 
 echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID/upload.jks"
 cat > "$ANDROID/keystore.properties" <<EOF
 storeFile=$ANDROID/upload.jks
 storePassword=$ANDROID_KEYSTORE_PASSWORD
 keyAlias=$ANDROID_KEY_ALIAS
-keyPassword=$ANDROID_KEY_PASSWORD
+keyPassword=$ANDROID_KEYSTORE_PASSWORD
 EOF
 
 # Declare the config ahead of buildTypes, then point the release type at it.
