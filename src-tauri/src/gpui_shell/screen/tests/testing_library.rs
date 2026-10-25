@@ -503,3 +503,58 @@ fn the_farewell_after_deleting_an_account_is_an_alert(cx: &mut TestAppContext) {
   let s = screen(&mut h);
   expect(s.get_by_role(by::role(Role::Alert).name("Sorry to see you go"))).to_be_visible();
 }
+
+fn setup_status(status: &str) -> crate::core::SetupScriptStatus {
+  crate::core::SetupScriptStatus {
+    configured: true,
+    status: status.into(),
+    run_id: Some(4),
+    script: Some("npm ci\n\nnpm run build".into()),
+  }
+}
+
+#[gpui::test]
+fn code_tab_alerts_on_the_setup_script_with_its_output_hidden(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    setup_status: Some(setup_status("failed")),
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("code-setup"));
+  assert!(
+    !h.drawn("code-setup-output"),
+    "output starts hidden, even after a failure"
+  );
+
+  h.click("code-setup-toggle");
+  assert!(h.drawn("code-setup-output"));
+  assert!(h.drawn("code-setup-command-0"));
+  assert!(h.drawn("code-setup-command-1"));
+  assert!(
+    !h.drawn("code-setup-command-2"),
+    "blank lines are not commands"
+  );
+  assert!(h.drawn("code-setup-logs"));
+  assert!(host.calls().contains(&"read setup logs 4".to_string()));
+
+  h.click("code-setup-toggle");
+  assert!(!h.drawn("code-setup-output"));
+}
+
+#[gpui::test]
+fn code_tab_reruns_the_setup_script(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    setup_status: Some(setup_status("passed")),
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  h.click("code-setup-rerun");
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"run setup 7".to_string()));
+}
+
+#[gpui::test]
+fn code_tab_draws_no_setup_alert_without_a_setup_script(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  assert!(!h.drawn("code-setup"));
+}

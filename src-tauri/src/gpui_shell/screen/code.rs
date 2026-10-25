@@ -43,16 +43,18 @@ use super::{
   },
   environment,
   file_picker::{FilePicker, FilePickerEvent, Scope},
+  github_data::LogLine,
   merge::full_path,
   prefetch, ActionSink, ScreenAction,
 };
 use crate::{
   core::{
     pr_sync::{self, SyncState},
+    running_checks::{CheckRun, ChecksTarget},
     WorkspaceEntry,
   },
   gpui_shell::{
-    form,
+    checks_run, form,
     native::{NativeEvent, ToastTone},
     popup::{PopupSink, Side, TooltipContent},
     theme::{self, Palette},
@@ -69,6 +71,8 @@ const HISTORY_PAGE: usize = 14;
 const STACK_DOCS_PATH: &str = "/docs/concepts/workspaces#stacks-and-rebasing";
 /// A root of at most this many entries draws every row.
 const ENTRIES_ALL: usize = 200;
+/// How often a pending or running setup script's status is read again.
+const SETUP_POLL: Duration = Duration::from_millis(1500);
 /// Rows drawn past each edge of the viewport.
 const ENTRIES_OVERSCAN: usize = 20;
 
@@ -136,6 +140,7 @@ pub struct StackRow {
 /// What [`CodeView::load`] reads, all at once.
 struct Read {
   overview: Overview,
+  setup: Option<crate::core::SetupScriptStatus>,
   history: Result<JjLogResult, String>,
   stack: Option<Vec<StackRow>>,
   settings: TaskSettings,
@@ -164,10 +169,16 @@ impl Read {
       let overview = scope.spawn(|| host.overview(&parent.repo_path, parent.workspace_id()));
       let history = scope.spawn(|| read_history(host, parent, limit));
       let stack = scope.spawn(|| read_stack(host, parent));
+      let setup = scope.spawn(|| {
+        parent
+          .workspace_id()
+          .and_then(|id| host.setup(&parent.repo_path, id))
+      });
       let settings = task_settings(host, &parent.repo_path);
       let pr_sync = read_pr_sync(host, parent);
       Read {
         overview: Overview::or_unavailable(super::joined(overview)),
+        setup: super::joined(setup),
         history: super::joined(history),
         stack: super::joined(stack),
         settings,
@@ -300,6 +311,11 @@ pub struct CodeView {
   about_tab: AboutTab,
   pr_text: Option<(String, String)>,
   syncing_submodule: bool,
+  /// The workspace setup script's status, whether its output is open, and
+  /// that output.
+  setup: Option<crate::core::SetupScriptStatus>,
+  setup_open: bool,
+  setup_logs: Option<Result<Vec<LogLine>, String>>,
   starting_devcontainer: bool,
   pub(super) picker: Option<Entity<FilePicker>>,
   /// The tab's scroll, and where the root's entry rows sit in it.
@@ -392,6 +408,9 @@ impl CodeView {
       about_tab: AboutTab::Draft,
       pr_text: None,
       syncing_submodule: false,
+      setup: None,
+      setup_open: false,
+      setup_logs: None,
       starting_devcontainer: false,
       picker: None,
       scroll: ScrollHandle::new(),
@@ -533,6 +552,8 @@ impl CodeView {
         self.history = None;
         self.history_error = None;
         self.history_error_open = false;
+        self.setup_open = false;
+        self.setup_logs = None;
         true
       }
       None if self.parent.key() == parent.key() => false,
@@ -555,8 +576,10 @@ impl CodeView {
       && self.history_error.is_none()
       && self.stack == read.stack
       && self.settings.as_ref() == Some(&settings)
-      && self.pr_sync.1 == read.pr_sync.1;
+      && self.pr_sync.1 == read.pr_sync.1
+      && self.setup == read.setup;
     self.overview = Some(read.overview);
+    self.set_setup(read.setup, cx);
     self.set_history(read.history);
     self.stack = read.stack;
     let environment = settings.environment.is_some();
@@ -612,6 +635,87 @@ impl CodeView {
         .ignore_closed();
     })
     .detach();
+  }
+
+  /// Shows the setup script's status; reads it again while it has not
+  /// finished, and its open output with it.
+  fn set_setup(&mut self, setup: Option<crate::core::SetupScriptStatus>, cx: &mut Context<Self>) {
+    let unfinished = setup
+      .as_ref()
+      .is_some_and(|s| s.configured && matches!(s.status.as_str(), "pending" | "running"));
+    self.setup = setup;
+    if self.setup_open {
+      self.load_setup_logs(cx);
+    }
+    if unfinished {
+      let key = self.parent.key();
+      cx.spawn(async move |this, cx| {
+        cx.background_executor().timer(SETUP_POLL).await;
+        this
+          .update(cx, |view, cx| {
+            if view.parent.key() == key {
+              view.load_setup(cx);
+            }
+          })
+          .ignore_closed();
+      })
+      .detach();
+    }
+  }
+
+  fn load_setup(&mut self, cx: &mut Context<Self>) {
+    self.read(
+      |host, parent| {
+        parent
+          .workspace_id()
+          .and_then(|id| host.setup(&parent.repo_path, id))
+      },
+      |view, setup, cx| view.set_setup(setup, cx),
+      cx,
+    );
+  }
+
+  fn load_setup_logs(&mut self, cx: &mut Context<Self>) {
+    let Some(run_id) = self.setup.as_ref().and_then(|s| s.run_id) else {
+      return;
+    };
+    self.read(
+      move |host, parent| host.setup_logs(&parent.repo_path, run_id),
+      |view, logs, _| view.setup_logs = Some(logs),
+      cx,
+    );
+  }
+
+  /// Runs the setup script again, then reads its status and output.
+  fn rerun_setup(&mut self, cx: &mut Context<Self>) {
+    let Some(workspace) = self.parent.workspace.clone() else {
+      return;
+    };
+    let target = ChecksTarget {
+      repo_path: self.parent.repo_path.clone(),
+      workspace_id: workspace.id,
+      workspace_path: full_path(&workspace),
+    };
+    let (host, view) = (self.host.clone(), cx.weak_entity());
+    let repo_path = target.repo_path.clone();
+    checks_run::start(
+      cx,
+      target,
+      CheckRun::Setup,
+      move |target, _| host.run_setup(target),
+      move |_, cx| {
+        view
+          .update(cx, |view, cx| {
+            tell(
+              view.host.as_ref(),
+              NativeEvent::WorkspaceChanged { repo_path },
+            );
+            view.load_setup(cx);
+          })
+          .ignore_closed();
+      },
+    );
+    cx.notify();
   }
 
   fn load_overview(&mut self, cx: &mut Context<Self>) {
@@ -1519,6 +1623,7 @@ impl Render for CodeView {
           .gap_4()
           .when(self.overview.is_none(), |this| this.child(skeleton(&p)))
           .children(self.conflicts(&p))
+          .children(self.setup_alert(&p, cx))
           .child(self.task_card(&p, window, cx))
           .children(self.about(&p, window, cx))
           .children(self.stack_panel(&p, cx))
@@ -1623,6 +1728,73 @@ impl CodeView {
             });
           }),
       ),
+    )
+  }
+
+  /// The workspace setup script: its state, re-run, and its commands and
+  /// output behind Show output.
+  fn setup_alert(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let setup = self.setup.as_ref().filter(|s| s.configured)?;
+    let workspace_id = self.parent.workspace_id()?;
+    let rerunning =
+      checks_run::keys(cx, &self.parent.repo_path).contains(&CheckRun::Setup.key(workspace_id));
+    let running = rerunning || matches!(setup.status.as_str(), "pending" | "running");
+    let (title, message, severity) = match setup.status.as_str() {
+      _ if rerunning || setup.status == "running" => (
+        "Running the workspace setup script",
+        "Checks run once it finishes.",
+        ui::Severity::Info,
+      ),
+      "pending" => (
+        "The workspace setup script has not run yet",
+        "Checks run once it finishes.",
+        ui::Severity::Info,
+      ),
+      "failed" => (
+        "Workspace setup script failed",
+        "Checks can still run.",
+        ui::Severity::Danger,
+      ),
+      _ => (
+        "Workspace setup script passed",
+        "Checks can run.",
+        ui::Severity::Info,
+      ),
+    };
+    let open = self.setup_open;
+    Some(
+      ui::Alert::new("code-setup", title, p)
+        .severity(severity)
+        .message(message)
+        .when(open, |alert| {
+          alert.content(setup_output(
+            setup.run_id,
+            setup.script.as_deref(),
+            self.setup_logs.as_ref(),
+            p,
+          ))
+        })
+        .action(
+          Button::new("code-setup-toggle", p)
+            .variant(Variant::Ghost)
+            .size(Size::Sm)
+            .label(if open { "Hide output" } else { "Show output" })
+            .on_click(cx.listener(|view, _, _, cx| {
+              view.setup_open = !view.setup_open;
+              if view.setup_open {
+                view.load_setup_logs(cx);
+              }
+              cx.notify();
+            })),
+        )
+        .action(
+          Button::new("code-setup-rerun", p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .disabled(running)
+            .label("Re-run setup script")
+            .on_click(cx.listener(|view, _, _, cx| view.rerun_setup(cx))),
+        ),
     )
   }
 
@@ -3314,4 +3486,91 @@ fn loc_indicator(
         ),
     )
     .child(count(format!("-{deletions}"), removed.text(p), minus_ch))
+}
+
+/// The setup script's commands and its run's output, for the setup alert.
+fn setup_output(
+  run_id: Option<i64>,
+  script: Option<&str>,
+  logs: Option<&Result<Vec<LogLine>, String>>,
+  p: &Palette,
+) -> impl IntoElement {
+  let block = |id: &'static str| {
+    ui::text(div().id(id).debug_selector(move || id.into()), TextSize::Xs)
+      .rounded(radius::SM)
+      .bg(p.muted)
+      .p_2()
+      .font_family(theme::MONO_FONT)
+  };
+  let heading = |text: &'static str| {
+    ui::text(div(), TextSize::Xs)
+      .mb_1()
+      .font_weight(FontWeight::MEDIUM)
+      .text_color(p.muted_foreground)
+      .child(text)
+  };
+  let commands = setup_commands(script.unwrap_or_default());
+  let output = match (run_id, logs) {
+    (None, _) => ui::text(div(), TextSize::Xs)
+      .text_color(p.muted_foreground)
+      .child("The setup script has not run yet.")
+      .into_any_element(),
+    (Some(_), None) => {
+      ui::spinner("code-setup-logs-spin", 12., p.muted_foreground).into_any_element()
+    }
+    (Some(_), Some(Err(err))) => ui::text(div(), TextSize::Xs)
+      .text_color(p.destructive)
+      .child(err.clone())
+      .into_any_element(),
+    (Some(_), Some(Ok(lines))) => block("code-setup-logs")
+      .max_h(zpx(256.))
+      .overflow_y_scroll()
+      .child(if lines.is_empty() {
+        "(no output)".to_string()
+      } else {
+        lines
+          .iter()
+          .map(|l| {
+            if l.stream == "stderr" {
+              format!("[stderr] {}", l.body)
+            } else {
+              l.body.clone()
+            }
+          })
+          .collect::<Vec<_>>()
+          .join("\n")
+      })
+      .into_any_element(),
+  };
+  div()
+    .id("code-setup-output")
+    .debug_selector(|| "code-setup-output".into())
+    .flex()
+    .flex_col()
+    .gap_2()
+    .child(
+      div()
+        .child(heading("Commands"))
+        .child(
+          block("code-setup-commands").children(commands.into_iter().enumerate().map(
+            |(i, command)| {
+              let id = format!("code-setup-command-{i}");
+              div()
+                .id(SharedString::from(id.clone()))
+                .debug_selector(move || id)
+                .child(command)
+            },
+          )),
+        ),
+    )
+    .child(div().child(heading("Output")).child(output))
+}
+
+/// The setup script's non-blank lines, each shown as a `$ ` command.
+fn setup_commands(script: &str) -> Vec<String> {
+  script
+    .lines()
+    .filter(|l| !l.trim().is_empty())
+    .map(|l| format!("$ {l}"))
+    .collect()
 }

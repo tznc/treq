@@ -199,6 +199,19 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
   ) -> Result<i64, String>;
   /// The native "Attach Files" dialog; `None` when cancelled.
   fn pick_files(&self) -> Option<Vec<String>>;
+  /// The workspace setup script's status; `None` when it cannot be read.
+  fn setup(&self, repo_path: &str, workspace_id: i64) -> Option<crate::core::SetupScriptStatus>;
+  /// The output of the setup script's run `run_id`.
+  fn setup_logs(
+    &self,
+    repo_path: &str,
+    run_id: i64,
+  ) -> Result<Vec<super::github_data::LogLine>, String>;
+  /// Runs the workspace setup script to the end.
+  fn run_setup(
+    &self,
+    target: &crate::core::running_checks::ChecksTarget,
+  ) -> Result<Vec<crate::core::checks::JobResult>, String>;
 }
 
 impl CodeHost for Backend {
@@ -446,6 +459,25 @@ impl CodeHost for Backend {
         .map(|p| p.to_string_lossy().into_owned())
         .collect(),
     )
+  }
+
+  fn setup(&self, repo_path: &str, workspace_id: i64) -> Option<crate::core::SetupScriptStatus> {
+    core::get_setup_script_status_sync(repo_path, workspace_id).ok()
+  }
+
+  fn setup_logs(
+    &self,
+    repo_path: &str,
+    run_id: i64,
+  ) -> Result<Vec<super::github_data::LogLine>, String> {
+    super::github_data::GithubHost::run_logs(self, repo_path, run_id, core::SETUP_SCRIPT_JOB_ID)
+  }
+
+  fn run_setup(
+    &self,
+    target: &crate::core::running_checks::ChecksTarget,
+  ) -> Result<Vec<crate::core::checks::JobResult>, String> {
+    core::running_checks::run(target, &core::running_checks::CheckRun::Setup)
   }
 }
 
