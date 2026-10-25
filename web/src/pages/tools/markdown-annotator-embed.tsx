@@ -41,7 +41,7 @@ function EmbedLoader({ onLoad, onError }: { onLoad: (f: LoadedFile) => void; onE
 
     if (urlParam) {
       let rawUrl: string;
-      let displayUrl = urlParam;
+      const displayUrl = urlParam;
 
       try {
         const u = new URL(urlParam);

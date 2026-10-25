@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import type React from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import BrowserOnly from '@docusaurus/BrowserOnly';
 import Link from '@docusaurus/Link';
 import { useHistory } from '@docusaurus/router';
@@ -19,7 +20,11 @@ function SearchBarInner() {
   const runQuery = useCallback(async (q: string) => {
     if (!q.trim()) { setResults([]); setOpen(false); return; }
     try {
-      const resolvedDb = db ?? await getDb().then(loaded => { setDb(loaded); return loaded; });
+      let resolvedDb = db;
+      if (!resolvedDb) {
+        resolvedDb = await getDb();
+        setDb(resolvedDb);
+      }
       const rows = execSearch(resolvedDb, q);
       setResults(rows);
       setOpen(rows.length > 0);

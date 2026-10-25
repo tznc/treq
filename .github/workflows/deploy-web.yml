@@ -23,6 +23,7 @@ on:
       - "web/**"
       - ".github/workflows/deploy-web.yml"
       - ".github/scripts/check_readability.py"
+      - "biome.json"
 
 # Production deploys queue behind each other. PR previews get a group per PR,
 # so one PR's preview no longer cancels another's pending run.
@@ -171,6 +172,11 @@ jobs:
         run: |
           uvx --from ast-grep-cli==0.38.7 ast-grep test --skip-snapshot-tests
           uvx --from ast-grep-cli==0.38.7 ast-grep scan web/e2e
+      - name: Lint (Biome)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        working-directory: ${{ github.workspace }}
+        # Matches the root lockfile's @biomejs/biome and reads the root biome.json.
+        run: npx --yes @biomejs/biome@2.4.7 lint web/src web/e2e web/plugins
       - name: Check docs readability
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         working-directory: ${{ github.workspace }}

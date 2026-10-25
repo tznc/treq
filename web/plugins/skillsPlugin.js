@@ -6,7 +6,10 @@ const path = require('path');
 // rendering a shared SkillDetailPage component with that skill's data as props.
 // This is the standard Docusaurus pattern for turning a data file into many
 // pages without hand-writing one file per route.
-/** @type {import('@docusaurus/types').PluginModule} */
+/**
+ * @param {import('@docusaurus/types').LoadContext} context
+ * @returns {import('@docusaurus/types').Plugin<Array<{route: string}>>}
+ */
 function skillsPlugin(context) {
   return {
     name: 'skills-plugin',

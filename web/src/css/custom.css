@@ -5,7 +5,9 @@
  */
 
 /* Tailwind utilities (no preflight — Infima handles base styles) */
+/* biome-ignore lint/suspicious/noUnknownAtRules: Tailwind v3 directive */
 @tailwind components;
+/* biome-ignore lint/suspicious/noUnknownAtRules: Tailwind v3 directive */
 @tailwind utilities;
 
 /* ── Shared design-system tokens ──────────────────────────────────────────────

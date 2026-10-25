@@ -1,4 +1,4 @@
-import React from 'react';
+import type React from 'react';
 import BrowserOnly from '@docusaurus/BrowserOnly';
 import Head from '@docusaurus/Head';
 import { AuthProvider } from '@site/src/components/AuthProvider';
