@@ -283,8 +283,10 @@ fn skill_install_deep_link(app: &AppHandle, url: &str) {
     log::info!("skill deep link ignored (malformed id)");
     return;
   };
+  // A link that launched Treq comes before any window: the first window
+  // to start shows it.
   let Some(label) = resolve_menu_target_label(app) else {
-    log::info!("skill deep link ignored (no window)");
+    crate::core::skills::queue_pending_skill_install(skill_id);
     return;
   };
   focus_target_window(app);
@@ -783,6 +785,14 @@ pub fn run() {
           });
         }
         let handle = app.handle().clone();
+        // The link that launched Treq, if any; later links reach on_open_url.
+        if let Ok(Some(urls)) = app.deep_link().get_current() {
+          for url in urls {
+            if classify_deep_link(url.as_str()) == DeepLinkKind::SkillInstall {
+              skill_install_deep_link(app.handle(), url.as_str());
+            }
+          }
+        }
         app.deep_link().on_open_url(move |event| {
           let urls: Vec<String> = event.urls().into_iter().map(|u| u.to_string()).collect();
           for url in urls {

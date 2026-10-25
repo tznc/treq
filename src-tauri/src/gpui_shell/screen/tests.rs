@@ -231,6 +231,21 @@ impl file_browser_data::FileBrowserHost for FakeHost {
 }
 
 impl FakeHost {
+  /// The copy a customise call reports, named after the registry skill.
+  fn customize_copy(&self, id: &str) -> Result<crate::core::skills::CustomizedSkill, String> {
+    let name = self
+      .skills
+      .iter()
+      .find(|s| s.skill.id == id)
+      .map_or_else(|| id.to_string(), |s| s.skill.name.clone());
+    Ok(crate::core::skills::CustomizedSkill {
+      id: id.into(),
+      agents_skill_path: format!(".agents/skills/{name}"),
+      claude_skill_path: format!(".claude/skills/{name}"),
+      name,
+    })
+  }
+
   /// What the Changes tab reads now.
   fn working(&self) -> Option<crate::jj::JjRevisionDiff> {
     let edited = self.edited.lock().unwrap().clone();
@@ -439,17 +454,26 @@ impl settings_data::SettingsHost for FakeHost {
     repo_path: &str,
   ) -> Result<crate::core::skills::CustomizedSkill, String> {
     self.record(format!("customize {skill_id} {repo_path}"));
-    let name = self
-      .skills
-      .iter()
-      .find(|s| s.skill.id == skill_id)
-      .map_or_else(|| skill_id.to_string(), |s| s.skill.name.clone());
-    Ok(crate::core::skills::CustomizedSkill {
-      id: skill_id.into(),
-      agents_skill_path: format!(".agents/skills/{name}"),
-      claude_skill_path: format!(".claude/skills/{name}"),
-      name,
-    })
+    self.customize_copy(skill_id)
+  }
+
+  fn customize_registry_skill(
+    &self,
+    skill_id: &str,
+    repo_path: &str,
+  ) -> Result<crate::core::skills::CustomizedSkill, String> {
+    self.record(format!("customize-registry {skill_id} {repo_path}"));
+    self.customize_copy(skill_id)
+  }
+
+  fn customize_global_skill(
+    &self,
+    name: &str,
+    source: &str,
+    repo_path: &str,
+  ) -> Result<crate::core::skills::CustomizedSkill, String> {
+    self.record(format!("customize-global {name} {source} {repo_path}"));
+    self.customize_copy(name)
   }
 
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String> {
@@ -2986,15 +3010,16 @@ fn custom_skill(
   name: &str,
   level: crate::core::skills::CustomSkillLevel,
 ) -> crate::core::skills::CustomSkill {
+  // Repository copies are relative to it; global ones are full paths.
   let root = match level {
-    crate::core::skills::CustomSkillLevel::Repo => "/repo",
-    crate::core::skills::CustomSkillLevel::Global => "/home/u",
+    crate::core::skills::CustomSkillLevel::Repo => "",
+    crate::core::skills::CustomSkillLevel::Global => "/home/u/",
   };
   crate::core::skills::CustomSkill {
     name: name.into(),
     description: Some(format!("{name} by hand")),
     level,
-    paths: vec![format!("{root}/.claude/skills/{name}")],
+    paths: vec![format!("{root}.claude/skills/{name}")],
   }
 }
 
@@ -3122,14 +3147,74 @@ fn hand_written_skill_edits_with_an_agent_and_cannot_uninstall(cx: &mut TestAppC
   h.click("skill-filter-custom");
   h.click("skill-customize-custom-global/notes");
   h.cx.run_until_parked();
-  assert!(host.writes().is_empty());
+  assert_eq!(
+    host.writes(),
+    ["customize-global notes /home/u/.claude/skills/notes /repo"],
+    "a global skill is copied into the repository first"
+  );
+  let prompt = started_prompt(&h);
+  assert!(prompt.contains(".agents/skills/notes/"), "{prompt}");
+  assert!(!prompt.contains("/home/"), "no home path: {prompt}");
+}
+
+fn started_prompt(h: &Harness) -> String {
   let sent = h.sent();
   let [ScreenAction::Field { field, value }] = &sent[..] else {
     panic!("not one field: {sent:?}");
   };
   assert_eq!(field, "skills.startAgent");
-  let prompt = value["prompt"].as_str().expect("prompt");
-  assert!(prompt.contains("/home/u/.claude/skills/notes/"), "{prompt}");
+  value["prompt"].as_str().expect("prompt").to_string()
+}
+
+#[gpui::test]
+fn customise_a_skill_not_yet_installed_pulls_it_from_the_registry(cx: &mut TestAppContext) {
+  let (mut h, host) = skills_harness(cx);
+  h.click("skill-customize-docx");
+  h.cx.run_until_parked();
+  assert_eq!(host.writes(), ["customize-registry docx /repo"]);
+  let prompt = started_prompt(&h);
+  assert!(prompt.contains(".agents/skills/Word/"), "{prompt}");
+}
+
+#[gpui::test]
+fn hand_written_repo_skill_prompt_uses_repo_paths(cx: &mut TestAppContext) {
+  let (mut h, host) = skills_status_harness(cx);
+  h.click("skill-filter-custom");
+  h.click("skill-customize-custom-repo/deploy");
+  h.cx.run_until_parked();
+  assert!(host.writes().is_empty(), "it is already the user's copy");
+  let prompt = started_prompt(&h);
+  assert!(prompt.contains(".claude/skills/deploy/"), "{prompt}");
+  assert!(!prompt.contains("/repo/"), "{prompt}");
+}
+
+#[gpui::test]
+fn skill_link_without_a_repository_installs_app_wide(cx: &mut TestAppContext) {
+  let mut docx = skill("docx", "Word", None);
+  docx.skill.checksum = Some("c0ffee".into());
+  let host = Arc::new(FakeHost {
+    skills: vec![docx],
+    ..FakeHost::default()
+  });
+  let route = serde_json::from_value(serde_json::json!({
+    "kind": "settings",
+    "dark": false,
+    "tab": "skills",
+    "repoPath": null,
+    "installRequest": "docx",
+  }))
+  .expect("parse");
+  let mut h = Harness::with_host(cx, route, host.clone());
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  assert!(h.drawn("skill-confirm-dialog"));
+  h.click("skill-confirm-install");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes()[0],
+    "install docx Application None",
+    "app-wide needs no repository"
+  );
 }
 
 #[gpui::test]
@@ -3303,7 +3388,10 @@ fn skill_link_for_installed_skill_says_so(cx: &mut TestAppContext) {
 #[gpui::test]
 fn customize_writes_a_copy_and_asks_for_an_agent(cx: &mut TestAppContext) {
   let (mut h, host) = skills_harness(cx);
-  assert!(!h.drawn("skill-customize-docx"), "only installed skills");
+  assert!(
+    h.drawn("skill-customize-docx"),
+    "not-installed skills customise from the registry"
+  );
   h.click("skill-customize-pdf");
   h.cx.run_until_parked();
   assert_eq!(host.writes(), ["customize pdf /repo"]);

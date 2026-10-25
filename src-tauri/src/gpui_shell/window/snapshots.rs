@@ -105,6 +105,16 @@ fn remote_chrome(model: &Model) -> Value {
 /// Which page shows, as `GpuiScreenView`.
 fn view(model: &Model, data: &Data) -> Value {
   if !model.has_repo() {
+    // A skill link still asks to install app-wide, which needs no repository.
+    if let (Page::Settings { tab }, Some(skill)) = (&model.page, &model.skill_install) {
+      return json!({
+        "kind": "settings",
+        "tab": tab,
+        "repoPath": null,
+        "currentBranch": null,
+        "installRequest": skill,
+      });
+    }
     return json!({"kind": "onboarding", "remoteRepo": model.remote.form_json()});
   }
   let repo = model.repo();
@@ -464,6 +474,17 @@ mod tests {
     let View::Settings(route) = screen(&model, &data()).unwrap().view else {
       panic!("not settings");
     };
+    assert_eq!(route.install_request.as_deref(), Some("anthropic/pdf"));
+  }
+
+  #[test]
+  fn skill_link_shows_settings_even_without_a_repository() {
+    let mut model = Model::new(None);
+    model.open_skill_install("anthropic/pdf".into());
+    let View::Settings(route) = screen(&model, &data()).unwrap().view else {
+      panic!("not settings");
+    };
+    assert_eq!(route.repo_path, None);
     assert_eq!(route.install_request.as_deref(), Some("anthropic/pdf"));
   }
 

@@ -59,6 +59,20 @@ pub trait SettingsHost: ToolsHost + AccountHost {
   fn custom_skills(&self, repo_path: Option<&str>) -> Vec<CustomSkill>;
   /// Writes a user-owned copy of an installed skill into the repository.
   fn customize_skill(&self, skill_id: &str, repo_path: &str) -> Result<CustomizedSkill, String>;
+  /// Downloads a registry skill not installed yet and writes it into the
+  /// repository as a user-owned copy, checked against its checksum.
+  fn customize_registry_skill(
+    &self,
+    skill_id: &str,
+    repo_path: &str,
+  ) -> Result<CustomizedSkill, String>;
+  /// Copies a skill from the home folder (`source`) into the repository.
+  fn customize_global_skill(
+    &self,
+    name: &str,
+    source: &str,
+    repo_path: &str,
+  ) -> Result<CustomizedSkill, String>;
   /// The bytes at `url`, for the account's avatar.
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String>;
   fn notify(&self, event: NativeEvent);
@@ -172,6 +186,35 @@ impl SettingsHost for Backend {
       ));
     }
     skills::customize_skill(skill_id, repo_path)
+  }
+
+  fn customize_registry_skill(
+    &self,
+    skill_id: &str,
+    repo_path: &str,
+  ) -> Result<CustomizedSkill, String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(crate::gpui_shell::remote_repo::unsupported(
+        "Customizing a skill",
+      ));
+    }
+    let (entry, files) =
+      crate::gpui_shell::block_on(crate::commands::skills::download_verified(skill_id, None))?;
+    skills::customize_skill_from_files(&entry.id, &entry.name, &files, repo_path)
+  }
+
+  fn customize_global_skill(
+    &self,
+    name: &str,
+    source: &str,
+    repo_path: &str,
+  ) -> Result<CustomizedSkill, String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(crate::gpui_shell::remote_repo::unsupported(
+        "Customizing a skill",
+      ));
+    }
+    skills::customize_global_skill(name, std::path::Path::new(source), repo_path)
   }
 
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String> {

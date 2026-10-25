@@ -314,18 +314,11 @@ pub fn write_skill_pack(dest: &Path, files: &[(String, Vec<u8>)]) -> Result<(), 
   })
 }
 
-pub fn install_skill_files(
+/// The files' checksum, checked against the catalog's when it lists one.
+pub fn verify_skill_checksum(
   entry: &SkillCatalogEntry,
   files: &[(String, Vec<u8>)],
-  scope: SkillInstallScope,
-  repo_path: Option<&str>,
-) -> Result<InstalledSkill, String> {
-  if entry.proprietary {
-    return Err("Proprietary skills cannot be installed from the catalog".to_string());
-  }
-  if files.is_empty() {
-    return Err("Skill has no files to install".to_string());
-  }
+) -> Result<String, String> {
   let computed = skill_checksum(files);
   if let Some(expected) = entry
     .checksum
@@ -340,6 +333,22 @@ pub fn install_skill_files(
       ));
     }
   }
+  Ok(computed)
+}
+
+pub fn install_skill_files(
+  entry: &SkillCatalogEntry,
+  files: &[(String, Vec<u8>)],
+  scope: SkillInstallScope,
+  repo_path: Option<&str>,
+) -> Result<InstalledSkill, String> {
+  if entry.proprietary {
+    return Err("Proprietary skills cannot be installed from the catalog".to_string());
+  }
+  if files.is_empty() {
+    return Err("Skill has no files to install".to_string());
+  }
+  let computed = verify_skill_checksum(entry, files)?;
 
   let root = match scope {
     SkillInstallScope::Application => app_skills_root()?,
@@ -562,13 +571,6 @@ pub fn customize_skill(skill_id: &str, repo_path: &str) -> Result<CustomizedSkil
     .into_iter()
     .find(|item| item.id == skill_id)
     .ok_or_else(|| format!("Skill '{skill_id}' is not installed"))?;
-  let dirname = skill_dirname(&record.name)?;
-  if has_user_owned_copy(repo, &record.name) {
-    return Err(format!(
-      "Skill '{}' is already customized in this repository",
-      record.name
-    ));
-  }
   let root = match record.scope {
     SkillInstallScope::Application => app_skills_root()?,
     SkillInstallScope::Repository => repo_skills_root(repo_path),
@@ -578,15 +580,66 @@ pub fn customize_skill(skill_id: &str, repo_path: &str) -> Result<CustomizedSkil
     return Err(format!("Installed skill files missing for '{skill_id}'"));
   }
   let files = read_pack_files(&pack)?;
+  customize_skill_from_files(&record.id, &record.name, &files, repo_path)
+}
+
+/// Writes `files` as a user-owned copy of skill `name` into the repository's
+/// agent skill folders: from an installed pack, the registry, or a global
+/// skill. Never replaces a copy the user already owns.
+pub fn customize_skill_from_files(
+  id: &str,
+  name: &str,
+  files: &[(String, Vec<u8>)],
+  repo_path: &str,
+) -> Result<CustomizedSkill, String> {
+  let repo = Path::new(repo_path);
+  if !repo.exists() {
+    return Err(format!("Repository not found: {repo_path}"));
+  }
+  let dirname = skill_dirname(name)?;
+  if has_user_owned_copy(repo, name) {
+    return Err(format!(
+      "Skill '{name}' is already customized in this repository"
+    ));
+  }
   for parent in AGENT_SKILL_PARENTS {
-    write_skill_pack(&repo.join(parent).join(&dirname), &files)?;
+    write_skill_pack(&repo.join(parent).join(&dirname), files)?;
   }
   Ok(CustomizedSkill {
-    id: record.id,
-    name: record.name,
+    id: id.to_string(),
+    name: name.to_string(),
     agents_skill_path: format!("{}/{dirname}", AGENT_SKILL_PARENTS[0]),
     claude_skill_path: format!("{}/{dirname}", AGENT_SKILL_PARENTS[1]),
   })
+}
+
+/// Copies a skill from the home folder into the repository as a user-owned
+/// copy, so agents edit it inside the repository.
+pub fn customize_global_skill(
+  name: &str,
+  source: &Path,
+  repo_path: &str,
+) -> Result<CustomizedSkill, String> {
+  let files = read_pack_files(source)?;
+  customize_skill_from_files(name, name, &files, repo_path)
+}
+
+static PENDING_SKILL_INSTALL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Keeps a `treq://skill/install` id that arrived before any window could
+/// show it (a link that launched Treq).
+pub fn queue_pending_skill_install(skill_id: String) {
+  *PENDING_SKILL_INSTALL
+    .lock()
+    .unwrap_or_else(|p| p.into_inner()) = Some(skill_id);
+}
+
+/// The queued link's id, once.
+pub fn take_pending_skill_install() -> Option<String> {
+  PENDING_SKILL_INSTALL
+    .lock()
+    .unwrap_or_else(|p| p.into_inner())
+    .take()
 }
 
 /// Where a user-owned skill lives: this repository or the user's home.
@@ -636,7 +689,12 @@ fn custom_skills_in(root: &Path, level: CustomSkillLevel) -> Vec<CustomSkill> {
       let Some(name) = dir.file_name().map(|n| n.to_string_lossy().into_owned()) else {
         continue;
       };
-      let path = dir.to_string_lossy().into_owned();
+      // Repository copies are named relative to it, so prompts never carry
+      // an absolute path; a global skill keeps its full path to copy from.
+      let path = match level {
+        CustomSkillLevel::Repo => format!("{parent}/{name}"),
+        CustomSkillLevel::Global => dir.to_string_lossy().into_owned(),
+      };
       match found.iter_mut().find(|skill| skill.name == name) {
         Some(skill) => skill.paths.push(path),
         None => found.push(CustomSkill {
@@ -898,7 +956,11 @@ mod tests {
         ("notes", CustomSkillLevel::Global, 1, Some("Takes notes")),
       ]
     );
-    assert!(found[1].paths[0].ends_with(".agents/skills/review"));
+    assert_eq!(
+      found[1].paths,
+      [".agents/skills/review", ".claude/skills/review"]
+    );
+    assert!(found[2].paths[0].starts_with(home.path().to_str().unwrap()));
   }
 
   #[test]
@@ -926,9 +988,55 @@ mod tests {
 
   #[test]
   fn edit_custom_skill_prompt_names_its_folders() {
-    let prompt = edit_custom_skill_prompt("notes", &["/home/u/.claude/skills/notes".into()]);
+    let prompt = edit_custom_skill_prompt("notes", &[".claude/skills/notes".into()]);
     assert!(prompt.contains("\"notes\""));
-    assert!(prompt.contains("/home/u/.claude/skills/notes/"));
+    assert!(prompt.contains(".claude/skills/notes/"));
+  }
+
+  #[test]
+  fn customize_skill_from_files_writes_both_user_owned_copies() {
+    let repo = TempDir::new().unwrap();
+    let copy = customize_skill_from_files(
+      "anthropic/demo",
+      "demo",
+      &sample_files(),
+      repo.path().to_str().unwrap(),
+    )
+    .expect("customize");
+    assert_eq!(copy.agents_skill_path, ".agents/skills/demo");
+    for dir in [".agents/skills/demo", ".claude/skills/demo"] {
+      assert!(repo.path().join(dir).join("SKILL.md").exists());
+      assert!(!repo.path().join(dir).join(PROJECT_SKILL_MARKER).exists());
+    }
+    let err =
+      customize_skill_from_files("x", "demo", &sample_files(), repo.path().to_str().unwrap())
+        .expect_err("exists");
+    assert!(err.contains("already customized"), "{err}");
+  }
+
+  #[test]
+  fn customize_global_skill_copies_it_into_the_repo() {
+    let repo = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    write_user_skill(home.path(), ".claude/skills", "notes", "Takes notes");
+    let source = home.path().join(".claude/skills/notes");
+    let copy =
+      customize_global_skill("notes", &source, repo.path().to_str().unwrap()).expect("customize");
+    assert_eq!(copy.claude_skill_path, ".claude/skills/notes");
+    assert_eq!(
+      fs::read_to_string(repo.path().join(".agents/skills/notes/SKILL.md")).unwrap(),
+      fs::read_to_string(source.join("SKILL.md")).unwrap()
+    );
+  }
+
+  #[test]
+  fn pending_skill_install_is_taken_once() {
+    queue_pending_skill_install("anthropic/pdf".into());
+    assert_eq!(
+      take_pending_skill_install().as_deref(),
+      Some("anthropic/pdf")
+    );
+    assert_eq!(take_pending_skill_install(), None);
   }
 
   #[test]

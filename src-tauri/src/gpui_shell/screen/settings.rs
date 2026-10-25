@@ -907,26 +907,30 @@ impl SettingsView {
         .find(|skill| custom_row_id(skill) == id)
         .cloned()
     });
-    if let Some(skill) = custom {
+    // A repository copy is already the user's: edit it in place.
+    if let Some(skill) = custom
+      .as_ref()
+      .filter(|s| s.level == CustomSkillLevel::Repo)
+    {
       let prompt = skills::edit_custom_skill_prompt(&skill.name, &skill.paths);
       self.start_skill_agent(prompt, cx);
       return;
     }
-    let Some(view) = self.catalog_skill(&id) else {
-      return;
-    };
-    let Some(installed) = view.installed.clone() else {
-      return;
-    };
-    if view.customized {
-      let name = installed.name;
-      let prompt = skills::customize_skill_prompt(
-        &name,
-        &format!(".agents/skills/{name}"),
-        &format!(".claude/skills/{name}"),
-      );
-      self.start_skill_agent(prompt, cx);
-      return;
+    let installed = self.catalog_skill(&id).and_then(|v| v.installed.clone());
+    if custom.is_none() {
+      let Some(view) = self.catalog_skill(&id) else {
+        return;
+      };
+      if view.customized {
+        let name = installed.map_or_else(|| view.skill.name.clone(), |i| i.name);
+        let prompt = skills::customize_skill_prompt(
+          &name,
+          &format!(".agents/skills/{name}"),
+          &format!(".claude/skills/{name}"),
+        );
+        self.start_skill_agent(prompt, cx);
+        return;
+      }
     }
     let Some(repo) = self.route.repo_path.clone() else {
       return;
@@ -938,29 +942,36 @@ impl SettingsView {
       return;
     }
     skills.pending = Some(id.clone());
-    self.spawn(
-      cx,
-      move |host| host.customize_skill(&id, &repo),
-      |view, result, cx| {
-        if let Some(skills) = &mut view.skills {
-          skills.pending = None;
+    // Agents edit inside the repository, so every customisation starts from
+    // a repository copy: of a global skill, the installed pack, or the
+    // registry's files for a skill not installed yet.
+    let work = move |host: &dyn SettingsHost| match (&custom, &installed) {
+      (Some(skill), _) => {
+        let source = skill.paths.first().cloned().unwrap_or_default();
+        host.customize_global_skill(&skill.name, &source, &repo)
+      }
+      (None, Some(_)) => host.customize_skill(&id, &repo),
+      (None, None) => host.customize_registry_skill(&id, &repo),
+    };
+    self.spawn(cx, work, |view, result, cx| {
+      if let Some(skills) = &mut view.skills {
+        skills.pending = None;
+      }
+      match result {
+        Ok(copy) => {
+          let prompt = skills::customize_skill_prompt(
+            &copy.name,
+            &copy.agents_skill_path,
+            &copy.claude_skill_path,
+          );
+          view.start_skill_agent(prompt, cx);
         }
-        match result {
-          Ok(copy) => {
-            let prompt = skills::customize_skill_prompt(
-              &copy.name,
-              &copy.agents_skill_path,
-              &copy.claude_skill_path,
-            );
-            view.start_skill_agent(prompt, cx);
-          }
-          Err(err) => view
-            .host
-            .notify(toast(ToastTone::Error, "Skill library", err)),
-        }
-        view.load_skills(cx);
-      },
-    );
+        Err(err) => view
+          .host
+          .notify(toast(ToastTone::Error, "Skill library", err)),
+      }
+      view.load_skills(cx);
+    });
   }
 
   fn start_skill_agent(&self, prompt: String, cx: &mut Context<Self>) {
@@ -2501,16 +2512,17 @@ impl SettingsView {
     p: &Palette,
   ) -> gpui::Div {
     let id = &row.id;
-    let customise = (!row.uncataloged && (row.custom || level.is_some())).then(|| {
-      Button::new(format!("skill-customize-{id}"), p)
-        .variant(Variant::Outline)
-        .size(Size::Sm)
-        .disabled(row.busy)
-        .aria_label(format!("Customise {}", row.name))
-        .icon(theme::ICON_PENCIL, 14.)
-        .label("Customise")
-        .on_click(self.press(&format!("skills.customize:{id}")))
-    });
+    let customise =
+      (!row.uncataloged && !row.proprietary && self.route.repo_path.is_some()).then(|| {
+        Button::new(format!("skill-customize-{id}"), p)
+          .variant(Variant::Outline)
+          .size(Size::Sm)
+          .disabled(row.busy)
+          .aria_label(format!("Customise {}", row.name))
+          .icon(theme::ICON_PENCIL, 14.)
+          .label("Customise")
+          .on_click(self.press(&format!("skills.customize:{id}")))
+      });
     let docs = row.has_url.then(|| {
       Button::new(format!("skill-source-{id}"), p)
         .variant(Variant::Link)
