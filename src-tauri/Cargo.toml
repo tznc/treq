@@ -113,6 +113,8 @@ inconsistent_struct_constructor = "allow" # 1
 nonminimal_bool = "allow" # 1
 unused_async = "allow" # 1
 manual_assert_eq = "allow" # 1
+assert_is_empty = "allow" # 89
+unused_async_trait_impl = "allow" # 2
 
 dbg_macro = "warn"
 todo = "warn"
