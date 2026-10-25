@@ -1140,6 +1140,22 @@ impl terminal_data::TerminalHost for FakeHost {
     Ok(())
   }
 
+  fn remote_rename(
+    &self,
+    target: &terminal_data::RemoteTarget,
+    title: &str,
+  ) -> Result<Option<String>, String> {
+    self.record(format!("rename {} to {title}", target.label));
+    Ok(crate::core::pty_remote_supervisor::clean_title(title))
+  }
+
+  fn rename_session(&self, repo_path: &str, session_id: i64, name: &str) -> Result<(), String> {
+    self.record(format!(
+      "rename session {session_id} in {repo_path} to {name}"
+    ));
+    Ok(())
+  }
+
   fn sessions(&self, _: &str) -> Result<Vec<crate::local_db::Session>, String> {
     Ok(self.sessions.clone())
   }
@@ -7394,6 +7410,108 @@ fn terminal_pane_activates_the_selected_workspaces_terminal(cx: &mut TestAppCont
   assert!(!host.calls().contains(&format!("close {}", agent_pty())));
 }
 
+/// Double-clicks the element `selector` names.
+fn double_click(h: &mut Harness, selector: &'static str) {
+  let at = h.cx.debug_bounds(selector).expect(selector).center();
+  for click_count in [1, 2] {
+    h.cx.simulate_event(gpui::MouseDownEvent {
+      position: at,
+      modifiers: Modifiers::none(),
+      button: MouseButton::Left,
+      click_count,
+      first_mouse: false,
+    });
+    h.cx.simulate_event(gpui::MouseUpEvent {
+      position: at,
+      modifiers: Modifiers::none(),
+      button: MouseButton::Left,
+      click_count,
+    });
+  }
+  h.cx.run_until_parked();
+}
+
+/// The name the pane last told the sidebar for each terminal.
+fn terminal_names(h: &Harness) -> Vec<String> {
+  fields(h, "terminal.summaries")
+    .last()
+    .and_then(|s| s.as_array().cloned())
+    .unwrap_or_default()
+    .iter()
+    .map(|s| s["name"].as_str().unwrap_or_default().to_string())
+    .collect()
+}
+
+#[gpui::test]
+fn an_agent_terminal_is_renamed_from_its_title(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  double_click(&mut h, "terminal-title");
+  assert!(h.drawn("terminal-rename-input"));
+  // The name starts selected, so typing replaces it.
+  h.cx.simulate_input("Fix login");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("terminal-rename-input"));
+  assert!(host
+    .calls()
+    .contains(&"rename session 3 in /repo to Fix login".to_string()));
+  assert_eq!(terminal_names(&h), ["Fix login"]);
+  // Emptied, an agent keeps its name.
+  double_click(&mut h, "terminal-title");
+  h.cx.simulate_keystrokes("backspace enter");
+  h.cx.run_until_parked();
+  assert_eq!(terminal_names(&h), ["Fix login"]);
+}
+
+#[gpui::test]
+fn a_shell_is_named_until_cleared_and_escape_keeps_its_name(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(
+    &mut h,
+    serde_json::json!({ "commands": [{ "nonce": 1, "kind": "newShell", "dir": "/repo" }] }),
+  );
+  assert_eq!(terminal_names(&h), ["Shell"]);
+  double_click(&mut h, "terminal-title");
+  h.cx.simulate_input("dev server");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert_eq!(terminal_names(&h), ["dev server"]);
+  double_click(&mut h, "terminal-title");
+  h.cx.simulate_input("typo");
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("terminal-rename-input"));
+  assert_eq!(terminal_names(&h), ["dev server"]);
+  // An empty name shows "Shell" again.
+  double_click(&mut h, "terminal-title");
+  h.cx.simulate_keystrokes("backspace enter");
+  h.cx.run_until_parked();
+  assert_eq!(terminal_names(&h), ["Shell"]);
+  assert!(!host.calls().iter().any(|c| c.starts_with("rename")));
+}
+
+#[gpui::test]
+fn a_remote_session_is_named_on_its_host(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  let mut open = open_remote_command(1);
+  open["commands"][0]["remote"]["title"] = "deploy".into();
+  set_terminal(&mut h, open);
+  assert_eq!(terminal_names(&h), ["deploy"]);
+  double_click(&mut h, "terminal-title");
+  h.cx.simulate_input("  tail logs  ");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .calls()
+      .contains(&"rename shell-k1 to tail logs".to_string()),
+    "{:?}",
+    host.calls()
+  );
+  assert_eq!(terminal_names(&h), ["tail logs"]);
+}
+
 fn open_remote_command(nonce: u64) -> serde_json::Value {
   serde_json::json!({
     "commands": [{
@@ -9028,7 +9146,10 @@ fn user_managed_form_is_locked_while_react_registers(cx: &mut TestAppContext) {
 fn terminal_dialog_lists_sessions_to_reattach(cx: &mut TestAppContext) {
   let host = FakeHost {
     remote_sessions: Some(Ok(vec![
-      remote_session("claude-1", true),
+      crate::core::pty_remote_supervisor::PtySessionInfo {
+        title: Some("Fix the login".into()),
+        ..remote_session("claude-1", true)
+      },
       remote_session("shell-2", false),
     ])),
     ..FakeHost::default()
@@ -9045,8 +9166,8 @@ fn terminal_dialog_lists_sessions_to_reattach(cx: &mut TestAppContext) {
   assert_eq!(
     fields(&h, "remote.terminal.open"),
     vec![
-      serde_json::json!({ "label": "claude-1", "reattach": true }),
-      serde_json::json!({ "label": null, "reattach": false }),
+      serde_json::json!({ "label": "claude-1", "title": "Fix the login", "reattach": true }),
+      serde_json::json!({ "label": null, "title": null, "reattach": false }),
     ]
   );
 }
@@ -9063,7 +9184,7 @@ fn terminal_dialog_starts_a_session_when_listing_fails(cx: &mut TestAppContext) 
   h.click("remote-start-new");
   assert_eq!(
     fields(&h, "remote.terminal.open"),
-    vec![serde_json::json!({ "label": null, "reattach": false })]
+    vec![serde_json::json!({ "label": null, "title": null, "reattach": false })]
   );
 }
 

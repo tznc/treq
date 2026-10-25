@@ -1287,7 +1287,12 @@ impl RemoteView {
             .child("RUNNING SESSIONS"),
         )
         .children(sessions.iter().enumerate().map(|(i, session)| {
-          let label = session.label.clone();
+          let (label, title) = (session.label.clone(), session.title.clone());
+          let state = if session.running {
+            "running"
+          } else {
+            "stopped"
+          };
           div()
             .flex()
             .items_center()
@@ -1305,16 +1310,15 @@ impl RemoteView {
                   div()
                     .font_weight(FontWeight::MEDIUM)
                     .truncate()
-                    .child(session.label.clone()),
+                    .child(title.clone().unwrap_or_else(|| label.clone())),
                 )
                 .child(
                   ui::text(div(), TextSize::Xs)
                     .text_color(p.muted_foreground)
                     .truncate()
-                    .child(if session.running {
-                      "running"
-                    } else {
-                      "stopped"
+                    .child(match &title {
+                      Some(_) => format!("{label} · {state}"),
+                      None => state.to_string(),
                     }),
                 ),
             )
@@ -1324,7 +1328,7 @@ impl RemoteView {
                 .disabled(!session.running)
                 .label("Reattach")
                 .on_click(cx.listener(move |view, _, _, cx| {
-                  view.open_session(Some(label.clone()), true, cx)
+                  view.open_session(Some(label.clone()), title.clone(), true, cx)
                 })),
             )
         }))
@@ -1396,7 +1400,7 @@ impl RemoteView {
                   Variant::Outline
                 })
                 .label("Start new session")
-                .on_click(cx.listener(|view, _, _, cx| view.open_session(None, false, cx))),
+                .on_click(cx.listener(|view, _, _, cx| view.open_session(None, None, false, cx))),
             )
           }),
       );
@@ -1411,10 +1415,16 @@ impl RemoteView {
 
   /// Hands React the session to open in the terminal pane. A new session
   /// has no label: React makes a fresh one.
-  fn open_session(&mut self, label: Option<String>, reattach: bool, cx: &mut Context<Self>) {
+  fn open_session(
+    &mut self,
+    label: Option<String>,
+    title: Option<String>,
+    reattach: bool,
+    cx: &mut Context<Self>,
+  ) {
     self.field_react(
       "remote.terminal.open",
-      serde_json::json!({ "label": label, "reattach": reattach }),
+      serde_json::json!({ "label": label, "title": title, "reattach": reattach }),
       cx,
     );
   }
