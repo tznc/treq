@@ -457,7 +457,8 @@ pub fn project_view<'a>(
     .filter(|p| match view {
       ProjectView::All => true,
       ProjectView::Active => p.state == "started",
-      ProjectView::Backlog => p.state == "planned",
+      // Not started yet: Linear's `backlog` and `planned` project states.
+      ProjectView::Backlog => matches!(p.state.as_str(), "backlog" | "planned"),
       ProjectView::Mine => viewer.is_some_and(|v| p.lead.as_ref().is_some_and(|l| l.id == v)),
     })
     .collect()
@@ -832,6 +833,7 @@ mod tests {
       project("1", "started", Some(("me", "Me"))),
       project("2", "planned", Some(("u2", "Bo"))),
       project("3", "completed", None),
+      project("4", "backlog", None),
     ];
     let pick = |v, viewer| {
       project_view(&projects, v, viewer)
@@ -840,7 +842,7 @@ mod tests {
         .collect::<Vec<_>>()
     };
     assert_eq!(pick(ProjectView::Active, None), ["1"]);
-    assert_eq!(pick(ProjectView::Backlog, None), ["2"]);
+    assert_eq!(pick(ProjectView::Backlog, None), ["2", "4"]);
     assert_eq!(pick(ProjectView::Mine, Some("me")), ["1"]);
     assert!(pick(ProjectView::Mine, None).is_empty());
 
@@ -848,7 +850,7 @@ mod tests {
     let (states, leads) = project_filter_options(&all);
     assert_eq!(
       states.iter().map(|s| s.value.as_str()).collect::<Vec<_>>(),
-      ["completed", "planned", "started"]
+      ["backlog", "completed", "planned", "started"]
     );
     assert_eq!(
       leads.iter().map(|l| l.label.as_str()).collect::<Vec<_>>(),

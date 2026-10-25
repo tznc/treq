@@ -138,7 +138,7 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     title: "Linear tab: the user's task list",
     expectations: [
       "Linear tab selected with a '1' badge; GitHub tab keeps its '1' badge",
-      "'Your issues' lists ENG-142, ENG-139 and ENG-131 (not the done ENG-128 or hubot's ENG-125), with state, priority and project badges",
+      "'Your issues' lists ENG-143, ENG-142, ENG-139 and ENG-131 (not the done ENG-128 or hubot's ENG-125), with state, priority and project badges",
       "ENG-142 is checked; status reads '5 workspaces will be created, 1 already open'; button reads 'Create 6 Workspaces'",
     ],
   });

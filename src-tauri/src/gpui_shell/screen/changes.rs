@@ -649,7 +649,8 @@ impl ChangesView {
   }
 
   /// `loadAllFileHunks`: the first files, then the rest in batches, each
-  /// shown as it arrives. What was read before stays until replaced.
+  /// shown as it arrives. What was read before stays until replaced, and
+  /// files whose content id held are not read again.
   fn load_hunks(&mut self, paths: Vec<String>, token: Option<String>, cx: &mut Context<Self>) {
     self.generation += 1;
     self.hunks_token = None;
@@ -666,6 +667,18 @@ impl ChangesView {
     if self.hunks.len() != before || kept != before {
       self.layout_gen += 1;
     }
+    let ids = self.snapshot.as_ref().map(|s| &s.content_ids);
+    let paths: Vec<String> = paths
+      .into_iter()
+      .filter(|path| {
+        let shown = self
+          .hunks
+          .get(path)
+          .filter(|d| !d.loading && d.error.is_none());
+        let id = ids.and_then(|ids| ids.get(path));
+        id.is_none() || shown.and_then(|d| d.content_id.as_ref()) != id
+      })
+      .collect();
     let mut batches: Vec<Vec<String>> = Vec::new();
     let (first, rest) = paths.split_at(paths.len().min(FIRST_BATCH));
     if !first.is_empty() {
@@ -686,9 +699,22 @@ impl ChangesView {
   ) {
     if batches.is_empty() {
       self.hunks_token = token;
+      // No file needed reading: what a Reload prunes is already known.
+      self.prune_comments(cx);
       return;
     }
     let batch = batches.remove(0);
+    // Read from the listed diff's trees, and named by its file ids.
+    let (trees, ids) = match &self.snapshot {
+      Some(s) => {
+        let ids: HashMap<String, String> = batch
+          .iter()
+          .filter_map(|p| Some((p.clone(), s.content_ids.get(p)?.clone())))
+          .collect();
+        (s.token.clone(), ids)
+      }
+      None => (None, HashMap::new()),
+    };
     // What the batch's files show now, so the read compares against it off
     // the main thread.
     let shown: HashMap<String, (Arc<Vec<JjDiffHunk>>, Option<String>)> = batch
@@ -698,9 +724,15 @@ impl ChangesView {
         Some((path.clone(), (d.hunks.clone(), d.error.clone())))
       })
       .collect();
+    let read_from = trees.clone();
     self.run_changed(
       move |host, parent| {
-        let read = host.file_hunks(&parent.repo_path, parent.workspace_id(), batch)?;
+        let read = host.file_hunks(
+          &parent.repo_path,
+          parent.workspace_id(),
+          batch,
+          read_from.as_deref(),
+        )?;
         // A refresh reads every file again; one that reads the same keeps
         // its hunks, so its rows and marks are not redone.
         let files: Vec<_> = read
@@ -715,6 +747,7 @@ impl ChangesView {
               hunks: same.clone().unwrap_or_else(|| file.hunks.into()),
               loading: false,
               error: file.error,
+              content_id: None,
             };
             (file.path, same.is_some(), data)
           })
@@ -729,17 +762,22 @@ impl ChangesView {
         let mut changed = HashSet::new();
         match result {
           Ok((snapshot_token, files)) => {
+            // Read at another diff than listed: the ids don't name them.
+            let listed = trees.as_ref() == Some(&snapshot_token);
             if token.as_ref() != Some(&snapshot_token) {
               token = None;
             }
-            for (path, same, data) in files {
+            for (path, same, mut data) in files {
+              if listed && data.error.is_none() {
+                data.content_id = ids.get(&path).cloned();
+              }
               // Still showing the hunks it read the same as.
-              let kept = same
-                && view
-                  .hunks
-                  .get(&path)
-                  .is_some_and(|d| !d.loading && Arc::ptr_eq(&d.hunks, &data.hunks));
-              if kept {
+              if let Some(shown) = view
+                .hunks
+                .get_mut(&path)
+                .filter(|d| same && !d.loading && Arc::ptr_eq(&d.hunks, &data.hunks))
+              {
+                shown.content_id = data.content_id;
                 continue;
               }
               view.layout_gen += 1;
@@ -1080,16 +1118,19 @@ impl ChangesView {
     // with its own feedback, and runs even if the tab moved on meanwhile.
     cx.spawn(async move |this, cx| {
       let (work_host, work_parent) = (host.clone(), parent.clone());
-      let committed = cx
+      let (committed, auto_push) = cx
         .background_spawn(async move {
-          if split {
+          let committed = if split {
             work_host.split(&work_parent.working_directory(), &message, staged)
           } else {
             work_host.commit(&work_parent.repo_path, work_parent.workspace_id(), &message)
-          }
+          };
+          // A split never auto-pushed.
+          let auto_push = !split && work_host.auto_pushes(&work_parent.repo_path);
+          (committed, auto_push)
         })
         .await;
-      let pushing = committed.is_ok() && action == CommitAction::Push;
+      let pushing = committed.is_ok() && (action == CommitAction::Push || auto_push);
       this
         .update(cx, |view, cx| {
           if view.parent.key() != key {

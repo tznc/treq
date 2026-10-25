@@ -173,6 +173,7 @@ use gix::refs::Target;
 use imara_diff::intern::InternedInput;
 use imara_diff::sink::Counter;
 use imara_diff::{diff, Algorithm, UnifiedDiffBuilder};
+use jj_lib::backend::{TreeId, TreeValue};
 use jj_lib::commit::Commit;
 use jj_lib::config::{ConfigLayer, ConfigSource, StackedConfig};
 use jj_lib::conflict_labels::ConflictLabels;
@@ -186,7 +187,7 @@ use jj_lib::git;
 use jj_lib::gitignore::GitIgnoreFile;
 use jj_lib::lock::FileLock;
 use jj_lib::matchers::{Matcher, NothingMatcher, PrefixMatcher};
-use jj_lib::merge::{Diff, Merge};
+use jj_lib::merge::{Diff, Merge, MergedTreeValue};
 use jj_lib::merged_tree::MergedTree;
 use jj_lib::merged_tree_builder::MergedTreeBuilder;
 use jj_lib::object_id::{HexPrefix, ObjectId};
@@ -205,6 +206,7 @@ use jj_lib::rewrite::{
   RewriteRefsOptions,
 };
 use jj_lib::settings::UserSettings;
+use jj_lib::store::Store;
 use jj_lib::str_util::StringExpression;
 use jj_lib::tree_merge::MergeOptions;
 use jj_lib::working_copy::{SnapshotOptions, WorkingCopyFreshness};
@@ -1351,6 +1353,11 @@ pub struct JjFileChange {
   pub previous_path: Option<String>,
   pub changed_line_count: usize,
   pub diff_deferred: bool,
+  /// Names the file's two sides in a working-copy diff (with the marker
+  /// style, from `workspace_diff`): equal ids mean equal hunks, so a reread
+  /// keeps the hunks of files whose id held. `None` when unknown.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub content_id: Option<String>,
 }
 
 /// File content lines for context expansion
@@ -3030,6 +3037,7 @@ pub fn get_workspace_branch(workspace_path: &str) -> Result<String, JjError> {
 pub fn remove_workspace_directory_only(workspace_path: &str) -> Result<(), JjError> {
   let workspace_dir = Path::new(workspace_path);
   if workspace_dir.exists() {
+    local_db::release_connections_under(workspace_dir);
     fs::remove_dir_all(workspace_dir).map_err(|e| JjError::IoError(e.to_string()))?;
   }
   Ok(())
@@ -4401,6 +4409,9 @@ fn tree_changes(repo: &ReadonlyRepo, wc_commit: &Commit, tree: &MergedTree) -> V
       .diff_stream(tree, &diff_matcher)
       .collect::<Vec<_>>(),
   );
+  // Hunks are read against all parents merged; with one parent that is the
+  // tree diffed here, so its values name what the hunks are read between.
+  let content_ids = wc_commit.parent_ids().len() <= 1;
 
   let mut changes = Vec::new();
   for entry in diff_entries {
@@ -4415,15 +4426,40 @@ fn tree_changes(repo: &ReadonlyRepo, wc_commit: &Commit, tree: &MergedTree) -> V
     } else {
       "M"
     };
+    let content_id = content_ids.then(|| {
+      format!(
+        "{}>{}",
+        tree_value_id(&values.before),
+        tree_value_id(&values.after)
+      )
+    });
     changes.push(JjFileChange {
       path: file_path,
       status: status.to_string(),
       previous_path: None,
       changed_line_count: 0,
       diff_deferred: false,
+      content_id,
     });
   }
   changes
+}
+
+/// Names one side of a path in a tree diff by its object ids.
+fn tree_value_id(value: &MergedTreeValue) -> String {
+  value
+    .iter()
+    .map(|term| match term {
+      None => "-".to_string(),
+      Some(TreeValue::File { id, executable, .. }) => {
+        format!("{}{}", if *executable { "x" } else { "f" }, id.hex())
+      }
+      Some(TreeValue::Symlink(id)) => format!("l{}", id.hex()),
+      Some(TreeValue::Tree(id)) => format!("t{}", id.hex()),
+      Some(TreeValue::GitSubmodule(id)) => format!("s{}", id.hex()),
+    })
+    .collect::<Vec<_>>()
+    .join(",")
 }
 
 /// [`jj_is_working_copy_empty`] from a snapshot the caller already took, so
@@ -4605,7 +4641,7 @@ pub fn jj_get_file_hunks_batch(
       .iter()
       .map(|file_path| {
         file_hunks_between(
-          &loaded,
+          loaded.repo.store(),
           &parent_tree,
           &tree,
           file_path,
@@ -4618,8 +4654,71 @@ pub fn jj_get_file_hunks_batch(
   })
 }
 
+/// [`jj_get_file_hunks_batch`] for the diff `token` (a
+/// [`working_copy_token`]) names: its trees are read from the store by id,
+/// with no lock or snapshot, so the hunks show the state the token was read
+/// at. `None` when the store has no such trees.
+pub fn jj_get_file_hunks_at(
+  workspace_path: &str,
+  token: &str,
+  file_paths: &[String],
+  conflict_marker_style: &str,
+) -> Result<Option<FileHunksBatch>, JjError> {
+  let repo_path_opt = derive_repo_path_from_workspace(workspace_path);
+  let settings = create_user_settings(repo_path_opt.as_deref().unwrap_or(workspace_path))?;
+  // The store is all a read by id needs: no operation or view is loaded.
+  let workspace = Workspace::load(
+    &settings,
+    Path::new(workspace_path),
+    &StoreFactories::default(),
+    &default_working_copy_factories(),
+  )
+  .map_err(|e| JjError::IoError(format!("Failed to load workspace: {}", e)))?;
+  let store = workspace.repo_loader().store();
+  let Some((parent_tree, tree)) = working_copy_token_trees(store, token) else {
+    return Ok(None);
+  };
+  // A token from another repository, or trees since collected.
+  if block_on(parent_tree.trees()).is_err() || block_on(tree.trees()).is_err() {
+    return Ok(None);
+  }
+  let merge_options = MergeOptions::from_settings(&settings)
+    .map_err(|e| JjError::IoError(format!("Failed to load merge options: {}", e)))?;
+  let style = parse_conflict_marker_style(conflict_marker_style);
+  let hunks = file_paths
+    .iter()
+    .map(|file_path| {
+      file_hunks_between(store, &parent_tree, &tree, file_path, style, &merge_options)
+    })
+    .collect();
+  Ok(Some((token.to_string(), hunks)))
+}
+
+/// The two trees a [`working_copy_token`] names; `None` when it is not one.
+fn working_copy_token_trees(store: &Arc<Store>, token: &str) -> Option<(MergedTree, MergedTree)> {
+  let tree = |hex: &str| {
+    let ids = hex
+      .split(',')
+      .map(TreeId::try_from_hex)
+      .collect::<Option<Vec<_>>>()?;
+    // A merge has one more side than bases.
+    if ids.len() % 2 == 0 {
+      return None;
+    }
+    let ids = Merge::from_vec(ids);
+    Some(MergedTree::new(
+      store.clone(),
+      ids,
+      ConflictLabels::unlabeled(),
+    ))
+  };
+  let (parent, wc) = token.split_once("..")?;
+  Some((tree(parent)?, tree(wc)?))
+}
+
 /// Names a working-copy diff by its two trees: reads with the same token
-/// list the same files with the same hunks.
+/// list the same files with the same hunks. [`jj_get_file_hunks_at`]
+/// reads the trees back from it.
 fn working_copy_token(parent_tree: &MergedTree, tree: &MergedTree) -> String {
   let hex = |tree: &MergedTree| {
     tree
@@ -4634,7 +4733,7 @@ fn working_copy_token(parent_tree: &MergedTree, tree: &MergedTree) -> String {
 
 /// One file's hunks between the working copy's parent tree and its tree.
 fn file_hunks_between(
-  loaded: &LoadedWorkspaceRepo,
+  store: &Arc<Store>,
   parent_tree: &MergedTree,
   tree: &MergedTree,
   file_path: &str,
@@ -4652,14 +4751,14 @@ fn file_hunks_between(
     .map_err(|e| JjError::IoError(format!("Failed to read working path value: {}", e)))?;
   let labels = ConflictLabels::unlabeled();
   let before_materialized = block_on(jj_lib::conflicts::materialize_tree_value(
-    loaded.repo.store(),
+    store,
     target_repo_path.as_ref(),
     before,
     &labels,
   ))
   .map_err(|e| JjError::IoError(format!("Failed to materialize parent value: {}", e)))?;
   let after_materialized = block_on(jj_lib::conflicts::materialize_tree_value(
-    loaded.repo.store(),
+    store,
     target_repo_path.as_ref(),
     after,
     &labels,
@@ -9326,6 +9425,7 @@ fn build_file_change(
     previous_path,
     changed_line_count,
     diff_deferred,
+    content_id: None,
   }
 }
 

@@ -53,9 +53,27 @@ fn random_default_branch_name() -> String {
   format!("branch-{nanos}-{seq}")
 }
 
+/// The repo's `TempDir`. Closes the pooled SQLite connections to databases
+/// in it first, since Windows cannot delete files that are still open.
+pub struct RepoTempDir(TempDir);
+
+impl std::ops::Deref for RepoTempDir {
+  type Target = TempDir;
+
+  fn deref(&self) -> &TempDir {
+    &self.0
+  }
+}
+
+impl Drop for RepoTempDir {
+  fn drop(&mut self) {
+    treq_lib::local_db::release_connections_under(self.0.path());
+  }
+}
+
 #[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
 pub struct TestRepo {
-  pub temp_dir: TempDir,
+  pub temp_dir: RepoTempDir,
   pub repo_path: String,
   default_branch: String,
   remote_temp_dir: Option<TempDir>,
@@ -117,7 +135,7 @@ impl TestRepo {
     }
 
     Ok(TestRepo {
-      temp_dir,
+      temp_dir: RepoTempDir(temp_dir),
       repo_path,
       default_branch,
       remote_temp_dir: None,

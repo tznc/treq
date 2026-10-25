@@ -393,7 +393,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: list, workspace-diff, diff"
+              "description": "Action: list, workspace-diff, diff, diff-files"
             },
             {
               "name": "repo",
@@ -410,6 +410,16 @@
               "name": "path",
               "takesValue": true,
               "description": "Repository-relative file path"
+            },
+            {
+              "name": "paths",
+              "takesValue": true,
+              "description": "diff-files: the repository-relative paths, as a JSON list"
+            },
+            {
+              "name": "token",
+              "takesValue": true,
+              "description": "diff-files: the working-copy token of the workspace diff to read from"
             },
             {
               "name": "format",

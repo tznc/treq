@@ -11,8 +11,8 @@ use gpui::{div, TestAppContext};
 
 use super::*;
 
-/// Wraps the screen to count the window's frames: no view is cached, so
-/// every frame renders the root.
+/// Wraps the screen to count the window's frames: the root is not cached,
+/// so every frame renders it. The screen inside is cached, as in the shell.
 struct Counted {
   screen: Entity<Screen>,
   frames: Rc<Cell<usize>>,
@@ -21,7 +21,7 @@ struct Counted {
 impl Render for Counted {
   fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
     self.frames.set(self.frames.get() + 1);
-    div().size_full().child(self.screen.clone())
+    div().size_full().child(Screen::element(&self.screen))
   }
 }
 
