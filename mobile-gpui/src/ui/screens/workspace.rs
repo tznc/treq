@@ -193,6 +193,9 @@ pub struct WorkspaceScreen {
   /// Made when the Commits tab is first shown.
   commits: Option<Entity<CommitsScreen>>,
   commit_message: Entity<InputState>,
+  /// The Changes tab's items as the last render left them.
+  change_items: Vec<ChangeItem>,
+  change_rows: ListState,
   /// The action running from this screen, by name.
   busy: Option<&'static str>,
   message: Option<(bool, String)>,
@@ -258,6 +261,8 @@ impl WorkspaceScreen {
       sessions,
       commits: None,
       commit_message: cx.new(|cx| InputState::new(window, cx).placeholder("Commit message")),
+      change_items: Vec::new(),
+      change_rows: widgets::list_state(),
       busy: None,
       message: None,
       keys: IdempotencyKeys::default(),
@@ -759,23 +764,40 @@ impl WorkspaceScreen {
     )
   }
 
-  fn changes(&self, cx: &mut Context<Self>) -> AnyElement {
-    let diff = match &self.diff {
-      Load::Idle | Load::Loading => {
-        return widgets::card(cx)
-          .child(widgets::centered_message("Loading changes…", cx))
-          .into_any_element()
-      }
-      Load::Failed(error) => {
-        return widgets::card(cx)
+  /// The Changes tab: the files of each section as a virtualized list.
+  fn changes(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    let Load::Ready(diff) = &self.diff else {
+      let message = match &self.diff {
+        Load::Failed(error) => widgets::card(cx)
           .p_4()
-          .child(widgets::error_text(errors::describe(error).message, cx))
-          .into_any_element()
-      }
-      Load::Ready(diff) => diff,
+          .child(widgets::error_text(errors::describe(error).message, cx)),
+        _ => widgets::card(cx).child(widgets::centered_message("Loading changes…", cx)),
+      };
+      return div()
+        .id("changes")
+        .size_full()
+        .overflow_y_scroll()
+        .child(widgets::page().child(message))
+        .into_any_element();
+    };
+    let items = change_items(diff);
+    widgets::resize(&self.change_rows, items.len());
+    self.change_items = items;
+    let screen = cx.weak_entity();
+    list(self.change_rows.clone(), move |ix, _, cx| {
+      screen
+        .update(cx, |this, cx| this.change_item(ix, cx))
+        .unwrap_or_else(|_| div().into_any_element())
+    })
+    .size_full()
+    .into_any_element()
+  }
+
+  fn change_item(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+    let (Some(item), Load::Ready(diff)) = (self.change_items.get(ix), &self.diff) else {
+      return div().into_any_element();
     };
     let target = self.target.clone();
-    let committing = self.busy == Some("commit");
     let file_row = |id: (&'static str, usize), change: &JjFileChange, cx: &App| {
       widgets::row(
         id,
@@ -784,78 +806,152 @@ impl WorkspaceScreen {
         cx,
       )
     };
-    v_flex()
-      .gap_4()
-      .when(!diff.conflicted_files.is_empty(), |list| {
-        let t = target.clone();
-        list.child(
-          widgets::section("Conflicts", cx).child(widgets::card(cx).children(
-            diff.conflicted_files.iter().enumerate().map(|(i, path)| {
-              let t = t.clone();
-              widgets::row(("conflict", i), path.clone(), Some("Conflicted".into()), cx)
-                .text_color(cx.theme().danger)
-                .on_click(move |_, _, cx| conflicts::open(t.clone(), cx))
-            }),
-          )),
+    let card = |row: Stateful<Div>, slot: Slot, cx: &App| {
+      widgets::card_item(row, slot.first, slot.last, cx).into_any_element()
+    };
+    match *item {
+      ChangeItem::Title(section) => {
+        let title = match section {
+          Section::Conflicts => "Conflicts".to_string(),
+          Section::Uncommitted => "Uncommitted".to_string(),
+          Section::Committed => format!("On this branch · vs {}", self.target_branch()),
+        };
+        widgets::section(title, cx).px_4().pt_4().into_any_element()
+      }
+      ChangeItem::Empty(section) => {
+        let message = match section {
+          Section::Uncommitted => "No uncommitted changes.",
+          _ => "No committed changes yet.",
+        };
+        widgets::card_item(widgets::centered_message(message, cx), true, true, cx)
+          .into_any_element()
+      }
+      ChangeItem::Conflict(i, slot) => {
+        let t = target;
+        let row = widgets::row(
+          ("conflict", i),
+          diff.conflicted_files[i].clone(),
+          Some("Conflicted".into()),
+          cx,
         )
-      })
-      .child(
-        widgets::section("Uncommitted", cx).child(
-          widgets::card(cx)
-            .when(diff.uncommitted_files.is_empty(), |card| {
-              card.child(widgets::centered_message("No uncommitted changes.", cx))
-            })
-            .children(
-              diff
-                .uncommitted_files
-                .iter()
-                .enumerate()
-                .map(|(i, change)| {
-                  let (t, path) = (target.clone(), change.path.clone());
-                  file_row(("uncommitted", i), change, cx)
-                    .on_click(move |_, _, cx| diff::open(t.clone(), path.clone(), cx))
-                }),
-            )
-            .when(!diff.uncommitted_files.is_empty(), |card| {
-              card.child(
-                h_flex()
-                  .p_3()
-                  .gap_2()
-                  .child(div().flex_1().child(Input::new(&self.commit_message)))
-                  .child(
-                    Button::new("commit")
-                      .primary()
-                      .label("Commit")
-                      .loading(committing)
-                      .disabled(self.busy.is_some())
-                      .on_click(cx.listener(|this, _, window, cx| this.commit(window, cx))),
-                  ),
-              )
-            }),
-        ),
-      )
-      .child(
-        widgets::section(format!("On this branch · vs {}", self.target_branch()), cx).child(
-          widgets::card(cx)
-            .when(diff.committed_files.is_empty(), |card| {
-              card.child(widgets::centered_message("No committed changes yet.", cx))
-            })
-            .children(diff.committed_files.iter().enumerate().map(|(i, change)| {
-              let (t, path) = (target.clone(), change.path.clone());
-              let hunks = diff
+        .text_color(cx.theme().danger)
+        .on_click(move |_, _, cx| conflicts::open(t.clone(), cx));
+        card(row, slot, cx)
+      }
+      ChangeItem::Uncommitted(i, slot) => {
+        let path = diff.uncommitted_files[i].path.clone();
+        let row = file_row(("uncommitted", i), &diff.uncommitted_files[i], cx)
+          .on_click(move |_, _, cx| diff::open(target.clone(), path.clone(), cx));
+        card(row, slot, cx)
+      }
+      ChangeItem::Committed(i, slot) => {
+        let path = diff.committed_files[i].path.clone();
+        // The hunks are found on tap rather than copied into every row.
+        let row = file_row(("committed", i), &diff.committed_files[i], cx).on_click(cx.listener(
+          move |this, _, _, cx| {
+            let hunks = match &this.diff {
+              Load::Ready(diff) => diff
                 .hunks_by_file
                 .iter()
-                .find(|f| f.path == change.path)
+                .find(|f| f.path == path)
                 .map(|f| f.hunks.clone())
-                .unwrap_or_default();
-              file_row(("committed", i), change, cx).on_click(move |_, _, cx| {
-                diff::open_hunks(t.clone(), path.clone(), hunks.clone(), cx)
-              })
-            })),
-        ),
-      )
-      .into_any_element()
+                .unwrap_or_default(),
+              _ => Vec::new(),
+            };
+            diff::open_hunks(this.target.clone(), path.clone(), hunks, cx)
+          },
+        ));
+        card(row, slot, cx)
+      }
+      ChangeItem::CommitBar => {
+        let committing = self.busy == Some("commit");
+        let bar = h_flex()
+          .p_3()
+          .gap_2()
+          .child(div().flex_1().child(Input::new(&self.commit_message)))
+          .child(
+            Button::new("commit")
+              .primary()
+              .label("Commit")
+              .loading(committing)
+              .disabled(self.busy.is_some())
+              .on_click(cx.listener(|this, _, window, cx| this.commit(window, cx))),
+          );
+        widgets::card_item(bar, false, true, cx).into_any_element()
+      }
+      ChangeItem::End => div().h(px(16.)).into_any_element(),
+    }
   }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Section {
+  Conflicts,
+  Uncommitted,
+  Committed,
+}
+
+/// Where an item sits in its section's card.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Slot {
+  first: bool,
+  last: bool,
+}
+
+/// One item of the Changes list.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum ChangeItem {
+  Title(Section),
+  Empty(Section),
+  Conflict(usize, Slot),
+  Uncommitted(usize, Slot),
+  Committed(usize, Slot),
+  CommitBar,
+  End,
+}
+
+fn slots(n: usize, trailing: bool) -> impl Iterator<Item = Slot> {
+  (0..n).map(move |i| Slot {
+    first: i == 0,
+    last: i + 1 == n && !trailing,
+  })
+}
+
+/// The Changes tab flattened to list items: a title and a card of rows for
+/// each section, the commit bar closing the uncommitted card.
+fn change_items(diff: &JjRevisionDiff) -> Vec<ChangeItem> {
+  let mut items = Vec::new();
+  if !diff.conflicted_files.is_empty() {
+    items.push(ChangeItem::Title(Section::Conflicts));
+    items.extend(
+      slots(diff.conflicted_files.len(), false)
+        .enumerate()
+        .map(|(i, slot)| ChangeItem::Conflict(i, slot)),
+    );
+  }
+  items.push(ChangeItem::Title(Section::Uncommitted));
+  if diff.uncommitted_files.is_empty() {
+    items.push(ChangeItem::Empty(Section::Uncommitted));
+  } else {
+    items.extend(
+      slots(diff.uncommitted_files.len(), true)
+        .enumerate()
+        .map(|(i, slot)| ChangeItem::Uncommitted(i, slot)),
+    );
+    items.push(ChangeItem::CommitBar);
+  }
+  items.push(ChangeItem::Title(Section::Committed));
+  if diff.committed_files.is_empty() {
+    items.push(ChangeItem::Empty(Section::Committed));
+  } else {
+    items.extend(
+      slots(diff.committed_files.len(), false)
+        .enumerate()
+        .map(|(i, slot)| ChangeItem::Committed(i, slot)),
+    );
+  }
+  items.push(ChangeItem::End);
+  items
 }
 
 impl Render for WorkspaceScreen {
@@ -867,12 +963,7 @@ impl Render for WorkspaceScreen {
         .overflow_y_scroll()
         .child(widgets::page().child(self.sessions.clone()))
         .into_any_element(),
-      View::Changes => div()
-        .id("changes")
-        .size_full()
-        .overflow_y_scroll()
-        .child(widgets::page().child(self.changes(cx)))
-        .into_any_element(),
+      View::Changes => self.changes(cx),
       View::Commits => match &self.commits {
         Some(commits) => commits.clone().into_any_element(),
         None => div().into_any_element(),
@@ -1068,7 +1159,7 @@ mod tests {
       previous_path: previous.map(str::to_string),
       changed_line_count: lines,
       diff_deferred: false,
-    content_id: None,
+      content_id: None,
     }
   }
 

@@ -134,8 +134,10 @@ fn row_base(
     .border_color(theme.border)
     .active(|s| s.bg(theme.accent))
     .children(leading)
+    // A block column: the title and detail stack without a nested flex
+    // container, which costs far less to lay out in a long list.
     .child(
-      v_flex()
+      div()
         .flex_1()
         .min_w_0()
         .child(div().truncate().child(title.into()))
@@ -149,6 +151,49 @@ fn row_base(
     )
     .children(trailing)
     .children(end)
+}
+
+/// The state of a page-long virtualized list, which only builds and lays
+/// out the rows near the screen.
+pub fn list_state() -> ListState {
+  ListState::new(0, ListAlignment::Top, px(ROW_H * 4.))
+}
+
+/// Sets the number of items without forgetting the measured heights (or the
+/// scroll position) of the ones that stay.
+pub fn resize(state: &ListState, count: usize) {
+  let old = state.item_count();
+  if count > old {
+    state.splice(old..old, count - old);
+  } else if count < old {
+    state.splice(count..old, 0);
+  }
+}
+
+/// One item of a bordered card that spans several list items: the side
+/// borders of every item, the top of the `first` and the bottom of the `last`
+/// with its rounded corners.
+pub fn card_item(child: impl IntoElement, first: bool, last: bool, cx: &App) -> Div {
+  let theme = cx.theme();
+  div().px_4().child(
+    v_flex()
+      .border_l_1()
+      .border_r_1()
+      .border_color(theme.border)
+      .bg(theme.background)
+      .overflow_hidden()
+      .when(first, |c| {
+        c.border_t_1()
+          .rounded_tl(theme.radius_lg)
+          .rounded_tr(theme.radius_lg)
+      })
+      .when(last, |c| {
+        c.border_b_1()
+          .rounded_bl(theme.radius_lg)
+          .rounded_br(theme.radius_lg)
+      })
+      .child(child),
+  )
 }
 
 pub fn muted(text: impl Into<SharedString>, cx: &App) -> Div {

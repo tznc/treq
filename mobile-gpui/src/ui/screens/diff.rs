@@ -2,7 +2,7 @@
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-  component::{button::Button, v_flex, ActiveTheme, Sizable},
+  component::{button::Button, ActiveTheme, Sizable},
   *,
 };
 use treq_lib::{
@@ -66,7 +66,41 @@ pub struct DiffScreen {
   show_content: bool,
   /// Set when the hunks came with the page, which then never refetches.
   fixed: bool,
-  scroll: ScrollHandle,
+  rows: ListState,
+  /// What `rows` shows, as the last render flattened it.
+  items: Vec<DiffItem>,
+  /// Per hunk, and for the file content: the width of the widest line, so
+  /// that every line of one scrolls sideways together.
+  hunk_widths: Vec<f32>,
+  content_width: f32,
+  hunk_scroll: Vec<ScrollHandle>,
+  content_scroll: ScrollHandle,
+}
+
+/// One item of the diff list. Hunks and the file content are cards drawn
+/// as a run of items, so only the lines near the screen are built.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DiffItem {
+  Path,
+  /// Loading, failed or empty.
+  Body,
+  Header {
+    hunk: usize,
+    last: bool,
+  },
+  Line {
+    hunk: usize,
+    line: usize,
+    last: bool,
+  },
+  Toggle,
+  ContentMessage,
+  ContentLine {
+    line: usize,
+    first: bool,
+    last: bool,
+  },
+  End,
 }
 
 impl DiffScreen {
@@ -85,7 +119,12 @@ impl DiffScreen {
       content: Load::Idle,
       show_content: false,
       fixed,
-      scroll: ScrollHandle::new(),
+      rows: widgets::list_state(),
+      items: Vec::new(),
+      hunk_widths: Vec::new(),
+      content_width: 0.,
+      hunk_scroll: Vec::new(),
+      content_scroll: ScrollHandle::new(),
     };
     this.reload(cx);
     this
@@ -105,7 +144,12 @@ impl DiffScreen {
       content: Load::Idle,
       show_content: false,
       fixed: true,
-      scroll: ScrollHandle::new(),
+      rows: widgets::list_state(),
+      items: Vec::new(),
+      hunk_widths: Vec::new(),
+      content_width: 0.,
+      hunk_scroll: Vec::new(),
+      content_scroll: ScrollHandle::new(),
     }
   }
 
@@ -172,80 +216,210 @@ fn diff_line(line: &str, cx: &App) -> Div {
   .text_color(fg)
 }
 
-impl Render for DiffScreen {
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let hunks = match &self.hunks {
-      Load::Idle | Load::Loading => v_flex().child(widgets::centered_message("Loading diff…", cx)),
-      Load::Failed(error) => v_flex().child(widgets::error_text(error.clone(), cx)),
-      Load::Ready(hunks) if hunks.is_empty() => v_flex().child(widgets::centered_message(
-        "No diff available for this file.",
-        cx,
-      )),
-      Load::Ready(hunks) => v_flex()
-        .gap_3()
-        .children(hunks.iter().enumerate().map(|(i, hunk)| {
-          widgets::card(cx).child(
-            div().id(("hunk", i)).overflow_x_scroll().child(
-              v_flex()
-                .py_1()
-                .child(
-                  widgets::mono(hunk.header.clone(), cx)
-                    .px_2()
-                    .text_color(cx.theme().muted_foreground),
-                )
-                .children(hunk.lines.iter().map(|line| diff_line(line, cx))),
-            ),
-          )
-        })),
+/// Horizontal padding of a diff line (`px_2` on each side).
+const LINE_PAD: f32 = 16.;
+
+/// How wide `chars` monospace characters are, with a character to spare.
+fn text_width(chars: usize, advance: f32) -> f32 {
+  (chars + 1) as f32 * advance + LINE_PAD
+}
+
+/// The advance of one monospace character.
+fn mono_advance(window: &Window, cx: &App) -> f32 {
+  let theme = cx.theme();
+  let text = window.text_system();
+  let font = text.resolve_font(&font(theme.mono_font_family.clone()));
+  text
+    .advance(font, theme.mono_font_size, 'm')
+    .map_or(f32::from(theme.mono_font_size) * 0.6, |size| {
+      f32::from(size.width)
+    })
+}
+
+impl DiffScreen {
+  /// Lays the hunks and content out as list items.
+  fn flatten(&mut self, advance: f32) {
+    let mut items = vec![DiffItem::Path];
+    self.hunk_widths.clear();
+    match &self.hunks {
+      Load::Ready(hunks) if !hunks.is_empty() => {
+        for (h, hunk) in hunks.iter().enumerate() {
+          let chars = hunk
+            .lines
+            .iter()
+            .map(|l| l.chars().count())
+            .chain([hunk.header.chars().count()])
+            .max()
+            .unwrap_or(0);
+          self.hunk_widths.push(text_width(chars, advance));
+          items.push(DiffItem::Header {
+            hunk: h,
+            last: hunk.lines.is_empty(),
+          });
+          items.extend((0..hunk.lines.len()).map(|line| DiffItem::Line {
+            hunk: h,
+            line,
+            last: line + 1 == hunk.lines.len(),
+          }));
+        }
+      }
+      _ => items.push(DiffItem::Body),
+    }
+    if !self.fixed {
+      items.push(DiffItem::Toggle);
+    }
+    if self.show_content {
+      match &self.content {
+        Load::Ready(file) => {
+          let chars = file
+            .lines
+            .iter()
+            .map(|l| l.chars().count())
+            .max()
+            .unwrap_or(0);
+          self.content_width = text_width(chars + 7, advance);
+          let n = file.lines.len();
+          items.extend((0..n).map(|line| DiffItem::ContentLine {
+            line,
+            first: line == 0,
+            last: line + 1 == n,
+          }));
+        }
+        _ => items.push(DiffItem::ContentMessage),
+      }
+    }
+    items.push(DiffItem::End);
+    let hunks = self.hunk_widths.len();
+    self.hunk_scroll.resize_with(hunks, ScrollHandle::new);
+    self.items = items;
+  }
+
+  /// A line that scrolls sideways with the others sharing `scroll`.
+  fn scrolling(
+    id: usize,
+    scroll: &ScrollHandle,
+    width: f32,
+    line: impl IntoElement,
+  ) -> Stateful<Div> {
+    div()
+      .id(("diff-line", id))
+      .overflow_x_scroll()
+      .track_scroll(scroll)
+      .child(div().min_w(px(width)).child(line))
+  }
+
+  fn item(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+    let Some(item) = self.items.get(ix).copied() else {
+      return div().into_any_element();
     };
-    let content = self.show_content.then(|| match &self.content {
-      Load::Idle | Load::Loading => widgets::muted("Loading…", cx).into_any_element(),
-      Load::Failed(error) => widgets::error_text(error.clone(), cx).into_any_element(),
-      Load::Ready(file) => widgets::card(cx)
+    match item {
+      DiffItem::Path => widgets::muted(self.path.clone(), cx)
+        .px_4()
+        .pt_4()
+        .into_any_element(),
+      DiffItem::Body => {
+        let body = match &self.hunks {
+          Load::Failed(error) => widgets::error_text(error.clone(), cx),
+          Load::Ready(_) => widgets::centered_message("No diff available for this file.", cx),
+          _ => widgets::centered_message("Loading diff…", cx),
+        };
+        body.mx_4().mt_5().into_any_element()
+      }
+      DiffItem::Header { hunk, last } => {
+        let Load::Ready(hunks) = &self.hunks else {
+          return div().into_any_element();
+        };
+        let header = widgets::mono(hunks[hunk].header.clone(), cx)
+          .px_2()
+          .text_color(cx.theme().muted_foreground);
+        let row = Self::scrolling(ix, &self.hunk_scroll[hunk], self.hunk_widths[hunk], header);
+        widgets::card_item(
+          div().pt_1().when(last, |d| d.pb_1()).child(row),
+          true,
+          last,
+          cx,
+        )
+        .pt(px(if hunk == 0 { 20. } else { 12. }))
+        .into_any_element()
+      }
+      DiffItem::Line { hunk, line, last } => {
+        let Load::Ready(hunks) = &self.hunks else {
+          return div().into_any_element();
+        };
+        let row = Self::scrolling(
+          ix,
+          &self.hunk_scroll[hunk],
+          self.hunk_widths[hunk],
+          diff_line(&hunks[hunk].lines[line], cx),
+        );
+        widgets::card_item(div().when(last, |d| d.pb_1()).child(row), false, last, cx)
+          .into_any_element()
+      }
+      DiffItem::Toggle => div()
+        .px_4()
+        .pt_5()
         .child(
-          div()
-            .id("content")
-            .overflow_x_scroll()
-            .child(
-              v_flex()
-                .py_1()
-                .children(file.lines.iter().enumerate().map(|(i, line)| {
-                  widgets::mono(format!("{:>5}  {line}", file.start_line + i), cx).px_2()
-                })),
-            ),
+          Button::new("toggle-content")
+            .outline()
+            .small()
+            .label(if self.show_content {
+              "Hide working-copy content"
+            } else {
+              "Show working-copy content"
+            })
+            .on_click(cx.listener(|this, _, _, cx| {
+              this.show_content = !this.show_content;
+              if this.show_content && this.content.ready().is_none() {
+                this.load_content(cx);
+              }
+              cx.notify();
+            })),
         )
         .into_any_element(),
-    });
-    div()
-      .id("diff")
-      .size_full()
-      .overflow_y_scroll()
-      .track_scroll(&self.scroll)
-      .child(
-        widgets::page()
-          .child(widgets::muted(self.path.clone(), cx))
-          .child(hunks)
-          .when(!self.fixed, |page| {
-            page.child(
-              Button::new("toggle-content")
-                .outline()
-                .small()
-                .label(if self.show_content {
-                  "Hide working-copy content"
-                } else {
-                  "Show working-copy content"
-                })
-                .on_click(cx.listener(|this, _, _, cx| {
-                  this.show_content = !this.show_content;
-                  if this.show_content && this.content.ready().is_none() {
-                    this.load_content(cx);
-                  }
-                  cx.notify();
-                })),
-            )
-          })
-          .children(content),
-      )
+      DiffItem::ContentMessage => match &self.content {
+        Load::Failed(error) => widgets::error_text(error.clone(), cx),
+        _ => widgets::muted("Loading…", cx),
+      }
+      .px_4()
+      .pt_5()
+      .into_any_element(),
+      DiffItem::ContentLine { line, first, last } => {
+        let Load::Ready(file) = &self.content else {
+          return div().into_any_element();
+        };
+        let text = widgets::mono(
+          format!("{:>5}  {}", file.start_line + line, file.lines[line]),
+          cx,
+        )
+        .px_2();
+        let row = Self::scrolling(ix, &self.content_scroll, self.content_width, text);
+        let inner = div()
+          .when(first, |d| d.pt_1())
+          .when(last, |d| d.pb_1())
+          .child(row);
+        widgets::card_item(inner, first, last, cx)
+          .when(first, |d| d.pt_5())
+          .into_any_element()
+      }
+      DiffItem::End => div().h_4().into_any_element(),
+    }
+  }
+}
+
+impl Render for DiffScreen {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    let advance = mono_advance(window, cx);
+    self.flatten(advance);
+    widgets::resize(&self.rows, self.items.len());
+    let screen = cx.weak_entity();
+    div().id("diff").size_full().child(
+      list(self.rows.clone(), move |ix, _, cx| {
+        screen
+          .update(cx, |this, cx| this.item(ix, cx))
+          .unwrap_or_else(|_| div().into_any_element())
+      })
+      .size_full(),
+    )
   }
 }
 
