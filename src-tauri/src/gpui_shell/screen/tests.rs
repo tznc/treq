@@ -8293,6 +8293,7 @@ mod file_browser;
 mod fuzz;
 mod github;
 mod idle;
+mod input_latency;
 mod kept_tabs;
 mod linear_view;
 mod logs_explorer;
