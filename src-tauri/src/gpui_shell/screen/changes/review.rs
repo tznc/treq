@@ -625,9 +625,30 @@ impl ChangesView {
   /// diffs are read aside, and files whose diff changed (an agent edited
   /// them) wait behind the stale banner like added or removed ones.
   pub(super) fn recheck(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
-    let paths: Vec<String> = snapshot.files.iter().map(|f| f.path.clone()).collect();
+    // A file whose content id held shows the hunks it would read.
+    let paths: Vec<String> = snapshot
+      .files
+      .iter()
+      .map(|f| &f.path)
+      .filter(|path| {
+        let id = snapshot.content_ids.get(*path);
+        id.is_none() || self.hunks.get(*path).and_then(|d| d.content_id.as_ref()) != id
+      })
+      .cloned()
+      .collect();
+    if paths.is_empty() {
+      return;
+    }
+    let token = snapshot.token.clone();
     self.run(
-      move |host, parent| host.file_hunks(&parent.repo_path, parent.workspace_id(), paths),
+      move |host, parent| {
+        host.file_hunks(
+          &parent.repo_path,
+          parent.workspace_id(),
+          paths,
+          token.as_deref(),
+        )
+      },
       move |view, result, cx| {
         let read = match result {
           Ok(read) => read,

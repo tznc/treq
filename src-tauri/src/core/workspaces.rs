@@ -4267,10 +4267,17 @@ fn workspace_diff_with_conflict_style(
     .map_err(|e| format!("Failed to get workspace diff: {}", e))?;
 
   let jj::WorkingCopyChanges {
-    files: uncommitted_files,
+    files: mut uncommitted_files,
     conflicted: conflicted_files,
     token,
   } = working_copy;
+  // Conflicted sides read with the marker style, so it names the hunks too.
+  for file in &mut uncommitted_files {
+    if let Some(id) = &mut file.content_id {
+      id.push(':');
+      id.push_str(conflict_marker_style);
+    }
+  }
   let uncommitted_paths: std::collections::HashSet<String> = uncommitted_files
     .iter()
     .map(|file| file.path.clone())
