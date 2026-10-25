@@ -216,6 +216,7 @@ use jj_lib::workspace::{
 use jj_lib::workspace_store::{SimpleWorkspaceStore, WorkspaceStore as _};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -7836,7 +7837,29 @@ fn git_subprocess_options(settings: &UserSettings) -> Result<git::GitSubprocessO
     .to_subprocess_options();
   options.executable_path =
     PathBuf::from(binary_paths::resolve_remote_git().map_err(JjError::IoError)?);
+  disable_auto_maintenance(&mut options.environment);
   Ok(options)
+}
+
+/// Keeps `git fetch` and `git push` from spawning `git maintenance run --auto`
+/// (and a possible auto-gc that can stall a big repo) after every call. Passed
+/// through `GIT_CONFIG_COUNT` so any config the caller's environment already
+/// injects stays in force.
+fn disable_auto_maintenance(environment: &mut HashMap<OsString, OsString>) {
+  let existing = std::env::var("GIT_CONFIG_COUNT")
+    .ok()
+    .and_then(|count| count.parse::<usize>().ok())
+    .unwrap_or(0);
+  let settings = [("maintenance.auto", "false"), ("gc.auto", "0")];
+  for (offset, (key, value)) in settings.into_iter().enumerate() {
+    let index = existing + offset;
+    environment.insert(format!("GIT_CONFIG_KEY_{index}").into(), key.into());
+    environment.insert(format!("GIT_CONFIG_VALUE_{index}").into(), value.into());
+  }
+  environment.insert(
+    "GIT_CONFIG_COUNT".into(),
+    (existing + settings.len()).to_string().into(),
+  );
 }
 
 /// Branch status indicating whether a branch exists locally and/or remotely
@@ -10200,9 +10223,29 @@ fn import_remaining_git_refs(loaded: &mut LoadedWorkspaceRepo) -> Result<(), JjE
 #[cfg(test)]
 mod tests {
   use super::*;
+  use std::ffi::OsStr;
   use std::fs;
   use std::process::Command;
   use tempfile::TempDir;
+
+  #[test]
+  fn git_subprocess_environment_turns_off_auto_maintenance() {
+    let mut environment = HashMap::new();
+    disable_auto_maintenance(&mut environment);
+    let get = |key: &str| environment.get(OsStr::new(key)).and_then(|v| v.to_str());
+    let count: usize = get("GIT_CONFIG_COUNT").unwrap().parse().unwrap();
+    // Entries below an inherited `GIT_CONFIG_COUNT` belong to the caller.
+    let configured: Vec<_> = (0..count)
+      .filter_map(|i| {
+        Some((
+          get(&format!("GIT_CONFIG_KEY_{i}"))?,
+          get(&format!("GIT_CONFIG_VALUE_{i}"))?,
+        ))
+      })
+      .collect();
+    assert!(configured.contains(&("maintenance.auto", "false")));
+    assert!(configured.contains(&("gc.auto", "0")));
+  }
 
   #[test]
   fn shared_read_serves_callers_that_pile_up_with_one_more_run() {
