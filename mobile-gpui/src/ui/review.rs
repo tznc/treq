@@ -319,10 +319,27 @@ impl Composer {
   }
 }
 
+/// Lines of the picked range the composer previews, so it fits above the
+/// keyboard.
+const PREVIEW_LINES: usize = 6;
+
+fn more_lines_label(hidden: usize) -> String {
+  if hidden == 1 {
+    "1 more line".into()
+  } else {
+    format!("{hidden} more lines")
+  }
+}
+
 impl Render for Composer {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let can_suggest = suggestion_for(&self.pending).is_some();
     let empty = self.text.read(cx).value().trim().is_empty();
+    let hidden = self
+      .pending
+      .line_content
+      .len()
+      .saturating_sub(PREVIEW_LINES);
     v_flex()
       .px_4()
       .gap_3()
@@ -330,13 +347,23 @@ impl Render for Composer {
         c.child(
           widgets::card(cx)
             .py_1()
-            .children(self.pending.line_content.iter().take(6).map(|line| {
-              if self.pending.hunk_id == FILE_LINES {
-                widgets::mono(line.clone(), cx).px_2()
-              } else {
-                super::screens::diff::diff_line(line, cx)
-              }
-            })),
+            .children(
+              self
+                .pending
+                .line_content
+                .iter()
+                .take(PREVIEW_LINES)
+                .map(|line| {
+                  if self.pending.hunk_id == FILE_LINES {
+                    widgets::mono(line.clone(), cx).px_2()
+                  } else {
+                    super::screens::diff::diff_line(line, cx)
+                  }
+                }),
+            )
+            .when(hidden > 0, |c| {
+              c.child(widgets::muted(more_lines_label(hidden), cx).px_2())
+            }),
         )
       })
       .child(Textarea::new(&self.text))
