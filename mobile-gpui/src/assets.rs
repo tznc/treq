@@ -11,7 +11,9 @@ gpui_kit::assets::icon_assets!(
     CircleQuestionMark,
     CornerDownRight,
     ListIndentDecrease,
-    ListIndentIncrease
+    ListIndentIncrease,
+    MessageSquarePlus,
+    Send
   ]
 );
 

@@ -2,7 +2,7 @@
 //! Changes, Commits), with the workspace's actions in the ⋯ menu and a
 //! switcher to its siblings on the title.
 
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{cell::RefCell, collections::HashSet, rc::Rc, time::Duration};
 
 use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -19,7 +19,7 @@ use gpui_kit::{
 use serde::Deserialize;
 use treq_lib::{
   core::{
-    remote::TreqCommandRequest,
+    remote::{ReviewScope, TreqCommandRequest},
     remote_control_plane::SshEndpoint,
     workspaces::{WorkspaceStatus, WorkspaceSummary},
   },
@@ -33,7 +33,7 @@ use treq_ui::{
 
 use super::{
   commits::{self, CommitsScreen},
-  conflicts, diff, mutation_message, on_epoch,
+  conflicts, mutation_message, on_epoch,
   terminal::Sessions,
   workspaces,
 };
@@ -41,7 +41,7 @@ use crate::{
   errors,
   remote::{self, IdempotencyKeys, Mutation},
   store::SnapshotWorkspace,
-  ui::{self, load, nav, sheet, widgets, Load, Location},
+  ui::{self, load, nav, review::Review, sheet, widgets, Load, Location},
 };
 
 /// How often the change marker is polled to notice remote edits.
@@ -183,6 +183,8 @@ fn change_detail(change: &JjFileChange) -> String {
   detail
 }
 
+mod changes;
+
 pub struct WorkspaceScreen {
   target: Target,
   view: View,
@@ -190,6 +192,14 @@ pub struct WorkspaceScreen {
   diff: Load<JjRevisionDiff>,
   marker: Option<String>,
   sessions: Entity<Sessions>,
+  /// The Changes tab's review, kept on the host.
+  review: Entity<Review>,
+  /// The uncommitted files' diffs, shown inline on the Changes tab.
+  hunks: changes::FileHunks,
+  /// Large files the user asked to see.
+  opened: HashSet<String>,
+  /// Lines picked for a comment.
+  picked: Option<changes::PickedLines>,
   /// Made when the Commits tab is first shown.
   commits: Option<Entity<CommitsScreen>>,
   commit_message: Entity<InputState>,
@@ -249,6 +259,8 @@ impl WorkspaceScreen {
       });
     let sessions = cx.new(|cx| Sessions::new(target.clone(), workspace, cx));
     cx.observe(&sessions, |_, _, cx| cx.notify()).detach();
+    let review = cx.new(|cx| Review::new(target.clone(), ReviewScope::Changes, cx));
+    cx.observe(&review, |_, _, cx| cx.notify()).detach();
     let mut this = Self {
       view: View::Terminals,
       status: status.map_or(Load::Idle, Load::Ready),
@@ -256,6 +268,10 @@ impl WorkspaceScreen {
       target,
       marker: None,
       sessions,
+      review,
+      hunks: Default::default(),
+      opened: HashSet::new(),
+      picked: None,
       commits: None,
       commit_message: cx.new(|cx| InputState::new(window, cx).placeholder("Commit message")),
       busy: None,
@@ -264,6 +280,7 @@ impl WorkspaceScreen {
       changed: false,
       _poll: poll,
     };
+    this.load_hunks(cx);
     this.fetch(true, cx);
     this.poll_marker(cx);
     this
@@ -305,7 +322,10 @@ impl WorkspaceScreen {
     load::run(
       cx,
       remote::read_cached::<JjRevisionDiff>(diff_request(&self.target), join),
-      |this, result, _| this.diff = Load::from_result(result),
+      |this, result, cx| {
+        this.diff = Load::from_result(result);
+        this.load_hunks(cx);
+      },
     );
     if !join {
       self.sessions.update(cx, |sessions, cx| sessions.reload(cx));
@@ -776,14 +796,6 @@ impl WorkspaceScreen {
     };
     let target = self.target.clone();
     let committing = self.busy == Some("commit");
-    let file_row = |id: (&'static str, usize), change: &JjFileChange, cx: &App| {
-      widgets::row(
-        id,
-        change.path.clone(),
-        Some(change_detail(change).into()),
-        cx,
-      )
-    };
     v_flex()
       .gap_4()
       .when(!diff.conflicted_files.is_empty(), |list| {
@@ -800,24 +812,15 @@ impl WorkspaceScreen {
         )
       })
       .child(
-        widgets::section("Uncommitted", cx).child(
-          widgets::card(cx)
-            .when(diff.uncommitted_files.is_empty(), |card| {
-              card.child(widgets::centered_message("No uncommitted changes.", cx))
-            })
-            .children(
-              diff
-                .uncommitted_files
-                .iter()
-                .enumerate()
-                .map(|(i, change)| {
-                  let (t, path) = (target.clone(), change.path.clone());
-                  file_row(("uncommitted", i), change, cx)
-                    .on_click(move |_, _, cx| diff::open(t.clone(), path.clone(), cx))
-                }),
+        widgets::section("Uncommitted", cx)
+          .when(diff.uncommitted_files.is_empty(), |section| {
+            section.child(
+              widgets::card(cx).child(widgets::centered_message("No uncommitted changes.", cx)),
             )
-            .when(!diff.uncommitted_files.is_empty(), |card| {
-              card.child(
+          })
+          .when(!diff.uncommitted_files.is_empty(), |section| {
+            section.child(
+              widgets::card(cx).child(
                 h_flex()
                   .p_3()
                   .gap_2()
@@ -830,29 +833,29 @@ impl WorkspaceScreen {
                       .disabled(self.busy.is_some())
                       .on_click(cx.listener(|this, _, window, cx| this.commit(window, cx))),
                   ),
-              )
-            }),
-        ),
+              ),
+            )
+          })
+          .children(
+            diff
+              .uncommitted_files
+              .iter()
+              .map(|change| self.file_block(change, false, diff, cx)),
+          ),
       )
       .child(
-        widgets::section(format!("On this branch · vs {}", self.target_branch()), cx).child(
-          widgets::card(cx)
-            .when(diff.committed_files.is_empty(), |card| {
-              card.child(widgets::centered_message("No committed changes yet.", cx))
-            })
-            .children(diff.committed_files.iter().enumerate().map(|(i, change)| {
-              let (t, path) = (target.clone(), change.path.clone());
-              let hunks = diff
-                .hunks_by_file
-                .iter()
-                .find(|f| f.path == change.path)
-                .map(|f| f.hunks.clone())
-                .unwrap_or_default();
-              file_row(("committed", i), change, cx).on_click(move |_, _, cx| {
-                diff::open_hunks(t.clone(), path.clone(), hunks.clone(), cx)
-              })
-            })),
-        ),
+        widgets::section(format!("On this branch · vs {}", self.target_branch()), cx)
+          .when(diff.committed_files.is_empty(), |section| {
+            section.child(
+              widgets::card(cx).child(widgets::centered_message("No committed changes yet.", cx)),
+            )
+          })
+          .children(
+            diff
+              .committed_files
+              .iter()
+              .map(|change| self.file_block(change, true, diff, cx)),
+          ),
       )
       .into_any_element()
   }
@@ -867,11 +870,17 @@ impl Render for WorkspaceScreen {
         .overflow_y_scroll()
         .child(widgets::page().child(self.sessions.clone()))
         .into_any_element(),
-      View::Changes => div()
-        .id("changes")
+      View::Changes => v_flex()
         .size_full()
-        .overflow_y_scroll()
-        .child(widgets::page().child(self.changes(cx)))
+        .child(
+          div()
+            .id("changes")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(widgets::page().child(self.changes(cx))),
+        )
+        .children(self.changes_footer(cx))
         .into_any_element(),
       View::Commits => match &self.commits {
         Some(commits) => commits.clone().into_any_element(),
@@ -1068,7 +1077,7 @@ mod tests {
       previous_path: previous.map(str::to_string),
       changed_line_count: lines,
       diff_deferred: false,
-    content_id: None,
+      content_id: None,
     }
   }
 

@@ -281,6 +281,62 @@ impl Sessions {
     );
   }
 
+  /// The running agent sessions, by label, that a review can go to.
+  pub fn running_agents(&self) -> Vec<(String, RemoteAgentId)> {
+    self.sessions.ready().map_or_else(Vec::new, |list| {
+      list
+        .iter()
+        .filter(|s| s.running)
+        .filter_map(|s| match Program::of_label(&s.label) {
+          Program::Agent(agent) => Some((s.label.clone(), agent)),
+          Program::Shell => None,
+        })
+        .collect()
+    })
+  }
+
+  /// The agents a new session can run on this host.
+  pub fn agents_offered(cx: &App) -> Vec<RemoteAgentId> {
+    agents_on(host_check(cx).as_ref())
+  }
+
+  /// Pastes `text` into running session `label` and submits it, then opens
+  /// the session. `done` hears whether the host took it.
+  pub fn paste_into(
+    &mut self,
+    label: String,
+    text: String,
+    done: impl FnOnce(Result<(), String>, &mut App) + 'static,
+    cx: &mut Context<Self>,
+  ) {
+    let Some(workspace) = &self.workspace else {
+      return done(Err("This workspace is still loading.".into()), cx);
+    };
+    let request = TreqCommandRequest::PtyPaste {
+      repo: self.target.repo.clone(),
+      workspace: workspace.workspace_name.clone(),
+      label: label.clone(),
+      text,
+      submit: true,
+      idempotency_key: format!("pty.paste:{}", uuid::Uuid::new_v4()),
+    };
+    load::run(cx, remote::mutate(request), move |this, outcome, cx| {
+      let (ok, message) = super::mutation_message(&outcome, "");
+      if ok {
+        let program = Program::of_label(&label);
+        this.open(label, program.launch(Vec::new()), cx);
+        done(Ok(()), cx);
+      } else {
+        done(Err(errors::describe(&message).message), cx);
+      }
+    });
+  }
+
+  /// Starts a new `agent` session with `args`, and opens it.
+  pub fn start_agent(&mut self, agent: RemoteAgentId, args: Vec<String>, cx: &mut Context<Self>) {
+    self.start(Program::Agent(agent), args, cx);
+  }
+
   fn start(&mut self, program: Program, args: Vec<String>, cx: &mut Context<Self>) {
     let label = new_session_label(program, chrono::Utc::now().timestamp_millis());
     self.open(label, program.launch(args), cx);
