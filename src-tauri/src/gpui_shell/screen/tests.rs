@@ -47,6 +47,8 @@ struct FakeHost {
   /// What the merge preview reads, and whether merging fails.
   merge: merge::Preview,
   merge_error: Option<String>,
+  /// Notes a merge reports, such as stacked PRs moved onto a new base.
+  merge_notes: Vec<String>,
   /// What the Code tab reads.
   overview: code_data::Overview,
   history: Option<crate::jj::JjLogResult>,
@@ -57,6 +59,10 @@ struct FakeHost {
   /// Deferred file diffs `commit_file_diff` loads.
   file_diffs: Vec<crate::jj::JjFileDiff>,
   description: String,
+  /// Which of the workspace's fields follow its PR.
+  pr_sync: Option<crate::local_db::PrSyncRecord>,
+  /// The PR's title and body as GitHub has them.
+  pr_text: Option<(String, String)>,
   /// What the Changes tab reads, and the repository's `.gitattributes`.
   working: Option<crate::jj::JjRevisionDiff>,
   /// Replaces `working` once set: the files edited on disk meanwhile.
@@ -140,6 +146,8 @@ struct FakeHost {
   /// page (`Err` refuses it).
   github_repos: Option<Result<Vec<crate::core::account::GithubRepository>, String>>,
   oauth: Option<Result<String, crate::core::supabase::ApiError>>,
+  /// Why deleting the account fails; `None` deletes it.
+  account_deletion: Option<crate::core::supabase::ApiError>,
   /// What the agent launches read and did: each new session's start data
   /// by pane id, the `treq send` attachments, the prompt dialog's tasks
   /// (and whether starting fails), and the sessions started.
@@ -554,9 +562,28 @@ impl crate::gpui_shell::popover::PopoverHost for FakeHost {
   }
 }
 
+impl FakeHost {
+  fn merge_result(&self) -> Result<crate::core::MergeResult, String> {
+    match &self.merge_error {
+      Some(err) => Err(err.clone()),
+      None => Ok(crate::core::MergeResult {
+        plan: self
+          .merge
+          .plan
+          .clone()
+          .unwrap_or_else(|| merge_plan(&[], false)),
+        notes: self.merge_notes.clone(),
+      }),
+    }
+  }
+}
+
 impl merge::MergeHost for FakeHost {
-  fn merge_preview(&self, _: &str, workspace_id: i64) -> merge::Preview {
-    self.record(format!("read merge {workspace_id}"));
+  fn merge_preview(&self, _: &str, workspace_id: i64, rollup: bool) -> merge::Preview {
+    self.record(format!(
+      "read merge {workspace_id}{}",
+      if rollup { " rollup" } else { "" }
+    ));
     self.merge.clone()
   }
 
@@ -566,9 +593,35 @@ impl merge::MergeHost for FakeHost {
     workspace_id: i64,
     message: &str,
     strategy: merge::Strategy,
-  ) -> Result<(), String> {
-    self.record(format!("merge {workspace_id} {strategy:?} {message:?}"));
-    self.merge_error.clone().map_or(Ok(()), Err)
+    options: crate::core::LocalMergeOptions,
+  ) -> Result<crate::core::MergeResult, String> {
+    let mut line = format!("merge {workspace_id} {strategy:?} {message:?}");
+    if options.rollup {
+      line.push_str(" rollup");
+    }
+    if options.push {
+      line.push_str(" push");
+    }
+    self.record(line);
+    self.merge_result()
+  }
+
+  fn merge_on_github(
+    &self,
+    _: &str,
+    workspace_id: i64,
+    request: &merge::GithubMerge,
+  ) -> Result<crate::core::MergeResult, String> {
+    self.record(format!(
+      "merge on github {workspace_id} {}#{} {:?} {:?}",
+      request.repo_full_name, request.pr_number, request.method, request.subject
+    ));
+    self.merge_result()
+  }
+
+  fn sync_merged(&self, _: &str, workspace_id: i64) -> Result<crate::core::MergeResult, String> {
+    self.record(format!("sync merged {workspace_id}"));
+    self.merge_result()
   }
 }
 
@@ -616,8 +669,33 @@ impl code_data::CodeHost for FakeHost {
     Ok(())
   }
 
+  /// A local host: the file index is in memory, so searches run at once.
+  fn file_search_delay(&self, _: &str) -> std::time::Duration {
+    std::time::Duration::ZERO
+  }
+
   fn warm_file_index(&self, _: &str, workspace_id: Option<i64>, _: &str) {
     self.record(format!("read file index {workspace_id:?}"));
+  }
+
+  fn pr_sync(&self, _: &str, _: i64) -> Option<crate::local_db::PrSyncRecord> {
+    self.record("read pr sync".into());
+    self.pr_sync.clone()
+  }
+
+  fn resync_from_pr(&self, _: &str, workspace_id: i64) -> Result<(), String> {
+    self.record(format!("resync from PR {workspace_id}"));
+    Ok(())
+  }
+
+  fn pr_text(&self, _: &str, _: &crate::local_db::Workspace) -> Option<(String, String)> {
+    self.record("read pr text".into());
+    self.pr_text.clone()
+  }
+
+  fn push_to_pr(&self, _: &str, workspace_id: i64) -> Result<(), String> {
+    self.record(format!("push to PR {workspace_id}"));
+    Ok(())
   }
 
   fn search_files(
@@ -1448,6 +1526,11 @@ impl account_data::AccountHost for FakeHost {
       .oauth
       .clone()
       .unwrap_or_else(|| Ok("https://linear.app/oauth/authorize".into()))
+  }
+
+  fn delete_account(&self) -> Result<(), crate::core::supabase::ApiError> {
+    self.record("delete account".into());
+    self.account_deletion.clone().map_or(Ok(()), Err)
   }
 
   fn cloud_action(&self, action: account_data::CloudAction) {
@@ -2581,6 +2664,7 @@ fn open_pr() -> workspace_data::PrCache {
       base_ref_name: "main".into(),
       merge_state_status: None,
       is_draft: false,
+      body: String::new(),
     })),
     ci: Some(crate::github::PrCiStatus {
       state: "success".into(),
@@ -3070,6 +3154,162 @@ fn account_shows_the_plan_and_signs_out(cx: &mut TestAppContext) {
   assert!(h.sent().is_empty());
 }
 
+fn delete_dialog(h: &mut Harness) -> Option<settings::DeleteAccountDialog> {
+  match drawn_settings(h).account {
+    Some(settings::AccountTab::SignedIn(signed_in)) => signed_in.delete_account,
+    other => panic!("signed in: {other:?}"),
+  }
+}
+
+fn signed_in_as_ada(cx: &mut TestAppContext, host: Arc<FakeHost>) -> Harness {
+  let mut h = Harness::with_host(cx, account_route("account"), host);
+  h.set_account(account_state(
+    serde_json::json!({ "user": ada(), "subscription": pro() }),
+  ));
+  h
+}
+
+#[gpui::test]
+fn account_deletes_only_after_the_email_is_typed(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host.clone());
+  assert_eq!(delete_dialog(&mut h), None);
+
+  h.click("account-delete");
+  assert!(h.drawn("account-delete-dialog"));
+  let dialog = delete_dialog(&mut h).expect("asked");
+  assert!(!dialog.can_confirm);
+
+  h.click("account-delete-confirm");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "eve@example.com".into()),
+  );
+  assert!(!delete_dialog(&mut h).unwrap().can_confirm);
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+  assert!(!host.writes().contains(&"delete account".to_string()));
+
+  settings_act(
+    &mut h,
+    field("account.delete.email", " ADA@example.com ".into()),
+  );
+  assert!(delete_dialog(&mut h).unwrap().can_confirm);
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host
+      .writes()
+      .iter()
+      .filter(|w| *w == "delete account")
+      .count(),
+    1
+  );
+  assert_eq!(delete_dialog(&mut h), None);
+  assert!(h.sent().is_empty());
+}
+
+#[gpui::test]
+fn account_deletion_the_server_refuses_shows_why_and_keeps_the_dialog(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    account_deletion: Some(crate::core::supabase::ApiError {
+      status: 409,
+      code: "last_owner".into(),
+      message: "You are the last owner of Acme. Make another member an owner, or delete the organization, before deleting your account.".into(),
+      correlation_id: None,
+    }),
+    ..FakeHost::default()
+  });
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+
+  let dialog = delete_dialog(&mut h).expect("still open");
+  assert!(!dialog.deleting);
+  assert!(dialog.can_confirm);
+  assert_eq!(
+    dialog.error.as_deref(),
+    Some("You are the last owner of Acme. Make another member an owner, or delete the organization, before deleting your account.")
+  );
+  assert!(host.writes().contains(&"delete account".to_string()));
+}
+
+fn farewell(h: &mut Harness) -> bool {
+  match drawn_settings(h).account {
+    Some(settings::AccountTab::SignedOut { farewell, .. }) => farewell,
+    other => panic!("signed out: {other:?}"),
+  }
+}
+
+#[gpui::test]
+fn account_deletion_toasts_and_says_goodbye_once_signed_out(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"notify toast Account deleted".to_string()));
+
+  // The core signs out after deleting; the tab follows the account.
+  h.set_account(account_state(serde_json::json!({})));
+  assert!(farewell(&mut h));
+  assert!(h.drawn("account-farewell"));
+
+  h.click("account-farewell-dismiss");
+  assert!(!farewell(&mut h));
+  assert!(!h.drawn("account-farewell"));
+}
+
+#[gpui::test]
+fn a_refused_account_deletion_neither_toasts_nor_says_goodbye(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    account_deletion: Some(crate::core::supabase::ApiError::new("last_owner", "No")),
+    ..FakeHost::default()
+  });
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+  assert!(!host.writes().iter().any(|w| w.starts_with("notify toast")));
+  h.set_account(account_state(serde_json::json!({})));
+  assert!(!farewell(&mut h));
+}
+
+#[gpui::test]
+fn account_deletion_cancel_closes_without_deleting(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-cancel");
+  h.cx.run_until_parked();
+  assert_eq!(delete_dialog(&mut h), None);
+  assert!(!h.drawn("account-delete-dialog"));
+  assert!(!host.writes().contains(&"delete account".to_string()));
+
+  // Asking again starts from an empty field.
+  h.click("account-delete");
+  assert!(!delete_dialog(&mut h).unwrap().can_confirm);
+}
+
 #[gpui::test]
 fn account_offers_pro_on_the_free_plan(cx: &mut TestAppContext) {
   let route = account_route("account");
@@ -3464,7 +3704,58 @@ fn merge_preview(commits: usize) -> merge::Preview {
       }))
       .expect("diff"),
     ),
-    error: None,
+    plan: Some(merge_plan(&[], false)),
+    ..merge::Preview::default()
+  }
+}
+
+/// The landing plan of the `feature` workspace into `develop`, moving
+/// `retargeted` children onto it.
+fn merge_plan(retargeted: &[&str], can_rollup: bool) -> crate::core::MergeLandingPlan {
+  crate::core::MergeLandingPlan {
+    target_branch: "develop".into(),
+    landed_branches: vec!["feature".into()],
+    retargeted: retargeted
+      .iter()
+      .enumerate()
+      .map(|(i, branch)| crate::core::WorkspaceRetarget {
+        workspace_id: 20 + i as i64,
+        branch_name: branch.to_string(),
+        from_branch: "feature".into(),
+        to_branch: "develop".into(),
+      })
+      .collect(),
+    can_rollup,
+  }
+}
+
+/// The preview with PR #7 for `feature` on GitHub (`o/r`), whose default
+/// merge method is squash and which forbids rebase merges.
+fn github_preview(state: &str, merge_state: &str, base: &str) -> merge::Preview {
+  merge::Preview {
+    github: Some(merge::GithubPr {
+      repo_full_name: "o/r".into(),
+      pr: crate::github::PrInfo {
+        number: 7,
+        title: "Feature".into(),
+        state: state.into(),
+        url: "https://github.com/o/r/pull/7".into(),
+        head_ref_name: "feature".into(),
+        base_ref_name: base.into(),
+        merge_state_status: Some(merge_state.into()),
+        is_draft: false,
+        body: String::new(),
+      },
+      settings: Some(crate::github::GhRepoMergeSettings {
+        default_method: crate::github::GhMergeMethod::Squash,
+        allowed_methods: vec![
+          crate::github::GhMergeMethod::Merge,
+          crate::github::GhMergeMethod::Squash,
+        ],
+      }),
+    }),
+    can_push: true,
+    ..merge_preview(2)
   }
 }
 
@@ -3590,6 +3881,218 @@ fn merge_preview_collapses_files_and_goes_back(cx: &mut TestAppContext) {
     h.sent(),
     vec![ScreenAction::Press {
       id: "mergePreview.cancel".into()
+    }]
+  );
+}
+
+#[gpui::test]
+fn merge_preview_without_a_pr_merges_locally_only(cx: &mut TestAppContext) {
+  let (mut h, _) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge_preview(1),
+      ..FakeHost::default()
+    },
+  );
+  assert!(h.drawn("merge-landing"));
+  assert!(!h.drawn("merge-location-github"));
+  assert!(!h.drawn("merge-push"));
+}
+
+#[gpui::test]
+fn merge_preview_lists_children_it_retargets(cx: &mut TestAppContext) {
+  let (mut h, _) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge::Preview {
+        plan: Some(merge_plan(&["child"], false)),
+        ..merge_preview(1)
+      },
+      ..FakeHost::default()
+    },
+  );
+  assert_eq!(
+    merge_view(&mut h, |v| v.landing_lines()),
+    [
+      "feature lands in develop.",
+      "child is retargeted onto develop (was feature)",
+    ]
+  );
+}
+
+#[gpui::test]
+fn merge_preview_pushes_the_target_by_default(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge::Preview {
+        can_push: true,
+        ..merge_preview(1)
+      },
+      ..FakeHost::default()
+    },
+  );
+  assert!(h.drawn("merge-push"));
+  h.click("merge-confirm");
+  h.cx.run_until_parked();
+  assert!(host.writes()[0].ends_with(" push"), "{:?}", host.writes());
+}
+
+#[gpui::test]
+fn merge_preview_skips_the_push_when_unticked(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge::Preview {
+        can_push: true,
+        ..merge_preview(1)
+      },
+      ..FakeHost::default()
+    },
+  );
+  h.click("merge-push");
+  h.click("merge-confirm");
+  h.cx.run_until_parked();
+  assert!(!host.writes()[0].ends_with(" push"), "{:?}", host.writes());
+}
+
+#[gpui::test]
+fn merge_preview_rolls_up_a_stack(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge::Preview {
+        plan: Some(merge_plan(&[], true)),
+        rollup_root: Some("main".into()),
+        ..merge_preview(1)
+      },
+      ..FakeHost::default()
+    },
+  );
+  h.click("merge-rollup");
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"read merge 7 rollup".to_string()));
+  h.click("merge-confirm");
+  h.cx.run_until_parked();
+  assert!(host.writes()[0].ends_with(" rollup"), "{:?}", host.writes());
+}
+
+#[gpui::test]
+fn merge_preview_merges_the_pr_on_github_with_the_repo_default(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: github_preview("OPEN", "CLEAN", "develop"),
+      merge_notes: vec!["Moved PR #8 (child) onto develop".into()],
+      ..FakeHost::default()
+    },
+  );
+  h.click("merge-location-github");
+  assert_eq!(merge_view(&mut h, |v| v.strategy), merge::Strategy::Squash);
+  assert!(!h.drawn("merge-push"));
+  h.click("merge-strategy");
+  assert!(h.drawn("merge-strategy-squash"));
+  assert!(!h.drawn("merge-strategy-rebase"));
+  h.click("merge-strategy-squash");
+  h.click("merge-confirm");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "merge on github 7 o/r#7 Squash None",
+      "notify toast Pull request merged",
+      "notify toast Stacked pull requests updated",
+    ]
+  );
+  assert_eq!(
+    h.sent(),
+    vec![ScreenAction::Press {
+      id: "mergePreview.merged".into()
+    }]
+  );
+}
+
+#[gpui::test]
+fn merge_preview_hints_the_github_message_is_optional(cx: &mut TestAppContext) {
+  let (mut h, _) = merge_harness(
+    cx,
+    FakeHost {
+      merge: github_preview("OPEN", "CLEAN", "develop"),
+      ..FakeHost::default()
+    },
+  );
+  let placeholder = |h: &mut Harness| {
+    h.screen.read_with(&h.cx, |screen, cx| {
+      screen
+        .merge
+        .as_ref()
+        .expect("merge view")
+        .read(cx)
+        .message_placeholder()
+    })
+  };
+  assert_eq!(placeholder(&mut h), "Enter merge commit message...");
+  h.click("merge-location-github");
+  assert!(h.drawn("merge-message"));
+  assert_eq!(
+    placeholder(&mut h),
+    "Leave empty to use GitHub's default message"
+  );
+}
+
+#[gpui::test]
+fn merge_preview_warns_what_github_reports(cx: &mut TestAppContext) {
+  let (mut h, _) = merge_harness(
+    cx,
+    FakeHost {
+      merge: github_preview("OPEN", "DIRTY", "develop"),
+      ..FakeHost::default()
+    },
+  );
+  assert!(!h.drawn("merge-warning-0"));
+  h.click("merge-location-github");
+  assert!(h.drawn("merge-warning-0"));
+  assert_eq!(
+    merge_view(&mut h, |v| v.warnings()),
+    ["This pull request has merge conflicts on GitHub. Resolve them before merging."]
+  );
+}
+
+#[gpui::test]
+fn merge_preview_blocks_a_pr_with_another_base(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: github_preview("OPEN", "CLEAN", "main"),
+      ..FakeHost::default()
+    },
+  );
+  h.click("merge-location-github");
+  h.click("merge-confirm");
+  h.cx.run_until_parked();
+  assert!(host.writes().is_empty());
+}
+
+#[gpui::test]
+fn merge_preview_syncs_a_pr_already_merged(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: github_preview("MERGED", "CLEAN", "develop"),
+      ..FakeHost::default()
+    },
+  );
+  assert!(!h.drawn("merge-location-github"));
+  h.click("merge-sync");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    ["sync merged 7", "notify toast Workspace synced"]
+  );
+  assert_eq!(
+    h.sent(),
+    vec![ScreenAction::Press {
+      id: "mergePreview.merged".into()
     }]
   );
 }
@@ -4015,6 +4518,17 @@ fn clicking_empty_space_blurs_the_focused_input(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn code_tab_searches_mentions_without_waiting_when_the_host_is_local(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  h.click("task-input");
+  h.cx.simulate_input("look at @log");
+  // No clock advance: a zero `file_search_delay` skips the debounce timer.
+  h.cx.run_until_parked();
+  assert!(h.drawn("task-mention-0"));
+  assert!(host.calls().contains(&r#"read files "log""#.to_string()));
+}
+
+#[gpui::test]
 fn code_tab_suggests_files_for_mentions(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
   h.click("task-input");
@@ -4051,6 +4565,207 @@ fn code_tab_saves_the_description(cx: &mut TestAppContext) {
     host.writes()
   );
   assert!(!h.drawn("workspace-description-input"));
+}
+
+/// PR #42's record for `code_host`'s workspace: its description still the
+/// PR's, or edited since.
+fn synced(description: bool) -> Option<crate::local_db::PrSyncRecord> {
+  let text = if description {
+    "Fix the login flow"
+  } else {
+    "The PR body"
+  };
+  let title = code_host().loaded.workspace.map(|ws| ws.title);
+  Some(crate::local_db::PrSyncRecord {
+    pr_number: 42,
+    title,
+    description: Some(text.into()),
+  })
+}
+
+/// Hands the Code tab `code_host`'s workspace with another description, as
+/// the window's listing does after an edit.
+fn show_description(h: &mut Harness, description: &str) {
+  h.screen.update(&mut h.cx, |screen, cx| {
+    let code = screen
+      .workspace
+      .as_ref()
+      .unwrap()
+      .read(cx)
+      .code
+      .clone()
+      .unwrap();
+    code.update(cx, |view, cx| {
+      let mut parent = view.parent.clone();
+      if let Some(ws) = parent.workspace.as_mut() {
+        ws.description = Some(description.into());
+      }
+      view.set_parent(parent, false, cx);
+    });
+  });
+}
+
+#[gpui::test]
+fn code_tab_says_the_description_follows_the_pr(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_sync: synced(true),
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.cx.run_until_parked();
+  assert!(h.drawn("workspace-description-synced"));
+  assert!(!h.drawn("workspace-description-resync"));
+}
+
+#[gpui::test]
+fn code_tab_resyncs_a_locally_edited_description(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_sync: synced(false),
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  h.cx.run_until_parked();
+  assert!(!h.drawn("workspace-description-synced"));
+  assert!(h.drawn("workspace-pr-draft"));
+  // In the card's footer, under the description.
+  let resync = h.cx.debug_bounds("workspace-description-resync").unwrap();
+  let text = h.cx.debug_bounds("workspace-description").unwrap();
+  let card = h.cx.debug_bounds("workspace-about").unwrap();
+  assert!(resync.top() >= text.bottom(), "{resync:?} {text:?}");
+  assert!(card.contains(&resync.center()), "{card:?} {resync:?}");
+  h.click("workspace-description-resync");
+  h.cx.run_until_parked();
+  assert!(
+    host.writes().contains(&"resync from PR 7".to_string()),
+    "{:?}",
+    host.writes()
+  );
+}
+
+#[gpui::test]
+fn code_tab_rereads_pr_sync_when_the_description_changes(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_sync: synced(true),
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  h.cx.run_until_parked();
+  let reads = || {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.as_str() == "read pr sync")
+      .count()
+  };
+  let before = reads();
+  show_description(&mut h, "Copied from the PR");
+  h.cx.run_until_parked();
+  assert!(reads() > before, "{:?}", host.calls());
+}
+
+#[gpui::test]
+fn code_tab_shows_github_beside_a_local_draft(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_sync: synced(false),
+    pr_text: Some(("Login fix on GitHub".into(), "The PR body".into())),
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  h.cx.run_until_parked();
+  // The draft shows first, editable.
+  assert!(h.drawn("workspace-about-tab-draft") && h.drawn("workspace-about-tab-github"));
+  assert!(h.drawn("workspace-description-edit"));
+  assert!(!h.drawn("workspace-about-github"));
+  h.click("workspace-about-tab-github");
+  assert!(h.drawn("workspace-about-github"));
+  assert!(!h.drawn("workspace-description-edit") && !h.drawn("workspace-title-edit"));
+  assert!(host.calls().contains(&"read pr text".to_string()));
+  // Sync stays in the footer under either tab.
+  assert!(h.drawn("workspace-description-resync"));
+  h.click("workspace-about-tab-draft");
+  assert!(h.drawn("workspace-description-edit"));
+}
+
+#[gpui::test]
+fn code_tab_has_no_tabs_without_a_draft(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_sync: synced(true),
+    pr_text: Some(("t".into(), "b".into())),
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.cx.run_until_parked();
+  assert!(!h.drawn("workspace-about-tab-github"));
+  assert!(h.drawn("workspace-description-edit"));
+}
+
+#[gpui::test]
+fn code_tab_holds_title_and_description_in_one_card(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  h.cx.run_until_parked();
+  let card = h.cx.debug_bounds("workspace-about").expect("card");
+  let title = h.cx.debug_bounds("workspace-title").expect("title");
+  let text = h.cx.debug_bounds("workspace-description").expect("text");
+  assert!(card.contains(&title.center()) && card.contains(&text.center()));
+}
+
+#[gpui::test]
+fn code_tab_saves_a_pr_description_to_the_pr(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_sync: synced(true),
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  h.click("workspace-description-edit");
+  h.cx.simulate_input("!");
+  h.click("workspace-description-save");
+  h.cx.run_until_parked();
+  let writes = host.writes();
+  assert!(
+    writes.iter().any(|c| c.starts_with("set description 7 "))
+      && writes.contains(&"push to PR 7".to_string()),
+    "{writes:?}"
+  );
+}
+
+#[gpui::test]
+fn code_tab_saves_a_pr_title_as_a_local_draft(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_sync: synced(true),
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  h.click("workspace-title-edit");
+  h.cx.simulate_input("!");
+  h.click("workspace-title-save-menu");
+  h.click("workspace-title-save-draft");
+  h.cx.run_until_parked();
+  let writes = host.writes();
+  assert!(
+    writes.iter().any(|c| c.starts_with("set title 7 ")),
+    "{writes:?}"
+  );
+  assert!(!writes.contains(&"push to PR 7".to_string()), "{writes:?}");
+  assert!(!h.drawn("workspace-title-input"));
+}
+
+#[gpui::test]
+fn code_tab_offers_no_draft_without_a_pr(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  h.click("workspace-description-edit");
+  assert!(!h.drawn("workspace-description-save-menu"));
+  h.click("workspace-description-save");
+  h.cx.run_until_parked();
+  assert!(!host.writes().contains(&"push to PR 7".to_string()));
+}
+
+#[gpui::test]
+fn code_tab_shows_no_sync_note_without_a_pr(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  h.cx.run_until_parked();
+  assert!(!h.drawn("workspace-description-synced"));
+  assert!(!h.drawn("workspace-description-resync"));
+  assert!(!h.drawn("workspace-pr-draft"));
 }
 
 #[gpui::test]
@@ -5337,10 +6052,8 @@ fn changes_tab_finds_text_in_the_diff(cx: &mut TestAppContext) {
   h.cx.simulate_keystrokes("cmd-f");
   assert!(h.drawn("diff-search"));
   // a.rs: " a", "+b", "+c"; b.rs: "+d".
+  // A short diff is searched on every key: no pause is waited for.
   h.cx.simulate_input("b");
-  h.cx
-    .executor()
-    .advance_clock(std::time::Duration::from_millis(150));
   h.cx.run_until_parked();
   let count = |h: &mut Harness| {
     h.cx.run_until_parked();
@@ -8226,6 +8939,7 @@ mod file_browser;
 mod fuzz;
 mod github;
 mod idle;
+mod input_latency;
 mod kept_tabs;
 mod linear_view;
 mod logs_explorer;

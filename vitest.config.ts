@@ -11,6 +11,7 @@ export default defineConfig({
     globals: true,
     include: [
       "test/billing/**/*.test.ts",
+      "test/account/**/*.test.ts",
       "test/linear-proxy/**/*.test.ts",
       "test/desktop-token/**/*.test.ts",
       "test/github/**/*.test.ts",

@@ -9,6 +9,7 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
+  rc::Rc,
   sync::Arc,
   time::{Duration, Instant},
 };
@@ -435,7 +436,7 @@ impl OpenWorkspacesDialog {
     if self.issues.items.is_empty() {
       let cache = cache(cx);
       if let Some(items) = cache.linear_issues.get(&(repo.clone(), None)).cloned() {
-        self.issues.items = items;
+        self.issues.items = Vec::clone(&items);
         self.issues.viewer = cache.linear_viewer.get(&repo).map(|v| v.id.clone());
       }
     }
@@ -458,7 +459,7 @@ impl OpenWorkspacesDialog {
             let cache = cache(cx);
             cache
               .linear_issues
-              .insert((key.clone(), None), Instant::now(), items.clone());
+              .insert((key.clone(), None), Instant::now(), Rc::new(items.clone()));
             if let Some(viewer) = viewer {
               cache
                 .linear_viewer

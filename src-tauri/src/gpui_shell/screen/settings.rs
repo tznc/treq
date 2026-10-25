@@ -25,7 +25,8 @@ pub(super) mod account;
 )]
 pub use account::{
   AccountRoute, AccountTab, CloudCard, CloudEndpoint, CloudInstance, CloudRoute, CloudUsage,
-  GithubSection, IntegrationsTab, LinearSection, StatusTone, Subscription, UsageReport, User,
+  DeleteAccountDialog, GithubSection, IntegrationsTab, LinearSection, StatusTone, Subscription,
+  UsageReport, User,
 };
 
 use super::{
@@ -1357,6 +1358,12 @@ impl Render for SettingsView {
       {
         Some(self.cloud_delete_dialog(&p).into_any_element())
       }
+      Some(AccountTab::SignedIn(signed_in)) => signed_in.delete_account.as_ref().map(|dialog| {
+        let email = signed_in.email.clone().unwrap_or_default();
+        self
+          .delete_account_dialog(dialog, &email, &p, window, cx)
+          .into_any_element()
+      }),
       _ => None,
     };
 

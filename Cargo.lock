@@ -12621,6 +12621,7 @@ dependencies = [
  "notify",
  "notify-debouncer-full",
  "portable-pty",
+ "prost",
  "rand_core 0.10.1",
  "regex",
  "reqwest 0.12.28",

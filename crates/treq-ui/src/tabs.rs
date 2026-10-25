@@ -154,6 +154,7 @@ impl RenderOnce for Tabs {
       .id(self.id)
       .debug_selector(move || selector)
       .role(gpui::Role::TabList)
+      .test_support()
       .flex()
       .items_center()
       .when_some(self.focus, |el, focus| {
