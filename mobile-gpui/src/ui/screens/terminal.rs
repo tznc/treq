@@ -14,6 +14,7 @@ use gpui_kit::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
+    spinner::Spinner,
     v_flex, ActiveTheme, IconName, Sizable,
   },
   *,
@@ -128,22 +129,23 @@ fn session_row(
     (None, None) => session.label.clone(),
   };
   let working = matches!(state, Some((true, _)));
-  let trailing = h_flex()
-    .gap_2()
-    .items_center()
-    .when(working, |t| {
-      t.child(div().size(px(8.)).rounded_full().bg(theme.success))
-    })
-    .when(current, |t| t.child(IconName::Check))
-    .into_any_element();
+  let trailing = working.then(|| {
+    Spinner::new()
+      .small()
+      .color(theme.success)
+      .into_any_element()
+  });
   widgets::row_full(
     id,
     Some(leading),
     session_title(session),
     Some(detail.into()),
-    Some(trailing),
+    trailing,
     cx,
   )
+  .when(current, |row| {
+    row.bg(treq_ui::theme::current(cx).selected())
+  })
   .when(!session.running, |row| row.opacity(0.6))
 }
 
