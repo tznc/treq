@@ -7,7 +7,6 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
-use std::time::Duration;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
@@ -40,9 +39,6 @@ use crate::gpui_shell::{
   tooltips::{HasTooltips, Tooltips},
   ui::{self, Button, Size, TextSize, Variant},
 };
-
-/// `useDebounce(mentionQuery, 150)`.
-const MENTION_DEBOUNCE: Duration = Duration::from_millis(150);
 
 /// A workspace the prompt can run in.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -540,9 +536,12 @@ impl AgentPromptView {
 
   fn search_mentions(&mut self, query: String, cx: &mut Context<Self>) {
     let (host, repo) = (self.env.host.clone(), self.route.repo_path.clone());
+    let delay = host.file_search_delay(&repo);
     let (workspace_id, path) = (self.selected, self.working_directory());
     self._mention_search = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(MENTION_DEBOUNCE).await;
+      if !delay.is_zero() {
+        cx.background_executor().timer(delay).await;
+      }
       let search = query.clone();
       let results = cx
         .background_spawn(async move { host.search_files(&repo, workspace_id, &path, &search, 4) })

@@ -311,7 +311,6 @@ fn route(tab: &str, selected: Option<u64>, creating: bool) -> ScreenSnapshot {
     "filter": "open",
     "selected": selected,
     "creating": creating,
-    "mergeQueue": {"pro": false},
     "runningChecks": [],
   }))
   .expect("route")
@@ -348,6 +347,13 @@ fn harness_with(
 fn view<T>(h: &mut Harness, f: impl FnOnce(&GithubView) -> T) -> T {
   h.screen.read_with(&h.cx, |screen, cx| {
     f(screen.github.as_ref().expect("github view").read(cx))
+  })
+}
+
+fn view_mut<T>(h: &mut Harness, f: impl FnOnce(&mut GithubView) -> T) -> T {
+  h.screen.update(&mut h.cx, |screen, cx| {
+    let view = screen.github.clone().expect("github view");
+    view.update(cx, |view, _| f(view))
   })
 }
 
@@ -405,7 +411,6 @@ fn github_lists_issues_and_hands_moves_to_react(cx: &mut TestAppContext) {
   h.click("github-issue-2");
   h.click("github-filter-closed");
   h.click("github-tab-prs");
-  h.click("github-tab-merge-queue");
   h.click("github-new");
   assert_eq!(
     h.sent(),
@@ -413,7 +418,6 @@ fn github_lists_issues_and_hands_moves_to_react(cx: &mut TestAppContext) {
       press("github.select:2"),
       press("github.filter:closed"),
       press("github.tab:prs"),
-      press("github.tab:merge-queue"),
       press("github.new"),
     ]
   );
@@ -427,7 +431,7 @@ fn github_loads_more_pages_once_each(cx: &mut TestAppContext) {
   assert!(h.drawn("github-issue-3"));
   assert!(!h.drawn("github-load-more"));
   // The repeated #2 shows once.
-  assert_eq!(view(&mut h, |v| v.issue_items().len()), 3);
+  assert_eq!(view_mut(&mut h, |v| v.issue_items().len()), 3);
   assert!(host
     .calls()
     .contains(&"read issues acme/treq open Some(\"c1\")".to_string()));
@@ -970,6 +974,7 @@ fn new_pr_fake() -> Fake {
     base_ref_name: String::new(),
     merge_state_status: None,
     is_draft: false,
+    body: String::new(),
   };
   Fake {
     workspaces: vec![
@@ -1053,4 +1058,180 @@ fn github_reads_an_issue_ahead_while_the_pointer_rests_on_its_row(cx: &mut TestA
   assert!(!drawn_now(&mut h, "github-detail-loading-shown"));
   h.cx.run_until_parked();
   assert_eq!(reads(&host, "read issue 2"), 2);
+}
+
+fn thread_fake(count: usize) -> Fake {
+  let mut p = pr(1, "feat/b0", "main");
+  p.comments = Some(
+    (0..count)
+      .map(|i| GhIssueComment {
+        id: format!("c{i}"),
+        body: format!("comment {i}"),
+        author: author("bob"),
+        created_at: "2026-10-02T10:00:00Z".into(),
+        reactions: Vec::new(),
+      })
+      .collect(),
+  );
+  Fake {
+    remote: acme(),
+    pr_pages: vec![page(vec![pr(1, "feat/b0", "main")], false, None)],
+    pr: Some(p),
+    ..Fake::default()
+  }
+}
+
+#[gpui::test]
+fn github_long_comment_thread_folds_the_middle_and_expands_in_place(cx: &mut TestAppContext) {
+  let (mut h, _) = harness(cx, thread_fake(8), route("prs", Some(1), false));
+  h.cx.run_until_parked();
+  let shown = |h: &mut Harness| -> Vec<usize> {
+    (0..8)
+      .filter(|i| h.drawn(super::changes_large::leak(format!("reaction-add-c{i}"))))
+      .collect()
+  };
+  // The first comment and the newest three; four are behind the fold.
+  assert_eq!(shown(&mut h), [0, 5, 6, 7]);
+  assert!(h.drawn("github-comments-show-earlier"));
+  h.click("github-comments-show-earlier");
+  h.cx.run_until_parked();
+  assert_eq!(shown(&mut h), (0..8).collect::<Vec<_>>());
+  assert!(!h.drawn("github-comments-show-earlier"));
+}
+
+#[gpui::test]
+fn github_short_comment_thread_is_not_folded(cx: &mut TestAppContext) {
+  // Folding one comment would only trade it for a row.
+  let (mut h, _) = harness(cx, thread_fake(5), route("prs", Some(1), false));
+  h.cx.run_until_parked();
+  assert!(h.drawn("reaction-add-c2"));
+  assert!(!h.drawn("github-comments-show-earlier"));
+}
+
+/// Round 7 `integrations-scale` measurements: the lists and details with
+/// hundreds of rows. Run with `cargo test --features gpui-shell --lib
+/// gh_scale -- --ignored --nocapture --test-threads=1`.
+mod gh_scale {
+  use super::super::changes_large::{frame, report, timed};
+  use super::*;
+
+  fn n() -> usize {
+    std::env::var("PERF_N")
+      .ok()
+      .and_then(|v| v.parse().ok())
+      .unwrap_or(1000)
+  }
+
+  fn long_body(i: usize) -> String {
+    format!(
+      "## Comment {i}\n\nSome **bold** text and `code` with a [link](https://x.test/{i}).\n\n- one\n- two\n- three\n\n```rust\nfn f{i}() {{ println!(\"{i}\"); }}\n```\n\n{}",
+      "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ".repeat(12)
+    )
+  }
+
+  fn comments(count: usize) -> Vec<GhIssueComment> {
+    (0..count)
+      .map(|i| GhIssueComment {
+        id: format!("c{i}"),
+        body: long_body(i),
+        author: author("bob"),
+        created_at: "2026-10-02T10:00:00Z".into(),
+        reactions: Vec::new(),
+      })
+      .collect()
+  }
+
+  fn prs_fake(count: usize) -> Fake {
+    let prs: Vec<_> = (0..count)
+      .map(|i| {
+        let mut p = pr(i as u64 + 1, &format!("feat/b{i}"), "main");
+        p.author = author(&format!("user{}", i % 17));
+        p.title = format!("Change number {i} touching the thing {}", i % 31);
+        p
+      })
+      .collect();
+    Fake {
+      remote: acme(),
+      pr_pages: vec![page(prs, false, None)],
+      ..Fake::default()
+    }
+  }
+
+  fn issues_fake(count: usize) -> Fake {
+    let items: Vec<_> = (0..count)
+      .map(|i| {
+        issue(
+          i as u64 + 1,
+          &format!("Issue {i} about the thing {}", i % 31),
+        )
+      })
+      .collect();
+    Fake {
+      remote: acme(),
+      issue_pages: vec![page(items, false, None)],
+      ..Fake::default()
+    }
+  }
+
+  fn notify(h: &mut Harness) {
+    h.screen.update(&mut h.cx, |screen, cx| {
+      let view = screen.github.clone().expect("github view");
+      view.update(cx, |_, cx| cx.notify());
+    });
+  }
+
+  #[gpui::test]
+  #[ignore = "benchmark; run with --ignored --nocapture"]
+  fn gh_scale_pr_list(cx: &mut TestAppContext) {
+    let (mut h, _) = harness(cx, prs_fake(n()), route("prs", None, false));
+    let rows = view_mut(&mut h, |v| v.pr_items().len());
+    println!("PR rows loaded: {rows}");
+    let mut f: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
+    report("pr list steady frame", &mut f);
+    let mut keys: Vec<_> = (0..10)
+      .map(|i| {
+        timed(&mut h, |h| {
+          type_into(h, "github.search", &format!("thing {}", i % 7))
+        })
+      })
+      .collect();
+    report("pr list search keystroke", &mut keys);
+    type_into(&mut h, "github.search", "");
+    let mut hov: Vec<_> = (0..10).map(|_| timed(&mut h, notify)).collect();
+    report("pr list notify (hover)", &mut hov);
+  }
+
+  #[gpui::test]
+  #[ignore = "benchmark; run with --ignored --nocapture"]
+  fn gh_scale_issue_list(cx: &mut TestAppContext) {
+    let (mut h, _) = harness(cx, issues_fake(n()), route("issues", None, false));
+    println!(
+      "issue rows: {}",
+      view_mut(&mut h, |v| v.issue_items().len())
+    );
+    let mut f: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
+    report("issue list steady frame", &mut f);
+  }
+
+  fn detail_fake(count: usize) -> Fake {
+    let mut fake = prs_fake(3);
+    let mut p = pr(1, "feat/b0", "main");
+    p.body = Some(long_body(0));
+    p.comments = Some(comments(count));
+    fake.pr = Some(p);
+    fake
+  }
+
+  #[gpui::test]
+  #[ignore = "benchmark; run with --ignored --nocapture"]
+  fn gh_scale_pr_detail_comments(cx: &mut TestAppContext) {
+    for count in [10usize, 60, 300] {
+      let (mut h, _) = harness(cx, detail_fake(count), route("prs", Some(1), false));
+      h.cx.run_until_parked();
+      let mut f: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
+      report(&format!("pr detail {count} comments"), &mut f);
+      let mut hov: Vec<_> = (0..10).map(|_| timed(&mut h, notify)).collect();
+      report(&format!("pr detail {count} notify"), &mut hov);
+    }
+  }
 }

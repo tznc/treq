@@ -1341,20 +1341,18 @@ pub(crate) mod tests {
       Err("unknown changes action 'diff-files'".into()),
     );
     let paths: Vec<String> = (0..12).map(|i| format!("f{i}.rs")).collect();
-    let started = Instant::now();
     let batch = remote
       .file_hunks_batch(Some(1), paths.clone(), None)
       .unwrap();
-    let took = started.elapsed();
     let got: Vec<&str> = batch.files.iter().map(|f| f.path.as_str()).collect();
     assert_eq!(got, paths.iter().map(String::as_str).collect::<Vec<_>>());
     assert_eq!(transport.sent().len(), 1 + 12);
     let most = transport
       .most_reading
       .load(std::sync::atomic::Ordering::SeqCst);
+    // Counts overlapping reads rather than timing them: a loaded CI runner
+    // took 418 ms for a batch that does run in parallel.
     assert!((2..=PARALLEL_READS).contains(&most), "{most} at once");
-    // 12 serial reads would take 360 ms, after the failed `DiffFiles`.
-    assert!(took < Duration::from_millis(330), "{took:?}");
   }
 
   #[test]

@@ -89,6 +89,10 @@ pub(in crate::gpui_shell) fn start(
     let host = Arc::new(Backend::new(app.clone(), label.clone()));
     let dark = shell.os_dark;
     let controller = cx.new(|cx| WindowController::new(host, repo, present, dark, cx));
+    // A skill link that launched Treq arrived before this window could take it.
+    if let Some(skill_id) = crate::core::skills::take_pending_skill_install() {
+      controller.update(cx, |c, cx| c.open_skill_install(skill_id, cx));
+    }
     shell.window = Some(controller);
   })
 }
@@ -266,6 +270,13 @@ pub fn menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<Str
   true
 }
 
+/// A `treq://skill/install` link for window `label`. Any thread.
+pub fn skill_install_link(app: &AppHandle, label: &str, skill_id: String) {
+  if drives(label) {
+    with_controller(app, label, move |c, cx| c.open_skill_install(skill_id, cx));
+  }
+}
+
 /// Window `label` gained (`focused`) or lost focus. Any thread.
 pub fn window_focused(app: &AppHandle, label: &str, focused: bool) {
   set_focused(label, focused);
@@ -285,10 +296,15 @@ pub fn listen(app: &AppHandle) {
       return;
     };
     let stacks_moved = payload["stacks_moved"].as_bool().unwrap_or(false);
+    // The PR's title or body was copied into workspaces: read them again.
+    let synced = crate::pr_status::synced_repo(event.payload()).is_some();
     for label in labels() {
       let repo_path = repo_path.to_string();
       with_controller(&handle, &label, move |c, cx| {
-        c.prs_changed(&repo_path, stacks_moved, cx)
+        c.prs_changed(&repo_path, stacks_moved, cx);
+        if synced {
+          c.native_event(&NativeEvent::WorkspaceChanged { repo_path }, cx);
+        }
       });
     }
   });

@@ -14,7 +14,7 @@ fi
 
 case "$file_path" in
 *supabase/migrations/* | *supabase/functions/* | *supabase/config.toml | \
-*src/lib/supabase.ts | *src/stores/authStore.ts | *src/hooks/useMergeQueueStatus.ts | \
+*src/lib/supabase.ts | *src/stores/authStore.ts | \
 *web/src/lib/supabase.ts | *web/src/pages/sign-in.tsx | *web/src/pages/auth/* | \
 *web/src/pages/integrations/github/* | *web/src/components/AuthProvider.tsx | \
 *src/components/GitHubIntegrationSettings.tsx | *src/components/GitHubPanel.tsx)

@@ -499,6 +499,19 @@ pub enum TreqCommandRequest {
     draft: bool,
     idempotency_key: String,
   },
+  /// A GitHub read through the host's `gh`, against the repository's
+  /// GitHub remote. See [`GithubQuery`].
+  GithubRead {
+    repo: String,
+    query: GithubQuery,
+  },
+  /// A GitHub change through the host's `gh`, against the repository's
+  /// GitHub remote. See [`GithubAction`].
+  GithubWrite {
+    repo: String,
+    action: GithubAction,
+    idempotency_key: String,
+  },
   // -- Phase 5: agent lifecycle (VM-local supervisor) -----------------------------
   AgentStart {
     repo: String,
@@ -550,6 +563,13 @@ pub enum TreqCommandRequest {
     repo: String,
     workspace: String,
     label: String,
+  },
+  /// Names a persistent PTY session; an empty title clears it. Idempotent.
+  PtyRename {
+    repo: String,
+    workspace: String,
+    label: String,
+    title: String,
   },
   /// Returns the literal command line an SSH PTY channel should exec to
   /// attach (creating first if necessary) to a persistent session.
@@ -671,6 +691,7 @@ impl TreqCommandRequest {
       | Self::ProbeRepo { .. }
       | Self::GitRemoteInfo { .. }
       | Self::WorkspacePullRequest { .. }
+      | Self::GithubRead { .. }
       | Self::AgentStatus { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
@@ -713,11 +734,13 @@ impl TreqCommandRequest {
       | Self::GitBookmarkTrack { .. }
       | Self::GitPush { .. }
       | Self::CreatePullRequest { .. }
+      | Self::GithubWrite { .. }
       | Self::AgentStart { .. }
       | Self::AgentInput { .. }
       | Self::AgentStop { .. }
       | Self::PtyStart { .. }
       | Self::PtyStop { .. }
+      | Self::PtyRename { .. }
       | Self::PtyPaste { .. }
       | Self::ReviewSave { .. }
       | Self::ReviewClear { .. } => true,
@@ -747,6 +770,7 @@ impl TreqCommandRequest {
       | Self::ResolveConflict { .. }
       | Self::GitPush { .. }
       | Self::CreatePullRequest { .. }
+      | Self::GithubWrite { .. }
       | Self::AgentStart { .. }
       | Self::AgentInput { .. }
       | Self::PtyStart { .. }
@@ -791,11 +815,13 @@ impl TreqCommandRequest {
       | Self::GitBookmarkTrack { .. }
       | Self::GitRemoteInfo { .. }
       | Self::WorkspacePullRequest { .. }
+      | Self::GithubRead { .. }
       | Self::AgentStatus { .. }
       | Self::AgentStop { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
       | Self::PtyStop { .. }
+      | Self::PtyRename { .. }
       | Self::PtyAttachCommand { .. }
       | Self::ReviewLoad { .. }
       | Self::ReviewSave { .. }
@@ -862,6 +888,8 @@ impl TreqCommandRequest {
       Self::GitPush { .. } => "GitPush",
       Self::WorkspacePullRequest { .. } => "WorkspacePullRequest",
       Self::CreatePullRequest { .. } => "CreatePullRequest",
+      Self::GithubRead { .. } => "GithubRead",
+      Self::GithubWrite { .. } => "GithubWrite",
       Self::AgentStart { .. } => "AgentStart",
       Self::AgentInput { .. } => "AgentInput",
       Self::AgentStatus { .. } => "AgentStatus",
@@ -870,6 +898,7 @@ impl TreqCommandRequest {
       Self::PtyStart { .. } => "PtyStart",
       Self::PtyList { .. } => "PtyList",
       Self::PtyStop { .. } => "PtyStop",
+      Self::PtyRename { .. } => "PtyRename",
       Self::PtyAttachCommand { .. } => "PtyAttachCommand",
       Self::PtyPaste { .. } => "PtyPaste",
       Self::ReviewLoad { .. } => "ReviewLoad",
@@ -939,6 +968,7 @@ impl TreqCommandRequest {
     "PtyStart",
     "PtyList",
     "PtyStop",
+    "PtyRename",
     "PtyAttachCommand",
     "PtyPaste",
     "ReviewLoad",
@@ -951,6 +981,8 @@ impl TreqCommandRequest {
     "ListFiles",
     "WorkspacePullRequest",
     "CreatePullRequest",
+    "GithubRead",
+    "GithubWrite",
   ];
 }
 
@@ -2035,6 +2067,19 @@ impl TreqCommandRequest {
         fields.idempotency_key = Some(idempotency_key);
         ("git", "pr-create", repo)
       }
+      Self::GithubRead { repo, query } => {
+        fields.value = Some(serde_json::to_string(query).map_err(|e| e.to_string())?);
+        ("git", "github-read", repo)
+      }
+      Self::GithubWrite {
+        repo,
+        action,
+        idempotency_key,
+      } => {
+        fields.value = Some(serde_json::to_string(action).map_err(|e| e.to_string())?);
+        fields.idempotency_key = Some(idempotency_key);
+        ("git", "github-write", repo)
+      }
       Self::AgentStart {
         repo,
         workspace,
@@ -2099,6 +2144,17 @@ impl TreqCommandRequest {
         fields.workspace = Some(workspace);
         fields.target = Some(label);
         ("pty-remote", "stop", repo)
+      }
+      Self::PtyRename {
+        repo,
+        workspace,
+        label,
+        title,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(label);
+        fields.value = Some(title.clone());
+        ("pty-remote", "rename", repo)
       }
       Self::PtyAttachCommand {
         repo,
@@ -3090,6 +3146,20 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
         ))
       },
     ),
+    TreqCommandRequest::GithubRead { repo, query } => github_read(&repo, query),
+    TreqCommandRequest::GithubWrite {
+      repo,
+      action,
+      idempotency_key,
+    } => with_idempotency_key(
+      &repo,
+      "git.github-write",
+      Some(idempotency_key.as_str()),
+      request_snapshot
+        .as_ref()
+        .expect("GithubWrite is a mutation"),
+      || github_write(&repo, action),
+    ),
     TreqCommandRequest::AgentStart {
       repo,
       workspace,
@@ -3174,6 +3244,14 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       label,
     } => json(crate::core::pty_remote_supervisor::stop_session(
       &repo, &workspace, &label,
+    )),
+    TreqCommandRequest::PtyRename {
+      repo,
+      workspace,
+      label,
+      title,
+    } => json(crate::core::pty_remote_supervisor::rename_session(
+      &repo, &workspace, &label, &title,
     )),
     TreqCommandRequest::PtyAttachCommand {
       repo,
@@ -3463,6 +3541,210 @@ fn create_pull_request(
     number,
     url: format!("https://github.com/{}/pull/{number}", remote.full_name),
   })
+}
+
+/// What [`TreqCommandRequest::GithubRead`] reads; each matches the
+/// [`crate::core::github_cli`] function of the same name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum GithubQuery {
+  /// The repository's `owner/name` and the signed-in user, as a
+  /// [`GithubContext`].
+  Context,
+  ListIssues {
+    state: String,
+    #[serde(default)]
+    after: Option<String>,
+  },
+  ListPrs {
+    state: String,
+    page: u32,
+  },
+  SearchOpenPrs {
+    mine: bool,
+    query: String,
+    limit: u32,
+  },
+  Issue {
+    number: u64,
+  },
+  Pr {
+    number: u64,
+  },
+  PrDiff {
+    number: u64,
+  },
+  PrChecks {
+    number: u64,
+  },
+  PrReviewThreads {
+    number: u64,
+  },
+}
+
+/// What [`TreqCommandRequest::GithubWrite`] changes; each matches the
+/// [`crate::core::github_cli`] function of the same name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum GithubAction {
+  CreateIssue {
+    title: String,
+    body: String,
+  },
+  EditIssue {
+    number: u64,
+    title: String,
+    body: String,
+  },
+  CommentOnIssue {
+    number: u64,
+    body: String,
+  },
+  CloseIssue {
+    number: u64,
+    reason: String,
+  },
+  ReopenIssue {
+    number: u64,
+  },
+  DeleteIssue {
+    number: u64,
+  },
+  CommentOnPr {
+    number: u64,
+    body: String,
+  },
+  ClosePr {
+    number: u64,
+  },
+  ReopenPr {
+    number: u64,
+  },
+  SetPrDraft {
+    number: u64,
+    draft: bool,
+  },
+  ReplyToReviewThread {
+    thread_id: String,
+    body: String,
+  },
+  SubmitPrReview {
+    number: u64,
+    event: String,
+    body: String,
+    #[serde(default)]
+    comments: Vec<crate::github::GhDraftReviewComment>,
+  },
+  SetReaction {
+    comment_id: String,
+    content: String,
+    on: bool,
+  },
+}
+
+/// [`GithubQuery::Context`]'s result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GithubContext {
+  pub full_name: String,
+  pub login: String,
+}
+
+/// The repository's GitHub `owner/name`.
+fn github_full_name(repo: &str) -> Result<String, String> {
+  crate::github::get_git_remote_url_impl(repo)
+    .ok()
+    .flatten()
+    .map(|remote| remote.full_name)
+    .ok_or_else(|| "invalid_arguments: this repository has no GitHub remote".to_string())
+}
+
+fn require_text(text: &str, what: &str) -> Result<(), String> {
+  if text.trim().is_empty() {
+    return Err(format!("invalid_arguments: {what} is empty"));
+  }
+  Ok(())
+}
+
+/// [`TreqCommandRequest::GithubRead`].
+fn github_read(repo: &str, query: GithubQuery) -> Result<serde_json::Value, String> {
+  use crate::core::github_cli as gh;
+  fn json<T: Serialize>(result: Result<T, String>) -> Result<serde_json::Value, String> {
+    serde_json::to_value(result?).map_err(|error| error.to_string())
+  }
+  let name = github_full_name(repo)?;
+  let name = name.as_str();
+  match query {
+    GithubQuery::Context => json(gh::current_user().map(|login| GithubContext {
+      full_name: name.to_string(),
+      login,
+    })),
+    GithubQuery::ListIssues { state, after } => {
+      json(gh::list_issues(name, &state, after.as_deref()))
+    }
+    GithubQuery::ListPrs { state, page } => json(gh::list_prs(name, &state, page)),
+    GithubQuery::SearchOpenPrs { mine, query, limit } => {
+      json(gh::search_open_prs(name, mine, &query, limit))
+    }
+    GithubQuery::Issue { number } => json(gh::issue(name, number)),
+    GithubQuery::Pr { number } => json(gh::pr(name, number)),
+    GithubQuery::PrDiff { number } => json(gh::pr_diff(name, number)),
+    GithubQuery::PrChecks { number } => json(gh::pr_checks(name, number)),
+    GithubQuery::PrReviewThreads { number } => json(gh::pr_review_threads(name, number)),
+  }
+}
+
+/// [`TreqCommandRequest::GithubWrite`]. Blank text fails before the
+/// repository is looked at.
+fn github_write(repo: &str, action: GithubAction) -> Result<serde_json::Value, String> {
+  use crate::core::github_cli as gh;
+  match &action {
+    GithubAction::CreateIssue { title, .. } | GithubAction::EditIssue { title, .. } => {
+      require_text(title, "the title")?
+    }
+    GithubAction::CommentOnIssue { body, .. }
+    | GithubAction::CommentOnPr { body, .. }
+    | GithubAction::ReplyToReviewThread { body, .. } => require_text(body, "the comment")?,
+    _ => {}
+  }
+  fn done(result: Result<(), String>) -> Result<serde_json::Value, String> {
+    result.map(|()| serde_json::Value::Null)
+  }
+  let name = github_full_name(repo)?;
+  let name = name.as_str();
+  match action {
+    GithubAction::CreateIssue { title, body } => {
+      gh::create_issue(name, &title, &body).map(|number| serde_json::json!({ "number": number }))
+    }
+    GithubAction::EditIssue {
+      number,
+      title,
+      body,
+    } => done(gh::edit_issue(name, number, &title, &body)),
+    GithubAction::CommentOnIssue { number, body } => {
+      done(gh::comment_on_issue(name, number, &body))
+    }
+    GithubAction::CloseIssue { number, reason } => done(gh::close_issue(name, number, &reason)),
+    GithubAction::ReopenIssue { number } => done(gh::reopen_issue(name, number)),
+    GithubAction::DeleteIssue { number } => done(gh::delete_issue(name, number)),
+    GithubAction::CommentOnPr { number, body } => done(gh::comment_on_pr(name, number, &body)),
+    GithubAction::ClosePr { number } => done(gh::close_pr(name, number)),
+    GithubAction::ReopenPr { number } => done(gh::reopen_pr(name, number)),
+    GithubAction::SetPrDraft { number, draft } => done(gh::set_pr_draft(name, number, draft)),
+    GithubAction::ReplyToReviewThread { thread_id, body } => {
+      done(gh::reply_to_review_thread(&thread_id, &body))
+    }
+    GithubAction::SubmitPrReview {
+      number,
+      event,
+      body,
+      comments,
+    } => done(gh::submit_pr_review(name, number, &event, &body, &comments)),
+    GithubAction::SetReaction {
+      comment_id,
+      content,
+      on,
+    } => done(gh::set_reaction(&comment_id, &content, on)),
+  }
 }
 
 /// An entry of [`TreqCommandRequest::ListFiles`].
@@ -4281,6 +4563,57 @@ mod tests {
   fn create_pull_request_needs_a_title_before_touching_the_repo() {
     let error = create_pull_request("/nonexistent", 1, "  ", "", false).unwrap_err();
     assert!(error.contains("needs a title"), "{error}");
+  }
+
+  #[test]
+  fn github_writes_are_keyed_mutations_and_reads_are_not() {
+    let write = TreqCommandRequest::GithubWrite {
+      repo: "/r".into(),
+      action: GithubAction::CloseIssue {
+        number: 1,
+        reason: "completed".into(),
+      },
+      idempotency_key: "k".into(),
+    };
+    assert!(write.is_mutation());
+    assert!(write.requires_idempotency_key());
+    let read = TreqCommandRequest::GithubRead {
+      repo: "/r".into(),
+      query: GithubQuery::Issue { number: 1 },
+    };
+    assert!(!read.is_mutation());
+    assert!(!read.requires_idempotency_key());
+  }
+
+  #[test]
+  fn github_requests_need_a_github_remote_before_running_gh() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let error = github_read(repo, GithubQuery::Issue { number: 1 }).unwrap_err();
+    assert!(error.contains("no GitHub remote"), "{error}");
+    let error = github_write(repo, GithubAction::ReopenIssue { number: 1 }).unwrap_err();
+    assert!(error.contains("no GitHub remote"), "{error}");
+  }
+
+  #[test]
+  fn github_writes_with_text_reject_a_blank_body_or_title() {
+    for action in [
+      GithubAction::CreateIssue {
+        title: " ".into(),
+        body: String::new(),
+      },
+      GithubAction::CommentOnIssue {
+        number: 1,
+        body: "\n".into(),
+      },
+      GithubAction::ReplyToReviewThread {
+        thread_id: "t".into(),
+        body: "".into(),
+      },
+    ] {
+      let error = github_write("/nonexistent", action).unwrap_err();
+      assert!(error.starts_with("invalid_arguments:"), "{error}");
+    }
   }
 
   #[test]
@@ -5684,7 +6017,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 70);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 73);
   }
 
   #[test]

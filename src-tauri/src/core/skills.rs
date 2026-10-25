@@ -46,6 +46,9 @@ pub struct SkillCatalogEntry {
   pub proprietary: bool,
   #[serde(default)]
   pub url: Option<String>,
+  /// Path of the skill's page on the treq.dev skill registry.
+  #[serde(default)]
+  pub route: Option<String>,
   #[serde(default)]
   pub checksum: Option<String>,
   #[serde(default)]
@@ -79,6 +82,19 @@ pub struct SkillCatalogSkillView {
   pub skill: SkillCatalogEntry,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub installed: Option<InstalledSkill>,
+  /// The repository holds a user-owned copy, which Treq never overwrites.
+  #[serde(default)]
+  pub customized: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomizedSkill {
+  pub id: String,
+  pub name: String,
+  /// Relative to the repository root.
+  pub agents_skill_path: String,
+  pub claude_skill_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -211,7 +227,15 @@ pub fn merge_catalog_with_installed(
     .into_iter()
     .map(|skill| {
       let installed = installed.iter().find(|item| item.id == skill.id).cloned();
-      SkillCatalogSkillView { skill, installed }
+      let customized = installed.is_some()
+        && repo_path
+          .filter(|p| !p.trim().is_empty())
+          .is_some_and(|repo| has_user_owned_copy(Path::new(repo), &skill.name));
+      SkillCatalogSkillView {
+        skill,
+        installed,
+        customized,
+      }
     })
     .collect();
   Ok(SkillCatalogView {
@@ -290,18 +314,11 @@ pub fn write_skill_pack(dest: &Path, files: &[(String, Vec<u8>)]) -> Result<(), 
   })
 }
 
-pub fn install_skill_files(
+/// The files' checksum, checked against the catalog's when it lists one.
+pub fn verify_skill_checksum(
   entry: &SkillCatalogEntry,
   files: &[(String, Vec<u8>)],
-  scope: SkillInstallScope,
-  repo_path: Option<&str>,
-) -> Result<InstalledSkill, String> {
-  if entry.proprietary {
-    return Err("Proprietary skills cannot be installed from the catalog".to_string());
-  }
-  if files.is_empty() {
-    return Err("Skill has no files to install".to_string());
-  }
+) -> Result<String, String> {
   let computed = skill_checksum(files);
   if let Some(expected) = entry
     .checksum
@@ -316,6 +333,22 @@ pub fn install_skill_files(
       ));
     }
   }
+  Ok(computed)
+}
+
+pub fn install_skill_files(
+  entry: &SkillCatalogEntry,
+  files: &[(String, Vec<u8>)],
+  scope: SkillInstallScope,
+  repo_path: Option<&str>,
+) -> Result<InstalledSkill, String> {
+  if entry.proprietary {
+    return Err("Proprietary skills cannot be installed from the catalog".to_string());
+  }
+  if files.is_empty() {
+    return Err("Skill has no files to install".to_string());
+  }
+  let computed = verify_skill_checksum(entry, files)?;
 
   let root = match scope {
     SkillInstallScope::Application => app_skills_root()?,
@@ -510,6 +543,241 @@ fn install_generated_skill_copy(
     .map_err(|e| format!("Failed to ignore generated skill: {e}"))
 }
 
+const AGENT_SKILL_PARENTS: [&str; 2] = [".agents/skills", ".claude/skills"];
+
+fn is_user_owned_dir(dir: &Path) -> bool {
+  dir.exists() && !dir.join(PROJECT_SKILL_MARKER).exists()
+}
+
+fn has_user_owned_copy(workspace: &Path, name: &str) -> bool {
+  let Ok(dirname) = skill_dirname(name) else {
+    return false;
+  };
+  AGENT_SKILL_PARENTS
+    .iter()
+    .any(|parent| is_user_owned_dir(&workspace.join(parent).join(&dirname)))
+}
+
+/// Write an installed skill into the repository's agent skill folders as a
+/// user-owned copy. Without the generated-skill marker,
+/// `materialize_installed_skills` leaves these folders alone, so catalog
+/// updates never overwrite the user's edits.
+pub fn customize_skill(skill_id: &str, repo_path: &str) -> Result<CustomizedSkill, String> {
+  let repo = Path::new(repo_path);
+  if !repo.exists() {
+    return Err(format!("Repository not found: {repo_path}"));
+  }
+  let record = list_installed_skills(Some(repo_path))?
+    .into_iter()
+    .find(|item| item.id == skill_id)
+    .ok_or_else(|| format!("Skill '{skill_id}' is not installed"))?;
+  let root = match record.scope {
+    SkillInstallScope::Application => app_skills_root()?,
+    SkillInstallScope::Repository => repo_skills_root(repo_path),
+  };
+  let pack = pack_dir(&root, &record.id)?;
+  if !pack.exists() {
+    return Err(format!("Installed skill files missing for '{skill_id}'"));
+  }
+  let files = read_pack_files(&pack)?;
+  customize_skill_from_files(&record.id, &record.name, &files, repo_path)
+}
+
+/// Writes `files` as a user-owned copy of skill `name` into the repository's
+/// agent skill folders: from an installed pack, the registry, or a global
+/// skill. Never replaces a copy the user already owns.
+pub fn customize_skill_from_files(
+  id: &str,
+  name: &str,
+  files: &[(String, Vec<u8>)],
+  repo_path: &str,
+) -> Result<CustomizedSkill, String> {
+  let repo = Path::new(repo_path);
+  if !repo.exists() {
+    return Err(format!("Repository not found: {repo_path}"));
+  }
+  let dirname = skill_dirname(name)?;
+  if has_user_owned_copy(repo, name) {
+    return Err(format!(
+      "Skill '{name}' is already customized in this repository"
+    ));
+  }
+  for parent in AGENT_SKILL_PARENTS {
+    write_skill_pack(&repo.join(parent).join(&dirname), files)?;
+  }
+  Ok(CustomizedSkill {
+    id: id.to_string(),
+    name: name.to_string(),
+    agents_skill_path: format!("{}/{dirname}", AGENT_SKILL_PARENTS[0]),
+    claude_skill_path: format!("{}/{dirname}", AGENT_SKILL_PARENTS[1]),
+  })
+}
+
+/// Copies a skill from the home folder into the repository as a user-owned
+/// copy, so agents edit it inside the repository.
+pub fn customize_global_skill(
+  name: &str,
+  source: &Path,
+  repo_path: &str,
+) -> Result<CustomizedSkill, String> {
+  let files = read_pack_files(source)?;
+  customize_skill_from_files(name, name, &files, repo_path)
+}
+
+static PENDING_SKILL_INSTALL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Keeps a `treq://skill/install` id that arrived before any window could
+/// show it (a link that launched Treq).
+pub fn queue_pending_skill_install(skill_id: String) {
+  *PENDING_SKILL_INSTALL
+    .lock()
+    .unwrap_or_else(|p| p.into_inner()) = Some(skill_id);
+}
+
+/// The queued link's id, once.
+pub fn take_pending_skill_install() -> Option<String> {
+  PENDING_SKILL_INSTALL
+    .lock()
+    .unwrap_or_else(|p| p.into_inner())
+    .take()
+}
+
+/// Where a user-owned skill lives: this repository or the user's home.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CustomSkillLevel {
+  Repo,
+  Global,
+}
+
+/// A skill folder Treq did not generate: hand-written, or a customized copy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomSkill {
+  /// The folder name, which agents use as the skill's name.
+  pub name: String,
+  /// SKILL.md's frontmatter `description`.
+  pub description: Option<String>,
+  pub level: CustomSkillLevel,
+  /// Each copy's folder (`.agents/skills/<name>`, `.claude/skills/<name>`).
+  pub paths: Vec<String>,
+}
+
+fn skill_description(skill_md: &Path) -> Option<String> {
+  let text = fs::read_to_string(skill_md).ok()?;
+  let frontmatter = text.strip_prefix("---")?.split("\n---").next()?;
+  frontmatter.lines().find_map(|line| {
+    let value = line.trim().strip_prefix("description:")?.trim();
+    let value = value.trim_matches(|c| c == '"' || c == '\'');
+    (!value.is_empty()).then(|| value.to_string())
+  })
+}
+
+/// The user-owned skills under `root`'s agent skill folders, by name.
+fn custom_skills_in(root: &Path, level: CustomSkillLevel) -> Vec<CustomSkill> {
+  let mut found: Vec<CustomSkill> = Vec::new();
+  for parent in AGENT_SKILL_PARENTS {
+    let Ok(entries) = fs::read_dir(root.join(parent)) else {
+      continue;
+    };
+    let mut dirs: Vec<PathBuf> = entries
+      .filter_map(|entry| entry.ok().map(|e| e.path()))
+      .filter(|dir| dir.join("SKILL.md").is_file() && is_user_owned_dir(dir))
+      .collect();
+    dirs.sort();
+    for dir in dirs {
+      let Some(name) = dir.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+        continue;
+      };
+      // Repository copies are named relative to it, so prompts never carry
+      // an absolute path; a global skill keeps its full path to copy from.
+      let path = match level {
+        CustomSkillLevel::Repo => format!("{parent}/{name}"),
+        CustomSkillLevel::Global => dir.to_string_lossy().into_owned(),
+      };
+      match found.iter_mut().find(|skill| skill.name == name) {
+        Some(skill) => skill.paths.push(path),
+        None => found.push(CustomSkill {
+          name,
+          description: skill_description(&dir.join("SKILL.md")),
+          level,
+          paths: vec![path],
+        }),
+      }
+    }
+  }
+  found.sort_by(|a, b| a.name.cmp(&b.name));
+  found
+}
+
+/// User-owned skills in the repository's and the home folder's
+/// `.agents/skills` and `.claude/skills`: the repository's first. Folders
+/// with the generated-skill marker are Treq's and left out; missing paths
+/// give nothing.
+pub fn list_custom_skills(repo_path: Option<&str>, home: Option<&Path>) -> Vec<CustomSkill> {
+  let mut out = Vec::new();
+  if let Some(repo) = repo_path.filter(|p| !p.trim().is_empty()) {
+    out.extend(custom_skills_in(Path::new(repo), CustomSkillLevel::Repo));
+  }
+  if let Some(home) = home {
+    out.extend(custom_skills_in(home, CustomSkillLevel::Global));
+  }
+  out
+}
+
+/// The prompt for an agent session that edits a user-owned skill.
+pub fn edit_custom_skill_prompt(name: &str, paths: &[String]) -> String {
+  let folders = paths
+    .iter()
+    .map(|p| format!("{p}/"))
+    .collect::<Vec<_>>()
+    .join(" and ");
+  format!(
+    "Help me edit the \"{name}\" agent skill at {folders}. Read SKILL.md, ask me what I want to \
+     change, then make the edits and keep every copy identical."
+  )
+}
+
+const MAX_SKILL_ID_LENGTH: usize = 200;
+
+/// The catalog id from a `treq://skill/install?id=...` link, or `None`. The
+/// id is only a lookup key: installing reads the catalog entry with that id,
+/// never content from the link.
+pub fn parse_skill_install_link(url: &str) -> Option<String> {
+  let parsed = url::Url::parse(url).ok()?;
+  if parsed.scheme() != "treq" || parsed.host_str() != Some("skill") || parsed.path() != "/install"
+  {
+    return None;
+  }
+  let id = parsed
+    .query_pairs()
+    .find(|(key, _)| key == "id")
+    .map(|(_, value)| value.into_owned())?;
+  let segment_ok = |part: &str| {
+    !part.is_empty()
+      && part != "."
+      && part != ".."
+      && part
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+  };
+  (id.len() <= MAX_SKILL_ID_LENGTH && id.split('/').all(segment_ok)).then_some(id)
+}
+
+/// The prompt for an agent session that edits a customized skill's copy.
+pub fn customize_skill_prompt(
+  name: &str,
+  agents_skill_path: &str,
+  claude_skill_path: &str,
+) -> String {
+  format!(
+    "Help me customize the \"{name}\" agent skill. Its user-owned copy is at {agents_skill_path}/ \
+     and is mirrored at {claude_skill_path}/. Treq no longer updates these folders from the skill \
+     catalog. Read SKILL.md, ask me what I want to change, then make the edits and keep both \
+     folders identical."
+  )
+}
+
 /// Copy every installed library skill into a workspace's agent skill folders.
 pub fn materialize_installed_skills(repo_path: &str, workspace_path: &str) -> Result<(), String> {
   let workspace = Path::new(workspace_path);
@@ -574,6 +842,7 @@ mod tests {
       license: Some("MIT".to_string()),
       proprietary: false,
       url: None,
+      route: None,
       checksum: Some(checksum),
       files: vec![
         SkillFile {
@@ -592,6 +861,182 @@ mod tests {
         },
       ],
     }
+  }
+
+  #[test]
+  fn parse_catalog_keeps_registry_route() {
+    let catalog = parse_catalog(
+      br#"{"skills":[{"id":"openai/.curated/x","name":"x","source":"openai","route":"/skills/openai/curated/x"}]}"#,
+    )
+    .expect("parse");
+    assert_eq!(
+      catalog.skills[0].route.as_deref(),
+      Some("/skills/openai/curated/x")
+    );
+  }
+
+  #[test]
+  fn parse_skill_install_link_reads_the_catalog_id() {
+    assert_eq!(
+      parse_skill_install_link("treq://skill/install?id=anthropic%2Fpdf").as_deref(),
+      Some("anthropic/pdf")
+    );
+    assert_eq!(
+      parse_skill_install_link("treq://skill/install?id=openai%2F.curated%2Fx").as_deref(),
+      Some("openai/.curated/x")
+    );
+  }
+
+  #[test]
+  fn parse_skill_install_link_rejects_other_routes_and_unsafe_ids() {
+    let long = format!("treq://skill/install?id={}", "x".repeat(201));
+    for url in [
+      "treq://auth/callback?token=abc",
+      "treq://skill/uninstall?id=anthropic%2Fpdf",
+      "treq://skill/install/extra?id=anthropic%2Fpdf",
+      "https://treq.dev/skill/install?id=anthropic%2Fpdf",
+      "treq://skill/install",
+      "treq://skill/install?id=",
+      "treq://skill/install?id=..%2Fetc",
+      "treq://skill/install?id=a%2F..%2Fb",
+      "treq://skill/install?id=%2Fabs",
+      "treq://skill/install?id=a%5Cb",
+      "treq://skill/install?id=a%20b",
+      "treq://skill/install?id=a%2F",
+      long.as_str(),
+      "not a url",
+    ] {
+      assert_eq!(parse_skill_install_link(url), None, "{url}");
+    }
+  }
+
+  #[test]
+  fn customize_prompt_names_both_copies() {
+    let prompt = customize_skill_prompt("demo", ".agents/skills/demo", ".claude/skills/demo");
+    assert!(prompt.contains("\"demo\""));
+    assert!(prompt.contains(".agents/skills/demo/"));
+    assert!(prompt.contains(".claude/skills/demo/"));
+  }
+
+  fn write_user_skill(root: &Path, parent: &str, name: &str, description: &str) {
+    let dir = root.join(parent).join(name);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+      dir.join("SKILL.md"),
+      format!("---\nname: {name}\ndescription: {description}\n---\n# {name}\n"),
+    )
+    .unwrap();
+  }
+
+  #[test]
+  fn list_custom_skills_finds_user_owned_repo_and_global_skills() {
+    let repo = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    write_user_skill(repo.path(), ".agents/skills", "review", "Reviews diffs");
+    write_user_skill(repo.path(), ".claude/skills", "review", "Reviews diffs");
+    write_user_skill(repo.path(), ".claude/skills", "deploy", "Ships it");
+    write_user_skill(home.path(), ".claude/skills", "notes", "Takes notes");
+    let found = list_custom_skills(Some(repo.path().to_str().unwrap()), Some(home.path()));
+    let summary: Vec<_> = found
+      .iter()
+      .map(|s| {
+        (
+          s.name.as_str(),
+          s.level,
+          s.paths.len(),
+          s.description.as_deref(),
+        )
+      })
+      .collect();
+    assert_eq!(
+      summary,
+      [
+        ("deploy", CustomSkillLevel::Repo, 1, Some("Ships it")),
+        ("review", CustomSkillLevel::Repo, 2, Some("Reviews diffs")),
+        ("notes", CustomSkillLevel::Global, 1, Some("Takes notes")),
+      ]
+    );
+    assert_eq!(
+      found[1].paths,
+      [".agents/skills/review", ".claude/skills/review"]
+    );
+    assert!(found[2].paths[0].starts_with(home.path().to_str().unwrap()));
+  }
+
+  #[test]
+  fn list_custom_skills_skips_treq_generated_and_non_skill_dirs() {
+    let repo = TempDir::new().unwrap();
+    write_user_skill(repo.path(), ".agents/skills", "treq", "bundled");
+    fs::write(
+      repo
+        .path()
+        .join(".agents/skills/treq")
+        .join(PROJECT_SKILL_MARKER),
+      "",
+    )
+    .unwrap();
+    fs::create_dir_all(repo.path().join(".claude/skills/empty")).unwrap();
+    fs::write(repo.path().join(".claude/skills/README.md"), "not a skill").unwrap();
+    assert!(list_custom_skills(Some(repo.path().to_str().unwrap()), None).is_empty());
+  }
+
+  #[test]
+  fn list_custom_skills_returns_nothing_for_missing_paths() {
+    assert!(list_custom_skills(Some("/no/such/repo"), Some(Path::new("/no/such/home"))).is_empty());
+    assert!(list_custom_skills(None, None).is_empty());
+  }
+
+  #[test]
+  fn edit_custom_skill_prompt_names_its_folders() {
+    let prompt = edit_custom_skill_prompt("notes", &[".claude/skills/notes".into()]);
+    assert!(prompt.contains("\"notes\""));
+    assert!(prompt.contains(".claude/skills/notes/"));
+  }
+
+  #[test]
+  fn customize_skill_from_files_writes_both_user_owned_copies() {
+    let repo = TempDir::new().unwrap();
+    let copy = customize_skill_from_files(
+      "anthropic/demo",
+      "demo",
+      &sample_files(),
+      repo.path().to_str().unwrap(),
+    )
+    .expect("customize");
+    assert_eq!(copy.agents_skill_path, ".agents/skills/demo");
+    for dir in [".agents/skills/demo", ".claude/skills/demo"] {
+      assert!(repo.path().join(dir).join("SKILL.md").exists());
+      assert!(!repo.path().join(dir).join(PROJECT_SKILL_MARKER).exists());
+    }
+    let err =
+      customize_skill_from_files("x", "demo", &sample_files(), repo.path().to_str().unwrap())
+        .expect_err("exists");
+    assert!(err.contains("already customized"), "{err}");
+  }
+
+  #[test]
+  fn customize_global_skill_copies_it_into_the_repo() {
+    let repo = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    write_user_skill(home.path(), ".claude/skills", "notes", "Takes notes");
+    let source = home.path().join(".claude/skills/notes");
+    let copy =
+      customize_global_skill("notes", &source, repo.path().to_str().unwrap()).expect("customize");
+    assert_eq!(copy.claude_skill_path, ".claude/skills/notes");
+    assert_eq!(
+      fs::read_to_string(repo.path().join(".agents/skills/notes/SKILL.md")).unwrap(),
+      fs::read_to_string(source.join("SKILL.md")).unwrap()
+    );
+  }
+
+  #[test]
+  fn pending_skill_install_is_taken_once() {
+    queue_pending_skill_install("anthropic/pdf".into());
+    assert_eq!(
+      take_pending_skill_install().as_deref(),
+      Some("anthropic/pdf")
+    );
+    assert_eq!(take_pending_skill_install(), None);
   }
 
   #[test]
@@ -756,6 +1201,114 @@ mod tests {
       fs::read_to_string(user_dir.join("SKILL.md")).unwrap(),
       "user skill\n"
     );
+  }
+
+  fn install_sample() -> SkillCatalogEntry {
+    let files = sample_files();
+    let entry = sample_entry(skill_checksum(&files));
+    install_skill_files(&entry, &files, SkillInstallScope::Application, None).expect("install");
+    entry
+  }
+
+  #[test]
+  fn customize_skill_writes_user_owned_copies() {
+    let app = TempDir::new().unwrap();
+    let repo = TempDir::new().unwrap();
+    let _guard = AppDataDirGuard::set(app.path());
+    install_sample();
+    let customized =
+      customize_skill("test/demo", repo.path().to_str().unwrap()).expect("customize");
+    assert_eq!(customized.agents_skill_path, ".agents/skills/demo");
+    assert_eq!(customized.claude_skill_path, ".claude/skills/demo");
+    for dir in [".agents/skills/demo", ".claude/skills/demo"] {
+      let dir = repo.path().join(dir);
+      assert!(dir.join("SKILL.md").exists());
+      assert!(dir.join("notes.txt").exists());
+      assert!(!dir.join(PROJECT_SKILL_MARKER).exists());
+    }
+  }
+
+  #[test]
+  fn customize_skill_replaces_generated_copy() {
+    let app = TempDir::new().unwrap();
+    let repo = TempDir::new().unwrap();
+    let _guard = AppDataDirGuard::set(app.path());
+    install_sample();
+    let repo_path = repo.path().to_str().unwrap();
+    materialize_installed_skills(repo_path, repo_path).expect("materialize");
+    let generated = repo.path().join(".agents/skills/demo");
+    assert!(generated.join(PROJECT_SKILL_MARKER).exists());
+    customize_skill("test/demo", repo_path).expect("customize");
+    assert!(!generated.join(PROJECT_SKILL_MARKER).exists());
+    assert!(generated.join("SKILL.md").exists());
+  }
+
+  #[test]
+  fn customize_skill_keeps_existing_user_copy() {
+    let app = TempDir::new().unwrap();
+    let repo = TempDir::new().unwrap();
+    let _guard = AppDataDirGuard::set(app.path());
+    install_sample();
+    let user_dir = repo.path().join(".claude/skills/demo");
+    fs::create_dir_all(&user_dir).unwrap();
+    fs::write(user_dir.join("SKILL.md"), "mine\n").unwrap();
+    let err = customize_skill("test/demo", repo.path().to_str().unwrap()).expect_err("exists");
+    assert!(err.contains("already customized"), "{err}");
+    assert_eq!(
+      fs::read_to_string(user_dir.join("SKILL.md")).unwrap(),
+      "mine\n"
+    );
+    assert!(!repo.path().join(".agents/skills/demo").exists());
+  }
+
+  #[test]
+  fn customize_skill_rejects_skill_that_is_not_installed() {
+    let app = TempDir::new().unwrap();
+    let repo = TempDir::new().unwrap();
+    let _guard = AppDataDirGuard::set(app.path());
+    let err = customize_skill("test/demo", repo.path().to_str().unwrap()).expect_err("missing");
+    assert!(err.contains("not installed"), "{err}");
+  }
+
+  #[test]
+  fn customized_skill_survives_catalog_update() {
+    let app = TempDir::new().unwrap();
+    let repo = TempDir::new().unwrap();
+    let _guard = AppDataDirGuard::set(app.path());
+    install_sample();
+    let repo_path = repo.path().to_str().unwrap();
+    customize_skill("test/demo", repo_path).expect("customize");
+    let skill_md = repo.path().join(".agents/skills/demo/SKILL.md");
+    fs::write(&skill_md, "edited\n").unwrap();
+
+    let mut updated = sample_files();
+    updated[0].1 = b"---\nname: demo\n---\n# Demo v2\n".to_vec();
+    let mut entry = sample_entry(skill_checksum(&updated));
+    entry.checksum = Some(skill_checksum(&updated));
+    install_skill_files(&entry, &updated, SkillInstallScope::Application, None).expect("update");
+    materialize_installed_skills(repo_path, repo_path).expect("materialize");
+
+    assert_eq!(fs::read_to_string(&skill_md).unwrap(), "edited\n");
+  }
+
+  #[test]
+  fn merge_catalog_marks_customized_skills() {
+    let app = TempDir::new().unwrap();
+    let repo = TempDir::new().unwrap();
+    let _guard = AppDataDirGuard::set(app.path());
+    let entry = install_sample();
+    let repo_path = repo.path().to_str().unwrap();
+    let catalog = || SkillCatalog {
+      generated_at: None,
+      sources: vec![],
+      skills: vec![entry.clone()],
+    };
+    materialize_installed_skills(repo_path, repo_path).expect("materialize");
+    let view = merge_catalog_with_installed(catalog(), Some(repo_path)).unwrap();
+    assert!(!view.skills[0].customized);
+    customize_skill("test/demo", repo_path).expect("customize");
+    let view = merge_catalog_with_installed(catalog(), Some(repo_path)).unwrap();
+    assert!(view.skills[0].customized);
   }
 
   #[test]

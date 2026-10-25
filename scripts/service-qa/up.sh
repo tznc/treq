@@ -31,11 +31,10 @@ fi
 # (Deno nodeModulesDir), so workers do not need registry access at boot.
 npm install --omit=dev --prefix supabase/functions
 
-# Local-only Edge secrets for webhook HMAC + GitHub stub (not for production).
+# Local-only Edge secrets for webhook HMAC + stubs (not for production).
 # Loaded automatically from supabase/functions/.env on `supabase start`.
 cat > supabase/functions/.env <<'EOF'
 GITHUB_WEBHOOK_SECRET=service-qa-local-webhook-secret
-MERGE_QUEUE_GITHUB_STUB=1
 TREQ_REMOTE_SPRITES_STUB=1
 REMOTE_SSH_CA_ED25519_SEED_BASE64=U7QP4DsQ6pPuNz9nyuniR6tEsHqTOvulJhpWElYm07Y=
 REMOTE_SSH_CA_ED25519_PUBLIC_KEY_BASE64=uL88vOSTAX5b7HkQyciJmsjAKWT4aJVnukznoRrgDic=

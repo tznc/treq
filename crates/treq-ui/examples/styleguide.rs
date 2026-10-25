@@ -115,6 +115,7 @@ fn variant_knob(knobs: &gpui_styleguidist::Knobs) -> Variant {
       ("outline", Variant::Outline),
       ("ghost", Variant::Ghost),
       ("destructive", Variant::Destructive),
+      ("warning", Variant::Warning),
       ("secondary", Variant::Secondary),
       ("link", Variant::Link),
     ],
@@ -149,6 +150,7 @@ fn buttons() -> Vec<Example> {
           ("Rename…", Variant::Outline),
           ("Add", Variant::Ghost),
           ("Delete", Variant::Destructive),
+          ("Resync", Variant::Warning),
           ("Open docs", Variant::Link),
         ]
         .map(|(label, variant)| {

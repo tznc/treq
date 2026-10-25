@@ -194,6 +194,13 @@ pub fn init(cx: &mut App) {
     log::error!("failed to load bundled fonts: {err:#}");
   }
   gpui_kit::init(cx);
+  // gpui-kit's input takes ⌘/Ctrl+Enter itself and, when multi-line, inserts
+  // a newline, so the key never reaches the submit handlers in the screens.
+  cx.bind_keys([gpui::KeyBinding::new(
+    "secondary-enter",
+    gpui::NoAction,
+    Some("Input"),
+  )]);
   // Each blink repaints the window; at gpui-kit's 500ms that cost was
   // noticeable while idling in a focused input.
   gpui_kit::base::input::CursorBlinkDefaults::new()
@@ -437,6 +444,8 @@ pub struct Palette {
   pub destructive: Hsla,
   /// Tailwind yellow-500, the uncommitted-changes dot.
   pub warning: Hsla,
+  /// Text on a `warning` fill: dark in both themes, as amber is light.
+  pub warning_foreground: Hsla,
   pub pr_open: Hsla,
   pub pr_merged: Hsla,
   pub pr_closed: Hsla,
@@ -520,6 +529,7 @@ pub fn palette(dark: bool) -> Palette {
       primary: token(211., 100., 55.),
       destructive: token(0., 85., 58.),
       warning: rgb(0xeab308).into(),
+      warning_foreground: token(0., 0., 9.),
       pr_open: rgb(0x4ade80).into(),
       pr_merged: rgb(0xc084fc).into(),
       pr_closed: rgb(0xf87171).into(),
@@ -553,6 +563,7 @@ pub fn palette(dark: bool) -> Palette {
       primary: token(211., 100., 50.),
       destructive: token(0., 85., 60.),
       warning: rgb(0xeab308).into(),
+      warning_foreground: token(0., 0., 9.),
       pr_open: rgb(0x16a34a).into(),
       pr_merged: rgb(0x9333ea).into(),
       pr_closed: rgb(0xdc2626).into(),

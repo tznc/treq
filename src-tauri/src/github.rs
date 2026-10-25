@@ -1,4 +1,5 @@
 use crate::result_ext::ResultExt;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -20,6 +21,9 @@ pub struct PrInfo {
   pub merge_state_status: Option<String>,
   #[serde(default)]
   pub is_draft: bool,
+  /// The PR description, markdown. Empty when the PR has none.
+  #[serde(default)]
+  pub body: String,
 }
 
 /// Parse owner/repo from a GitHub remote URL in SSH or HTTPS form.
@@ -152,10 +156,11 @@ pub struct GhIssueComment {
   pub id: String,
   pub body: String,
   pub author: GhAuthor,
+  #[serde(alias = "created_at")]
   pub created_at: String,
   /// `gh` gives the counts; `gh_comment_reactions_impl` adds whether the
   /// viewer reacted.
-  #[serde(default, rename(deserialize = "reactionGroups"))]
+  #[serde(default, rename(deserialize = "reactionGroups"), alias = "reactions")]
   pub reactions: Vec<GhReactionGroup>,
 }
 
@@ -170,16 +175,18 @@ pub struct GhReactionGroup {
 }
 
 /// A `ReactionGroup` as `gh --json` (`users`) or GraphQL (`reactors`)
-/// spells it.
+/// spells it, or as [`GhReactionGroup`] serializes it (`count`).
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawReactionGroup {
   content: String,
   #[serde(default)]
+  count: Option<u32>,
+  #[serde(default)]
   users: Option<TotalCount>,
   #[serde(default)]
   reactors: Option<TotalCount>,
-  #[serde(default)]
+  #[serde(default, alias = "viewer_has_reacted")]
   viewer_has_reacted: bool,
 }
 
@@ -193,7 +200,10 @@ impl From<RawReactionGroup> for GhReactionGroup {
   fn from(raw: RawReactionGroup) -> Self {
     GhReactionGroup {
       content: raw.content,
-      count: raw.reactors.or(raw.users).map_or(0, |c| c.total_count),
+      count: raw
+        .count
+        .or_else(|| raw.reactors.or(raw.users).map(|c| c.total_count))
+        .unwrap_or(0),
       viewer_has_reacted: raw.viewer_has_reacted,
     }
   }
@@ -209,7 +219,9 @@ pub struct GhIssue {
   pub body: Option<String>,
   pub author: GhAuthor,
   pub labels: Vec<GhLabel>,
+  #[serde(alias = "created_at")]
   pub created_at: String,
+  #[serde(alias = "updated_at")]
   pub updated_at: String,
   pub comments: Option<Vec<GhIssueComment>>,
 }
@@ -224,13 +236,18 @@ pub struct GhPullRequest {
   pub body: Option<String>,
   pub author: GhAuthor,
   pub labels: Vec<GhLabel>,
+  #[serde(alias = "head_ref_name")]
   pub head_ref_name: String,
+  #[serde(alias = "base_ref_name")]
   pub base_ref_name: String,
+  #[serde(alias = "merge_state_status")]
   pub merge_state_status: Option<String>,
+  #[serde(alias = "created_at")]
   pub created_at: String,
+  #[serde(alias = "updated_at")]
   pub updated_at: String,
   pub comments: Option<Vec<GhIssueComment>>,
-  #[serde(default)]
+  #[serde(default, alias = "is_draft")]
   pub is_draft: bool,
 }
 
@@ -681,6 +698,28 @@ pub fn gh_edit_issue_impl(
   check_gh_output(out).map(|_| ())
 }
 
+/// Replace a PR's title and/or body; a `None` field is left as it is. The
+/// body goes over stdin, like [`gh_edit_issue_impl`].
+pub fn gh_edit_pr_impl(
+  gh_path: &str,
+  repo_full_name: &str,
+  pr_number: u64,
+  title: Option<&str>,
+  body: Option<&str>,
+  extended_path: &str,
+) -> Result<(), String> {
+  let num = pr_number.to_string();
+  let mut args = vec!["pr", "edit", num.as_str(), "--repo", repo_full_name];
+  if let Some(title) = title {
+    args.extend(["--title", title]);
+  }
+  if body.is_some() {
+    args.extend(["--body-file", "-"]);
+  }
+  let out = run_gh_with_stdin(gh_path, &args, body.unwrap_or_default(), extended_path)?;
+  check_gh_output(out).map(|_| ())
+}
+
 /// Delete an issue. GitHub allows this only for repo admins; gh reports the
 /// permission error otherwise. `--yes` skips gh's interactive prompt, so the
 /// caller must confirm with the user first.
@@ -1000,7 +1039,7 @@ pub fn gh_set_reaction_impl(
 
 /// One inline comment of a submitted review. `side` is `LEFT` or `RIGHT`;
 /// `start_line` makes it a multi-line comment on the same side.
-#[derive(serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct GhDraftReviewComment {
   pub path: String,
   pub line: u64,
@@ -1099,6 +1138,211 @@ pub fn gh_set_pr_draft_impl(
   }
   let out = run_gh(gh_path, &args, extended_path)?;
   check_gh_output(out).map(|_| ())
+}
+
+/// How GitHub lands a pull request: `gh pr merge --merge|--squash|--rebase`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GhMergeMethod {
+  Merge,
+  Squash,
+  Rebase,
+}
+
+impl GhMergeMethod {
+  fn flag(self) -> &'static str {
+    match self {
+      GhMergeMethod::Merge => "--merge",
+      GhMergeMethod::Squash => "--squash",
+      GhMergeMethod::Rebase => "--rebase",
+    }
+  }
+
+  fn from_graphql(value: &str) -> Option<Self> {
+    match value {
+      "MERGE" => Some(GhMergeMethod::Merge),
+      "SQUASH" => Some(GhMergeMethod::Squash),
+      "REBASE" => Some(GhMergeMethod::Rebase),
+      _ => None,
+    }
+  }
+}
+
+/// Merge methods a repository allows, and the one GitHub preselects for the viewer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GhRepoMergeSettings {
+  pub default_method: GhMergeMethod,
+  pub allowed_methods: Vec<GhMergeMethod>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhRepoMergeSettingsRaw {
+  viewer_default_merge_method: Option<String>,
+  merge_commit_allowed: bool,
+  squash_merge_allowed: bool,
+  rebase_merge_allowed: bool,
+}
+
+pub fn gh_repo_merge_settings_impl(
+  gh_path: &str,
+  repo_full_name: &str,
+  extended_path: &str,
+) -> Result<GhRepoMergeSettings, String> {
+  let out = run_gh(
+    gh_path,
+    &[
+      "repo",
+      "view",
+      repo_full_name,
+      "--json",
+      "viewerDefaultMergeMethod,mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed",
+    ],
+    extended_path,
+  )?;
+  let bytes = check_gh_output(out)?;
+  let raw: GhRepoMergeSettingsRaw =
+    serde_json::from_slice(&bytes).map_err(|e| format!("Failed to parse gh output: {e}"))?;
+  let allowed_methods: Vec<GhMergeMethod> = [
+    (raw.merge_commit_allowed, GhMergeMethod::Merge),
+    (raw.squash_merge_allowed, GhMergeMethod::Squash),
+    (raw.rebase_merge_allowed, GhMergeMethod::Rebase),
+  ]
+  .into_iter()
+  .filter_map(|(allowed, method)| allowed.then_some(method))
+  .collect();
+  let default_method = raw
+    .viewer_default_merge_method
+    .as_deref()
+    .and_then(GhMergeMethod::from_graphql)
+    .filter(|method| allowed_methods.contains(method))
+    .or_else(|| allowed_methods.first().copied())
+    .ok_or_else(|| format!("{repo_full_name} allows no merge methods"))?;
+  Ok(GhRepoMergeSettings {
+    default_method,
+    allowed_methods,
+  })
+}
+
+/// Turn `gh pr merge` stderr into a message that names the blocker.
+/// The raw gh output is kept after the summary so nothing is lost.
+pub fn classify_gh_merge_error(stderr: &str) -> String {
+  let lower = stderr.to_lowercase();
+  let summary =
+    if lower.contains("status check") || (lower.contains("checks") && lower.contains("fail")) {
+      "Required checks are failing"
+    } else if lower.contains("conflict") || lower.contains("cannot be cleanly created") {
+      "The pull request has merge conflicts"
+    } else if lower.contains("not allowed on this repository") {
+      "This merge method is not allowed on this repository"
+    } else if lower.contains("review") && lower.contains("required") {
+      "The pull request needs an approving review"
+    } else if lower.contains("not mergeable") {
+      "The pull request is not mergeable"
+    } else {
+      return format!("GitHub merge failed: {}", stderr.trim());
+    };
+  format!("{summary}: {}", stderr.trim())
+}
+
+/// Merge a PR on GitHub. Rebase merges keep the original commit messages, so
+/// `subject`/`body` only apply to merge and squash.
+pub fn gh_merge_pr_impl(
+  gh_path: &str,
+  repo_full_name: &str,
+  pr_number: u64,
+  method: GhMergeMethod,
+  subject: Option<&str>,
+  body: Option<&str>,
+  extended_path: &str,
+) -> Result<(), String> {
+  let num = pr_number.to_string();
+  let mut args = vec![
+    "pr",
+    "merge",
+    num.as_str(),
+    "--repo",
+    repo_full_name,
+    method.flag(),
+  ];
+  let (subject, body) = match method {
+    GhMergeMethod::Rebase => (None, None),
+    _ => (
+      subject.filter(|s| !s.trim().is_empty()),
+      body.filter(|b| !b.trim().is_empty()),
+    ),
+  };
+  if let Some(subject) = subject {
+    args.extend(["--subject", subject]);
+  }
+  let out = match body {
+    Some(body) => {
+      args.extend(["--body-file", "-"]);
+      run_gh_with_stdin(gh_path, &args, body, extended_path)?
+    }
+    None => run_gh(gh_path, &args, extended_path)?,
+  };
+  if out.status.success() {
+    Ok(())
+  } else {
+    Err(classify_gh_merge_error(&String::from_utf8_lossy(
+      &out.stderr,
+    )))
+  }
+}
+
+pub fn gh_set_pr_base_impl(
+  gh_path: &str,
+  repo_full_name: &str,
+  pr_number: u64,
+  base_branch: &str,
+  extended_path: &str,
+) -> Result<(), String> {
+  let num = pr_number.to_string();
+  let out = run_gh(
+    gh_path,
+    &[
+      "pr",
+      "edit",
+      &num,
+      "--repo",
+      repo_full_name,
+      "--base",
+      base_branch,
+    ],
+    extended_path,
+  )?;
+  check_gh_output(out).map(|_| ())
+}
+
+/// Point the open PR of each `(branch, new_base)` at its new base, so stacked
+/// PRs follow their workspace after the parent lands. Best-effort: returns one
+/// note per PR moved or failed; branches without an open PR are skipped.
+pub fn gh_retarget_open_prs_impl(
+  gh_path: &str,
+  repo_path: &str,
+  repo_full_name: &str,
+  retargets: &[(String, String)],
+  extended_path: &str,
+) -> Vec<String> {
+  retargets
+    .iter()
+    .filter_map(|(branch, new_base)| {
+      let pr = get_pr_info_via_gh_impl(gh_path, repo_path, branch, extended_path)
+        .ok()
+        .flatten()
+        .filter(|pr| pr.state == "OPEN" && pr.base_ref_name != *new_base)?;
+      Some(
+        match gh_set_pr_base_impl(gh_path, repo_full_name, pr.number, new_base, extended_path) {
+          Ok(()) => format!("Moved PR #{} ({}) onto {}", pr.number, branch, new_base),
+          Err(e) => format!(
+            "Could not move PR #{} ({}) onto {}: {}",
+            pr.number, branch, new_base, e
+          ),
+        },
+      )
+    })
+    .collect()
 }
 
 #[allow(
@@ -1346,6 +1590,8 @@ pub fn get_pr_info_via_gh_impl(
     merge_state_status: Option<String>,
     #[serde(default)]
     is_draft: bool,
+    #[serde(default)]
+    body: String,
   }
 
   let mut cmd = std::process::Command::new(gh_path);
@@ -1355,7 +1601,7 @@ pub fn get_pr_info_via_gh_impl(
       "pr",
       "view",
       "--json",
-      "number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft",
+      "number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,body",
       "--",
       branch_name,
     ])
@@ -1386,6 +1632,7 @@ pub fn get_pr_info_via_gh_impl(
     base_ref_name: raw.base_ref_name,
     merge_state_status: raw.merge_state_status,
     is_draft: raw.is_draft,
+    body: raw.body,
   }))
 }
 
@@ -1393,7 +1640,7 @@ pub fn get_pr_info_via_gh_impl(
 /// may have a branch's PR beyond the page; see [`PrListing::truncated`].
 const PR_LIST_LIMIT: usize = 100;
 
-const PR_LIST_JSON_FIELDS: &str = "number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,isCrossRepository,statusCheckRollup";
+const PR_LIST_JSON_FIELDS: &str = "number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,isCrossRepository,statusCheckRollup,body";
 
 /// One `statusCheckRollup` entry: a check run or a commit status.
 #[derive(serde::Deserialize)]
@@ -1466,6 +1713,8 @@ struct GhListedPr {
   is_cross_repository: bool,
   #[serde(default)]
   status_check_rollup: Option<Vec<GhRollupEntry>>,
+  #[serde(default)]
+  body: String,
 }
 
 /// The PR and rolled-up CI status of each head branch in a `gh pr list` page.
@@ -1511,6 +1760,7 @@ fn parse_pr_list(stdout: &[u8]) -> Result<PrListing, String> {
         base_ref_name: pr.base_ref_name,
         merge_state_status: pr.merge_state_status,
         is_draft: pr.is_draft,
+        body: pr.body,
       };
       (branch, (info, ci))
     })
@@ -1554,7 +1804,7 @@ pub fn list_prs_with_checks_via_gh_impl(
 
 // ── GitHub PR review comment threads (read-only) ────────────────────────────
 
-#[derive(serde::Serialize, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
 pub struct GhReviewComment {
   pub id: String,
   pub body: String,
@@ -1565,7 +1815,7 @@ pub struct GhReviewComment {
   pub reactions: Vec<GhReactionGroup>,
 }
 
-#[derive(serde::Serialize, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
 pub struct GhReviewThread {
   pub id: String,
   pub is_resolved: bool,
@@ -1838,6 +2088,13 @@ mod tests {
   }
 
   #[test]
+  fn pr_list_carries_the_pr_body() {
+    let json = r#"[{"number":1,"title":"t","state":"OPEN","url":"u","headRefName":"feat/a","baseRefName":"main","mergeStateStatus":"CLEAN","isDraft":false,"isCrossRepository":false,"statusCheckRollup":[],"body":"**Why**"}]"#;
+    let listing = super::parse_pr_list(json.as_bytes()).unwrap();
+    assert_eq!(listing.by_branch["feat/a"].0.body, "**Why**");
+  }
+
+  #[test]
   fn pr_list_marks_a_full_page_as_truncated() {
     let json = format!(
       "[{}]",
@@ -1884,6 +2141,87 @@ mod tests {
   }
 
   use super::*;
+
+  /// The host sends what it read from `gh` to the phone as JSON; reading
+  /// that JSON back must give the same values.
+  #[test]
+  fn github_types_survive_a_serialize_deserialize_round_trip() {
+    fn round_trip<T: serde::Serialize + serde::de::DeserializeOwned>(
+      value: &T,
+    ) -> serde_json::Value {
+      let json = serde_json::to_value(value).unwrap();
+      let back: T = serde_json::from_value(json.clone()).unwrap();
+      assert_eq!(serde_json::to_value(&back).unwrap(), json);
+      json
+    }
+    let author = GhAuthor {
+      login: "octo".into(),
+      avatar_url: Some("https://a".into()),
+    };
+    let comment = GhIssueComment {
+      id: "c1".into(),
+      body: "hi".into(),
+      author: author.clone(),
+      created_at: "2026-01-01T00:00:00Z".into(),
+      reactions: vec![GhReactionGroup {
+        content: "HEART".into(),
+        count: 3,
+        viewer_has_reacted: true,
+      }],
+    };
+    round_trip(&GhIssue {
+      number: 1,
+      title: "t".into(),
+      state: "OPEN".into(),
+      url: "u".into(),
+      body: Some("b".into()),
+      author: author.clone(),
+      labels: vec![GhLabel {
+        name: "bug".into(),
+        color: "f00".into(),
+      }],
+      created_at: "c".into(),
+      updated_at: "u".into(),
+      comments: Some(vec![comment.clone()]),
+    });
+    round_trip(&GhListPage {
+      items: vec![GhPullRequest {
+        number: 2,
+        title: "t".into(),
+        state: "OPEN".into(),
+        url: "u".into(),
+        body: None,
+        author: author.clone(),
+        labels: vec![],
+        head_ref_name: "feat".into(),
+        base_ref_name: "main".into(),
+        merge_state_status: Some("CLEAN".into()),
+        created_at: "c".into(),
+        updated_at: "u".into(),
+        comments: Some(vec![comment]),
+        is_draft: true,
+      }],
+      has_more: true,
+      end_cursor: Some("x".into()),
+    });
+    round_trip(&vec![GhReviewThread {
+      id: "t1".into(),
+      is_resolved: true,
+      is_outdated: false,
+      path: "a.rs".into(),
+      line: Some(4),
+      diff_side: "RIGHT".into(),
+      comments: vec![GhReviewComment {
+        id: "r1".into(),
+        body: "b".into(),
+        author,
+        created_at: "c".into(),
+        diff_hunk: "@@".into(),
+        url: "u".into(),
+        reactions: vec![],
+      }],
+    }]);
+  }
   use std::fs;
   use std::io::Write;
   use tempfile::TempDir;
@@ -2106,6 +2444,27 @@ mod tests {
 
   #[test]
   #[cfg(unix)]
+  fn get_pr_info_parses_body() {
+    let bin_dir = TempDir::new().unwrap();
+    let repo_dir = TempDir::new().unwrap();
+    let gh_path = write_fake_gh(
+      &bin_dir,
+      r#"echo '{"number":7,"title":"T","state":"OPEN","url":"u","headRefName":"feat","baseRefName":"main","mergeStateStatus":null,"isDraft":false,"body":"**Why**: because"}'"#,
+    );
+
+    let info = get_pr_info_via_gh_impl(
+      &gh_path,
+      repo_dir.path().to_str().unwrap(),
+      "feat",
+      "/usr/bin:/bin",
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(info.body, "**Why**: because");
+  }
+
+  #[test]
+  #[cfg(unix)]
   fn get_pr_info_invokes_gh_with_exact_arguments_and_working_directory() {
     let bin_dir = TempDir::new().unwrap();
     let repo_dir = TempDir::new().unwrap();
@@ -2113,7 +2472,7 @@ mod tests {
     let expected_dir = expected_dir.display();
     let script = format!(
       r#"test "$PWD" = "{expected_dir}" || exit 8
-test "$*" = "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft -- feat" || exit 9
+test "$*" = "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,body -- feat" || exit 9
 echo '{{"number":42,"title":"My PR","state":"OPEN","url":"https://github.com/o/r/pull/42","headRefName":"feat","baseRefName":"main","mergeStateStatus":null,"isDraft":false}}'"#,
     );
     let gh_path = write_fake_gh(&bin_dir, &script);
@@ -2134,7 +2493,7 @@ echo '{{"number":42,"title":"My PR","state":"OPEN","url":"https://github.com/o/r
     let bin_dir = TempDir::new().unwrap();
     let gh_path = write_fake_gh(
       &bin_dir,
-      r#"test "$*" = "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft -- --web" || exit 9
+      r#"test "$*" = "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,body -- --web" || exit 9
 echo 'no pull requests found for branch "--web"' >&2
 exit 1"#,
     );
@@ -2449,6 +2808,45 @@ echo 'https://github.com/owner/repo/pull/8'"#,
     .unwrap();
 
     assert_eq!(fs::read_to_string(&body_path).unwrap(), body);
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn gh_edit_pr_sends_title_as_arg_and_body_over_stdin() {
+    let bin_dir = TempDir::new().unwrap();
+    let body_path = bin_dir.path().join("body");
+    let gh_path = write_fake_gh(
+      &bin_dir,
+      &format!(
+        "test \"$*\" = \"pr edit 7 --repo owner/repo --title New title --body-file -\" || exit 9\ncat > '{}'",
+        body_path.display()
+      ),
+    );
+    let body = oversized_body();
+
+    gh_edit_pr_impl(
+      &gh_path,
+      "owner/repo",
+      7,
+      Some("New title"),
+      Some(&body),
+      "/usr/bin:/bin",
+    )
+    .unwrap();
+
+    assert_eq!(fs::read_to_string(&body_path).unwrap(), body);
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn gh_edit_pr_leaves_out_fields_it_does_not_change() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_fake_gh(
+      &bin_dir,
+      "test \"$*\" = \"pr edit 7 --repo owner/repo --title T\" || exit 9\ncat > /dev/null",
+    );
+
+    gh_edit_pr_impl(&gh_path, "owner/repo", 7, Some("T"), None, "/usr/bin:/bin").unwrap();
   }
 
   #[test]
@@ -3425,5 +3823,223 @@ esac
     let err =
       gh_submit_pr_review_impl("gh", "o/r", 7, "MERGE", "", &[], "/usr/bin:/bin").unwrap_err();
     assert!(err.contains("Invalid review event"));
+  }
+
+  // ── gh_merge_pr_impl / gh_repo_merge_settings_impl ──────────────────────
+
+  #[test]
+  #[cfg(unix)]
+  fn merge_pr_passes_method_flag_and_body_on_stdin() {
+    let bin_dir = TempDir::new().unwrap();
+    let out_dir = TempDir::new().unwrap();
+    let stdin_file = out_dir.path().join("stdin");
+    let script = format!(
+      r#"test "$*" = "pr merge 12 --repo o/r --squash --subject Ship it --body-file -" || exit 9
+cat > {}"#,
+      stdin_file.display()
+    );
+    let gh_path = write_fake_gh(&bin_dir, &script);
+
+    gh_merge_pr_impl(
+      &gh_path,
+      "o/r",
+      12,
+      GhMergeMethod::Squash,
+      Some("Ship it"),
+      Some("body text"),
+      "/usr/bin:/bin",
+    )
+    .unwrap();
+
+    assert_eq!(fs::read_to_string(stdin_file).unwrap(), "body text");
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn merge_pr_rebase_omits_subject_and_body() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_fake_gh(
+      &bin_dir,
+      r#"test "$*" = "pr merge 3 --repo o/r --rebase" || exit 9"#,
+    );
+
+    gh_merge_pr_impl(
+      &gh_path,
+      "o/r",
+      3,
+      GhMergeMethod::Rebase,
+      Some("ignored"),
+      Some("ignored"),
+      "/usr/bin:/bin",
+    )
+    .unwrap();
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn merge_pr_reports_failing_checks() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_fake_gh(
+      &bin_dir,
+      "echo 'X Pull request o/r#3 is not mergeable: the base branch policy prohibits the merge.' >&2\necho 'Required status check \"ci\" is failing.' >&2\nexit 1",
+    );
+
+    let err = gh_merge_pr_impl(
+      &gh_path,
+      "o/r",
+      3,
+      GhMergeMethod::Merge,
+      None,
+      None,
+      "/usr/bin:/bin",
+    )
+    .unwrap_err();
+
+    assert!(err.starts_with("Required checks are failing"), "{err}");
+  }
+
+  #[test]
+  fn classify_merge_error_detects_conflicts() {
+    let err = classify_gh_merge_error(
+      "Pull request o/r#3 is not mergeable: the merge commit cannot be cleanly created.",
+    );
+    assert!(
+      err.starts_with("The pull request has merge conflicts"),
+      "{err}"
+    );
+  }
+
+  #[test]
+  fn classify_merge_error_detects_not_mergeable() {
+    let err = classify_gh_merge_error(
+      "Pull request o/r#3 is not mergeable: the base branch policy prohibits the merge.",
+    );
+    assert!(
+      err.starts_with("The pull request is not mergeable"),
+      "{err}"
+    );
+  }
+
+  #[test]
+  fn classify_merge_error_detects_disallowed_method() {
+    let err = classify_gh_merge_error(
+      "GraphQL: Squash merges are not allowed on this repository. (mergePullRequest)",
+    );
+    assert!(err.starts_with("This merge method is not allowed"), "{err}");
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn repo_merge_settings_reads_default_and_allowed_methods() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_fake_gh(
+      &bin_dir,
+      r#"test "$*" = "repo view o/r --json viewerDefaultMergeMethod,mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed" || exit 9
+echo '{"viewerDefaultMergeMethod":"SQUASH","mergeCommitAllowed":false,"squashMergeAllowed":true,"rebaseMergeAllowed":true}'"#,
+    );
+
+    let settings = gh_repo_merge_settings_impl(&gh_path, "o/r", "/usr/bin:/bin").unwrap();
+
+    assert_eq!(settings.default_method, GhMergeMethod::Squash);
+    assert_eq!(
+      settings.allowed_methods,
+      vec![GhMergeMethod::Squash, GhMergeMethod::Rebase]
+    );
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn repo_merge_settings_falls_back_to_first_allowed_when_default_disallowed() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_fake_gh(
+      &bin_dir,
+      r#"echo '{"viewerDefaultMergeMethod":"MERGE","mergeCommitAllowed":false,"squashMergeAllowed":false,"rebaseMergeAllowed":true}'"#,
+    );
+
+    let settings = gh_repo_merge_settings_impl(&gh_path, "o/r", "/usr/bin:/bin").unwrap();
+
+    assert_eq!(settings.default_method, GhMergeMethod::Rebase);
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn set_pr_base_passes_base_flag() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_fake_gh(
+      &bin_dir,
+      r#"test "$*" = "pr edit 5 --repo o/r --base main" || exit 9"#,
+    );
+
+    gh_set_pr_base_impl(&gh_path, "o/r", 5, "main", "/usr/bin:/bin").unwrap();
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn retarget_open_prs_moves_only_open_prs_onto_new_base() {
+    let bin_dir = TempDir::new().unwrap();
+    let repo_dir = TempDir::new().unwrap();
+    let log = repo_dir.path().join("edits.log");
+    let script = format!(
+      r#"case "$*" in
+  "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,body -- feat/open")
+    echo '{{"number":8,"title":"Open","state":"OPEN","url":"u","headRefName":"feat/open","baseRefName":"feat/parent","mergeStateStatus":null,"isDraft":false}}' ;;
+  "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,body -- feat/closed")
+    echo '{{"number":9,"title":"Closed","state":"CLOSED","url":"u","headRefName":"feat/closed","baseRefName":"feat/parent","mergeStateStatus":null,"isDraft":false}}' ;;
+  "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,body -- feat/none")
+    echo 'no pull requests found for branch "feat/none"' >&2; exit 1 ;;
+  "pr edit"*) echo "$*" >> {log} ;;
+  *) exit 9 ;;
+esac"#,
+      log = log.display()
+    );
+    let gh_path = write_fake_gh(&bin_dir, &script);
+    let retargets = vec![
+      ("feat/open".to_string(), "main".to_string()),
+      ("feat/closed".to_string(), "main".to_string()),
+      ("feat/none".to_string(), "main".to_string()),
+    ];
+
+    let notes = gh_retarget_open_prs_impl(
+      &gh_path,
+      repo_dir.path().to_str().unwrap(),
+      "o/r",
+      &retargets,
+      "/usr/bin:/bin",
+    );
+
+    assert_eq!(notes, vec!["Moved PR #8 (feat/open) onto main".to_string()]);
+    assert_eq!(
+      fs::read_to_string(log).unwrap().trim(),
+      "pr edit 8 --repo o/r --base main"
+    );
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn retarget_open_prs_reports_failed_edit() {
+    let bin_dir = TempDir::new().unwrap();
+    let repo_dir = TempDir::new().unwrap();
+    let gh_path = write_fake_gh(
+      &bin_dir,
+      r#"case "$*" in
+  "pr view"*) echo '{"number":8,"title":"Open","state":"OPEN","url":"u","headRefName":"feat/open","baseRefName":"feat/parent","mergeStateStatus":null,"isDraft":false}' ;;
+  *) echo 'HTTP 422' >&2; exit 1 ;;
+esac"#,
+    );
+
+    let notes = gh_retarget_open_prs_impl(
+      &gh_path,
+      repo_dir.path().to_str().unwrap(),
+      "o/r",
+      &[("feat/open".to_string(), "main".to_string())],
+      "/usr/bin:/bin",
+    );
+
+    assert_eq!(notes.len(), 1);
+    assert!(
+      notes[0].starts_with("Could not move PR #8 (feat/open) onto main"),
+      "{}",
+      notes[0]
+    );
   }
 }

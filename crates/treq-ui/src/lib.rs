@@ -215,6 +215,9 @@ pub enum Variant {
   Link,
   Outline,
   Secondary,
+  /// Filled amber: an action that brings back something that drifted
+  /// (Resync after a local edit). Not for errors; those are `Destructive`.
+  Warning,
 }
 
 /// `ui/button.tsx` sizes.
@@ -222,6 +225,8 @@ pub enum Variant {
 pub enum Size {
   Default,
   Icon,
+  /// 32px square: an icon button beside small (`Sm`) controls.
+  IconSm,
   IconXs,
   Lg,
   Sm,
@@ -367,7 +372,10 @@ impl Button {
   }
 
   fn filled(&self) -> bool {
-    matches!(self.variant, Variant::Default | Variant::Destructive)
+    matches!(
+      self.variant,
+      Variant::Default | Variant::Destructive | Variant::Warning
+    )
   }
 
   fn variant_foreground(&self) -> Hsla {
@@ -378,6 +386,7 @@ impl Button {
       Variant::Ghost | Variant::Outline => p.foreground,
       Variant::Link => p.primary,
       Variant::Secondary => p.secondary_foreground,
+      Variant::Warning => p.warning_foreground,
     }
   }
 }
@@ -412,6 +421,7 @@ impl Button {
       Variant::Link => (clear, clear, clear),
       Variant::Outline => (p.background, p.input, p.accent),
       Variant::Secondary => (p.secondary, p.secondary, p.secondary.opacity(0.7)),
+      Variant::Warning => (p.warning, p.warning, p.warning.opacity(0.85)),
     };
     let hover_bg = self.hover_bg.unwrap_or(hover_bg);
     let (bg, hover_bg) = if self.selected && !self.filled() {
@@ -507,6 +517,7 @@ impl RenderOnce for Button {
       .map(|b| match self.size {
         Size::Default => text(b.h(zpx(40.)).px_4(), TextSize::Sm),
         Size::Icon => b.size(zpx(40.)),
+        Size::IconSm => b.size(zpx(32.)),
         Size::IconXs => b.size(zpx(24.)),
         Size::Lg => text(b.h(zpx(44.)).px_6(), TextSize::Lg),
         Size::Sm => text(b.h(zpx(32.)).px_3(), TextSize::Sm),
@@ -775,6 +786,18 @@ mod tests {
     assert_eq!(on.colors().bg, p.selected());
     // A plain button is no toggle.
     assert_eq!(Button::new("plain", &p).pressed, None);
+  }
+
+  #[test]
+  fn warning_button_is_filled_with_a_dark_label() {
+    let p = theme::palette(false);
+    let warning = Button::new("warning", &p).variant(Variant::Warning);
+    assert!(warning.filled());
+    assert_eq!(warning.foreground(), p.warning_foreground);
+    assert_eq!(
+      theme::palette(true).warning_foreground,
+      p.warning_foreground
+    );
   }
 
   #[test]

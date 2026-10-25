@@ -16,7 +16,7 @@ use gpui_kit::component::{
   searchable_list::SearchableListItem,
   select::{Select, SelectEvent, SelectState},
   slider::{Slider, SliderEvent, SliderState},
-  IndexPath,
+  IndexPath, Sizable,
 };
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
@@ -59,6 +59,8 @@ pub struct Controls {
   sink: ActionSink,
   inputs: HashMap<String, Entity<InputState>>,
   textareas: HashMap<String, Entity<TextareaState>>,
+  /// Each textarea's placeholder, so a changed one is set again.
+  placeholders: HashMap<String, String>,
   selects: HashMap<String, (Options, Entity<SelectState<Options>>)>,
   sliders: HashMap<String, Entity<SliderState>>,
   _subscriptions: Vec<Subscription>,
@@ -70,6 +72,7 @@ impl Controls {
       sink,
       inputs: HashMap::new(),
       textareas: HashMap::new(),
+      placeholders: HashMap::new(),
       selects: HashMap::new(),
       sliders: HashMap::new(),
       _subscriptions: Vec::new(),
@@ -144,6 +147,12 @@ impl Controls {
     state
   }
 
+  /// The placeholder the textarea for `field` shows, once drawn.
+  #[cfg(test)]
+  pub fn textarea_placeholder(&self, field: &str) -> Option<&str> {
+    self.placeholders.get(field).map(String::as_str)
+  }
+
   /// `ui/textarea.tsx` with `rows` lines.
   pub fn textarea<V: 'static>(
     &mut self,
@@ -158,8 +167,19 @@ impl Controls {
       if !state.read(cx).focus_handle(cx).is_focused(window) && state.read(cx).value() != value {
         state.update(cx, |s, cx| s.set_value(value.to_string(), window, cx));
       }
+      if self.placeholders.get(field).map(String::as_str) != Some(placeholder) {
+        state.update(cx, |s, cx| {
+          s.set_placeholder(placeholder.to_string(), window, cx)
+        });
+        self
+          .placeholders
+          .insert(field.to_string(), placeholder.to_string());
+      }
       return state;
     }
+    self
+      .placeholders
+      .insert(field.to_string(), placeholder.to_string());
     let state = cx.new(|cx| {
       TextareaState::new(window, cx)
         .rows(rows)
@@ -323,6 +343,31 @@ pub fn select_field(
         .accessibility_label(name)
         .disabled(disabled)
         .h(zpx(FIELD_HEIGHT)),
+    )
+}
+
+const SMALL_FIELD_HEIGHT: f32 = 32.;
+
+/// `select_field` at a small button's height, for a control inside a row.
+pub fn small_select_field(
+  id: impl Into<SharedString>,
+  name: impl Into<SharedString>,
+  state: &Entity<SelectState<Options>>,
+  disabled: bool,
+) -> impl IntoElement {
+  let id: SharedString = id.into();
+  let selector = id.to_string();
+  div()
+    .id(id.clone())
+    .debug_selector(move || selector)
+    .w_full()
+    .child(
+      Select::new(state)
+        .id(id)
+        .accessibility_label(name)
+        .disabled(disabled)
+        .small()
+        .h(zpx(SMALL_FIELD_HEIGHT)),
     )
 }
 

@@ -1,17 +1,13 @@
 //! What GPUI does itself that React's Dashboard and `ShowWorkspace`
-//! handlers did: run checks, create pull requests, retarget, queue for the
-//! merge queue, and delete or archive workspaces. Each reports with a toast
-//! and tells React which caches to refresh (`NativeEvent`).
+//! handlers did: run checks, create pull requests, retarget, and delete or
+//! archive workspaces. Each reports with a toast and tells React which caches to refresh (`NativeEvent`).
 
 use super::{
-  github_data::GithubHost, merge_queue_data::MergeQueueHost, workspace_data::WorkspaceHost,
+  code_data::CodeHost, github_data::GithubHost, workspace_data::WorkspaceHost,
+  workspace_dialog_data::WorkspaceDialogHost,
 };
 use crate::{
-  core::{
-    self,
-    account::{self, QueueAction},
-    supabase::ApiError,
-  },
+  core,
   gpui_shell::{
     confirm::Question,
     native::{Backend, NativeEvent, ToastTone},
@@ -21,20 +17,12 @@ use crate::{
 /// What the workspace actions ask of the backend; faked in tests. All but
 /// the `WorkspaceHost` methods block, so they are called off the main
 /// thread.
-pub trait WorkspaceActionsHost: GithubHost + MergeQueueHost {
-  /// Adds the branch to, or takes it off, the merge queue.
-  fn queue(&self, full_name: &str, branch: &str, action: QueueAction) -> Result<(), ApiError>;
+pub trait WorkspaceActionsHost: GithubHost + CodeHost + WorkspaceDialogHost {
   fn delete_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
   fn archive_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
 }
 
 impl WorkspaceActionsHost for Backend {
-  fn queue(&self, full_name: &str, branch: &str, action: QueueAction) -> Result<(), ApiError> {
-    let cloud = crate::commands::cloud::owned_cloud(self.app())
-      .ok_or_else(|| ApiError::new("no_account", "The account is not available in this window."))?;
-    crate::gpui_shell::block_on(account::enqueue(&cloud.supabase, full_name, branch, action))
-  }
-
   fn delete_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
     if let Some(remote) = self.remote(repo_path) {
       return remote.delete_workspace(workspace_id);

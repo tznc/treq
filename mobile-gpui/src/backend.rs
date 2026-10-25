@@ -204,6 +204,11 @@ pub fn spawn<T: Send + 'static>(
 
 /// Runs `future` on the backend runtime without waiting for it.
 pub fn spawn_detached(future: impl Future<Output = ()> + Send + 'static) {
+  // Measurement tests render views without a backend.
+  #[cfg(test)]
+  if try_get().is_none() {
+    return;
+  }
   get().runtime.spawn(future);
 }
 

@@ -28,8 +28,6 @@ pub const DEFAULT_ZOOM: u32 = 100;
 pub const ZOOM_STEP: u32 = 5;
 pub const MIN_ZOOM: u32 = 50;
 pub const MAX_ZOOM: u32 = 200;
-/// `MERGE_QUEUE_HISTORY_PAGE_SIZE`.
-pub const HISTORY_PAGE: usize = 5;
 /// `useGpuiTerminalPane`'s `KEPT`.
 const KEPT_COMMANDS: usize = 20;
 
@@ -432,13 +430,13 @@ pub struct Model {
   /// The terminal pane's commands (`GpuiTerminalCommand`), newest last.
   pub commands: Vec<Value>,
   pub nonce: u64,
-  /// The Merge Queue tab's history toggle and page.
-  pub show_merged: bool,
-  pub history_limit: usize,
   /// A workspace to select once it is listed.
   pub pending_select: Option<PendingSelect>,
   /// The remote dialogs, endpoint and repository.
   pub remote: Remote,
+  /// The catalog skill a `treq://skill/install` link asked to install,
+  /// until Settings' confirmation is answered.
+  pub skill_install: Option<String>,
   /// The confirmation on screen, over everything else.
   pub confirm: Option<Confirm>,
 }
@@ -459,7 +457,6 @@ impl Model {
   pub fn new(repo: Option<String>) -> Self {
     Self {
       main_repo: repo.unwrap_or_default(),
-      history_limit: HISTORY_PAGE,
       ..Self::default()
     }
   }
@@ -584,6 +581,15 @@ impl Model {
         tab: "repository".into(),
       });
     }
+  }
+
+  /// A `treq://skill/install` link: Settings' Skills tab confirms it.
+  pub fn open_skill_install(&mut self, skill_id: String) {
+    self.open_settings();
+    if let Page::Settings { tab } = &mut self.page {
+      *tab = "skills".into();
+    }
+    self.skill_install = Some(skill_id);
   }
 
   /// `closeSettings`.
@@ -992,7 +998,6 @@ impl Model {
     let cutoffs = std::mem::take(&mut self.remote.cutoffs);
     *self = Self {
       prefs: self.prefs.clone(),
-      history_limit: HISTORY_PAGE,
       ..Self::default()
     };
     self.remote.cutoffs = cutoffs;
