@@ -15,7 +15,7 @@ use treq_lib::{
   jj::JjFileLines,
 };
 
-use super::{diff, files, terminal::Sessions, workspace::Target};
+use super::{code, diff, terminal::Sessions, workspace::Target};
 use crate::{
   errors, remote,
   store::SnapshotWorkspace,
@@ -33,7 +33,7 @@ const BINARY: &[&str] = &[
 ];
 
 pub fn is_binary(path: &str) -> bool {
-  let name = files::split_path(path).0;
+  let name = code::split_path(path).0;
   name
     .rsplit_once('.')
     .is_some_and(|(_, ext)| BINARY.contains(&ext.to_ascii_lowercase().as_str()))
@@ -46,7 +46,7 @@ pub fn open(
   sessions: WeakEntity<Sessions>,
   cx: &mut App,
 ) {
-  let title = files::split_path(&path).0.to_string();
+  let title = code::split_path(&path).0.to_string();
   let location = Location {
     repo: Some(target.repo.clone()),
     workspace: Some(SnapshotWorkspace {
@@ -271,7 +271,7 @@ impl Render for FileScreen {
                   .gap_1()
                   .child(widgets::muted(self.path.clone(), cx))
                   .when_some(
-                    self.status.as_deref().and_then(files::status_label),
+                    self.status.as_deref().and_then(code::status_label),
                     |head, label| head.child(widgets::muted(label, cx)),
                   )
                   .when(self.selection.is_none() && !self.lines.is_empty(), |head| {

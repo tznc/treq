@@ -1,4 +1,4 @@
-//! The workspace's files, for its Files tab: one folder at a time, or the
+//! The workspace's files, for its Code tab: one folder at a time, or the
 //! files whose path matches a search.
 
 use std::time::Duration;
@@ -22,7 +22,7 @@ use crate::{
 /// How long typing pauses before a search goes to the host.
 const SEARCH_DELAY: Duration = Duration::from_millis(250);
 
-pub struct FilesView {
+pub struct CodeView {
   target: Target,
   sessions: WeakEntity<Sessions>,
   /// The folder shown, relative to the workspace; empty at its root.
@@ -67,7 +67,7 @@ pub fn status_label(status: &str) -> Option<&'static str> {
   }
 }
 
-impl FilesView {
+impl CodeView {
   pub fn new(
     target: Target,
     sessions: WeakEntity<Sessions>,
@@ -294,7 +294,7 @@ impl FilesView {
   }
 }
 
-impl Render for FilesView {
+impl Render for CodeView {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let searching = !self.query_text(cx).is_empty();
     let location = if self.dir.is_empty() {
@@ -307,7 +307,7 @@ impl Render for FilesView {
       )
     };
     div()
-      .id("files")
+      .id("code")
       .size_full()
       .overflow_y_scroll()
       .track_scroll(&self.scroll)

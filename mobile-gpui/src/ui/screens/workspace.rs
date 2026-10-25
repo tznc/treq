@@ -1,5 +1,5 @@
 //! One workspace: its branch and status over four tabs (Terminals,
-//! Changes, Commits, Files), with the workspace's actions in the ⋯ menu and a
+//! Changes, Commits, Code), with the workspace's actions in the ⋯ menu and a
 //! switcher to its siblings on the title.
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
@@ -32,10 +32,9 @@ use treq_ui::{
 };
 
 use super::{
+  code::CodeView,
   commits::{self, CommitsScreen},
-  conflicts, diff,
-  files::FilesView,
-  mutation_message, on_epoch,
+  conflicts, diff, mutation_message, on_epoch,
   terminal::Sessions,
   workspaces,
 };
@@ -114,10 +113,10 @@ enum View {
   Terminals,
   Changes,
   Commits,
-  Files,
+  Code,
 }
 
-const VIEWS: [View; 4] = [View::Terminals, View::Changes, View::Commits, View::Files];
+const VIEWS: [View; 4] = [View::Terminals, View::Changes, View::Commits, View::Code];
 
 #[derive(Deserialize)]
 struct ChangeMarker {
@@ -195,8 +194,8 @@ pub struct WorkspaceScreen {
   sessions: Entity<Sessions>,
   /// Made when the Commits tab is first shown.
   commits: Option<Entity<CommitsScreen>>,
-  /// Made when the Files tab is first shown.
-  files: Option<Entity<FilesView>>,
+  /// Made when the Code tab is first shown.
+  code: Option<Entity<CodeView>>,
   commit_message: Entity<InputState>,
   /// The action running from this screen, by name.
   busy: Option<&'static str>,
@@ -262,7 +261,7 @@ impl WorkspaceScreen {
       marker: None,
       sessions,
       commits: None,
-      files: None,
+      code: None,
       commit_message: cx.new(|cx| InputState::new(window, cx).placeholder("Commit message")),
       busy: None,
       message: None,
@@ -318,8 +317,8 @@ impl WorkspaceScreen {
       if let Some(commits) = &self.commits {
         commits.update(cx, |commits, cx| commits.reload(cx));
       }
-      if let Some(files) = &self.files {
-        files.update(cx, |files, cx| files.reload(cx));
+      if let Some(code) = &self.code {
+        code.update(cx, |code, cx| code.reload(cx));
       }
     }
   }
@@ -355,9 +354,9 @@ impl WorkspaceScreen {
       let target = self.target.clone();
       self.commits = Some(cx.new(|cx| CommitsScreen::new(target, cx)));
     }
-    if view == View::Files && self.files.is_none() {
+    if view == View::Code && self.code.is_none() {
       let (target, sessions) = (self.target.clone(), self.sessions.downgrade());
-      self.files = Some(cx.new(|cx| FilesView::new(target, sessions, window, cx)));
+      self.code = Some(cx.new(|cx| CodeView::new(target, sessions, window, cx)));
     }
     cx.notify();
   }
@@ -763,7 +762,7 @@ impl WorkspaceScreen {
           }
         })
         .tab(counted(Tab::new("tab-commits", "Commits"), ahead))
-        .tab(Tab::new("tab-files", "Files"))
+        .tab(Tab::new("tab-code", "Code"))
         .selected(VIEWS.iter().position(|v| *v == view).unwrap_or(0))
         .on_select(move |ix, window, cx| {
           this
@@ -891,8 +890,8 @@ impl Render for WorkspaceScreen {
         Some(commits) => commits.clone().into_any_element(),
         None => div().into_any_element(),
       },
-      View::Files => match &self.files {
-        Some(files) => files.clone().into_any_element(),
+      View::Code => match &self.code {
+        Some(code) => code.clone().into_any_element(),
         None => div().into_any_element(),
       },
     };
