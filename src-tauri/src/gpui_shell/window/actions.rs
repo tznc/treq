@@ -281,6 +281,7 @@ impl Model {
       "filePicker.close" => self.dialogs.file_picker = false,
       // Pages.
       "settings.close" => self.close_settings(),
+      "skills.installRequest.close" => self.skill_install = None,
       "linear.openSettings" => {
         self.open_settings();
         if let Page::Settings { tab } = &mut self.page {
@@ -501,6 +502,19 @@ impl Model {
         "includeSubItems": value["includeSubissues"].as_bool().unwrap_or(false),
         "subItemIds": value.get("sub_issue_ids").cloned().unwrap_or_else(|| json!([])),
       })),
+      // Customizing a skill edits its copy in the home repository.
+      "skills.startAgent" => {
+        self.page = Page::Workspace;
+        return with(Effect::StartAgent {
+          repo_path: repo,
+          workspace_id: None,
+          agent: None,
+          prompt: value["prompt"].as_str().map(str::to_string),
+          mode: None,
+          name: Some("Customize skill".into()),
+          select: true,
+        });
+      }
       // A review of text not tied to a workspace runs in the home repository.
       "linear.startReview" | "prReview.startAgentReview" => {
         return with(Effect::StartAgent {
@@ -1088,6 +1102,46 @@ mod tests {
     );
     model.screen_action(&press("settings.close"), &data);
     assert!(matches!(model.page, Page::Linear));
+  }
+
+  #[test]
+  fn skill_link_opens_the_skills_tab_until_answered() {
+    let (mut model, data) = (model(), data());
+    model.sidebar_action(&SidebarAction::OpenGithub, &data);
+    model.open_skill_install("anthropic/pdf".into());
+    assert_eq!(
+      model.page,
+      Page::Settings {
+        tab: "skills".into()
+      }
+    );
+    assert_eq!(model.skill_install.as_deref(), Some("anthropic/pdf"));
+    model.screen_action(&press("skills.installRequest.close"), &data);
+    assert_eq!(model.skill_install, None);
+    model.screen_action(&press("settings.close"), &data);
+    assert!(matches!(model.page, Page::Github(_)));
+  }
+
+  #[test]
+  fn skill_customize_starts_an_agent_in_the_home_repository() {
+    let (mut model, data) = (model(), data());
+    model.open_settings();
+    let effects = model
+      .screen_action(
+        &field("skills.startAgent", json!({"prompt": "Edit the skill"})),
+        &data,
+      )
+      .unwrap_or_default();
+    assert_eq!(model.page, Page::Workspace);
+    assert!(effects.iter().any(|effect| matches!(
+      effect,
+      Effect::StartAgent {
+        workspace_id: None,
+        prompt: Some(prompt),
+        select: true,
+        ..
+      } if prompt == "Edit the skill"
+    )));
   }
 
   #[test]

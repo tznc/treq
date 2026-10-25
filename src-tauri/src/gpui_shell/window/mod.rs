@@ -32,8 +32,8 @@ pub(super) use host::WindowHost;
 pub(super) use keys::{from_app, window_shortcut};
 pub(super) use shell::{
   answer, cutoff_cleared, follow_appearance, forget, instance_state, listen, managed_endpoint,
-  menu_event, native_event, overlay_action, routed, screen_action, shortcut, sidebar_action, start,
-  window_focused, workspace, workspace_route,
+  menu_event, native_event, overlay_action, routed, screen_action, shortcut, sidebar_action,
+  skill_install_link, start, window_focused, workspace, workspace_route,
 };
 
 #[cfg(test)]
