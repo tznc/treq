@@ -20,7 +20,7 @@ use gpui_kit::component::input::{
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, list, prelude::*, px, Context, Entity, FocusHandle, KeyDownEvent, ListOffset,
-  ListSizingBehavior, SharedString, Subscription, Task, Window,
+  ListSizingBehavior, ScrollHandle, SharedString, Subscription, Task, Window,
 };
 
 use super::{
@@ -107,6 +107,11 @@ pub(super) enum Body {
 /// `BranchSwitcher`'s groups.
 const BRANCH_GROUPS: [&str; 3] = ["Current Branch", "Local Branches", "Remote Branches"];
 
+/// Up to this many rows the list draws them all in a scrolled column, so
+/// every row (the palette's commands, a short branch list) can be found and
+/// clicked; beyond it only the rows on screen are drawn.
+const ALL_ROWS_UP_TO: usize = 60;
+
 /// What the list shows for the body and search, which hovering and
 /// selecting leave as they are.
 struct Listing {
@@ -136,8 +141,11 @@ pub struct Overlay {
   /// The selected entry (cmdk's `value`), as an index into [`Self::entries`].
   pub(super) selected: Option<usize>,
   pub(super) body: Body,
-  /// The list's rows, of which only those on screen are drawn.
+  /// The list's rows, of which only those on screen are drawn once there
+  /// are more than [`ALL_ROWS_UP_TO`].
   items: Rows<Item>,
+  /// Scrolls the column that holds every row of a short list.
+  scroll: ScrollHandle,
   /// Set when the rows no longer stand for the same entries, so none keeps
   /// the height it measured.
   items_changed: bool,
@@ -183,6 +191,7 @@ impl Overlay {
       selected: None,
       body,
       items: Rows::default(),
+      scroll: ScrollHandle::new(),
       items_changed: false,
       rows: Vec::new(),
       listing: None,
@@ -417,6 +426,7 @@ impl Overlay {
         item_ix: 0,
         offset_in_item: px(0.),
       });
+      self.scroll.set_offset(gpui::point(px(0.), px(0.)));
       cx.notify();
     }
   }
@@ -428,7 +438,11 @@ impl Overlay {
     if next != self.selected {
       self.selected = next;
       if let Some(&(_, item)) = next.and_then(|n| self.rows.iter().find(|(e, _)| *e == n)) {
-        self.items.list.scroll_to_reveal_item(item);
+        if self.items.len() <= ALL_ROWS_UP_TO {
+          self.scroll.scroll_to_item(item);
+        } else {
+          self.items.list.scroll_to_reveal_item(item);
+        }
       }
       cx.notify();
     }
@@ -833,9 +847,9 @@ impl Overlay {
     children
   }
 
-  /// The `Command.List`'s rows and group headings, as a virtual list that
-  /// draws only those on screen.
-  fn list(&mut self, window: &Window, cx: &mut Context<Self>) -> gpui::List {
+  /// The `Command.List`'s rows and group headings: all of them for a short
+  /// list, or a virtual list that draws only those on screen.
+  fn list(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<gpui::List> {
     let listing = self.listing();
     let mut items = Vec::new();
     self.rows.clear();
@@ -856,11 +870,13 @@ impl Overlay {
     }
     let changed = std::mem::take(&mut self.items_changed);
     self.items.sync(window, items, |a, b| !changed && a == b);
-    list(
-      self.items.list.clone(),
-      cx.processor(|this, ix, _, cx| this.item(ix, cx)),
-    )
-    .with_sizing_behavior(ListSizingBehavior::Infer)
+    (self.items.len() > ALL_ROWS_UP_TO).then(|| {
+      list(
+        self.items.list.clone(),
+        cx.processor(|this, ix, _, cx| this.item(ix, cx)),
+      )
+      .with_sizing_behavior(ListSizingBehavior::Infer)
+    })
   }
 
   /// The list's row `ix`.
@@ -921,6 +937,11 @@ impl Render for Overlay {
       );
       let messages = self.messages(&p);
       let list = self.list(window, cx);
+      let rows: Vec<gpui::AnyElement> = if list.is_none() {
+        (0..self.items.len()).map(|ix| self.item(ix, cx)).collect()
+      } else {
+        Vec::new()
+      };
       let (hints, right): (&[(&str, &str)], _) = match self.body {
         Body::Branches { .. } => (
           &[("↑↓", "Navigate"), ("↵", "Switch"), ("Esc", "Close")],
@@ -985,7 +1006,19 @@ impl Render for Overlay {
                 .flex_col()
                 .py_2()
                 .children(messages)
-                .child(list.flex_1().min_h_0()),
+                .map(|el| match list {
+                  Some(list) => el.child(list.flex_1().min_h_0()),
+                  None => el.child(
+                    div()
+                      .id("overlay-rows")
+                      .flex()
+                      .flex_col()
+                      .min_h_0()
+                      .overflow_y_scroll()
+                      .track_scroll(&self.scroll)
+                      .children(rows),
+                  ),
+                }),
             )
             .child(footer(&p, hints, right)),
         )
