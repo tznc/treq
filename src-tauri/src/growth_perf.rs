@@ -315,3 +315,22 @@ fn probe_statuses() {
 fn probe_statuses_inner(repo: &str) {
   crate::core::list_workspace_statuses(repo).unwrap();
 }
+
+/// Reopening a repo with many workspaces: `core::init` (setup + rebase pass) and
+/// the reconcile every rewrite runs, on a repo left by `many_workspaces`.
+#[test]
+#[ignore]
+fn probe_init() {
+  let repo = std::env::var("GROWTH_REPO").unwrap();
+  for round in 0..2 {
+    mark(&format!("init_{round}"));
+    let t = Instant::now();
+    crate::core::init(&repo).unwrap();
+    let a = t.elapsed().as_secs_f64() * 1e3;
+    mark(&format!("reconcile_{round}"));
+    let t = Instant::now();
+    crate::jj::reconcile_all_workspaces_after_rewrite(&repo, None).unwrap();
+    let b = t.elapsed().as_secs_f64() * 1e3;
+    eprintln!("round {round}: core::init {a:.0} ms, reconcile_all_workspaces_after_rewrite {b:.0} ms");
+  }
+}
