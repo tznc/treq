@@ -147,7 +147,6 @@ mod tests {
     PrInfo {
       number: 7,
       title: "Feature".into(),
-      body: String::new(),
       state: state.into(),
       url: String::new(),
       head_ref_name: "feature".into(),

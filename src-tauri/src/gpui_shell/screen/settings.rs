@@ -170,7 +170,7 @@ pub const LABEL_APP_WIDE: &str = "App-wide";
 pub const LABEL_REPOSITORY: &str = "Repository";
 pub const LABEL_CUSTOM_REPO: &str = "Custom · Repo";
 pub const LABEL_CUSTOM_GLOBAL: &str = "Custom · Global";
-pub const LABEL_UNCATALOGUED: &str = "Not in registry";
+pub const LABEL_UNCATALOGED: &str = "Not in registry";
 
 /// The filter chips, in order: id and label.
 const SKILL_FILTERS: [(&str, &str); 5] = [
@@ -215,7 +215,7 @@ pub struct SkillRow {
   /// The repository holds a user-owned copy that catalog updates never touch.
   pub customized: bool,
   /// Installed but no longer listed in the registry.
-  pub uncatalogued: bool,
+  pub uncataloged: bool,
   /// A user-owned skill with no registry entry: hand-written.
   pub custom: bool,
   /// Its install status: level, custom copies, registry state.
@@ -1398,7 +1398,7 @@ impl SettingsView {
               .as_ref()
               .map(|i| data::scope_value(i.scope).to_string()),
             customized,
-            uncatalogued: false,
+            uncataloged: false,
             custom: false,
             labels,
             busy: pending == Some(view.skill.id.as_str()),
@@ -1426,11 +1426,11 @@ impl SettingsView {
               proprietary: false,
               installed: Some(data::scope_value(installed.scope).to_string()),
               customized: false,
-              uncatalogued: true,
+              uncataloged: true,
               custom: false,
               labels: vec![
                 level_label(installed.scope).to_string(),
-                LABEL_UNCATALOGUED.into(),
+                LABEL_UNCATALOGED.into(),
               ],
               busy: pending == Some(installed.id.as_str()),
             });
@@ -1455,7 +1455,7 @@ impl SettingsView {
             proprietary: false,
             installed: None,
             customized: true,
-            uncatalogued: false,
+            uncataloged: false,
             custom: true,
             labels: vec![match custom.level {
               CustomSkillLevel::Repo => LABEL_CUSTOM_REPO.into(),
@@ -2501,7 +2501,7 @@ impl SettingsView {
     p: &Palette,
   ) -> gpui::Div {
     let id = &row.id;
-    let customise = (!row.uncatalogued && (row.custom || level.is_some())).then(|| {
+    let customise = (!row.uncataloged && (row.custom || level.is_some())).then(|| {
       Button::new(format!("skill-customize-{id}"), p)
         .variant(Variant::Outline)
         .size(Size::Sm)

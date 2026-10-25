@@ -42,7 +42,7 @@ struct FakeHost {
   /// The skill registry, as `skill_catalog` returns it.
   skills: Vec<crate::core::skills::SkillCatalogSkillView>,
   /// Installed skills the registry no longer lists.
-  uncatalogued: Vec<crate::core::skills::InstalledSkill>,
+  uncataloged: Vec<crate::core::skills::InstalledSkill>,
   /// User-owned skills in the repository and the home folder.
   custom: Vec<crate::core::skills::CustomSkill>,
   /// What the workspace header reads.
@@ -399,7 +399,7 @@ impl settings_data::SettingsHost for FakeHost {
         .skills
         .iter()
         .filter_map(|s| s.installed.clone())
-        .chain(self.uncatalogued.iter().cloned())
+        .chain(self.uncataloged.iter().cloned())
         .collect(),
     )
   }
@@ -3011,7 +3011,7 @@ fn skills_status_harness(cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
       skill("xlsx", "Excel", Some("repository")),
       pptx,
     ],
-    uncatalogued: vec![crate::core::skills::InstalledSkill {
+    uncataloged: vec![crate::core::skills::InstalledSkill {
       id: "old/gone".into(),
       name: "gone".into(),
       checksum: "abc".into(),
@@ -4088,7 +4088,6 @@ fn github_preview(state: &str, merge_state: &str, base: &str) -> merge::Preview 
       pr: crate::github::PrInfo {
         number: 7,
         title: "Feature".into(),
-        body: String::new(),
         state: state.into(),
         url: "https://github.com/o/r/pull/7".into(),
         head_ref_name: "feature".into(),
