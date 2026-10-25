@@ -33,14 +33,6 @@ use crate::{
 };
 
 /// `ISSUE_CLOSE_REASONS`.
-/// A long comment thread shows its first comment and its newest ones, with
-/// the rest behind "Show N earlier comments".
-const FOLDED_KEEP_FIRST: usize = 1;
-const FOLDED_KEEP_LAST: usize = 3;
-/// A fold hides at least this many comments, so its row never stands in for
-/// a single comment.
-const FOLD_MIN_HIDDEN: usize = 2;
-
 const CLOSE_REASONS: [(&str, &str); 2] = [
   ("completed", "Close as completed"),
   ("not planned", "Close as not planned"),
@@ -370,19 +362,9 @@ impl GithubView {
     cx: &mut Context<Self>,
   ) -> Option<Div> {
     let comments = comments.as_ref().filter(|c| !c.is_empty())?;
-    // A long thread shows its first comment and the newest few; `None`
-    // stands for the fold. Folded comments are not built.
-    let folded = !self.detail.comments_expanded
-      && comments.len() >= FOLDED_KEEP_FIRST + FOLDED_KEEP_LAST + FOLD_MIN_HIDDEN;
-    let shown: Vec<Option<usize>> = if folded {
-      (0..FOLDED_KEEP_FIRST)
-        .map(Some)
-        .chain([None])
-        .chain((comments.len() - FOLDED_KEEP_LAST..comments.len()).map(Some))
-        .collect()
-    } else {
-      (0..comments.len()).map(Some).collect()
-    };
+    // `None` stands for the fold.
+    let shown =
+      crate::gpui_shell::screen::rows::thread(comments.len(), self.detail.comments_expanded);
     Some(
       div()
         .flex()
@@ -419,7 +401,7 @@ impl GithubView {
             .into_any_element()
           }
           None => {
-            let hidden = comments.len() - FOLDED_KEEP_FIRST - FOLDED_KEEP_LAST;
+            let hidden = crate::gpui_shell::screen::rows::hidden(comments.len());
             super::super::workspace_dialog::disclosure(
               "github-comments-show-earlier",
               format!("Show {hidden} earlier comments"),

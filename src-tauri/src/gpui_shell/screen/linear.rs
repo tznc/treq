@@ -177,6 +177,8 @@ pub struct LinearView {
   issue_rows: Rows<IssueRow>,
   column_rows: HashMap<String, Rows<IssueRow>>,
   comments: HashMap<Commented, Fetch<Vec<LinearComment>>>,
+  /// Comment threads whose fold is open: every comment shows.
+  comments_expanded: HashSet<Commented>,
   pub(super) projects: Fetch<Vec<LinearProject>>,
   pub(super) project_view: ProjectView,
   pub(super) project_filters: ProjectFilters,
@@ -267,6 +269,7 @@ impl LinearView {
       issue_rows: Rows::default(),
       column_rows: HashMap::new(),
       comments: HashMap::new(),
+      comments_expanded: HashSet::new(),
       projects: Fetch::default(),
       project_view: ProjectView::All,
       project_filters: ProjectFilters::default(),
@@ -553,7 +556,7 @@ impl LinearView {
         self.issue_view = IssueView::All;
         self.issue_filters = IssueFilters::default();
         self.open_issue = None;
-    self.load_issues_unless_fresh(cx);
+        self.load_issues_unless_fresh(cx);
       }
       Section::Projects => {
         self.project_view = ProjectView::All;
@@ -2360,9 +2363,31 @@ impl LinearView {
               )
             })
             .children(
-              unanchored
-                .iter()
-                .map(|c| self.comment_card(&of, &open, c, true, p, cx)),
+              // A long thread shows its first comment and the newest few.
+              super::rows::thread(unanchored.len(), self.comments_expanded.contains(&of))
+                .into_iter()
+                .map(|ix| match ix {
+                  Some(ix) => self
+                    .comment_card(&of, &open, unanchored[ix], true, p, cx)
+                    .into_any_element(),
+                  None => {
+                    let of = of.clone();
+                    super::workspace_dialog::disclosure(
+                      "linear-comments-show-earlier",
+                      format!(
+                        "Show {} earlier comments",
+                        super::rows::hidden(unanchored.len())
+                      ),
+                      false,
+                      p,
+                      cx.listener(move |view, _, _, cx| {
+                        view.comments_expanded.insert(of.clone());
+                        cx.notify();
+                      }),
+                    )
+                    .into_any_element()
+                  }
+                }),
             )
         })
     });

@@ -589,6 +589,30 @@ fn linear_document_comments_show_at_the_paragraph_they_quote(cx: &mut TestAppCon
   // The quoting comment sits in the text, above the comments under it.
   assert!(quoted.bottom() <= column.top(), "{quoted:?} {column:?}");
   assert!(column.contains(&unquoted.center()));
+}
+
+#[gpui::test]
+fn linear_long_comment_thread_folds_the_middle_and_expands_in_place(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.linear.comments = (0..8)
+    .map(|i| ("1".to_string(), comment(&format!("c{i}"), None)))
+    .collect();
+  let (mut h, _) = linear_harness(cx, host);
+  h.click("linear-issue-1");
+  h.cx.run_until_parked();
+  let shown = |h: &mut Harness| -> Vec<usize> {
+    (0..8)
+      .filter(|i| h.drawn(super::changes_large::leak(format!("linear-comment-c{i}"))))
+      .collect()
+  };
+  // The first comment and the newest three; four are behind the fold.
+  assert_eq!(shown(&mut h), [0, 5, 6, 7]);
+  assert!(h.drawn("linear-comments-show-earlier"));
+  h.click("linear-comments-show-earlier");
+  h.cx.run_until_parked();
+  assert_eq!(shown(&mut h), (0..8).collect::<Vec<_>>());
+  assert!(!h.drawn("linear-comments-show-earlier"));
+}
 
 /// Round 7 `integrations-scale` measurements. Run with `cargo test
 /// --features gpui-shell --lib lin_scale -- --ignored --nocapture
