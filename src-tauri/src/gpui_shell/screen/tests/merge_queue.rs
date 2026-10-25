@@ -237,3 +237,26 @@ fn merge_queue_waits_for_the_queue(cx: &mut TestAppContext) {
   assert!(!h.drawn("merge-queue-list"));
   assert!(!h.drawn("merge-queue-target"));
 }
+
+#[gpui::test]
+fn merge_queue_reads_only_the_history_it_shows(cx: &mut TestAppContext) {
+  let merged: Vec<_> = (1..=40)
+    .map(|i| entry(&format!("done{i}"), "main", i, "merged"))
+    .collect();
+  let (mut h, host) = open(
+    cx,
+    queue_host(),
+    merged.clone(),
+    serde_json::json!({"showMergedHistory": true}),
+  );
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(2000.)));
+  let reads = |host: &FakeHost| host.queue_history.lock().unwrap().clone();
+  // The page shown plus the slack, not the 40 merged entries there are.
+  assert_eq!(reads(&host), [25]);
+  assert!(h.drawn("merge-queue-single-done40"));
+  assert!(h.drawn("merge-queue-load-more"));
+
+  let (_, host) = open(cx, queue_host(), merged, serde_json::json!({}));
+  assert_eq!(reads(&host), [20]);
+}

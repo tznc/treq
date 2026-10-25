@@ -76,16 +76,19 @@ pub struct QueueEntry {
   pub deletions: Option<u32>,
 }
 
-/// The repository's merge queue, by position then branch name.
+/// The repository's merge queue, by position then branch name: every queued
+/// entry, and the newest `history_limit` merged ones (all of them for `None`).
 pub async fn queue_entries(
   supabase: &Supabase,
   full_name: &str,
+  history_limit: Option<usize>,
 ) -> Result<Vec<QueueEntry>, ApiError> {
+  let body = match history_limit {
+    Some(limit) => json!({ "p_repo_full_name": full_name, "p_history_limit": limit }),
+    None => json!({ "p_repo_full_name": full_name }),
+  };
   let entries: Option<Vec<QueueEntry>> = supabase
-    .rpc(
-      "get_repo_branch_queue_statuses",
-      &json!({ "p_repo_full_name": full_name }),
-    )
+    .rpc("get_repo_branch_queue_statuses", &body)
     .await?;
   let mut entries = entries.unwrap_or_default();
   entries.sort_by(|a, b| {
@@ -191,7 +194,7 @@ mod tests {
       .mount(&server)
       .await;
     let (supabase, _) = client(&server.uri());
-    let branches: Vec<_> = queue_entries(&supabase, "o/r")
+    let branches: Vec<_> = queue_entries(&supabase, "o/r", None)
       .await
       .unwrap()
       .into_iter()
@@ -199,6 +202,46 @@ mod tests {
       .collect();
     assert_eq!(branches, ["z", "a", "b"]);
     assert!(queue_enabled(&supabase, "o/r").await.unwrap());
+  }
+
+  #[tokio::test]
+  async fn the_history_limit_is_sent_only_when_given_and_gzip_is_decoded() {
+    use std::io::Write;
+    let server = MockServer::start().await;
+    let rows = json!([{
+      "branch_name": "a", "pr_number": 1, "status": "merged", "position": 1,
+      "target_branch": "main"
+    }]);
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gz.write_all(&serde_json::to_vec(&rows).unwrap()).unwrap();
+    Mock::given(method("POST"))
+      .and(path("/rest/v1/rpc/get_repo_branch_queue_statuses"))
+      .and(body_json(
+        json!({"p_repo_full_name": "o/r", "p_history_limit": 25}),
+      ))
+      .and(wiremock::matchers::header_regex("accept-encoding", "gzip"))
+      .respond_with(
+        ResponseTemplate::new(200)
+          .insert_header("content-encoding", "gzip")
+          .set_body_raw(gz.finish().unwrap(), "application/json"),
+      )
+      .expect(1)
+      .mount(&server)
+      .await;
+    Mock::given(method("POST"))
+      .and(path("/rest/v1/rpc/get_repo_branch_queue_statuses"))
+      .and(body_json(json!({"p_repo_full_name": "o/r"})))
+      .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let (supabase, _) = client(&server.uri());
+    let limited = queue_entries(&supabase, "o/r", Some(25)).await.unwrap();
+    assert_eq!(limited.len(), 1);
+    assert!(queue_entries(&supabase, "o/r", None)
+      .await
+      .unwrap()
+      .is_empty());
   }
 
   #[tokio::test]
