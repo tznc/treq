@@ -1,5 +1,6 @@
 //! The workspace's files, for its Code tab: one folder at a time, or the
-//! files whose path matches a search.
+//! files whose path matches a search. Comments left in the file viewer
+//! batch into the tab's review, sent from the bar at its bottom.
 
 use std::time::Duration;
 
@@ -11,12 +12,18 @@ use gpui_kit::{
   },
   *,
 };
-use treq_lib::core::remote::{RemoteFileEntry, RemoteFileSearchResult, TreqCommandRequest};
+use treq_lib::core::remote::{
+  RemoteFileEntry, RemoteFileSearchResult, ReviewScope, TreqCommandRequest,
+};
 
 use super::{file, terminal::Sessions, workspace::Target};
 use crate::{
   errors, remote,
-  ui::{load, widgets, Load},
+  ui::{
+    load,
+    review::{self, Handler, Review},
+    widgets, Load,
+  },
 };
 
 /// How long typing pauses before a search goes to the host.
@@ -24,7 +31,11 @@ const SEARCH_DELAY: Duration = Duration::from_millis(250);
 
 pub struct CodeView {
   target: Target,
-  sessions: WeakEntity<Sessions>,
+  sessions: Entity<Sessions>,
+  /// The review written in the file viewer, kept apart from Changes'.
+  review: Entity<Review>,
+  /// Switches the workspace to its Changes tab.
+  show_changes: Handler,
   /// The folder shown, relative to the workspace; empty at its root.
   dir: String,
   listing: Load<Vec<RemoteFileEntry>>,
@@ -57,6 +68,20 @@ fn parent_dir(dir: &str) -> String {
   split_path(dir).1.to_string()
 }
 
+/// A row's second line: its status, then its comments in the review.
+fn row_detail(status: Option<&str>, comments: usize) -> Option<SharedString> {
+  let comments = (comments > 0).then(|| match comments {
+    1 => "1 comment".to_string(),
+    n => format!("{n} comments"),
+  });
+  match (status, comments) {
+    (Some(s), Some(c)) => Some(format!("{s} · {c}").into()),
+    (Some(s), None) => Some(s.into()),
+    (None, Some(c)) => Some(c.into()),
+    (None, None) => None,
+  }
+}
+
 /// What a file's status says on its row.
 pub fn status_label(status: &str) -> Option<&'static str> {
   match status {
@@ -70,7 +95,8 @@ pub fn status_label(status: &str) -> Option<&'static str> {
 impl CodeView {
   pub fn new(
     target: Target,
-    sessions: WeakEntity<Sessions>,
+    sessions: Entity<Sessions>,
+    show_changes: Handler,
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Self {
@@ -81,10 +107,14 @@ impl CodeView {
       }
     })
     .detach();
+    let review = cx.new(|cx| Review::new(target.clone(), ReviewScope::Files, cx));
+    cx.observe(&review, |_, _, cx| cx.notify()).detach();
     let listing = remote::last(&list_request(&target, "")).map_or(Load::Idle, Load::Ready);
     let mut this = Self {
       target,
       sessions,
+      review,
+      show_changes,
       dir: String::new(),
       listing,
       query,
@@ -129,7 +159,17 @@ impl CodeView {
   }
 
   fn open_file(&self, path: String, status: Option<String>, cx: &mut Context<Self>) {
-    file::open(self.target.clone(), path, status, self.sessions.clone(), cx);
+    file::open(
+      file::Opened {
+        target: self.target.clone(),
+        path,
+        status,
+        sessions: self.sessions.clone(),
+        review: self.review.clone(),
+        show_changes: self.show_changes.clone(),
+      },
+      cx,
+    );
   }
 
   fn query_text(&self, cx: &App) -> String {
@@ -227,10 +267,12 @@ impl CodeView {
           IconName::File
         })
         .into_any_element();
-      let detail = status
-        .as_deref()
-        .and_then(status_label)
-        .map(SharedString::from);
+      let comments = if entry.is_directory {
+        0
+      } else {
+        self.review.read(cx).count_for(&entry.path)
+      };
+      let detail = row_detail(status.as_deref().and_then(status_label), comments);
       let path = entry.path.clone();
       let is_directory = entry.is_directory;
       widgets::row_full(
@@ -306,31 +348,38 @@ impl Render for CodeView {
         self.dir.replace('/', " / ")
       )
     };
-    div()
-      .id("code")
+    let bar = review::bar(&self.review, &self.sessions, cx);
+    v_flex()
       .size_full()
-      .overflow_y_scroll()
-      .track_scroll(&self.scroll)
       .child(
-        widgets::page()
-          .gap_3()
-          .child(Input::new(&self.query).large().cleanable(true))
-          .child(if searching {
-            v_flex()
-              .gap_2()
-              .child(widgets::section("Matching files", cx))
-              .child(self.matches(cx))
-          } else {
-            v_flex()
-              .gap_2()
-              .child(
-                widgets::mono(location, cx)
-                  .text_color(cx.theme().muted_foreground)
-                  .truncate(),
-              )
-              .child(self.folder(cx))
-          }),
+        div()
+          .id("code")
+          .flex_1()
+          .min_h_0()
+          .overflow_y_scroll()
+          .track_scroll(&self.scroll)
+          .child(
+            widgets::page()
+              .gap_3()
+              .child(Input::new(&self.query).large().cleanable(true))
+              .child(if searching {
+                v_flex()
+                  .gap_2()
+                  .child(widgets::section("Matching files", cx))
+                  .child(self.matches(cx))
+              } else {
+                v_flex()
+                  .gap_2()
+                  .child(
+                    widgets::mono(location, cx)
+                      .text_color(cx.theme().muted_foreground)
+                      .truncate(),
+                  )
+                  .child(self.folder(cx))
+              }),
+          ),
       )
+      .children(bar)
   }
 }
 
@@ -344,5 +393,16 @@ mod tests {
     assert_eq!(split_path("README.md"), ("README.md", ""));
     assert_eq!(parent_dir("src/ui"), "src");
     assert_eq!(parent_dir("src"), "");
+  }
+
+  #[core::prelude::v1::test]
+  fn rows_add_their_comment_count_to_the_status() {
+    assert_eq!(row_detail(None, 0), None);
+    assert_eq!(row_detail(Some("Conflicted"), 0), Some("Conflicted".into()));
+    assert_eq!(row_detail(None, 1), Some("1 comment".into()));
+    assert_eq!(
+      row_detail(Some("Uncommitted changes"), 3),
+      Some("Uncommitted changes · 3 comments".into())
+    );
   }
 }

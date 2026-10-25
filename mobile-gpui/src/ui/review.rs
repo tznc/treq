@@ -208,7 +208,6 @@ pub const FILE_LINES: &str = "browser";
 
 /// The comment box for lines `start..=end` of file `path`, whose text is
 /// `lines`, in a viewer with no diff.
-#[allow(dead_code, reason = "the file viewer comments through it")]
 pub fn lines_pending(path: &str, start: u32, end: u32, lines: Vec<String>) -> Pending {
   Pending {
     file_path: path.into(),

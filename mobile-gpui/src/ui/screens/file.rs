@@ -1,25 +1,31 @@
 //! One file of the workspace, read-only with line numbers. Tapping lines
-//! selects them, and "Ask agent" starts an agent with the file (and the
-//! selected lines) named in its first message.
+//! selects them for a comment; comments show under their last line and
+//! batch into the Code tab's review, sent to an agent from the bar at the
+//! bottom, as in desktop's file browser.
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
     button::{Button, ButtonVariants},
-    h_flex, v_flex, ActiveTheme, IconName, Sizable,
+    h_flex, v_flex, ActiveTheme, Sizable,
   },
   *,
 };
+use std::rc::Rc;
 use treq_lib::{
   core::remote::{FileRevision, TreqCommandRequest},
   jj::JjFileLines,
 };
 
-use super::{code, diff, terminal::Sessions, workspace::Target};
+use super::{code, terminal::Sessions, workspace::Target};
 use crate::{
   errors, remote,
   store::SnapshotWorkspace,
-  ui::{load, nav, widgets, Location},
+  ui::{
+    load, nav,
+    review::{self, Handler, Review, FILE_LINES},
+    widgets, Location,
+  },
 };
 
 /// Lines read per request; a full page means there may be more.
@@ -39,23 +45,27 @@ pub fn is_binary(path: &str) -> bool {
     .is_some_and(|(_, ext)| BINARY.contains(&ext.to_ascii_lowercase().as_str()))
 }
 
-pub fn open(
-  target: Target,
-  path: String,
-  status: Option<String>,
-  sessions: WeakEntity<Sessions>,
-  cx: &mut App,
-) {
-  let title = code::split_path(&path).0.to_string();
+/// What the file viewer opens with.
+pub struct Opened {
+  pub target: Target,
+  pub path: String,
+  pub status: Option<String>,
+  pub sessions: Entity<Sessions>,
+  pub review: Entity<Review>,
+  pub show_changes: Handler,
+}
+
+pub fn open(opened: Opened, cx: &mut App) {
+  let title = code::split_path(&opened.path).0.to_string();
   let location = Location {
-    repo: Some(target.repo.clone()),
+    repo: Some(opened.target.repo.clone()),
     workspace: Some(SnapshotWorkspace {
-      id: target.id.clone(),
-      name: target.name.clone(),
+      id: opened.target.id.clone(),
+      name: opened.target.name.clone(),
     }),
   };
   nav::push(title, location, cx, move |_, cx| {
-    cx.new(|cx| FileScreen::new(target, path, status, sessions, cx))
+    cx.new(|cx| FileScreen::new(opened, cx))
   });
 }
 
@@ -70,20 +80,8 @@ pub fn tap_line(selection: Option<(usize, usize)>, line: usize) -> Option<(usize
   }
 }
 
-/// The first message an agent asked about `path` starts with.
-pub fn agent_prompt(path: &str, selection: Option<(usize, usize)>) -> String {
-  match selection {
-    Some((a, b)) if a == b => format!("In {path} line {a}: "),
-    Some((a, b)) => format!("In {path} lines {a}-{b}: "),
-    None => format!("In {path}: "),
-  }
-}
-
 pub struct FileScreen {
-  target: Target,
-  path: String,
-  status: Option<String>,
-  sessions: WeakEntity<Sessions>,
+  opened: Opened,
   lines: Vec<String>,
   /// The first line not read yet, when the last page came back full.
   more_from: Option<usize>,
@@ -94,19 +92,11 @@ pub struct FileScreen {
 }
 
 impl FileScreen {
-  fn new(
-    target: Target,
-    path: String,
-    status: Option<String>,
-    sessions: WeakEntity<Sessions>,
-    cx: &mut Context<Self>,
-  ) -> Self {
-    let binary = is_binary(&path);
+  fn new(opened: Opened, cx: &mut Context<Self>) -> Self {
+    cx.observe(&opened.review, |_, _, cx| cx.notify()).detach();
+    let binary = is_binary(&opened.path);
     let mut this = Self {
-      target,
-      path,
-      status,
-      sessions,
+      opened,
       lines: Vec::new(),
       more_from: None,
       loading: false,
@@ -120,6 +110,10 @@ impl FileScreen {
     this
   }
 
+  fn path(&self) -> &str {
+    &self.opened.path
+  }
+
   fn read_from(&mut self, start: usize, cx: &mut Context<Self>) {
     if self.loading {
       return;
@@ -127,9 +121,9 @@ impl FileScreen {
     self.loading = true;
     self.error = None;
     let request = TreqCommandRequest::ReadFile {
-      repo: self.target.repo.clone(),
-      workspace: Some(self.target.id.clone()),
-      path: self.path.clone(),
+      repo: self.opened.target.repo.clone(),
+      workspace: Some(self.opened.target.id.clone()),
+      path: self.opened.path.clone(),
       revision: FileRevision::WorkingCopy,
       start_line: Some(start),
       end_line: Some(start + PAGE - 1),
@@ -151,12 +145,16 @@ impl FileScreen {
     );
   }
 
-  fn ask_agent(&mut self, cx: &mut Context<Self>) {
-    let prompt = agent_prompt(&self.path, self.selection);
-    self
-      .sessions
-      .update(cx, |sessions, cx| sessions.new_agent_with(prompt, cx))
-      .ok();
+  /// The comment box for the selected lines, with their text.
+  fn pending(&self) -> Option<treq_lib::core::review::Pending> {
+    let (a, b) = self.selection?;
+    let lines = self.lines.get(a - 1..b.min(self.lines.len()))?.to_vec();
+    Some(review::lines_pending(
+      self.path(),
+      a as u32,
+      b as u32,
+      lines,
+    ))
   }
 
   fn line_row(&self, index: usize, line: &str, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -168,7 +166,7 @@ impl FileScreen {
     h_flex()
       .id(("line", index))
       .px_2()
-      .when(selected, |row| row.bg(theme.primary.opacity(0.15)))
+      .when(selected, |row| row.bg(review::picked_bg(cx)))
       .child(
         widgets::mono(format!("{number:>5}  "), cx).text_color(if selected {
           theme.primary
@@ -191,7 +189,7 @@ impl FileScreen {
   }
 
   fn body(&self, cx: &mut Context<Self>) -> AnyElement {
-    if is_binary(&self.path) {
+    if is_binary(self.path()) {
       return widgets::card(cx)
         .child(widgets::centered_message("Binary file, not shown.", cx))
         .into_any_element();
@@ -206,12 +204,22 @@ impl FileScreen {
         })
         .into_any_element();
     }
-    let rows: Vec<_> = self
-      .lines
+    let review = self.opened.review.clone();
+    // Comments on this file's lines, by the line they end on.
+    let comments: Vec<_> = review
+      .read(cx)
+      .comments()
       .iter()
-      .enumerate()
-      .map(|(i, line)| self.line_row(i, line, cx))
+      .filter(|c| c.file_path == self.opened.path && c.hunk_id == FILE_LINES && !c.is_file())
+      .cloned()
       .collect();
+    let mut rows: Vec<AnyElement> = Vec::new();
+    for (i, line) in self.lines.iter().enumerate() {
+      rows.push(self.line_row(i, line, cx).into_any_element());
+      for c in comments.iter().filter(|c| c.end_line as usize == i + 1) {
+        rows.push(review::comment_card(&review, c, false, cx));
+      }
+    }
     v_flex()
       .gap_3()
       .child(
@@ -243,17 +251,78 @@ impl FileScreen {
       })
       .into_any_element()
   }
+
+  fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let changed = self.opened.status.as_deref() == Some("workingCopy");
+    let show_changes = self.opened.show_changes.clone();
+    v_flex()
+      .gap_1()
+      .child(
+        h_flex()
+          .gap_2()
+          .items_center()
+          .child(
+            widgets::muted(self.opened.path.clone(), cx)
+              .flex_1()
+              .min_w_0(),
+          )
+          .when(changed, |row| {
+            row.child(
+              Button::new("view-changes")
+                .ghost()
+                .small()
+                .label("Changes")
+                .on_click(move |_, window, cx| show_changes(window, cx)),
+            )
+          })
+          .child(review::file_comment_button(
+            &self.opened.review,
+            self.path(),
+          )),
+      )
+      .when_some(
+        self.opened.status.as_deref().and_then(code::status_label),
+        |head, label| head.child(widgets::muted(label, cx)),
+      )
+      // Kept while lines are picked, so the rows don't jump under the tap.
+      .when(!self.lines.is_empty(), |head| {
+        head.child(widgets::muted(
+          "Tap a line to comment on it, or two lines for the range between.",
+          cx,
+        ))
+      })
+      .children(review::file_cards(
+        &self.opened.review,
+        self.path(),
+        None,
+        cx,
+      ))
+  }
 }
 
 impl Render for FileScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let changed = self.status.as_deref().is_some_and(|s| s == "workingCopy");
-    let ask_label = match self.selection {
-      Some((a, b)) if a == b => format!("Ask agent about line {a}"),
-      Some((a, b)) => format!("Ask agent about lines {a}–{b}"),
-      None => "Ask agent about this file".into(),
+    let footer = match self.selection {
+      Some(_) => {
+        let this = cx.weak_entity();
+        let clear: Handler = Rc::new(move |_, cx| {
+          this
+            .update(cx, |screen, cx| {
+              screen.selection = None;
+              cx.notify();
+            })
+            .ok();
+        });
+        Some(review::selection_bar(
+          &self.opened.review,
+          self.pending(),
+          false,
+          clear,
+          cx,
+        ))
+      }
+      None => review::bar(&self.opened.review, &self.opened.sessions, cx),
     };
-    let border = cx.theme().border;
     v_flex()
       .size_full()
       .child(
@@ -266,50 +335,11 @@ impl Render for FileScreen {
           .child(
             widgets::page()
               .gap_3()
-              .child(
-                v_flex()
-                  .gap_1()
-                  .child(widgets::muted(self.path.clone(), cx))
-                  .when_some(
-                    self.status.as_deref().and_then(code::status_label),
-                    |head, label| head.child(widgets::muted(label, cx)),
-                  )
-                  .when(self.selection.is_none() && !self.lines.is_empty(), |head| {
-                    head.child(widgets::muted(
-                      "Tap a line to select it, then another to select the lines between.",
-                      cx,
-                    ))
-                  }),
-              )
+              .child(self.header(cx))
               .child(self.body(cx)),
           ),
       )
-      .child(
-        h_flex()
-          .p_3()
-          .gap_2()
-          .border_t_1()
-          .border_color(border)
-          .when(changed, |bar| {
-            let (target, path) = (self.target.clone(), self.path.clone());
-            bar.child(
-              Button::new("view-changes")
-                .outline()
-                .large()
-                .label("Changes")
-                .on_click(move |_, _, cx| diff::open(target.clone(), path.clone(), cx)),
-            )
-          })
-          .child(
-            Button::new("ask-agent")
-              .primary()
-              .large()
-              .flex_1()
-              .icon(IconName::Bot)
-              .label(ask_label)
-              .on_click(cx.listener(|this, _, _, cx| this.ask_agent(cx))),
-          ),
-      )
+      .children(footer)
   }
 }
 
@@ -325,19 +355,6 @@ mod tests {
     let range = tap_line(one, 3);
     assert_eq!(range, Some((3, 7)));
     assert_eq!(tap_line(range, 10), Some((10, 10)));
-  }
-
-  #[core::prelude::v1::test]
-  fn the_prompt_names_the_file_and_lines() {
-    assert_eq!(agent_prompt("src/a.rs", None), "In src/a.rs: ");
-    assert_eq!(
-      agent_prompt("src/a.rs", Some((4, 4))),
-      "In src/a.rs line 4: "
-    );
-    assert_eq!(
-      agent_prompt("src/a.rs", Some((4, 9))),
-      "In src/a.rs lines 4-9: "
-    );
   }
 
   #[core::prelude::v1::test]

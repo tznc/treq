@@ -43,7 +43,11 @@ use crate::{
   errors,
   remote::{self, IdempotencyKeys, Mutation},
   store::SnapshotWorkspace,
-  ui::{self, load, nav, review::Review, sheet, widgets, Load, Location},
+  ui::{
+    self, load, nav,
+    review::{self, Review},
+    sheet, widgets, Load, Location,
+  },
 };
 
 /// How often the change marker is polled to notice remote edits.
@@ -392,8 +396,16 @@ impl WorkspaceScreen {
       self.commits = Some(cx.new(|cx| CommitsScreen::new(target, cx)));
     }
     if view == View::Code && self.code.is_none() {
-      let (target, sessions) = (self.target.clone(), self.sessions.downgrade());
-      self.code = Some(cx.new(|cx| CodeView::new(target, sessions, window, cx)));
+      let (target, sessions) = (self.target.clone(), self.sessions.clone());
+      let screen = cx.weak_entity();
+      // From the file viewer, above this page: back here, on Changes.
+      let show_changes: review::Handler = Rc::new(move |window, cx| {
+        nav::pop(cx);
+        screen
+          .update(cx, |screen, cx| screen.select(View::Changes, window, cx))
+          .ok();
+      });
+      self.code = Some(cx.new(|cx| CodeView::new(target, sessions, show_changes, window, cx)));
     }
     cx.notify();
   }
