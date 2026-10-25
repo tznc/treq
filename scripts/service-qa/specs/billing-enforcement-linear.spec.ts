@@ -85,20 +85,22 @@ it("requires Pro for Linear OAuth and the Linear proxy", async () => {
 
     // ── linear-proxy ──────────────────────────────────────────────────────
     // Both users hold an OAuth token, as if they connected while Pro.
-    await admin.from("linear_oauth_tokens").insert([
-      {
-        user_id: free.user.id,
-        access_token: "lin_oauth_free",
-        linear_workspace_id: "ws",
-        linear_workspace_name: "Workspace",
-      },
-      {
-        user_id: pro.user.id,
-        access_token: "lin_oauth_pro",
-        linear_workspace_id: "ws",
-        linear_workspace_name: "Workspace",
-      },
-    ]);
+    // Tokens live in Vault (032_linear_tokens_vault.sql), so they are
+    // written through linear_tokens_save.
+    for (const [userId, token] of [
+      [free.user.id, "lin_oauth_free"],
+      [pro.user.id, "lin_oauth_pro"],
+    ]) {
+      const { error } = await admin.rpc("linear_tokens_save", {
+        p_user_id: userId,
+        p_access_token: token,
+        p_refresh_token: null,
+        p_expires_at: null,
+        p_workspace_id: "ws",
+        p_workspace_name: "Workspace",
+      });
+      expect(error).toBeNull();
+    }
     const proxy = (userId: string, fetch: ReturnType<typeof stubLinear>) =>
       proxyLinearRequest(
         { query: "query { viewer { id } }" },

@@ -67,6 +67,12 @@ impl<K: PartialEq, V> Lru<K, V> {
       .map(|(_, _, value)| value)
   }
 
+  /// How long before `now` `key` was read, whatever its age.
+  pub fn age(&self, key: &K, now: Instant) -> Option<Duration> {
+    let (_, at, _) = self.entries.iter().find(|(k, _, _)| k == key)?;
+    Some(now.duration_since(*at))
+  }
+
   /// Whether `key` was read less than [`FRESH`] before `now`.
   pub fn has_fresh(&self, key: &K, now: Instant) -> bool {
     self

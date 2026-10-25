@@ -1,6 +1,6 @@
 //! The Supabase account, which Rust owns ([`crate::core::cloud`]): what the
-//! Account and Integrations tabs, the Merge Queue tab and the remote setup
-//! dialog read of it, and what they ask of it.
+//! Account and Integrations tabs and the remote setup dialog read of it,
+//! and what they ask of it.
 //!
 //! The account reaches GPUI as the [`Account`] global, set on every change
 //! (`gpui_shell::account_changed`); views observe it. Calls go through
@@ -49,6 +49,9 @@ pub trait AccountHost: Send + Sync {
   fn github_repositories(&self) -> Result<Vec<GithubRepository>, String>;
   /// Linear's OAuth page for this account.
   fn linear_oauth_url(&self) -> Result<String, ApiError>;
+  /// Deletes the account on the server, then signs out here; `Err` is the
+  /// server's reason it was not deleted.
+  fn delete_account(&self) -> Result<(), ApiError>;
   /// Starts a cloud workspace action; it reports through the account.
   fn cloud_action(&self, action: CloudAction);
 }
@@ -132,6 +135,11 @@ impl AccountHost for Backend {
   fn linear_oauth_url(&self) -> Result<String, ApiError> {
     let cloud = self.cloud().map_err(|e| ApiError::new("unavailable", e))?;
     crate::gpui_shell::block_on(account::linear_oauth_url(&cloud.supabase))
+  }
+
+  fn delete_account(&self) -> Result<(), ApiError> {
+    let cloud = self.cloud().map_err(|e| ApiError::new("unavailable", e))?;
+    crate::gpui_shell::block_on(cloud.delete_account())
   }
 
   fn cloud_action(&self, action: CloudAction) {

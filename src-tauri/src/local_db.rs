@@ -36,6 +36,15 @@ pub struct Workspace {
   pub archived: bool,
 }
 
+/// The PR values last copied into a workspace (`core::pr_sync`). A field is
+/// `None` when it does not follow the PR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrSyncRecord {
+  pub pr_number: u64,
+  pub title: Option<String>,
+  pub description: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Session {
   pub id: i64,
@@ -47,6 +56,10 @@ pub struct Session {
 }
 
 static INITIALIZED_DBS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+/// Held for a whole `init_local_db`: its migrations check for a column, then
+/// add it, so two threads migrating one file both add it and the second fails.
+static INIT_LOCK: Mutex<()> = Mutex::new(());
 
 /// Schema version stored in `PRAGMA user_version`. Bump it whenever
 /// `init_local_db` gains a table, column, index or migration so existing
@@ -252,6 +265,7 @@ fn resolve_db_path(repo_arg: &str) -> Result<PathBuf, String> {
 /// # Returns
 /// The path to the created/opened database file.
 pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
+  let _init = INIT_LOCK.lock_or_recover();
   let db_path = resolve_db_path(repo_path)?;
   if let Some(parent) = db_path.parent() {
     fs::create_dir_all(parent).map_err(|e| format!("Failed to create .treq directory: {}", e))?;
@@ -870,6 +884,19 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
 
   conn
     .execute(
+      "CREATE TABLE IF NOT EXISTS workspace_pr_sync (
+            workspace_id INTEGER PRIMARY KEY,
+            pr_number INTEGER NOT NULL,
+            title TEXT,
+            description TEXT,
+            FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+        )",
+      [],
+    )
+    .map_err(|e| format!("Failed to create workspace_pr_sync table: {}", e))?;
+
+  conn
+    .execute(
       "CREATE TABLE IF NOT EXISTS repo_trust (
             id INTEGER PRIMARY KEY,
             trusted_at TEXT NOT NULL
@@ -1451,6 +1478,73 @@ pub fn clear_workspace_description(repo_path: &str, id: i64) -> Result<(), Strin
       [id],
     )
     .map_err(|e| format!("Failed to clear workspace description: {}", e))?;
+  Ok(())
+}
+
+fn pr_sync_record(row: &Row) -> rusqlite::Result<(i64, PrSyncRecord)> {
+  Ok((
+    row.get(0)?,
+    PrSyncRecord {
+      pr_number: row.get::<_, i64>(1)? as u64,
+      title: row.get(2)?,
+      description: row.get(3)?,
+    },
+  ))
+}
+
+pub fn get_workspace_pr_sync(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<Option<PrSyncRecord>, String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .query_row(
+      "SELECT workspace_id, pr_number, title, description FROM workspace_pr_sync WHERE workspace_id = ?1",
+      [workspace_id],
+      pr_sync_record,
+    )
+    .optional()
+    .map(|row| row.map(|(_, record)| record))
+    .map_err(|e| format!("Failed to read workspace PR sync: {}", e))
+}
+
+pub fn list_workspace_pr_syncs(
+  repo_path: &str,
+) -> Result<std::collections::HashMap<i64, PrSyncRecord>, String> {
+  let conn = get_connection(repo_path)?;
+  let mut stmt = conn
+    .prepare("SELECT workspace_id, pr_number, title, description FROM workspace_pr_sync")
+    .map_err(|e| format!("Failed to list workspace PR syncs: {}", e))?;
+  let rows = stmt
+    .query_map([], pr_sync_record)
+    .map_err(|e| format!("Failed to list workspace PR syncs: {}", e))?;
+  rows
+    .collect::<rusqlite::Result<_>>()
+    .map_err(|e| format!("Failed to list workspace PR syncs: {}", e))
+}
+
+pub fn set_workspace_pr_sync(
+  repo_path: &str,
+  workspace_id: i64,
+  record: &PrSyncRecord,
+) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .execute(
+      "INSERT INTO workspace_pr_sync (workspace_id, pr_number, title, description)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(workspace_id) DO UPDATE SET
+           pr_number = excluded.pr_number,
+           title = excluded.title,
+           description = excluded.description",
+      params![
+        workspace_id,
+        record.pr_number as i64,
+        record.title,
+        record.description
+      ],
+    )
+    .map_err(|e| format!("Failed to save workspace PR sync: {}", e))?;
   Ok(())
 }
 
@@ -2919,6 +3013,39 @@ mod tests {
       .expect("open database")
       .query_row("PRAGMA user_version", [], |row| row.get(0))
       .expect("user_version")
+  }
+
+  // Windows and background tasks open a repo's db at the same time; each
+  // migration checks for its column, then adds it.
+  #[test]
+  fn concurrent_inits_of_an_old_db_all_succeed() {
+    for _ in 0..200 {
+      let temp_dir = TempDir::new().expect("Failed to create temp dir");
+      // Old enough that every init adds the missing workspaces columns.
+      let (repo_path, _) = open_legacy_db(
+        &temp_dir,
+        "CREATE TABLE workspaces (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           workspace_name TEXT NOT NULL,
+           workspace_path TEXT NOT NULL UNIQUE,
+           branch_name TEXT NOT NULL,
+           created_at TEXT NOT NULL
+         );",
+      );
+      let start = std::sync::Arc::new(std::sync::Barrier::new(16));
+      let inits: Vec<_> = (0..16)
+        .map(|_| {
+          let (repo_path, start) = (repo_path.clone(), start.clone());
+          std::thread::spawn(move || {
+            start.wait();
+            init_local_db(&repo_path)
+          })
+        })
+        .collect();
+      for init in inits {
+        init.join().unwrap().expect("concurrent init");
+      }
+    }
   }
 
   #[test]

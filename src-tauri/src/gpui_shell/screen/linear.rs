@@ -7,6 +7,9 @@
 //! resolves, deletes and applies review comments, and starts the review
 //! agent itself. React still owns the prompt dialog, so GPUI hands back an
 //! issue to kick off (`linear.kickoff`) for React to open it with.
+//!
+//! Issues are created from the toolbar's "New issue", and edited or deleted
+//! from their page.
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
@@ -29,6 +32,7 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   changes::threads::suggestion_box,
   code::markdown,
+  github::parts::busy_spinner,
   integrations_cache::cache,
   linear_data::{
     self as data, agent_count_label, comment_file, Anchor, Commented, FilterOption, IssueFilters,
@@ -41,6 +45,7 @@ use super::{
 use crate::{
   core::linear_review::BODY_FILE,
   gpui_shell::{
+    form::{self, Controls, SelectOption},
     native::{NativeEvent, ToastTone},
     popup::{self, NativeMenuItem, PopupRequest, PopupSink},
     theme::{self, Palette},
@@ -53,6 +58,8 @@ use crate::{
 
 /// How often the review agent's comments are read again (`refreshMs`).
 const REVIEW_POLL: Duration = Duration::from_secs(10);
+/// How long the issues a visit read stand in for reading them again.
+const ISSUES_FRESH: Duration = Duration::from_secs(30);
 
 /// `Issues` or `Projects`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -165,16 +172,30 @@ pub struct LinearView {
   teams: Fetch<Vec<LinearTeam>>,
   viewer: Option<LinearUser>,
   /// The issues, by team.
-  pub(super) issues: HashMap<Option<String>, Fetch<Vec<LinearIssue>>>,
+  pub(super) issues: HashMap<Option<String>, Fetch<Rc<Vec<LinearIssue>>>>,
   pub(super) mode: IssueMode,
   pub(super) issue_view: IssueView,
   pub(super) issue_filters: IssueFilters,
   /// The issue whose page shows, in place of the list.
   pub(super) open_issue: Option<String>,
+  /// The New issue form, while open.
+  new_issue: Option<NewIssue>,
+  /// The open issue's title and description being edited.
+  editing: Option<(String, String)>,
+  saving: bool,
+  /// The delete confirmation is open.
+  pub(super) confirm_delete: bool,
+  deleting: bool,
+  delete_focused: bool,
+  controls: Controls,
+  /// Fields whose controls show the view's value even while focused.
+  reset: HashSet<&'static str>,
   /// The issue list's rows, and each Kanban column's, by its name.
   issue_rows: Rows<IssueRow>,
   column_rows: HashMap<String, Rows<IssueRow>>,
   comments: HashMap<Commented, Fetch<Vec<LinearComment>>>,
+  /// Comment threads whose fold is open: every comment shows.
+  comments_expanded: HashSet<Commented>,
   pub(super) projects: Fetch<Vec<LinearProject>>,
   pub(super) project_view: ProjectView,
   pub(super) project_filters: ProjectFilters,
@@ -192,6 +213,17 @@ pub struct LinearView {
   /// Texts whose review is being prepared.
   pub(super) starting: HashSet<Commented>,
   _poll: Task<()>,
+}
+
+/// The New issue form's fields.
+#[derive(Debug, Clone, Default)]
+struct NewIssue {
+  /// The team picked; `None` for the default (`create_team`).
+  team_id: Option<String>,
+  title: String,
+  description: String,
+  pending: bool,
+  error: Option<String>,
 }
 
 /// An issue's row in the list or a Kanban column: the issue, by its index
@@ -245,6 +277,15 @@ impl LinearView {
         return;
       }
     });
+    let view = cx.weak_entity();
+    let sink: ActionSink = Rc::new(move |action, cx| {
+      let view = view.clone();
+      cx.defer(move |cx| {
+        view
+          .update(cx, |view, cx| view.handle_field(action, cx))
+          .ignore_closed();
+      });
+    });
     let mut this = Self {
       host,
       react,
@@ -262,9 +303,18 @@ impl LinearView {
       issue_view: IssueView::All,
       issue_filters: IssueFilters::default(),
       open_issue: None,
+      new_issue: None,
+      editing: None,
+      saving: false,
+      confirm_delete: false,
+      deleting: false,
+      delete_focused: false,
+      controls: Controls::new(sink),
+      reset: HashSet::new(),
       issue_rows: Rows::default(),
       column_rows: HashMap::new(),
       comments: HashMap::new(),
+      comments_expanded: HashSet::new(),
       projects: Fetch::default(),
       project_view: ProjectView::All,
       project_filters: ProjectFilters::default(),
@@ -328,7 +378,7 @@ impl LinearView {
       },
       cx,
     );
-    self.load_issues(cx);
+    self.load_issues_unless_fresh(cx);
   }
 
   /// Runs `work` off the main thread, then `apply` on the view, unless the
@@ -357,6 +407,26 @@ impl LinearView {
     .detach();
   }
 
+  /// Reads the issues again, unless a read the cache holds is under
+  /// [`ISSUES_FRESH`] old: opening the panel, switching the section or the
+  /// team would otherwise repeat every page of a long list each time.
+  fn load_issues_unless_fresh(&mut self, cx: &mut Context<Self>) {
+    let key = (self.route.repo_path.clone(), self.team.clone());
+    let fresh = cache(cx)
+      .linear_issues
+      .age(&key, Instant::now())
+      .is_some_and(|age| age < ISSUES_FRESH);
+    if fresh
+      && self
+        .issues
+        .get(&self.team)
+        .is_some_and(|f| f.data.is_some())
+    {
+      return;
+    }
+    self.load_issues(cx);
+  }
+
   fn load_issues(&mut self, cx: &mut Context<Self>) {
     let team = self.team.clone();
     let seed = cache(cx)
@@ -372,6 +442,7 @@ impl LinearView {
     self.run(
       move |host, repo| host.linear_issues(repo, team.as_deref()),
       move |view, result, cx| {
+        let result = result.map(Rc::new);
         if let Ok(issues) = &result {
           cache(cx).linear_issues.insert(
             (view.route.repo_path.clone(), key.clone()),
@@ -529,8 +600,9 @@ impl LinearView {
         self.mode = IssueMode::List;
         self.issue_view = IssueView::All;
         self.issue_filters = IssueFilters::default();
+        self.close_issue_forms();
         self.open_issue = None;
-        self.load_issues(cx);
+        self.load_issues_unless_fresh(cx);
       }
       Section::Projects => {
         self.project_view = ProjectView::All;
@@ -549,8 +621,9 @@ impl LinearView {
       return;
     }
     self.team = team;
+    self.close_issue_forms();
     self.open_issue = None;
-    self.load_issues(cx);
+    self.load_issues_unless_fresh(cx);
     cx.notify();
   }
 
@@ -577,6 +650,8 @@ impl LinearView {
 
   /// Shows the issue's page, with its description and comments.
   pub(super) fn open_issue(&mut self, id: &str, cx: &mut Context<Self>) {
+    self.new_issue = None;
+    self.editing = None;
     self.open_issue = Some(id.to_string());
     self.load_comments(Commented::Issue(id.to_string()), cx);
     cx.notify();
@@ -585,7 +660,227 @@ impl LinearView {
   /// Back from the issue's page to the list or board.
   pub(super) fn close_issue(&mut self, cx: &mut Context<Self>) {
     self.open_issue = None;
+    self.editing = None;
     cx.notify();
+  }
+
+  fn close_issue_forms(&mut self) {
+    self.new_issue = None;
+    self.editing = None;
+    self.confirm_delete = false;
+  }
+
+  /// A form control changed (`Controls` reports it as a field).
+  fn handle_field(&mut self, action: ScreenAction, cx: &mut Context<Self>) {
+    let ScreenAction::Field { field, value } = action else {
+      return;
+    };
+    let text = value.as_str().unwrap_or_default().to_string();
+    match field.as_str() {
+      "linear.new.team" => {
+        if let Some(form) = &mut self.new_issue {
+          form.team_id = Some(text);
+        }
+      }
+      "linear.new.title" => {
+        if let Some(form) = &mut self.new_issue {
+          form.title = text;
+        }
+      }
+      "linear.new.description" => {
+        if let Some(form) = &mut self.new_issue {
+          form.description = text;
+        }
+      }
+      "linear.edit.title" => {
+        if let Some((title, _)) = &mut self.editing {
+          *title = text;
+        }
+      }
+      "linear.edit.description" => {
+        if let Some((_, description)) = &mut self.editing {
+          *description = text;
+        }
+      }
+      _ => {}
+    }
+    cx.notify();
+  }
+
+  fn input(
+    &mut self,
+    field: &'static str,
+    value: &str,
+    placeholder: &str,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> gpui::Entity<gpui_kit::component::input::InputState> {
+    let state = self.controls.input(field, value, placeholder, window, cx);
+    if self.reset.remove(field) {
+      let value = value.to_string();
+      state.update(cx, |s, cx| s.set_value(value, window, cx));
+    }
+    state
+  }
+
+  fn textarea(
+    &mut self,
+    field: &'static str,
+    value: &str,
+    placeholder: &str,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> gpui::Entity<gpui_kit::component::input::TextareaState> {
+    let state = self
+      .controls
+      .textarea(field, value, placeholder, 6, window, cx);
+    if self.reset.remove(field) {
+      let value = value.to_string();
+      state.update(cx, |s, cx| s.set_value(value, window, cx));
+    }
+    state
+  }
+
+  /// The team a new issue goes to: the one picked, else the team shown,
+  /// else the first.
+  fn create_team(&self) -> Option<LinearTeam> {
+    let teams = self.teams.data.as_deref().unwrap_or_default();
+    let picked = self
+      .new_issue
+      .as_ref()
+      .and_then(|f| f.team_id.as_ref())
+      .and_then(|id| teams.iter().find(|t| &t.id == id));
+    picked
+      .or_else(|| {
+        self
+          .team
+          .as_ref()
+          .and_then(|key| teams.iter().find(|t| &t.key == key))
+      })
+      .or(teams.first())
+      .cloned()
+  }
+
+  pub(super) fn open_new_issue(&mut self, cx: &mut Context<Self>) {
+    self.editing = None;
+    self.new_issue = Some(NewIssue::default());
+    for field in [
+      "linear.new.title",
+      "linear.new.description",
+      "linear.new.team",
+    ] {
+      self.reset.insert(field);
+    }
+    cx.notify();
+  }
+
+  fn create_issue(&mut self, cx: &mut Context<Self>) {
+    let Some(form) = self.new_issue.as_mut() else {
+      return;
+    };
+    if form.pending || form.title.trim().is_empty() {
+      return;
+    }
+    let team = self.create_team();
+    let Some(form) = self.new_issue.as_mut() else {
+      return;
+    };
+    let Some(team) = team else {
+      form.error = Some("There is no Linear team to create the issue in.".into());
+      cx.notify();
+      return;
+    };
+    form.pending = true;
+    form.error = None;
+    let (title, description) = (form.title.clone(), form.description.clone());
+    self.run(
+      move |host, repo| host.linear_create_issue(repo, &team.id, &title, &description),
+      |view, result, cx| match result {
+        Ok(issue) => {
+          view.new_issue = None;
+          view.load_issues(cx);
+          view.open_issue(&issue.id, cx);
+        }
+        Err(err) => {
+          if let Some(form) = &mut view.new_issue {
+            form.pending = false;
+            form.error = Some(err);
+          }
+        }
+      },
+      cx,
+    );
+    cx.notify();
+  }
+
+  fn edit_issue(&mut self, issue: &LinearIssue, cx: &mut Context<Self>) {
+    self.editing = Some((
+      issue.title.clone(),
+      issue.description.clone().unwrap_or_default(),
+    ));
+    self.reset.insert("linear.edit.title");
+    self.reset.insert("linear.edit.description");
+    cx.notify();
+  }
+
+  fn save_issue(&mut self, cx: &mut Context<Self>) {
+    let (Some(id), Some((title, description))) = (self.open_issue.clone(), self.editing.clone())
+    else {
+      return;
+    };
+    if self.saving || title.trim().is_empty() {
+      return;
+    }
+    self.saving = true;
+    self.run(
+      move |host, repo| host.linear_update_issue(repo, &id, &title, &description),
+      |view, result, cx| {
+        view.saving = false;
+        match result {
+          Ok(_) => {
+            view.editing = None;
+            view.load_issues(cx);
+          }
+          Err(err) => view.toast("Failed to update issue", err),
+        }
+      },
+      cx,
+    );
+    cx.notify();
+  }
+
+  fn delete_issue(&mut self, cx: &mut Context<Self>) {
+    let Some(id) = self.open_issue.clone() else {
+      return;
+    };
+    if self.deleting {
+      return;
+    }
+    self.deleting = true;
+    self.run(
+      move |host, repo| host.linear_delete_issue(repo, &id),
+      |view, result, cx| {
+        view.deleting = false;
+        view.confirm_delete = false;
+        match result {
+          Ok(()) => {
+            view.open_issue = None;
+            view.editing = None;
+            view.load_issues(cx);
+          }
+          Err(err) => view.toast("Failed to delete issue", err),
+        }
+      },
+      cx,
+    );
+    cx.notify();
+  }
+
+  fn cancel_delete(&mut self, cx: &mut Context<Self>) {
+    if !self.deleting {
+      self.confirm_delete = false;
+      cx.notify();
+    }
   }
 
   /// The agent button: the agent prompt opens over the window with the
@@ -704,7 +999,7 @@ impl LinearView {
   // ---- What the view shows. ----
 
   pub(super) fn current_issues(&self) -> Option<&Vec<LinearIssue>> {
-    self.issues.get(&self.team).and_then(|f| f.data.as_ref())
+    self.issues.get(&self.team).and_then(|f| f.data.as_deref())
   }
 
   fn viewer_id(&self) -> Option<&str> {
@@ -1200,7 +1495,9 @@ impl Render for LinearView {
       Section::Issues => self.issues_section(&p, window, cx).into_any_element(),
       Section::Projects => self.projects_section(&p, cx).into_any_element(),
     };
-    let dialog = self.document_dialog(&p, window, cx);
+    let dialog = self
+      .delete_dialog(&p, window, cx)
+      .or_else(|| self.document_dialog(&p, window, cx));
     div()
       .debug_selector(|| "linear-panel".into())
       .size_full()
@@ -1217,7 +1514,7 @@ impl Render for LinearView {
 }
 
 impl LinearView {
-  fn issues_section(&mut self, p: &Palette, window: &Window, cx: &mut Context<Self>) -> Div {
+  fn issues_section(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> Div {
     let fetch = self.issues.get(&self.team).cloned().unwrap_or_default();
     let loading = fetch.is_loading();
     let all = fetch.data.clone().unwrap_or_default();
@@ -1228,8 +1525,11 @@ impl LinearView {
       .open_issue
       .as_ref()
       .and_then(|id| all.iter().find(|i| &i.id == id));
-    if let Some(issue) = open {
-      return self.issue_page(issue, &all, p, cx);
+    if self.new_issue.is_some() {
+      return self.new_issue_page(p, window, cx);
+    }
+    if let Some(issue) = open.cloned() {
+      return self.issue_page(&issue, &all, p, window, cx);
     }
     let f = &self.issue_filters;
     let groups = vec![
@@ -1297,6 +1597,15 @@ impl LinearView {
       ))
       .child(self.filter_menu("linear-issues-filter-trigger", groups, false, p, cx))
       .child(div().flex_1())
+      .child(
+        Button::new("linear-new-issue", p)
+          .variant(Variant::Ghost)
+          .size(Size::Sm)
+          .gap_1()
+          .icon(theme::ICON_PLUS, 14.)
+          .label("New issue")
+          .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.open_new_issue(cx))),
+      )
       .child(
         self.refresh_button("linear-issues-refresh", loading, p, cx, |view, cx| {
           view.load_issues(cx)
@@ -1470,12 +1779,14 @@ impl LinearView {
   /// The issue's page: its title and details, the description, then the
   /// comments under it, as in Linear.
   fn issue_page(
-    &self,
+    &mut self,
     issue: &LinearIssue,
     all: &[LinearIssue],
     p: &Palette,
+    window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Div {
+    let editing = self.editing.is_some();
     let parent = issue
       .parent_id
       .as_deref()
@@ -1511,6 +1822,25 @@ impl LinearView {
           .child(issue.identifier.clone()),
       )
       .child(div().flex_1())
+      .when(!editing, |this| {
+        this
+          .child(
+            ui::IconButton::new("linear-issue-edit", theme::ICON_PENCIL, "Edit issue", p).on_click(
+              cx.listener({
+                let issue = issue.clone();
+                move |view, _: &ClickEvent, _, cx| view.edit_issue(&issue, cx)
+              }),
+            ),
+          )
+          .child(
+            ui::IconButton::new("linear-issue-delete", theme::ICON_TRASH, "Delete issue", p)
+              .on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
+                view.confirm_delete = true;
+                view.delete_focused = false;
+                cx.notify();
+              })),
+          )
+      })
       .child(self.agent_button("linear-issue-page-kickoff".into(), &issue.id, p, cx))
       .child({
         let url = issue.url.clone();
@@ -1563,20 +1893,332 @@ impl LinearView {
               .flex()
               .flex_col()
               .gap_3()
+              .map(|this| {
+                if editing {
+                  this
+                    .child(issue_meta(issue.identifier.clone(), issue, p))
+                    .child(self.edit_form(p, window, cx))
+                } else {
+                  this
+                    .child(
+                      ui::text(div(), TextSize::Lg)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(issue.title.clone()),
+                    )
+                    .child(issue_meta(issue.identifier.clone(), issue, p))
+                    .children(labels)
+                    .child(div().pt_3().child(self.commented(
+                      target,
+                      CommentPlacement::Below,
+                      p,
+                      cx,
+                    )))
+                }
+              }),
+          ),
+      )
+  }
+
+  /// The New issue page: a back button over the form.
+  fn new_issue_page(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> Div {
+    let bar = div()
+      .flex()
+      .flex_none()
+      .items_center()
+      .gap_2()
+      .px_4()
+      .py_2()
+      .border_b_1()
+      .border_color(p.border)
+      .child(
+        ui::IconButton::new(
+          "linear-new-issue-back",
+          theme::ICON_ARROW_LEFT,
+          "Back to issues",
+          p,
+        )
+        .on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
+          view.new_issue = None;
+          cx.notify();
+        })),
+      );
+    div().flex_1().min_h_0().flex().flex_col().child(bar).child(
+      div()
+        .id("linear-new-issue-scroll")
+        .flex_1()
+        .min_h_0()
+        .overflow_y_scroll()
+        .child(
+          div()
+            .max_w(zpx(820.))
+            .px_2()
+            .child(self.new_issue_form(p, window, cx)),
+        ),
+    )
+  }
+
+  /// The open issue's title and description, editable.
+  fn edit_form(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> Div {
+    let (title, description) = self.editing.clone().unwrap_or_default();
+    let title_state = self.input("linear.edit.title", &title, "Title", window, cx);
+    let body_state = self.textarea(
+      "linear.edit.description",
+      &description,
+      "Description (optional, Markdown)",
+      window,
+      cx,
+    );
+    let saving = self.saving;
+    div()
+      .debug_selector(|| "linear-issue-edit-form".into())
+      .flex()
+      .flex_col()
+      .gap_2()
+      .child(ui::text(
+        div().child(form::input_field(
+          "linear-issue-edit-title",
+          &title_state,
+          false,
+          saving,
+        )),
+        TextSize::Sm,
+      ))
+      .child(form::textarea_field(&body_state, false, saving))
+      .child(
+        div()
+          .flex()
+          .gap_2()
+          .child(
+            busy_spinner(
+              Button::new("linear-issue-edit-save", p)
+                .size(Size::Sm)
+                .gap_1()
+                .disabled(title.trim().is_empty() || saving),
+              "linear-issue-edit-save",
+              saving,
+              p.primary_foreground,
+            )
+            .label("Save")
+            .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.save_issue(cx))),
+          )
+          .child(
+            Button::new("linear-issue-edit-cancel", p)
+              .variant(Variant::Ghost)
+              .size(Size::Sm)
+              .disabled(saving)
+              .label("Cancel")
+              .on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
+                view.editing = None;
+                cx.notify();
+              })),
+          ),
+      )
+  }
+
+  /// "New issue": a team, a title and a description.
+  fn new_issue_form(
+    &mut self,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let form = self.new_issue.clone().unwrap_or_default();
+    let team = self.create_team();
+    let options: Vec<SelectOption> = self
+      .teams
+      .data
+      .iter()
+      .flatten()
+      .map(|t| SelectOption {
+        value: t.id.clone(),
+        label: format!("{} ({})", t.name, t.key),
+      })
+      .collect();
+    let team_state = self.controls.select(
+      "linear.new.team",
+      &options,
+      team.as_ref().map(|t| t.id.as_str()).unwrap_or_default(),
+      window,
+      cx,
+    );
+    let title_state = self.input("linear.new.title", &form.title, "Title", window, cx);
+    let body_state = self.textarea(
+      "linear.new.description",
+      &form.description,
+      "Description (optional, Markdown)",
+      window,
+      cx,
+    );
+    let pending = form.pending;
+    div()
+      .debug_selector(|| "linear-new-issue-form".into())
+      .p_4()
+      .flex()
+      .flex_col()
+      .gap_3()
+      .child(
+        ui::text(div(), TextSize::Lg)
+          .font_weight(FontWeight::SEMIBOLD)
+          .child("New issue"),
+      )
+      .child(
+        div()
+          .flex()
+          .flex_col()
+          .gap_1()
+          .child(
+            ui::text(div(), TextSize::Xs)
+              .text_color(p.muted_foreground)
+              .child("Team"),
+          )
+          .child(ui::text(
+            div().child(form::select_field(
+              "linear-new-issue-team",
+              "Team",
+              &team_state,
+              pending,
+            )),
+            TextSize::Sm,
+          )),
+      )
+      .child(ui::text(
+        div().child(form::input_field(
+          "linear-new-issue-title",
+          &title_state,
+          false,
+          pending,
+        )),
+        TextSize::Sm,
+      ))
+      .child(form::textarea_field(&body_state, false, pending))
+      .child(
+        div()
+          .flex()
+          .gap_2()
+          .child(
+            busy_spinner(
+              Button::new("linear-new-issue-submit", p)
+                .size(Size::Sm)
+                .gap_1()
+                .disabled(form.title.trim().is_empty() || pending),
+              "linear-new-issue-submit",
+              pending,
+              p.primary_foreground,
+            )
+            .label("Create issue")
+            .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.create_issue(cx))),
+          )
+          .child(
+            Button::new("linear-new-issue-cancel", p)
+              .variant(Variant::Ghost)
+              .size(Size::Sm)
+              .disabled(pending)
+              .label("Cancel")
+              .on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
+                view.new_issue = None;
+                cx.notify();
+              })),
+          ),
+      )
+      .children(form.error.map(|err| {
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.destructive)
+          .whitespace_normal()
+          .child(err)
+      }))
+  }
+
+  /// The delete confirmation for the open issue.
+  fn delete_dialog(
+    &mut self,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Option<AnyElement> {
+    if !self.confirm_delete {
+      return None;
+    }
+    let identifier = self
+      .open_issue
+      .as_ref()
+      .and_then(|id| self.current_issues()?.iter().find(|i| &i.id == id))
+      .map_or_else(|| "this issue".to_string(), |i| i.identifier.clone());
+    if !self.delete_focused {
+      self.delete_focused = true;
+      window.focus(&self.focus, cx);
+    }
+    let pending = self.deleting;
+    let viewport = window.viewport_size();
+    let (backdrop, panel) = dialog(
+      "linear-delete-dialog",
+      crate::gpui_shell::ui::zoomed(512., window),
+      None,
+      viewport,
+      p,
+    );
+    let keys = cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
+      if ui::is_escape(&e.keystroke) {
+        cx.stop_propagation();
+        view.cancel_delete(cx);
+      }
+    });
+    Some(
+      overlay(
+        backdrop.on_mouse_down(
+          gpui::MouseButton::Left,
+          cx.listener(|view, _, _, cx| view.cancel_delete(cx)),
+        ),
+        panel
+          .id("linear-delete-panel")
+          .track_focus(&self.focus)
+          .capture_key_down(keys)
+          .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+          .child(
+            div()
+              .flex()
+              .flex_col()
+              .gap_2()
+              .child(title(format!("Delete {identifier}?")))
               .child(
-                ui::text(div(), TextSize::Lg)
-                  .font_weight(FontWeight::SEMIBOLD)
-                  .child(issue.title.clone()),
+                ui::text(div(), TextSize::Sm)
+                  .text_color(p.muted_foreground)
+                  .whitespace_normal()
+                  .child(
+                    "Linear moves the issue to its trash, where it can be restored for 30 days.",
+                  ),
+              ),
+          )
+          .child(
+            div()
+              .flex()
+              .justify_end()
+              .gap_2()
+              .child(
+                Button::new("linear-delete-cancel", p)
+                  .variant(Variant::Ghost)
+                  .disabled(pending)
+                  .label("Cancel")
+                  .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.cancel_delete(cx))),
               )
-              .child(issue_meta(issue.identifier.clone(), issue, p))
-              .children(labels)
               .child(
-                div()
-                  .pt_3()
-                  .child(self.commented(target, CommentPlacement::Below, p, cx)),
+                busy_spinner(
+                  Button::new("linear-delete-confirm", p)
+                    .bg(p.destructive)
+                    .hover_bg(p.destructive.opacity(0.9))
+                    .text_color(p.destructive_foreground)
+                    .gap_1()
+                    .disabled(pending),
+                  "linear-delete-confirm",
+                  pending,
+                  p.destructive_foreground,
+                )
+                .label("Delete")
+                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.delete_issue(cx))),
               ),
           ),
       )
+      .into_any_element(),
+    )
   }
 
   /// `LinearKanbanView`: a column per state, every shown issue in its own;
@@ -2337,9 +2979,26 @@ impl LinearView {
               )
             })
             .children(
-              unanchored
-                .iter()
-                .map(|c| self.comment_card(&of, &open, c, true, p, cx)),
+              // A long thread shows its first comment and the newest few.
+              super::rows::thread(unanchored.len(), self.comments_expanded.contains(&of))
+                .into_iter()
+                .map(|ix| match ix {
+                  Some(ix) => self
+                    .comment_card(&of, &open, unanchored[ix], true, p, cx)
+                    .into_any_element(),
+                  None => {
+                    let of = of.clone();
+                    super::github::parts::fold_row(
+                      "linear-comments-show-earlier",
+                      super::rows::hidden(unanchored.len()),
+                      p,
+                      cx.listener(move |view, _, _, cx| {
+                        view.comments_expanded.insert(of.clone());
+                        cx.notify();
+                      }),
+                    )
+                  }
+                }),
             )
         })
     });

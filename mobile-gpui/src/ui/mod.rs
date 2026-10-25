@@ -3,9 +3,12 @@
 //! [`Root`] owns the stack and the app-wide [`AppModel`] (sign-in and
 //! connection state). Screens push and pop pages through [`nav`].
 
+mod delete_account;
 mod hold;
 mod home;
 mod load;
+#[cfg(test)]
+mod perf;
 mod review;
 mod screens;
 pub mod sheet;
@@ -51,6 +54,8 @@ pub struct AppModel {
   pub user: Option<String>,
   pub auth_busy: bool,
   pub auth_error: Option<String>,
+  /// What Home says after signing out on purpose, such as a deleted account.
+  pub auth_notice: Option<String>,
   /// The machine the screens act on, if any.
   pub connection: Option<Connection>,
   /// Each machine's state this session, by machine id
@@ -248,6 +253,17 @@ pub mod nav {
       == Some(view)
   }
 
+  /// Retitles the page showing `view` (a renamed terminal).
+  pub fn set_title(view: EntityId, title: impl Into<SharedString>, cx: &mut App) {
+    let title = title.into();
+    update(cx, move |root, cx| {
+      if let Some(page) = root.stack.iter_mut().find(|p| p.view.entity_id() == view) {
+        page.title = title;
+        cx.notify();
+      }
+    });
+  }
+
   pub fn pop(cx: &mut App) {
     update(cx, |root, cx| {
       if root.stack.len() > 1 {
@@ -340,12 +356,20 @@ impl Root {
     self.sheet = None;
     tauri_plugin_gpui::set_back_enabled(self.stack.len() > 1);
     self.save_snapshot(cx);
+    // A page revealed by a pop was cached while it was covered; redraw it
+    // once so state it reads outside the entity (the store) is current.
+    if let Some(page) = self.stack.last() {
+      App::notify(cx, page.view.entity_id());
+    }
     cx.notify();
   }
 
   fn handle(&mut self, event: AppEvent, _window: &mut Window, cx: &mut Context<Self>) {
     match event {
       AppEvent::Auth(user) => self.model.update(cx, |m, cx| {
+        if user.is_some() {
+          m.auth_notice = None;
+        }
         m.user = user;
         cx.notify();
       }),
@@ -479,7 +503,20 @@ impl Render for Root {
             }),
         )
       })
-      .child(div().flex_1().min_h_0().child(page.view.clone()))
+      .child(
+        div()
+          .flex_1()
+          .min_h_0()
+          // Cached: a sheet, spinner or caret blink elsewhere in the window
+          // must not re-render the page. It re-renders when it notifies
+          // itself or an entity it observes, or when its bounds change.
+          .child(
+            page
+              .view
+              .clone()
+              .cached(StyleRefinement::default().size_full()),
+          ),
+      )
       .when_some(blocked, |root, reason| {
         root.child(cutoff_overlay(reason, managed, cx))
       })

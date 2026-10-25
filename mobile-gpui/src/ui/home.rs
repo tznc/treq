@@ -1,6 +1,7 @@
 //! Home: a landing page when signed out with no machines, otherwise the
 //! machine list (Treq Cloud and SSH hosts), each with its own connection.
 
+use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
@@ -192,6 +193,7 @@ impl HomeScreen {
     let model = model(cx).read(cx);
     let busy = model.auth_busy;
     let error = model.auth_error.clone();
+    let notice = model.auth_notice.clone();
     let signed_in = model.user.is_some();
     let section = widgets::section("Treq Cloud", cx);
     if !signed_in {
@@ -199,6 +201,7 @@ impl HomeScreen {
         widgets::card(cx)
           .p_4()
           .gap_3()
+          .children(notice.map(|n| div().text_sm().child(n)))
           .child(widgets::muted(
             "Sign in to reach your Treq Cloud machine.",
             cx,
@@ -292,22 +295,33 @@ impl HomeScreen {
     let model = model(cx).read(cx);
     let email = model.user.clone()?;
     let busy = model.auth_busy;
+    let delete_email = email.clone();
     Some(
-      widgets::section("Account", cx).child(
-        widgets::card(cx).p_4().child(
-          h_flex()
-            .gap_3()
-            .items_center()
-            .child(div().flex_1().min_w_0().truncate().child(email))
-            .child(
-              Button::new("sign-out")
-                .outline()
-                .label("Sign out")
-                .loading(busy)
-                .on_click(|_, _, cx| super::sign_out(cx)),
-            ),
+      widgets::section("Account", cx)
+        .child(
+          widgets::card(cx).p_4().child(
+            h_flex()
+              .gap_3()
+              .items_center()
+              .child(div().flex_1().min_w_0().truncate().child(email))
+              .child(
+                Button::new("sign-out")
+                  .outline()
+                  .label("Sign out")
+                  .loading(busy)
+                  .on_click(|_, _, cx| super::sign_out(cx)),
+              ),
+          ),
+        )
+        .child(
+          Button::new("delete-account")
+            .ghost()
+            .w_full()
+            .text_color(cx.theme().danger)
+            .label("Delete account")
+            .disabled(busy)
+            .on_click(move |_, _, cx| super::delete_account::open(delete_email.clone(), cx)),
         ),
-      ),
     )
   }
 
@@ -316,6 +330,7 @@ impl HomeScreen {
     let model = model(cx).read(cx);
     let busy = model.auth_busy;
     let error = model.auth_error.clone();
+    let notice = model.auth_notice.clone();
     v_flex()
       .min_h_full()
       .p_6()
@@ -344,6 +359,7 @@ impl HomeScreen {
               .on_click(|_, _, cx| super::sign_in(cx)),
           )
           .children(error.map(|e| widgets::error_text(e, cx).text_center()))
+          .children(notice.map(|n| widgets::muted(n, cx).text_center()))
           .child(
             Button::new("add-host")
               .outline()

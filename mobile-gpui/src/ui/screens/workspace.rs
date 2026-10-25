@@ -53,6 +53,10 @@ use crate::{
 /// How often the change marker is polled to notice remote edits.
 const MARKER_POLL: Duration = Duration::from_secs(15);
 
+/// How often the Terminals tab rereads its sessions while shown, so each
+/// agent's working or idle state stays current.
+const SESSIONS_POLL: Duration = Duration::from_secs(5);
+
 /// The repository and workspace a view works in. `id` is the numeric
 /// workspace id the remote CLI expects.
 #[derive(Clone)]
@@ -214,6 +218,9 @@ pub struct WorkspaceScreen {
   /// Made when the Code tab is first shown.
   code: Option<Entity<CodeView>>,
   commit_message: Entity<InputState>,
+  /// The Changes tab's items as the last render left them.
+  change_items: Vec<ChangeItem>,
+  change_rows: ListState,
   /// The action running from this screen, by name.
   busy: Option<&'static str>,
   message: Option<(bool, String)>,
@@ -222,6 +229,7 @@ pub struct WorkspaceScreen {
   /// list) refetch when this one closes.
   changed: bool,
   _poll: Task<()>,
+  _sessions_poll: Task<()>,
 }
 
 impl WorkspaceScreen {
@@ -241,6 +249,20 @@ impl WorkspaceScreen {
         // to the foreground refetches at once.
         if crate::backend::in_foreground() && nav::is_top(cx.entity_id(), cx) {
           this.poll_marker(cx);
+        }
+      });
+      if polled.is_err() {
+        break;
+      }
+    });
+    let sessions_poll = cx.spawn(async move |this, cx| loop {
+      cx.background_executor().timer(SESSIONS_POLL).await;
+      let polled = this.update(cx, |this, cx| {
+        if this.view == View::Terminals
+          && crate::backend::in_foreground()
+          && nav::is_top(cx.entity_id(), cx)
+        {
+          this.sessions.update(cx, |sessions, cx| sessions.reload(cx));
         }
       });
       if polled.is_err() {
@@ -287,11 +309,14 @@ impl WorkspaceScreen {
       commits: None,
       code: None,
       commit_message: cx.new(|cx| InputState::new(window, cx).placeholder("Commit message")),
+      change_items: Vec::new(),
+      change_rows: widgets::list_state(),
       busy: None,
       message: None,
       keys: IdempotencyKeys::default(),
       changed: false,
       _poll: poll,
+      _sessions_poll: sessions_poll,
     };
     this.load_hunks(cx);
     this.fetch(true, cx);
@@ -929,86 +954,181 @@ impl WorkspaceScreen {
     )
   }
 
-  fn changes(&self, cx: &mut Context<Self>) -> AnyElement {
-    let diff = match &self.diff {
-      Load::Idle | Load::Loading => {
-        return widgets::card(cx)
-          .child(widgets::centered_message("Loading changes…", cx))
-          .into_any_element()
-      }
-      Load::Failed(error) => {
-        return widgets::card(cx)
+  /// The Changes tab: sections, file cards and each file's diff as a
+  /// virtualized list, so only the files near the screen are built.
+  fn changes(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    let Load::Ready(diff) = &self.diff else {
+      let message = match &self.diff {
+        Load::Failed(error) => widgets::card(cx)
           .p_4()
-          .child(widgets::error_text(errors::describe(error).message, cx))
+          .child(widgets::error_text(errors::describe(error).message, cx)),
+        _ => widgets::card(cx).child(widgets::centered_message("Loading changes…", cx)),
+      };
+      return div()
+        .id("changes")
+        .size_full()
+        .overflow_y_scroll()
+        .child(widgets::page().child(message))
+        .into_any_element();
+    };
+    let items = change_items(diff);
+    widgets::resize(&self.change_rows, items.len());
+    self.change_items = items;
+    let screen = cx.weak_entity();
+    list(self.change_rows.clone(), move |ix, _, cx| {
+      screen
+        .update(cx, |this, cx| this.change_item(ix, cx))
+        .unwrap_or_else(|_| div().into_any_element())
+    })
+    .size_full()
+    .into_any_element()
+  }
+
+  fn change_item(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+    let (Some(item), Load::Ready(diff)) = (self.change_items.get(ix), &self.diff) else {
+      return div().into_any_element();
+    };
+    match *item {
+      ChangeItem::Title(section) => {
+        let title = match section {
+          Section::Conflicts => "Conflicts".to_string(),
+          Section::Uncommitted => "Uncommitted".to_string(),
+          Section::Committed => format!("On this branch · vs {}", self.target_branch()),
+        };
+        widgets::section(title, cx).px_4().pt_4().into_any_element()
+      }
+      ChangeItem::Empty(section) => {
+        let message = match section {
+          Section::Uncommitted => "No uncommitted changes.",
+          _ => "No committed changes yet.",
+        };
+        div()
+          .px_4()
+          .pt_2()
+          .child(widgets::card(cx).child(widgets::centered_message(message, cx)))
           .into_any_element()
       }
-      Load::Ready(diff) => diff,
-    };
-    let target = self.target.clone();
-    let committing = self.busy == Some("commit");
-    v_flex()
-      .gap_4()
-      .when(!diff.conflicted_files.is_empty(), |list| {
-        let t = target.clone();
-        list.child(
-          widgets::section("Conflicts", cx).child(widgets::card(cx).children(
-            diff.conflicted_files.iter().enumerate().map(|(i, path)| {
-              let t = t.clone();
-              widgets::row(("conflict", i), path.clone(), Some("Conflicted".into()), cx)
-                .text_color(cx.theme().danger)
-                .on_click(move |_, _, cx| conflicts::open(t.clone(), cx))
-            }),
-          )),
+      ChangeItem::Conflict(i, slot) => {
+        let t = self.target.clone();
+        let row = widgets::row(
+          ("conflict", i),
+          diff.conflicted_files[i].clone(),
+          Some("Conflicted".into()),
+          cx,
         )
-      })
-      .child(
-        widgets::section("Uncommitted", cx)
-          .when(diff.uncommitted_files.is_empty(), |section| {
-            section.child(
-              widgets::card(cx).child(widgets::centered_message("No uncommitted changes.", cx)),
-            )
-          })
-          .when(!diff.uncommitted_files.is_empty(), |section| {
-            section.child(
-              widgets::card(cx).child(
-                h_flex()
-                  .p_3()
-                  .gap_2()
-                  .child(div().flex_1().child(Input::new(&self.commit_message)))
-                  .child(
-                    Button::new("commit")
-                      .primary()
-                      .label("Commit")
-                      .loading(committing)
-                      .disabled(self.busy.is_some())
-                      .on_click(cx.listener(|this, _, window, cx| this.commit(window, cx))),
-                  ),
-              ),
-            )
-          })
-          .children(
-            diff
-              .uncommitted_files
-              .iter()
-              .map(|change| self.file_block(change, false, diff, cx)),
-          ),
-      )
-      .child(
-        widgets::section(format!("On this branch · vs {}", self.target_branch()), cx)
-          .when(diff.committed_files.is_empty(), |section| {
-            section.child(
-              widgets::card(cx).child(widgets::centered_message("No committed changes yet.", cx)),
-            )
-          })
-          .children(
-            diff
-              .committed_files
-              .iter()
-              .map(|change| self.file_block(change, true, diff, cx)),
-          ),
-      )
-      .into_any_element()
+        .text_color(cx.theme().danger)
+        .on_click(move |_, _, cx| conflicts::open(t.clone(), cx));
+        let item = widgets::card_item(row, slot.first, slot.last, cx);
+        if slot.first {
+          item.pt_2().into_any_element()
+        } else {
+          item.into_any_element()
+        }
+      }
+      ChangeItem::CommitBar => {
+        let committing = self.busy == Some("commit");
+        let bar = h_flex()
+          .p_3()
+          .gap_2()
+          .child(div().flex_1().child(Input::new(&self.commit_message)))
+          .child(
+            Button::new("commit")
+              .primary()
+              .label("Commit")
+              .loading(committing)
+              .disabled(self.busy.is_some())
+              .on_click(cx.listener(|this, _, window, cx| this.commit(window, cx))),
+          );
+        div()
+          .px_4()
+          .pt_2()
+          .child(widgets::card(cx).child(bar))
+          .into_any_element()
+      }
+      ChangeItem::File { committed, index } => {
+        let files = if committed {
+          &diff.committed_files
+        } else {
+          &diff.uncommitted_files
+        };
+        div()
+          .px_4()
+          .pt_2()
+          .child(self.file_block(&files[index], committed, diff, cx))
+          .into_any_element()
+      }
+      ChangeItem::End => div().h(px(16.)).into_any_element(),
+    }
   }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Section {
+  Conflicts,
+  Uncommitted,
+  Committed,
+}
+
+/// Where a conflict row sits in its card.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Slot {
+  first: bool,
+  last: bool,
+}
+
+/// One item of the Changes list.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum ChangeItem {
+  Title(Section),
+  Empty(Section),
+  Conflict(usize, Slot),
+  CommitBar,
+  File { committed: bool, index: usize },
+  End,
+}
+
+/// The Changes tab flattened to list items: a title per section, then its
+/// rows or file blocks, with the commit bar ahead of the uncommitted files.
+fn change_items(diff: &JjRevisionDiff) -> Vec<ChangeItem> {
+  let mut items = Vec::new();
+  if !diff.conflicted_files.is_empty() {
+    items.push(ChangeItem::Title(Section::Conflicts));
+    let n = diff.conflicted_files.len();
+    items.extend((0..n).map(|i| {
+      ChangeItem::Conflict(
+        i,
+        Slot {
+          first: i == 0,
+          last: i + 1 == n,
+        },
+      )
+    }));
+  }
+  items.push(ChangeItem::Title(Section::Uncommitted));
+  if diff.uncommitted_files.is_empty() {
+    items.push(ChangeItem::Empty(Section::Uncommitted));
+  } else {
+    items.push(ChangeItem::CommitBar);
+    items.extend(
+      (0..diff.uncommitted_files.len()).map(|index| ChangeItem::File {
+        committed: false,
+        index,
+      }),
+    );
+  }
+  items.push(ChangeItem::Title(Section::Committed));
+  if diff.committed_files.is_empty() {
+    items.push(ChangeItem::Empty(Section::Committed));
+  } else {
+    items.extend(
+      (0..diff.committed_files.len()).map(|index| ChangeItem::File {
+        committed: true,
+        index,
+      }),
+    );
+  }
+  items.push(ChangeItem::End);
+  items
 }
 
 impl Render for WorkspaceScreen {
@@ -1022,14 +1142,7 @@ impl Render for WorkspaceScreen {
         .into_any_element(),
       View::Changes => v_flex()
         .size_full()
-        .child(
-          div()
-            .id("changes")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .child(widgets::page().child(self.changes(cx))),
-        )
+        .child(div().flex_1().min_h_0().child(self.changes(cx)))
         .children(self.changes_footer(cx))
         .into_any_element(),
       View::Commits => match &self.commits {
@@ -1243,6 +1356,61 @@ mod tests {
     assert_eq!(
       change_detail(&change("R", 12, Some("src/b.rs"))),
       "Renamed · from src/b.rs · 12 lines"
+    );
+  }
+
+  fn file(path: &str) -> JjFileChange {
+    JjFileChange {
+      path: path.into(),
+      ..change("M", 1, None)
+    }
+  }
+
+  fn revision(conflicted: usize, uncommitted: usize, committed: usize) -> JjRevisionDiff {
+    let files = |n: usize| (0..n).map(|i| file(&format!("f{i}"))).collect::<Vec<_>>();
+    JjRevisionDiff {
+      committed_files: files(committed),
+      hunks_by_file: Vec::new(),
+      uncommitted_files: files(uncommitted),
+      conflicted_files: (0..conflicted).map(|i| format!("c{i}")).collect(),
+      too_large_to_render: false,
+      render_block_reason: None,
+      working_copy_token: None,
+    }
+  }
+
+  #[core::prelude::v1::test]
+  fn changes_flatten_to_titled_sections_with_the_commit_bar_first() {
+    let file = |committed, index| ChangeItem::File { committed, index };
+    assert_eq!(
+      change_items(&revision(1, 2, 1)),
+      vec![
+        ChangeItem::Title(Section::Conflicts),
+        ChangeItem::Conflict(
+          0,
+          Slot {
+            first: true,
+            last: true
+          }
+        ),
+        ChangeItem::Title(Section::Uncommitted),
+        ChangeItem::CommitBar,
+        file(false, 0),
+        file(false, 1),
+        ChangeItem::Title(Section::Committed),
+        file(true, 0),
+        ChangeItem::End,
+      ]
+    );
+    assert_eq!(
+      change_items(&revision(0, 0, 0)),
+      vec![
+        ChangeItem::Title(Section::Uncommitted),
+        ChangeItem::Empty(Section::Uncommitted),
+        ChangeItem::Title(Section::Committed),
+        ChangeItem::Empty(Section::Committed),
+        ChangeItem::End,
+      ]
     );
   }
 }

@@ -2,7 +2,7 @@
 // A stand-in `gh` for the landing capture: answers the calls the app makes
 // (PR status, checks, the GitHub panel's lists, review threads) with fixture
 // data for lorem-ipsum/event-bus. No network, no token.
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,6 +43,24 @@ const prs = [
     headRefName: "feat/event-ingest",
     baseRefName: "main",
     mergeStateStatus: "CLEAN",
+  },
+  {
+    number: 415,
+    title: "feat(spool): fail readiness when the spool queue is unreachable",
+    headRefName: "feat/spool-readiness",
+    baseRefName: "main",
+    mergeStateStatus: "CLEAN",
+    author: author("erin"),
+    createdAt: "2026-08-08T09:00:00Z",
+    body: [
+      "## Summary",
+      "",
+      "`/readyz` now returns **503** while the spool queue can't be reached, so the",
+      "load balancer stops routing ingest traffic to a pod that would drop it.",
+      "",
+      "- Probes the queue with a 500 ms timeout",
+      "- Keeps `/healthz` green, so the pod isn't restarted",
+    ].join("\n"),
   },
   {
     number: 409,
@@ -88,6 +106,16 @@ if (existsSync(overrides)) {
   const changes = JSON.parse(readFileSync(overrides, "utf8"));
   for (const pr of prs) Object.assign(pr, changes[pr.headRefName]);
 }
+// `gh pr edit` titles and bodies, kept beside the call log so later calls
+// see them, as GitHub would.
+const prEditsFile = process.env.TREQ_FAKE_GH_LOG
+  ? join(dirname(process.env.TREQ_FAKE_GH_LOG), "gh-pr-edits.json")
+  : null;
+const prEdits =
+  prEditsFile && existsSync(prEditsFile)
+    ? JSON.parse(readFileSync(prEditsFile, "utf8"))
+    : {};
+for (const pr of prs) Object.assign(pr, prEdits[pr.number]);
 
 const issues = [
   {
@@ -290,6 +318,16 @@ if (group === "pr" && command === "list") {
   list = list.filter((pr) => words.every((word) => pr.title.toLowerCase().includes(word)));
   out(list.map((pr) => pick(pr, after("--json"))));
 }
+if (group === "pr" && command === "edit") {
+  const number = args[2];
+  const edit = { ...prEdits[number] };
+  if (has("--title")) edit.title = after("--title");
+  if (has("--body-file")) edit.body = readFileSync(0, "utf8");
+  if (prEditsFile) {
+    writeFileSync(prEditsFile, JSON.stringify({ ...prEdits, [number]: edit }));
+  }
+  process.exit(0);
+}
 if (group === "pr" && command === "view") {
   const key = has("--") ? branch : args[2];
   const pr = prs.find((p) => p.headRefName === key || String(p.number) === key);
@@ -374,6 +412,15 @@ if (group === "api" && command === "user") {
     process.exit(0);
   }
   out({ login: "octocat" });
+}
+// The merge preview's GitHub merge: squash by default, rebase merges off.
+if (group === "repo" && command === "view") {
+  out({
+    viewerDefaultMergeMethod: "SQUASH",
+    mergeCommitAllowed: true,
+    squashMergeAllowed: true,
+    rebaseMergeAllowed: false,
+  });
 }
 if (group === "issue" && command === "view") {
   const issue = issues.find((i) => String(i.number) === args[2]);

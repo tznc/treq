@@ -8,8 +8,8 @@ use serde::Deserialize;
 use super::{
   checklist::ToolsHost,
   workspace::{
-    Checks, CommitsLabel, CreatePr, Disabled, Header, HomeTarget, Linear, Loc, Merge, MergeQueue,
-    Pill, PrState, Rebase, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
+    Checks, CommitsLabel, CreatePr, Disabled, Header, HomeTarget, Linear, Loc, Merge, Pill,
+    PrState, Rebase, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
   },
 };
 use crate::{
@@ -47,8 +47,6 @@ pub struct Route {
   pub creating_pr: bool,
   /// Workflows started from this window that have not reported yet.
   pub running_checks: Vec<String>,
-  /// The merge queue button, from Supabase.
-  pub merge_queue: Option<MergeQueue>,
   /// Workflow files running as a whole (`isRunning(filename)`), where
   /// `running_checks` also holds those running a single job.
   #[serde(default)]
@@ -781,10 +779,6 @@ pub fn workspace_view(
       spinning: matches!(pending, Pending::Sync | Pending::Reset),
     }),
     checks,
-    merge_queue: route
-      .merge_queue
-      .clone()
-      .filter(|_| on_feature && !not_on_remote),
     merge: on_feature.then(|| Merge {
       passing: ci_passing,
       disabled: merge_blocked,
@@ -874,7 +868,6 @@ mod remote_header_tests {
       "retargeting": false,
       "creatingPr": false,
       "runningChecks": [],
-      "mergeQueue": null,
       "revision": 0,
     }))
     .unwrap()

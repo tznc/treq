@@ -11,7 +11,7 @@ This document defines how Treq sells Pro and Team, how the service decides who i
 - A signed-in user can start a Pro trial or buy Team from the web dashboard, and manage or cancel it without contacting anyone.
 - The service decides entitlement from records keyed by user or organization ID. An email address never decides it.
 - Every cloud feature checks entitlement on the server. A modified build of the open-source app cannot turn a cloud feature on.
-- An organization owns its GitHub App installation, its merge queue configuration, and its Team subscription.
+- An organization owns its GitHub App installation and its Team subscription.
 
 ## Non-goals
 
@@ -30,7 +30,7 @@ This document defines how Treq sells Pro and Team, how the service decides who i
 
 The trial applies to Pro only. A user gets one Pro trial per Stripe customer, recorded when the first trial starts.
 
-The cloud features are the GitHub App and its merge queue, managed cloud workspaces, mobile access, and Linear OAuth. GitHub through the local `gh` CLI and Linear through a personal API key stay free.
+The cloud features are the GitHub App, managed cloud workspaces, mobile access, and Linear OAuth. GitHub through the local `gh` CLI and Linear through a personal API key stay free.
 
 ## Entitlement
 
@@ -56,7 +56,7 @@ Stripe stays the source of truth for payment state. The webhook copies the field
 | `organization_members` | User, organization, and role (`owner` or `member`). | Organization function |
 | `organization_invites` | Email, hashed token, inviter, expiry, accepted time. | Organization function |
 
-`github_app_installations` gains a nullable `organization_id`. Row-level security lets a user read an installation when they linked it or when they belong to its organization. The same rule extends to repositories and merge queue configuration.
+`github_app_installations` gains a nullable `organization_id`. Row-level security lets a user read an installation when they linked it or when they belong to its organization. The same rule extends to repositories.
 
 `public.subscriptions` keeps its current columns (`plan`, `status`, `current_period_end`), so the desktop app needs no change to read it. Its source moves from the Stripe foreign data wrapper to `billing_subscriptions` and `has_pro`. A later migration removes the foreign data wrapper and its vault secret.
 
@@ -79,13 +79,12 @@ Each check calls `has_pro` on the server. The desktop and web gates stay for dis
 
 | Feature | Where it is checked | When entitlement ends |
 | --- | --- | --- |
-| GitHub App install | `create-github-install-intent` and `complete-github-installation`. The App requests user authorization during installation, and the function confirms the installation appears in GitHub's `/user/installations` for that user before linking. | Existing installations stay linked. The merge queue stops. |
-| Merge queue | `set_merge_queue_enabled` and the merge queue worker | The worker pauses the queue and comments once on each queued pull request. |
+| GitHub App install | `create-github-install-intent` and `complete-github-installation`. The App requests user authorization during installation, and the function confirms the installation appears in GitHub's `/user/installations` for that user before linking. | Existing installations stay linked. |
 | Linear OAuth | `create-linear-oauth-intent` and `linear-proxy` | The proxy returns 402 and the app falls back to the personal API key. |
 | Managed cloud workspace | `remote-instance` actions `ensure`, `wake`, and `reprovision`, plus the SSH relay and key install that would wake it | The instance stops. Its disk is kept for 7 days, then deleted. `status` and `delete` always work. |
 | Mobile access | The same checks as cloud workspaces, since mobile reaches them through Remote Development | As above. |
 
-For an organization's installation, the merge queue checks the organization's Team subscription. For a personal installation, it checks the linking user.
+For an organization's installation, `installation_has_pro` checks the organization's Team subscription. For a personal installation, it checks the linking user.
 
 Sprites have no stop call. A Sprite pauses on its own about 30 seconds after its last activity, so the service stops it by refusing every action that would wake it. Its disk is still billed by the provider for those 7 days. An hourly scheduled job runs the lapse sweep, because the project has no in-database scheduler.
 

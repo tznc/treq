@@ -1,7 +1,7 @@
 use crate::core::skills::{
   catalog_url, install_skill_files, merge_catalog_with_installed, parse_catalog,
-  read_bytes_from_locator, InstalledSkill, SkillCatalog, SkillCatalogEntry, SkillCatalogView,
-  SkillInstallScope,
+  read_bytes_from_locator, verify_skill_checksum, InstalledSkill, SkillCatalog, SkillCatalogEntry,
+  SkillCatalogView, SkillInstallScope,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -124,6 +124,38 @@ pub fn cached_catalog_view(
   merge_catalog_with_installed(catalog, repo_path).ok()
 }
 
+/// The registry entry for `skill_id`, from the catalog the list was drawn
+/// from (read again only when it does not list the skill).
+async fn find_entry(
+  skill_id: &str,
+  catalog_url: Option<&str>,
+) -> Result<SkillCatalogEntry, String> {
+  let mut catalog = load_catalog(catalog_url, CATALOG_INSTALL).await?;
+  if !catalog.skills.iter().any(|skill| skill.id == skill_id) {
+    catalog = load_catalog(catalog_url, Duration::ZERO).await?;
+  }
+  catalog
+    .skills
+    .into_iter()
+    .find(|skill| skill.id == skill_id)
+    .ok_or_else(|| format!("Skill '{skill_id}' was not found in the catalog"))
+}
+
+/// Downloads `skill_id`'s files without installing them, checked against the
+/// catalog's checksum: the start of a customised copy.
+pub async fn download_verified(
+  skill_id: &str,
+  catalog_url: Option<&str>,
+) -> Result<(SkillCatalogEntry, Vec<(String, Vec<u8>)>), String> {
+  let entry = find_entry(skill_id, catalog_url).await?;
+  if entry.proprietary {
+    return Err("Proprietary skills cannot be copied from the catalog".to_string());
+  }
+  let files = download_skill_files(&entry).await?;
+  verify_skill_checksum(&entry, &files)?;
+  Ok((entry, files))
+}
+
 /// Downloads `skill_id` from the registry and installs it at `scope`.
 /// Callers then record the app index (`persist_app_index_setting`).
 pub async fn download_and_install(
@@ -132,17 +164,7 @@ pub async fn download_and_install(
   repo_path: Option<&str>,
   catalog_url: Option<&str>,
 ) -> Result<InstalledSkill, String> {
-  // The catalog the list was drawn from, not a second read of it; one read
-  // again only when it does not list the skill.
-  let mut catalog = load_catalog(catalog_url, CATALOG_INSTALL).await?;
-  if !catalog.skills.iter().any(|skill| skill.id == skill_id) {
-    catalog = load_catalog(catalog_url, Duration::ZERO).await?;
-  }
-  let entry = catalog
-    .skills
-    .into_iter()
-    .find(|skill| skill.id == skill_id)
-    .ok_or_else(|| format!("Skill '{skill_id}' was not found in the catalog"))?;
+  let entry = find_entry(skill_id, catalog_url).await?;
   let files = download_skill_files(&entry).await?;
   install_skill_files(&entry, &files, scope, repo_path)
 }

@@ -4,7 +4,7 @@
 //
 // This function is deliberately NOT reachable with a normal end user's
 // Supabase session token. This codebase has no notion of an "admin" role on
-// a Supabase user (see e.g. 005_merge_queue_pgmq.sql's pattern of
+// a Supabase user (the codebase uses
 // service-role-only SECURITY DEFINER wrappers instead of a user-role check) -
 // every other privileged operation in this codebase is gated by holding the
 // service-role key, a server-side secret, rather than by a claim on a user

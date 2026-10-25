@@ -1,0 +1,57 @@
+# cargo-deny: advisories, licenses, crate sources and duplicates.
+# Run locally with `cargo deny check`.
+
+[graph]
+all-features = true
+
+[advisories]
+# Flag only unmaintained crates the workspace depends on directly; transitive
+# ones are the upstream crate's call.
+unmaintained = "workspace"
+ignore = [
+  { id = "RUSTSEC-2023-0071", reason = "rsa Marvin attack: no fixed release; pulled in by russh" },
+]
+
+[licenses]
+# Every crate under a dual license must offer at least one of these.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-1-Clause",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+# The workspace crates are not published.
+ignore = true
+
+[bans]
+# gpui, Tauri and the Windows crates pull several versions of the same
+# crates; report them without failing.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = [
+  "https://github.com/Ziinc/gpui-bootstrap",
+  "https://github.com/Ziinc/gpui-kit",
+  "https://github.com/Ziinc/gpui-playwright",
+  "https://github.com/Ziinc/gpui-styleguidist",
+  "https://github.com/ziinc/tauri-gpui",
+]

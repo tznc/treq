@@ -211,7 +211,9 @@ pub struct WorkspacesScreen {
   /// The host's last change marker, to refetch when something else changed
   /// the repository.
   marker: Option<String>,
-  scroll: ScrollHandle,
+  /// The rows on screen, in display order, as the last render left them.
+  entries: Vec<Entry>,
+  rows: ListState,
   _poll: Task<()>,
 }
 
@@ -250,7 +252,8 @@ impl WorkspacesScreen {
       message: None,
       refresh_error: None,
       marker: None,
-      scroll: ScrollHandle::new(),
+      entries: Vec::new(),
+      rows: widgets::list_state(),
       _poll: poll,
     };
     this.poll_marker(cx);
@@ -260,6 +263,45 @@ impl WorkspacesScreen {
 
   pub fn reload(&mut self, cx: &mut Context<Self>) {
     self.fetch(false, cx);
+  }
+
+  /// A screen showing `list`, without the host reads (measurement tests).
+  #[cfg(test)]
+  pub(crate) fn for_test(
+    list: Vec<WorkspaceSummary>,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Self {
+    let query = cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces"));
+    Self {
+      repo: "/r".into(),
+      list: Load::Ready(list),
+      query,
+      selection: None,
+      pending: HashSet::new(),
+      message: None,
+      refresh_error: None,
+      marker: None,
+      entries: Vec::new(),
+      rows: widgets::list_state(),
+      _poll: Task::ready(()),
+    }
+  }
+
+  /// The list's viewport and the bounds of its item `ix`, once drawn.
+  #[cfg(test)]
+  pub(crate) fn drawn(&self, ix: usize) -> (Bounds<Pixels>, Option<Bounds<Pixels>>) {
+    (self.rows.viewport_bounds(), self.rows.bounds_for_item(ix))
+  }
+
+  #[cfg(test)]
+  pub(crate) fn set_selecting(
+    &mut self,
+    ids: impl IntoIterator<Item = i64>,
+    cx: &mut Context<Self>,
+  ) {
+    self.selection = Some(ids.into_iter().collect());
+    cx.notify();
   }
 
   fn fetch(&mut self, join: bool, cx: &mut Context<Self>) {
@@ -343,6 +385,10 @@ impl WorkspacesScreen {
           move |_, cx| {
             this.update(cx, |screen, cx| screen.select(None, cx)).ok();
           }
+        }),
+        sheet::MenuEntry::new("menu-issues", "Issues", {
+          let repo = self.repo.clone();
+          move |_, cx| super::issues::open(repo.clone(), cx)
         }),
         sheet::MenuEntry::new("menu-refresh", "Refresh", move |_, cx| {
           this.update(cx, |screen, cx| screen.reload(cx)).ok();
@@ -800,10 +846,10 @@ impl WorkspacesScreen {
   }
 }
 
-impl Render for WorkspacesScreen {
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let query = self.query.read(cx).value().to_string();
-    let body = match &self.list {
+impl WorkspacesScreen {
+  /// The card standing in for the rows: loading, failed, empty or no match.
+  fn placeholder(&self, cx: &mut Context<Self>) -> Div {
+    match &self.list {
       Load::Idle | Load::Loading => {
         widgets::card(cx).child(widgets::centered_message("Loading workspaces…", cx))
       }
@@ -834,73 +880,114 @@ impl Render for WorkspacesScreen {
         .text_center()
         .into_any_element(),
       ]),
-      Load::Ready(list) => {
-        let entries: Vec<Entry> = stack_order(list)
-          .into_iter()
-          .filter(|e| matches(&list[e.index], &query))
-          .collect();
-        if entries.is_empty() {
-          widgets::card(cx).child(widgets::centered_message("No workspaces match.", cx))
-        } else {
-          let rows: Vec<AnyElement> = entries.iter().map(|e| self.row(e, list, cx)).collect();
-          widgets::card(cx).children(rows)
-        }
-      }
-    };
+      Load::Ready(_) => widgets::card(cx).child(widgets::centered_message("No workspaces match.", cx)),
+    }
+  }
+
+  /// The search box and list title above the rows.
+  fn head(&self, cx: &mut Context<Self>) -> AnyElement {
     let count = self.list.ready().map_or(0, Vec::len);
     let palette = treq_ui::theme::current(cx);
+    // A list row is as wide as its content unless told otherwise, which
+    // left the search field a sliver and the refresh button by the count.
+    v_flex()
+      .w_full()
+      .gap_3()
+      .px_4()
+      .pt_4()
+      .pb_3()
+      .when(count > 0, |head| {
+        head.child(Input::new(&self.query).large().cleanable(true))
+      })
+      .child(
+        h_flex()
+          .gap_2()
+          .items_center()
+          .child(
+            div()
+              .text_xs()
+              .font_weight(FontWeight::SEMIBOLD)
+              .text_color(cx.theme().muted_foreground)
+              .child("WORKSPACES"),
+          )
+          .when(count > 0, |h| h.child(treq_ui::Count::new(count, &palette)))
+          .child(div().flex_1())
+          .child(
+            Button::new("refresh")
+              .ghost()
+              .small()
+              .icon(IconName::RefreshCw)
+              .loading(self.list.is_loading())
+              .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
+          ),
+      )
+      .children(
+        self
+          .refresh_error
+          .clone()
+          .map(|error| widgets::error_text(error, cx)),
+      )
+      .into_any_element()
+  }
+
+  /// The line under the rows and the page's bottom padding.
+  fn tail(&self, cx: &mut Context<Self>) -> AnyElement {
+    div()
+      .px_4()
+      .pb_4()
+      .children(self.message.clone().map(|(ok, text)| {
+        let line = if ok {
+          widgets::muted(text, cx)
+        } else {
+          widgets::error_text(text, cx)
+        };
+        line.pt_3()
+      }))
+      .into_any_element()
+  }
+
+  /// Item `ix` of the list: the head, the rows (or their placeholder), the tail.
+  fn item(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+    // The list is borrowed while it builds items, so its count is not asked.
+    let last = 1 + self.entries.len().max(1);
+    if ix == 0 {
+      return self.head(cx);
+    }
+    if ix >= last {
+      return self.tail(cx);
+    }
+    let (Load::Ready(list), Some(entry)) = (&self.list, self.entries.get(ix - 1)) else {
+      return div().px_4().child(self.placeholder(cx)).into_any_element();
+    };
+    let (first, end) = (ix == 1, ix + 1 == last);
+    widgets::card_item(self.row(entry, list, cx), first, end, cx).into_any_element()
+  }
+}
+
+impl Render for WorkspacesScreen {
+  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    let query = self.query.read(cx).value().to_string();
+    self.entries = match &self.list {
+      Load::Ready(list) => stack_order(list)
+        .into_iter()
+        .filter(|e| matches(&list[e.index], &query))
+        .collect(),
+      _ => Vec::new(),
+    };
+    // Head, then the rows (one placeholder card without any), then the tail.
+    widgets::resize(&self.rows, 2 + self.entries.len().max(1));
+    let screen = cx.weak_entity();
     v_flex()
       .size_full()
       .child(
-        div()
-          .id("workspaces")
-          .flex_1()
-          .min_h_0()
-          .overflow_y_scroll()
-          .track_scroll(&self.scroll)
-          .child(
-            widgets::page()
-              .gap_3()
-              .when(count > 0, |page| {
-                page.child(Input::new(&self.query).large().cleanable(true))
-              })
-              .child(
-                h_flex()
-                  .gap_2()
-                  .items_center()
-                  .child(
-                    div()
-                      .text_xs()
-                      .font_weight(FontWeight::SEMIBOLD)
-                      .text_color(cx.theme().muted_foreground)
-                      .child("WORKSPACES"),
-                  )
-                  .when(count > 0, |h| h.child(treq_ui::Count::new(count, &palette)))
-                  .child(div().flex_1())
-                  .child(
-                    Button::new("refresh")
-                      .ghost()
-                      .small()
-                      .icon(IconName::RefreshCw)
-                      .loading(self.list.is_loading())
-                      .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
-                  ),
-              )
-              .children(
-                self
-                  .refresh_error
-                  .clone()
-                  .map(|error| widgets::error_text(error, cx)),
-              )
-              .child(body)
-              .children(self.message.clone().map(|(ok, text)| {
-                if ok {
-                  widgets::muted(text, cx)
-                } else {
-                  widgets::error_text(text, cx)
-                }
-              })),
-          ),
+        div().flex_1().min_h_0().child(
+          list(self.rows.clone(), move |ix, _, cx| {
+            screen
+              .update(cx, |this, cx| this.item(ix, cx))
+              .unwrap_or_else(|_| div().into_any_element())
+          })
+          .size_full(),
+        ),
       )
       .child(self.bottom_bar(cx))
   }

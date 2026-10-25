@@ -30,7 +30,6 @@ const FREE_FEATURES: PlanFeature[] = [
 const PRO_FEATURES: PlanFeature[] = [
   {key: 'free', text: 'Everything in Free'},
   {key: 'github-app', text: 'Treq GitHub App'},
-  {key: 'merge-queue', text: 'Merge queue (private alpha)'},
   {key: 'cloud', text: 'Managed cloud workspace'},
   {key: 'linear-oauth', text: 'Linear OAuth'},
 ];
@@ -38,7 +37,6 @@ const PRO_FEATURES: PlanFeature[] = [
 const TEAM_FEATURES: PlanFeature[] = [
   {key: 'pro', text: 'Everything in Pro for every member'},
   {key: 'installation', text: 'Shared GitHub App installation'},
-  {key: 'merge-queue', text: 'Shared merge queue (private alpha)'},
   {key: 'one-bill', text: 'One bill for the whole team'},
 ];
 
@@ -66,12 +64,6 @@ const COMPARISON_ROWS: ComparisonRow[] = [
     free: {included: true, detail: 'Local gh CLI'},
     pro: {included: true, detail: 'Treq GitHub App'},
     team: {included: true, detail: 'Shared GitHub App installation'},
-  },
-  {
-    feature: 'Merge queue',
-    free: {included: false},
-    pro: {included: true, detail: 'Private alpha'},
-    team: {included: true, detail: 'Shared, private alpha'},
   },
   {
     feature: 'Managed cloud workspace',

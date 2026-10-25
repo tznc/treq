@@ -112,9 +112,6 @@ pub struct SidebarRow {
   pub conflicted: bool,
   pub status: Option<RowStatus>,
   pub pr: Option<PrState>,
-  /// The workspace's merge queue entry, when the merge queue is on.
-  #[serde(default)]
-  pub queue: Option<String>,
   /// Being archived: dimmed, with a spinner, and not clickable.
   #[serde(default)]
   pub archiving: bool,
@@ -646,35 +643,6 @@ pub(super) fn pr_color(pr: PrState, palette: &Palette) -> Hsla {
     PrState::Open => palette.pr_open,
     PrState::Merged => palette.pr_merged,
     PrState::Closed => palette.pr_closed,
-  }
-}
-
-/// A merge queue entry's dot: color, whether it pulses, and its label, as in
-/// the React sidebar.
-fn queue_dot(status: &str, palette: &Palette) -> (Hsla, bool, String) {
-  match status {
-    "queued" => (Tone::Warning.color(palette), false, "In merge queue".into()),
-    "testing" => (
-      Tone::Primary.color(palette),
-      true,
-      "CI running in merge queue".into(),
-    ),
-    "merging" => (
-      Tone::Success.color(palette),
-      true,
-      "Passed CI, merging now".into(),
-    ),
-    "merged" => (
-      Tone::GitMerged.color(palette),
-      false,
-      "Merged via queue".into(),
-    ),
-    "failed" => (
-      Tone::Danger.color(palette),
-      false,
-      "Failed in merge queue".into(),
-    ),
-    other => (palette.muted_foreground, false, other.into()),
   }
 }
 
@@ -1352,7 +1320,7 @@ impl Sidebar {
         .into_any_element()
     };
 
-    // The status dot and queue dot give way to the action buttons on hover.
+    // The status dot gives way to the action buttons on hover.
     let indicators = div()
       .flex()
       .flex_none()
@@ -1376,29 +1344,6 @@ impl Sidebar {
           )
         },
       )
-      .when_some(row.queue.as_deref(), |this, status| {
-        let (color, pulse, _) = queue_dot(status, palette);
-        let dot = div()
-          .id(("queue", id as u64))
-          .debug_selector(move || format!("queue-{id}"))
-          .flex_none()
-          .size(zpx(8.))
-          .rounded_full()
-          .bg(color);
-        if pulse {
-          this.child(
-            dot.with_animation(
-              ("queue-pulse", id as u64),
-              Animation::new(Duration::from_secs(2))
-                .repeat()
-                .with_max_fps(ui::PULSE_FPS),
-              |dot, delta| dot.opacity(0.5 + 0.5 * (delta * std::f32::consts::TAU).cos().abs()),
-            ),
-          )
-        } else {
-          this.child(dot)
-        }
-      })
       .when_some(row.status.as_ref(), |this, status| {
         let color = status_color(status.color, palette);
         if status.spin {

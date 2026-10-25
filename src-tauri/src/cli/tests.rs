@@ -1095,6 +1095,29 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       draft: true,
       idempotency_key: key(),
     },
+    R::GithubRead {
+      repo: repo(),
+      query: crate::core::remote::GithubQuery::ListIssues {
+        state: "open".into(),
+        after: Some("cursor".into()),
+      },
+    },
+    R::GithubWrite {
+      repo: repo(),
+      action: crate::core::remote::GithubAction::SubmitPrReview {
+        number: 7,
+        event: "REQUEST_CHANGES".into(),
+        body: "Line one\nline two".into(),
+        comments: vec![crate::github::GhDraftReviewComment {
+          path: "a.rs".into(),
+          line: 4,
+          side: "RIGHT".into(),
+          start_line: Some(2),
+          body: "nit".into(),
+        }],
+      },
+      idempotency_key: key(),
+    },
     R::AgentStart {
       repo: repo(),
       workspace: "1".into(),
@@ -1138,6 +1161,12 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       repo: repo(),
       workspace: "1".into(),
       label: "shell".into(),
+    },
+    R::PtyRename {
+      repo: repo(),
+      workspace: "1".into(),
+      label: "claude-1".into(),
+      title: "Fix login redirect".into(),
     },
     R::PtyAttachCommand {
       repo: repo(),
