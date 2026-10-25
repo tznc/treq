@@ -1068,6 +1068,7 @@ mod tests {
       previous_path: previous.map(str::to_string),
       changed_line_count: lines,
       diff_deferred: false,
+    content_id: None,
     }
   }
 

@@ -15,7 +15,9 @@ use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use tauri_plugin_gpui::gpui::{self, div, prelude::*, AnyElement, Context, FontWeight, Window};
+use tauri_plugin_gpui::gpui::{
+  self, div, prelude::*, AnyElement, Context, Focusable as _, FontWeight, Window,
+};
 
 use super::{help, toast, SettingsView, Tab};
 use crate::gpui_shell::{
@@ -283,6 +285,8 @@ struct Linear {
   path: String,
   key: Option<String>,
   editing: bool,
+  /// The key field takes focus on its next draw, once it opens.
+  focus: bool,
   draft: String,
   saving: bool,
 }
@@ -636,6 +640,7 @@ impl SettingsView {
       path: path.clone(),
       key: None,
       editing: false,
+      focus: false,
       draft: String::new(),
       saving: false,
     });
@@ -892,7 +897,14 @@ impl SettingsView {
       "linear.apiKey.edit" => {
         if let Some(linear) = &mut self.account.linear {
           linear.editing = true;
+          linear.focus = true;
           linear.draft = linear.key.clone().unwrap_or_default();
+        }
+      }
+      "linear.apiKey.cancel" => {
+        if let Some(linear) = &mut self.account.linear {
+          linear.editing = false;
+          linear.draft.clear();
         }
       }
       "linear.apiKey.save" => self.save_linear_key(cx),
@@ -1699,10 +1711,13 @@ impl SettingsView {
         .into_any_element();
     }
     let key_control: AnyElement = if linear.editing {
-      let input =
-        self
-          .controls
-          .password("linear.apiKey", &linear.draft, "linear_api_...", window, cx);
+      let input = self
+        .controls
+        .password("linear.apiKey", &linear.draft, "lin_api_...", window, cx);
+      if let Some(state) = self.account.linear.as_mut().filter(|l| l.focus) {
+        state.focus = false;
+        input.read(cx).focus_handle(cx).focus(window, cx);
+      }
       div()
         .flex()
         .flex_none()
@@ -1713,6 +1728,14 @@ impl SettingsView {
           false,
           linear.saving,
         )))
+        .child(
+          Button::new("linear-api-key-cancel", p)
+            .size(Size::Sm)
+            .variant(Variant::Ghost)
+            .disabled(linear.saving)
+            .label("Cancel")
+            .on_click(self.press("linear.apiKey.cancel")),
+        )
         .child(
           Button::new("linear-api-key-save", p)
             .size(Size::Sm)

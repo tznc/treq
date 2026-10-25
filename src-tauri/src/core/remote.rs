@@ -166,6 +166,17 @@ pub enum TreqCommandRequest {
     workspace: Option<String>,
     path: String,
   },
+  /// `DiffFile` for several files at once, from the trees `token` (a
+  /// `working_copy_token` from `WorkspaceDiff`) names when given, else from
+  /// a snapshot. Answers a `WorkspaceFileHunksBatch`; a host older than it
+  /// fails, so callers fall back to `DiffFile`.
+  DiffFiles {
+    repo: String,
+    workspace: Option<String>,
+    paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    token: Option<String>,
+  },
   ReadFile {
     repo: String,
     workspace: Option<String>,
@@ -561,6 +572,7 @@ impl TreqCommandRequest {
       | Self::InspectWorkspace { .. }
       | Self::ListChanges { .. }
       | Self::DiffFile { .. }
+      | Self::DiffFiles { .. }
       | Self::ReadFile { .. }
       | Self::ListCommits { .. }
       | Self::ListConflicts { .. }
@@ -652,6 +664,7 @@ impl TreqCommandRequest {
       | Self::InspectWorkspace { .. }
       | Self::ListChanges { .. }
       | Self::DiffFile { .. }
+      | Self::DiffFiles { .. }
       | Self::ReadFile { .. }
       | Self::ListCommits { .. }
       | Self::ListConflicts { .. }
@@ -700,6 +713,7 @@ impl TreqCommandRequest {
       Self::InspectWorkspace { .. } => "InspectWorkspace",
       Self::ListChanges { .. } => "ListChanges",
       Self::DiffFile { .. } => "DiffFile",
+      Self::DiffFiles { .. } => "DiffFiles",
       Self::ReadFile { .. } => "ReadFile",
       Self::ListCommits { .. } => "ListCommits",
       Self::ListConflicts { .. } => "ListConflicts",
@@ -768,6 +782,7 @@ impl TreqCommandRequest {
     "InspectWorkspace",
     "ListChanges",
     "DiffFile",
+    "DiffFiles",
     "ReadFile",
     "ListCommits",
     "ListConflicts",
@@ -1649,6 +1664,21 @@ impl TreqCommandRequest {
         fields.path = Some(path);
         ("changes", "diff", repo)
       }
+      Self::DiffFiles {
+        repo,
+        workspace,
+        paths,
+        token,
+      } => {
+        fields.workspace = workspace.as_deref();
+        // JSON, as paths may hold commas.
+        let paths = serde_json::to_string(paths).map_err(|e| e.to_string())?;
+        fields.extra.push(("paths", paths));
+        if let Some(token) = token {
+          fields.extra.push(("token", token.clone()));
+        }
+        ("changes", "diff-files", repo)
+      }
       Self::ReadFile {
         repo,
         workspace,
@@ -2238,6 +2268,19 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       workspace_id(workspace.as_ref())?,
       &path,
       "git",
+    )),
+    // The marker style `WorkspaceDiff` names its token with on a host.
+    TreqCommandRequest::DiffFiles {
+      repo,
+      workspace,
+      paths,
+      token,
+    } => json(crate::core::changes::list_file_hunks_batch(
+      &repo,
+      workspace_id(workspace.as_ref())?,
+      paths,
+      crate::core::DEFAULT_CONFLICT_MARKER_STYLE,
+      token.as_deref(),
     )),
     TreqCommandRequest::ReadFile {
       repo,
@@ -3485,6 +3528,39 @@ pub async fn execute_remote_command<T: DeserializeOwned>(
       })?;
   serde_json::from_slice::<T>(&output.stdout)
     .map_err(|error| RemoteCommandError::InvalidJson(error.to_string()))
+}
+
+impl RemoteCommandError {
+  /// Whether the command failed because the pooled connection was dead
+  /// without being known to be: a channel error (closed session, relay
+  /// recycled), a channel that never opened, or the deadline. A read is safe
+  /// to send again on a fresh connection.
+  pub fn is_stale_connection(&self) -> bool {
+    use crate::core::remote_ssh_transport::SshTransportError;
+    matches!(self, Self::Transport(message)
+      if message.starts_with(&SshTransportError::ChannelError(String::new()).to_string())
+        || *message == SshTransportError::DeadlineExceeded.to_string())
+  }
+}
+
+/// [`execute_remote_command`] for a read: after a stale-connection failure
+/// (see [`RemoteCommandError::is_stale_connection`]) the dead connection is
+/// dropped and the read is sent once more on a fresh one. Mutations never go
+/// through here; they verify before any retry ([`retry_after_reconnect`]).
+pub async fn execute_remote_read<T: DeserializeOwned>(
+  pool: &crate::core::remote_ssh_transport::SshConnectionPool,
+  endpoint: &crate::core::remote_control_plane::SshEndpoint,
+  request: TreqCommandRequest,
+  limits: crate::core::remote_ssh_transport::ExecLimits,
+  cancellation: &crate::core::remote_ssh_transport::CancellationToken,
+) -> Result<T, RemoteCommandError> {
+  match execute_remote_command::<T>(pool, endpoint, request.clone(), limits, cancellation).await {
+    Err(error) if error.is_stale_connection() => {
+      pool.mark_dead(endpoint).await;
+      execute_remote_command::<T>(pool, endpoint, request, limits, cancellation).await
+    }
+    result => result,
+  }
 }
 
 impl TransportError {
@@ -5025,7 +5101,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 62);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 63);
   }
 
   #[test]

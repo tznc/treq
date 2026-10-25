@@ -625,7 +625,7 @@ impl FileBrowserView {
       self.run(
         move |host| {
           host
-            .file_hunks(&repo, workspace_id, vec![rel.clone()])
+            .file_hunks(&repo, workspace_id, vec![rel.clone()], None)
             .map(|batch| {
               batch
                 .files
