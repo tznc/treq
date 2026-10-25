@@ -159,6 +159,31 @@ pub fn actions(pr: &GhPullRequest) -> Vec<PrAction> {
   }
 }
 
+/// Shows a write the host confirmed on the loaded `pr`, so the page changes
+/// at once; the refetch that follows replaces it with GitHub's copy.
+pub fn apply(pr: &mut GhPullRequest, action: &GithubAction) {
+  match action {
+    GithubAction::ClosePr { .. } => pr.state = "CLOSED".into(),
+    GithubAction::ReopenPr { .. } => pr.state = "OPEN".into(),
+    GithubAction::SetPrDraft { draft, .. } => pr.is_draft = *draft,
+    GithubAction::CommentOnPr { body, .. } => {
+      pr.comments
+        .get_or_insert_with(Vec::new)
+        .push(GhIssueComment {
+          id: String::new(),
+          body: body.clone(),
+          author: treq_lib::github::GhAuthor {
+            login: "You".into(),
+            avatar_url: None,
+          },
+          created_at: String::new(),
+          reactions: Vec::new(),
+        });
+    }
+    _ => {}
+  }
+}
+
 /// An entry of the title bar's ⋯ menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuItem {
@@ -379,7 +404,7 @@ impl PrDetailScreen {
     self.message = None;
     let request = TreqCommandRequest::GithubWrite {
       repo: self.repo.clone(),
-      action,
+      action: action.clone(),
       idempotency_key,
     };
     load::run_in(
@@ -400,6 +425,9 @@ impl PrDetailScreen {
           },
         ));
         if matches!(outcome, Ok(Mutation::Applied(_))) {
+          if let Load::Ready(pr) = &mut this.pr {
+            apply(pr, &action);
+          }
           applied(this, window, cx);
         }
         this.reload(cx);
@@ -623,7 +651,7 @@ impl PrDetailScreen {
               .child(day(&comment.created_at)),
           ),
       )
-      .child(div().child(comment.body.clone()))
+      .child(widgets::markdown(("pr-comment", i), &comment.body, cx))
       .child(reactions)
       .children(picker)
   }
@@ -697,7 +725,7 @@ impl Render for PrDetailScreen {
       });
     let description =
       widgets::section("Description", cx).child(widgets::card(cx).p_4().child(match body {
-        Some(body) => div().child(body),
+        Some(body) => widgets::markdown("pr-body", &body, cx),
         None => widgets::muted("No description provided.", cx),
       }));
     let comment_rows: Vec<Div> = comments
@@ -778,6 +806,32 @@ mod tests {
     assert_eq!(groups, vec![group("HEART", 3, true)]);
     assert_eq!(emoji("ROCKET"), "🚀");
     assert_eq!(emoji("NEW_ONE"), "NEW_ONE");
+  }
+
+  #[core::prelude::v1::test]
+  fn applied_writes_show_before_the_refetch() {
+    let mut p = pr(5, "OPEN", false);
+    apply(
+      &mut p,
+      &GithubAction::SetPrDraft {
+        number: 5,
+        draft: true,
+      },
+    );
+    assert!(p.is_draft);
+    apply(&mut p, &GithubAction::ClosePr { number: 5 });
+    assert_eq!(p.state, "CLOSED");
+    apply(&mut p, &GithubAction::ReopenPr { number: 5 });
+    assert_eq!(p.state, "OPEN");
+    apply(
+      &mut p,
+      &GithubAction::CommentOnPr {
+        number: 5,
+        body: "lgtm".into(),
+      },
+    );
+    let comments = p.comments.as_ref().unwrap();
+    assert_eq!(comments.last().unwrap().body, "lgtm");
   }
 
   #[core::prelude::v1::test]

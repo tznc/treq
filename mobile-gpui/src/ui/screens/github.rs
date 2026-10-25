@@ -5,12 +5,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-  component::{
-    button::{Button, ButtonVariants},
-    h_flex, v_flex, Sizable,
-  },
+  component::{v_flex, ActiveTheme},
   *,
 };
 
@@ -121,21 +117,26 @@ impl GithubScreen {
 
 impl Render for GithubScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let tabs = h_flex().px_4().pt_3().gap_2().children(Tab::ALL.map(|tab| {
-      Button::new(tab.id())
-        .large()
-        .flex_1()
-        .h(px(44.))
-        .label(tab.label())
-        .map(|b| {
-          if tab == self.tab {
-            b.primary()
-          } else {
-            b.outline()
-          }
-        })
-        .on_click(cx.listener(move |this, _, window, cx| this.select(tab, window, cx)))
-    }));
+    let palette = treq_ui::theme::current(cx);
+    let view = cx.weak_entity();
+    // Underlined labels, as desktop's GitHub page has, so the tabs never
+    // look like the Open / Closed filter below them.
+    let tabs = div()
+      .px_4()
+      .pt_2()
+      .border_b_1()
+      .border_color(cx.theme().border)
+      .child(
+        treq_ui::Tabs::new("github-tabs", &palette)
+          .style(treq_ui::TabsStyle::Underline)
+          .tabs(Tab::ALL.map(|tab| treq_ui::Tab::new(tab.id(), tab.label())))
+          .selected(Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0))
+          .on_select(move |ix, window, cx| {
+            view
+              .update(cx, |this, cx| this.select(Tab::ALL[ix], window, cx))
+              .ok();
+          }),
+      );
     let body: AnyView = match (self.tab, &self.prs) {
       (Tab::PullRequests, Some(prs)) => prs.clone().into(),
       _ => self.issues.clone().into(),
