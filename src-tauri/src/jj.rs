@@ -3030,6 +3030,7 @@ pub fn get_workspace_branch(workspace_path: &str) -> Result<String, JjError> {
 pub fn remove_workspace_directory_only(workspace_path: &str) -> Result<(), JjError> {
   let workspace_dir = Path::new(workspace_path);
   if workspace_dir.exists() {
+    local_db::release_connections_under(workspace_dir);
     fs::remove_dir_all(workspace_dir).map_err(|e| JjError::IoError(e.to_string()))?;
   }
   Ok(())
