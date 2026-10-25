@@ -3783,6 +3783,7 @@ fn github_preview(state: &str, merge_state: &str, base: &str) -> merge::Preview 
         base_ref_name: base.into(),
         merge_state_status: Some(merge_state.into()),
         is_draft: false,
+        body: String::new(),
       },
       settings: Some(crate::github::GhRepoMergeSettings {
         default_method: crate::github::GhMergeMethod::Squash,
