@@ -334,3 +334,19 @@ fn probe_init() {
     eprintln!("round {round}: core::init {a:.0} ms, reconcile_all_workspaces_after_rewrite {b:.0} ms");
   }
 }
+
+/// Commit latency in a repo with many workspaces (repo left by `many_workspaces`).
+#[test]
+#[ignore]
+fn probe_commit() {
+  let repo = std::env::var("GROWTH_REPO").unwrap();
+  let all = crate::core::list_workspaces(&repo).unwrap();
+  let w = &all[0];
+  let wsp = Path::new(&repo).join(".treq/workspaces").join(&w.workspace_path);
+  for round in 0..3 {
+    fs::write(wsp.join(format!("c{round}.txt")), "x\n").unwrap();
+    let t = Instant::now();
+    crate::core::commit_workspace(&repo, w.id, &format!("commit {round}")).unwrap();
+    eprintln!("round {round}: commit_workspace with {} workspaces: {:.0} ms", all.len(), t.elapsed().as_secs_f64() * 1e3);
+  }
+}
