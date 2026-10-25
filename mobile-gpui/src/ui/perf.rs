@@ -19,7 +19,7 @@ use futures::channel::mpsc;
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
   div, px, size, AnyView, AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity,
-  IntoElement, ParentElement as _, Pixels, Point, Render, Size, Styled as _, StyleRefinement,
+  IntoElement, ParentElement as _, Pixels, Point, Render, Size, StyleRefinement, Styled as _,
   TestAppContext, Window, WindowBounds, WindowOptions,
 };
 use treq_lib::{
@@ -220,36 +220,73 @@ impl Render for Variant {
           .px_4()
           .py_2()
           .gap_3()
-          .child(v_flex().flex_1().min_w_0().child(div().truncate().child("Workspace number"))
-            .child(div().truncate().child("feature/branch")))
+          .child(
+            v_flex()
+              .flex_1()
+              .min_w_0()
+              .child(div().truncate().child("Workspace number"))
+              .child(div().truncate().child("feature/branch")),
+          )
           .into_any_element(),
         "two-text-no-truncate" => h_flex()
           .id(("n", i))
           .px_4()
           .py_2()
           .gap_3()
-          .child(v_flex().flex_1().min_w_0().child(div().child("Workspace number"))
-            .child(div().child("feature/branch")))
+          .child(
+            v_flex()
+              .flex_1()
+              .min_w_0()
+              .child(div().child("Workspace number"))
+              .child(div().child("feature/branch")),
+          )
           .into_any_element(),
         "two-text-nowrap" => h_flex()
           .id(("w", i))
           .px_4()
           .py_2()
           .gap_3()
-          .child(v_flex().flex_1().min_w_0().child(div().whitespace_nowrap().overflow_hidden().child("Workspace number"))
-            .child(div().whitespace_nowrap().overflow_hidden().child("feature/branch")))
+          .child(
+            v_flex()
+              .flex_1()
+              .min_w_0()
+              .child(
+                div()
+                  .whitespace_nowrap()
+                  .overflow_hidden()
+                  .child("Workspace number"),
+              )
+              .child(
+                div()
+                  .whitespace_nowrap()
+                  .overflow_hidden()
+                  .child("feature/branch"),
+              ),
+          )
           .into_any_element(),
-        "one-truncate" => div().id(("o", i)).h(px(56.)).child(div().truncate().child("Workspace number")).into_any_element(),
-        "two-truncate-vflex-only" => v_flex().id(("v", i)).child(div().truncate().child("Workspace number"))
-            .child(div().truncate().child("feature/branch")).into_any_element(),
+        "one-truncate" => div()
+          .id(("o", i))
+          .h(px(56.))
+          .child(div().truncate().child("Workspace number"))
+          .into_any_element(),
+        "two-truncate-vflex-only" => v_flex()
+          .id(("v", i))
+          .child(div().truncate().child("Workspace number"))
+          .child(div().truncate().child("feature/branch"))
+          .into_any_element(),
         // Block (not flex) column for the two texts.
         "block-column-in-hflex" => h_flex()
           .id(("a", i))
           .px_4()
           .py_2()
           .gap_3()
-          .child(div().flex_1().min_w_0().child(div().truncate().child("Workspace number"))
-            .child(div().truncate().child("feature/branch")))
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .child(div().truncate().child("Workspace number"))
+              .child(div().truncate().child("feature/branch")),
+          )
           .into_any_element(),
         // Whole row a block container; texts truncate; chevron absolute-free.
         "block-row" => div()
@@ -265,8 +302,25 @@ impl Render for Variant {
           .px_4()
           .py_2()
           .gap_3()
-          .child(v_flex().flex_1().min_w_0().child(div().w(px(300.)).h(px(20.)).truncate().child("Workspace number"))
-            .child(div().w(px(300.)).h(px(20.)).truncate().child("feature/branch")))
+          .child(
+            v_flex()
+              .flex_1()
+              .min_w_0()
+              .child(
+                div()
+                  .w(px(300.))
+                  .h(px(20.))
+                  .truncate()
+                  .child("Workspace number"),
+              )
+              .child(
+                div()
+                  .w(px(300.))
+                  .h(px(20.))
+                  .truncate()
+                  .child("feature/branch"),
+              ),
+          )
           .into_any_element(),
         // Single text node with a newline-free combined label.
         "one-text-in-hflex" => h_flex()
@@ -274,7 +328,13 @@ impl Render for Variant {
           .px_4()
           .py_2()
           .gap_3()
-          .child(div().flex_1().min_w_0().truncate().child("Workspace number"))
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .truncate()
+              .child("Workspace number"),
+          )
           .into_any_element(),
         // Block text column; the chevron is out of flow.
         "absolute-chevron-row" => div()
@@ -287,14 +347,23 @@ impl Render for Variant {
           .child(div().truncate().child("feature/branch"))
           .child(div().absolute().right_4().top_4().child("›"))
           .into_any_element(),
-        "one-text" => div().id(("o", i)).h(px(56.)).child("Workspace number").into_any_element(),
+        "one-text" => div()
+          .id(("o", i))
+          .h(px(56.))
+          .child("Workspace number")
+          .into_any_element(),
         "fixed-height-row" => h_flex()
           .id(("f", i))
           .h(px(56.))
           .px_4()
           .gap_3()
-          .child(v_flex().flex_1().min_w_0().child(div().truncate().child("Workspace number"))
-            .child(div().truncate().child("feature/branch")))
+          .child(
+            v_flex()
+              .flex_1()
+              .min_w_0()
+              .child(div().truncate().child("Workspace number"))
+              .child(div().truncate().child("feature/branch")),
+          )
           .into_any_element(),
         _ => unreachable!(),
       }
@@ -349,7 +418,11 @@ fn mobile_render_virtual_list(cx: &mut TestAppContext) {
   for n in rows_env(&[20, 100, 400, 2000]) {
     let (window, _) = mount(cx, |_, cx| cx.new(|_| Virtual { n }));
     draw(cx, window);
-    measure(&format!("uniform_list of production rows, n={n}"), frames(), || draw(cx, window));
+    measure(
+      &format!("uniform_list of production rows, n={n}"),
+      frames(),
+      || draw(cx, window),
+    );
   }
 }
 
@@ -357,11 +430,31 @@ fn mobile_render_virtual_list(cx: &mut TestAppContext) {
 #[ignore]
 fn mobile_render_row_variants(cx: &mut TestAppContext) {
   let only = std::env::var("KIND").ok();
-  for kind in ["absolute-chevron-row", "block-column-in-hflex", "block-row", "fixed-width-texts-in-hflex", "one-text-in-hflex", "one-text", "one-truncate", "two-truncate-vflex-only", "two-text-no-truncate", "two-text-nowrap", "two-text-in-hflex", "fixed-height-row", "production-row", "hold-wrapped"] {
+  for kind in [
+    "absolute-chevron-row",
+    "block-column-in-hflex",
+    "block-row",
+    "fixed-width-texts-in-hflex",
+    "one-text-in-hflex",
+    "one-text",
+    "one-truncate",
+    "two-truncate-vflex-only",
+    "two-text-no-truncate",
+    "two-text-nowrap",
+    "two-text-in-hflex",
+    "fixed-height-row",
+    "production-row",
+    "hold-wrapped",
+  ] {
     if only.as_deref().is_some_and(|k| k != kind) {
       continue;
     }
-    let (window, _) = mount(cx, |_, cx| cx.new(|_| Variant { n: rows_env(&[100])[0], kind }));
+    let (window, _) = mount(cx, |_, cx| {
+      cx.new(|_| Variant {
+        n: rows_env(&[100])[0],
+        kind,
+      })
+    });
     draw(cx, window);
     measure(&format!("100 x {kind}"), frames(), || draw(cx, window));
   }
@@ -376,16 +469,20 @@ fn mobile_render_workspaces_list(cx: &mut TestAppContext) {
       cx.new(|cx| WorkspacesScreen::for_test(list, window, cx))
     });
     draw(cx, window);
-    measure(&format!("workspaces list n={n} idle redraw"), frames(), || {
-      draw(cx, window)
-    });
+    measure(
+      &format!("workspaces list n={n} idle redraw"),
+      frames(),
+      || draw(cx, window),
+    );
     cx.update_window(window, |_, _, cx| {
       screen.update(cx, |s, cx| s.set_selecting([1, 2, 3], cx))
     })
     .unwrap();
-    measure(&format!("workspaces list n={n} selecting"), frames(), || {
-      draw(cx, window)
-    });
+    measure(
+      &format!("workspaces list n={n} selecting"),
+      frames(),
+      || draw(cx, window),
+    );
   }
 }
 
@@ -403,14 +500,21 @@ struct SpinnerSheet;
 
 impl Render for SpinnerSheet {
   fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-    div().absolute().bottom_0().child(gpui_kit::component::spinner::Spinner::new())
+    div()
+      .absolute()
+      .bottom_0()
+      .child(gpui_kit::component::spinner::Spinner::new())
   }
 }
 
 impl Render for SpinnerOverPage {
   fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
     let page = if self.cached {
-      self.page.clone().cached(StyleRefinement::default().size_full()).into_any_element()
+      self
+        .page
+        .clone()
+        .cached(StyleRefinement::default().size_full())
+        .into_any_element()
     } else {
       self.page.clone().into_any_element()
     };
@@ -429,16 +533,24 @@ fn mobile_render_spinner_over_page(cx: &mut TestAppContext) {
     let (window, _host) = mount(cx, |window, cx| {
       let page = cx.new(|cx| WorkspacesScreen::for_test(list, window, cx));
       let spinner = cx.new(|_| SpinnerSheet);
-      cx.new(|_| SpinnerOverPage { page: page.into(), cached, spinner })
+      cx.new(|_| SpinnerOverPage {
+        page: page.into(),
+        cached,
+        spinner,
+      })
     });
     draw(cx, window);
-    measure(&format!("spinner animation frame over n-row page, cached={cached}"), frames(), || {
-      cx.update_window(window, |_, window, cx| {
-        window.simulate_next_frame(cx);
-        window.draw(cx).clear(cx);
-      })
-      .unwrap();
-    });
+    measure(
+      &format!("spinner animation frame over n-row page, cached={cached}"),
+      frames(),
+      || {
+        cx.update_window(window, |_, window, cx| {
+          window.simulate_next_frame(cx);
+          window.draw(cx).clear(cx);
+        })
+        .unwrap();
+      },
+    );
   }
 }
 
@@ -508,24 +620,37 @@ impl Render for DiffAsText {
     let theme = cx.theme();
     let (add, del) = (theme.success, theme.danger);
     div().size_full().child(
-      v_flex().id("diff").size_full().overflow_y_scroll().children(self.hunks.iter().map(|hunk| {
-        let mut text = String::new();
-        let mut runs = Vec::new();
-        for line in &hunk.lines {
-          let start = text.len();
-          text.push_str(line);
-          text.push('\n');
-          let color = match super::screens::diff::line_kind(line) {
-            super::screens::diff::LineKind::Added => Some(add),
-            super::screens::diff::LineKind::Removed => Some(del),
-            super::screens::diff::LineKind::Context => None,
-          };
-          if let Some(color) = color {
-            runs.push((start..text.len() - 1, HighlightStyle { color: Some(color), ..Default::default() }));
+      v_flex()
+        .id("diff")
+        .size_full()
+        .overflow_y_scroll()
+        .children(self.hunks.iter().map(|hunk| {
+          let mut text = String::new();
+          let mut runs = Vec::new();
+          for line in &hunk.lines {
+            let start = text.len();
+            text.push_str(line);
+            text.push('\n');
+            let color = match super::screens::diff::line_kind(line) {
+              super::screens::diff::LineKind::Added => Some(add),
+              super::screens::diff::LineKind::Removed => Some(del),
+              super::screens::diff::LineKind::Context => None,
+            };
+            if let Some(color) = color {
+              runs.push((
+                start..text.len() - 1,
+                HighlightStyle {
+                  color: Some(color),
+                  ..Default::default()
+                },
+              ));
+            }
           }
-        }
-        div().px_2().whitespace_nowrap().child(StyledText::new(text).with_highlights(runs))
-      })),
+          div()
+            .px_2()
+            .whitespace_nowrap()
+            .child(StyledText::new(text).with_highlights(runs))
+        })),
     )
   }
 }
@@ -537,7 +662,11 @@ fn mobile_render_diff_as_text(cx: &mut TestAppContext) {
     let hunks: Vec<JjDiffHunk> = (0..n / 100).map(|_| hunk(100)).collect();
     let (window, _) = mount(cx, |_, cx| cx.new(|_| DiffAsText { hunks }));
     draw(cx, window);
-    measure(&format!("diff as one text per hunk, {n} lines"), frames().min(50), || draw(cx, window));
+    measure(
+      &format!("diff as one text per hunk, {n} lines"),
+      frames().min(50),
+      || draw(cx, window),
+    );
   }
 }
 
@@ -587,20 +716,29 @@ fn mobile_render_terminal_view(cx: &mut TestAppContext) {
   feed(&tx, colored_screen(40, 51, 0));
   cx.run_until_parked();
   draw(cx, window);
-  measure("terminal 51x40 full colored, unchanged redraw", frames(), || {
-    draw(cx, window)
-  });
+  measure(
+    "terminal 51x40 full colored, unchanged redraw",
+    frames(),
+    || draw(cx, window),
+  );
   let mut seed = 0;
-  measure("terminal 51x40 full repaint chunk + redraw", frames(), || {
-    seed += 1;
-    feed(&tx, colored_screen(40, 51, seed));
-    cx.run_until_parked();
-    draw(cx, window);
-  });
+  measure(
+    "terminal 51x40 full repaint chunk + redraw",
+    frames(),
+    || {
+      seed += 1;
+      feed(&tx, colored_screen(40, 51, seed));
+      cx.run_until_parked();
+      draw(cx, window);
+    },
+  );
   // A spinner tick: one row changes.
   measure("terminal 51x40 one row changed + redraw", frames(), || {
     seed += 1;
-    feed(&tx, format!("\x1b[3;1H\x1b[32mtick {seed}\x1b[0m").into_bytes());
+    feed(
+      &tx,
+      format!("\x1b[3;1H\x1b[32mtick {seed}\x1b[0m").into_bytes(),
+    );
     cx.run_until_parked();
     draw(cx, window);
   });
@@ -697,7 +835,9 @@ fn mobile_render_micro_scrollback_memory() {
     let mut parser = vt100::Parser::new(40, cols, 5000);
     let a0 = LIVE.load(Relaxed);
     for chunk in 0..6000 {
-      let line: String = (0..cols as usize).map(|c| (b'a' + ((c + chunk) % 26) as u8) as char).collect();
+      let line: String = (0..cols as usize)
+        .map(|c| (b'a' + ((c + chunk) % 26) as u8) as char)
+        .collect();
       parser.process(format!("\x1b[3{}m{line}\x1b[0m\r\n", 1 + chunk % 7).as_bytes());
     }
     println!(
@@ -739,7 +879,9 @@ fn mobile_render_terminal_slow_drag_scrolls_nothing(cx: &mut TestAppContext) {
       }
     })
     .unwrap();
-    let offset = cx.update_window(window, |_, _, cx| view.read(cx).scrollback_offset()).unwrap();
+    let offset = cx
+      .update_window(window, |_, _, cx| view.read(cx).scrollback_offset())
+      .unwrap();
     println!(
       "20 touch-move events of {per_event_px} px (= {:.0} px total, {:.1} lines): scrolled back {offset} lines",
       20.0 * per_event_px,
@@ -758,7 +900,9 @@ fn mobile_render_terminal_slow_drag_scrolls_nothing(cx: &mut TestAppContext) {
 #[test]
 #[ignore]
 fn mobile_render_micro_snapshot_write() {
-  use treq_lib::core::remote_records::{self as records, SessionEndpoint, SessionSnapshot, SnapshotWorkspace};
+  use treq_lib::core::remote_records::{
+    self as records, SessionEndpoint, SessionSnapshot, SnapshotWorkspace,
+  };
   let dir = std::env::temp_dir().join(format!("treq-perf-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let db = treq_lib::db::Database::new(dir.join("treq.db")).unwrap();
@@ -766,12 +910,132 @@ fn mobile_render_micro_snapshot_write() {
   let snapshot = SessionSnapshot {
     endpoint: SessionEndpoint::Managed,
     repo_path: Some("/home/dev/src/treq".into()),
-    workspace: Some(SnapshotWorkspace { id: "12".into(), name: "ws-12".into() }),
+    workspace: Some(SnapshotWorkspace {
+      id: "12".into(),
+      name: "ws-12".into(),
+    }),
   };
   let n = 300;
   let start = Instant::now();
   for _ in 0..n {
     records::save_session_snapshot(&db, Some(&snapshot));
   }
-  println!("save_session_snapshot: {:.0} us/write (tmpfs-or-disk of this machine, WAL+NORMAL)", start.elapsed().as_secs_f64() * 1e6 / n as f64);
+  println!(
+    "save_session_snapshot: {:.0} us/write (tmpfs-or-disk of this machine, WAL+NORMAL)",
+    start.elapsed().as_secs_f64() * 1e6 / n as f64
+  );
+}
+
+// Regular tests (not `#[ignore]`d): the cached page boundary `Root` uses.
+
+/// A page that counts its renders and shows what it was last given.
+struct CountingPage {
+  renders: std::rc::Rc<std::cell::Cell<usize>>,
+  shown: std::rc::Rc<std::cell::RefCell<String>>,
+  text: String,
+  /// Read in `render` without being notified, like a global.
+  watched: Entity<Watched>,
+}
+
+struct Watched(String);
+
+impl Render for CountingPage {
+  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    self.renders.set(self.renders.get() + 1);
+    *self.shown.borrow_mut() = format!("{}/{}", self.text, self.watched.read(cx).0);
+    div().size_full().child(self.text.clone())
+  }
+}
+
+#[gpui_kit::test]
+fn cached_page_rerenders_for_its_own_and_observed_state_only(cx: &mut TestAppContext) {
+  let renders: std::rc::Rc<std::cell::Cell<usize>> = Default::default();
+  let shown: std::rc::Rc<std::cell::RefCell<String>> = Default::default();
+  let (window, host) = mount(cx, |_, cx| {
+    let watched = cx.new(|_| Watched("a".into()));
+    let page = cx.new(|cx| {
+      // What a page does for state it reads outside itself.
+      cx.observe(&watched, |_, _, cx| cx.notify()).detach();
+      CountingPage {
+        renders: renders.clone(),
+        shown: shown.clone(),
+        text: "one".into(),
+        watched: watched.clone(),
+      }
+    });
+    cx.new(|_| Host {
+      child: page.into(),
+      cached: true,
+      ticks: 0,
+    })
+  });
+  draw(cx, window);
+  let first = renders.get();
+
+  // Something elsewhere in the window changes: the page is reused.
+  for _ in 0..2 {
+    cx.update_window(window, |_, _, cx| {
+      host.update(cx, |h, cx| {
+        h.ticks += 1;
+        cx.notify()
+      })
+    })
+    .unwrap();
+    redraw(cx, window);
+  }
+  let settled = renders.get();
+  assert!(
+    settled <= first + 1,
+    "the page settles after the first frame"
+  );
+  cx.update_window(window, |_, _, cx| {
+    host.update(cx, |h, cx| {
+      h.ticks += 1;
+      cx.notify()
+    })
+  })
+  .unwrap();
+  redraw(cx, window);
+  assert_eq!(
+    renders.get(),
+    settled,
+    "an unrelated notify must not re-render the page"
+  );
+
+  // The page's own state changes: it renders again with the new state.
+  let page = cx
+    .update_window(window, |_, _, cx| {
+      host
+        .read(cx)
+        .child
+        .clone()
+        .downcast::<CountingPage>()
+        .unwrap()
+    })
+    .unwrap();
+  cx.update_window(window, |_, _, cx| {
+    page.update(cx, |p, cx| {
+      p.text = "two".into();
+      cx.notify()
+    })
+  })
+  .unwrap();
+  redraw(cx, window);
+  assert_eq!(renders.get(), settled + 1);
+  assert_eq!(*shown.borrow(), "two/a");
+
+  // An entity the page observes changes: it renders again with that too.
+  let watched = cx
+    .update_window(window, |_, _, cx| page.read(cx).watched.clone())
+    .unwrap();
+  cx.update_window(window, |_, _, cx| {
+    watched.update(cx, |w, cx| {
+      w.0 = "b".into();
+      cx.notify()
+    })
+  })
+  .unwrap();
+  redraw(cx, window);
+  assert_eq!(renders.get(), settled + 2);
+  assert_eq!(*shown.borrow(), "two/b");
 }
