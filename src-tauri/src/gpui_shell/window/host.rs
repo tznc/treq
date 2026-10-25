@@ -982,7 +982,7 @@ mod watch_tests {
       std::fs::create_dir_all(root.join(format!("target/debug/d{i}"))).unwrap();
     }
     let all = walkdir_count(&root);
-    eprintln!(
+    println!(
       "recursive: {all} watches, per directory: {}",
       watchable_dirs(&root).len()
     );

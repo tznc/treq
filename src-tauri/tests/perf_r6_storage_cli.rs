@@ -35,7 +35,7 @@ fn timed<T>(name: &str, f: impl FnOnce() -> T) -> T {
   let out = f();
   let ms = start.elapsed().as_secs_f64() * 1000.0;
   mark(&format!("end_{name}"));
-  eprintln!("PHASE {name}: {ms:.1} ms");
+  println!("PHASE {name}: {ms:.1} ms");
   out
 }
 
