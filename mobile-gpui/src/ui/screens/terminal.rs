@@ -439,8 +439,7 @@ impl Sessions {
     load::run(cx, remote::mutate(request), move |this, outcome, cx| {
       let (ok, message) = super::mutation_message(&outcome, "");
       if ok {
-        let program = Program::of_label(&label);
-        this.open(label, program.launch(Vec::new()), cx);
+        this.open_listed(&label, false, cx);
         done(Ok(()), cx);
       } else {
         done(Err(errors::describe(&message).message), cx);
