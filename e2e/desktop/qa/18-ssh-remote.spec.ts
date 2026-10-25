@@ -5,7 +5,7 @@
 // with their installers and starting each as an agent, and a dropped connection. Opt-in: set QA_SSH_HOST, QA_SSH_PORT, QA_SSH_USER,
 // QA_SSH_KEY (a private key with its `.pub` beside it) and QA_SSH_REPO (a
 // path on the server the run replaces with a fresh Git repository). The
-// server needs `treq`, jj, git, tmux and curl, and must reach
+// server needs `treq`, jj, git and curl (tmux only for tmux mode), and must reach
 // claude.ai, cursor.com, nodejs.org and registry.npmjs.org;
 // `ssh-server/up.sh` starts one in Docker and prints the
 // variables.
@@ -58,6 +58,7 @@ test.beforeAll(async () => {
      git add .; git commit -qm 'Initial commit'
      printf 'pub fn add(a: i32, b: i32) -> i32 { a + b }\\n' > src/lib.rs
      git add .; git commit -qm 'Add lib'
+     treq pty-remote reset --repo / --format json >/dev/null 2>&1 || true
      tmux kill-server 2>/dev/null || true`,
   );
   const fixture = makeFixture("treq-qa-ssh-");
@@ -148,9 +149,12 @@ test("ssh remote: connect and open a Git repository", async () => {
   await page.getByRole("checkbox", { name: "Show hidden folders" }).click();
   await page.getByRole("button", { name: /on QA container$/ }).click();
   await expect(page.getByRole("button", { name: "Remove host…" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Use tmux…" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reset terminals…" })).toBeVisible();
   await page.waitForTimeout(3000);
   await shot("host-tools", "The SSH host's tools popover", [
-    "Asked over SSH (`treq repo tools`): Git, Jujutsu and tmux are installed",
+    "Asked over SSH (`treq repo tools`): Git and Jujutsu are installed; tmux is listed under Optional",
+    "A Terminals section says they are held by the Treq daemon, with Use tmux… and Reset terminals…",
     "Claude Code is not installed yet; Remove host… at the bottom",
   ]);
   await page.keyboard.press("Escape");
@@ -330,9 +334,12 @@ test("ssh remote: dropped connection reattaches on its own", async () => {
   onServer(`setsid sh -c "sleep 1; pkill -f 'sshd: .*@'" </dev/null >/dev/null 2>&1 &`);
   await page.waitForTimeout(10_000);
   await expect(page.getByRole("button", { name: "Reattach" })).toHaveCount(0);
+  // The Treq daemon holds the sessions, not tmux.
+  expect(onServer("pgrep -f 'pty-remote daemon' >/dev/null && echo daemon || true")).toContain("daemon");
+  expect(onServer("tmux ls 2>/dev/null | grep -c treq-pty || true").trim()).toBe("0");
   await shot("reattached", "After the server drops every SSH connection", [
     "Every remote terminal reattached on its own, with no Reattach/Close overlay",
-    "The shell and agent show their earlier output: the tmux sessions survived on the server",
+    "The shell and agent show their earlier output: the treq daemon kept the sessions on the server",
   ]);
   await page.getByRole("button", { name: "Refresh" }).click();
   await page.getByRole("tab", { name: "Changes" }).click();

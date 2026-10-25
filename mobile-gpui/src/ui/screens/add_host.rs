@@ -137,6 +137,7 @@ impl HostForm {
       auth_identity_reference: identity,
       alias: None,
       created_at: now.to_rfc3339(),
+      terminal_backend: Default::default(),
     })
   }
 }
@@ -661,6 +662,7 @@ mod tests {
         auth_identity_reference: "~/.ssh/id_ed25519".into(),
         alias: None,
         created_at: String::new(),
+        terminal_backend: Default::default(),
       }
     }
 

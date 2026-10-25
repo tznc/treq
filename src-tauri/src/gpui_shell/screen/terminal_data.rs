@@ -376,6 +376,7 @@ impl TerminalHost for Backend {
       self,
       &target.endpoint,
       TreqCommandRequest::PtyList {
+        backend: target.endpoint.terminal_backend,
         repo: target.repository_id.clone(),
         workspace: Some(target.workspace_id.clone()),
       },
@@ -389,6 +390,7 @@ impl TerminalHost for Backend {
       self,
       &target.endpoint,
       TreqCommandRequest::PtyStop {
+        backend: target.endpoint.terminal_backend,
         repo: target.repository_id.clone(),
         workspace: target.workspace_id.clone(),
         label: target.label.clone(),
@@ -402,6 +404,7 @@ impl TerminalHost for Backend {
       self,
       &target.endpoint,
       TreqCommandRequest::PtyRename {
+        backend: target.endpoint.terminal_backend,
         repo: target.repository_id.clone(),
         workspace: target.workspace_id.clone(),
         label: target.label.clone(),

@@ -1,5 +1,5 @@
 # The SSH host 18-ssh-remote.spec.ts connects to: sshd with key-only login
-# for `dev`, plus what Treq needs on a host (git, tmux; `treq` and `jj` are
+# for `dev`, plus what Treq needs on a host (git; tmux for tmux mode; `treq` and `jj` are
 # copied in by up.sh). Claude Code is not baked in: the spec installs it
 # from a Treq terminal with the official installer, as a user would.
 FROM ubuntu:24.04

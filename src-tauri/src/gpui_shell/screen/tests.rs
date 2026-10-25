@@ -320,6 +320,20 @@ impl machines::MachinesHost for FakeHost {
     true
   }
 
+  fn set_terminal_backend(
+    &self,
+    place: &machines::Place,
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
+  ) -> Result<(), String> {
+    self.record(format!("terminals {place:?} {backend:?}"));
+    Ok(())
+  }
+
+  fn reset_terminals(&self, place: &machines::Place) -> Result<(), String> {
+    self.record(format!("reset terminals {place:?}"));
+    Ok(())
+  }
+
   fn pick_folder(&self) -> Option<String> {
     self.picked.clone()
   }
@@ -1932,6 +1946,7 @@ fn listing() -> machines::Listing {
         place: Place::Local,
         name: "This computer".into(),
         detail: "laptop".into(),
+        terminals: None,
       },
       Machine {
         id: "ssh:ep-1".into(),
@@ -1940,6 +1955,7 @@ fn listing() -> machines::Listing {
         },
         name: "Dev box".into(),
         detail: "me@devbox".into(),
+        terminals: Some(Default::default()),
       },
       Machine {
         id: "cloud".into(),
@@ -1949,6 +1965,7 @@ fn listing() -> machines::Listing {
         },
         name: "Cloud workspace".into(),
         detail: "Not created yet".into(),
+        terminals: None,
       },
       Machine {
         id: "devcontainer:c1".into(),
@@ -1959,6 +1976,7 @@ fn listing() -> machines::Listing {
         },
         name: "web".into(),
         detail: "Stopped".into(),
+        terminals: None,
       },
     ],
     recents: vec![
@@ -2072,6 +2090,7 @@ fn onboarding_adds_the_dev_containers_docker_lists_to_its_rows(cx: &mut TestAppC
         },
         name: "api".into(),
         detail: "Running".into(),
+        terminals: None,
       }],
       vec![Recent {
         machine_id: "devcontainer:c2".into(),
@@ -2138,7 +2157,7 @@ fn onboarding_checks_a_host_only_when_its_popover_opens(cx: &mut TestAppContext)
   assert_eq!(host.calls(), ["check"]);
   h.click("machine-tools-ssh:ep-1");
   assert!(h.drawn("machine-tools-popover"));
-  // jj and tmux are required on a host; Git is there.
+  // jj is required on a host and tmux is offered; Git is there.
   assert!(h.drawn("install-tmux"));
   assert!(h.drawn("install-jj"));
   assert!(!h.drawn("install-git"));
@@ -2153,6 +2172,76 @@ fn onboarding_checks_a_host_only_when_its_popover_opens(cx: &mut TestAppContext)
   h.click("machine-remove");
   h.answer("Remove host");
   assert!(host.calls().iter().any(|c| c.starts_with("remove Ssh")));
+}
+
+#[gpui::test]
+fn onboarding_switches_a_hosts_terminals_to_tmux_after_confirming(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  h.click("machine-tools-ssh:ep-1");
+  assert!(h.drawn("machine-terminals"));
+  h.click("machine-terminal-backend");
+  // Switching closes the host's open terminals, so it asks first.
+  h.answer("Cancel");
+  assert!(!host.calls().iter().any(|c| c.starts_with("terminals")));
+  h.click("machine-tools-ssh:ep-1");
+  h.click("machine-terminal-backend");
+  h.answer("Use tmux");
+  assert!(
+    host
+      .calls()
+      .iter()
+      .any(|c| c.starts_with("terminals Ssh") && c.ends_with("Tmux")),
+    "{:?}",
+    host.calls()
+  );
+}
+
+#[gpui::test]
+fn onboarding_resets_a_hosts_terminals_after_confirming(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  h.click("machine-tools-ssh:ep-1");
+  h.click("machine-reset-terminals");
+  h.answer("Cancel");
+  assert!(!host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("reset terminals")));
+  h.click("machine-tools-ssh:ep-1");
+  h.click("machine-reset-terminals");
+  h.answer("Reset terminals");
+  assert!(
+    host
+      .calls()
+      .iter()
+      .any(|c| c.starts_with("reset terminals Ssh")),
+    "{:?}",
+    host.calls()
+  );
+}
+
+#[gpui::test]
+fn onboarding_shows_no_terminal_settings_for_this_computer(cx: &mut TestAppContext) {
+  let mut h = Harness::with_host(
+    cx,
+    onboarding(),
+    Arc::new(FakeHost {
+      listing: listing(),
+      ..FakeHost::default()
+    }),
+  );
+  h.click("machine-tools-local");
+  assert!(h.drawn("machine-tools-popover"));
+  assert!(!h.drawn("machine-terminals"));
 }
 
 #[gpui::test]

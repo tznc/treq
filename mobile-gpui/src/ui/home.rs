@@ -21,6 +21,7 @@ use crate::{
   errors::{self, Fix},
   managed, store,
 };
+use treq_lib::core::pty_remote_supervisor::PtyBackend;
 
 const TAGLINE: &str = "Isolates each agent and rebases stacked PRs when the base moves";
 
@@ -57,13 +58,18 @@ fn repo_name(path: &str) -> &str {
 /// What the host is missing, as one sentence, if anything.
 fn missing_tools(state: &MachineState) -> Option<String> {
   let check = state.check.as_ref()?;
-  match (check.terminal.is_none(), check.agents.is_empty()) {
+  // Hosts added here keep the default backend, the Treq daemon.
+  let backend = PtyBackend::default();
+  match (!check.holds_terminals(backend), check.agents.is_empty()) {
     (false, false) => None,
     (true, true) => Some(
-      "No tmux or screen, and no agent CLI (claude, codex, cursor-agent, copilot): terminals and agents won't start."
+      "This host can't keep terminals (Treq supports Linux and macOS hosts), and has no agent CLI (claude, codex, cursor-agent, copilot)."
         .into(),
     ),
-    (true, false) => Some("No tmux or screen: terminals and agents won't start.".into()),
+    (true, false) => Some(
+      "This host can't keep terminals (Treq supports Linux and macOS hosts): terminals and agents won't start."
+        .into(),
+    ),
     (false, true) => Some("No agent CLI found (claude, codex, cursor-agent, copilot).".into()),
   }
 }
@@ -412,6 +418,7 @@ mod tests {
         root: "/home/dev".into(),
         root_exists: true,
         terminal: terminal.map(str::to_string),
+        tmux: false,
         agents,
       }),
     }
@@ -420,13 +427,18 @@ mod tests {
   #[core::prelude::v1::test]
   fn names_what_the_host_is_missing() {
     assert_eq!(
+      missing_tools(&ready(Some("daemon"), vec![RemoteAgentId::Claude])),
+      None
+    );
+    // A host whose treq predates the daemon reports its multiplexer.
+    assert_eq!(
       missing_tools(&ready(Some("tmux"), vec![RemoteAgentId::Claude])),
       None
     );
     assert!(missing_tools(&ready(None, vec![RemoteAgentId::Claude]))
       .unwrap()
-      .contains("tmux"));
-    assert!(missing_tools(&ready(Some("tmux"), vec![]))
+      .contains("can't keep terminals"));
+    assert!(missing_tools(&ready(Some("daemon"), vec![]))
       .unwrap()
       .contains("agent CLI"));
     // An older treq gives no check, so nothing is claimed missing.

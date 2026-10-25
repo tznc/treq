@@ -15,7 +15,8 @@
 // supabase.com/docs/guides/functions/limits), and that cap includes an open
 // WebSocket. A relay connection therefore drops after a few minutes at
 // most. That is expected: the client's SSH pool reconnects on the next
-// command, and PTY sessions run inside tmux on the VM so they reattach.
+// command, and PTY sessions are held by the treq terminal daemon on the VM
+// so they reattach.
 
 import {
   PRO_REQUIRED_CODE,

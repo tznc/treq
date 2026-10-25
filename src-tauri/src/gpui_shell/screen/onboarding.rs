@@ -28,7 +28,7 @@ use super::{
   ActionSink, Ctx, ScreenAction,
 };
 use crate::{
-  core::{self, PrerequisiteStatus},
+  core::{self, pty_remote_supervisor::PtyBackend, PrerequisiteStatus},
   gpui_shell::{
     confirm::{self, Question},
     native::{Backend, NativeEvent, ToastTone},
@@ -90,8 +90,11 @@ pub struct OnboardingView {
   /// Signed in, and the cloud workspace's status, as the cloud row last
   /// showed them.
   cloud_seen: (bool, Option<String>),
-  /// Remove Host's confirmation, while open.
+  /// Remove Host's or a terminals change's confirmation, while open.
   confirm: Option<confirm::Pending<Self>>,
+  /// By machine id: a terminals change running (`None`), or how the last
+  /// one went, shown in the machine's popover.
+  terminals: HashMap<String, Option<Result<(), String>>>,
 }
 
 /// The listing the last onboarding screen read, which the next one draws
@@ -138,6 +141,7 @@ impl OnboardingView {
       inputs: onboarding_remote::Inputs::default(),
       cloud_seen: cloud_seen(cx),
       confirm: None,
+      terminals: HashMap::new(),
     };
     // Signing in, or the cloud workspace changing state, changes its row.
     cx.observe_global::<super::account_data::Account>(|view, cx| {
@@ -328,8 +332,93 @@ impl OnboardingView {
         );
         cx.notify();
       }
+      "machines.terminalBackend" => {
+        let Some(machine) = self.machine(arg).cloned() else {
+          return;
+        };
+        let Some(current) = machine.terminals else {
+          return;
+        };
+        let next = match current {
+          PtyBackend::Daemon => PtyBackend::Tmux,
+          PtyBackend::Tmux => PtyBackend::Daemon,
+        };
+        self.popover = None;
+        let question = Question::new(
+          format!(
+            "Use {} for terminals on {}?",
+            backend_name(next),
+            machine.name
+          ),
+          "Terminals and agents running on the host now are closed.",
+          match next {
+            PtyBackend::Daemon => "Use Treq daemon",
+            PtyBackend::Tmux => "Use tmux",
+          },
+        )
+        .destructive();
+        confirm::ask(
+          &mut self.confirm,
+          question,
+          move |view, cx| {
+            let place = machine.place.clone();
+            view.change_terminals(&machine.id, cx, move |host| {
+              host.set_terminal_backend(&place, next)
+            });
+          },
+          cx,
+        );
+        cx.notify();
+      }
+      "machines.resetTerminals" => {
+        let Some(machine) = self.machine(arg).cloned() else {
+          return;
+        };
+        self.popover = None;
+        let question = Question::new(
+          format!("Reset terminals on {}?", machine.name),
+          "Every terminal and agent Treq runs on the host is closed.",
+          "Reset terminals",
+        )
+        .destructive();
+        confirm::ask(
+          &mut self.confirm,
+          question,
+          move |view, cx| {
+            let place = machine.place.clone();
+            view.change_terminals(&machine.id, cx, move |host| host.reset_terminals(&place));
+          },
+          cx,
+        );
+        cx.notify();
+      }
       _ => (self.react)(ScreenAction::Press { id: press.clone() }, cx),
     }
+  }
+
+  /// Runs a change to a machine's terminals off the main thread, then lists
+  /// the machines again so its popover shows the outcome.
+  fn change_terminals(
+    &mut self,
+    id: &str,
+    cx: &mut Context<Self>,
+    change: impl FnOnce(&dyn OnboardingHost) -> Result<(), String> + Send + 'static,
+  ) {
+    self.terminals.insert(id.to_string(), None);
+    cx.notify();
+    let (host, id) = (self.host.clone(), id.to_string());
+    cx.spawn(async move |this, cx| {
+      let result = cx
+        .background_spawn(async move { change(host.as_ref()) })
+        .await;
+      this
+        .update(cx, |view, cx| {
+          view.terminals.insert(id, Some(result));
+          view.load(cx);
+        })
+        .ignore_closed();
+    })
+    .detach();
   }
 
   /// The Dev Containers section's +: a repository's container, started.
@@ -429,6 +518,13 @@ impl OnboardingView {
   }
 }
 
+fn backend_name(backend: PtyBackend) -> &'static str {
+  match backend {
+    PtyBackend::Daemon => "the Treq daemon",
+    PtyBackend::Tmux => "tmux",
+  }
+}
+
 fn press(id: impl Into<String>) -> ScreenAction {
   ScreenAction::Press { id: id.into() }
 }
@@ -519,6 +615,9 @@ impl OnboardingView {
   ) -> AnyElement {
     let p = ctx.palette;
     let removable = matches!(machine.place, Place::Ssh { .. });
+    let terminals = machine
+      .terminals
+      .map(|backend| self.terminals_section(machine, backend, ctx));
     Popover::new("machine-tools-popover", &p)
       .w(zpx(POPOVER_WIDTH))
       .p_3()
@@ -532,6 +631,7 @@ impl OnboardingView {
             .message(error),
         )
       })
+      .children(terminals)
       .when(removable, |d| {
         d.child(
           div()
@@ -549,6 +649,67 @@ impl OnboardingView {
             ),
         )
       })
+      .into_any_element()
+  }
+
+  /// What holds the machine's terminals, switching it (SSH hosts, whose
+  /// setting Treq keeps), and resetting them.
+  fn terminals_section(&self, machine: &Machine, backend: PtyBackend, ctx: &Ctx) -> AnyElement {
+    let p = ctx.palette;
+    let state = self.terminals.get(&machine.id);
+    let busy = matches!(state, Some(None));
+    let switchable = matches!(machine.place, Place::Ssh { .. });
+    div()
+      .id("machine-terminals")
+      .debug_selector(|| "machine-terminals".into())
+      .pt_2()
+      .border_t_1()
+      .border_color(p.border)
+      .flex()
+      .flex_col()
+      .gap_2()
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child(format!("Terminals are held by {}.", backend_name(backend))),
+      )
+      .when_some(
+        state.cloned().flatten().and_then(Result::err),
+        |d, error| {
+          d.child(
+            Alert::new("machine-terminals-error", "Couldn't change terminals", &p)
+              .severity(Severity::Warning)
+              .message(error),
+          )
+        },
+      )
+      .child(
+        div()
+          .flex()
+          .gap_2()
+          .justify_end()
+          .when(switchable, |d| {
+            d.child(
+              Button::new("machine-terminal-backend", &p)
+                .variant(Variant::Ghost)
+                .size(Size::Sm)
+                .disabled(busy)
+                .label(match backend {
+                  PtyBackend::Daemon => "Use tmux…",
+                  PtyBackend::Tmux => "Use Treq daemon…",
+                })
+                .on_click(ctx.send(press(format!("machines.terminalBackend:{}", machine.id)))),
+            )
+          })
+          .child(
+            Button::new("machine-reset-terminals", &p)
+              .variant(Variant::Ghost)
+              .size(Size::Sm)
+              .disabled(busy)
+              .label("Reset terminals…")
+              .on_click(ctx.send(press(format!("machines.resetTerminals:{}", machine.id)))),
+          ),
+      )
       .into_any_element()
   }
 

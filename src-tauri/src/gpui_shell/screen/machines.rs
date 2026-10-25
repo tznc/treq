@@ -10,6 +10,7 @@ use crate::{
   core::{
     self, devcontainer,
     feature_preview::{self, PreviewFeature},
+    pty_remote_supervisor::PtyBackend,
     remote::TreqCommandRequest,
     remote_records, PrerequisiteStatus,
   },
@@ -52,8 +53,8 @@ impl Place {
     }
   }
 
-  /// Treq reaches it over SSH or `docker exec`, so jj and tmux must be
-  /// installed there too.
+  /// Treq reaches it over SSH or `docker exec`, so jj must be installed
+  /// there too.
   pub fn is_host(&self) -> bool {
     !matches!(self, Place::Local)
   }
@@ -68,6 +69,9 @@ pub struct Machine {
   pub name: String,
   /// The address or state under the name.
   pub detail: String,
+  /// What holds the machine's persistent terminals, for a machine Treq
+  /// reaches over SSH. `None` where terminals run on this computer.
+  pub terminals: Option<PtyBackend>,
 }
 
 /// A repository opened recently on a machine.
@@ -107,6 +111,13 @@ pub trait MachinesHost: ToolsHost {
   fn open_local(&self, path: &str);
   /// Forgets the saved SSH host; whether it did.
   fn remove_machine(&self, place: &Place) -> bool;
+  /// Blocks: switches an SSH host's terminals to `backend`, first ending
+  /// the ones running under its old backend, which would otherwise keep
+  /// running unseen.
+  fn set_terminal_backend(&self, place: &Place, backend: PtyBackend) -> Result<(), String>;
+  /// Blocks: ends every terminal and agent Treq runs on the machine, and
+  /// for the daemon stops it.
+  fn reset_terminals(&self, place: &Place) -> Result<(), String>;
   /// Blocks: asks for a folder; `None` when cancelled.
   fn pick_folder(&self) -> Option<String>;
   /// Blocks: builds and starts Treq's dev container for the repository.
@@ -143,6 +154,7 @@ fn cloud_machine(backend: &Backend) -> Option<Machine> {
     },
     name: "Cloud workspace".into(),
     detail: detail.into(),
+    terminals: None,
   };
   snapshot.auth.session.as_ref()?;
   let Some(status) = snapshot.cloud.instance_status else {
@@ -152,8 +164,11 @@ fn cloud_machine(backend: &Backend) -> Option<Machine> {
     return Some(before(CLOUD_NOT_CREATED, "Not created yet"));
   };
   let endpoint = status.endpoint_summary();
+  // Treq provisions the cloud workspace, so its terminals are the daemon's.
+  let terminals = (instance.status == "ready").then_some(PtyBackend::Daemon);
   Some(Machine {
     id: "cloud".into(),
+    terminals,
     detail: match &endpoint {
       Some(e) if instance.status == "ready" => format!("{}@{}", e.username, e.hostname),
       _ => instance.status.clone(),
@@ -189,6 +204,7 @@ impl MachinesHost for Backend {
       place: Place::Local,
       name: "This computer".into(),
       detail: hostname(),
+      terminals: None,
     });
     listing.recents.extend(
       local
@@ -212,6 +228,7 @@ impl MachinesHost for Backend {
           22 => format!("{}@{}", e.username, e.hostname),
           port => format!("{}@{}:{port}", e.username, e.hostname),
         },
+        terminals: Some(e.terminal_backend),
       }));
     }
     let cloud = cloud_machine(self);
@@ -274,6 +291,7 @@ impl MachinesHost for Backend {
           running: container.running,
         },
         name,
+        terminals: None,
       });
     }
     (machines, recents)
@@ -353,6 +371,44 @@ impl MachinesHost for Backend {
     };
     self.with_db(|db| remote_records::remove_user_managed_endpoint(db, endpoint_id));
     true
+  }
+
+  fn set_terminal_backend(&self, place: &Place, backend: PtyBackend) -> Result<(), String> {
+    let Place::Ssh { endpoint_id } = place else {
+      return Err("Only SSH hosts can switch what holds their terminals.".into());
+    };
+    let reset = self.reset_terminals(place);
+    self.with_db(|db| remote_records::set_terminal_backend(db, endpoint_id, backend));
+    // Switched either way: a host that could not be reached has nothing
+    // of Treq's to see, but say so.
+    reset.map_err(|error| format!("Switched, but the old terminals could not be closed: {error}"))
+  }
+
+  fn reset_terminals(&self, place: &Place) -> Result<(), String> {
+    let endpoint_id = match place {
+      Place::Ssh { endpoint_id } => endpoint_id,
+      Place::Cloud {
+        endpoint_id: Some(endpoint_id),
+        status,
+      } if status == "ready" => endpoint_id,
+      Place::Cloud { .. } => return Err("Wake the cloud workspace to reset its terminals.".into()),
+      Place::Local | Place::DevContainer { .. } => {
+        return Err("Terminals here run on this computer.".into())
+      }
+    };
+    let (endpoint, _) = self
+      .machine_endpoint(endpoint_id)
+      .ok_or_else(|| "This machine cannot be reached.".to_string())?;
+    // A reset is safe to send twice, so it goes as a read, which retries
+    // once on a dropped connection.
+    self
+      .remote_read(
+        &endpoint,
+        TreqCommandRequest::PtyReset {
+          backend: endpoint.terminal_backend,
+        },
+      )
+      .map(drop)
   }
 }
 

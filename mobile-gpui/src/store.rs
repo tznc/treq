@@ -95,6 +95,7 @@ mod tests {
           auth_identity_reference: "~/.ssh/id_ed25519".into(),
           alias: None,
           created_at: "2026-01-01T00:00:00Z".into(),
+          terminal_backend: Default::default(),
         },
       );
       for r in 0..5 {

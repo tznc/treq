@@ -693,8 +693,10 @@ pub(crate) fn parse_remote_command_request(
       workspace: require_workspace()?,
     }),
     ("pty-remote", "start") => {
+      let backend = pty_backend(matches)?;
       let payload = core::remote::parse_pty_launch_payload(&require_value("pty launch payload")?)?;
       Ok(TreqCommandRequest::PtyStart {
+        backend,
         repo,
         workspace: require_workspace()?,
         label: require_target("session label")?,
@@ -705,8 +707,16 @@ pub(crate) fn parse_remote_command_request(
         idempotency_key: require_idempotency_key(idempotency_key)?,
       })
     }
-    ("pty-remote", "list") => Ok(TreqCommandRequest::PtyList { repo, workspace }),
+    ("pty-remote", "list") => Ok(TreqCommandRequest::PtyList {
+      backend: pty_backend(matches)?,
+      repo,
+      workspace,
+    }),
+    ("pty-remote", "reset") => Ok(TreqCommandRequest::PtyReset {
+      backend: pty_backend(matches)?,
+    }),
     ("pty-remote", "paste") => Ok(TreqCommandRequest::PtyPaste {
+      backend: pty_backend(matches)?,
       repo,
       workspace: require_workspace()?,
       label: require_target("session label")?,
@@ -715,11 +725,13 @@ pub(crate) fn parse_remote_command_request(
       idempotency_key: require_idempotency_key(idempotency_key)?,
     }),
     ("pty-remote", "stop") => Ok(TreqCommandRequest::PtyStop {
+      backend: pty_backend(matches)?,
       repo,
       workspace: require_workspace()?,
       label: require_target("session label")?,
     }),
     ("pty-remote", "rename") => Ok(TreqCommandRequest::PtyRename {
+      backend: pty_backend(matches)?,
       repo,
       workspace: require_workspace()?,
       label: require_target("session label")?,
@@ -727,8 +739,10 @@ pub(crate) fn parse_remote_command_request(
       title: value.clone().unwrap_or_default(),
     }),
     ("pty-remote", "attach-command") => {
+      let backend = pty_backend(matches)?;
       let payload = core::remote::parse_pty_launch_payload(&require_value("pty launch payload")?)?;
       Ok(TreqCommandRequest::PtyAttachCommand {
+        backend,
         repo,
         workspace: require_workspace()?,
         label: require_target("session label")?,
@@ -740,6 +754,50 @@ pub(crate) fn parse_remote_command_request(
     }
     _ => Err(format!("unknown {command} action '{action}'")),
   }
+}
+
+fn pty_backend(matches: &Matches) -> Result<core::pty_remote_supervisor::PtyBackend, String> {
+  core::pty_remote_supervisor::PtyBackend::parse(get_arg_value(matches, "backend").as_deref())
+}
+
+/// `pty-remote` actions that hold the terminal instead of printing a
+/// result: `daemon` (serves until reset or idle) and `attach` (what an SSH
+/// PTY channel runs, from `attach-command`).
+fn interactive_pty_action(matches: &Matches) -> Option<String> {
+  get_arg_value(matches, "action").filter(|action| action == "daemon" || action == "attach")
+}
+
+fn handle_interactive_pty(action: &str, matches: &Matches) -> bool {
+  let result = match action {
+    "daemon" => core::pty_remote_supervisor::run_daemon(),
+    _ => run_pty_attach(matches),
+  };
+  match result {
+    Ok(()) => true,
+    Err(error) => {
+      eprintln!("treq pty-remote {action}: {error}");
+      false
+    }
+  }
+}
+
+fn run_pty_attach(matches: &Matches) -> Result<(), String> {
+  let required = |name: &str, what: &str| {
+    get_arg_value(matches, name).ok_or_else(|| format!("invalid_arguments: {what} is required"))
+  };
+  let repo = required("repo", "repo")?;
+  let workspace = required("workspace", "workspace")?;
+  let label = required("target", "session label")?;
+  let payload = core::remote::parse_pty_launch_payload(&required("value", "pty launch payload")?)?;
+  core::pty_remote_supervisor::run_daemon_attach(
+    &repo,
+    &payload.remote_dir,
+    &workspace,
+    &label,
+    &payload.launch,
+    payload.cols,
+    payload.rows,
+  )
 }
 
 fn handle_remote_review_command(
@@ -778,6 +836,10 @@ pub fn handle_cli_command(subcommand: &SubcommandMatches) -> Option<i32> {
     "agent-review" => run_structured(&subcommand.matches, |format| {
       agent_review_handlers::handle_agent_review_command(&subcommand.matches, format)
     }),
+    "pty-remote" if interactive_pty_action(&subcommand.matches).is_some() => {
+      let action = interactive_pty_action(&subcommand.matches).unwrap_or_default();
+      handle_interactive_pty(&action, &subcommand.matches)
+    }
     "workspace" | "changes" | "file" | "commits" | "conflicts" | "git" | "agent-remote"
     | "pty-remote" => run_structured(&subcommand.matches, |format| {
       handle_remote_review_command(&subcommand.name, &subcommand.matches, format)

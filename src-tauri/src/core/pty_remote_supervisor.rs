@@ -6,68 +6,75 @@
 //! suspension, a dropped connection, or an app relaunch without losing the
 //! running remote process.
 //!
-//! ## Implementation decision: tmux-backed, not a custom supervisor
+//! ## Backends
 //!
-//! The PRD's open question asked whether to build a custom Treq-owned
-//! supervisor (fork+setsid+pty+ring buffer) or lean on `tmux`/`screen`. This
-//! module picks **tmux as the primary backend**, with `screen` as a fallback
-//! when `tmux` is not installed (`detect_backend`), and returns a clear
-//! `dependency_error` when neither is present rather than silently
-//! degrading to a non-persistent session:
+//! Each machine picks one ([`PtyBackend`], passed as `--backend`):
 //!
-//! - A custom supervisor duplicates a huge amount of battle-tested behavior
-//!   (job control, signal forwarding, scrollback, resize propagation) that
-//!   tmux/screen already get right; the PRD's own examples of what a
-//!   session must survive (detach, reattach, resize) are tmux's core
-//!   purpose.
-//! - Session persistence with tmux is one detached session per
-//!   (repo, workspace, label), keyed by a name derived from all three so `list`
-//!   and `attach` are naturally idempotent — reattach-or-create.
-//! - Resize does not need a dedicated wire message: when the SSH PTY
-//!   channel's `window_change_request` changes the terminal size tmux is
-//!   attached through, tmux resizes its virtual screen to match the
-//!   attached client automatically (tmux's default `aggressive-resize off`
-//!   behavior already tracks the (single) attached client). `resize_session`
-//!   below exists for completeness / explicit resize-without-attach (e.g. a
-//!   mobile client that wants to pre-size a session before attaching) but is
-//!   not on the hot path of normal use.
-//! - Trade-off accepted: this depends on `tmux` (or `screen`) being present
-//!   on the remote VM. Treq's managed-instance provisioning path can
-//!   guarantee this; a user-managed endpoint that lacks both gets a clear
-//!   `dependency_error` from `start_session`/`build_attach_command` telling
-//!   the user to install one, rather than silently falling back to a
-//!   non-reattachable raw PTY. This resolves the PRD's open question in
-//!   favor of "depend on it, fail loudly if absent" over "always work but
-//!   never survive a reconnect".
+//! - **Daemon** (default): Treq's own `core::pty_daemon`, started on demand
+//!   as `treq pty-remote daemon`. It holds each session's PTY and screen, and
+//!   replays the screen plus the last 250 lines on reattach. The host needs
+//!   nothing but `treq`.
+//! - **tmux**: one detached tmux session per (repo, workspace, label), for
+//!   users who would rather not run the daemon. A host without tmux gets a
+//!   clear `dependency_error` instead of a session that cannot survive a
+//!   reconnect.
 //!
-//! Mirrors `core::agent_supervisor`'s shape (pidfile-style JSON record
-//! under `.treq/`, no public network port, only reachable through the
-//! allow-listed CLI surface) but session state itself lives in tmux's own
-//! server, not a Treq-owned file — Treq only tracks *naming* and *binding*
-//! (repo/workspace/label -> tmux session name) so `list` can report
-//! workspace-scoped sessions without shelling out to tmux for repos it
-//! does not know about.
+//! Both key sessions by [`session_name`], derived from repo, workspace and
+//! label, so `start` and `attach` are naturally idempotent (reattach or
+//! create) and `list` is a filter over the backend's own session names: no
+//! Treq-owned index can go stale. Resize needs no dedicated wire message on
+//! either: the SSH PTY channel's `window_change_request` reaches the attached
+//! client, which tmux follows and `treq pty-remote attach` forwards.
+//! [`resize_session`] exists for resizing without attaching.
+//!
+//! "Reset terminals" ([`reset_sessions`]) ends every Treq session on the
+//! host under a backend; for the daemon it also stops the daemon.
 
 use crate::core::remote_pty::{build_launch_program, PtyLaunchSpec};
 use crate::result_ext::ResultExt;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 
-/// Which backend `start_session`/`build_attach_command` will use. Detected
-/// once per call rather than cached, since a VM's installed tooling does not
-/// change within a single CLI invocation's lifetime and caching would risk
-/// staleness across long-lived callers (e.g. a desktop process that stays
-/// up across an `apt remove tmux`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Which program holds a machine's persistent sessions. Chosen per machine
+/// in the app (`SshEndpoint::terminal_backend`) and passed to every
+/// `pty-remote` call as `--backend`, so the host keeps no setting of its own.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PtyBackend {
+  /// Treq's own daemon (`core::pty_daemon`). Needs nothing on the host but
+  /// `treq`.
+  #[default]
+  Daemon,
+  /// tmux, for users who would rather not run the Treq daemon.
   Tmux,
-  Screen,
 }
 
-/// Detects the best available backend. Prefers tmux (richer scripting for
-/// list/resize/kill by name); falls back to screen; `None` when neither is
-/// on `PATH`.
-pub fn detect_backend() -> Option<PtyBackend> {
+impl PtyBackend {
+  pub fn is_default(&self) -> bool {
+    *self == Self::default()
+  }
+
+  pub fn as_str(self) -> &'static str {
+    match self {
+      Self::Daemon => "daemon",
+      Self::Tmux => "tmux",
+    }
+  }
+
+  /// Parses `--backend`. Absent means the daemon.
+  pub fn parse(value: Option<&str>) -> Result<Self, String> {
+    match value.map(str::trim) {
+      None | Some("") | Some("daemon") => Ok(Self::Daemon),
+      Some("tmux") => Ok(Self::Tmux),
+      Some(other) => Err(format!(
+        "invalid_arguments: unknown terminal backend '{other}' (expected daemon or tmux)"
+      )),
+    }
+  }
+}
+
+/// Whether tmux is installed, for [`PtyBackend::Tmux`].
+pub fn tmux_available() -> bool {
   // Every remote attach is a new process, and the login shell that
   // `detect_binary` asks for the full PATH takes a shell start. tmux found
   // on the PATH the process already has needs no other answer.
@@ -76,21 +83,15 @@ pub fn detect_backend() -> Option<PtyBackend> {
     .and_then(|path| crate::binary_paths::detect_binary_in("tmux", path))
     .is_some()
   {
-    return Some(PtyBackend::Tmux);
+    return true;
   }
-  if crate::binary_paths::detect_binary("tmux").is_some() {
-    Some(PtyBackend::Tmux)
-  } else if crate::binary_paths::detect_binary("screen").is_some() {
-    Some(PtyBackend::Screen)
-  } else {
-    None
-  }
+  crate::binary_paths::detect_binary("tmux").is_some()
 }
 
 /// One VM-local persistent PTY session's identity. The session name is
 /// derived deterministically from `repo`, `workspace` and `label`, so
 /// repeated `start` calls for the same triple are idempotent: the same
-/// underlying tmux/screen session is reused rather than a duplicate created.
+/// underlying session is reused rather than a duplicate created.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PtySessionInfo {
   pub session_name: String,
@@ -99,12 +100,11 @@ pub struct PtySessionInfo {
   /// True when the backend reports the session currently exists (it may
   /// have exited between calls, e.g. the shell/agent inside it quit).
   pub running: bool,
-  /// The name a user gave the session (tmux only; see [`rename_session`]).
+  /// The name a user gave the session (see [`rename_session`]).
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub title: Option<String>,
-  /// Seconds since the session last printed anything, by the host's clock
-  /// (tmux only), so a client can tell a working agent from one waiting
-  /// for input.
+  /// Seconds since the session last printed anything, by the host's clock,
+  /// so a client can tell a working agent from one waiting for input.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub idle_secs: Option<u64>,
 }
@@ -126,7 +126,7 @@ const TITLE_MAX_CHARS: usize = 80;
 const TMUX_LIST_FORMAT: &str = "#{session_name}|#{window_activity}|#{@treq-title}";
 
 /// Prefix shared by every session this module creates. Listing filters the
-/// backend's sessions by it, so unrelated tmux/screen sessions on the host
+/// backend's sessions by it, so unrelated tmux sessions on the host
 /// are never reported or touched.
 const SESSION_PREFIX: &str = "treq-pty-";
 
@@ -165,7 +165,7 @@ pub fn repo_scope(repo: &str) -> String {
 
 /// Encodes one name component so it contains only `[A-Za-z0-9_]`. Every
 /// other byte, `_` included, becomes `_xx` (two lowercase hex digits). The
-/// result is safe to pass to `tmux -t` and `screen -S` without quoting, and
+/// result is safe to pass to `tmux -t` without quoting, and
 /// `-` stays free as an unambiguous separator, so a workspace such as
 /// `feat-x` or a label such as `shell-2` round-trips exactly through
 /// [`parse_session_name`].
@@ -204,7 +204,7 @@ fn decode_component(value: &str) -> Option<String> {
   String::from_utf8(out).ok()
 }
 
-/// Builds the tmux/screen session name for a (repo, workspace, label)
+/// Builds the session name for a (repo, workspace, label)
 /// triple: `treq-pty-<repo scope>-<workspace>-<label>`, with the workspace
 /// and label encoded by [`encode_component`].
 pub fn session_name(repo: &str, workspace: &str, label: &str) -> String {
@@ -250,8 +250,8 @@ fn parse_session_name(name: &str) -> Option<ParsedSessionName> {
   })
 }
 
-/// A session as the backend lists it: its name, plus what tmux reports
-/// about it (screen reports neither).
+/// A session as a backend lists it: its name, plus when it last printed
+/// and its title.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ListedSession {
   name: String,
@@ -316,8 +316,27 @@ fn filter_sessions<S: Into<ListedSession>>(
     .collect()
 }
 
-fn no_backend_error() -> String {
-  "dependency_error: Neither tmux nor screen is installed on this host; pty-remote requires one of them for persistent/reattachable sessions".to_string()
+fn no_tmux_error() -> String {
+  "dependency_error: tmux is not installed on this host; install it, or switch the machine's terminals to the Treq daemon".to_string()
+}
+
+fn require_tmux() -> Result<(), String> {
+  if tmux_available() {
+    Ok(())
+  } else {
+    Err(no_tmux_error())
+  }
+}
+
+fn running_info(name: String, workspace: &str, label: &str) -> PtySessionInfo {
+  PtySessionInfo {
+    session_name: name,
+    workspace: workspace.to_string(),
+    label: label.to_string(),
+    running: true,
+    title: None,
+    idle_secs: None,
+  }
 }
 
 /// Starts (or, if one already exists, leaves running) a detached persistent
@@ -328,7 +347,12 @@ fn no_backend_error() -> String {
 /// dynamic component exactly as `core::remote_pty`'s direct-launch path
 /// does. No code path here lets a caller-supplied string reach the shell
 /// unquoted.
+#[allow(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn start_session(
+  backend: PtyBackend,
   repo: &str,
   remote_dir: &str,
   workspace: &str,
@@ -337,141 +361,109 @@ pub fn start_session(
   cols: u16,
   rows: u16,
 ) -> Result<PtySessionInfo, String> {
-  let backend = detect_backend().ok_or_else(no_backend_error)?;
   let name = session_name(repo, workspace, label);
-
-  if session_exists(backend, &name) {
-    return Ok(PtySessionInfo {
-      session_name: name,
-      workspace: workspace.to_string(),
-      label: label.to_string(),
-      running: true,
-      title: None,
-      idle_secs: None,
-    });
-  }
-
-  let command = build_launch_program(launch);
-  let command = command.as_str();
-  let quoted_dir = crate::core::remote::shell_quote(remote_dir);
   match backend {
-    PtyBackend::Tmux => {
-      let shell_cmd = format!("cd {quoted_dir} && exec {command}");
-      let status = Command::new("tmux")
-        .args([
-          "new-session",
-          "-d",
-          "-s",
-          &name,
-          "-x",
-          &cols.to_string(),
-          "-y",
-          &rows.to_string(),
-          &shell_cmd,
-          // The pane is the whole terminal: no tmux status line under it.
-          ";",
-          "set-option",
-          "status",
-          "off",
-        ])
-        .status()
-        .map_err(|e| format!("dependency_error: Failed to spawn tmux: {e}"))?;
-      if !status.success() {
-        return Err(format!(
-          "dependency_error: tmux new-session exited with {status}"
-        ));
-      }
+    PtyBackend::Daemon => {
+      daemon::start(&daemon::paths()?, &name, remote_dir, launch, cols, rows)?;
     }
-    PtyBackend::Screen => {
-      let shell_cmd = format!("cd {quoted_dir} && exec {command}");
-      let status = Command::new("screen")
-        .args(["-dmS", &name, "bash", "-lc", &shell_cmd])
-        .status()
-        .map_err(|e| format!("dependency_error: Failed to spawn screen: {e}"))?;
-      if !status.success() {
-        return Err(format!(
-          "dependency_error: screen -dmS exited with {status}"
-        ));
+    PtyBackend::Tmux => {
+      require_tmux()?;
+      if !tmux_session_exists(&name) {
+        tmux_start(&name, remote_dir, launch, cols, rows)?;
       }
     }
   }
-
-  Ok(PtySessionInfo {
-    session_name: name,
-    workspace: workspace.to_string(),
-    label: label.to_string(),
-    running: true,
-    title: None,
-    idle_secs: None,
-  })
+  Ok(running_info(name, workspace, label))
 }
 
-fn session_exists(backend: PtyBackend, name: &str) -> bool {
-  match backend {
-    PtyBackend::Tmux => Command::new("tmux")
-      .args(["has-session", "-t", &format!("={name}")])
-      .status()
-      .map(|s| s.success())
-      .unwrap_or(false),
-    PtyBackend::Screen => Command::new("screen")
-      .args(["-ls", name])
-      .output()
-      .map(|out| String::from_utf8_lossy(&out.stdout).contains(name))
-      .unwrap_or(false),
+fn tmux_start(
+  name: &str,
+  remote_dir: &str,
+  launch: &PtyLaunchSpec,
+  cols: u16,
+  rows: u16,
+) -> Result<(), String> {
+  let command = build_launch_program(launch);
+  let quoted_dir = crate::core::remote::shell_quote(remote_dir);
+  let shell_cmd = format!("cd {quoted_dir} && exec {command}");
+  let status = Command::new("tmux")
+    .args([
+      "new-session",
+      "-d",
+      "-s",
+      name,
+      "-x",
+      &cols.to_string(),
+      "-y",
+      &rows.to_string(),
+      &shell_cmd,
+      // The pane is the whole terminal: no tmux status line under it.
+      ";",
+      "set-option",
+      "status",
+      "off",
+    ])
+    .status()
+    .map_err(|e| format!("dependency_error: Failed to spawn tmux: {e}"))?;
+  if !status.success() {
+    return Err(format!(
+      "dependency_error: tmux new-session exited with {status}"
+    ));
   }
+  Ok(())
+}
+
+fn tmux_session_exists(name: &str) -> bool {
+  Command::new("tmux")
+    .args(["has-session", "-t", &format!("={name}")])
+    .status()
+    .map(|s| s.success())
+    .unwrap_or(false)
+}
+
+/// Every session tmux reports, or none when tmux is missing or has no
+/// server running.
+fn tmux_sessions() -> Vec<ListedSession> {
+  if !tmux_available() {
+    return vec![];
+  }
+  let Ok(output) = Command::new("tmux")
+    // -u: print titles as UTF-8 whatever the host's locale; tmux replaces
+    // non-ASCII with `_` otherwise.
+    .args(["-u", "list-sessions", "-F", TMUX_LIST_FORMAT])
+    .output()
+  else {
+    return vec![];
+  };
+  // tmux exits non-zero ("no server running") when there are no sessions
+  // at all — that is an empty list, not an error.
+  if !output.status.success() {
+    return vec![];
+  }
+  String::from_utf8_lossy(&output.stdout)
+    .lines()
+    .map(parse_tmux_list_line)
+    .collect()
 }
 
 /// Lists persistent sessions for `repo`, optionally narrowed to
 /// `workspace`. Reads backend-reported state directly (no Treq-owned index
 /// file to go stale): every session this module creates follows
 /// [`session_name`], so listing is a filter over the backend's own list.
-pub fn list_sessions(repo: &str, workspace: Option<&str>) -> Result<Vec<PtySessionInfo>, String> {
-  let Some(backend) = detect_backend() else {
-    return Ok(vec![]);
+/// Never starts the daemon.
+pub fn list_sessions(
+  backend: PtyBackend,
+  repo: &str,
+  workspace: Option<&str>,
+) -> Result<Vec<PtySessionInfo>, String> {
+  let sessions = match backend {
+    PtyBackend::Daemon => daemon::sessions(&daemon::paths()?)?,
+    PtyBackend::Tmux => tmux_sessions(),
   };
-  let names = match backend {
-    PtyBackend::Tmux => {
-      let output = Command::new("tmux")
-        // -u: print titles as UTF-8 whatever the host's locale; tmux
-        // replaces non-ASCII with `_` otherwise.
-        .args(["-u", "list-sessions", "-F", TMUX_LIST_FORMAT])
-        .output()
-        .map_err(|e| format!("dependency_error: Failed to list tmux sessions: {e}"))?;
-      if !output.status.success() {
-        // tmux exits non-zero ("no server running") when there are no
-        // sessions at all — that is an empty list, not an error.
-        return Ok(vec![]);
-      }
-      String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(parse_tmux_list_line)
-        .collect::<Vec<_>>()
-    }
-    PtyBackend::Screen => {
-      let output = Command::new("screen")
-        .arg("-ls")
-        .output()
-        .map_err(|e| format!("dependency_error: Failed to list screen sessions: {e}"))?;
-      String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-          let trimmed = line.trim();
-          // Lines look like "12345.treq-pty-foo-bar\t(Detached)".
-          trimmed.split_whitespace().next().and_then(|token| {
-            token
-              .split_once('.')
-              .map(|(_, name)| ListedSession::from(name.to_string()))
-              .filter(|_| token.contains('.'))
-          })
-        })
-        .collect::<Vec<_>>()
-    }
-  };
-
   let now = std::time::SystemTime::now()
     .duration_since(std::time::UNIX_EPOCH)
     .map_or(0, |d| d.as_secs());
-  Ok(filter_sessions(names, &repo_scope(repo), workspace, now))
+  Ok(filter_sessions(sessions, &repo_scope(repo), workspace, now))
 }
 
 /// A title as stored: one line without control characters, trimmed and at
@@ -487,93 +479,136 @@ pub fn clean_title(title: &str) -> Option<String> {
   (!line.is_empty()).then_some(line)
 }
 
-/// Names a session; an empty `title` clears the name. Needs tmux, which
-/// keeps the title with the session (a user option), so it goes when the
-/// session ends.
+/// Names a session; an empty `title` clears the name. The backend keeps the
+/// title with the session (tmux as a user option, the daemon in memory),
+/// so it goes when the session ends.
 pub fn rename_session(
+  backend: PtyBackend,
   repo: &str,
   workspace: &str,
   label: &str,
   title: &str,
 ) -> Result<Option<String>, String> {
-  match detect_backend() {
-    Some(PtyBackend::Tmux) => {}
-    Some(PtyBackend::Screen) => {
-      return Err("dependency_error: Naming terminals needs tmux on this host".to_string())
-    }
-    None => return Err(no_backend_error()),
-  }
   let name = session_name(repo, workspace, label);
-  // A client names a new session right after attaching, which can be
-  // before the attach has created it: give it a moment to appear.
-  for _ in 0..RENAME_WAIT_TRIES {
-    if session_exists(PtyBackend::Tmux, &name) {
-      break;
-    }
-    std::thread::sleep(RENAME_WAIT_STEP);
-  }
-  // `=` for an exact match; the trailing `:` makes it a session target,
-  // which set-option needs (a bare `=name` reads as a pane and fails).
-  let target = format!("={name}:");
   let title = clean_title(title);
-  let mut args = vec!["set-option", "-t", target.as_str()];
-  match &title {
-    Some(title) => args.extend([TITLE_OPTION, title.as_str()]),
-    None => args.extend(["-u", TITLE_OPTION]),
+  match backend {
+    PtyBackend::Daemon => {
+      let paths = daemon::paths()?;
+      // A client names a new session right after attaching, which can be
+      // before the attach has created it: give it a moment to appear.
+      for _ in 0..RENAME_WAIT_TRIES {
+        match daemon::rename(&paths, &name, title.as_deref()) {
+          Err(e) if e.starts_with("session_not_found") => std::thread::sleep(RENAME_WAIT_STEP),
+          Err(e) => return Err(e),
+          Ok(()) => return Ok(title),
+        }
+      }
+      Err(format!("Terminal '{label}' is not running"))
+    }
+    PtyBackend::Tmux => {
+      require_tmux()?;
+      for _ in 0..RENAME_WAIT_TRIES {
+        if tmux_session_exists(&name) {
+          break;
+        }
+        std::thread::sleep(RENAME_WAIT_STEP);
+      }
+      // `=` for an exact match; the trailing `:` makes it a session target,
+      // which set-option needs (a bare `=name` reads as a pane and fails).
+      let target = format!("={name}:");
+      let mut args = vec!["set-option", "-t", target.as_str()];
+      match &title {
+        Some(title) => args.extend([TITLE_OPTION, title.as_str()]),
+        None => args.extend(["-u", TITLE_OPTION]),
+      }
+      let status = Command::new("tmux")
+        .args(&args)
+        .status()
+        .map_err(|e| format!("dependency_error: Failed to run tmux: {e}"))?;
+      if !status.success() {
+        return Err(format!("Terminal '{label}' is not running"));
+      }
+      Ok(title)
+    }
   }
-  let status = Command::new("tmux")
-    .args(&args)
-    .status()
-    .map_err(|e| format!("dependency_error: Failed to run tmux: {e}"))?;
-  if !status.success() {
-    return Err(format!("Terminal '{label}' is not running"));
-  }
-  Ok(title)
+}
+
+/// Sessions under either backend, for counts that should not depend on
+/// which one a machine uses (a workspace's running terminals).
+pub fn list_all_sessions(repo: &str, workspace: Option<&str>) -> Vec<PtySessionInfo> {
+  [PtyBackend::Daemon, PtyBackend::Tmux]
+    .into_iter()
+    .flat_map(|backend| list_sessions(backend, repo, workspace).unwrap_or_default())
+    .collect()
 }
 
 /// Stops (kills) a persistent session. Idempotent: stopping a session that
 /// does not exist is not an error.
-pub fn stop_session(repo: &str, workspace: &str, label: &str) -> Result<(), String> {
-  let Some(backend) = detect_backend() else {
-    return Ok(());
-  };
+pub fn stop_session(
+  backend: PtyBackend,
+  repo: &str,
+  workspace: &str,
+  label: &str,
+) -> Result<(), String> {
   let name = session_name(repo, workspace, label);
   match backend {
+    PtyBackend::Daemon => daemon::stop(&daemon::paths()?, &name),
     PtyBackend::Tmux => {
-      // `=` asks tmux for an exact match. Without it tmux falls back to
-      // prefix matching, so stopping `...-shell` could kill `...-shell_2d2`.
-      Command::new("tmux")
-        .args(["kill-session", "-t", &format!("={name}")])
-        .status()
-        .best_effort();
-    }
-    PtyBackend::Screen => {
-      Command::new("screen")
-        .args(["-S", &name, "-X", "quit"])
-        .status()
-        .best_effort();
+      if tmux_available() {
+        tmux_kill(&name);
+      }
+      Ok(())
     }
   }
-  Ok(())
+}
+
+fn tmux_kill(name: &str) {
+  // `=` asks tmux for an exact match. Without it tmux falls back to prefix
+  // matching, so stopping `...-shell` could kill `...-shell_2d2`.
+  Command::new("tmux")
+    .args(["kill-session", "-t", &format!("={name}")])
+    .status()
+    .best_effort();
+}
+
+/// Ends every Treq session on the host under `backend`, whatever its
+/// repository: the machine's "Reset terminals". For the daemon this also
+/// stops the daemon and clears its directory; for tmux it leaves sessions
+/// Treq did not create alone.
+pub fn reset_sessions(backend: PtyBackend) -> Result<(), String> {
+  match backend {
+    PtyBackend::Daemon => daemon::reset(&daemon::paths()?),
+    PtyBackend::Tmux => {
+      for session in tmux_sessions()
+        .into_iter()
+        .filter(|session| parse_session_name(&session.name).is_some())
+      {
+        tmux_kill(&session.name);
+      }
+      Ok(())
+    }
+  }
 }
 
 /// Pastes `text` into a running session as one bracketed paste (so a TUI
 /// such as Claude Code takes it as typed input, newlines included), then
 /// presses Enter when `submit`. Errors when the session is not running.
 pub fn paste_text(
+  backend: PtyBackend,
   repo: &str,
   workspace: &str,
   label: &str,
   text: &str,
   submit: bool,
 ) -> Result<(), String> {
-  let backend = detect_backend().ok_or_else(no_backend_error)?;
   let name = session_name(repo, workspace, label);
-  if !session_exists(backend, &name) {
-    return Err(format!("session_not_found: {label} is not running"));
-  }
   match backend {
+    PtyBackend::Daemon => daemon::paste(&daemon::paths()?, &name, label, text, submit),
     PtyBackend::Tmux => {
+      require_tmux()?;
+      if !tmux_session_exists(&name) {
+        return Err(format!("session_not_found: {label} is not running"));
+      }
       let target = format!("={name}:");
       let buffer = format!("treq-paste-{name}");
       run_tmux_with_input(&["load-buffer", "-b", &buffer, "-"], text)?;
@@ -583,22 +618,9 @@ pub fn paste_text(
         std::thread::sleep(std::time::Duration::from_millis(SUBMIT_DELAY_MS));
         run_tmux(&["send-keys", "-t", &target, "Enter"])?;
       }
-    }
-    PtyBackend::Screen => {
-      let mut stuffed = text.to_string();
-      if submit {
-        stuffed.push('\r');
-      }
-      let status = Command::new("screen")
-        .args(["-S", &name, "-X", "stuff", &stuffed])
-        .status()
-        .map_err(|e| format!("dependency_error: Failed to run screen: {e}"))?;
-      if !status.success() {
-        return Err(format!("session_not_found: {label} is not running"));
-      }
+      Ok(())
     }
   }
-  Ok(())
 }
 
 /// How long `paste_text` waits between the paste and Enter.
@@ -644,21 +666,22 @@ fn tmux_result(output: std::process::Output) -> Result<(), String> {
 }
 
 /// Explicitly resizes a session's virtual terminal, independent of any
-/// attached client. Normally unnecessary (see module docs: tmux/screen
-/// auto-resize to the attached client's window), but useful to pre-size a
-/// session before the first attach.
+/// attached client. Normally unnecessary (both backends follow the attached
+/// client's window), but useful to pre-size a session before the first
+/// attach.
 pub fn resize_session(
+  backend: PtyBackend,
   repo: &str,
   workspace: &str,
   label: &str,
   cols: u16,
   rows: u16,
 ) -> Result<(), String> {
-  let backend = detect_backend()
-    .ok_or_else(|| "dependency_error: Neither tmux nor screen is installed".to_string())?;
   let name = session_name(repo, workspace, label);
   match backend {
+    PtyBackend::Daemon => daemon::resize(&daemon::paths()?, &name, cols, rows),
     PtyBackend::Tmux => {
+      require_tmux()?;
       let status = Command::new("tmux")
         .args([
           "resize-window",
@@ -676,15 +699,9 @@ pub fn resize_session(
           "dependency_error: tmux resize-window exited with {status}"
         ));
       }
-    }
-    PtyBackend::Screen => {
-      // `screen` has no headless resize-by-name equivalent; resize happens
-      // implicitly on attach via the terminal's own size. Treated as a no-op
-      // rather than an error so callers on a screen-only host are not
-      // blocked.
+      Ok(())
     }
   }
-  Ok(())
 }
 
 /// Builds the literal command line an SSH PTY channel execs to attach to
@@ -695,11 +712,16 @@ pub fn resize_session(
 /// component (directory, session name) is quoted with `shell_quote` exactly
 /// as that function does.
 ///
-/// Uses `tmux new-session -A` ("attach if it exists, else create") so one
-/// command line covers both "start a fresh session" and "reattach to a
-/// running one" — the mobile/desktop client does not need to know in
-/// advance which case applies.
+/// Both backends attach-or-create in one command line, so the
+/// mobile/desktop client does not need to know in advance whether the
+/// session is running: tmux through `new-session -A`, the daemon through
+/// `treq pty-remote attach`, which starts the session when it is missing.
+#[allow(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn build_attach_command(
+  backend: PtyBackend,
   repo: &str,
   remote_dir: &str,
   workspace: &str,
@@ -708,19 +730,61 @@ pub fn build_attach_command(
   cols: u16,
   rows: u16,
 ) -> Result<String, String> {
-  let backend = detect_backend().ok_or_else(no_backend_error)?;
-  Ok(attach_command_for_backend(
-    backend,
-    &session_name(repo, workspace, label),
-    remote_dir,
-    launch,
-    cols,
-    rows,
-  ))
+  match backend {
+    PtyBackend::Daemon => {
+      let treq = std::env::current_exe()
+        .map_err(|e| format!("dependency_error: Failed to find treq on this host: {e}"))?;
+      Ok(daemon_attach_command(
+        &treq.to_string_lossy(),
+        repo,
+        remote_dir,
+        workspace,
+        label,
+        launch,
+        cols,
+        rows,
+      ))
+    }
+    PtyBackend::Tmux => {
+      require_tmux()?;
+      Ok(tmux_attach_command(
+        &session_name(repo, workspace, label),
+        remote_dir,
+        launch,
+        cols,
+        rows,
+      ))
+    }
+  }
 }
 
-fn attach_command_for_backend(
-  backend: PtyBackend,
+#[allow(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
+fn daemon_attach_command(
+  treq: &str,
+  repo: &str,
+  remote_dir: &str,
+  workspace: &str,
+  label: &str,
+  launch: &PtyLaunchSpec,
+  cols: u16,
+  rows: u16,
+) -> String {
+  use crate::core::remote::shell_quote;
+  let payload = crate::core::remote::pty_launch_payload(remote_dir, launch, cols, rows);
+  format!(
+    "exec {} pty-remote attach --repo {} --workspace {} --target {} --value {}",
+    shell_quote(treq),
+    shell_quote(repo),
+    shell_quote(workspace),
+    shell_quote(label),
+    shell_quote(&payload),
+  )
+}
+
+fn tmux_attach_command(
   name: &str,
   remote_dir: &str,
   launch: &PtyLaunchSpec,
@@ -730,14 +794,219 @@ fn attach_command_for_backend(
   let command = build_launch_program(launch);
   let quoted_dir = crate::core::remote::shell_quote(remote_dir);
   let quoted_name = crate::core::remote::shell_quote(name);
-  match backend {
-    // The pane is the whole terminal: no tmux status line under it.
-    PtyBackend::Tmux => format!(
-      "cd {quoted_dir} && exec tmux new-session -A -s {quoted_name} -x {cols} -y {rows} {command} \\; set-option status off"
-    ),
-    PtyBackend::Screen => {
-      format!("cd {quoted_dir} && exec screen -xRR {quoted_name} {command}")
+  // The pane is the whole terminal: no tmux status line under it.
+  format!(
+    "cd {quoted_dir} && exec tmux new-session -A -s {quoted_name} -x {cols} -y {rows} {command} \\; set-option status off"
+  )
+}
+
+/// `treq pty-remote attach`: what [`build_attach_command`]'s daemon command
+/// line runs on the host. Bridges this process's terminal to the session,
+/// starting it first when it is not running, until the session ends.
+pub fn run_daemon_attach(
+  repo: &str,
+  remote_dir: &str,
+  workspace: &str,
+  label: &str,
+  launch: &PtyLaunchSpec,
+  cols: u16,
+  rows: u16,
+) -> Result<(), String> {
+  daemon::attach(
+    &session_name(repo, workspace, label),
+    remote_dir,
+    launch,
+    cols,
+    rows,
+  )
+}
+
+/// `treq pty-remote daemon`: serves until reset or idle.
+pub fn run_daemon() -> Result<(), String> {
+  daemon::serve()
+}
+
+/// The daemon backend. On a host without unix sockets every call says the
+/// daemon is unavailable; Treq supports Linux and macOS hosts.
+#[cfg(unix)]
+mod daemon {
+  use super::*;
+  use crate::core::pty_daemon::{self, DaemonPaths, Request, StartSpec};
+
+  pub(super) fn paths() -> Result<DaemonPaths, String> {
+    DaemonPaths::default_paths()
+  }
+
+  fn spec(remote_dir: &str, launch: &PtyLaunchSpec, cols: u16, rows: u16) -> StartSpec {
+    StartSpec {
+      dir: remote_dir.to_string(),
+      program: build_launch_program(launch),
+      cols,
+      rows,
     }
+  }
+
+  fn call(paths: &DaemonPaths, request: &Request) -> Result<serde_json::Value, String> {
+    pty_daemon::call(pty_daemon::connect_or_spawn(paths)?, request)
+  }
+
+  pub(super) fn start(
+    paths: &DaemonPaths,
+    name: &str,
+    remote_dir: &str,
+    launch: &PtyLaunchSpec,
+    cols: u16,
+    rows: u16,
+  ) -> Result<(), String> {
+    call(
+      paths,
+      &Request::Start {
+        name: name.to_string(),
+        spec: spec(remote_dir, launch, cols, rows),
+      },
+    )
+    .map(drop)
+  }
+
+  pub(super) fn sessions(paths: &DaemonPaths) -> Result<Vec<ListedSession>, String> {
+    let Some(value) = pty_daemon::request_if_running(paths, &Request::List)? else {
+      return Ok(vec![]);
+    };
+    let listed: Vec<pty_daemon::Listed> = serde_json::from_value(value)
+      .map_err(|e| format!("daemon_error: unexpected session list: {e}"))?;
+    Ok(
+      listed
+        .into_iter()
+        .map(|l| ListedSession {
+          name: l.name,
+          last_output: l.last_output,
+          title: l.title,
+        })
+        .collect(),
+    )
+  }
+
+  pub(super) fn rename(paths: &DaemonPaths, name: &str, title: Option<&str>) -> Result<(), String> {
+    let request = Request::Rename {
+      name: name.to_string(),
+      title: title.map(str::to_string),
+    };
+    match pty_daemon::request_if_running(paths, &request)? {
+      Some(_) => Ok(()),
+      None => Err(format!("session_not_found: {name} is not running")),
+    }
+  }
+
+  pub(super) fn stop(paths: &DaemonPaths, name: &str) -> Result<(), String> {
+    pty_daemon::request_if_running(
+      paths,
+      &Request::Stop {
+        name: name.to_string(),
+      },
+    )
+    .map(drop)
+  }
+
+  pub(super) fn paste(
+    paths: &DaemonPaths,
+    name: &str,
+    label: &str,
+    text: &str,
+    submit: bool,
+  ) -> Result<(), String> {
+    let request = Request::Paste {
+      name: name.to_string(),
+      text: text.to_string(),
+      submit,
+    };
+    match pty_daemon::request_if_running(paths, &request)? {
+      Some(_) => Ok(()),
+      None => Err(format!("session_not_found: {label} is not running")),
+    }
+  }
+
+  pub(super) fn resize(
+    paths: &DaemonPaths,
+    name: &str,
+    cols: u16,
+    rows: u16,
+  ) -> Result<(), String> {
+    call(
+      paths,
+      &Request::Resize {
+        name: name.to_string(),
+        cols,
+        rows,
+      },
+    )
+    .map(drop)
+  }
+
+  pub(super) fn reset(paths: &DaemonPaths) -> Result<(), String> {
+    pty_daemon::reset(paths)
+  }
+
+  pub(super) fn attach(
+    name: &str,
+    remote_dir: &str,
+    launch: &PtyLaunchSpec,
+    cols: u16,
+    rows: u16,
+  ) -> Result<(), String> {
+    pty_daemon::run_attach(&paths()?, name, spec(remote_dir, launch, cols, rows))
+  }
+
+  pub(super) fn serve() -> Result<(), String> {
+    pty_daemon::serve(&paths()?).map(drop)
+  }
+}
+
+#[cfg(not(unix))]
+mod daemon {
+  use super::*;
+
+  pub(super) struct DaemonPaths;
+
+  fn unsupported<T>() -> Result<T, String> {
+    Err("dependency_error: the Treq terminal daemon runs on Linux and macOS hosts only; use tmux mode".to_string())
+  }
+
+  pub(super) fn paths() -> Result<DaemonPaths, String> {
+    unsupported()
+  }
+  pub(super) fn start(
+    _: &DaemonPaths,
+    _: &str,
+    _: &str,
+    _: &PtyLaunchSpec,
+    _: u16,
+    _: u16,
+  ) -> Result<(), String> {
+    unsupported()
+  }
+  pub(super) fn sessions(_: &DaemonPaths) -> Result<Vec<ListedSession>, String> {
+    unsupported()
+  }
+  pub(super) fn rename(_: &DaemonPaths, _: &str, _: Option<&str>) -> Result<(), String> {
+    unsupported()
+  }
+  pub(super) fn stop(_: &DaemonPaths, _: &str) -> Result<(), String> {
+    unsupported()
+  }
+  pub(super) fn paste(_: &DaemonPaths, _: &str, _: &str, _: &str, _: bool) -> Result<(), String> {
+    unsupported()
+  }
+  pub(super) fn resize(_: &DaemonPaths, _: &str, _: u16, _: u16) -> Result<(), String> {
+    unsupported()
+  }
+  pub(super) fn reset(_: &DaemonPaths) -> Result<(), String> {
+    unsupported()
+  }
+  pub(super) fn attach(_: &str, _: &str, _: &PtyLaunchSpec, _: u16, _: u16) -> Result<(), String> {
+    unsupported()
+  }
+  pub(super) fn serve() -> Result<(), String> {
+    unsupported()
   }
 }
 
@@ -745,10 +1014,6 @@ fn attach_command_for_backend(
 mod tests {
   use super::*;
   use crate::core::remote_pty::RemoteAgentId;
-
-  fn tmux_available() -> bool {
-    detect_backend() == Some(PtyBackend::Tmux)
-  }
 
   #[test]
   fn session_name_encodes_unsafe_characters_into_a_tmux_safe_name() {
@@ -882,9 +1147,207 @@ mod tests {
   }
 
   #[test]
+  fn backend_flag_defaults_to_the_daemon_and_rejects_unknown_names() {
+    assert_eq!(PtyBackend::parse(None), Ok(PtyBackend::Daemon));
+    assert_eq!(PtyBackend::parse(Some("daemon")), Ok(PtyBackend::Daemon));
+    assert_eq!(PtyBackend::parse(Some("tmux")), Ok(PtyBackend::Tmux));
+    assert!(PtyBackend::parse(Some("screen"))
+      .unwrap_err()
+      .starts_with("invalid_arguments"));
+    assert_eq!(
+      serde_json::to_string(&PtyBackend::Tmux).unwrap(),
+      "\"tmux\""
+    );
+  }
+
+  #[test]
+  fn daemon_attach_command_runs_treq_attach_with_every_value_quoted() {
+    let malicious = "'; rm -rf / #";
+    let launch = PtyLaunchSpec::Agent {
+      agent: RemoteAgentId::Claude,
+      args: vec![malicious.to_string()],
+    };
+    let command = daemon_attach_command(
+      "/opt/treq bin/treq",
+      "/srv/repo",
+      &format!("/tmp/x{malicious}"),
+      "7",
+      &format!("term{malicious}"),
+      &launch,
+      80,
+      24,
+    );
+    assert!(
+      command.starts_with("exec '/opt/treq bin/treq' pty-remote attach --repo '/srv/repo' --workspace '7' --target 'term'\\''"),
+      "{command}"
+    );
+    assert!(!command.contains(&format!(" {malicious}")));
+    // The payload the attach parses back is the one start would send.
+    let value = command.rsplit_once("--value ").unwrap().1;
+    assert!(value.starts_with('\'') && value.ends_with('\''));
+  }
+
+  #[cfg(unix)]
+  mod daemon_backend {
+    use super::super::daemon;
+    use super::*;
+    use crate::core::pty_daemon::{self, DaemonPaths, Request};
+
+    struct Served {
+      paths: DaemonPaths,
+      handle: Option<std::thread::JoinHandle<Result<bool, String>>>,
+      _dir: tempfile::TempDir,
+    }
+
+    impl Served {
+      fn start() -> Self {
+        let dir = tempfile::Builder::new()
+          .prefix("tsup")
+          .tempdir_in("/tmp")
+          .unwrap();
+        let paths = DaemonPaths::new(dir.path().join("pty"));
+        let serving = paths.clone();
+        let handle = std::thread::spawn(move || pty_daemon::serve(&serving));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while pty_daemon::connect(&paths).unwrap().is_none() {
+          assert!(std::time::Instant::now() < deadline, "daemon did not start");
+          std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        Self {
+          paths,
+          handle: Some(handle),
+          _dir: dir,
+        }
+      }
+    }
+
+    impl Drop for Served {
+      fn drop(&mut self) {
+        pty_daemon::request_if_running(&self.paths, &Request::Shutdown).ok();
+        if let Some(handle) = self.handle.take() {
+          handle.join().ok();
+        }
+      }
+    }
+
+    #[test]
+    fn listing_without_a_daemon_is_empty_and_starts_nothing() {
+      let dir = tempfile::Builder::new()
+        .prefix("tsup")
+        .tempdir_in("/tmp")
+        .unwrap();
+      let paths = DaemonPaths::new(dir.path().join("pty"));
+      assert!(daemon::sessions(&paths).unwrap().is_empty());
+      daemon::stop(&paths, "anything").unwrap();
+      assert!(!paths.socket().exists());
+    }
+
+    #[test]
+    fn start_list_paste_stop_round_trip_scoped_to_the_repository() {
+      let served = Served::start();
+      let repo = tempfile::tempdir().unwrap();
+      let repo_path = repo.path().to_str().unwrap();
+      let other = tempfile::tempdir().unwrap();
+      let out = repo.path().join("pasted.txt");
+      let name = session_name(repo_path, "3", "shell");
+
+      daemon::start(
+        &served.paths,
+        &name,
+        repo_path,
+        &PtyLaunchSpec::Shell,
+        80,
+        24,
+      )
+      .unwrap();
+      // Starting again reuses the session.
+      daemon::start(
+        &served.paths,
+        &name,
+        repo_path,
+        &PtyLaunchSpec::Shell,
+        80,
+        24,
+      )
+      .unwrap();
+      let names = daemon::sessions(&served.paths).unwrap();
+      let listed = filter_sessions(names.clone(), &repo_scope(repo_path), Some("3"), 0);
+      assert_eq!(listed.len(), 1);
+      assert_eq!(listed[0].label, "shell");
+      assert!(filter_sessions(names, &repo_scope(other.path().to_str().unwrap()), None, 0).is_empty());
+
+      std::thread::sleep(std::time::Duration::from_millis(300));
+      let command = format!("printf 'a\\nb' > {}", out.display());
+      daemon::paste(&served.paths, &name, "shell", &command, true).unwrap();
+      let mut pasted = String::new();
+      for _ in 0..50 {
+        pasted = std::fs::read_to_string(&out).unwrap_or_default();
+        if !pasted.is_empty() {
+          break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+      }
+      assert_eq!(pasted, "a\nb");
+
+      daemon::resize(&served.paths, &name, 100, 40).unwrap();
+      daemon::stop(&served.paths, &name).unwrap();
+      assert!(daemon::sessions(&served.paths).unwrap().is_empty());
+      assert!(daemon::paste(&served.paths, &name, "shell", "x", false)
+        .unwrap_err()
+        .starts_with("session_not_found"));
+    }
+
+    #[test]
+    fn the_daemon_names_a_session_and_reports_its_idle_time() {
+      let served = Served::start();
+      let repo = tempfile::tempdir().unwrap();
+      let repo_path = repo.path().to_str().unwrap();
+      let name = session_name(repo_path, "3", "claude-1");
+      daemon::start(&served.paths, &name, repo_path, &PtyLaunchSpec::Shell, 80, 24).unwrap();
+      daemon::rename(&served.paths, &name, Some("Fix login")).unwrap();
+      let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+      let session = loop {
+        let listed = filter_sessions(
+          daemon::sessions(&served.paths).unwrap(),
+          &repo_scope(repo_path),
+          Some("3"),
+          crate::core::pty_daemon::unix_now(),
+        );
+        // The shell's prompt is its first output.
+        if listed[0].idle_secs.is_some() {
+          break listed[0].clone();
+        }
+        assert!(std::time::Instant::now() < deadline, "the shell printed nothing");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+      };
+      assert_eq!(session.title.as_deref(), Some("Fix login"));
+      assert!(session.idle_secs.is_some_and(|s| s < 10));
+      daemon::rename(&served.paths, &name, None).unwrap();
+      assert_eq!(daemon::sessions(&served.paths).unwrap()[0].title, None);
+    }
+
+    #[test]
+    fn reset_ends_every_session_and_the_daemon() {
+      let mut served = Served::start();
+      daemon::start(
+        &served.paths,
+        "treq-pty-a",
+        "/",
+        &PtyLaunchSpec::Shell,
+        80,
+        24,
+      )
+      .unwrap();
+      daemon::reset(&served.paths).unwrap();
+      served.handle.take().unwrap().join().unwrap().unwrap();
+      assert!(daemon::sessions(&served.paths).unwrap().is_empty());
+      assert!(!served.paths.dir().exists());
+    }
+  }
+
+  #[test]
   fn attach_command_quotes_a_malicious_working_directory() {
-    let command = attach_command_for_backend(
-      PtyBackend::Tmux,
+    let command = tmux_attach_command(
       &session_name("/srv/repo", "ws1", "term"),
       "/tmp/x'; rm -rf / #",
       &PtyLaunchSpec::Shell,
@@ -906,29 +1369,27 @@ mod tests {
       agent: RemoteAgentId::Claude,
       args: vec!["--prompt".to_string(), malicious_arg.to_string()],
     };
-    for backend in [PtyBackend::Tmux, PtyBackend::Screen] {
-      let command = attach_command_for_backend(
-        backend,
-        &session_name("/srv/repo", "ws1", "term"),
-        "/tmp",
-        &launch,
-        80,
-        24,
-      );
-      assert!(command.contains("claude"));
-      assert!(command.contains(" -lc "));
-      assert!(!command.contains(&format!(" {malicious_arg} ")));
-    }
+    let command = tmux_attach_command(
+      &session_name("/srv/repo", "ws1", "term"),
+      "/tmp",
+      &launch,
+      80,
+      24,
+    );
+    assert!(command.contains("claude"));
+    assert!(command.contains(" -lc "));
+    assert!(!command.contains(&format!(" {malicious_arg} ")));
   }
 
   #[test]
-  fn build_attach_command_errors_clearly_when_no_backend_detected() {
-    // Cannot force `detect_binary` to fail where tmux/screen exist, so this
-    // only runs on hosts that genuinely lack both.
-    if detect_backend().is_some() {
+  fn tmux_mode_errors_clearly_when_tmux_is_missing() {
+    // Cannot force `detect_binary` to fail where tmux exists, so this only
+    // runs on hosts that genuinely lack it.
+    if tmux_available() {
       return;
     }
     let error = build_attach_command(
+      PtyBackend::Tmux,
       "/srv/repo",
       "/tmp",
       "ws1",
@@ -952,11 +1413,19 @@ mod tests {
     let (workspace, label) = ("test-ws-paste", "shell");
     let out = dir.path().join("pasted.txt");
 
-    assert!(paste_text(repo_path, workspace, label, "echo hi", true)
-      .unwrap_err()
-      .contains("session_not_found"));
+    assert!(paste_text(
+      PtyBackend::Tmux,
+      repo_path,
+      workspace,
+      label,
+      "echo hi",
+      true
+    )
+    .unwrap_err()
+    .contains("session_not_found"));
 
     start_session(
+      PtyBackend::Tmux,
       repo_path,
       repo_path,
       workspace,
@@ -968,7 +1437,15 @@ mod tests {
     .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(500));
     let command = format!("printf 'a\\nb' > {}", out.display());
-    paste_text(repo_path, workspace, label, &command, true).unwrap();
+    paste_text(
+      PtyBackend::Tmux,
+      repo_path,
+      workspace,
+      label,
+      &command,
+      true,
+    )
+    .unwrap();
     let mut pasted = String::new();
     for _ in 0..50 {
       pasted = std::fs::read_to_string(&out).unwrap_or_default();
@@ -977,7 +1454,7 @@ mod tests {
       }
       std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    stop_session(repo_path, workspace, label).unwrap();
+    stop_session(PtyBackend::Tmux, repo_path, workspace, label).unwrap();
     assert_eq!(pasted, "a\nb");
   }
 
@@ -993,9 +1470,10 @@ mod tests {
     let label = "term-1";
 
     // Ensure a clean slate in case a previous failed run left a session.
-    let _ = stop_session(repo_path, workspace, label);
+    let _ = stop_session(PtyBackend::Tmux, repo_path, workspace, label);
 
     let info = start_session(
+      PtyBackend::Tmux,
       repo_path,
       repo_path,
       workspace,
@@ -1010,6 +1488,7 @@ mod tests {
 
     // Starting again is idempotent: same session, no error.
     let info_again = start_session(
+      PtyBackend::Tmux,
       repo_path,
       repo_path,
       workspace,
@@ -1021,7 +1500,7 @@ mod tests {
     .unwrap();
     assert_eq!(info_again.session_name, info.session_name);
 
-    let sessions = list_sessions(repo_path, Some(workspace)).unwrap();
+    let sessions = list_sessions(PtyBackend::Tmux, repo_path, Some(workspace)).unwrap();
     let listed = sessions
       .iter()
       .find(|s| s.session_name == info.session_name)
@@ -1031,19 +1510,24 @@ mod tests {
 
     // A different repository on the same host does not see the session.
     let other = tempfile::tempdir().unwrap();
-    let other_sessions = list_sessions(other.path().to_str().unwrap(), Some(workspace)).unwrap();
+    let other_sessions = list_sessions(
+      PtyBackend::Tmux,
+      other.path().to_str().unwrap(),
+      Some(workspace),
+    )
+    .unwrap();
     assert!(other_sessions.is_empty());
 
-    resize_session(repo_path, workspace, label, 100, 40).unwrap();
+    resize_session(PtyBackend::Tmux, repo_path, workspace, label, 100, 40).unwrap();
 
-    stop_session(repo_path, workspace, label).unwrap();
-    let sessions_after = list_sessions(repo_path, Some(workspace)).unwrap();
+    stop_session(PtyBackend::Tmux, repo_path, workspace, label).unwrap();
+    let sessions_after = list_sessions(PtyBackend::Tmux, repo_path, Some(workspace)).unwrap();
     assert!(!sessions_after
       .iter()
       .any(|s| s.session_name == info.session_name));
 
     // Stopping again is idempotent.
-    stop_session(repo_path, workspace, label).unwrap();
+    stop_session(PtyBackend::Tmux, repo_path, workspace, label).unwrap();
   }
 
   #[test]
@@ -1055,8 +1539,9 @@ mod tests {
     let dir = tempfile::tempdir().unwrap();
     let repo_path = dir.path().to_str().unwrap();
     let workspace = "test-ws-prefix";
-    let _ = stop_session(repo_path, workspace, "sh-2");
+    let _ = stop_session(PtyBackend::Tmux, repo_path, workspace, "sh-2");
     start_session(
+      PtyBackend::Tmux,
       repo_path,
       repo_path,
       workspace,
@@ -1069,11 +1554,11 @@ mod tests {
 
     // `sh` encodes to a strict prefix of `sh-2`'s name. tmux's default
     // prefix matching would otherwise resolve it to the running session.
-    stop_session(repo_path, workspace, "sh").unwrap();
-    let sessions = list_sessions(repo_path, Some(workspace)).unwrap();
+    stop_session(PtyBackend::Tmux, repo_path, workspace, "sh").unwrap();
+    let sessions = list_sessions(PtyBackend::Tmux, repo_path, Some(workspace)).unwrap();
     assert!(sessions.iter().any(|s| s.label == "sh-2"));
 
-    stop_session(repo_path, workspace, "sh-2").unwrap();
+    stop_session(PtyBackend::Tmux, repo_path, workspace, "sh-2").unwrap();
   }
 
   #[test]
@@ -1086,9 +1571,10 @@ mod tests {
     let repo_path = dir.path().to_str().unwrap();
     let workspace = "test-ws-reattach";
     let label = "term";
-    let _ = stop_session(repo_path, workspace, label);
+    let _ = stop_session(PtyBackend::Tmux, repo_path, workspace, label);
 
     let info = start_session(
+      PtyBackend::Tmux,
       repo_path,
       repo_path,
       workspace,
@@ -1100,6 +1586,7 @@ mod tests {
     .unwrap();
 
     let attach_cmd = build_attach_command(
+      PtyBackend::Tmux,
       repo_path,
       repo_path,
       workspace,
@@ -1112,6 +1599,6 @@ mod tests {
     assert!(attach_cmd.contains("new-session -A"));
     assert!(attach_cmd.contains(&info.session_name));
 
-    stop_session(repo_path, workspace, label).unwrap();
+    stop_session(PtyBackend::Tmux, repo_path, workspace, label).unwrap();
   }
 }

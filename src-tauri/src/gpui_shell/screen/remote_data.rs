@@ -80,6 +80,7 @@ impl RemoteHost for Backend {
       &exec.0,
       endpoint,
       remote::TreqCommandRequest::PtyList {
+        backend: endpoint.terminal_backend,
         repo: repo.to_string(),
         workspace: Some(workspace.to_string()),
       },

@@ -213,9 +213,9 @@ const TOOLS: [Known; 8] = [
     binary: "tmux",
     host_only: true,
     label: "tmux",
-    kind: Kind::Required,
+    kind: Kind::Optional,
     install_url: "https://github.com/tmux/tmux/wiki/Installing",
-    note: Some("Keeps terminals and agents running between connections"),
+    note: Some("Only for hosts set to keep terminals in tmux"),
   },
   Known {
     binary: "claude",
@@ -276,7 +276,7 @@ pub fn from_statuses(
 }
 
 /// The checklist of a machine Treq reaches over SSH or in a container:
-/// jj and tmux are required there too.
+/// jj is required there too, and tmux is offered.
 pub fn from_host_statuses(
   title: &str,
   statuses: Option<&[PrerequisiteStatus]>,

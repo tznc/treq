@@ -1677,6 +1677,7 @@ mod tests {
         key_reference: "id_ed25519".to_string(),
       },
       transport: Default::default(),
+      terminal_backend: Default::default(),
     }
   }
 
@@ -1991,6 +1992,7 @@ mod tests {
       }],
       authentication: SshAuthentication::PublicKey { key_reference },
       transport: Default::default(),
+      terminal_backend: Default::default(),
     }
   }
 

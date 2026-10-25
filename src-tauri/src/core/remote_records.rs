@@ -39,6 +39,13 @@ pub struct UserManagedEndpoint {
   #[serde(default)]
   pub alias: Option<String>,
   pub created_at: String,
+  /// What holds the machine's persistent terminals. Records saved before
+  /// the setting existed read as the default, the Treq daemon.
+  #[serde(
+    default,
+    skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+  )]
+  pub terminal_backend: crate::core::pty_remote_supervisor::PtyBackend,
 }
 
 impl UserManagedEndpoint {
@@ -58,6 +65,7 @@ impl UserManagedEndpoint {
       authentication: SshAuthentication::PublicKey {
         key_reference: self.auth_identity_reference.clone(),
       },
+      terminal_backend: self.terminal_backend,
       transport: SshTransport::Direct,
     }
   }
@@ -126,6 +134,22 @@ pub fn save_user_managed_endpoint(db: &Database, endpoint: UserManagedEndpoint) 
   list.retain(|e| e.id != endpoint.id);
   list.insert(0, endpoint);
   write_list(db, USER_MANAGED_ENDPOINTS, &list);
+}
+
+/// Sets which program holds `id`'s terminals. `false` when no saved machine
+/// has that id.
+pub fn set_terminal_backend(
+  db: &Database,
+  id: &str,
+  backend: crate::core::pty_remote_supervisor::PtyBackend,
+) -> bool {
+  let mut list = user_managed_endpoints(db);
+  let Some(endpoint) = list.iter_mut().find(|e| e.id == id) else {
+    return false;
+  };
+  endpoint.terminal_backend = backend;
+  write_list(db, USER_MANAGED_ENDPOINTS, &list);
+  true
 }
 
 pub fn remove_user_managed_endpoint(db: &Database, id: &str) {
@@ -483,10 +507,31 @@ mod tests {
       auth_identity_reference: "keystore:device".into(),
       alias: None,
       created_at: "2026-01-01T00:00:00Z".into(),
+      terminal_backend: Default::default(),
     }
     .to_endpoint();
     assert_eq!(endpoint.host_keys[0].fingerprint_sha256, "SHA256:abc");
     assert_eq!(endpoint.source, SshEndpointSource::UserManaged);
+  }
+
+  #[test]
+  fn a_machine_keeps_its_terminal_backend_and_older_records_use_the_daemon() {
+    use crate::core::pty_remote_supervisor::PtyBackend;
+    let (_dir, db) = database();
+    // A record saved before the setting existed.
+    set_setting(
+      &db,
+      USER_MANAGED_ENDPOINTS,
+      r#"[{"id":"u1","display_name":"box","hostname":"box.local","port":22,"username":"me","host_key_fingerprint":"SHA256:abc","auth_identity_reference":"keystore:device","created_at":"2026-01-01T00:00:00Z"}]"#,
+    );
+    let saved = &user_managed_endpoints(&db)[0];
+    assert_eq!(saved.terminal_backend, PtyBackend::Daemon);
+
+    assert!(set_terminal_backend(&db, "u1", PtyBackend::Tmux));
+    let saved = &user_managed_endpoints(&db)[0];
+    assert_eq!(saved.terminal_backend, PtyBackend::Tmux);
+    assert_eq!(saved.to_endpoint().terminal_backend, PtyBackend::Tmux);
+    assert!(!set_terminal_backend(&db, "missing", PtyBackend::Tmux));
   }
 
   #[test]
@@ -770,6 +815,7 @@ mod tests {
       auth_identity_reference: "/k/id_ed25519".into(),
       alias: None,
       created_at: NOW.into(),
+      terminal_backend: Default::default(),
     };
     save_user_managed_endpoint(&db, endpoint("a"));
     save_user_managed_endpoint(&db, endpoint("b"));
