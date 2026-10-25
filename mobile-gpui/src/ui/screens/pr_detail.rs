@@ -1,7 +1,7 @@
 //! One GitHub pull request: its description, checks, comments with
 //! reactions, a comment box, and the state changes (close, reopen, ready
-//! for review, back to draft). [`open`] pushes it; the action buttons at
-//! the bottom come from [`actions`], so another action is one more
+//! for review, back to draft). [`open`] pushes it; the state changes sit in
+//! the title bar's ⋯ menu ([`menu_items`]), so another one is one more
 //! [`PrAction`].
 
 use std::rc::Rc;
@@ -89,7 +89,7 @@ pub fn toggle_reaction(groups: &mut Vec<GhReactionGroup>, content: &str) -> bool
   }
 }
 
-/// A change to the pull request's state, offered at the bottom of the page.
+/// A change to the pull request's state, offered in the ⋯ menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrAction {
   MarkReady,
@@ -157,6 +157,31 @@ pub fn actions(pr: &GhPullRequest) -> Vec<PrAction> {
     _ if pr.is_draft => vec![PrAction::MarkReady, PrAction::Close],
     _ => vec![PrAction::ConvertToDraft, PrAction::Close],
   }
+}
+
+/// An entry of the title bar's ⋯ menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuItem {
+  Change(PrAction),
+  OpenOnGithub,
+  CopyLink,
+  Refresh,
+}
+
+/// The ⋯ menu: `pr`'s state changes, then its links, then Refresh.
+pub fn menu_items(pr: Option<&GhPullRequest>) -> Vec<MenuItem> {
+  let Some(pr) = pr else {
+    return vec![MenuItem::Refresh];
+  };
+  actions(pr)
+    .into_iter()
+    .map(MenuItem::Change)
+    .chain([
+      MenuItem::OpenOnGithub,
+      MenuItem::CopyLink,
+      MenuItem::Refresh,
+    ])
+    .collect()
 }
 
 pub fn request(repo: &str, number: u64) -> TreqCommandRequest {
@@ -295,26 +320,41 @@ impl PrDetailScreen {
   /// The title bar's ⋯.
   fn menu(&mut self, cx: &mut Context<Self>) {
     let this = cx.weak_entity();
-    let mut entries = vec![sheet::MenuEntry::new("menu-refresh", "Refresh", {
-      let this = this.clone();
-      move |_, cx| {
-        this.update(cx, |screen, cx| screen.reload(cx)).ok();
-      }
-    })];
-    if let Some(url) = self.url() {
-      entries.push(sheet::MenuEntry::new(
-        "menu-open",
-        "Open on GitHub",
-        move |_, cx| {
-          this.update(cx, |screen, cx| screen.open_on_github(cx)).ok();
-        },
-      ));
-      entries.push(sheet::MenuEntry::new(
-        "menu-copy",
-        "Copy link",
-        move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(url.clone())),
-      ));
-    }
+    let url = self.url().unwrap_or_default();
+    let entries = menu_items(self.pr.ready())
+      .into_iter()
+      .map(|item| {
+        let this = this.clone();
+        match item {
+          MenuItem::Change(action) => {
+            let entry = sheet::MenuEntry::new(action.key(), action.label(), move |window, cx| {
+              this
+                .update(cx, |screen, cx| screen.tap_action(action, window, cx))
+                .ok();
+            });
+            if action.destructive() {
+              entry.danger()
+            } else {
+              entry
+            }
+          }
+          MenuItem::OpenOnGithub => {
+            sheet::MenuEntry::new("menu-open", "Open on GitHub", move |_, cx| {
+              this.update(cx, |screen, cx| screen.open_on_github(cx)).ok();
+            })
+          }
+          MenuItem::CopyLink => {
+            let url = url.clone();
+            sheet::MenuEntry::new("menu-copy", "Copy link", move |_, cx| {
+              cx.write_to_clipboard(ClipboardItem::new_string(url.clone()))
+            })
+          }
+          MenuItem::Refresh => sheet::MenuEntry::new("menu-refresh", "Refresh", move |_, cx| {
+            this.update(cx, |screen, cx| screen.reload(cx)).ok();
+          }),
+        }
+      })
+      .collect();
     sheet::menu(format!("Pull request #{}", self.number), entries, cx);
   }
 
@@ -671,25 +711,6 @@ impl Render for PrDetailScreen {
       })
       .children(comment_rows);
     let busy = self.busy;
-    let action_buttons: Vec<Button> = actions(&pr)
-      .into_iter()
-      .map(|action| {
-        Button::new(action.key())
-          .large()
-          .flex_1()
-          .h(px(widgets::CTA_H - 8.))
-          .label(action.label())
-          .loading(busy == Some(action.key()))
-          .map(|b| {
-            if action.destructive() {
-              b.danger()
-            } else {
-              b.outline()
-            }
-          })
-          .on_click(cx.listener(move |this, _, window, cx| this.tap_action(action, window, cx)))
-      })
-      .collect();
     let composer = v_flex().gap_2().child(Textarea::new(&self.comment)).child(
       Button::new("comment")
         .outline()
@@ -726,26 +747,6 @@ impl Render for PrDetailScreen {
               }),
           ),
       )
-      .child(
-        // Primary actions stay at the bottom, in thumb reach.
-        v_flex()
-          .p_4()
-          .gap_2()
-          .border_t_1()
-          .border_color(theme.border)
-          .bg(theme.background)
-          .child(h_flex().gap_2().children(action_buttons))
-          .child(
-            Button::new("pr-open")
-              .primary()
-              .large()
-              .w_full()
-              .h(px(widgets::CTA_H))
-              .icon(IconName::ExternalLink)
-              .label("Open on GitHub")
-              .on_click(cx.listener(|this, _, _, cx| this.open_on_github(cx))),
-          ),
-      )
       .into_any_element()
   }
 }
@@ -777,6 +778,26 @@ mod tests {
     assert_eq!(groups, vec![group("HEART", 3, true)]);
     assert_eq!(emoji("ROCKET"), "🚀");
     assert_eq!(emoji("NEW_ONE"), "NEW_ONE");
+  }
+
+  #[core::prelude::v1::test]
+  fn menu_holds_state_changes_then_links() {
+    use MenuItem::*;
+    assert_eq!(
+      menu_items(Some(&pr(1, "OPEN", false))),
+      [
+        Change(PrAction::ConvertToDraft),
+        Change(PrAction::Close),
+        OpenOnGithub,
+        CopyLink,
+        Refresh
+      ]
+    );
+    assert_eq!(
+      menu_items(Some(&pr(1, "MERGED", false))),
+      [OpenOnGithub, CopyLink, Refresh]
+    );
+    assert_eq!(menu_items(None), [Refresh]);
   }
 
   #[core::prelude::v1::test]
