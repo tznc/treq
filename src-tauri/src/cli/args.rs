@@ -65,7 +65,7 @@ struct CommandConfig {
   subcommands: HashMap<String, CommandConfig>,
 }
 
-#[allow(
+#[expect(
   clippy::expect_used,
   reason = "tauri.conf.json is embedded at build time and checked by tests"
 )]

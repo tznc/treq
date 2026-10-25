@@ -4,7 +4,7 @@
 /// Lowercase, hyphen-separated slug of `title`, capped at `max_len` bytes on
 /// a word boundary where possible. Returns an empty string for titles with no
 /// ASCII alphanumerics.
-#[allow(
+#[expect(
   clippy::string_slice,
   reason = "the slug holds only ASCII alphanumerics and dashes"
 )]

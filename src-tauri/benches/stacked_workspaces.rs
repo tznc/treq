@@ -1,8 +1,7 @@
-#![allow(
+#![expect(
   clippy::unwrap_used,
   clippy::let_underscore_must_use,
   clippy::expect_used,
-  clippy::string_slice,
   reason = "test code"
 )]
 //! A stack of workspaces, each on the branch below it, over 200 tracked

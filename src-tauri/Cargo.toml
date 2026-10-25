@@ -130,6 +130,8 @@ mem_forget = "warn"
 exit = "warn"
 undocumented_unsafe_blocks = "warn"
 allow_attributes_without_reason = "warn"
+# `#[expect]` warns once its lint stops firing, so stale suppressions surface.
+allow_attributes = "warn"
 redundant_clone = "warn"
 manual_let_else = "warn"
 needless_collect = "warn"

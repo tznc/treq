@@ -3,7 +3,7 @@
 //! `cargo test --test chat_record_cost -- --ignored --nocapture`
 //! (`CHAT_TICKS=3600` for an hour). Linux only: bytes written come from
 //! `/proc/self/io`.
-#![allow(
+#![expect(
   clippy::unwrap_used,
   clippy::let_underscore_must_use,
   clippy::undocumented_unsafe_blocks,

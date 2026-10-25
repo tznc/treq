@@ -172,7 +172,7 @@ pub fn span_id_for_job(run_id: i64, job_id: &str) -> String {
 }
 
 /// Build an OTel record for one captured line.
-#[allow(
+#[expect(
   clippy::too_many_arguments,
   reason = "flat argument list kept to match callers"
 )]

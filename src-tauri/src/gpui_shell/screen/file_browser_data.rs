@@ -212,7 +212,7 @@ pub struct LineMarks {
 }
 
 /// `handleFileClick`'s hunk parse.
-#[allow(clippy::expect_used, reason = "constant pattern")]
+#[expect(clippy::expect_used, reason = "constant pattern")]
 pub fn line_marks(hunks: &[JjDiffHunk]) -> LineMarks {
   static HEADER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@").expect("regex"));

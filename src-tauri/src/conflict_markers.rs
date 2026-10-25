@@ -63,7 +63,7 @@ pub struct ConflictRegionView {
 
 pub type ConflictRegion = ConflictRegionView;
 
-#[allow(
+#[expect(
   clippy::string_slice,
   reason = "offsets come from ASCII find() and is_ascii_digit() scans of a marker line"
 )]

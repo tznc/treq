@@ -772,7 +772,7 @@ impl OpenWorkspacesDialog {
     cx.notify();
   }
 
-  #[allow(
+  #[expect(
     clippy::expect_used,
     reason = "the fields are created before this read"
   )]

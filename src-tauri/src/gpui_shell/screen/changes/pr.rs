@@ -418,7 +418,7 @@ impl ChangesView {
   }
 
   /// `addComment`: the draft is kept with the hash of its lines.
-  #[allow(
+  #[expect(
     clippy::expect_used,
     reason = "the probe is a constant JSON shape of the comment type"
   )]
