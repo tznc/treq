@@ -1139,6 +1139,12 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       workspace: "1".into(),
       label: "shell".into(),
     },
+    R::PtyRename {
+      repo: repo(),
+      workspace: "1".into(),
+      label: "claude-1".into(),
+      title: "Fix login redirect".into(),
+    },
     R::PtyAttachCommand {
       repo: repo(),
       workspace: "1".into(),
