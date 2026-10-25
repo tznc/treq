@@ -527,10 +527,12 @@ pub fn diff_hunks(
         .children(hunk.lines.iter().enumerate().map(|(l, line)| {
           let on = picked.contains(&(h, l));
           let tap = on_tap.clone();
-          let under: Vec<AnyElement> = comments_under(&comments, path, hunk, l, hunks)
-            .into_iter()
-            .map(|c| comment_card(review, c, false, cx))
-            .collect();
+          let outdated = |c: &LineComment| is_outdated(c, Some(hunks));
+          let under: Vec<AnyElement> =
+            comments_under(&comments, path, hunk, line_at(hunk, l), &outdated)
+              .into_iter()
+              .map(|c| comment_card(review, c, false, cx))
+              .collect();
           let number = line_at(hunk, l).0;
           v_flex()
             .child(
