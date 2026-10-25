@@ -1746,8 +1746,19 @@ impl LinearView {
             .aria_label(error.clone())
             .test_support()
             .p_4()
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap_3()
             .text_color(p.destructive)
-            .child(error),
+            .child(error)
+            .child(
+              Button::new("linear-projects-open-settings", p)
+                .variant(Variant::Outline)
+                .size(Size::Sm)
+                .label("Open Settings")
+                .on_click(cx.listener(|view, _, _, cx| view.open_settings(cx))),
+            ),
         )
       })
       .when(
