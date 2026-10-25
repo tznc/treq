@@ -1,11 +1,11 @@
 // The desktop Linear integration against the fake Linear (./fake-linear.ts):
 // connecting it from Settings with an API key, the Linear view (issue
-// views, an expanded issue with its comments, Kanban, the team menu,
-// projects with a document), Kick off into the agent prompt, a workspace
-// created from an issue in the New Workspaces dialog with its header
-// chip, and a key Linear rejects.
+// views, an issue's page with its comments, Kanban, the team menu,
+// projects with a document), the agent button into the agent prompt, a
+// workspace created from an issue in the New Workspaces dialog with its
+// header chip, and a key Linear rejects.
 //
-// Issue rows and project rows are not observable; they are clicked at
+// Project rows and documents are not observable; they are clicked at
 // their place in the 1400x900 window.
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -84,8 +84,8 @@ test("linear: issues", async ({ page }) => {
     title: "Linear view: All Issues",
     expectations: [
       "Header: Linear, an 'All Teams' selector, Issues / Projects tabs; view tabs, List / Kanban, Filter and Refresh",
-      "Six rows (ENG-143, ENG-142, ENG-139, ENG-131, ENG-128, ENG-125) with state, priority, labels, project and assignee",
-      "Each row has a Kick off button; no spinner or error",
+      "Two-line rows: the title, then identifier · state · priority · project · labels · assignee",
+      "ENG-143 indented under ENG-142; a robot agent button at the right of each row; no spinner or error",
     ],
   });
 
@@ -94,23 +94,27 @@ test("linear: issues", async ({ page }) => {
   await capture(page, {
     name: "22-linear-04-my-issues",
     title: "Linear view: My Issues",
-    expectations: ["Only octocat's issues: ENG-143, ENG-142, ENG-139, ENG-131, ENG-128 (not hubot's ENG-125)"],
+    expectations: [
+      "Only octocat's issues: ENG-143, ENG-142, ENG-139, ENG-131, ENG-128 (not hubot's ENG-125)",
+      "Same two-line rows as All Issues",
+    ],
   });
   await page.getByRole("tab", { name: "All Issues" }).click();
   await settle(page, 800);
 
-  // Expand ENG-142 (the second row) for its description and comments.
-  await page.mouse.click(700, 186);
+  await page.getByRole("listitem", { name: "Retry webhook deliveries" }).click();
+  await expect(page.getByRole("button", { name: "Back to issues" })).toBeVisible();
   await settle(page, 2000);
   await capture(page, {
-    name: "22-linear-05-issue-expanded",
-    title: "Linear view: an expanded issue",
+    name: "22-linear-05-issue-page",
+    title: "Linear view: an issue's page",
     expectations: [
-      "The clicked row expands to show its description and a COMMENTS column",
-      "Two comments (hubot, octocat) with authors and times; a 'Review with agent' button",
+      "The list gives way to ENG-142's page: Back, the identifier, the agent button and Open in Linear",
+      "Title, state/priority/project/assignee badges, the Bug label, the description",
+      "COMMENTS under the description: hubot's and octocat's bubbles with times",
     ],
   });
-  await page.mouse.click(700, 186);
+  await page.getByRole("button", { name: "Back to issues" }).click();
   await settle(page, 800);
 
   await page.getByRole("tab", { name: "Kanban" }).click();
@@ -120,9 +124,20 @@ test("linear: issues", async ({ page }) => {
     title: "Linear view: Kanban",
     expectations: [
       "Columns Backlog, Todo, In Progress, Done in workflow order, cards under each",
-      "ENG-143's card says it is a sub-issue of ENG-142; label chips on cards",
+      "Each card: identifier with a robot agent button on the right, title, label chips",
+      "ENG-143's card says it is a sub-issue of ENG-142",
     ],
   });
+  await page.getByRole("listitem", { name: "Cache key-value lookups" }).click();
+  await expect(page.getByRole("button", { name: "Back to issues" })).toBeVisible();
+  await settle(page, 1500);
+  await capture(page, {
+    name: "22-linear-06b-kanban-card-page",
+    title: "Linear view: a Kanban card opens the issue's page",
+    expectations: ["ENG-139's page, with 'No comments' under its description"],
+  });
+  await page.getByRole("button", { name: "Back to issues" }).click();
+  await settle(page, 800);
   await page.getByRole("tab", { name: "List" }).click();
   await settle(page, 800);
 
@@ -149,6 +164,7 @@ test("linear: projects", async ({ page }) => {
     expectations: [
       "Ingest, Docs and API listed with status and lead; view tabs All / Mine / Active / Backlog",
       "The first project, Ingest, is selected with its detail on the right",
+      "Ingest has no comments, so no comments section shows under its description",
     ],
   });
   // The first project is selected; open its document.
@@ -160,7 +176,8 @@ test("linear: projects", async ({ page }) => {
     screen: true,
     expectations: [
       "A dialog titled 'Retry policy' renders the document's markdown (heading, bold 5)",
-      "Its comments column reads 'No comments'",
+      "hubot's comment shows as a bubble right under the paragraph it quotes, 'exponential backoff' highlighted",
+      "No comments column",
     ],
   });
   await page.keyboard.press("Escape");
@@ -183,11 +200,11 @@ test("linear: kick off an issue", async ({ page }) => {
   await page.getByRole("tab", { name: "Issues", exact: true }).click();
   await page.getByRole("tab", { name: "List" }).click();
   await settle(page, 1000);
-  await page.getByRole("button", { name: "Kick off" }).first().click();
+  await page.getByRole("button", { name: "Start agent" }).first().click();
   await settle(page, 1500);
   await capture(page, {
     name: "22-linear-10-kickoff",
-    title: "Kick off: the agent prompt with the issue",
+    title: "Agent button: the agent prompt with the issue",
     screen: true,
     expectations: [
       "The agent prompt dialog with a 'Linear · ENG-142' chip",
@@ -232,7 +249,7 @@ test("linear: new workspace from an issue", async ({ page }) => {
     title: "Workspace created from ENG-139",
     expectations: [
       "The sidebar selects the new 'Cache key-value lookups' row; the header branch is octocat/eng-139-…",
-      "The workspace header shows an ENG-139 Linear chip",
+      "An ENG-139 chip, without an icon, sits on the right of the header next to the checks/PR buttons",
     ],
   });
 });
@@ -245,16 +262,9 @@ test("linear: a rejected key", async ({ page }) => {
     name: "22-linear-13-rejected-key",
     title: "Linear view: Linear rejects the key",
     expectations: [
-      "The issues pane says Linear rejected the API key, with an Open Settings button",
-      "No stale issue rows from the earlier, valid key",
+      "One empty state fills the view: the Linear logo, 'Linear rejected the API key', the reason and Open Settings",
+      "No Issues/Projects tabs, team selector or stale issue rows",
     ],
-  });
-  await page.getByRole("tab", { name: "Projects", exact: true }).click();
-  await settle(page, 1500);
-  await capture(page, {
-    name: "22-linear-14-rejected-key-projects",
-    title: "Linear view: Projects with a rejected key",
-    expectations: ["The projects pane shows the same rejection with a way to fix it (Open Settings)"],
   });
   await home(page);
   await page.getByRole("button", { name: "New workspaces" }).click();
