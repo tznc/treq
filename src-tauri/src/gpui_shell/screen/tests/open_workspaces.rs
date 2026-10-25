@@ -737,3 +737,45 @@ mod pr_query {
     );
   }
 }
+
+/// Round 7 `integrations-scale` measurements. Run with `cargo test
+/// --features gpui-shell --lib dlg_scale -- --ignored --nocapture
+/// --test-threads=1`.
+mod dlg_scale {
+  use super::*;
+  use super::super::changes_large::{frame, report, timed};
+
+  #[gpui::test]
+  #[ignore = "benchmark; run with --ignored --nocapture"]
+  fn dlg_scale_linear_issues(cx: &mut TestAppContext) {
+    let n: usize = std::env::var("PERF_N")
+      .ok()
+      .and_then(|v| v.parse().ok())
+      .unwrap_or(1000);
+    let mut host = FakeHost::default();
+    host.linear.viewer = Some(user("u1", "Me"));
+    host.linear.issues = (0..n)
+      .map(|i| issue(&i.to_string(), ("Todo", "unstarted"), Some(user("u2", "You"))))
+      .collect();
+    host.github.remote = acme();
+    let (mut h, _) = dialog_with(host, true, cx);
+    let screen = screen(&mut h);
+    screen
+      .user()
+      .click(&screen.get_by_role(by::role(Role::Tab).name("Linear")));
+    let screen = self::screen(&mut h);
+    let mut f: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
+    report(&format!("dialog linear tab, {n} issues"), &mut f);
+    let mut keys: Vec<_> = (0..8)
+      .map(|i| {
+        timed(&mut h, |h| {
+          let s = self::screen(h);
+          s.user()
+            .type_text(&s.get_by_label_text("Workspaces"), if i % 2 == 0 { "a" } else { "\n" });
+        })
+      })
+      .collect();
+    report("dialog type in lines box", &mut keys);
+    drop(screen);
+  }
+}
