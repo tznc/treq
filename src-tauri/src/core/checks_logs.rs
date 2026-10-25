@@ -1642,4 +1642,45 @@ mod tests {
     assert!(bodies.contains(&"from yesterday"));
     assert!(bodies.contains(&"from today"));
   }
+
+  /// Round 7 measurement: `cargo test --lib logs_perf_checks -- --ignored --nocapture`.
+  #[test]
+  #[ignore = "perf measurement"]
+  fn logs_perf_checks() {
+    use std::time::Instant;
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_string_lossy().to_string();
+    let total = 200_000usize;
+    let writer = LogWriter::create(&repo, 1, "job").unwrap();
+    let t = Instant::now();
+    for i in 0..total {
+      let run = (i / 50_000) as i64 + 1;
+      let line = make_log_line(
+        format_timestamp(BASE_NANOS + (i as u64) * 1_000_000),
+        run,
+        "build",
+        (i % 20) as i64,
+        "step",
+        "stdout",
+        if i % 997 == 0 { "error" } else { "info" },
+        &format!("compiling crate number {i} with a moderately long message body to look real xxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
+      );
+      writer.write_line(&line).unwrap();
+    }
+    println!("write {total} lines autocommit: {:?}", t.elapsed());
+    let time = |label: &str, q: LogQuery| {
+      let t = Instant::now();
+      let r = query_repo_logs(&repo, &q).unwrap();
+      println!("{label}: {:?} rows={}", t.elapsed(), r.len());
+      let t = Instant::now();
+      let b = query_log_timeseries(&repo, &q, 1).unwrap();
+      println!("{label} timeseries: {:?} buckets={}", t.elapsed(), b.len());
+    };
+    time("default", LogQuery::default());
+    time("level error", LogQuery { levels: Some(vec!["error".into()]), ..Default::default() });
+    time("search common", LogQuery { search: Some("crate number 1".into()), ..Default::default() });
+    time("search rare", LogQuery { search: Some("number 199999 ".into()), ..Default::default() });
+    let r = query_repo_logs(&repo, &LogQuery::default()).unwrap();
+    println!("first row run={} last row run={} step={}", r[0].run_id, r[r.len()-1].run_id, r[r.len()-1].step_index);
+  }
 }

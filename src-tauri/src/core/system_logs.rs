@@ -214,4 +214,32 @@ mod tests {
       query_system_logs(Path::new("/nonexistent/treq-logs"), &LogQuery::default()).unwrap();
     assert!(records.is_empty());
   }
+
+  /// Round 7 measurement: `cargo test --lib logs_perf_system -- --ignored --nocapture`.
+  #[test]
+  #[ignore = "perf measurement"]
+  fn logs_perf_system() {
+    use std::io::Write;
+    use std::time::Instant;
+    let dir = tempfile::tempdir().unwrap();
+    for day in 0..7u64 {
+      let mut f = std::io::BufWriter::new(
+        std::fs::File::create(dir.path().join(format!("treq.2026-10-{:02}", 10 + day))).unwrap(),
+      );
+      for i in 0..150_000u64 {
+        let l = if i % 5000 == 0 { "ERROR" } else if i % 50 == 0 { "WARN" } else { "INFO" };
+        writeln!(f, "{}", line(day * 1_000_000 + i, l, &format!("request {i} handled by worker thread pool with a typical message length ok"))).unwrap();
+      }
+    }
+    let bytes: u64 = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.metadata().unwrap().len()).sum();
+    println!("7 files, {} MB", bytes / 1_000_000);
+    let run = |label: &str, q: LogQuery| {
+      let t = Instant::now();
+      let r = query_system_logs(dir.path(), &q).unwrap();
+      println!("{label}: {:?} rows={}", t.elapsed(), r.len());
+    };
+    run("default", LogQuery::default());
+    run("errors only", LogQuery { levels: Some(vec!["error".into()]), ..Default::default() });
+    run("search rare (miss)", LogQuery { search: Some("zzzznotfound".into()), ..Default::default() });
+  }
 }
