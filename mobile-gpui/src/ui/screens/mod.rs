@@ -11,6 +11,8 @@ pub mod issue;
 pub mod issues;
 pub mod new_workspaces;
 pub mod pr_detail;
+pub mod pr_review;
+pub mod pr_review_logic;
 pub mod pull_request;
 pub mod pull_requests;
 pub mod repos;
