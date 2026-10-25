@@ -227,10 +227,10 @@ pub fn line_marks(hunks: &[JjDiffHunk]) -> LineMarks {
     };
     let mut line = start;
     for text in &hunk.lines {
-      if text.starts_with('+') && !text.starts_with("+++") {
+      if text.starts_with('+') {
         marks.added.insert(line);
         line += 1;
-      } else if text.starts_with('-') && !text.starts_with("---") {
+      } else if text.starts_with('-') {
         if line > 1 {
           marks.deleted_after.insert(line - 1);
         }
