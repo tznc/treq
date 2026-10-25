@@ -149,6 +149,8 @@ pub enum AccountTab {
     error: Option<String>,
     /// Dev builds only.
     dev: Option<DevCallback>,
+    /// "Sorry to see you go", after this window deleted the account.
+    farewell: bool,
   },
   SignedIn(Box<SignedIn>),
 }
@@ -291,6 +293,8 @@ pub(super) struct State {
   confirming_delete: bool,
   /// The open delete-account confirmation (`can_confirm` is derived).
   delete_account: Option<DeleteAccountDialog>,
+  /// The account was deleted here; the signed-out tab says goodbye.
+  farewell: bool,
   /// The avatar URL, and its image once loaded.
   avatar: Option<(String, Option<Arc<gpui::Image>>)>,
   linear: Option<Linear>,
@@ -531,6 +535,7 @@ impl SettingsView {
             .clone()
             .or_else(|| account.dev_callback.error.clone()),
         }),
+        farewell: state.farewell,
       };
     };
     let subscription = account.subscription.as_ref();
@@ -763,6 +768,7 @@ impl SettingsView {
     if signed_in {
       self.account.callback_url.clear();
       self.account.callback_error = None;
+      self.account.farewell = false;
     } else {
       self.account.github = None;
       self.account.cloud_read = false;
@@ -854,7 +860,15 @@ impl SettingsView {
       cx,
       |host| host.delete_account(),
       |view, result, _| match result {
-        Ok(()) => view.account.delete_account = None,
+        Ok(()) => {
+          view.account.delete_account = None;
+          view.account.farewell = true;
+          view.host.notify(toast(
+            ToastTone::Success,
+            "Account deleted",
+            "Your Treq account and its data have been deleted.",
+          ));
+        }
         Err(error) => {
           if let Some(dialog) = &mut view.account.delete_account {
             dialog.deleting = false;
@@ -935,6 +949,7 @@ impl SettingsView {
         }
       }
       "account.delete.confirm" => self.delete_account(cx),
+      "account.farewell.dismiss" => self.account.farewell = false,
       "linear.oauth" => self.start_linear_oauth(cx),
       "cloud.provision" => self.host.cloud_action(CloudAction::Provision),
       "cloud.wake" => self.host.cloud_action(CloudAction::Wake),
@@ -1422,11 +1437,29 @@ impl SettingsView {
             .child("Signing you in…"),
         )
         .into_any_element(),
-      AccountTab::SignedOut { error, dev } => {
+      AccountTab::SignedOut {
+        error,
+        dev,
+        farewell,
+      } => {
         let dev = dev
           .as_ref()
           .map(|dev| self.dev_callback(dev, p, window, cx));
+        let farewell = farewell.then(|| {
+          div().w_full().max_w(zpx(448.)).child(
+            ui::Alert::new("account-farewell", "Sorry to see you go", p)
+              .message("Your Treq account and its data have been deleted. You can create a new account anytime.")
+              .action(
+                Button::new("account-farewell-dismiss", p)
+                  .variant(Variant::Outline)
+                  .size(Size::Sm)
+                  .label("Dismiss")
+                  .on_click(self.press("account.farewell.dismiss")),
+              ),
+          )
+        });
         centered(16.)
+          .children(farewell)
           .child(
             div()
               .size(zpx(64.))

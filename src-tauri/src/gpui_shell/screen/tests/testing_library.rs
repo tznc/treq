@@ -489,3 +489,17 @@ fn account_deletion_refusal_is_announced_as_an_alert_in_a_dialog(cx: &mut TestAp
   let s = screen(&mut h);
   expect(s.get_by_role(by::role(Role::Alert).name(reason))).to_be_visible();
 }
+
+#[gpui::test]
+fn the_farewell_after_deleting_an_account_is_an_alert(cx: &mut TestAppContext) {
+  let mut h = signed_in_as_ada(cx, Arc::new(FakeHost::default()));
+  h.click("account-delete");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-confirm");
+  h.set_account(account_state(serde_json::json!({})));
+  let s = screen(&mut h);
+  expect(s.get_by_role(by::role(Role::Alert).name("Sorry to see you go"))).to_be_visible();
+}

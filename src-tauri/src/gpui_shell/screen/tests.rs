@@ -3155,6 +3155,57 @@ fn account_deletion_the_server_refuses_shows_why_and_keeps_the_dialog(cx: &mut T
   assert!(host.writes().contains(&"delete account".to_string()));
 }
 
+fn farewell(h: &mut Harness) -> bool {
+  match drawn_settings(h).account {
+    Some(settings::AccountTab::SignedOut { farewell, .. }) => farewell,
+    other => panic!("signed out: {other:?}"),
+  }
+}
+
+#[gpui::test]
+fn account_deletion_toasts_and_says_goodbye_once_signed_out(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"notify toast Account deleted".to_string()));
+
+  // The core signs out after deleting; the tab follows the account.
+  h.set_account(account_state(serde_json::json!({})));
+  assert!(farewell(&mut h));
+  assert!(h.drawn("account-farewell"));
+
+  h.click("account-farewell-dismiss");
+  assert!(!farewell(&mut h));
+  assert!(!h.drawn("account-farewell"));
+}
+
+#[gpui::test]
+fn a_refused_account_deletion_neither_toasts_nor_says_goodbye(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    account_deletion: Some(crate::core::supabase::ApiError::new("last_owner", "No")),
+    ..FakeHost::default()
+  });
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+  assert!(!host.writes().iter().any(|w| w.starts_with("notify toast")));
+  h.set_account(account_state(serde_json::json!({})));
+  assert!(!farewell(&mut h));
+}
+
 #[gpui::test]
 fn account_deletion_cancel_closes_without_deleting(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());

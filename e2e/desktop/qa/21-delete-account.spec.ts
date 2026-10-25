@@ -184,15 +184,22 @@ test("account: delete refused while last owner, then deleted and signed out", as
       timeout: 30_000,
     });
     await expect(dialog).toHaveCount(0);
-    await settle(page, 1200);
+    const farewell = page.getByRole("alert", { name: "Sorry to see you go" });
+    await expect(farewell).toBeVisible();
+    await settle(page, 800);
+    // The toast is a popup window of its own, so grab the whole screen.
     await capture(page, {
       name: "21-delete-account-04-signed-out",
-      title: "Account deleted: the app is signed out",
+      title: "Account deleted: toast, farewell, and the app signed out",
+      screen: true,
       expectations: [
-        "The dialog is gone",
-        "The Account tab shows 'Sign in to Treq' with a 'Sign in with Browser' button",
+        "An 'Account deleted' success toast shows",
+        "A 'Sorry to see you go' alert with a Dismiss button sits above 'Sign in to Treq'",
+        "The delete dialog is gone and 'Sign in with Browser' shows",
       ],
     });
+    await page.getByTestId("account-farewell-dismiss").click();
+    await expect(farewell).toHaveCount(0);
 
     // The account is gone on the server: the password no longer signs in.
     const again = await auth("token?grant_type=password", { email, password });
