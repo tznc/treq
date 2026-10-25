@@ -318,6 +318,8 @@ pub struct CodeView {
   /// there to show its output.
   setup: Option<crate::core::SetupScriptStatus>,
   logs_enabled: bool,
+  /// The file list shows its untouched entries.
+  show_untouched: bool,
   starting_devcontainer: bool,
   pub(super) picker: Option<Entity<FilePicker>>,
   /// The tab's scroll, and where the root's entry rows sit in it.
@@ -412,6 +414,7 @@ impl CodeView {
       syncing_submodule: false,
       setup: None,
       logs_enabled: false,
+      show_untouched: false,
       starting_devcontainer: false,
       picker: None,
       scroll: ScrollHandle::new(),
@@ -553,6 +556,7 @@ impl CodeView {
         self.history = None;
         self.history_error = None;
         self.history_error_open = false;
+        self.show_untouched = false;
         true
       }
       None if self.parent.key() == parent.key() => false,
@@ -2742,17 +2746,30 @@ impl CodeView {
   }
 
   fn files(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let entries = self
+    let all = self
       .overview
       .as_ref()
       .map_or(&[][..], |o| o.entries.as_slice());
+    // Untouched entries fold behind a toggle, below the changed ones;
+    // submodule rows carry their own controls, and an entry without a status
+    // may have changed, so both stay up top.
+    let untouched =
+      |e: &WorkspaceEntry| e.submodule_pin.is_none() && e.status.as_deref() == Some("untouched");
+    let (rest, mut entries): (Vec<&WorkspaceEntry>, Vec<&WorkspaceEntry>) =
+      all.iter().partition(|e| untouched(e));
+    let changed = entries.len();
+    let untouched_count = rest.len();
+    let show_untouched = self.show_untouched;
+    if show_untouched {
+      entries.extend(rest);
+    }
     let font = self.settings.as_ref().map_or(14., |s| s.font_size);
     let home = self.parent.workspace.is_none();
     let hover = p.muted.opacity(0.6);
     let muted_fg = p.muted_foreground;
     let mut list = section(p).flex().flex_col();
     let loaded = self.overview.is_some();
-    let empty = entries.is_empty();
+    let empty = all.is_empty();
     let unavailable = self.overview.as_ref().is_some_and(|o| o.unavailable);
     let count = entries.len();
     let shown = self.entry_rows.shown(count, &self.scroll);
@@ -2761,7 +2778,15 @@ impl CodeView {
     if shown.start > 0 {
       list = list.child(div().h(pitch * shown.start as f32 - px(1.)));
     }
+    let mut toggle = (untouched_count > 0).then(|| {
+      self
+        .unchanged_toggle(untouched_count, changed > 0, p, cx)
+        .into_any_element()
+    });
     for (i, entry) in entries.iter().enumerate().take(shown.end).skip(shown.start) {
+      if i == changed {
+        list = list.children(toggle.take());
+      }
       let pin = entry.submodule_pin.clone();
       let submodule = pin.is_some();
       let icon = match (&pin, entry.is_directory) {
@@ -2770,23 +2795,26 @@ impl CodeView {
         (None, false) => (theme::ICON_FILE, p.muted_foreground),
       };
       let pip = match entry.status.as_deref() {
-        Some("conflict") => Some(ui::Tone::Danger.color(p)),
-        Some("committed") => Some(ui::Tone::Primary.color(p)),
-        Some("workingCopy") => Some(ui::Tone::Warning.color(p)),
+        Some("conflict") => Some((ui::Tone::Danger.color(p), "Conflicted")),
+        Some("committed") => Some((ui::Tone::Primary.color(p), "Committed")),
+        Some("workingCopy") => Some((ui::Tone::Warning.color(p), "Working copy change")),
         _ => None,
       };
-      let name_color = if entry.status.is_some() {
-        p.foreground
-      } else {
-        p.muted_foreground.opacity(0.7)
+      let name_color = match (entry.status.as_deref(), pip) {
+        (Some("conflict"), _) => ui::Tone::Danger.color(p),
+        (_, Some(_)) => p.foreground,
+        _ => p.muted_foreground.opacity(0.7),
       };
+      let pip_id = SharedString::from(format!("code-entry-status-{}", entry.name));
+      // A row has something above it: an earlier row, or the toggle.
+      let divided = i > 0 || (i >= changed && untouched_count > 0);
       let id = SharedString::from(format!("code-entry-{}", entry.name));
       let selector = if submodule {
         format!("submodule-row-{}", entry.name)
       } else {
         id.to_string()
       };
-      let open = entry.clone();
+      let open = (*entry).clone();
       let synced = entry.submodule_synced.unwrap_or(false);
       let path = entry.name.clone();
       let syncing = self.syncing_submodule;
@@ -2794,7 +2822,7 @@ impl CodeView {
         list.child(
           div()
             .debug_selector(move || selector)
-            .when(i > 0, |this| this.border_t_1().border_color(p.border))
+            .when(divided, |this| this.border_t_1().border_color(p.border))
             .when(
               count > ENTRIES_ALL && (i == shown.start || i == 1),
               |this| {
@@ -2843,7 +2871,17 @@ impl CodeView {
                       )))
                     }),
                 )
-                .children(pip.map(|c| div().size_2().flex_none().rounded_full().bg(c)))
+                .children(pip.map(|(color, label)| {
+                  div()
+                    .id(pip_id.clone())
+                    .role(Role::Image)
+                    .aria_label(label)
+                    .test_support()
+                    .size_2()
+                    .flex_none()
+                    .rounded_full()
+                    .bg(color)
+                }))
                 .on_click(cx.listener(move |view, _, _, cx| view.open_entry(&open, cx))),
             )
             .when(home && submodule, |this| {
@@ -2871,6 +2909,11 @@ impl CodeView {
             }),
         );
     }
+    // The toggle closes the list when nothing drawn follows it; one scrolled
+    // above the drawn rows stays undrawn with them.
+    if changed >= shown.end {
+      list = list.children(toggle);
+    }
     if shown.end < count {
       list = list.child(div().h(pitch * (count - shown.end) as f32));
     }
@@ -2897,6 +2940,55 @@ impl CodeView {
       );
     }
     list
+  }
+
+  /// The row that shows or hides the file list's `count` untouched entries.
+  fn unchanged_toggle(
+    &self,
+    count: usize,
+    divided: bool,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let show = self.show_untouched;
+    let (hover, muted_fg) = (p.muted.opacity(0.6), p.muted_foreground);
+    let label = if show {
+      "Hide unchanged files".to_string()
+    } else if count == 1 {
+      "Show 1 unchanged file".to_string()
+    } else {
+      format!("Show {count} unchanged files")
+    };
+    ui::text(div(), TextSize::Xs)
+      .id("code-unchanged-toggle")
+      .debug_selector(|| "code-unchanged-toggle".into())
+      .role(Role::Button)
+      .aria_label(label.clone())
+      .aria_expanded(show)
+      .test_support()
+      .when(divided, |this| this.border_t_1().border_color(p.border))
+      .flex()
+      .items_center()
+      .gap_2()
+      .px_4()
+      .py_1p5()
+      .text_color(muted_fg)
+      .cursor_pointer()
+      .hover(move |s| s.bg(hover))
+      .child(ui::icon(
+        if show {
+          theme::ICON_CHEVRON_DOWN
+        } else {
+          theme::ICON_CHEVRON_RIGHT
+        },
+        12.,
+        muted_fg,
+      ))
+      .child(label)
+      .on_click(cx.listener(|view, _, _, cx| {
+        view.show_untouched = !view.show_untouched;
+        cx.notify();
+      }))
   }
 
   fn readme(&self, p: &Palette) -> impl IntoElement {

@@ -33,7 +33,7 @@ pub struct WorkspaceEntry {
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub submodule_synced: Option<bool>,
   /// File status for highlighting in the Code tab file list: "conflict",
-  /// "workingCopy", or "committed". Absent means untouched. Only populated by
+  /// "workingCopy", "committed", or "untouched". Only populated by
   /// `core::files::list_workspace_files`; plain directory listings leave it unset.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub status: Option<String>,
@@ -286,34 +286,6 @@ pub fn ls_workspace(
   Ok(entries)
 }
 
-/// Like `ls_workspace`, but also annotates each entry with its jj file
-/// status (conflict/committed/working-copy) for the Code tab's file list.
-/// This is meaningfully more expensive (three extra jj computations), so it
-/// is kept separate from the plain `ls_workspace` used by callers that
-/// don't need status.
-pub fn ls_workspace_with_status(
-  repo_path: &str,
-  workspace_id: Option<i64>,
-) -> Result<Vec<WorkspaceEntry>, String> {
-  let workspace_root = resolve_workspace_root(repo_path, workspace_id)?;
-  let mut entries = ls_workspace(repo_path, workspace_id)?;
-
-  let target_branch = match workspace_id {
-    Some(id) => local_db::get_workspace_by_id(repo_path, id)
-      .ok()
-      .flatten()
-      .and_then(|ws| ws.target_branch),
-    None => None,
-  };
-  crate::core::files::annotate_entry_statuses(
-    &workspace_root,
-    &mut entries,
-    target_branch.as_deref(),
-  );
-
-  Ok(entries)
-}
-
 /// The README among a workspace root's `entries`, read.
 fn read_readme(entries: &[WorkspaceEntry]) -> Result<Option<String>, String> {
   let readme = entries
@@ -328,13 +300,13 @@ fn read_readme(entries: &[WorkspaceEntry]) -> Result<Option<String>, String> {
   }
 }
 
-/// The Code tab's overview: `ls_workspace_with_status` and the README it
+/// The Code tab's overview: `files::list_workspace_files` and the README it
 /// lists, from one listing of the root rather than two.
 pub fn workspace_overview(
   repo_path: &str,
   workspace_id: Option<i64>,
 ) -> Result<(Vec<WorkspaceEntry>, Option<String>), String> {
-  let entries = ls_workspace_with_status(repo_path, workspace_id)?;
+  let entries = crate::core::files::list_workspace_files(repo_path, workspace_id)?;
   let readme = read_readme(&entries)?;
   Ok((entries, readme))
 }
