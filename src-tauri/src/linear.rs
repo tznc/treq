@@ -326,13 +326,20 @@ fn http_status_error(status: reqwest::StatusCode, text: &str, via_proxy: bool) -
   }
 }
 
+/// Whether `error` (a read's) means Linear is not connected or refuses the
+/// key, which only Settings can fix.
+pub fn needs_connection(error: &str) -> bool {
+  error == NOT_CONNECTED || error.starts_with(REJECTED_KEY) || error.starts_with(REJECTED_PROXY)
+}
+
+const REJECTED_KEY: &str = "Linear rejected the API key";
+const REJECTED_PROXY: &str = "treq could not authenticate with the Linear proxy";
+
 fn auth_error(status: reqwest::StatusCode, via_proxy: bool) -> String {
   if via_proxy {
-    format!("treq could not authenticate with the Linear proxy ({status}). Sign in to treq again.")
+    format!("{REJECTED_PROXY} ({status}). Sign in to treq again.")
   } else {
-    format!(
-      "Linear rejected the API key ({status}). Check the Linear settings for this repository."
-    )
+    format!("{REJECTED_KEY} ({status}). Check the Linear settings for this repository.")
   }
 }
 
@@ -1211,6 +1218,11 @@ mod tests {
     )
     .unwrap_err();
     assert!(err.contains("rejected the API key"), "{err}");
+    assert!(needs_connection(&err));
+    assert!(needs_connection(NOT_CONNECTED));
+    assert!(!needs_connection(
+      "Linear rate limit reached (429). Try again in a minute."
+    ));
   }
 
   #[test]
