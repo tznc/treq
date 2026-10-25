@@ -5392,10 +5392,8 @@ fn changes_tab_finds_text_in_the_diff(cx: &mut TestAppContext) {
   h.cx.simulate_keystrokes("cmd-f");
   assert!(h.drawn("diff-search"));
   // a.rs: " a", "+b", "+c"; b.rs: "+d".
+  // A short diff is searched on every key: no pause is waited for.
   h.cx.simulate_input("b");
-  h.cx
-    .executor()
-    .advance_clock(std::time::Duration::from_millis(150));
   h.cx.run_until_parked();
   let count = |h: &mut Harness| {
     h.cx.run_until_parked();
