@@ -159,7 +159,13 @@ async fn issue(instance_id: &str, fresh: bool) -> Result<(Lease, SshEndpoint), S
       .map_err(|e| e.to_string())
     },
     |key_id| async move {
-      shared::issue(supabase, instance_id, &key_id, DEVICE_KEYSTORE_KEY_REFERENCE).await
+      shared::issue(
+        supabase,
+        instance_id,
+        &key_id,
+        DEVICE_KEYSTORE_KEY_REFERENCE,
+      )
+      .await
     },
   )
   .await
