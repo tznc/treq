@@ -320,6 +320,25 @@ fn measure(h: &mut Harness) {
     .collect();
   report("scroll 200px", &mut scroll);
 
+  // A sidebar frame redraws the shell; the cached screen replays.
+  let mut beside: Vec<_> = (0..20)
+    .map(|_| {
+      timed(h, |h| {
+        h.cx.update(|window, cx| {
+          if let Some(Some(root)) = window.root::<Framed>() {
+            root.update(cx, |_, cx| cx.notify());
+          }
+        })
+      })
+    })
+    .collect();
+  report("a frame beside the screen", &mut beside);
+  let screen = h.screen.clone();
+  let mut own: Vec<_> = (0..20)
+    .map(|_| timed(h, |h| screen.update(&mut h.cx, |_, cx| cx.notify())))
+    .collect();
+  report("the screen's own frame", &mut own);
+
   h.click("commit-message");
   let mut typing: Vec<_> = (0..20)
     .map(|_| timed(h, |h| h.cx.simulate_input("x")))
