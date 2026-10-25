@@ -50,6 +50,11 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static COUNTING: Counting = Counting;
 
+/// The running (allocations, bytes) totals, for the other benchmarks.
+pub(super) fn counts() -> (usize, usize) {
+  (ALLOCS.load(Relaxed), BYTES.load(Relaxed))
+}
+
 /// Allocations and bytes allocated by one full frame, as the median of
 /// `n` frames.
 fn frame_allocs(h: &mut Harness, n: usize) -> (usize, usize) {
