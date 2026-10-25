@@ -23,7 +23,7 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   logs_data::{
     agent_chat_records, chart, filter_label, find_matches, format_timestamp, log_lines_prompt,
-    sql_result_prompt, toggle, Host, LineSelection, Source, DEFAULT_QUERY, LEVELS, SERIES,
+    sql_result_prompt, toggle, Chart, Host, LineSelection, Source, DEFAULT_QUERY, LEVELS, SERIES,
     TEMPLATES,
   },
   ActionSink, ScreenAction,
@@ -32,7 +32,7 @@ use crate::{
   core::{
     agent_chat::{AgentChat, AgentChatSummary},
     checks::WorkflowInfo,
-    checks_logs::{LogBucket, LogQuery, LogRecordView, SqlResult},
+    checks_logs::{LogQuery, LogRecordView, SqlResult},
   },
   gpui_shell::{
     popup::{native_entries, NativeMenuItem, PopupRequest, PopupSink},
@@ -169,7 +169,10 @@ pub struct LogsView {
   search_input: Option<Entity<InputState>>,
   /// `None` while reading.
   records: Option<Vec<LogRecordView>>,
-  buckets: Vec<LogBucket>,
+  /// The source `records` were read for, while they are lines of checks.
+  records_for: Option<Source>,
+  /// The chart above the feed, built once per read.
+  chart: Chart,
   chats: Option<Vec<AgentChatSummary>>,
   chat_id: Option<i64>,
   chat: Option<AgentChat>,
@@ -215,7 +218,8 @@ impl LogsView {
       search: String::new(),
       search_input: None,
       records: None,
-      buckets: Vec::new(),
+      records_for: None,
+      chart: Chart::default(),
       chats: None,
       chat_id: None,
       chat: None,
@@ -320,30 +324,38 @@ impl LogsView {
     self.generation += 1;
     self.selection.clear();
     let query = self.query();
+    if self.source != Source::Checks {
+      self.records_for = None;
+    }
     match self.source {
       Source::Agent => return self.load_chats(cx),
       Source::Checks => {
-        self.records = None;
+        // A new filter keeps the lines shown until the new ones arrive.
+        if self.records_for != Some(Source::Checks) {
+          self.records = None;
+        }
         let chart_query = query.clone();
         self.run(
-          move |host, repo| {
-            let records = host.repo_logs(repo, &query);
-            let buckets = host.log_timeseries(repo, &chart_query);
-            (records, buckets)
-          },
-          |view, (records, buckets), _| {
+          move |host, repo| host.repo_logs(repo, &query),
+          |view, records, _| {
             view.records = Some(records.unwrap_or_else(|err| {
               log::warn!("Failed to read check logs: {err}");
               Vec::new()
             }));
-            view.buckets = buckets.unwrap_or_default();
+            view.records_for = Some(Source::Checks);
           },
+          cx,
+        );
+        // The chart is read on its own, so the lines paint first.
+        self.run(
+          move |host, repo| chart(&host.log_timeseries(repo, &chart_query).unwrap_or_default()),
+          |view, chart, _| view.chart = chart,
           cx,
         );
       }
       Source::AppSetup | Source::System => {
         self.records = None;
-        self.buckets.clear();
+        self.chart = Chart::default();
         let system = self.source == Source::System;
         self.run(
           move |host, _| {
@@ -367,7 +379,7 @@ impl LogsView {
   }
 
   fn load_chats(&mut self, cx: &mut Context<Self>) {
-    self.buckets.clear();
+    self.chart = Chart::default();
     if self.chats.is_none() {
       self.records = None;
       self.run(
@@ -1340,7 +1352,7 @@ impl LogsView {
 
   /// `LogsTimeseriesChart`: stacked bars of records per second.
   fn chart(&self, p: &Palette) -> Option<impl IntoElement> {
-    let data = chart(&self.buckets);
+    let data = &self.chart;
     if data.labels.is_empty() {
       return None;
     }
