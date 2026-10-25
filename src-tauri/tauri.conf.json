@@ -771,7 +771,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Command action: start, list, stop, attach-command, paste"
+              "description": "Command action: start, list, stop, rename, attach-command, paste"
             },
             {
               "name": "repo",
@@ -792,7 +792,7 @@
             {
               "name": "value",
               "takesValue": true,
-              "description": "JSON-encoded {remote_dir, command, cols, rows} launch payload for start/attach-command; the text for paste"
+              "description": "JSON-encoded {remote_dir, command, cols, rows} launch payload for start/attach-command; the title for rename (empty clears it); the text for paste"
             },
             {
               "name": "submit",

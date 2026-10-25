@@ -551,6 +551,13 @@ pub enum TreqCommandRequest {
     workspace: String,
     label: String,
   },
+  /// Names a persistent PTY session; an empty title clears it. Idempotent.
+  PtyRename {
+    repo: String,
+    workspace: String,
+    label: String,
+    title: String,
+  },
   /// Returns the literal command line an SSH PTY channel should exec to
   /// attach (creating first if necessary) to a persistent session.
   PtyAttachCommand {
@@ -718,6 +725,7 @@ impl TreqCommandRequest {
       | Self::AgentStop { .. }
       | Self::PtyStart { .. }
       | Self::PtyStop { .. }
+      | Self::PtyRename { .. }
       | Self::PtyPaste { .. }
       | Self::ReviewSave { .. }
       | Self::ReviewClear { .. } => true,
@@ -796,6 +804,7 @@ impl TreqCommandRequest {
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
       | Self::PtyStop { .. }
+      | Self::PtyRename { .. }
       | Self::PtyAttachCommand { .. }
       | Self::ReviewLoad { .. }
       | Self::ReviewSave { .. }
@@ -870,6 +879,7 @@ impl TreqCommandRequest {
       Self::PtyStart { .. } => "PtyStart",
       Self::PtyList { .. } => "PtyList",
       Self::PtyStop { .. } => "PtyStop",
+      Self::PtyRename { .. } => "PtyRename",
       Self::PtyAttachCommand { .. } => "PtyAttachCommand",
       Self::PtyPaste { .. } => "PtyPaste",
       Self::ReviewLoad { .. } => "ReviewLoad",
@@ -939,6 +949,7 @@ impl TreqCommandRequest {
     "PtyStart",
     "PtyList",
     "PtyStop",
+    "PtyRename",
     "PtyAttachCommand",
     "PtyPaste",
     "ReviewLoad",
@@ -2100,6 +2111,17 @@ impl TreqCommandRequest {
         fields.target = Some(label);
         ("pty-remote", "stop", repo)
       }
+      Self::PtyRename {
+        repo,
+        workspace,
+        label,
+        title,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(label);
+        fields.value = Some(title.clone());
+        ("pty-remote", "rename", repo)
+      }
       Self::PtyAttachCommand {
         repo,
         workspace,
@@ -3174,6 +3196,14 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       label,
     } => json(crate::core::pty_remote_supervisor::stop_session(
       &repo, &workspace, &label,
+    )),
+    TreqCommandRequest::PtyRename {
+      repo,
+      workspace,
+      label,
+      title,
+    } => json(crate::core::pty_remote_supervisor::rename_session(
+      &repo, &workspace, &label, &title,
     )),
     TreqCommandRequest::PtyAttachCommand {
       repo,
@@ -5684,7 +5714,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 70);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 71);
   }
 
   #[test]

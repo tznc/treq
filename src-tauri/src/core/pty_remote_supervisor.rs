@@ -99,7 +99,26 @@ pub struct PtySessionInfo {
   /// True when the backend reports the session currently exists (it may
   /// have exited between calls, e.g. the shell/agent inside it quit).
   pub running: bool,
+  /// The name a user gave the session (tmux only; see [`rename_session`]).
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub title: Option<String>,
+  /// Seconds since the session last printed anything, by the host's clock
+  /// (tmux only), so a client can tell a working agent from one waiting
+  /// for input.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub idle_secs: Option<u64>,
 }
+
+/// The tmux user option holding a session's title.
+const TITLE_OPTION: &str = "@treq-title";
+
+/// Longest title kept, in characters.
+const TITLE_MAX_CHARS: usize = 80;
+
+/// One line of `tmux list-sessions` as [`list_sessions`] formats it. tmux
+/// prints control characters (a tab) as `_`, so fields are split by `|`,
+/// which session names never contain; the title comes last and may.
+const TMUX_LIST_FORMAT: &str = "#{session_name}|#{window_activity}|#{@treq-title}";
 
 /// Prefix shared by every session this module creates. Listing filters the
 /// backend's sessions by it, so unrelated tmux/screen sessions on the host
@@ -226,26 +245,67 @@ fn parse_session_name(name: &str) -> Option<ParsedSessionName> {
   })
 }
 
+/// A session as the backend lists it: its name, plus what tmux reports
+/// about it (screen reports neither).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ListedSession {
+  name: String,
+  /// Unix seconds of the last output.
+  last_output: Option<u64>,
+  title: Option<String>,
+}
+
+impl From<String> for ListedSession {
+  fn from(name: String) -> Self {
+    Self {
+      name,
+      ..Self::default()
+    }
+  }
+}
+
+/// Parses one line printed with [`TMUX_LIST_FORMAT`]. An unset title prints
+/// as an empty field.
+fn parse_tmux_list_line(line: &str) -> ListedSession {
+  let mut fields = line.splitn(3, '|');
+  let name = fields.next().unwrap_or_default().to_string();
+  let last_output = fields.next().and_then(|t| t.trim().parse().ok());
+  let title = fields
+    .next()
+    .map(str::trim)
+    .filter(|t| !t.is_empty())
+    .map(str::to_string);
+  ListedSession {
+    name,
+    last_output,
+    title,
+  }
+}
+
 /// Keeps only the sessions that belong to `scope` (and to `workspace`, when
-/// given) out of the backend's raw session names. Split out from
+/// given) out of the backend's raw session list. Split out from
 /// [`list_sessions`] so the filtering is testable without a tmux server.
-fn filter_sessions(
-  names: impl IntoIterator<Item = String>,
+fn filter_sessions<S: Into<ListedSession>>(
+  sessions: impl IntoIterator<Item = S>,
   scope: &str,
   workspace: Option<&str>,
+  now: u64,
 ) -> Vec<PtySessionInfo> {
-  names
+  sessions
     .into_iter()
-    .filter_map(|name| {
-      let parsed = parse_session_name(&name)?;
+    .map(Into::into)
+    .filter_map(|listed: ListedSession| {
+      let parsed = parse_session_name(&listed.name)?;
       if parsed.scope != scope || workspace.is_some_and(|w| w != parsed.workspace) {
         return None;
       }
       Some(PtySessionInfo {
-        session_name: name,
+        session_name: listed.name,
         workspace: parsed.workspace,
         label: parsed.label,
         running: true,
+        title: listed.title,
+        idle_secs: listed.last_output.map(|at| now.saturating_sub(at)),
       })
     })
     .collect()
@@ -281,6 +341,8 @@ pub fn start_session(
       workspace: workspace.to_string(),
       label: label.to_string(),
       running: true,
+      title: None,
+      idle_secs: None,
     });
   }
 
@@ -334,6 +396,8 @@ pub fn start_session(
     workspace: workspace.to_string(),
     label: label.to_string(),
     running: true,
+    title: None,
+    idle_secs: None,
   })
 }
 
@@ -363,7 +427,9 @@ pub fn list_sessions(repo: &str, workspace: Option<&str>) -> Result<Vec<PtySessi
   let names = match backend {
     PtyBackend::Tmux => {
       let output = Command::new("tmux")
-        .args(["list-sessions", "-F", "#{session_name}"])
+        // -u: print titles as UTF-8 whatever the host's locale; tmux
+        // replaces non-ASCII with `_` otherwise.
+        .args(["-u", "list-sessions", "-F", TMUX_LIST_FORMAT])
         .output()
         .map_err(|e| format!("dependency_error: Failed to list tmux sessions: {e}"))?;
       if !output.status.success() {
@@ -373,7 +439,7 @@ pub fn list_sessions(repo: &str, workspace: Option<&str>) -> Result<Vec<PtySessi
       }
       String::from_utf8_lossy(&output.stdout)
         .lines()
-        .map(|s| s.to_string())
+        .map(parse_tmux_list_line)
         .collect::<Vec<_>>()
     }
     PtyBackend::Screen => {
@@ -389,7 +455,7 @@ pub fn list_sessions(repo: &str, workspace: Option<&str>) -> Result<Vec<PtySessi
           trimmed.split_whitespace().next().and_then(|token| {
             token
               .split_once('.')
-              .map(|(_, name)| name.to_string())
+              .map(|(_, name)| ListedSession::from(name.to_string()))
               .filter(|_| token.contains('.'))
           })
         })
@@ -397,7 +463,59 @@ pub fn list_sessions(repo: &str, workspace: Option<&str>) -> Result<Vec<PtySessi
     }
   };
 
-  Ok(filter_sessions(names, &repo_scope(repo), workspace))
+  let now = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .map_or(0, |d| d.as_secs());
+  Ok(filter_sessions(names, &repo_scope(repo), workspace, now))
+}
+
+/// A title as stored: one line without control characters, trimmed and at
+/// most [`TITLE_MAX_CHARS`] long. `None` when nothing is left.
+fn clean_title(title: &str) -> Option<String> {
+  let line: String = title
+    .chars()
+    .map(|c| if c.is_control() { ' ' } else { c })
+    .collect();
+  let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+  let line: String = line.chars().take(TITLE_MAX_CHARS).collect();
+  let line = line.trim_end().to_string();
+  (!line.is_empty()).then_some(line)
+}
+
+/// Names a session; an empty `title` clears the name. Needs tmux, which
+/// keeps the title with the session (a user option), so it goes when the
+/// session ends.
+pub fn rename_session(
+  repo: &str,
+  workspace: &str,
+  label: &str,
+  title: &str,
+) -> Result<Option<String>, String> {
+  match detect_backend() {
+    Some(PtyBackend::Tmux) => {}
+    Some(PtyBackend::Screen) => {
+      return Err("dependency_error: Naming terminals needs tmux on this host".to_string())
+    }
+    None => return Err(no_backend_error()),
+  }
+  let name = session_name(repo, workspace, label);
+  // `=` for an exact match; the trailing `:` makes it a session target,
+  // which set-option needs (a bare `=name` reads as a pane and fails).
+  let target = format!("={name}:");
+  let title = clean_title(title);
+  let mut args = vec!["set-option", "-t", target.as_str()];
+  match &title {
+    Some(title) => args.extend([TITLE_OPTION, title.as_str()]),
+    None => args.extend(["-u", TITLE_OPTION]),
+  }
+  let status = Command::new("tmux")
+    .args(&args)
+    .status()
+    .map_err(|e| format!("dependency_error: Failed to run tmux: {e}"))?;
+  if !status.success() {
+    return Err(format!("Terminal '{label}' is not running"));
+  }
+  Ok(title)
 }
 
 /// Stops (kills) a persistent session. Idempotent: stopping a session that
@@ -688,26 +806,64 @@ mod tests {
       "unrelated".to_string(),
     ];
 
-    let all_a = filter_sessions(names.clone(), &repo_scope("/srv/a"), None);
+    let all_a = filter_sessions(names.clone(), &repo_scope("/srv/a"), None, 0);
     let labels: Vec<_> = all_a
       .iter()
       .map(|s| (s.workspace.as_str(), s.label.as_str()))
       .collect();
     assert_eq!(labels, vec![("root", "shell"), ("feat", "claude")]);
 
-    let root_a = filter_sessions(names.clone(), &repo_scope("/srv/a"), Some("root"));
+    let root_a = filter_sessions(names.clone(), &repo_scope("/srv/a"), Some("root"), 0);
     assert_eq!(root_a.len(), 1);
     assert_eq!(
       root_a[0].session_name,
       session_name("/srv/a", "root", "shell")
     );
 
-    let root_b = filter_sessions(names, &repo_scope("/srv/b"), Some("root"));
+    let root_b = filter_sessions(names, &repo_scope("/srv/b"), Some("root"), 0);
     assert_eq!(root_b.len(), 1);
     assert_eq!(
       root_b[0].session_name,
       session_name("/srv/b", "root", "shell")
     );
+  }
+
+  #[test]
+  fn tmux_list_lines_carry_title_and_idle_time() {
+    let name = session_name("/srv/a", "root", "claude-1");
+    let lines = [
+      format!("{name}|1761350000|Fix login redirect"),
+      format!("{}|1761350001|", session_name("/srv/a", "root", "shell-2")),
+    ];
+    let sessions = filter_sessions(
+      lines.iter().map(|l| parse_tmux_list_line(l)),
+      &repo_scope("/srv/a"),
+      Some("root"),
+      1761350010,
+    );
+    assert_eq!(sessions.len(), 2);
+    assert_eq!(sessions[0].title.as_deref(), Some("Fix login redirect"));
+    assert_eq!(sessions[0].idle_secs, Some(10));
+    assert_eq!(sessions[1].title, None);
+    // A title may itself contain the separator: only the first two split.
+    let listed = parse_tmux_list_line(&format!("{name}|5|a | b"));
+    assert_eq!(listed.title.as_deref(), Some("a | b"));
+  }
+
+  #[test]
+  fn titles_are_one_trimmed_bounded_line() {
+    assert_eq!(clean_title("  Fix\nlogin\t redirect "), Some("Fix login redirect".into()));
+    assert_eq!(clean_title(" \n "), None);
+    assert_eq!(clean_title(&"x".repeat(200)).unwrap().chars().count(), TITLE_MAX_CHARS);
+  }
+
+  #[test]
+  fn sessions_from_older_hosts_have_no_title() {
+    let info: PtySessionInfo = serde_json::from_value(serde_json::json!({
+      "session_name": "s", "workspace": "w", "label": "l", "running": true
+    }))
+    .unwrap();
+    assert_eq!((info.title, info.idle_secs), (None, None));
   }
 
   #[test]

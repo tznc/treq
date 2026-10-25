@@ -708,6 +708,13 @@ pub(crate) fn parse_remote_command_request(
       workspace: require_workspace()?,
       label: require_target("session label")?,
     }),
+    ("pty-remote", "rename") => Ok(TreqCommandRequest::PtyRename {
+      repo,
+      workspace: require_workspace()?,
+      label: require_target("session label")?,
+      // An empty or missing value clears the title.
+      title: value.clone().unwrap_or_default(),
+    }),
     ("pty-remote", "attach-command") => {
       let payload = core::remote::parse_pty_launch_payload(&require_value("pty launch payload")?)?;
       Ok(TreqCommandRequest::PtyAttachCommand {

@@ -7676,6 +7676,8 @@ fn remote_session(
     workspace: "root".into(),
     label: label.into(),
     running,
+    title: None,
+    idle_secs: None,
   }
 }
 
