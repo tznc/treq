@@ -20,7 +20,7 @@ use gpui_kit::{
 };
 use treq_lib::{
   core::{
-    remote::{GithubAction, GithubQuery, TreqCommandRequest},
+    remote::{GithubAction, GithubContext, GithubQuery, TreqCommandRequest},
     review::{line_at, line_label, LineRef},
   },
   github::{GhReviewComment, GhReviewThread},
@@ -29,10 +29,11 @@ use treq_lib::{
 use super::{
   diff::{self, Picked},
   mutation_message, on_epoch,
-  pr_detail::{emoji, toggle_reaction, REACTIONS},
+  pr_detail::{self, emoji, toggle_reaction, REACTIONS},
   pr_review_logic::{
-    can_submit, collapsed, detached_threads, extends, parse_diff, pending_for, submit_action,
-    suggestion, thread_count, threads_at, Event, PendingComment, PrFile,
+    allowed, can_submit, collapsed, detached_threads, extends, parse_diff, pending_for,
+    submit_action, suggestion, thread_count, threads_at, Event, PendingComment, PrFile,
+    OWN_PR_HINT,
   },
 };
 use crate::{
@@ -105,6 +106,9 @@ pub struct PrReviewScreen {
   message: Option<(bool, String)>,
   keys: IdempotencyKeys,
   scroll: ScrollHandle,
+  /// The signed-in GitHub login and the PR's author, once read.
+  login: Option<String>,
+  author: Option<String>,
 }
 
 impl PrReviewScreen {
@@ -135,8 +139,27 @@ impl PrReviewScreen {
       message: None,
       keys: IdempotencyKeys::default(),
       scroll: ScrollHandle::new(),
+      login: None,
+      author: None,
     };
     this.fetch(true, cx);
+    let context = TreqCommandRequest::GithubRead {
+      repo: this.repo.clone(),
+      query: GithubQuery::Context,
+    };
+    load::run(
+      cx,
+      remote::read_cached::<GithubContext>(context, true),
+      |this, result, _| this.login = result.ok().map(|c| c.login),
+    );
+    load::run(
+      cx,
+      remote::read_cached::<treq_lib::github::GhPullRequest>(
+        pr_detail::request(&this.repo, number),
+        true,
+      ),
+      |this, result, _| this.author = result.ok().map(|pr| pr.author.login),
+    );
     this
   }
 
@@ -413,6 +436,7 @@ impl PrReviewScreen {
   fn open_submit(&mut self, cx: &mut Context<Self>) {
     let screen = cx.weak_entity();
     let (summary, pending) = (self.summary.clone(), self.pending.len());
+    let (login, author) = (self.login.clone(), self.author.clone());
     sheet::open(Some("Finish your review".into()), cx, move |window, cx| {
       cx.new(|cx| {
         let body = cx.new(|cx| {
@@ -429,6 +453,8 @@ impl PrReviewScreen {
           body,
           event: Event::Comment,
           pending,
+          login,
+          author,
         }
       })
     });
@@ -1016,6 +1042,8 @@ struct SubmitSheet {
   body: Entity<TextareaState>,
   event: Event,
   pending: usize,
+  login: Option<String>,
+  author: Option<String>,
 }
 
 impl Render for SubmitSheet {
@@ -1023,17 +1051,21 @@ impl Render for SubmitSheet {
     let choices: Vec<AnyElement> = Event::ALL
       .iter()
       .map(|&event| {
+        let ok = allowed(event, self.login.as_deref(), self.author.as_deref());
         widgets::choice(
           SharedString::from(format!("event-{}", event.value())),
           event.label(),
-          Some(event.hint().into()),
+          Some(if ok { event.hint() } else { OWN_PR_HINT }.into()),
           self.event == event,
           cx,
         )
-        .on_click(cx.listener(move |this, _, _, cx| {
-          this.event = event;
-          cx.notify();
-        }))
+        .when(!ok, |row| row.opacity(0.5))
+        .when(ok, |row| {
+          row.on_click(cx.listener(move |this, _, _, cx| {
+            this.event = event;
+            cx.notify();
+          }))
+        })
         .into_any_element()
       })
       .collect();

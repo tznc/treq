@@ -171,6 +171,16 @@ pub fn can_submit(event: Event, body: &str, pending: usize) -> bool {
   event != Event::RequestChanges || !body.trim().is_empty() || pending > 0
 }
 
+/// The hint under a verdict the PR's author cannot pick.
+pub const OWN_PR_HINT: &str =
+  "Pull request authors can't approve or request changes on their own pull request.";
+
+/// Whether `login` may pick `event` on a PR by `author`: authors can only
+/// comment on their own PR. Unknown logins allow everything.
+pub fn allowed(event: Event, login: Option<&str>, author: Option<&str>) -> bool {
+  event == Event::Comment || login.is_none() || login != author
+}
+
 /// The host write submitting the review with every pending comment.
 pub fn submit_action(
   number: u64,
@@ -358,6 +368,16 @@ deleted file mode 100644
         ]
       }
     );
+  }
+
+  #[core::prelude::v1::test]
+  fn authors_only_comment_on_their_own_pr() {
+    let me = Some("me");
+    assert!(allowed(Event::Comment, me, me));
+    assert!(!allowed(Event::Approve, me, me));
+    assert!(!allowed(Event::RequestChanges, me, me));
+    assert!(allowed(Event::Approve, me, Some("you")));
+    assert!(allowed(Event::Approve, None, me));
   }
 
   #[core::prelude::v1::test]
