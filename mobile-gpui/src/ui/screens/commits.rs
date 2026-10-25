@@ -93,6 +93,11 @@ struct Notice {
   undo: Option<(String, String)>,
 }
 
+/// Emitted after a commit action that may have changed the host, so the
+/// workspace screen reloads its status, changes and this list (desktop's
+/// `CommitsScreen::changed`).
+pub struct Changed;
+
 pub struct CommitsScreen {
   target: Target,
   log: Load<JjLogResult>,
@@ -361,10 +366,12 @@ impl CommitsScreen {
       },
       undo,
     });
-    self.reload(cx);
+    cx.emit(Changed);
     cx.notify();
   }
 }
+
+impl EventEmitter<Changed> for CommitsScreen {}
 
 fn request(target: &Target) -> TreqCommandRequest {
   TreqCommandRequest::ListCommits {
@@ -415,11 +422,17 @@ impl Render for CommitsScreen {
         .gap_3()
         .items_center()
         .justify_between()
-        .child(if notice.ok {
-          widgets::muted(notice.text, cx)
-        } else {
-          widgets::error_text(notice.text, cx)
-        })
+        // Takes the row's free width and wraps, so a long error stays on
+        // screen.
+        .child(
+          if notice.ok {
+            widgets::muted(notice.text, cx)
+          } else {
+            widgets::error_text(notice.text, cx)
+          }
+          .flex_1()
+          .min_w_0(),
+        )
         .when_some(notice.undo, |bar, (operation, short)| {
           bar.child(
             Button::new("commit-undo-delete")
