@@ -29,6 +29,48 @@ use crate::core::remote_ssh_transport::{
 /// this ring is a safety backstop, not the primary consumption path.
 pub const MAX_BUFFERED_OUTPUT_BYTES: usize = 1024 * 1024;
 
+/// `PtyAttachCommand` answers, kept per endpoint generation and request so a
+/// terminal that attaches again (the auto-reattach after a dropped
+/// connection, reopening a session) skips the exec that asks the host for
+/// the command: a channel open plus a `treq` process, two round trips. The
+/// command is a pure function of the request, but a host-side change (tmux
+/// or screen swapped, `treq` updated) can make it stale, so a caller
+/// [`forget`](Self::forget)s the entry when attaching with it fails.
+#[derive(Default)]
+pub struct AttachCommandCache {
+  commands: Mutex<HashMap<String, String>>,
+}
+
+impl AttachCommandCache {
+  pub fn key(endpoint: &SshEndpoint, request: &crate::core::remote::TreqCommandRequest) -> String {
+    format!(
+      "{}#{}#{}",
+      endpoint.id,
+      crate::core::remote_records::endpoint_generation(endpoint),
+      serde_json::to_string(request).unwrap_or_default()
+    )
+  }
+
+  pub fn get(&self, key: &str) -> Option<String> {
+    self.lock().get(key).cloned()
+  }
+
+  pub fn insert(&self, key: String, command: String) {
+    self.lock().insert(key, command);
+  }
+
+  pub fn forget(&self, key: &str) {
+    self.lock().remove(key);
+  }
+
+  fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
+    self
+      .commands
+      .lock()
+      .unwrap_or_else(|poisoned| poisoned.into_inner())
+  }
+}
+
 /// Typed launch behavior for a new remote PTY. Never accepts an arbitrary
 /// frontend-supplied shell command string — this is the security boundary
 /// that prevents shell injection through a workspace path, agent id, or
@@ -1291,5 +1333,32 @@ mod tests {
 
     manager.close("reattach-1").await.unwrap();
     assert!(!manager.session_exists("reattach-1"));
+  }
+
+  #[test]
+  fn attach_commands_are_cached_per_endpoint_and_request_until_forgotten() {
+    use crate::core::remote::TreqCommandRequest;
+    let host_key = test_host_key();
+    let addr: std::net::SocketAddr = "127.0.0.1:22".parse().unwrap();
+    let endpoint = test_endpoint("e1", addr, &host_key, "k".into());
+    let other = test_endpoint("e2", addr, &host_key, "k".into());
+    let request = |cols: u16| TreqCommandRequest::PtyAttachCommand {
+      repo: "/r".into(),
+      workspace: "w".into(),
+      label: "shell".into(),
+      remote_dir: "/r/w".into(),
+      launch: PtyLaunchSpec::Shell,
+      cols,
+      rows: 24,
+    };
+    let cache = AttachCommandCache::default();
+    let key = AttachCommandCache::key(&endpoint, &request(80));
+    assert_eq!(cache.get(&key), None);
+    cache.insert(key.clone(), "tmux attach".into());
+    assert_eq!(cache.get(&key).as_deref(), Some("tmux attach"));
+    assert_ne!(key, AttachCommandCache::key(&endpoint, &request(100)));
+    assert_ne!(key, AttachCommandCache::key(&other, &request(80)));
+    cache.forget(&key);
+    assert_eq!(cache.get(&key), None);
   }
 }
