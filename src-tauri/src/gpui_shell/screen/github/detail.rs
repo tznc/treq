@@ -362,6 +362,9 @@ impl GithubView {
     cx: &mut Context<Self>,
   ) -> Option<Div> {
     let comments = comments.as_ref().filter(|c| !c.is_empty())?;
+    // `None` stands for the fold.
+    let shown =
+      crate::gpui_shell::screen::rows::thread(comments.len(), self.detail.comments_expanded);
     Some(
       div()
         .flex()
@@ -372,27 +375,40 @@ impl GithubView {
           Some(theme::ICON_MESSAGE),
           p,
         ))
-        .children(comments.iter().map(|c| {
-          parts::comment(
-            &c.author.login,
-            &time::date(&c.created_at),
-            markdown(
-              SharedString::from(format!("github-comment-{}", c.id)),
-              &c.body,
-              13.,
-              self.dark,
+        .children(shown.iter().map(|&shown_ix| match shown_ix {
+          Some(ix) => {
+            let c = &comments[ix];
+            parts::comment(
+              &c.author.login,
+              &time::date(&c.created_at),
+              markdown(
+                SharedString::from(format!("github-comment-{}", c.id)),
+                &c.body,
+                13.,
+                self.dark,
+              )
+              .into_any_element(),
+              p,
             )
-            .into_any_element(),
+            .child(reactions::bar(
+              &self.tips,
+              self.reaction_picker.as_deref(),
+              &c.id,
+              &c.reactions,
+              p,
+              cx,
+            ))
+            .into_any_element()
+          }
+          None => parts::fold_row(
+            "github-comments-show-earlier",
+            crate::gpui_shell::screen::rows::hidden(comments.len()),
             p,
-          )
-          .child(reactions::bar(
-            &self.tips,
-            self.reaction_picker.as_deref(),
-            &c.id,
-            &c.reactions,
-            p,
-            cx,
-          ))
+            cx.listener(|view, _, _, cx| {
+              view.detail.comments_expanded = true;
+              cx.notify();
+            }),
+          ),
         })),
     )
   }

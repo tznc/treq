@@ -64,8 +64,6 @@ use crate::{
   local_db::{PrSyncRecord, Workspace},
 };
 
-/// `useDebounce(mentionQuery, 150)`.
-const MENTION_DEBOUNCE: Duration = Duration::from_millis(150);
 /// `LinearCommitHistory`'s page size.
 const HISTORY_PAGE: usize = 14;
 const STACK_DOCS_PATH: &str = "/docs/concepts/workspaces#stacks-and-rebasing";
@@ -750,9 +748,12 @@ impl CodeView {
 
   fn search_mentions(&mut self, query: String, cx: &mut Context<Self>) {
     let (host, parent) = (self.host.clone(), self.parent.clone());
+    let delay = host.file_search_delay(&parent.repo_path);
     let path = parent.working_directory();
     self._mention_search = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(MENTION_DEBOUNCE).await;
+      if !delay.is_zero() {
+        cx.background_executor().timer(delay).await;
+      }
       let search = query.clone();
       let results = cx
         .background_spawn(async move {
