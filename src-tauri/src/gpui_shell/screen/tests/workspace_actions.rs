@@ -318,7 +318,7 @@ fn offers_pro_when_the_queue_needs_it(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn hands_a_remote_repositorys_actions_to_react(cx: &mut TestAppContext) {
+fn hands_a_remote_repository_actions_to_react(cx: &mut TestAppContext) {
   let host = FakeHost {
     react_actions: true,
     ..no_pr_host()
