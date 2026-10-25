@@ -393,7 +393,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: list, workspace-diff, diff, diff-files"
+              "description": "Action: list, workspace-diff, diff, diff-files, review, review-save, review-clear"
             },
             {
               "name": "repo",
@@ -420,6 +420,16 @@
               "name": "token",
               "takesValue": true,
               "description": "diff-files: the working-copy token of the workspace diff to read from"
+            },
+            {
+              "name": "target",
+              "takesValue": true,
+              "description": "review, review-save, review-clear: the review's page, changes or files"
+            },
+            {
+              "name": "value",
+              "takesValue": true,
+              "description": "review-save: the review as JSON {comments, summary, notes}"
             },
             {
               "name": "format",
@@ -752,7 +762,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Command action: start, list, stop, attach-command"
+              "description": "Command action: start, list, stop, attach-command, paste"
             },
             {
               "name": "repo",
@@ -773,7 +783,12 @@
             {
               "name": "value",
               "takesValue": true,
-              "description": "JSON-encoded {remote_dir, command, cols, rows} launch payload for start/attach-command"
+              "description": "JSON-encoded {remote_dir, command, cols, rows} launch payload for start/attach-command; the text for paste"
+            },
+            {
+              "name": "submit",
+              "takesValue": true,
+              "description": "paste: true to press Enter after the text"
             },
             {
               "name": "idempotency-key",
