@@ -72,7 +72,7 @@ icons! {
   ICON_INFO => "info",
   ICON_LAPTOP => "laptop",
   ICON_LAYERS => "layers-2",
-  ICON_LINEAR => "list-todo",
+  ICON_LINEAR => "linear",
   ICON_LINK => "link",
   ICON_MERGE => "git-merge",
   ICON_MORE => "ellipsis-vertical",
