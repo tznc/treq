@@ -476,7 +476,7 @@ pub fn list_sessions(repo: &str, workspace: Option<&str>) -> Result<Vec<PtySessi
 
 /// A title as stored: one line without control characters, trimmed and at
 /// most [`TITLE_MAX_CHARS`] long. `None` when nothing is left.
-fn clean_title(title: &str) -> Option<String> {
+pub fn clean_title(title: &str) -> Option<String> {
   let line: String = title
     .chars()
     .map(|c| if c.is_control() { ' ' } else { c })

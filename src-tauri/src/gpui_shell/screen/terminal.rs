@@ -10,6 +10,7 @@
 //! [`terminal_data`]: super::terminal_data
 //! [`terminal_emu`]: super::terminal_emu
 
+use crate::core::pty_remote_supervisor::clean_title;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::lock_ext::LockExt as _;
@@ -30,9 +31,9 @@ use gpui_kit::component::{
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, img, linear_color_stop, linear_gradient, point, prelude::*, px,
-  relative, App, Bounds, ClipboardItem, Context, Div, Entity, ExternalPaths, FocusHandle,
-  KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels, ScrollHandle,
-  ScrollWheelEvent, SharedString, Stateful, Subscription, Task, Window,
+  relative, AnyElement, App, Bounds, ClipboardItem, Context, Div, Entity, ExternalPaths,
+  FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels,
+  ScrollHandle, ScrollWheelEvent, SharedString, Stateful, Subscription, Task, Window,
 };
 
 use super::{
@@ -1686,6 +1687,8 @@ struct Column {
 enum Kind {
   Agent {
     pane_id: i64,
+    /// The session's id in `repo_path`'s session table.
+    session_id: i64,
     name: String,
     repo_path: String,
     workspace_path: Option<String>,
@@ -1694,11 +1697,11 @@ enum Kind {
   },
   Shell {
     dir: String,
+    /// The name the user gave it, shown in place of "Shell".
+    title: Option<String>,
   },
   /// A persistent remote session, in a shell slot.
-  Remote {
-    target: Box<RemoteTarget>,
-  },
+  Remote { target: Box<RemoteTarget> },
 }
 
 /// A divider or the pane's edge being dragged.
@@ -1834,6 +1837,15 @@ pub struct TerminalPane {
   releases_seen: u64,
   /// Agent sessions being read before their columns open, by pane id.
   opening: std::collections::HashMap<i64, Task<()>>,
+  /// The column whose name is being edited in its header.
+  renaming: Option<Renaming>,
+}
+
+/// A column's name being edited in place of its title.
+struct Renaming {
+  id: String,
+  input: Entity<InputState>,
+  _subscription: Subscription,
 }
 
 impl Drop for TerminalPane {
@@ -1917,6 +1929,7 @@ impl TerminalPane {
       _environment_task: None,
       _keys: None,
       opening: Default::default(),
+      renaming: None,
     }
   }
 
@@ -2036,6 +2049,184 @@ impl TerminalPane {
         .ignore_closed();
     }));
     cx.notify();
+  }
+
+  /// Double-clicking a column's title edits its name in place.
+  fn start_rename(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(column) = self.columns.iter().find(|c| c.id == id) else {
+      return;
+    };
+    // What shows while the field is empty: the name it falls back to.
+    let (current, placeholder) = match &column.kind {
+      Kind::Agent { name, .. } => (name.clone(), String::new()),
+      Kind::Shell { title, .. } => (title.clone().unwrap_or_default(), "Shell".into()),
+      Kind::Remote { target } => (
+        target.title.clone().unwrap_or_default(),
+        target.label.clone(),
+      ),
+    };
+    let input = cx.new(|cx| {
+      InputState::new(window, cx)
+        .placeholder(placeholder)
+        .default_value(current)
+    });
+    let subscription = cx.subscribe(&input, |pane, _, event: &InputEvent, cx| {
+      if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+        pane.finish_rename(true, cx);
+      }
+    });
+    input.update(cx, |input, cx| {
+      input.focus(window, cx);
+      input.select_all(window, cx);
+    });
+    self.renaming = Some(Renaming {
+      id: id.to_string(),
+      input,
+      _subscription: subscription,
+    });
+    cx.notify();
+  }
+
+  /// Ends the edit, keeping what was typed when `save`.
+  fn finish_rename(&mut self, save: bool, cx: &mut Context<Self>) {
+    let Some(renaming) = self.renaming.take() else {
+      return;
+    };
+    self.focus_next = Some(renaming.id.clone());
+    cx.notify();
+    if save {
+      let typed = renaming.input.read(cx).value().to_string();
+      self.rename(&renaming.id, clean_title(&typed), cx);
+    }
+  }
+
+  /// Names the column: an agent in its session table, a remote session on
+  /// its host, a shell for as long as it runs. `None` clears a shell's or a
+  /// remote session's name; an agent keeps its own.
+  fn rename(&mut self, id: &str, title: Option<String>, cx: &mut Context<Self>) {
+    let Some(kind) = self
+      .columns
+      .iter()
+      .find(|c| c.id == id)
+      .map(|c| c.kind.clone())
+    else {
+      return;
+    };
+    let kind = match kind {
+      Kind::Agent {
+        ref name,
+        ref repo_path,
+        session_id,
+        ..
+      } => {
+        let Some(title) = title.filter(|t| t != name) else {
+          return;
+        };
+        if let Err(error) = self.host.rename_session(repo_path, session_id, &title) {
+          return self.toast("Couldn't rename the agent", error, ToastTone::Error);
+        }
+        let mut kind = kind;
+        if let Kind::Agent { name, .. } = &mut kind {
+          *name = title;
+        }
+        kind
+      }
+      Kind::Shell { dir, .. } => Kind::Shell { dir, title },
+      Kind::Remote { target } => {
+        let host = self.host.clone();
+        let typed = title.unwrap_or_default();
+        let task = cx
+          .background_executor()
+          .spawn(async move { host.remote_rename(&target, &typed) });
+        let id = id.to_string();
+        cx.spawn(async move |pane, cx| {
+          let kept = task.await;
+          pane
+            .update(cx, |pane, cx| match kept {
+              Ok(title) => pane.set_title(&id, title, cx),
+              Err(error) => pane.toast("Couldn't rename the session", error, ToastTone::Error),
+            })
+            .ignore_closed();
+        })
+        .detach();
+        return;
+      }
+    };
+    self.set_kind(id, kind, cx);
+  }
+
+  /// A remote session's name as its host kept it.
+  fn set_title(&mut self, id: &str, title: Option<String>, cx: &mut Context<Self>) {
+    let Some(Kind::Remote { mut target }) = self
+      .columns
+      .iter()
+      .find(|c| c.id == id)
+      .map(|c| c.kind.clone())
+    else {
+      return;
+    };
+    target.title = title;
+    self.set_kind(id, Kind::Remote { target }, cx);
+  }
+
+  fn set_kind(&mut self, id: &str, kind: Kind, cx: &mut Context<Self>) {
+    if let Some(kept) = kept().lock_or_recover().values_mut().find(|k| k.id == id) {
+      kept.kind = kind.clone();
+    }
+    if let Some(column) = self.columns.iter_mut().find(|c| c.id == id) {
+      column.kind = kind;
+    }
+    self.publish(cx);
+    cx.notify();
+  }
+
+  /// A column's title, which a double click edits.
+  fn title(&self, id: &str, text: String, color: gpui::Hsla, cx: &mut Context<Self>) -> AnyElement {
+    if let Some(renaming) = self.renaming.as_ref().filter(|r| r.id == id) {
+      return div()
+        .debug_selector(|| "terminal-rename-input".into())
+        .w(zpx(200.))
+        .min_w_0()
+        .text_color(color)
+        .capture_action(cx.listener(|pane, _: &Escape, _, cx| {
+          pane.finish_rename(false, cx);
+          cx.stop_propagation();
+        }))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(
+          ui::input(&renaming.input)
+            .appearance(false)
+            .bordered(false)
+            .small(),
+        )
+        .into_any_element();
+    }
+    let id = id.to_string();
+    let tip = format!("terminal-title-tip-{id}");
+    let title = div()
+      .id(SharedString::from(format!("terminal-title-{id}")))
+      .test_support()
+      .debug_selector(|| "terminal-title".into())
+      .min_w_0()
+      .truncate()
+      .font_weight(gpui::FontWeight::MEDIUM)
+      .text_color(color)
+      .on_mouse_down(
+        MouseButton::Left,
+        cx.listener(move |pane, e: &MouseDownEvent, window, cx| {
+          if e.click_count == 2 {
+            cx.stop_propagation();
+            pane.activate(&id, cx);
+            pane.start_rename(&id, window, cx);
+          }
+        }),
+      )
+      .child(text);
+    let rename = Some(TooltipContent::Text("Double-click to rename".into()));
+    self
+      .tooltips
+      .wrap(tip, Side::Top, rename, title, cx)
+      .into_any_element()
   }
 
   fn toast(&self, title: &str, description: String, tone: ToastTone) {
@@ -2219,7 +2410,7 @@ impl TerminalPane {
         repo_path,
         ..
       } => workspace_path.clone().unwrap_or_else(|| repo_path.clone()),
-      Kind::Shell { dir } => dir.clone(),
+      Kind::Shell { dir, .. } => dir.clone(),
       Kind::Remote { target } => target.remote_working_directory.clone(),
     }
   }
@@ -2333,7 +2524,7 @@ impl TerminalPane {
           Summary {
             id: column.id.clone(),
             kind: "shell",
-            name: "Shell".into(),
+            name: column_title(&column.kind),
             branch_name: Some(name),
             repo_path: None,
             is_main_repo: main,
@@ -2499,7 +2690,8 @@ impl TerminalPane {
     }
     let id = terminal_data::shell_pty_id(&dir, millis);
     let start = Start::Shell { dir: dir.clone() };
-    self.push_column(id.clone(), id.clone(), Kind::Shell { dir }, start, cx);
+    let kind = Kind::Shell { dir, title: None };
+    self.push_column(id.clone(), id.clone(), kind, start, cx);
     self.publish(cx);
     // The new shell takes focus at the end of the row, scrolled into view.
     self.focus_column(&id, window, cx);
@@ -3290,13 +3482,7 @@ impl TerminalPane {
               .gap_1p5()
               .min_w_0()
               .child(ui::icon(agent_icon(agent), 16., d.foreground))
-              .child(
-                div()
-                  .truncate()
-                  .font_weight(gpui::FontWeight::MEDIUM)
-                  .text_color(d.foreground)
-                  .child(name.clone()),
-              )
+              .child(self.title(&column.id, name.clone(), d.foreground, cx))
               .child(label(
                 label_name,
                 workspace_name.is_none(),
@@ -3377,9 +3563,10 @@ impl TerminalPane {
                 .child(ui::icon(theme::ICON_TERMINAL_SQUARE, 14., muted).flex_shrink_0())
                 .child(
                   div()
-                    .truncate()
-                    .child(format!("{} · {}", target.endpoint.hostname, target.label)),
+                    .flex_shrink_0()
+                    .child(format!("{} ·", target.endpoint.hostname)),
                 )
+                .child(self.title(&column.id, column_title(&column.kind), muted, cx))
                 .children(ended.map(|status| {
                   ui::text(div(), TextSize::Xs)
                     .debug_selector(|| "remote-terminal-ended".into())
@@ -3404,7 +3591,7 @@ impl TerminalPane {
             ),
         )
       }
-      Kind::Shell { dir } => {
+      Kind::Shell { dir, .. } => {
         let (name, main) = self.label(dir);
         let close = self.tooltips.wrap(
           format!("terminal-close-tip-{}", column.id),
@@ -3433,12 +3620,7 @@ impl TerminalPane {
               .gap_1p5()
               .min_w_0()
               .child(ui::icon(theme::ICON_TERMINAL, 12., title_fg))
-              .child(
-                div()
-                  .font_weight(gpui::FontWeight::MEDIUM)
-                  .text_color(title_fg)
-                  .child("Shell"),
-              )
+              .child(self.title(&column.id, column_title(&column.kind), title_fg, cx))
               .child(label(name, main, dir.clone(), self.react.clone())),
           )
           .child(close)
@@ -3465,8 +3647,7 @@ impl TerminalPane {
     let focus_id = id.clone();
     let double_id = id.clone();
     let name = match &column.kind {
-      Kind::Agent { name, .. } => format!("{name} terminal"),
-      Kind::Shell { .. } => "Shell terminal".into(),
+      Kind::Agent { .. } | Kind::Shell { .. } => format!("{} terminal", column_title(&column.kind)),
       Kind::Remote { .. } => "Remote terminal".into(),
     };
     div()
@@ -3801,6 +3982,7 @@ fn agent_session(
     };
     let kind = Kind::Agent {
       pane_id,
+      session_id: session.id,
       name: session.name.clone(),
       repo_path: repo,
       workspace_path,
@@ -3819,6 +4001,16 @@ fn agent_session(
     ));
   }
   None
+}
+
+/// What a column's header calls it: the agent session's name, a shell's
+/// or a remote session's given name, else "Shell" or the session's label.
+fn column_title(kind: &Kind) -> String {
+  match kind {
+    Kind::Agent { name, .. } => name.clone(),
+    Kind::Shell { title, .. } => title.clone().unwrap_or_else(|| "Shell".into()),
+    Kind::Remote { target } => target.title.clone().unwrap_or_else(|| target.label.clone()),
+  }
 }
 
 fn default_agent(host: &dyn terminal_data::TerminalHost, repo: &str) -> String {

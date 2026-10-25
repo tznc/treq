@@ -150,7 +150,9 @@ impl Model {
           .unwrap_or_else(|| remote::session_label(None, remote::now_ms()));
         let reattach = value["reattach"].as_bool().unwrap_or(false);
         let workspace = self.selected_workspace(data).cloned();
-        let effects = self.open_remote_target(workspace.as_ref(), label, None, reattach);
+        // The session's name on the host, which its column shows.
+        let title = value["title"].as_str().map(str::to_string);
+        let effects = self.open_remote_target(workspace.as_ref(), label, title, None, reattach);
         self.remote.terminal = false;
         effects
       }
@@ -162,7 +164,7 @@ impl Model {
           .find(|w| full_path(w) == dir)
           .cloned();
         let label = remote::session_label(None, remote::now_ms());
-        self.open_remote_target(workspace.as_ref(), label, None, false)
+        self.open_remote_target(workspace.as_ref(), label, None, None, false)
       }
       field if field.starts_with("remoteRepo.") => remote(self.remote.form_field(field, value)),
       _ => return None,
@@ -201,12 +203,14 @@ impl Model {
     &mut self,
     workspace: Option<&Workspace>,
     label: String,
+    title: Option<String>,
     agent: Option<RemoteAgentId>,
     reattach: bool,
   ) -> Vec<Effect> {
     match self.remote_scope(workspace) {
       Ok(mut target) => {
         target["label"] = label.into();
+        target["title"] = title.into();
         target["launch"] = serde_json::to_value(remote::launch_for(agent)).unwrap_or_default();
         target["reattach"] = reattach.into();
         self.terminal("openRemote", json!({"remote": target}));
@@ -240,7 +244,7 @@ impl Model {
     };
     self.set_selected(workspace.as_ref().map(|w| w.id));
     let label = remote::session_label(Some(agent), remote::now_ms());
-    self.open_remote_target(workspace.as_ref(), label, Some(agent), false)
+    self.open_remote_target(workspace.as_ref(), label, None, Some(agent), false)
   }
 
   /// A remote repository opened: the window shows it as it shows a local
@@ -317,7 +321,7 @@ mod tests {
     let mut model = remote_model();
     let id = model.remote.endpoint.clone().unwrap().id;
     model.remote.cutoffs.insert(id, "key_revoked".into());
-    let effects = model.open_remote_target(None, "shell-1".into(), None, false);
+    let effects = model.open_remote_target(None, "shell-1".into(), None, None, false);
     assert!(matches!(
       effects.as_slice(),
       [Effect::Toast { description, .. }] if description.starts_with("Reconnect")

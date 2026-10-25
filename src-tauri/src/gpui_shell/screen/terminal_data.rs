@@ -59,6 +59,9 @@ pub struct RemoteTarget {
   pub remote_working_directory: String,
   /// The persistent session's label on the host.
   pub label: String,
+  /// The session's name on the host (`PtyList`'s `title`), if it has one.
+  #[serde(default)]
+  pub title: Option<String>,
   /// What starts when no session has the label yet; the login shell if
   /// unset.
   #[serde(default)]
@@ -144,6 +147,11 @@ pub trait TerminalHost:
   fn remote_running(&self, target: &RemoteTarget) -> Option<bool>;
   /// `PtyStop`: ends the persistent session on the host.
   fn remote_stop(&self, target: &RemoteTarget) -> Result<(), String>;
+  /// `PtyRename`: names the target's session on the host, or clears its
+  /// name when `title` is empty; the title the host kept.
+  fn remote_rename(&self, target: &RemoteTarget, title: &str) -> Result<Option<String>, String>;
+  /// Renames an agent session in its repository's session table.
+  fn rename_session(&self, repo_path: &str, session_id: i64, name: &str) -> Result<(), String>;
   fn sessions(&self, repo_path: &str) -> Result<Vec<crate::local_db::Session>, String>;
   /// The repository's supporting repositories that still exist.
   fn supporting_repos(&self, repo_path: &str) -> Vec<String>;
@@ -387,6 +395,24 @@ impl TerminalHost for Backend {
       },
     )
     .map(drop)
+  }
+
+  fn remote_rename(&self, target: &RemoteTarget, title: &str) -> Result<Option<String>, String> {
+    let kept = Transport::read(
+      self,
+      &target.endpoint,
+      TreqCommandRequest::PtyRename {
+        repo: target.repository_id.clone(),
+        workspace: target.workspace_id.clone(),
+        label: target.label.clone(),
+        title: title.to_string(),
+      },
+    )?;
+    serde_json::from_value(kept).map_err(|e| e.to_string())
+  }
+
+  fn rename_session(&self, repo_path: &str, session_id: i64, name: &str) -> Result<(), String> {
+    crate::local_db::update_session_name(&self.state_scope(repo_path), session_id, name.into())
   }
 
   fn sessions(&self, repo_path: &str) -> Result<Vec<crate::local_db::Session>, String> {
