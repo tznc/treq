@@ -35,7 +35,7 @@ use super::{
   code::CodeView,
   commits::{self, CommitsScreen},
   conflicts, mutation_message, on_epoch,
-  pull_request::{self, CreateSheet, PullRequestSheet},
+  pull_request::{self, CreateSheet},
   terminal::Sessions,
   workspaces,
 };
@@ -531,12 +531,15 @@ impl WorkspaceScreen {
   }
 
   fn show_pr(&mut self, cx: &mut Context<Self>) {
-    let Some(status) = self.pr.ready().cloned() else {
+    let Some(number) = self
+      .pr
+      .ready()
+      .and_then(|s| s.pull_request.as_ref())
+      .map(|pr| pr.number)
+    else {
       return;
     };
-    sheet::open(Some("Pull request".into()), cx, move |_, cx| {
-      cx.new(|_| PullRequestSheet::new(status))
-    });
+    super::pr_detail::open(self.target.repo.clone(), number, cx);
   }
 
   fn create_pr_sheet(&mut self, cx: &mut Context<Self>) {
