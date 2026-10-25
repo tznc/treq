@@ -31,7 +31,7 @@ function issue(
     state: { name: state[0], type: state[1] },
     labels: { nodes: labels.map((name) => ({ name })) },
     branchName: `octocat/eng-${n}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-    parent: parent === null ? null : { id: `issue-${parent}` },
+    parent: parent === null ? null : { id: `issue-${parent}`, identifier: `ENG-${parent}` },
     children: { nodes: [] as { id: string }[] },
     url: `https://linear.app/lorem/issue/ENG-${n}`,
     assignee,
