@@ -317,4 +317,37 @@ mod tests {
     assert_eq!(tip_title(Some(&e)), Some("Fix".into()));
     assert_eq!(tip_title(None), None);
   }
+
+  /// Round 7 measurement: what every Merge Queue render and 30 s poll
+  /// does with a long merged history.
+  #[test]
+  #[ignore = "perf measurement"]
+  fn queue_perf_render_work() {
+    use std::time::Instant;
+    for merged in [200usize, 2000, 10_000] {
+      let mut entries: Vec<_> = (0..merged)
+        .map(|i| {
+          let mut e = entry(&format!("feature/branch-{i}"), "main", i as i64, "merged");
+          e.pr_title = Some(format!("Add the thing number {i} to the module"));
+          e
+        })
+        .collect();
+      entries.push(entry("active", "main", merged as i64 + 1, "queued"));
+      let stats = HashMap::new();
+      let t = Instant::now();
+      let with = with_local_stats(&entries, &stats);
+      let a = t.elapsed();
+      let t = Instant::now();
+      let (active, history) = partition(&with);
+      let b = t.elapsed();
+      let t = Instant::now();
+      let _ = history_page(&history, 5);
+      let c = t.elapsed();
+      println!(
+        "merged={merged}: with_local_stats {a:?}, partition {b:?} (active {} history {}), history_page(5) {c:?}",
+        active.len(),
+        history.len()
+      );
+    }
+  }
 }

@@ -811,4 +811,44 @@ mod tests {
       1
     );
   }
+
+  /// Round 7 measurement: `cargo test --lib logs_perf_agent -- --ignored --nocapture`.
+  #[test]
+  #[ignore = "perf measurement"]
+  fn logs_perf_agent_chats() {
+    use std::time::Instant;
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_string_lossy().to_string();
+    let (chats, messages) = (150i64, 600usize);
+    for id in 0..chats {
+      let chat = AgentChat {
+        session_id: id,
+        pty_session_id: format!("pty-{id}"),
+        name: format!("chat {id}"),
+        agent: AgentType::Claude,
+        workspace_id: None,
+        created_at: format!("2026-10-{:02}T00:00:00Z", 1 + id % 25),
+        screen_before_last_user_message: String::new(),
+        messages: (0..messages)
+          .map(|i| ChatMessage {
+            id: i,
+            role: if i % 2 == 0 { ChatRole::User } else { ChatRole::Agent },
+            message: format!("message {i} {}", "lorem ipsum dolor ".repeat(60)),
+            time: "t".into(),
+          })
+          .collect(),
+      };
+      save_chat_unlocked(&repo, &chat).unwrap();
+    }
+    let bytes: u64 = std::fs::read_dir(agent_chats_dir(&repo)).unwrap().flatten().map(|e| e.metadata().unwrap().len()).sum();
+    println!("{chats} chats x {messages} messages = {} MB", bytes / 1_000_000);
+    for round in 0..3 {
+      let t = Instant::now();
+      let n = list_agent_chats(&repo).unwrap().len();
+      println!("list_agent_chats #{round}: {:?} ({n})", t.elapsed());
+    }
+    let t = Instant::now();
+    let c = get_agent_chat(&repo, 3).unwrap().unwrap();
+    println!("get_agent_chat (cached clone): {:?} ({} msgs)", t.elapsed(), c.messages.len());
+  }
 }

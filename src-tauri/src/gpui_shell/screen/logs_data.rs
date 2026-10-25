@@ -599,4 +599,26 @@ mod tests {
     assert_eq!(chart.labels, vec!["10:00:01", "10:00:02", "10:00:03"]);
     assert_eq!(chart.counts, vec![[5, 1, 0], [0, 0, 0], [0, 0, 2]]);
   }
+
+  /// Round 7 measurement: what every Logs render does with the agent feed.
+  #[test]
+  #[ignore = "perf measurement"]
+  fn logs_perf_render_work() {
+    use std::time::Instant;
+    for (n, size) in [(2000usize, 90usize), (5000, 2000), (20000, 500)] {
+      let records: Vec<_> = (0..n)
+        .map(|i| record(&format!("{i} {}", "lorem ipsum ".repeat(size / 12))))
+        .collect();
+      let t = Instant::now();
+      let cloned = records.clone();
+      let clone = t.elapsed();
+      let t = Instant::now();
+      let hits = find_matches(&cloned, "zzz");
+      println!(
+        "n={n} body={size}B: records.clone() {clone:?}, find_matches(miss) {:?} ({})",
+        t.elapsed(),
+        hits.len()
+      );
+    }
+  }
 }
