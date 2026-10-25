@@ -92,6 +92,8 @@ pub fn toggle_reaction(groups: &mut Vec<GhReactionGroup>, content: &str) -> bool
 /// A change to the pull request's state, offered in the ⋯ menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrAction {
+  /// Opens the code review; not a write.
+  Review,
   MarkReady,
   ConvertToDraft,
   Close,
@@ -101,6 +103,7 @@ pub enum PrAction {
 impl PrAction {
   pub fn label(self) -> &'static str {
     match self {
+      PrAction::Review => "Review changes",
       PrAction::MarkReady => "Ready for review",
       PrAction::ConvertToDraft => "Convert to draft",
       PrAction::Close => "Close",
@@ -108,9 +111,10 @@ impl PrAction {
     }
   }
 
-  /// What the host runs.
-  pub fn github_action(self, number: u64) -> GithubAction {
-    match self {
+  /// What the host runs; `None` for an action that opens a page.
+  pub fn github_action(self, number: u64) -> Option<GithubAction> {
+    Some(match self {
+      PrAction::Review => return None,
       PrAction::MarkReady => GithubAction::SetPrDraft {
         number,
         draft: false,
@@ -121,12 +125,13 @@ impl PrAction {
       },
       PrAction::Close => GithubAction::ClosePr { number },
       PrAction::Reopen => GithubAction::ReopenPr { number },
-    }
+    })
   }
 
   /// What the page says once it applied.
   pub fn done_message(self) -> &'static str {
     match self {
+      PrAction::Review => "",
       PrAction::MarkReady => "Marked ready for review.",
       PrAction::ConvertToDraft => "Converted to draft.",
       PrAction::Close => "Pull request closed.",
@@ -141,6 +146,7 @@ impl PrAction {
 
   fn key(self) -> &'static str {
     match self {
+      PrAction::Review => "pr-review",
       PrAction::MarkReady => "pr-ready",
       PrAction::ConvertToDraft => "pr-draft",
       PrAction::Close => "pr-close",
@@ -149,14 +155,15 @@ impl PrAction {
   }
 }
 
-/// The state changes `pr` offers: none once merged.
+/// What `pr` offers: its review, then the state changes (none once merged).
 pub fn actions(pr: &GhPullRequest) -> Vec<PrAction> {
-  match pr.state.as_str() {
-    "MERGED" => Vec::new(),
+  let changes = match pr.state.as_str() {
+    "MERGED" => vec![],
     "CLOSED" => vec![PrAction::Reopen],
     _ if pr.is_draft => vec![PrAction::MarkReady, PrAction::Close],
     _ => vec![PrAction::ConvertToDraft, PrAction::Close],
-  }
+  };
+  std::iter::once(PrAction::Review).chain(changes).collect()
 }
 
 /// Shows a write the host confirmed on the loaded `pr`, so the page changes
@@ -438,10 +445,13 @@ impl PrDetailScreen {
 
   fn run_action(&mut self, action: PrAction, window: &mut Window, cx: &mut Context<Self>) {
     let number = self.number;
+    let Some(github_action) = action.github_action(number) else {
+      return;
+    };
     self.write(
       action.key(),
       vec![self.repo.clone(), number.to_string()],
-      action.github_action(number),
+      github_action,
       action.done_message(),
       window,
       cx,
@@ -450,6 +460,9 @@ impl PrDetailScreen {
   }
 
   fn tap_action(&mut self, action: PrAction, window: &mut Window, cx: &mut Context<Self>) {
+    if action == PrAction::Review {
+      return super::pr_review::open(self.repo.clone(), self.number, cx);
+    }
     if !action.destructive() {
       return self.run_action(action, window, cx);
     }
@@ -858,39 +871,43 @@ mod tests {
   fn actions_follow_state() {
     assert_eq!(
       actions(&pr(1, "OPEN", false)),
-      [PrAction::ConvertToDraft, PrAction::Close]
+      [PrAction::Review, PrAction::ConvertToDraft, PrAction::Close]
     );
     assert_eq!(
       actions(&pr(1, "OPEN", true)),
-      [PrAction::MarkReady, PrAction::Close]
+      [PrAction::Review, PrAction::MarkReady, PrAction::Close]
     );
-    assert_eq!(actions(&pr(1, "CLOSED", false)), [PrAction::Reopen]);
-    assert!(actions(&pr(1, "MERGED", false)).is_empty());
+    assert_eq!(
+      actions(&pr(1, "CLOSED", false)),
+      [PrAction::Review, PrAction::Reopen]
+    );
+    assert_eq!(actions(&pr(1, "MERGED", false)), [PrAction::Review]);
+    assert_eq!(PrAction::Review.github_action(1), None);
   }
 
   #[core::prelude::v1::test]
   fn actions_map_to_github_writes() {
     assert_eq!(
       PrAction::MarkReady.github_action(5),
-      GithubAction::SetPrDraft {
+      Some(GithubAction::SetPrDraft {
         number: 5,
         draft: false
-      }
+      })
     );
     assert_eq!(
       PrAction::ConvertToDraft.github_action(5),
-      GithubAction::SetPrDraft {
+      Some(GithubAction::SetPrDraft {
         number: 5,
         draft: true
-      }
+      })
     );
     assert_eq!(
       PrAction::Close.github_action(5),
-      GithubAction::ClosePr { number: 5 }
+      Some(GithubAction::ClosePr { number: 5 })
     );
     assert_eq!(
       PrAction::Reopen.github_action(5),
-      GithubAction::ReopenPr { number: 5 }
+      Some(GithubAction::ReopenPr { number: 5 })
     );
     assert!(PrAction::Close.destructive());
     assert!(!PrAction::Reopen.destructive());
