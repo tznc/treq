@@ -5767,7 +5767,7 @@ fn changes_tab_hides_the_committed_group_when_filtered_out(cx: &mut TestAppConte
 fn changes_tab_asks_for_a_commit_message(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   h.click("commit-message");
-  h.cx.simulate_keystrokes("cmd-enter");
+  h.cx.simulate_keystrokes("secondary-enter");
   h.cx.run_until_parked();
   assert!(h.drawn("commit-message-error"));
   assert!(!host.writes().iter().any(|w| w.starts_with("commit")));
@@ -6227,7 +6227,7 @@ fn left_comments_the_selected_lines(cx: &mut TestAppContext) {
   h.cx.simulate_keystrokes("shift-down left");
   assert!(h.drawn("comment-input"));
   h.cx.simulate_input("Both");
-  h.cx.simulate_keystrokes("cmd-enter");
+  h.cx.simulate_keystrokes("secondary-enter");
   settle_save(&mut h);
   let saved = host.review.lock().unwrap().clone().unwrap_or_default();
   assert!(
@@ -6253,7 +6253,7 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
     }),
     "```suggestion\nb\nc\n```\n"
   );
-  h.cx.simulate_keystrokes("cmd-enter");
+  h.cx.simulate_keystrokes("secondary-enter");
   assert!(h.drawn("agent-review-suggestion"), "drawn as a diff");
   // The write changes a.rs on disk; that read is not stale.
   let mut applied = host.working.clone().expect("working");

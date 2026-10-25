@@ -117,6 +117,10 @@ fn contained_path(root: &Path, file_path: &str) -> Result<PathBuf, String> {
     .map_err(|e| format!("Failed to resolve {}: {}", root.display(), e))?;
   let requested = Path::new(file_path);
   let relative = if requested.is_absolute() {
+    // Resolved like the root, so a path through a symlink still matches it.
+    let requested = requested
+      .canonicalize()
+      .map_err(|e| format!("Failed to read {file_path}: {e}"))?;
     requested
       .strip_prefix(&root)
       .map_err(|_| format!("'{file_path}' is outside the workspace"))?
@@ -236,6 +240,32 @@ mod tests {
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "A\n");
+  }
+
+  // macOS temp dirs live under /var, a symlink to /private/var.
+  #[cfg(unix)]
+  #[test]
+  fn accepts_an_absolute_path_under_a_symlinked_root() {
+    let real = tempfile::TempDir::new().unwrap();
+    std::fs::write(real.path().join("a.rs"), "a\n").unwrap();
+    let links = tempfile::TempDir::new().unwrap();
+    let root = links.path().join("root");
+    std::os::unix::fs::symlink(real.path(), &root).unwrap();
+
+    splice_lines(
+      root.to_str().unwrap(),
+      root.join("a.rs").to_str().unwrap(),
+      1,
+      1,
+      None,
+      "A",
+    )
+    .unwrap();
+
+    assert_eq!(
+      std::fs::read_to_string(real.path().join("a.rs")).unwrap(),
+      "A\n"
+    );
   }
 
   #[test]
