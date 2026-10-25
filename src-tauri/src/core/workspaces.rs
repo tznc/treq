@@ -3048,18 +3048,29 @@ pub fn merge_workspace(
   message: &str,
   merge_strategy: MergeCommit,
 ) -> Result<(), String> {
-  merge_workspace_with(repo_path, workspace_id, message, merge_strategy, false)
+  merge_workspace_with(
+    repo_path,
+    workspace_id,
+    message,
+    merge_strategy,
+    false,
+    false,
+  )
 }
 
 /// [`merge_workspace`] that removes the merged checkout in the background
-/// (see [`delete_workspace_removing_directory_later`]).
+/// (see [`delete_workspace_removing_directory_later`]) and moves the home
+/// repository to the target branch after returning, so the caller can report
+/// the merge first. That move holds the repo's commit lock from before this
+/// returns until it is done, so reads that take the lock (the sidebar poll)
+/// wait for it instead of seeing the old checkout.
 pub fn merge_workspace_removing_directory_later(
   repo_path: &str,
   workspace_id: i64,
   message: &str,
   merge_strategy: MergeCommit,
 ) -> Result<(), String> {
-  merge_workspace_with(repo_path, workspace_id, message, merge_strategy, true)
+  merge_workspace_with(repo_path, workspace_id, message, merge_strategy, true, true)
 }
 
 fn merge_workspace_with(
@@ -3068,6 +3079,7 @@ fn merge_workspace_with(
   message: &str,
   merge_strategy: MergeCommit,
   defer_removal: bool,
+  defer_home_edit: bool,
 ) -> Result<(), String> {
   // Get the workspace from the database
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
@@ -3133,10 +3145,15 @@ fn merge_workspace_with(
     }
   }
 
-  jj::jj_edit_bookmark(repo_path, target_branch)
-    .map_err(|e| format!("Failed to update home repo to target branch: {}", e))?;
-  if workspace.branch_name == target_branch {
-    sync_home_and_workspace_for_branch(repo_path, target_branch, SyncSource::WorkspaceToHome)?;
+  // Merging the target branch into itself syncs the home checkout with the
+  // workspace's, which needs the edit first.
+  let home_edit_later = defer_home_edit && workspace.branch_name != target_branch;
+  if !home_edit_later {
+    jj::jj_edit_bookmark(repo_path, target_branch)
+      .map_err(|e| format!("Failed to update home repo to target branch: {}", e))?;
+    if workspace.branch_name == target_branch {
+      sync_home_and_workspace_for_branch(repo_path, target_branch, SyncSource::WorkspaceToHome)?;
+    }
   }
 
   // Remove the workspace from jj and its directory from disk.
@@ -3157,7 +3174,27 @@ fn merge_workspace_with(
   local_db::delete_workspace(repo_path, workspace_id)
     .map_err(|e| format!("Failed to delete workspace from db: {}", e))?;
 
+  if home_edit_later {
+    edit_home_bookmark_later(repo_path, target_branch);
+  }
   Ok(())
+}
+
+/// Moves the home repository to `bookmark` on a background thread, under the
+/// repo's commit lock. Returns once the thread holds the lock, so no read
+/// that takes the lock slips in before the move.
+fn edit_home_bookmark_later(repo_path: &str, bookmark: &str) {
+  let (repo_path, bookmark) = (repo_path.to_string(), bookmark.to_string());
+  let (locked, wait_for_lock) = std::sync::mpsc::channel();
+  std::thread::spawn(move || {
+    let lock = commit_lock_for_repo(&repo_path);
+    let _guard = lock.lock_or_recover();
+    locked.send(()).ignore_closed();
+    jj::jj_edit_bookmark(&repo_path, &bookmark)
+      .map_err(|e| format!("Failed to update home repo to target branch: {e}"))
+      .warn_on_err("jj edit home bookmark after merge");
+  });
+  wait_for_lock.recv().ignore_closed();
 }
 
 fn sync_home_and_workspace_for_branch(
