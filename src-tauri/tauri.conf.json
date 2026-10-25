@@ -609,7 +609,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Command action: fetch, pull, remote-info, bookmark-track, push, pr, pr-create"
+              "description": "Command action: fetch, pull, remote-info, bookmark-track, push, pr, pr-create, github-read, github-write"
             },
             {
               "name": "repo",
@@ -630,7 +630,7 @@
             {
               "name": "value",
               "takesValue": true,
-              "description": "Bookmark name for bookmark-track, or the pull request body for pr-create"
+              "description": "Bookmark name for bookmark-track, the pull request body for pr-create, or the JSON query or action for github-read and github-write"
             },
             {
               "name": "idempotency-key",

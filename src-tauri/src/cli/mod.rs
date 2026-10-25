@@ -656,6 +656,17 @@ pub(crate) fn parse_remote_command_request(
       draft: get_arg_value(matches, "draft").as_deref() == Some("true"),
       idempotency_key: require_idempotency_key(idempotency_key)?,
     }),
+    ("git", "github-read") => Ok(TreqCommandRequest::GithubRead {
+      repo,
+      query: serde_json::from_str(&require_value("GitHub query JSON")?)
+        .map_err(|e| format!("invalid GitHub query: {e}"))?,
+    }),
+    ("git", "github-write") => Ok(TreqCommandRequest::GithubWrite {
+      repo,
+      action: serde_json::from_str(&require_value("GitHub action JSON")?)
+        .map_err(|e| format!("invalid GitHub action: {e}"))?,
+      idempotency_key: require_idempotency_key(idempotency_key)?,
+    }),
     ("agent-remote", "start") => Ok(TreqCommandRequest::AgentStart {
       repo,
       workspace: require_workspace()?,
