@@ -1,6 +1,6 @@
 use crate::result_ext::ResultExt;
 use crate::{jj, local_db};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -56,20 +56,23 @@ pub(crate) fn deduplicate_file_paths(file_paths: Vec<String>) -> Vec<String> {
     .collect()
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceFileHunksBatchFile {
   pub path: String,
+  #[serde(default)]
   pub hunks: Vec<jj::JjDiffHunk>,
-  #[serde(skip_serializing_if = "Option::is_none")]
+  #[serde(default, skip_serializing_if = "Option::is_none")]
   pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+/// Also what a remote host's `DiffFiles` answers.
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceFileHunksBatch {
   /// Names the working-copy diff the files were read from, and the marker
   /// style; empty when unknown. Equal tokens mean equal hunks.
+  #[serde(default)]
   pub snapshot_token: String,
   pub files: Vec<WorkspaceFileHunksBatchFile>,
 }
