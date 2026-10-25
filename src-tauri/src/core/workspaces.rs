@@ -4574,7 +4574,7 @@ fn notify_auto_review_rebase(repo_path: &str, workspace_id: i64) {
 
 /// Reads the repo-level "auto_push" setting from the app database.
 /// Defaults to `false` when unset, unparseable, or the database is unavailable.
-fn resolve_auto_push(repo_path: &str) -> bool {
+pub fn resolve_auto_push(repo_path: &str) -> bool {
   let app_db_path = crate::core::resolve_app_db_path(repo_path);
   if !app_db_path.exists() {
     return false;
