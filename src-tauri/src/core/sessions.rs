@@ -32,6 +32,11 @@ pub fn list_sessions(repo_path: &str) -> Result<Vec<Session>, String> {
   local_db::get_sessions(repo_path)
 }
 
+/// Gives the session a new name.
+pub fn rename_session(repo_path: &str, session_id: i64, name: &str) -> Result<(), String> {
+  local_db::update_session_name(repo_path, session_id, name.to_string())
+}
+
 /// The model the session runs, when one was chosen.
 pub fn session_model(repo_path: &str, session_id: i64) -> Result<Option<String>, String> {
   local_db::get_session_model(repo_path, session_id)

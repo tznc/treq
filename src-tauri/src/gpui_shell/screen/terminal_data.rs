@@ -412,7 +412,7 @@ impl TerminalHost for Backend {
   }
 
   fn rename_session(&self, repo_path: &str, session_id: i64, name: &str) -> Result<(), String> {
-    crate::local_db::update_session_name(&self.state_scope(repo_path), session_id, name.into())
+    crate::core::sessions::rename_session(&self.state_scope(repo_path), session_id, name)
   }
 
   fn sessions(&self, repo_path: &str) -> Result<Vec<crate::local_db::Session>, String> {
