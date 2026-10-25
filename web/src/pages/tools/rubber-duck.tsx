@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import type React from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Layout from '@theme/Layout';
 import DownloadCTA from '@site/src/components/DownloadCTA';
 import Head from '@docusaurus/Head';

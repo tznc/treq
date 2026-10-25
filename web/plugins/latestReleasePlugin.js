@@ -37,7 +37,10 @@ async function fetchLatestRelease() {
 
 // Writes static/version (read by the macOS updater via treq.dev/version) and
 // exposes the latest release to the client as global data.
-/** @type {import('@docusaurus/types').PluginModule} */
+/**
+ * @param {import('@docusaurus/types').LoadContext} context
+ * @returns {import('@docusaurus/types').Plugin<Awaited<ReturnType<typeof fetchLatestRelease>> | null>}
+ */
 function latestReleasePlugin(context) {
   return {
     name: 'latest-release-plugin',

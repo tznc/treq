@@ -1,7 +1,9 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.4.7/schema.json",
 	"files": {
-		"includes": ["**"]
+		"includes": [
+			"**"
+		]
 	},
 	"formatter": {
 		"indentStyle": "space",
@@ -16,5 +18,37 @@
 				"noExplicitAny": "error"
 			}
 		}
-	}
+	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true,
+			"cssModules": true
+		}
+	},
+	"overrides": [
+		{
+			"includes": [
+				"web/**"
+			],
+			"linter": {
+				"rules": {
+					"a11y": "warn",
+					"correctness": {
+						"useExhaustiveDependencies": "warn"
+					},
+					"style": {
+						"noNonNullAssertion": "warn"
+					},
+					"suspicious": {
+						"noArrayIndexKey": "warn",
+						"useIterableCallbackReturn": "warn",
+						"noControlCharactersInRegex": "warn"
+					},
+					"security": {
+						"noDangerouslySetInnerHtml": "warn"
+					}
+				}
+			}
+		}
+	]
 }

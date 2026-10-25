@@ -31,7 +31,7 @@ function pickDefaultFile(files: SkillFile[]): SkillFile | null {
 
 export default function SkillDetailPage({ skill }: { skill: Skill }) {
   return (
-    <Layout title={skill.name} description={skill.description}>
+    <Layout title={skill.name} description={skill.description ?? undefined}>
       <SkillDetailContent skill={skill} />
     </Layout>
   );

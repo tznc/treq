@@ -1,4 +1,4 @@
-'use strict';
+
 
 const SITE_URL = 'https://treq.dev';
 
