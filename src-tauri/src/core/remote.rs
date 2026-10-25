@@ -3530,6 +3530,39 @@ pub async fn execute_remote_command<T: DeserializeOwned>(
     .map_err(|error| RemoteCommandError::InvalidJson(error.to_string()))
 }
 
+impl RemoteCommandError {
+  /// Whether the command failed because the pooled connection was dead
+  /// without being known to be: a channel error (closed session, relay
+  /// recycled), a channel that never opened, or the deadline. A read is safe
+  /// to send again on a fresh connection.
+  pub fn is_stale_connection(&self) -> bool {
+    use crate::core::remote_ssh_transport::SshTransportError;
+    matches!(self, Self::Transport(message)
+      if message.starts_with(&SshTransportError::ChannelError(String::new()).to_string())
+        || *message == SshTransportError::DeadlineExceeded.to_string())
+  }
+}
+
+/// [`execute_remote_command`] for a read: after a stale-connection failure
+/// (see [`RemoteCommandError::is_stale_connection`]) the dead connection is
+/// dropped and the read is sent once more on a fresh one. Mutations never go
+/// through here; they verify before any retry ([`retry_after_reconnect`]).
+pub async fn execute_remote_read<T: DeserializeOwned>(
+  pool: &crate::core::remote_ssh_transport::SshConnectionPool,
+  endpoint: &crate::core::remote_control_plane::SshEndpoint,
+  request: TreqCommandRequest,
+  limits: crate::core::remote_ssh_transport::ExecLimits,
+  cancellation: &crate::core::remote_ssh_transport::CancellationToken,
+) -> Result<T, RemoteCommandError> {
+  match execute_remote_command::<T>(pool, endpoint, request.clone(), limits, cancellation).await {
+    Err(error) if error.is_stale_connection() => {
+      pool.mark_dead(endpoint).await;
+      execute_remote_command::<T>(pool, endpoint, request, limits, cancellation).await
+    }
+    result => result,
+  }
+}
+
 impl TransportError {
   fn command_failed_from_message(message: String) -> Self {
     Self::CommandFailed {

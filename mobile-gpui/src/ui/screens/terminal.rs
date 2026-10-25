@@ -22,7 +22,7 @@ use treq_lib::{
   core::{
     pty_remote_supervisor::PtySessionInfo,
     remote::{RemoteHostCheck, TreqCommandRequest},
-    remote_pty::{PtyLaunchSpec, RemoteAgentId, RemotePtyBinding},
+    remote_pty::{AttachCommandCache, PtyLaunchSpec, RemoteAgentId, RemotePtyBinding},
   },
   local_db::Workspace,
 };
@@ -36,6 +36,10 @@ use crate::{
     widgets, Load, Location,
   },
 };
+
+/// Attach commands the host answered, kept for re-attaching.
+static ATTACH_COMMANDS: std::sync::LazyLock<AttachCommandCache> =
+  std::sync::LazyLock::new(AttachCommandCache::default);
 
 /// Size used to start a session, until the view measures itself.
 const INITIAL_SIZE: (u16, u16) = (80, 24);
@@ -661,9 +665,18 @@ impl TerminalScreen {
       window_label: None,
     };
     let attach = async move {
-      let command = remote::read::<String>(request).await?;
+      // Re-attaching the same session skips asking the host for the command.
+      let cache_key = AttachCommandCache::key(&endpoint, &request);
+      let command = match ATTACH_COMMANDS.get(&cache_key) {
+        Some(command) => command,
+        None => {
+          let command = remote::read::<String>(request).await?;
+          ATTACH_COMMANDS.insert(cache_key.clone(), command.clone());
+          command
+        }
+      };
       let output = tx.clone();
-      backend::get()
+      let attached = backend::get()
         .ptys
         .create_with_command(
           binding,
@@ -679,7 +692,12 @@ impl TerminalScreen {
           },
         )
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+      if attached.is_err() {
+        // The host may have changed under the cached command.
+        ATTACH_COMMANDS.forget(&cache_key);
+      }
+      attached
     };
     let screen = cx.weak_entity();
     load::run_in(window, cx, attach, move |this, result, window, cx| {

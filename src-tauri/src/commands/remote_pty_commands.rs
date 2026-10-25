@@ -6,7 +6,9 @@
 
 use crate::core::remote::TreqCommandRequest;
 use crate::core::remote_control_plane::SshEndpoint;
-use crate::core::remote_pty::{PtyLaunchSpec, RemotePtyBinding, RemotePtyError, RemotePtyManager};
+use crate::core::remote_pty::{
+  AttachCommandCache, PtyLaunchSpec, RemotePtyBinding, RemotePtyError, RemotePtyManager,
+};
 use crate::core::remote_ssh_transport::{CancellationToken, ExecLimits};
 use serde::Serialize;
 use tauri::Emitter;
@@ -97,6 +99,10 @@ pub struct Reattach {
   pub rows: u16,
 }
 
+/// Attach commands the host answered, kept for re-attaching.
+static ATTACH_COMMANDS: std::sync::LazyLock<AttachCommandCache> =
+  std::sync::LazyLock::new(AttachCommandCache::default);
+
 /// `remote_pty_reattach`'s work, shared with the native terminal pane:
 /// fetches the attach command, then opens the channel with it, handing its output
 /// to `crate::pty_stream` and emitting its `remote-pty-exit-<id>` event.
@@ -119,23 +125,33 @@ pub async fn reattach(
     rows,
   } = request;
   let cancellation = CancellationToken::new();
-  let attach_command = crate::core::remote::execute_remote_command::<String>(
-    pool,
-    &endpoint,
-    TreqCommandRequest::PtyAttachCommand {
-      repo: repository_id.clone(),
-      workspace: workspace_id.clone(),
-      label,
-      remote_dir: remote_working_directory.clone(),
-      launch,
-      cols,
-      rows,
-    },
-    ExecLimits::default(),
-    &cancellation,
-  )
-  .await
-  .map_err(|e| e.to_string())?;
+  let attach_request = TreqCommandRequest::PtyAttachCommand {
+    repo: repository_id.clone(),
+    workspace: workspace_id.clone(),
+    label,
+    remote_dir: remote_working_directory.clone(),
+    launch,
+    cols,
+    rows,
+  };
+  // Re-attaching the same session skips asking the host for the command.
+  let cache_key = AttachCommandCache::key(&endpoint, &attach_request);
+  let attach_command = match ATTACH_COMMANDS.get(&cache_key) {
+    Some(command) => command,
+    None => {
+      let command = crate::core::remote::execute_remote_command::<String>(
+        pool,
+        &endpoint,
+        attach_request,
+        ExecLimits::default(),
+        &cancellation,
+      )
+      .await
+      .map_err(|e| e.to_string())?;
+      ATTACH_COMMANDS.insert(cache_key.clone(), command.clone());
+      command
+    }
+  };
 
   let binding = RemotePtyBinding {
     endpoint_id: endpoint.id.clone(),
@@ -147,7 +163,7 @@ pub async fn reattach(
   };
 
   let (on_output, on_exit) = tauri_event_handlers(app, session_id);
-  manager
+  let attached = manager
     .create_with_command(
       binding,
       &endpoint,
@@ -157,6 +173,10 @@ pub async fn reattach(
       on_output,
       on_exit,
     )
-    .await
-    .map_err(remote_pty_error_to_string)
+    .await;
+  if attached.is_err() {
+    // The host may have changed under the cached command.
+    ATTACH_COMMANDS.forget(&cache_key);
+  }
+  attached.map_err(remote_pty_error_to_string)
 }
