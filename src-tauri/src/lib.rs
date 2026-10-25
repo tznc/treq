@@ -8,7 +8,13 @@
 )]
 
 // The app side of dispatch (listener, responses) is unused by the headless CLI.
-#[cfg_attr(not(feature = "gui"), expect(dead_code, reason = "the headless CLI does not use the app side of dispatch"))]
+#[cfg_attr(
+  not(feature = "gui"),
+  expect(
+    dead_code,
+    reason = "the headless CLI does not use the app side of dispatch"
+  )
+)]
 mod agent_dispatch;
 #[cfg(feature = "gui")]
 mod agent_runtime;
@@ -89,7 +95,6 @@ extern crate self as treq_lib;
 
 /// The real-repository fixture the integration tests use (`tests/common`).
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test fixture")]
 mod test_repo;
 
 #[cfg(feature = "gui")]

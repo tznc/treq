@@ -34,7 +34,6 @@ static TRAILING_SEPARATORS: LazyLock<Regex> =
   LazyLock::new(|| Regex::new(r"[/.\-]+$").expect("regex"));
 
 /// `sanitizeForBranchName`.
-#[expect(clippy::expect_used, reason = "constant pattern")]
 fn sanitize_for_branch_name(text: &str) -> String {
   let lower: String = text
     .to_lowercase()
@@ -54,7 +53,6 @@ fn sanitize_for_branch_name(text: &str) -> String {
 }
 
 /// `cleanBranchNameTrailing`.
-#[expect(clippy::expect_used, reason = "constant pattern")]
 fn clean_branch_name_trailing(name: &str) -> String {
   let single = &*TRAILING_SEPARATOR_LETTER;
   let separators = &*TRAILING_SEPARATORS;

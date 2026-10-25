@@ -1,4 +1,4 @@
-#![expect(clippy::expect_used, clippy::string_slice, reason = "test code")]
+#![expect(clippy::expect_used, reason = "test code")]
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use tempfile::TempDir;

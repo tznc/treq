@@ -1,4 +1,4 @@
-#![expect(clippy::expect_used, clippy::string_slice, reason = "test code")]
+#![expect(clippy::expect_used, reason = "test code")]
 //! Real-`sshd` counterpart to `core::remote_ssh_transport`'s `mod tests`.
 //!
 //! Every test in that module runs against an in-process mock

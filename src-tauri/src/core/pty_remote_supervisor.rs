@@ -699,10 +699,6 @@ pub fn resize_session(
 /// command line covers both "start a fresh session" and "reattach to a
 /// running one" — the mobile/desktop client does not need to know in
 /// advance which case applies.
-#[expect(
-  clippy::too_many_arguments,
-  reason = "flat argument list kept to match callers"
-)]
 pub fn build_attach_command(
   repo: &str,
   remote_dir: &str,

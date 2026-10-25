@@ -40,7 +40,7 @@ pub const SECURE_STORAGE_UNAVAILABLE_PREFIX: &str = "secure_storage_unavailable:
 
 #[cfg_attr(
   not(any(mobile, test)),
-  allow(dead_code, reason = "only used on mobile builds and in tests")
+  expect(dead_code, reason = "only used on mobile builds and in tests")
 )]
 fn generate_private_key() -> Result<PrivateKey, String> {
   let mut seed = [0u8; 32];
@@ -52,7 +52,7 @@ fn generate_private_key() -> Result<PrivateKey, String> {
 
 #[cfg_attr(
   not(any(mobile, test)),
-  allow(dead_code, reason = "only used on mobile builds and in tests")
+  expect(dead_code, reason = "only used on mobile builds and in tests")
 )]
 fn device_key_info(key: &PrivateKey) -> Result<DeviceKeyInfo, String> {
   let public_key = key.public_key();

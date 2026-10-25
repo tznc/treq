@@ -2,9 +2,7 @@
   clippy::unwrap_used,
   clippy::let_underscore_must_use,
   clippy::expect_used,
-  clippy::string_slice,
   clippy::print_stdout,
-  clippy::print_stderr,
   reason = "measurement code"
 )]
 //! Round 6 measurements for multi-window and merge/sync/push flows. Ignored:

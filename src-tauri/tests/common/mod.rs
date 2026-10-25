@@ -7,7 +7,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 
-#[expect(dead_code, reason = "each test binary uses a subset of the fixtures")]
+#[expect(
+  clippy::allow_attributes,
+  reason = "dead in only some of the binaries that share this file"
+)]
+#[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
 pub const PASSING_WORKFLOW: &str = "
 name: Passing CI
 on:
@@ -22,7 +26,11 @@ jobs:
         run: echo world
 ";
 
-#[expect(dead_code, reason = "each test binary uses a subset of the fixtures")]
+#[expect(
+  clippy::allow_attributes,
+  reason = "dead in only some of the binaries that share this file"
+)]
+#[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
 pub const FAILING_WORKFLOW: &str = "
 name: Failing CI
 on:
@@ -71,7 +79,11 @@ impl Drop for RepoTempDir {
   }
 }
 
-#[expect(dead_code, reason = "each test binary uses a subset of the fixtures")]
+#[expect(
+  clippy::allow_attributes,
+  reason = "dead in only some of the binaries that share this file"
+)]
+#[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
 pub struct TestRepo {
   pub temp_dir: RepoTempDir,
   pub repo_path: String,
@@ -331,7 +343,11 @@ impl TestRepo {
   /// helpers below against the actual CLI on platforms where it's reliably
   /// available (see that file for why Windows is excluded). Test bodies
   /// themselves should use the jj-lib wrappers, not this.
-  #[expect(dead_code, reason = "each test binary uses a subset of the fixtures")]
+  #[expect(
+    clippy::allow_attributes,
+    reason = "dead in only some of the binaries that share this file"
+  )]
+  #[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
   pub fn run_jj_cli(cwd: &str, args: &[&str]) -> Result<String, String> {
     let jj_binary = treq_lib::binary_paths::detect_binary("jj").unwrap_or_else(|| "jj".to_string());
     let output = Command::new(jj_binary)
@@ -1180,7 +1196,11 @@ pub fn write_test_file(
 /// Helpers for verifying jj state
 pub struct JjVerifier;
 
-#[expect(dead_code, reason = "each test binary uses a subset of the fixtures")]
+#[expect(
+  clippy::allow_attributes,
+  reason = "dead in only some of the binaries that share this file"
+)]
+#[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
 impl JjVerifier {
   /// Get list of jj workspaces, including `default` (equivalent to `jj workspace list`,
   /// name column only). Not `list_jj_workspaces`, which filters `default` out for

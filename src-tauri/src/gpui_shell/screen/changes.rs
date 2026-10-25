@@ -2597,10 +2597,6 @@ impl ChangesView {
     )
   }
 
-  #[expect(
-    clippy::too_many_arguments,
-    reason = "flat argument list kept to match callers"
-  )]
   fn file_row(
     &mut self,
     list: List,
