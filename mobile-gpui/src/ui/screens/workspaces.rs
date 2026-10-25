@@ -386,6 +386,10 @@ impl WorkspacesScreen {
             this.update(cx, |screen, cx| screen.select(None, cx)).ok();
           }
         }),
+        sheet::MenuEntry::new("menu-issues", "Issues", {
+          let repo = self.repo.clone();
+          move |_, cx| super::issues::open(repo.clone(), cx)
+        }),
         sheet::MenuEntry::new("menu-refresh", "Refresh", move |_, cx| {
           this.update(cx, |screen, cx| screen.reload(cx)).ok();
         }),
