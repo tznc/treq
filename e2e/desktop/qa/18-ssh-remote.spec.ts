@@ -263,7 +263,8 @@ test("ssh remote: install the agent CLIs", async () => {
      npm i -g @openai/codex @github/copilot >/dev/null 2>&1`,
   );
   for (const bin of ["claude", "codex", "cursor-agent", "copilot"]) {
-    expect(onServer(`~/.local/bin/${bin} --version`)).not.toBe("");
+    // A login shell, as Treq starts agents: npm's CLIs need node on PATH.
+    expect(onServer(`bash -lc '${bin} --version'`)).not.toBe("");
   }
 });
 
