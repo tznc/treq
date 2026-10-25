@@ -19,7 +19,7 @@ use gpui_kit::{
 use serde::Deserialize;
 use treq_lib::{
   core::{
-    remote::TreqCommandRequest,
+    remote::{CreatedPullRequest, RemotePullRequestStatus, TreqCommandRequest},
     remote_control_plane::SshEndpoint,
     workspaces::{WorkspaceStatus, WorkspaceSummary},
   },
@@ -35,6 +35,7 @@ use super::{
   code::CodeView,
   commits::{self, CommitsScreen},
   conflicts, diff, mutation_message, on_epoch,
+  pull_request::{self, CreateSheet, PullRequestSheet},
   terminal::Sessions,
   workspaces,
 };
@@ -190,6 +191,8 @@ pub struct WorkspaceScreen {
   view: View,
   status: Load<WorkspaceStatus>,
   diff: Load<JjRevisionDiff>,
+  /// The branch's pull request, read with the host's `gh`.
+  pr: Load<RemotePullRequestStatus>,
   marker: Option<String>,
   sessions: Entity<Sessions>,
   /// Made when the Commits tab is first shown.
@@ -257,6 +260,7 @@ impl WorkspaceScreen {
       view: View::Terminals,
       status: status.map_or(Load::Idle, Load::Ready),
       diff: remote::last(&diff_request(&target)).map_or(Load::Idle, Load::Ready),
+      pr: remote::last(&pull_request::status_request(&target)).map_or(Load::Idle, Load::Ready),
       target,
       marker: None,
       sessions,
@@ -311,6 +315,19 @@ impl WorkspaceScreen {
       cx,
       remote::read_cached::<JjRevisionDiff>(diff_request(&self.target), join),
       |this, result, _| this.diff = Load::from_result(result),
+    );
+    // GitHub is slow and optional: a failed read keeps the last answer.
+    load::run(
+      cx,
+      remote::read_cached::<RemotePullRequestStatus>(
+        pull_request::status_request(&self.target),
+        join,
+      ),
+      |this, result, _| match result {
+        Ok(status) => this.pr = Load::Ready(status),
+        Err(error) if this.pr.ready().is_none() => this.pr = Load::Failed(error),
+        Err(_) => {}
+      },
     );
     if !join {
       self.sessions.update(cx, |sessions, cx| sessions.reload(cx));
@@ -390,7 +407,7 @@ impl WorkspaceScreen {
     let (stack_repo, stack_branch) = (repo.clone(), branch.clone());
     let (rename_repo, rename_ws) = (repo.clone(), workspace.clone());
     let reload = this.clone();
-    let entries = vec![
+    let mut entries = vec![
       sheet::MenuEntry::new("menu-push", "Push", on(Self::confirm_push)),
       sheet::MenuEntry::new(
         "menu-rebase",
@@ -432,7 +449,101 @@ impl WorkspaceScreen {
       sheet::MenuEntry::new("menu-archive", "Archive", on(Self::confirm_archive)),
       sheet::MenuEntry::new("menu-delete", "Delete…", on(Self::confirm_delete)).danger(),
     ];
+    let pr_entry = match &self.pr {
+      Load::Ready(RemotePullRequestStatus {
+        pull_request: Some(pr),
+        ..
+      }) => Some(sheet::MenuEntry::new(
+        "menu-pr",
+        format!("Pull request #{}", pr.number),
+        on(Self::show_pr),
+      )),
+      Load::Ready(RemotePullRequestStatus {
+        github_repo: None, ..
+      }) => None,
+      _ => Some(sheet::MenuEntry::new(
+        "menu-pr",
+        "Create pull request…",
+        on(Self::create_pr_sheet),
+      )),
+    };
+    if let Some(entry) = pr_entry {
+      entries.insert(1, entry);
+    }
     sheet::menu(workspaces::title_of(&workspace), entries, cx);
+  }
+
+  fn show_pr(&mut self, cx: &mut Context<Self>) {
+    let Some(status) = self.pr.ready().cloned() else {
+      return;
+    };
+    sheet::open(Some("Pull request".into()), cx, move |_, cx| {
+      cx.new(|_| PullRequestSheet::new(status))
+    });
+  }
+
+  fn create_pr_sheet(&mut self, cx: &mut Context<Self>) {
+    if let Load::Failed(error) = &self.pr {
+      self.message = Some((false, errors::describe(error).message));
+      return cx.notify();
+    }
+    let Some(workspace) = self.workspace() else {
+      return;
+    };
+    let title = workspaces::title_of(workspace);
+    let body = workspace.description.clone().unwrap_or_default();
+    let into = self.target_branch();
+    let this = cx.weak_entity();
+    let on_create: pull_request::OnCreate = Box::new(move |title, body, draft, cx| {
+      this
+        .update(cx, |screen, cx| screen.create_pr(title, body, draft, cx))
+        .ok();
+    });
+    sheet::open(Some("New pull request".into()), cx, move |window, cx| {
+      cx.new(|cx| CreateSheet::new(title, body, into, on_create, window, cx))
+    });
+  }
+
+  fn create_pr(&mut self, title: String, body: String, draft: bool, cx: &mut Context<Self>) {
+    if self.busy.is_some() {
+      return;
+    }
+    let Target { repo, id, .. } = self.target.clone();
+    let inputs = vec![repo.clone(), id.clone(), title.clone()];
+    let key = self.keys.key_for("pr", &[&repo, &id, &title]);
+    self.busy = Some("pr");
+    self.message = None;
+    let request = TreqCommandRequest::CreatePullRequest {
+      repo,
+      workspace: id,
+      title,
+      body,
+      draft,
+      idempotency_key: key,
+    };
+    load::run(cx, remote::mutate(request), move |this, outcome, cx| {
+      this.busy = None;
+      let refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
+      this.keys.settle("pr", &refs, &outcome);
+      this.message = Some(match &outcome {
+        Ok(Mutation::Applied(value)) => {
+          this.changed = true;
+          let created = serde_json::from_value::<CreatedPullRequest>(value.clone()).ok();
+          (
+            true,
+            created.map_or("Pull request created.".into(), |pr| {
+              format!("Pull request #{} created.", pr.number)
+            }),
+          )
+        }
+        other => (
+          false,
+          errors::describe(&mutation_message(other, "").1).message,
+        ),
+      });
+      this.reload(cx);
+    });
+    cx.notify();
   }
 
   fn confirm_push(&mut self, cx: &mut Context<Self>) {
@@ -680,8 +791,8 @@ impl WorkspaceScreen {
     cx.notify();
   }
 
-  fn header(&self, cx: &App) -> impl IntoElement {
-    let theme = cx.theme();
+  fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let muted = cx.theme().muted_foreground;
     let Some(status) = self.status.ready() else {
       return match &self.status {
         Load::Failed(error) => widgets::error_text(errors::describe(error).message, cx),
@@ -706,10 +817,10 @@ impl WorkspaceScreen {
               .min_w_0()
               .truncate(),
           )
-          .child(div().text_color(theme.muted_foreground).child("→"))
+          .child(div().text_color(muted).child("→"))
           .child(
             widgets::mono(self.target_branch(), cx)
-              .text_color(theme.muted_foreground)
+              .text_color(muted)
               .truncate(),
           ),
       )
@@ -733,6 +844,14 @@ impl WorkspaceScreen {
               Tag::secondary()
                 .small()
                 .child(format!("↑{} ahead", partial.commits_ahead)),
+            )
+          })
+          .when_some(self.pr.ready().and_then(pull_request::tag), |row, tag| {
+            row.child(
+              div()
+                .id("pr-tag")
+                .child(tag)
+                .on_click(cx.listener(|this, _, _, cx| this.show_pr(cx))),
             )
           }),
       )
@@ -918,6 +1037,7 @@ impl Render for WorkspaceScreen {
             "target" => "Changing target…",
             "archive" => "Archiving…",
             "delete" => "Deleting…",
+            "pr" => "Pushing and opening the pull request…",
             _ => "Working…",
           },
           cx,

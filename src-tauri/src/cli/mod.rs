@@ -627,6 +627,18 @@ pub(crate) fn parse_remote_command_request(
       workspace,
       idempotency_key: require_idempotency_key(idempotency_key)?,
     }),
+    ("git", "pr") => Ok(TreqCommandRequest::WorkspacePullRequest {
+      repo,
+      workspace: require_workspace()?,
+    }),
+    ("git", "pr-create") => Ok(TreqCommandRequest::CreatePullRequest {
+      repo,
+      workspace: require_workspace()?,
+      title: get_arg_value(matches, "title").ok_or("--title is required")?,
+      body: value.unwrap_or_default(),
+      draft: get_arg_value(matches, "draft").as_deref() == Some("true"),
+      idempotency_key: require_idempotency_key(idempotency_key)?,
+    }),
     ("agent-remote", "start") => Ok(TreqCommandRequest::AgentStart {
       repo,
       workspace: require_workspace()?,

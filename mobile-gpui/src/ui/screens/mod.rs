@@ -7,6 +7,7 @@ pub mod conflicts;
 pub mod diff;
 pub mod file;
 pub mod new_workspaces;
+pub mod pull_request;
 pub mod repos;
 pub mod terminal;
 pub mod workspace;

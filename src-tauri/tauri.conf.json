@@ -591,7 +591,7 @@
           ]
         },
         "git": {
-          "description": "Git fetch, bookmark tracking, and push",
+          "description": "Git fetch, bookmark tracking, push and GitHub pull requests",
           "afterHelp": "Example:\n  treq git push --repo . --workspace 1 --idempotency-key k1",
           "args": [
             {
@@ -599,7 +599,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Command action: fetch, pull, remote-info, bookmark-track, push"
+              "description": "Command action: fetch, pull, remote-info, bookmark-track, push, pr, pr-create"
             },
             {
               "name": "repo",
@@ -620,12 +620,22 @@
             {
               "name": "value",
               "takesValue": true,
-              "description": "Bookmark name for bookmark-track"
+              "description": "Bookmark name for bookmark-track, or the pull request body for pr-create"
             },
             {
               "name": "idempotency-key",
               "takesValue": true,
               "description": "Idempotency key for mutations where a retry could duplicate work"
+            },
+            {
+              "name": "title",
+              "takesValue": true,
+              "description": "Pull request title for pr-create"
+            },
+            {
+              "name": "draft",
+              "takesValue": true,
+              "description": "true to open the pull request as a draft (pr-create)"
             },
             {
               "name": "format",
