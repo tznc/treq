@@ -884,7 +884,10 @@ impl WorkspacesScreen {
   fn head(&self, cx: &mut Context<Self>) -> AnyElement {
     let count = self.list.ready().map_or(0, Vec::len);
     let palette = treq_ui::theme::current(cx);
+    // A list row is as wide as its content unless told otherwise, which
+    // left the search field a sliver and the refresh button by the count.
     v_flex()
+      .w_full()
       .gap_3()
       .px_4()
       .pt_4()
