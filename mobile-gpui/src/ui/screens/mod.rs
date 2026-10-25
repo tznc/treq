@@ -6,6 +6,7 @@ pub mod commits;
 pub mod conflicts;
 pub mod diff;
 pub mod file;
+pub mod github;
 pub mod issue;
 pub mod issues;
 pub mod new_workspaces;
