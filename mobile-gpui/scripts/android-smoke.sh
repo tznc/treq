@@ -8,7 +8,7 @@ set -euo pipefail
 
 APK=$1
 OUT=${2:-target/android-smoke}
-PKG=com.treq
+PKG=com.treq.mobile
 mkdir -p "$OUT"
 # Bound every adb call so a wedged device fails the run instead of hanging it.
 ADB_BIN=$(command -v adb)

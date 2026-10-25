@@ -63,8 +63,8 @@ pub fn run() {
   let app = builder
     .setup(|app| {
       let data_dir = app.path().app_data_dir()?;
-      // The app shares `com.treq` with the desktop app, so a desktop run
-      // keeps its own settings database instead of opening the real one.
+      // A desktop run keeps its settings database apart from the desktop
+      // app's.
       #[cfg(desktop)]
       let data_dir = data_dir.join("mobile-gpui");
       let events = backend::init(app.handle().clone(), data_dir)?;
