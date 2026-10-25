@@ -360,3 +360,161 @@ fn input_latency_review_comment(cx: &mut TestAppContext) {
   h.click("comment-input");
   report("review comment draft: keystroke", typing(&mut h, 20));
 }
+
+/// A focused text field blinks its caret: frames drawn while it is focused
+/// or not, in the active window and in the background (the terminal stops
+/// its blink there; `a_background_terminal_does_not_blink`). The workspace
+/// is in sync with its remote, so nothing else animates.
+#[gpui::test]
+#[ignore = "benchmark"]
+fn input_latency_caret_blink_idle(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  if let Some(status) = host.loaded.status.as_mut() {
+    status.remote_sync = crate::core::RemoteSyncStatus::InSync;
+  }
+  let (mut h, host, frames) = super::idle::counted(cx, host, changes_route());
+  assert!(h.drawn("commit-message"));
+  let idle = super::idle::idle_for;
+  idle(&mut h, &host, &frames, 10);
+  let blurred = idle(&mut h, &host, &frames, 20);
+  h.click("commit-message");
+  idle(&mut h, &host, &frames, 3);
+  let focused = idle(&mut h, &host, &frames, 20);
+  h.cx.deactivate_window();
+  idle(&mut h, &host, &frames, 3);
+  let background = idle(&mut h, &host, &frames, 20);
+  println!("no focus, active window:           {:>3} frames in 20 s", blurred.frames);
+  println!("commit box focused, active window: {:>3} frames in 20 s", focused.frames);
+  println!("commit box focused, background:    {:>3} frames in 20 s", background.frames);
+}
+
+/// Frames the window draws per typed character.
+#[gpui::test]
+#[ignore = "benchmark"]
+fn input_latency_frames_per_keystroke(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  if let Some(status) = host.loaded.status.as_mut() {
+    status.remote_sync = crate::core::RemoteSyncStatus::InSync;
+  }
+  let (mut h, _host, frames) = super::idle::counted(cx, host, changes_route());
+  h.click("commit-message");
+  h.cx.run_until_parked();
+  let before = frames.get();
+  for ch in ["a", "b", "c", "d", "e"] {
+    h.cx.simulate_keystrokes(ch);
+  }
+  let after_keys = frames.get();
+  h.cx.run_until_parked();
+  h.cx.update(|window, cx| window.draw(cx).clear(cx));
+  println!(
+    "draws during 5 keystrokes: {} (+{} on an explicit draw after)",
+    after_keys - before,
+    frames.get() - after_keys
+  );
+}
+
+/// Five full frames of the many-files Changes tab and nothing else, for
+/// callgrind: `FILES=300 valgrind --tool=callgrind --toggle-collect='*Window*::draw' <test binary> input_latency_profile --ignored`.
+#[gpui::test]
+#[ignore = "benchmark"]
+fn input_latency_profile_many_files(cx: &mut TestAppContext) {
+  let n = std::env::var("FILES")
+    .ok()
+    .and_then(|v| v.parse().ok())
+    .unwrap_or(300);
+  let (mut h, _) = workspace_harness(cx, many_files_host(n), changes_route());
+  if h.drawn("view-large-changeset") {
+    h.click("view-large-changeset");
+  }
+  h.cx.run_until_parked();
+  for _ in 0..5 {
+    h.cx.update(|window, cx| {
+      window.refresh();
+      window.draw(cx).clear(cx);
+    });
+  }
+}
+
+/// Does a notify in one cached view re-render its cached sibling? GPUI marks
+/// the notifier's ancestors dirty, and an outer view that re-renders draws
+/// its subtree with `refreshing` set, which a nested cached view honours by
+/// rendering again. `cargo test --lib input_latency_nested_cache -- --nocapture`.
+mod nested_cache {
+  use std::{cell::Cell, rc::Rc};
+
+  use gpui::{
+    div, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
+    StyleRefinement, Styled as _, TestAppContext, Window,
+  };
+
+  struct Heavy(Rc<Cell<usize>>);
+  impl Render for Heavy {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+      self.0.set(self.0.get() + 1);
+      div().size_full()
+    }
+  }
+
+  struct Light(Rc<Cell<usize>>);
+  impl Render for Light {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+      self.0.set(self.0.get() + 1);
+      div().size_full()
+    }
+  }
+
+  struct Parent {
+    heavy: Entity<Heavy>,
+    light: Entity<Light>,
+    own: Rc<Cell<usize>>,
+  }
+  impl Render for Parent {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+      self.own.set(self.own.get() + 1);
+      div()
+        .size_full()
+        .flex()
+        .child(self.heavy.clone().cached(StyleRefinement::default().size_full()))
+        .child(self.light.clone().cached(StyleRefinement::default().size_full()))
+    }
+  }
+
+  struct Root(Entity<Parent>);
+  impl Render for Root {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+      div()
+        .size_full()
+        .child(self.0.clone().cached(StyleRefinement::default().size_full()))
+    }
+  }
+
+  #[gpui::test]
+  #[ignore = "benchmark"]
+  fn input_latency_nested_cache(cx: &mut TestAppContext) {
+    let (heavy_n, light_n, own_n) = (
+      Rc::new(Cell::new(0)),
+      Rc::new(Cell::new(0)),
+      Rc::new(Cell::new(0)),
+    );
+    let (hn, ln, on) = (heavy_n.clone(), light_n.clone(), own_n.clone());
+    let (root, cx) = cx.add_window_view(move |_, cx| {
+      let parent = cx.new(|cx| Parent {
+        heavy: cx.new(|_| Heavy(hn)),
+        light: cx.new(|_| Light(ln)),
+        own: on,
+      });
+      Root(parent)
+    });
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let before = (own_n.get(), heavy_n.get(), light_n.get());
+    // Notify the light sibling only, as a keystroke notifies its input.
+    let light = root.read_with(cx, |root, cx| root.0.read(cx).light.clone());
+    light.update(cx, |_, cx| cx.notify());
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let after = (own_n.get(), heavy_n.get(), light_n.get());
+    println!(
+      "renders after the first frame: parent={} heavy={} light={}; after notifying `light`: parent={} heavy={} light={}",
+      before.0, before.1, before.2, after.0, after.1, after.2
+    );
+  }
+}
