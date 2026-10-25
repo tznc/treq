@@ -48,6 +48,10 @@ pub struct Session {
 
 static INITIALIZED_DBS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
+/// Held for a whole `init_local_db`: its migrations check for a column, then
+/// add it, so two threads migrating one file both add it and the second fails.
+static INIT_LOCK: Mutex<()> = Mutex::new(());
+
 /// Schema version stored in `PRAGMA user_version`. Bump it whenever
 /// `init_local_db` gains a table, column, index or migration so existing
 /// databases re-run it once; databases at this version skip it entirely.
@@ -252,6 +256,7 @@ fn resolve_db_path(repo_arg: &str) -> Result<PathBuf, String> {
 /// # Returns
 /// The path to the created/opened database file.
 pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
+  let _init = INIT_LOCK.lock_or_recover();
   let db_path = resolve_db_path(repo_path)?;
   if let Some(parent) = db_path.parent() {
     fs::create_dir_all(parent).map_err(|e| format!("Failed to create .treq directory: {}", e))?;
@@ -2919,6 +2924,39 @@ mod tests {
       .expect("open database")
       .query_row("PRAGMA user_version", [], |row| row.get(0))
       .expect("user_version")
+  }
+
+  // Windows and background tasks open a repo's db at the same time; each
+  // migration checks for its column, then adds it.
+  #[test]
+  fn concurrent_inits_of_an_old_db_all_succeed() {
+    for _ in 0..200 {
+      let temp_dir = TempDir::new().expect("Failed to create temp dir");
+      // Old enough that every init adds the missing workspaces columns.
+      let (repo_path, _) = open_legacy_db(
+        &temp_dir,
+        "CREATE TABLE workspaces (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           workspace_name TEXT NOT NULL,
+           workspace_path TEXT NOT NULL UNIQUE,
+           branch_name TEXT NOT NULL,
+           created_at TEXT NOT NULL
+         );",
+      );
+      let start = std::sync::Arc::new(std::sync::Barrier::new(16));
+      let inits: Vec<_> = (0..16)
+        .map(|_| {
+          let (repo_path, start) = (repo_path.clone(), start.clone());
+          std::thread::spawn(move || {
+            start.wait();
+            init_local_db(&repo_path)
+          })
+        })
+        .collect();
+      for init in inits {
+        init.join().unwrap().expect("concurrent init");
+      }
+    }
   }
 
   #[test]
