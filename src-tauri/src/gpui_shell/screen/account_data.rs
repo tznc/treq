@@ -51,6 +51,9 @@ pub trait AccountHost: Send + Sync {
   fn linear_oauth_url(&self) -> Result<String, ApiError>;
   /// Starts a cloud workspace action; it reports through the account.
   fn cloud_action(&self, action: CloudAction);
+  /// Deletes the account on the server, then signs out. A refusal carries
+  /// the server's sentence.
+  fn delete_account(&self) -> Result<(), ApiError>;
 }
 
 pub(crate) fn cloud_route(cloud: &CloudWorkspace) -> CloudRoute {
@@ -132,6 +135,11 @@ impl AccountHost for Backend {
   fn linear_oauth_url(&self) -> Result<String, ApiError> {
     let cloud = self.cloud().map_err(|e| ApiError::new("unavailable", e))?;
     crate::gpui_shell::block_on(account::linear_oauth_url(&cloud.supabase))
+  }
+
+  fn delete_account(&self) -> Result<(), ApiError> {
+    let cloud = self.cloud().map_err(|e| ApiError::new("unavailable", e))?;
+    crate::gpui_shell::block_on(cloud.delete_account())
   }
 
   fn cloud_action(&self, action: CloudAction) {

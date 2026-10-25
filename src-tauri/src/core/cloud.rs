@@ -23,7 +23,7 @@ use super::{
   remote_control_plane::{SshAuthentication, SshEndpoint, SshEndpointSource},
   remote_local_keys::LocalSshIdentity,
   remote_ssh_transport::CutoffReason,
-  supabase::Supabase,
+  supabase::{ApiError, Supabase},
 };
 use crate::lock_ext::LockExt;
 
@@ -269,6 +269,14 @@ impl Cloud {
     self.signing_out.store(false, flag);
     *self.workspace.lock_or_recover() = CloudWorkspace::default();
     self.changed();
+  }
+
+  /// Deletes the account on the server, then signs out here. A refusal
+  /// keeps the session, so the user can act on the server's sentence.
+  pub async fn delete_account(&self) -> Result<(), ApiError> {
+    account::delete_account(&self.supabase).await?;
+    self.sign_out().await;
+    Ok(())
   }
 
   /// Rereads the subscription (on window focus, after a purchase on the
@@ -875,6 +883,48 @@ mod tests {
     let snapshot = cloud.snapshot();
     assert_eq!(snapshot.subscription, None);
     assert_eq!(snapshot.auth.session, None);
+  }
+
+  #[tokio::test]
+  async fn deleting_the_account_signs_out_once_the_server_deleted_it() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .and(path("/auth/v1/logout"))
+      .respond_with(ResponseTemplate::new(204))
+      .mount(&server)
+      .await;
+    mount(
+      &server,
+      "delete-account",
+      json!({}),
+      json!({"deleted": true}),
+    )
+    .await;
+    let (cloud, fake) = signed_in(&server).await;
+    cloud.delete_account().await.unwrap();
+    assert_eq!(
+      *fake.log.lock().unwrap(),
+      vec!["cut off managed".to_string()]
+    );
+    assert_eq!(cloud.snapshot().auth.session, None);
+  }
+
+  #[tokio::test]
+  async fn a_refused_deletion_keeps_the_session() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/delete-account"))
+      .respond_with(ResponseTemplate::new(409).set_body_json(json!({
+        "error": "You are the only owner of Acme, which has other members.",
+        "code": "sole_owner"
+      })))
+      .mount(&server)
+      .await;
+    let (cloud, fake) = signed_in(&server).await;
+    let refused = cloud.delete_account().await.unwrap_err();
+    assert_eq!(refused.status, 409);
+    assert!(fake.log.lock().unwrap().is_empty());
+    assert!(cloud.snapshot().auth.session.is_some());
   }
 
   #[tokio::test]

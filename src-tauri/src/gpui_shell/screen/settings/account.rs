@@ -33,6 +33,10 @@ use crate::gpui_shell::{
   ui::{self, Button, Size, TextSize, Tone, Variant},
 };
 
+mod delete;
+
+pub use delete::AccountDeletion;
+
 /// The repository setting the Linear API key is stored under.
 const LINEAR_API_KEY: &str = "linear_api_key";
 
@@ -176,6 +180,8 @@ pub struct SignedIn {
   pub period: Option<(String, String)>,
   pub manage_label: String,
   pub cloud: Option<CloudCard>,
+  /// The delete-account dialog, while open.
+  pub deletion: Option<AccountDeletion>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -281,6 +287,8 @@ pub(super) struct State {
   /// "No token found in URL", from the last Go.
   callback_error: Option<String>,
   confirming_delete: bool,
+  /// The delete-account dialog, while open.
+  deletion: Option<delete::Deletion>,
   /// The avatar URL, and its image once loaded.
   avatar: Option<(String, Option<Arc<gpui::Image>>)>,
   linear: Option<Linear>,
@@ -553,6 +561,10 @@ impl SettingsView {
         .cloud
         .as_ref()
         .map(|cloud| cloud_card(cloud, state.confirming_delete)),
+      deletion: state
+        .deletion
+        .as_ref()
+        .map(|d| d.drawn(user.email.as_deref())),
     }))
   }
 
@@ -756,6 +768,7 @@ impl SettingsView {
       self.account.github = None;
       LAST_GITHUB.with(|last| *last.borrow_mut() = None);
       self.account.cloud_read = false;
+      self.account.deletion = None;
     }
     self.sync_avatar(cx);
     if !signed_in || self.account.rust.loading {
@@ -885,6 +898,9 @@ impl SettingsView {
 
   /// The account and integrations buttons GPUI handles; false for the rest.
   pub(super) fn press_account(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
+    if self.press_deletion(id, cx) {
+      return true;
+    }
     let web = native::web_url();
     match id {
       "account.signIn" => self.host.open_url(&format!("{web}/sign-in?source=desktop")),
@@ -943,6 +959,7 @@ impl SettingsView {
     let text = value.as_str().unwrap_or_default().to_string();
     match field {
       "account.callbackUrl" => self.account.callback_url = text,
+      delete::FIELD => self.set_deletion_text(text),
       "linear.apiKey" => {
         if let Some(linear) = &mut self.account.linear {
           linear.draft = text;
@@ -1618,6 +1635,7 @@ impl SettingsView {
             .on_click(self.press("account.signOut")),
         ),
       )
+      .child(self.deletion_row(p))
   }
 
   /// `CloudWorkspaceCard`.

@@ -1,7 +1,8 @@
 //! What the signed-in account reads from Supabase: its subscription, the
 //! GitHub repositories the Treq app can see, Linear OAuth, and the merge
 //! queue (`subscriptions`, `github_repositories`, the merge queue RPCs and
-//! the `enqueue-workspace` and `create-linear-oauth-intent` functions).
+//! the `enqueue-workspace` and `create-linear-oauth-intent` functions), and
+//! deleting the account (`delete-account`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -58,6 +59,17 @@ pub async fn linear_oauth_url(supabase: &Supabase) -> Result<String, ApiError> {
     .filter(|url| !url.is_empty())
     .map(str::to_string)
     .ok_or_else(|| ApiError::new("no_url", "No authorization URL returned"))
+}
+
+/// Deletes the signed-in account (`delete-account`): its subscriptions are
+/// cancelled and its Treq Cloud machines destroyed first. A 409 carries the
+/// server's sentence on what to do first, such as handing over an
+/// organization.
+pub async fn delete_account(supabase: &Supabase) -> Result<(), ApiError> {
+  supabase
+    .invoke::<Value>("delete-account", &json!({}))
+    .await
+    .map(drop)
 }
 
 /// A queued branch (`get_repo_branch_queue_statuses`).
@@ -227,6 +239,34 @@ mod tests {
       .map(|r| serde_json::from_slice::<Value>(&r.body).unwrap()["branch_name"].to_string())
       .collect();
     assert_eq!(order, ["\"top\"", "\"base\""]);
+  }
+
+  #[tokio::test]
+  async fn deletes_the_account_or_passes_on_the_refusal() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/delete-account"))
+      .respond_with(ResponseTemplate::new(200).set_body_json(json!({"deleted": true})))
+      .up_to_n_times(1)
+      .mount(&server)
+      .await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/delete-account"))
+      .respond_with(ResponseTemplate::new(409).set_body_json(json!({
+        "error": "You are the only owner of Acme, which has other members.",
+        "code": "sole_owner"
+      })))
+      .mount(&server)
+      .await;
+    let (supabase, _) = client(&server.uri());
+    delete_account(&supabase).await.unwrap();
+    let refused = delete_account(&supabase).await.unwrap_err();
+    assert_eq!(refused.status, 409);
+    assert_eq!(refused.code, "sole_owner");
+    assert_eq!(
+      refused.message,
+      "You are the only owner of Acme, which has other members."
+    );
   }
 
   #[tokio::test]

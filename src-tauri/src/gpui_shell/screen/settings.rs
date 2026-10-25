@@ -24,8 +24,9 @@ pub(super) mod account;
   allow(unused_imports, reason = "re-exported for the tests only")
 )]
 pub use account::{
-  AccountRoute, AccountTab, CloudCard, CloudEndpoint, CloudInstance, CloudRoute, CloudUsage,
-  GithubSection, IntegrationsTab, LinearSection, StatusTone, Subscription, UsageReport, User,
+  AccountDeletion, AccountRoute, AccountTab, CloudCard, CloudEndpoint, CloudInstance, CloudRoute,
+  CloudUsage, GithubSection, IntegrationsTab, LinearSection, StatusTone, Subscription, UsageReport,
+  User,
 };
 
 use super::{
@@ -1359,6 +1360,13 @@ impl Render for SettingsView {
       }
       _ => None,
     };
+    let deletion = match &s.account {
+      Some(AccountTab::SignedIn(signed_in)) => signed_in
+        .deletion
+        .as_ref()
+        .map(|d| self.deletion_dialog(d, &p, window, cx).into_any_element()),
+      _ => None,
+    };
 
     div()
       .relative()
@@ -1387,6 +1395,7 @@ impl Render for SettingsView {
       )
       .children(dialog)
       .children(delete_dialog)
+      .children(deletion)
   }
 }
 

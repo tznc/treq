@@ -140,6 +140,8 @@ struct FakeHost {
   /// page (`Err` refuses it), and the merge queue (opt-in and entries).
   github_repos: Option<Result<Vec<crate::core::account::GithubRepository>, String>>,
   oauth: Option<Result<String, crate::core::supabase::ApiError>>,
+  /// Why deleting the account fails, if it does.
+  deletion_error: Option<crate::core::supabase::ApiError>,
   /// `None` fails the read, as when it never answers.
   queue: Mutex<Option<(bool, Vec<merge_queue_data::QueueEntry>)>>,
   /// What the agent launches read and did: each new session's start data
@@ -1450,6 +1452,11 @@ impl account_data::AccountHost for FakeHost {
       .oauth
       .clone()
       .unwrap_or_else(|| Ok("https://linear.app/oauth/authorize".into()))
+  }
+
+  fn delete_account(&self) -> Result<(), crate::core::supabase::ApiError> {
+    self.record("delete account".into());
+    self.deletion_error.clone().map_or(Ok(()), Err)
   }
 
   fn cloud_action(&self, action: account_data::CloudAction) {
@@ -8253,6 +8260,7 @@ fn opening_a_repository_remembers_it_and_reports_it_open() {
   assert_eq!(shown, [path]);
 }
 
+mod account_deletion;
 mod allocs;
 mod changes_large;
 mod code_files_large;
