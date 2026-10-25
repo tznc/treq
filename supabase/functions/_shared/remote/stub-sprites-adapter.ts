@@ -1,7 +1,6 @@
 // In-memory Sprites adapter for local service-qa, activated when
 // TREQ_REMOTE_SPRITES_STUB=1 so the control plane can be exercised end to end
-// without a real Fly account or vendor token, mirroring
-// `stub-github-adapter.ts`'s role for the merge queue.
+// without a real Fly account or vendor token.
 
 import type {
   CreateInstanceParams,

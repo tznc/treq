@@ -28,8 +28,6 @@ pub const DEFAULT_ZOOM: u32 = 100;
 pub const ZOOM_STEP: u32 = 5;
 pub const MIN_ZOOM: u32 = 50;
 pub const MAX_ZOOM: u32 = 200;
-/// `MERGE_QUEUE_HISTORY_PAGE_SIZE`.
-pub const HISTORY_PAGE: usize = 5;
 /// `useGpuiTerminalPane`'s `KEPT`.
 const KEPT_COMMANDS: usize = 20;
 
@@ -432,9 +430,6 @@ pub struct Model {
   /// The terminal pane's commands (`GpuiTerminalCommand`), newest last.
   pub commands: Vec<Value>,
   pub nonce: u64,
-  /// The Merge Queue tab's history toggle and page.
-  pub show_merged: bool,
-  pub history_limit: usize,
   /// A workspace to select once it is listed.
   pub pending_select: Option<PendingSelect>,
   /// The remote dialogs, endpoint and repository.
@@ -462,7 +457,6 @@ impl Model {
   pub fn new(repo: Option<String>) -> Self {
     Self {
       main_repo: repo.unwrap_or_default(),
-      history_limit: HISTORY_PAGE,
       ..Self::default()
     }
   }
@@ -1004,7 +998,6 @@ impl Model {
     let cutoffs = std::mem::take(&mut self.remote.cutoffs);
     *self = Self {
       prefs: self.prefs.clone(),
-      history_limit: HISTORY_PAGE,
       ..Self::default()
     };
     self.remote.cutoffs = cutoffs;

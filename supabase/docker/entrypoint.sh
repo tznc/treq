@@ -48,12 +48,9 @@ export GITHUB_APP_ID="${GITHUB_APP_ID:-}"
 export GITHUB_APP_PRIVATE_KEY_BASE64="${GITHUB_APP_PRIVATE_KEY_BASE64:-}"
 export GITHUB_APP_CLIENT_ID="${GITHUB_APP_CLIENT_ID:-}"
 export GITHUB_APP_CLIENT_SECRET="${GITHUB_APP_CLIENT_SECRET:-}"
-export MERGE_QUEUE_GITHUB_STUB="${MERGE_QUEUE_GITHUB_STUB:-0}"
 export DENO_DIR="${DENO_DIR:-/root/.cache/deno}"
 export FUNCTIONS_HTTP_PORT="${FUNCTIONS_HTTP_PORT:-9000}"
 export KONG_HTTP_PORT="${KONG_HTTP_PORT:-8000}"
-export MERGE_QUEUE_WORKER_INTERVAL_SEC="${MERGE_QUEUE_WORKER_INTERVAL_SEC:-60}"
-export MERGE_QUEUE_RECONCILER_INTERVAL_SEC="${MERGE_QUEUE_RECONCILER_INTERVAL_SEC:-600}"
 
 mkdir -p /tmp /run/openrc
 touch /run/openrc/softlevel
@@ -141,12 +138,9 @@ mkdir -p /etc/treq
   printf 'export GITHUB_APP_PRIVATE_KEY_BASE64=%q\n' "${GITHUB_APP_PRIVATE_KEY_BASE64}"
   printf 'export GITHUB_APP_CLIENT_ID=%q\n' "${GITHUB_APP_CLIENT_ID}"
   printf 'export GITHUB_APP_CLIENT_SECRET=%q\n' "${GITHUB_APP_CLIENT_SECRET}"
-  printf 'export MERGE_QUEUE_GITHUB_STUB=%q\n' "${MERGE_QUEUE_GITHUB_STUB}"
   printf 'export DENO_DIR=%q\n' "${DENO_DIR}"
   printf 'export FUNCTIONS_HTTP_PORT=%q\n' "${FUNCTIONS_HTTP_PORT}"
   printf 'export KONG_HTTP_PORT=%q\n' "${KONG_HTTP_PORT}"
-  printf 'export MERGE_QUEUE_WORKER_INTERVAL_SEC=%q\n' "${MERGE_QUEUE_WORKER_INTERVAL_SEC}"
-  printf 'export MERGE_QUEUE_RECONCILER_INTERVAL_SEC=%q\n' "${MERGE_QUEUE_RECONCILER_INTERVAL_SEC}"
   printf 'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n'
 } >/etc/treq/env
 chmod 600 /etc/treq/env

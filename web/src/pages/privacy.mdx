@@ -48,7 +48,7 @@ The app contacts Treq's servers only after you sign in, and only to check your p
 | **Account:** email, name, avatar URL, sign-in provider | You create an account | You, or Google or GitHub when you sign in with them |
 | **Billing:** Stripe customer ID, plan, subscription status, trial and renewal dates | You start a trial or buy a plan | Stripe |
 | **Organizations:** organization name, members and roles, invitee emails, invite times | You create or join an organization | You and your organization's owners |
-| **GitHub App:** installation ID, account or organization name, repository names, pull request numbers, titles, and status for queued pull requests | You install the Treq GitHub App or use the merge queue | GitHub |
+| **GitHub App:** installation ID, account or organization name, and repository names | You install the Treq GitHub App | GitHub |
 | **Linear:** OAuth access token, and the issue data requested through the proxy | You connect Linear with OAuth | Linear |
 | **Cloud workspaces:** files, repositories, and processes on the workspace, device public keys, SSH certificates, connection logs | You use a managed cloud workspace or mobile access | You and your devices |
 | **Website analytics:** pages visited, referrer, browser, approximate location from an anonymized IP | You visit treq.dev | Google Analytics |
@@ -58,7 +58,7 @@ Linear tokens are readable only by Treq's server functions, never by the app or 
 
 ## How We Use Data
 
-- **Run the hosted services.** Sign you in, decide which features your plan includes, merge queued pull requests, proxy Linear requests, and provision and connect cloud workspaces.
+- **Run the hosted services.** Sign you in, decide which features your plan includes, proxy Linear requests, and provision and connect cloud workspaces.
 - **Bill you.** Create checkout sessions, keep subscription state in sync with Stripe, and send receipts through Stripe.
 - **Keep the service secure.** Detect abuse, enforce resource limits, and investigate incidents.
 - **Communicate.** Send account, billing, security, and policy notices. We send product news only if you opt in.

@@ -47,45 +47,9 @@ interface GithubRepo {
   installation_id: number;
 }
 
-interface MergeQueueConfig {
-  id?: string;
-  repo_id: number;
-  target_branch: string;
-  required_checks: string[];
-  max_parallel_queues: number;
-  batch_size: number;
-  merge_method: "merge" | "squash" | "rebase";
-  queue_trigger_label: string;
-  delete_branch_on_merge: boolean;
-  enabled: boolean;
-}
-
-interface QueueStatus {
-  queue_id: string;
-  target_branch: string;
-  queued_count: number;
-  testing_count: number;
-  paused: boolean;
-  bisect_mode: boolean;
-}
-
 type Tab = "subscription" | "integrations" | "team";
 
-function defaultConfig(repoId: number, defaultBranch: string): MergeQueueConfig {
-  return {
-    repo_id: repoId,
-    target_branch: defaultBranch,
-    required_checks: [],
-    max_parallel_queues: 1,
-    batch_size: 5,
-    merge_method: "squash",
-    queue_trigger_label: "merge-queue",
-    delete_branch_on_merge: true,
-    enabled: true,
-  };
-}
-
-// ── Repo config panel ────────────────────────────────────────────────────────
+// ── Repo row ─────────────────────────────────────────────────────────────────
 
 function RepoRow({ repo }: { repo: GithubRepo }) {
   return (
@@ -100,251 +64,14 @@ function RepoRow({ repo }: { repo: GithubRepo }) {
   );
 }
 
-function RepoConfigPanel({
-  repo,
-  onSave,
-}: {
-  repo: GithubRepo;
-  onSave?: () => void;
-}) {
-  const [config, setConfig] = useState<MergeQueueConfig>(
-    defaultConfig(repo.id, repo.default_branch)
-  );
-  const [queueStatus, setQueueStatus] = useState<QueueStatus[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    supabase
-      .from("merge_queue_configs")
-      .select("*")
-      .eq("repo_id", repo.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) setConfig(data as MergeQueueConfig);
-      });
-
-    supabase
-      .rpc("get_repo_queue_status", { p_repo_id: repo.id })
-      .then(({ data }) => {
-        if (data) setQueueStatus(data as QueueStatus[]);
-      });
-  }, [repo.id]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    await supabase.from("merge_queue_configs").upsert(
-      {
-        ...config,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "repo_id,target_branch" }
-    );
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-    onSave?.();
-  };
-
-  const totalQueued = queueStatus.reduce((s, q) => s + Number(q.queued_count), 0);
-  const totalTesting = queueStatus.reduce((s, q) => s + Number(q.testing_count), 0);
-
-  return (
-    <div style={styles.repoCard}>
-      <div
-        style={styles.repoHeader}
-        onClick={() => setExpanded((e) => !e)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => e.key === "Enter" && setExpanded((x) => !x)}
-      >
-        <div style={styles.repoMeta}>
-          <span style={styles.repoName}>{repo.full_name}</span>
-          {repo.private && <span style={styles.privateBadge}>private</span>}
-        </div>
-        <div style={styles.repoStats}>
-          {totalQueued > 0 && (
-            <span style={styles.statBadge}>
-              {totalQueued} queued
-            </span>
-          )}
-          {totalTesting > 0 && (
-            <span style={{ ...styles.statBadge, background: "rgba(245,158,11,0.12)", color: "#f59e0b" }}>
-              {totalTesting} testing
-            </span>
-          )}
-          <span style={styles.chevron}>{expanded ? "▲" : "▼"}</span>
-        </div>
-      </div>
-
-      {expanded && (
-        <div style={styles.configBody}>
-          {/* Queue status */}
-          {queueStatus.length > 0 && (
-            <div style={styles.configSection}>
-              <div style={styles.configLabel}>Active queues</div>
-              {queueStatus.map((q) => (
-                <div key={q.queue_id} style={styles.queueStatusRow}>
-                  <span style={styles.branchPill}>→ {q.target_branch}</span>
-                  <span style={styles.queueStatusText}>
-                    {q.queued_count} queued · {q.testing_count} testing
-                    {q.paused && " · paused"}
-                    {q.bisect_mode && " · bisecting"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Config form */}
-          <div style={styles.configSection}>
-            <div style={styles.configRow}>
-              <label style={styles.configLabel}>Target branch</label>
-              <input
-                style={styles.input}
-                value={config.target_branch}
-                onChange={(e) =>
-                  setConfig((c) => ({ ...c, target_branch: e.target.value }))
-                }
-                placeholder="main"
-              />
-            </div>
-
-            <div style={styles.configRow}>
-              <label style={styles.configLabel}>Trigger label</label>
-              <input
-                style={styles.input}
-                value={config.queue_trigger_label}
-                onChange={(e) =>
-                  setConfig((c) => ({ ...c, queue_trigger_label: e.target.value }))
-                }
-                placeholder="merge-queue"
-              />
-            </div>
-
-            <div style={styles.configRow}>
-              <label style={styles.configLabel}>Required CI checks</label>
-              <input
-                style={styles.input}
-                value={config.required_checks.join(", ")}
-                onChange={(e) =>
-                  setConfig((c) => ({
-                    ...c,
-                    required_checks: e.target.value
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  }))
-                }
-                placeholder="ci / test, ci / lint"
-              />
-              <div style={styles.inputHint}>Comma-separated check names</div>
-            </div>
-
-            <div style={styles.configRowInline}>
-              <div style={{ flex: 1 }}>
-                <label style={styles.configLabel}>Max parallel lanes</label>
-                <input
-                  style={{ ...styles.input, width: "80px" }}
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={config.max_parallel_queues}
-                  onChange={(e) =>
-                    setConfig((c) => ({
-                      ...c,
-                      max_parallel_queues: Math.max(1, Math.min(10, parseInt(e.target.value) || 1)),
-                    }))
-                  }
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={styles.configLabel}>Batch size</label>
-                <input
-                  style={{ ...styles.input, width: "80px" }}
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={config.batch_size}
-                  onChange={(e) =>
-                    setConfig((c) => ({
-                      ...c,
-                      batch_size: Math.max(1, Math.min(20, parseInt(e.target.value) || 1)),
-                    }))
-                  }
-                />
-              </div>
-            </div>
-
-            <div style={styles.configRow}>
-              <label style={styles.configLabel}>Merge method</label>
-              <select
-                style={styles.select}
-                value={config.merge_method}
-                onChange={(e) =>
-                  setConfig((c) => ({
-                    ...c,
-                    merge_method: e.target.value as "merge" | "squash" | "rebase",
-                  }))
-                }
-              >
-                <option value="squash">Squash and merge</option>
-                <option value="merge">Merge commit</option>
-                <option value="rebase">Rebase and merge</option>
-              </select>
-            </div>
-
-            <div style={styles.configRowInline}>
-              <label style={styles.checkboxLabel}>
-                <input
-                  type="checkbox"
-                  checked={config.delete_branch_on_merge}
-                  onChange={(e) =>
-                    setConfig((c) => ({ ...c, delete_branch_on_merge: e.target.checked }))
-                  }
-                  style={{ marginRight: "0.5rem" }}
-                />
-                Delete branch after merge
-              </label>
-              <label style={styles.checkboxLabel}>
-                <input
-                  type="checkbox"
-                  checked={config.enabled}
-                  onChange={(e) =>
-                    setConfig((c) => ({ ...c, enabled: e.target.checked }))
-                  }
-                  style={{ marginRight: "0.5rem" }}
-                />
-                Queue enabled
-              </label>
-            </div>
-          </div>
-
-          <div style={styles.configActions}>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              style={styles.saveButton}
-            >
-              {saving ? "Saving…" : saved ? "Saved ✓" : "Save config"}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Integrations tab ─────────────────────────────────────────────────────────
 
 function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
   const { siteConfig } = useDocusaurusContext();
   const flags = siteConfig.customFields?.featureFlags as
-    | { githubApp?: boolean; mergeQueue?: boolean }
+    | { githubApp?: boolean }
     | undefined;
   const githubAppEnabled = Boolean(flags?.githubApp);
-  const mergeQueueEnabled = Boolean(flags?.mergeQueue);
 
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(true);
@@ -499,13 +226,7 @@ function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
             {loadingRepos ? (
               <div style={styles.loadingText}>Loading repositories…</div>
             ) : (
-              repos.map((repo) =>
-                mergeQueueEnabled ? (
-                  <RepoConfigPanel key={repo.id} repo={repo} />
-                ) : (
-                  <RepoRow key={repo.id} repo={repo} />
-                )
-              )
+              repos.map((repo) => <RepoRow key={repo.id} repo={repo} />)
             )}
           </div>
         )}
@@ -1269,8 +990,7 @@ function OrganizationCard({
         <div>
           <p style={styles.inputHint}>
             Attach an installation you linked. Members can then see its
-            repositories, its merge queue runs on this organization&apos;s Team,
-            and only owners of {org.name} can relink it.
+            repositories, it runs on this organization&apos;s Team, and only owners of {org.name} can relink it.
           </p>
           <div style={styles.billingActions}>
             {attachable.map((i) => (
@@ -2147,49 +1867,7 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: "var(--ifm-color-emphasis-100)",
     color: "var(--ifm-color-emphasis-600)",
   },
-  repoStats: { display: "flex", alignItems: "center", gap: "0.5rem" },
-  statBadge: {
-    fontSize: "0.75rem",
-    padding: "0.15rem 0.5rem",
-    borderRadius: "10px",
-    background: "rgba(16,185,129,0.1)",
-    color: "#10b981",
-    fontWeight: 500,
-  },
-  chevron: { fontSize: "0.7rem", color: "var(--ifm-color-emphasis-400)" },
-  configBody: {
-    borderTop: "1px solid var(--ifm-color-emphasis-100)",
-    padding: "1rem",
-    backgroundColor: "var(--ifm-background-surface-color)",
-  },
-  configSection: { marginBottom: "1rem" },
-  configRow: { marginBottom: "0.75rem" },
-  configRowInline: {
-    display: "flex",
-    gap: "1.5rem",
-    marginBottom: "0.75rem",
-    flexWrap: "wrap",
-  },
-  configLabel: {
-    display: "block",
-    fontSize: "0.78rem",
-    fontWeight: 600,
-    color: "var(--ifm-color-emphasis-600)",
-    marginBottom: "0.3rem",
-    textTransform: "uppercase",
-    letterSpacing: "0.03em",
-  },
   input: {
-    width: "100%",
-    padding: "0.4rem 0.6rem",
-    borderRadius: "6px",
-    border: "1px solid var(--ifm-color-emphasis-200)",
-    backgroundColor: "var(--ifm-background-color)",
-    color: "var(--ifm-font-color-base)",
-    fontSize: "0.85rem",
-    outline: "none",
-  },
-  select: {
     width: "100%",
     padding: "0.4rem 0.6rem",
     borderRadius: "6px",
@@ -2204,28 +1882,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: "var(--ifm-color-emphasis-400)",
     marginTop: "0.2rem",
   },
-  checkboxLabel: {
-    display: "flex",
-    alignItems: "center",
-    fontSize: "0.85rem",
-    cursor: "pointer",
-  },
-  queueStatusRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.75rem",
-    padding: "0.4rem 0",
-    fontSize: "0.82rem",
-  },
-  branchPill: {
-    fontFamily: "monospace",
-    fontSize: "0.8rem",
-    padding: "0.1rem 0.4rem",
-    borderRadius: "4px",
-    backgroundColor: "var(--ifm-color-emphasis-100)",
-  },
-  queueStatusText: { color: "var(--ifm-color-emphasis-600)" },
-  configActions: { display: "flex", justifyContent: "flex-end" },
   // Team tab
   orgCard: {
     padding: "1.5rem",

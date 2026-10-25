@@ -1,6 +1,6 @@
 //! The Supabase account, which Rust owns ([`crate::core::cloud`]): what the
-//! Account and Integrations tabs, the Merge Queue tab and the remote setup
-//! dialog read of it, and what they ask of it.
+//! Account and Integrations tabs and the remote setup dialog read of it,
+//! and what they ask of it.
 //!
 //! The account reaches GPUI as the [`Account`] global, set on every change
 //! (`gpui_shell::account_changed`); views observe it. Calls go through

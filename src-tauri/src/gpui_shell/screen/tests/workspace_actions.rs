@@ -1,6 +1,6 @@
 //! The workspace header's actions GPUI runs itself (`workspace/actions.rs`):
-//! checks, pull requests, retargeting, the merge queue, Reset to remote and
-//! Delete Workspace.
+//! checks, pull requests, retargeting, Reset to remote and Delete
+//! Workspace.
 
 use gpui::TestAppContext;
 
@@ -274,49 +274,6 @@ fn retargets_onto_another_branch(cx: &mut TestAppContext) {
   );
 }
 
-fn queue_route(label: &str) -> ScreenSnapshot {
-  let mut json = route_json(Some(7), "main");
-  json["mergeQueue"] = serde_json::json!({
-    "label": label,
-    "secondary": false,
-    "disabled": false,
-    "tooltip": "Add this branch to the merge queue",
-  });
-  serde_json::from_value(json).expect("route")
-}
-
-#[gpui::test]
-fn adds_to_and_removes_from_the_merge_queue(cx: &mut TestAppContext) {
-  let (mut h, host) = workspace_harness(cx, feature_host(), queue_route("Add to Queue"));
-  h.cx.run_until_parked();
-  act(&mut h, press("workspace.mergeQueue"));
-  h.update(|s| *s = queue_route("Queued"));
-  act(&mut h, press("workspace.mergeQueue"));
-  assert_eq!(
-    calls_starting(&host, &["queue", "notify toast"]),
-    [
-      "queue tznc/treq feature/login Enqueue",
-      "notify toast Added to merge queue",
-      "queue tznc/treq feature/login Dequeue",
-      "notify toast Removed from merge queue",
-    ]
-  );
-}
-
-#[gpui::test]
-fn offers_pro_when_the_queue_needs_it(cx: &mut TestAppContext) {
-  let host = FakeHost {
-    failing: vec!["queue_pro"],
-    ..feature_host()
-  };
-  let (mut h, host) = workspace_harness(cx, host, queue_route("Add to Queue"));
-  h.cx.run_until_parked();
-  act(&mut h, press("workspace.mergeQueue"));
-  assert!(host
-    .calls()
-    .contains(&"notify toast The merge queue needs Pro".to_string()));
-}
-
 #[gpui::test]
 fn hands_a_remote_repository_actions_to_react(cx: &mut TestAppContext) {
   let host = FakeHost {
@@ -325,22 +282,14 @@ fn hands_a_remote_repository_actions_to_react(cx: &mut TestAppContext) {
   };
   let (mut h, host) = workspace_harness(cx, host, workspace_route());
   h.cx.run_until_parked();
-  for id in [
-    "workspace.checksRunAll",
-    "workspace.createPr",
-    "workspace.mergeQueue",
-  ] {
+  for id in ["workspace.checksRunAll", "workspace.createPr"] {
     act(&mut h, press(id));
   }
   assert_eq!(
     h.sent(),
-    [
-      press("workspace.checksRunAll"),
-      press("workspace.createPr"),
-      press("workspace.mergeQueue"),
-    ]
+    [press("workspace.checksRunAll"), press("workspace.createPr"),]
   );
-  assert!(calls_starting(&host, &["run ", "create pr", "queue"]).is_empty());
+  assert!(calls_starting(&host, &["run ", "create pr"]).is_empty());
 }
 
 #[gpui::test]

@@ -147,15 +147,11 @@ struct FakeHost {
   /// What the Open Workspaces dialog reads.
   open_workspaces: open_workspaces::Fake,
   /// What the account reads: the GitHub repositories and Linear's OAuth
-  /// page (`Err` refuses it), and the merge queue (opt-in and entries).
+  /// page (`Err` refuses it).
   github_repos: Option<Result<Vec<crate::core::account::GithubRepository>, String>>,
   oauth: Option<Result<String, crate::core::supabase::ApiError>>,
   /// Why deleting the account fails; `None` deletes it.
   account_deletion: Option<crate::core::supabase::ApiError>,
-  /// `None` fails the read, as when it never answers.
-  queue: Mutex<Option<(bool, Vec<merge_queue_data::QueueEntry>)>>,
-  /// The merged-history size each queue read asked for.
-  queue_history: Mutex<Vec<usize>>,
   /// What the agent launches read and did: each new session's start data
   /// by pane id, the `treq send` attachments, the prompt dialog's tasks
   /// (and whether starting fails), and the sessions started.
@@ -1597,39 +1593,6 @@ impl account_data::AccountHost for FakeHost {
   }
 }
 
-impl merge_queue_data::MergeQueueHost for FakeHost {
-  fn merge_queue(
-    &self,
-    full_name: &str,
-    history: usize,
-  ) -> Result<(bool, Vec<merge_queue_data::QueueEntry>), String> {
-    self.record(format!("read queue {full_name}"));
-    self.queue_history.lock().unwrap().push(history);
-    let (enabled, mut entries) = self
-      .queue
-      .lock()
-      .unwrap()
-      .clone()
-      .ok_or_else(|| "unread".to_string())?;
-    // Like the RPC: every queued entry, the newest `history` merged ones.
-    let mut merged = 0;
-    entries.sort_by_key(|e| std::cmp::Reverse(e.position));
-    entries.retain(|e| {
-      e.status != "merged" || {
-        merged += 1;
-        merged <= history
-      }
-    });
-    entries.sort_by_key(|e| e.position);
-    Ok((enabled, entries))
-  }
-
-  fn dequeue(&self, full_name: &str, branches: &[String]) -> Result<(), String> {
-    self.record(format!("dequeue {full_name} {}", branches.join(",")));
-    Ok(())
-  }
-}
-
 impl remote_data::RemoteHost for FakeHost {
   fn ssh_aliases(&self) -> Vec<String> {
     vec!["devbox".into(), "staging".into()]
@@ -2614,7 +2577,6 @@ const WORKSPACE_JSON: &str = r#"{
     "statusLoading": false,
     "sync": {"ahead": 2, "behind": 0, "disabled": false, "spinning": false},
     "checks": {"status": "passed", "count": "7/7", "name": "Checks: Treq 3/3, GitHub 4/4"},
-    "mergeQueue": null,
     "merge": {"passing": true, "disabled": false, "tooltip": null},
     "details": true,
     "more": {"disabled": false}
@@ -2640,7 +2602,6 @@ fn route_json(workspace_id: Option<i64>, home_branch: &str) -> serde_json::Value
     "retargeting": false,
     "creatingPr": false,
     "runningChecks": [],
-    "mergeQueue": null,
     "revision": 0
   })
 }
@@ -9310,22 +9271,6 @@ impl workspace_dialog_data::WorkspaceDialogHost for FakeHost {
 }
 
 impl workspace_ops::WorkspaceActionsHost for FakeHost {
-  fn queue(
-    &self,
-    full_name: &str,
-    branch: &str,
-    action: crate::core::account::QueueAction,
-  ) -> Result<(), crate::core::supabase::ApiError> {
-    self.record(format!("queue {full_name} {branch} {action:?}"));
-    if self.failing.contains(&"queue_pro") {
-      return Err(crate::core::supabase::ApiError::new(
-        "pro_required",
-        "Needs Pro",
-      ));
-    }
-    Ok(())
-  }
-
   fn delete_workspace(&self, _: &str, workspace_id: i64) -> Result<(), String> {
     self.record(format!("delete workspace {workspace_id}"));
     if self.failing.contains(&"delete_workspace") {
@@ -9397,7 +9342,6 @@ mod input_latency;
 mod kept_tabs;
 mod linear_view;
 mod logs_explorer;
-mod merge_queue;
 mod open_workspaces;
 mod pr_review;
 mod prefetch;

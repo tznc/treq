@@ -2,10 +2,10 @@
 -- 028_organizations_team.sql: Pro for every member of an organization with a
 -- Team subscription (and for nobody else), the subscriptions view the
 -- desktop app reads, attaching an installation to an organization, relink
--- protection, organization read access to installations, repositories and
--- merge queue configuration, and the webhook's organization owners.
+-- protection, organization read access to installations and repositories,
+-- and the webhook's organization owners.
 begin;
-select plan(64);
+select plan(58);
 
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000000f1', 'team-owner@example.com'),
@@ -23,8 +23,6 @@ insert into public.github_repositories (id, installation_id, owner, name, full_n
   (9601, 9501, 'acme-gh', 'api', 'acme-gh/api'),
   (9602, 9502, 'personal-gh', 'dotfiles', 'personal-gh/dotfiles'),
   (9603, 9503, 'other-gh', 'web', 'other-gh/web');
-
-insert into public.merge_queue_configs (repo_id, target_branch, enabled) values (9601, 'main', false);
 
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
@@ -121,12 +119,6 @@ select results_eq($$select id from public.github_app_installations$$, $$values (
   'a member reads the organization''s installation');
 select results_eq($$select id from public.github_repositories$$, $$values (9601::bigint)$$,
   'a member reads the organization''s repositories');
-select results_eq($$select repo_id from public.merge_queue_configs$$, $$values (9601::bigint)$$,
-  'a member reads the organization''s merge queue configuration');
-select lives_ok($$update public.merge_queue_configs set batch_size = 2 where repo_id = 9601$$,
-  'a member''s config update runs');
-select is((select batch_size from public.merge_queue_configs where repo_id = 9601), 5,
-  'but changes nothing: read access does not include writes');
 
 select set_config('request.jwt.claims',
   '{"sub":"00000000-0000-0000-0000-0000000000f3","role":"authenticated"}', true);
@@ -136,8 +128,6 @@ select results_eq($$select id from public.github_app_installations order by id$$
 select results_eq($$select id from public.github_repositories order by id$$,
   $$values (9602::bigint), (9603::bigint)$$,
   'an outsider reads none of the organization''s repositories');
-select is((select count(*)::int from public.merge_queue_configs), 0,
-  'an outsider reads none of the organization''s configs');
 
 -- ── Team entitlement ──────────────────────────────────────────────────────
 reset role;
@@ -185,8 +175,6 @@ select set_config('request.jwt.claims',
 select results_eq($$select owner_type, stripe_customer_id from public.billing_customers$$,
   $$values ('organization'::text, 'cus_team_acme'::text)$$,
   'the owner reads the organization''s billing customer');
-select is(public.set_merge_queue_enabled('acme-gh/api', true), true,
-  'the owner who linked the organization''s installation turns its merge queue on through Team');
 
 reset role;
 update public.billing_subscriptions set status = 'past_due' where stripe_subscription_id = 'sub_team_acme';
@@ -277,8 +265,6 @@ select set_config('request.jwt.claims',
   '{"sub":"00000000-0000-0000-0000-0000000000f5","role":"authenticated"}', true);
 select is((select count(*)::int from public.github_app_installations where id = 9501), 0,
   'the removed owner no longer reads the installation');
-select is((select count(*)::int from public.merge_queue_configs where repo_id = 9601), 0,
-  'nor can they manage its merge queue configuration');
 
 reset role;
 insert into public.organization_members (org_id, user_id, role)
