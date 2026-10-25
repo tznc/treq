@@ -1,5 +1,5 @@
 //! The workspace branch's GitHub pull request: a tag in the workspace
-//! header, a sheet with its checks, and the sheet that creates one. GitHub
+//! header, the checks rows [`super::pr_detail`] shows, and the sheet that creates one. GitHub
 //! is reached with the host's `gh`, so the host's sign-in is the one used.
 
 use gpui_kit::prelude::FluentBuilder as _;
@@ -9,7 +9,7 @@ use gpui_kit::{
     h_flex,
     input::{Input, InputState, Textarea, TextareaState},
     tag::Tag,
-    v_flex, ActiveTheme, IconName, Sizable, StyledExt,
+    v_flex, ActiveTheme, IconName, Sizable,
   },
   *,
 };
@@ -82,7 +82,7 @@ pub fn tag(status: &RemotePullRequestStatus) -> Option<Tag> {
   Some(tag.small().child(label))
 }
 
-fn check_icon(check: &PrCheckEntry, cx: &App) -> AnyElement {
+pub fn check_icon(check: &PrCheckEntry, cx: &App) -> AnyElement {
   let theme = cx.theme();
   let (icon, color) = match check.bucket.as_str() {
     "pass" => (IconName::CircleCheck, theme.success),
@@ -93,106 +93,10 @@ fn check_icon(check: &PrCheckEntry, cx: &App) -> AnyElement {
   div().text_color(color).child(icon).into_any_element()
 }
 
-fn duration(secs: u64) -> String {
+pub fn duration(secs: u64) -> String {
   match secs {
     0..60 => format!("{secs}s"),
     _ => format!("{}m {}s", secs / 60, secs % 60),
-  }
-}
-
-/// The pull request and its checks.
-pub struct PullRequestSheet {
-  status: RemotePullRequestStatus,
-  error: Option<String>,
-}
-
-impl PullRequestSheet {
-  pub fn new(status: RemotePullRequestStatus) -> Self {
-    Self {
-      status,
-      error: None,
-    }
-  }
-}
-
-impl Render for PullRequestSheet {
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let Some(pr) = self.status.pull_request.clone() else {
-      return v_flex().into_any_element();
-    };
-    let checks = self.status.checks.as_ref();
-    let url = pr.url.clone();
-    v_flex()
-      .px_4()
-      .pb_4()
-      .gap_3()
-      .child(
-        v_flex()
-          .gap_1()
-          .child(div().font_semibold().child(pr.title.clone()))
-          .child(widgets::muted(
-            format!(
-              "#{} · {} · {} into {}",
-              pr.number,
-              state_label(&pr),
-              pr.head_ref_name,
-              pr.base_ref_name
-            ),
-            cx,
-          )),
-      )
-      .child(
-        widgets::section(
-          checks.map_or("Checks".into(), |c| {
-            format!("Checks · {}", checks_summary(c))
-          }),
-          cx,
-        )
-        .child(
-          widgets::card(cx)
-            .when(checks.is_none_or(|c| c.checks.is_empty()), |card| {
-              card.child(widgets::centered_message("No checks reported yet.", cx))
-            })
-            .children(
-              checks
-                .into_iter()
-                .flat_map(|c| c.checks.iter())
-                .enumerate()
-                .map(|(i, check)| {
-                  let link = check.link.clone();
-                  widgets::row_full(
-                    ("check", i),
-                    Some(check_icon(check, cx)),
-                    check.name.clone(),
-                    check.duration_secs.map(|s| duration(s).into()),
-                    None,
-                    cx,
-                  )
-                  .when(!link.is_empty(), |row| {
-                    row.on_click(cx.listener(move |this, _, _, cx| {
-                      this.error = open_url(&link).err();
-                      cx.notify();
-                    }))
-                  })
-                }),
-            ),
-        ),
-      )
-      .when_some(self.error.clone(), |sheet, error| {
-        sheet.child(widgets::error_text(error, cx))
-      })
-      .child(
-        Button::new("pr-open")
-          .primary()
-          .large()
-          .icon(IconName::ExternalLink)
-          .label("Open on GitHub")
-          .on_click(cx.listener(move |this, _, _, cx| {
-            this.error = open_url(&url).err();
-            cx.notify();
-          })),
-      )
-      .into_any_element()
   }
 }
 
@@ -295,7 +199,6 @@ mod tests {
     PrInfo {
       number: 7,
       title: "Fix".into(),
-      body: String::new(),
       state: state.into(),
       url: "https://github.com/o/r/pull/7".into(),
       head_ref_name: "fix".into(),
