@@ -68,6 +68,7 @@ Stripe stays the source of truth for payment state. The webhook copies the field
 | `billing-portal` | User JWT | Returns a Stripe customer portal URL for the caller's customer, or for an organization they own. |
 | `stripe-webhook` | Stripe signature | Verifies `Stripe-Signature` with `STRIPE_WEBHOOK_SECRET`, skips events already in `billing_events`, and upserts `billing_subscriptions` on `customer.subscription.created`, `updated`, and `deleted`. `checkout.session.completed` confirms the customer mapping and sets `trial_used_at`. |
 | `organizations` | User JWT | Creates an organization, invites by email, accepts an invite by token, promotes and demotes owners, removes a member, deletes the organization, and attaches a GitHub App installation the caller linked. After a join, leave or removal it sets the Team subscription's quantity to the member count. |
+| `delete-account` | User JWT | Deletes the caller's account. Refuses with 409 while the caller is the only owner of an organization that has other members. Otherwise cancels the live Stripe subscriptions of the caller and of each organization they are alone in, at once and without a refund, destroys their Treq Cloud machines, then deletes the auth user. Stripe keeps the customers. A failed step leaves the account in place, and a retry finishes the job. |
 
 The Checkout session carries the owner type and ID in `metadata` and `client_reference_id`. The webhook reads the owner from the customer mapping, not from the email on the Stripe customer.
 
