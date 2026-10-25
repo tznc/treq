@@ -1776,7 +1776,7 @@ impl SettingsView {
     });
     div()
       .child(section_header(
-        theme::ICON_ZAP,
+        theme::ICON_LINEAR,
         "Linear",
         "Issue tracker integration",
         p,

@@ -1098,7 +1098,7 @@ impl Render for LinearView {
           .flex()
           .items_center()
           .gap_2()
-          .child(ui::icon(theme::ICON_ZAP, 20., p.muted_foreground))
+          .child(ui::icon(theme::ICON_LINEAR, 20., p.muted_foreground))
           .child(
             ui::text(div(), TextSize::Sm)
               .font_weight(FontWeight::SEMIBOLD)

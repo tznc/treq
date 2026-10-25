@@ -1147,30 +1147,6 @@ impl WorkspaceView {
 
     if !h.home {
       left = left.child(mono_title(&h.branch).debug_selector(|| "workspace-branch".into()));
-      if let Some(linear) = &h.linear {
-        let url = linear.url.clone();
-        let sink = self.sink.clone();
-        left = left.child(
-          ui::text(div(), TextSize::Xs)
-            .id("workspace-linear")
-            .debug_selector(|| "workspace-linear".into())
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_1()
-            .px_2()
-            .py_0p5()
-            .rounded_full()
-            .bg(p.muted)
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(p.muted_foreground)
-            .cursor_pointer()
-            .hover(|s| s.bg(p.muted.opacity(0.8)))
-            .child(ui::icon(theme::ICON_ZAP, 12., p.muted_foreground))
-            .child(linear.key.clone())
-            .on_click(move |_, _, cx| sink(ScreenAction::OpenUrl { url: url.clone() }, cx)),
-        );
-      }
       if let Some(target) = &h.target {
         let label = target.branch.clone().unwrap_or_else(|| "Select...".into());
         let button = Button::new("workspace-target", p)
@@ -1336,6 +1312,29 @@ impl WorkspaceView {
         button,
         cx,
       ));
+    }
+    // The Linear issue sits with the GitHub checks and pull request.
+    if let Some(linear) = h.linear.as_ref().filter(|_| !h.home) {
+      let url = linear.url.clone();
+      let sink = self.sink.clone();
+      right = right.child(
+        ui::text(div(), TextSize::Xs)
+          .id("workspace-linear")
+          .debug_selector(|| "workspace-linear".into())
+          .flex()
+          .flex_none()
+          .items_center()
+          .px_2()
+          .py_0p5()
+          .rounded_full()
+          .bg(p.muted)
+          .font_weight(FontWeight::MEDIUM)
+          .text_color(p.muted_foreground)
+          .cursor_pointer()
+          .hover(|s| s.bg(p.muted.opacity(0.8)))
+          .child(linear.key.clone())
+          .on_click(move |_, _, cx| sink(ScreenAction::OpenUrl { url: url.clone() }, cx)),
+      );
     }
     if let Some(checks) = &h.checks {
       right = right.child(
