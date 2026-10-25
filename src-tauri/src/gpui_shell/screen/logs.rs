@@ -10,6 +10,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use crate::result_ext::ResultExt;
 use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, time::Duration};
 
 use gpui_kit::component::input::{Escape, InputEvent, InputState, Textarea, TextareaState};
@@ -182,6 +183,8 @@ pub struct LogsView {
   scroll: UniformListScrollHandle,
   debounce: Option<Task<()>>,
   find_key_watched: bool,
+  /// Hidden while another tab shows, so Cmd+F is another view's.
+  hidden: bool,
   /// The lines drawn, and the find bar's matches among them.
   visible: Rc<Vec<LogRecordView>>,
   matches: Vec<usize>,
@@ -228,6 +231,7 @@ impl LogsView {
       scroll: UniformListScrollHandle::new(),
       debounce: None,
       find_key_watched: false,
+      hidden: false,
       visible: Rc::default(),
       matches: Vec::new(),
       _subscriptions: Vec::new(),
@@ -235,6 +239,11 @@ impl LogsView {
     this.read_workflows(cx);
     this.load(cx);
     this
+  }
+
+  /// Hidden while another tab shows; it keeps what it read.
+  pub fn set_shown(&mut self, shown: bool) {
+    self.hidden = !shown;
   }
 
   pub fn set_repo(&mut self, repo_path: String, dark: bool, cx: &mut Context<Self>) {
@@ -266,12 +275,14 @@ impl LogsView {
       let value = cx
         .background_spawn(async move { work(host.as_ref(), &repo) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.generation == generation {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.generation == generation {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -282,13 +293,15 @@ impl LogsView {
       let workflows = cx
         .background_spawn(async move { host.workflows(&repo) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        match workflows {
-          Ok(workflows) => view.workflows = workflows,
-          Err(err) => log::warn!("Failed to list workflows: {err}"),
-        }
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          match workflows {
+            Ok(workflows) => view.workflows = workflows,
+            Err(err) => log::warn!("Failed to list workflows: {err}"),
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -427,7 +440,7 @@ impl LogsView {
     }
     self.debounce = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(SEARCH_DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| view.load(cx));
+      this.update(cx, |view, cx| view.load(cx)).ignore_closed();
     }));
   }
 
@@ -475,17 +488,19 @@ impl LogsView {
       let result = cx
         .background_spawn(async move { host.run_sql(&repo, &sql) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.explorer.running = false;
-        match result {
-          Ok(result) => view.explorer.result = Some(result),
-          Err(err) => {
-            view.explorer.result = None;
-            view.explorer.error = Some(err);
+      this
+        .update(cx, |view, cx| {
+          view.explorer.running = false;
+          match result {
+            Ok(result) => view.explorer.result = Some(result),
+            Err(err) => {
+              view.explorer.result = None;
+              view.explorer.error = Some(err);
+            }
           }
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -519,7 +534,9 @@ impl LogsView {
       .map(|source| {
         let entity = entity.clone();
         NativeMenuItem::item(source.label(), move |cx| {
-          let _ = entity.update(cx, |view, cx| view.set_source(source, cx));
+          entity
+            .update(cx, |view, cx| view.set_source(source, cx))
+            .ignore_closed();
         })
         .radio(source == current)
       })
@@ -537,12 +554,14 @@ impl LogsView {
       .map(|chat| {
         let (entity, id) = (entity.clone(), chat.session_id);
         NativeMenuItem::item(format!("{} · {}", chat.name, chat.agent), move |cx| {
-          let _ = entity.update(cx, |view, cx| {
-            view.chat_id = Some(id);
-            view.selection.clear();
-            view.read_chat(cx);
-            cx.notify();
-          });
+          entity
+            .update(cx, |view, cx| {
+              view.chat_id = Some(id);
+              view.selection.clear();
+              view.read_chat(cx);
+              cx.notify();
+            })
+            .ignore_closed();
         })
       })
       .collect();
@@ -627,6 +646,7 @@ impl LogsView {
           && !crate::gpui_shell::keys::held(k.modifiers).shift
           && !crate::gpui_shell::keys::held(k.modifiers).alt
           && !view.explorer_open
+          && !view.hidden
         {
           view.find.open = true;
           view.find.focus = true;

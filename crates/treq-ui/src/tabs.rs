@@ -3,6 +3,7 @@
 use std::rc::Rc;
 
 use gpui::{div, prelude::*, App, FocusHandle, KeyDownEvent, SharedString, Window};
+use gpui_kit::base::TestSupportExt as _;
 
 use crate::{badge::Tone, text, theme, theme::Palette, zpx, Badge, Count, Dot, TextSize};
 
@@ -153,6 +154,7 @@ impl RenderOnce for Tabs {
       .id(self.id)
       .debug_selector(move || selector)
       .role(gpui::Role::TabList)
+      .test_support()
       .flex()
       .items_center()
       .when_some(self.focus, |el, focus| {
@@ -194,6 +196,7 @@ impl RenderOnce for Tabs {
           .role(gpui::Role::Tab)
           .aria_label(tab.label.clone())
           .aria_selected(active)
+          .test_support()
           .flex()
           .items_center()
           .gap_1p5()

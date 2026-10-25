@@ -24,6 +24,7 @@ fn icon(icon: context_menu::MenuIcon) -> MenuIcon {
     context_menu::MenuIcon::GitBranch => MenuIcon::GitBranch,
     context_menu::MenuIcon::Link => MenuIcon::Link,
     context_menu::MenuIcon::Pencil => MenuIcon::Pencil,
+    context_menu::MenuIcon::RotateCcw => MenuIcon::RotateCcw,
     context_menu::MenuIcon::Settings => MenuIcon::Settings,
     context_menu::MenuIcon::Trash => MenuIcon::Trash2,
   }

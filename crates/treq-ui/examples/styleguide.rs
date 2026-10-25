@@ -2,7 +2,7 @@
 //!
 //! - `cargo run -p treq-ui --example styleguide` opens it.
 //! - `-- render` re-renders the snapshots under `styleguide/`; `-- check`
-//!   compares against them, which CI runs as the visual regression check.
+//!   compares against them.
 
 use gpui::{div, prelude::*, px, App};
 use gpui_styleguidist::{example, Example, Styleguide};
@@ -115,6 +115,7 @@ fn variant_knob(knobs: &gpui_styleguidist::Knobs) -> Variant {
       ("outline", Variant::Outline),
       ("ghost", Variant::Ghost),
       ("destructive", Variant::Destructive),
+      ("warning", Variant::Warning),
       ("secondary", Variant::Secondary),
       ("link", Variant::Link),
     ],
@@ -149,6 +150,7 @@ fn buttons() -> Vec<Example> {
           ("Rename…", Variant::Outline),
           ("Add", Variant::Ghost),
           ("Delete", Variant::Destructive),
+          ("Resync", Variant::Warning),
           ("Open docs", Variant::Link),
         ]
         .map(|(label, variant)| {

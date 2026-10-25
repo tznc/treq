@@ -244,7 +244,8 @@ fn test_workspace_list_statuses_preserves_existing_workspace_metadata_on_upsert(
     Some(vec!["src/lib.rs".to_string()])
   );
   assert!(status.current.not_on_remote);
-  assert_ne!(
+  // Nothing changed, so the poll leaves the row untouched.
+  assert_eq!(
     status.current.refreshed_at.as_deref(),
     Some("2001-01-01T00:00:00Z")
   );
@@ -508,4 +509,44 @@ fn test_workspace_list_statuses_includes_last_activity_at_from_wc_tip() {
     newer_activity > older_activity,
     "expected newer tip activity ({newer_activity}) > older ({older_activity})"
   );
+}
+
+#[test]
+fn test_workspaces_have_changes_reads_each_working_copy_together() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let created: Vec<_> = (1..=3)
+    .map(|i| {
+      treq_lib::core::create_workspace(
+        &repo.repo_path,
+        &format!("feat/changes-{i}"),
+        None,
+        None,
+        None,
+        None,
+        None,
+      )
+      .expect("Failed to create workspace")
+    })
+    .collect();
+  let edited = repo.workspaces_dir().join(&created[1].workspace_path);
+  TestRepo::write_workspace_file(edited.to_str().expect("utf-8"), "edit.txt", "agent edit\n")
+    .expect("Failed to write workspace file");
+
+  let changes = treq_lib::core::workspaces_have_changes(&repo.repo_path, &created);
+
+  assert_eq!(
+    changes,
+    std::collections::HashMap::from([
+      (created[0].id, false),
+      (created[1].id, true),
+      (created[2].id, false),
+    ])
+  );
+  for workspace in &created {
+    assert_eq!(
+      treq_lib::core::workspace_has_changes(&repo.repo_path, workspace.id).ok(),
+      Some(changes[&workspace.id]),
+      "the same as read one at a time"
+    );
+  }
 }

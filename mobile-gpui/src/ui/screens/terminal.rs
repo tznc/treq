@@ -4,7 +4,7 @@
 //! session, attached, full screen. Leaving it detaches; the session keeps
 //! running on the host.
 
-use std::{rc::Rc, time::Duration};
+use std::{collections::HashMap, rc::Rc, time::Duration};
 
 use futures::channel::mpsc;
 use gpui_kit::component::Disableable as _;
@@ -22,7 +22,7 @@ use treq_lib::{
   core::{
     pty_remote_supervisor::PtySessionInfo,
     remote::{RemoteHostCheck, TreqCommandRequest},
-    remote_pty::{PtyLaunchSpec, RemoteAgentId, RemotePtyBinding},
+    remote_pty::{AttachCommandCache, PtyLaunchSpec, RemoteAgentId, RemotePtyBinding},
   },
   local_db::Workspace,
 };
@@ -37,8 +37,16 @@ use crate::{
   },
 };
 
+/// Attach commands the host answered, kept for re-attaching.
+static ATTACH_COMMANDS: std::sync::LazyLock<AttachCommandCache> =
+  std::sync::LazyLock::new(AttachCommandCache::default);
+
 /// Size used to start a session, until the view measures itself.
 const INITIAL_SIZE: (u16, u16) = (80, 24);
+
+/// How long a reattached session must stay up before a later drop gets
+/// its own automatic reattach.
+const AUTO_REATTACH_RESET: Duration = Duration::from_secs(10);
 
 /// The gap between a sent message and its Enter, so an agent's TUI reads
 /// the text as typed rather than pasted (a pasted newline doesn't submit).
@@ -67,7 +75,7 @@ impl Key {
 /// Shell keys a phone keyboard lacks.
 const SHELL_KEYS: &[(&str, Key)] = &[
   ("Esc", Key::Named("escape")),
-  ("Tab", Key::Named("tab")),
+  ("⇥", Key::Named("tab")),
   ("^C", Key::Ctrl("c")),
   ("^D", Key::Ctrl("d")),
   ("^Z", Key::Ctrl("z")),
@@ -77,19 +85,14 @@ const SHELL_KEYS: &[(&str, Key)] = &[
   ("→", Key::Named("right")),
 ];
 
-/// Keys an agent's TUI asks for: interrupt, mode switch, menu movement,
-/// and the numbered answers of its permission prompts.
+/// Keys an agent's TUI asks for: interrupt, mode switch and menu movement.
 const AGENT_KEYS: &[(&str, Key)] = &[
   ("Esc", Key::Named("escape")),
-  ("⇧Tab", Key::Bytes(b"\x1b[Z")),
+  ("⇧⇥", Key::Bytes(b"\x1b[Z")),
   ("↑", Key::Named("up")),
   ("↓", Key::Named("down")),
   ("⏎", Key::Named("enter")),
-  ("1", Key::Bytes(b"1")),
-  ("2", Key::Bytes(b"2")),
-  ("3", Key::Bytes(b"3")),
   ("^C", Key::Ctrl("c")),
-  ("Tab", Key::Named("tab")),
   ("/", Key::Bytes(b"/")),
 ];
 
@@ -216,16 +219,34 @@ pub struct Sessions {
   workspace: Option<Workspace>,
   sessions: Load<Vec<PtySessionInfo>>,
   notice: Option<String>,
+  /// Unsent messages by session label, kept while the session's page is
+  /// closed (to read a diff, say) so the message is there on return.
+  drafts: HashMap<String, String>,
+}
+
+fn list_request(repo: &str, workspace: &Workspace) -> TreqCommandRequest {
+  TreqCommandRequest::PtyList {
+    repo: repo.to_string(),
+    workspace: Some(workspace.workspace_name.clone()),
+  }
 }
 
 impl Sessions {
-  pub fn new(target: Target) -> Self {
-    Self {
+  /// Lists at once when `workspace`, the record, is already known.
+  pub fn new(target: Target, workspace: Option<Workspace>, cx: &mut Context<Self>) -> Self {
+    let sessions = workspace
+      .as_ref()
+      .and_then(|w| remote::last(&list_request(&target.repo, w)))
+      .map_or(Load::Idle, Load::Ready);
+    let mut this = Self {
       target,
-      workspace: None,
-      sessions: Load::Idle,
+      workspace,
+      sessions,
       notice: None,
-    }
+      drafts: HashMap::new(),
+    };
+    this.fetch(true, cx);
+    this
   }
 
   /// The workspace record (from the workspace's status), which names its
@@ -234,7 +255,7 @@ impl Sessions {
     let first = self.workspace.is_none();
     self.workspace = Some(workspace);
     if first {
-      self.reload(cx);
+      self.fetch(true, cx);
     }
   }
 
@@ -246,24 +267,82 @@ impl Sessions {
   }
 
   pub fn reload(&mut self, cx: &mut Context<Self>) {
+    self.fetch(false, cx);
+  }
+
+  /// `join` as in [`remote::read_cached`].
+  fn fetch(&mut self, join: bool, cx: &mut Context<Self>) {
     let Some(workspace) = &self.workspace else {
       return;
     };
     if self.sessions.ready().is_none() {
       self.sessions = Load::Loading;
     }
-    let request = TreqCommandRequest::PtyList {
-      repo: self.target.repo.clone(),
-      workspace: Some(workspace.workspace_name.clone()),
-    };
+    let request = list_request(&self.target.repo, workspace);
     load::run(
       cx,
-      remote::read::<Vec<PtySessionInfo>>(request),
+      remote::read_cached::<Vec<PtySessionInfo>>(request, join),
       |this, result, cx| {
         this.sessions = Load::from_result(result);
         cx.notify();
       },
     );
+  }
+
+  /// The running agent sessions, by label, that a review can go to.
+  pub fn running_agents(&self) -> Vec<(String, RemoteAgentId)> {
+    self.sessions.ready().map_or_else(Vec::new, |list| {
+      list
+        .iter()
+        .filter(|s| s.running)
+        .filter_map(|s| match Program::of_label(&s.label) {
+          Program::Agent(agent) => Some((s.label.clone(), agent)),
+          Program::Shell => None,
+        })
+        .collect()
+    })
+  }
+
+  /// The agents a new session can run on this host.
+  pub fn agents_offered(cx: &App) -> Vec<RemoteAgentId> {
+    agents_on(host_check(cx).as_ref())
+  }
+
+  /// Pastes `text` into running session `label` and submits it, then opens
+  /// the session. `done` hears whether the host took it.
+  pub fn paste_into(
+    &mut self,
+    label: String,
+    text: String,
+    done: impl FnOnce(Result<(), String>, &mut App) + 'static,
+    cx: &mut Context<Self>,
+  ) {
+    let Some(workspace) = &self.workspace else {
+      return done(Err("This workspace is still loading.".into()), cx);
+    };
+    let request = TreqCommandRequest::PtyPaste {
+      repo: self.target.repo.clone(),
+      workspace: workspace.workspace_name.clone(),
+      label: label.clone(),
+      text,
+      submit: true,
+      idempotency_key: format!("pty.paste:{}", uuid::Uuid::new_v4()),
+    };
+    load::run(cx, remote::mutate(request), move |this, outcome, cx| {
+      let (ok, message) = super::mutation_message(&outcome, "");
+      if ok {
+        let program = Program::of_label(&label);
+        this.open(label, program.launch(Vec::new()), cx);
+        done(Ok(()), cx);
+      } else {
+        done(Err(errors::describe(&message).message), cx);
+      }
+    });
+  }
+
+  /// Starts a new `agent` session with `args`, and opens it.
+  pub fn start_agent(&mut self, agent: RemoteAgentId, args: Vec<String>, cx: &mut Context<Self>) {
+    self.start(Program::Agent(agent), args, cx);
   }
 
   fn start(&mut self, program: Program, args: Vec<String>, cx: &mut Context<Self>) {
@@ -288,10 +367,15 @@ impl Sessions {
   }
 
   fn new_agent(&mut self, cx: &mut Context<Self>) {
+    self.new_agent_with(String::new(), cx)
+  }
+
+  /// The New agent sheet with `message` already typed as its first message.
+  pub fn new_agent_with(&mut self, message: String, cx: &mut Context<Self>) {
     let agents = agents_on(host_check(cx).as_ref());
     let sessions = cx.weak_entity();
     sheet::open(Some("New agent".into()), cx, move |window, cx| {
-      cx.new(|cx| AgentSheet::new(agents, sessions, window, cx))
+      cx.new(|cx| AgentSheet::new(agents, sessions, message, window, cx))
     });
   }
 
@@ -419,10 +503,15 @@ impl AgentSheet {
   fn new(
     agents: Vec<RemoteAgentId>,
     sessions: WeakEntity<Sessions>,
+    message: String,
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Self {
-    let message = cx.new(|cx| InputState::new(window, cx).placeholder("First message (optional)"));
+    let message = cx.new(|cx| {
+      InputState::new(window, cx)
+        .placeholder("First message (optional)")
+        .default_value(message)
+    });
     Self {
       agents,
       selected: 0,
@@ -505,6 +594,12 @@ pub struct TerminalScreen {
   /// connection dropped). Its last screen stays up so its final output
   /// (an error, a summary) can still be read.
   ended: Option<Option<u32>>,
+  /// The automatic reattach after a dropped connection was used. A
+  /// session that stays up again gives it back, so each drop gets one
+  /// before Reattach is offered.
+  auto_spent: bool,
+  /// Counts attaches, so a timer can tell whether its attach is current.
+  attaches: usize,
   message: Entity<InputState>,
   sessions: WeakEntity<Sessions>,
 }
@@ -568,8 +663,15 @@ impl TerminalScreen {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Self {
-    let message =
-      cx.new(|cx| InputState::new(window, cx).placeholder(format!("Message {}", program.name())));
+    let draft = sessions
+      .upgrade()
+      .and_then(|list| list.update(cx, |list, _| list.drafts.remove(&label)))
+      .unwrap_or_default();
+    let message = cx.new(|cx| {
+      InputState::new(window, cx)
+        .placeholder(format!("Message {}", program.name()))
+        .default_value(draft)
+    });
     cx.subscribe_in(
       &message,
       window,
@@ -580,12 +682,22 @@ impl TerminalScreen {
       },
     )
     .detach();
-    // Leaving the page detaches; the list then shows what's still running.
+    // Leaving the page detaches; the list then shows what's still running
+    // and keeps the unsent message for the next visit.
     let list = sessions.clone();
-    cx.on_release(move |_, cx| {
+    cx.on_release(move |this: &mut Self, cx| {
+      let draft = this.message.read(cx).value().to_string();
+      let label = this.label.clone();
       let list = list.clone();
       cx.defer(move |cx| {
-        list.update(cx, |list, cx| list.reload(cx)).ok();
+        list
+          .update(cx, |list, cx| {
+            if !draft.trim().is_empty() {
+              list.drafts.insert(label, draft);
+            }
+            list.reload(cx)
+          })
+          .ok();
       });
     })
     .detach();
@@ -596,6 +708,8 @@ impl TerminalScreen {
       program,
       view: Load::Loading,
       ended: None,
+      auto_spent: false,
+      attaches: 0,
       message,
       sessions,
     };
@@ -612,6 +726,8 @@ impl TerminalScreen {
       }
     };
     self.view = Load::Loading;
+    self.attaches += 1;
+    let attach_id = self.attaches;
     let repo = self.target.repo.clone();
     let workspace = self.workspace.clone();
     let label = self.label.clone();
@@ -636,9 +752,18 @@ impl TerminalScreen {
       window_label: None,
     };
     let attach = async move {
-      let command = remote::read::<String>(request).await?;
+      // Re-attaching the same session skips asking the host for the command.
+      let cache_key = AttachCommandCache::key(&endpoint, &request);
+      let command = match ATTACH_COMMANDS.get(&cache_key) {
+        Some(command) => command,
+        None => {
+          let command = remote::read::<String>(request).await?;
+          ATTACH_COMMANDS.insert(cache_key.clone(), command.clone());
+          command
+        }
+      };
       let output = tx.clone();
-      backend::get()
+      let attached = backend::get()
         .ptys
         .create_with_command(
           binding,
@@ -654,7 +779,12 @@ impl TerminalScreen {
           },
         )
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+      if attached.is_err() {
+        // The host may have changed under the cached command.
+        ATTACH_COMMANDS.forget(&cache_key);
+      }
+      attached
     };
     let screen = cx.weak_entity();
     load::run_in(window, cx, attach, move |this, result, window, cx| {
@@ -665,8 +795,10 @@ impl TerminalScreen {
               session_id,
               INITIAL_SIZE,
               rx,
-              move |status, _, cx| {
-                screen.update(cx, |this, cx| this.ended(status, cx)).ok();
+              move |status, window, cx| {
+                screen
+                  .update(cx, |this, cx| this.ended(status, window, cx))
+                  .ok();
               },
               window,
               cx,
@@ -675,6 +807,17 @@ impl TerminalScreen {
           if this.program == Program::Shell {
             view.update(cx, |view, cx| view.focus(window, cx));
           }
+          cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(AUTO_REATTACH_RESET).await;
+            this
+              .update(cx, |this, _| {
+                if this.attaches == attach_id && this.ended.is_none() {
+                  this.auto_spent = false;
+                }
+              })
+              .ok();
+          })
+          .detach();
           Load::Ready(view)
         }
         Err(error) => Load::Failed(errors::describe(&error).message),
@@ -683,9 +826,16 @@ impl TerminalScreen {
     });
   }
 
-  /// The session's program exited, or the channel dropped: back to the
-  /// list, which says which.
-  fn ended(&mut self, status: Option<u32>, cx: &mut Context<Self>) {
+  /// The session's program exited, or the channel dropped. A drop
+  /// reattaches once on its own; after that, or when the program exited,
+  /// the last screen stays up with Reattach (or Start again).
+  fn ended(&mut self, status: Option<u32>, window: &mut Window, cx: &mut Context<Self>) {
+    if status.is_none() && !self.auto_spent {
+      self.auto_spent = true;
+      self.attach(self.program.launch(Vec::new()), window, cx);
+      cx.notify();
+      return;
+    }
     self.ended = Some(status);
     cx.notify();
   }
@@ -773,7 +923,7 @@ impl TerminalScreen {
       .id("keys")
       .gap_1()
       .p_1()
-      .overflow_hidden()
+      .overflow_x_scroll()
       .bg(cx.theme().secondary)
       .children(
         self
@@ -786,6 +936,7 @@ impl TerminalScreen {
             Button::new(("key", i))
               .outline()
               .small()
+              .flex_shrink_0()
               .min_w(px(36.))
               .label(*label)
               .on_click(move |_, window, cx| {
@@ -867,6 +1018,9 @@ impl Render for TerminalScreen {
             ),
         )
       })
+      .when(self.ended.is_none(), |screen| {
+        screen.child(self.key_row(&view, cx))
+      })
       .when(agent && self.ended.is_none(), |screen| {
         screen.child(
           h_flex()
@@ -882,10 +1036,6 @@ impl Render for TerminalScreen {
                 .on_click(cx.listener(|this, _, window, cx| this.send(window, cx))),
             ),
         )
-      })
-      // The keys go last, nearest the thumb.
-      .when(self.ended.is_none(), |screen| {
-        screen.child(self.key_row(&view, cx))
       })
       .into_any_element()
   }

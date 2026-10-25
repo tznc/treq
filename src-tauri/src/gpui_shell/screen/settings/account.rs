@@ -14,8 +14,11 @@ use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
+use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
-use tauri_plugin_gpui::gpui::{self, div, prelude::*, AnyElement, Context, FontWeight, Window};
+use tauri_plugin_gpui::gpui::{
+  self, div, prelude::*, AnyElement, Context, Focusable as _, FontWeight, SharedString, Window,
+};
 
 use super::{help, toast, SettingsView, Tab};
 use crate::gpui_shell::{
@@ -121,6 +124,12 @@ pub struct UsageReport {
   pub disk_used_bytes: u64,
 }
 
+thread_local! {
+  /// The repositories the Integrations tab last read, shown while it reads
+  /// them again.
+  static LAST_GITHUB: std::cell::RefCell<Option<Vec<GithubRepo>>> = const { std::cell::RefCell::new(None) };
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct GithubRoute {
@@ -146,6 +155,8 @@ pub enum AccountTab {
     error: Option<String>,
     /// Dev builds only.
     dev: Option<DevCallback>,
+    /// "Sorry to see you go", after this window deleted the account.
+    farewell: bool,
   },
   SignedIn(Box<SignedIn>),
 }
@@ -168,6 +179,19 @@ pub struct SignedIn {
   pub period: Option<(String, String)>,
   pub manage_label: String,
   pub cloud: Option<CloudCard>,
+  /// The delete-account confirmation, while it is open.
+  pub delete_account: Option<DeleteAccountDialog>,
+}
+
+/// "Delete your Treq account?": the email typed to confirm, and the
+/// server's reason when it refused.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DeleteAccountDialog {
+  pub typed: String,
+  /// The typed text is the account's email (any case, trimmed).
+  pub can_confirm: bool,
+  pub deleting: bool,
+  pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -273,6 +297,10 @@ pub(super) struct State {
   /// "No token found in URL", from the last Go.
   callback_error: Option<String>,
   confirming_delete: bool,
+  /// The open delete-account confirmation (`can_confirm` is derived).
+  delete_account: Option<DeleteAccountDialog>,
+  /// The account was deleted here; the signed-out tab says goodbye.
+  farewell: bool,
   /// The avatar URL, and its image once loaded.
   avatar: Option<(String, Option<Arc<gpui::Image>>)>,
   linear: Option<Linear>,
@@ -283,6 +311,8 @@ struct Linear {
   path: String,
   key: Option<String>,
   editing: bool,
+  /// The key field takes focus on its next draw, once it opens.
+  focus: bool,
   draft: String,
   saving: bool,
 }
@@ -423,7 +453,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
   let creation_retry =
     record.is_some_and(|i| i.status == "failed" && i.provider_resource_id.is_none());
   let error = cloud.provisioning_error.as_deref();
-  let pro_required = error.filter(|e| e.starts_with(PRO_REQUIRED_PREFIX));
+  let pro_required = error.and_then(|e| e.strip_prefix(PRO_REQUIRED_PREFIX));
   let creating = cloud.submitting && instance.is_none();
   let stage = cloud.provisioning_stage.clone().filter(|s| !s.is_empty());
   CloudCard {
@@ -468,7 +498,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
       spinning: creating || stage.is_some(),
       stage,
     }),
-    pro_required: pro_required.map(|e| first_line(&e[PRO_REQUIRED_PREFIX.len()..])),
+    pro_required: pro_required.map(first_line),
     error: error.filter(|_| pro_required.is_none()).map(first_line),
     submitting: cloud.submitting,
     confirming_delete,
@@ -513,6 +543,7 @@ impl SettingsView {
             .clone()
             .or_else(|| account.dev_callback.error.clone()),
         }),
+        farewell: state.farewell,
       };
     };
     let subscription = account.subscription.as_ref();
@@ -543,6 +574,10 @@ impl SettingsView {
         .cloud
         .as_ref()
         .map(|cloud| cloud_card(cloud, state.confirming_delete)),
+      delete_account: state.delete_account.as_ref().map(|d| DeleteAccountDialog {
+        can_confirm: !d.deleting && email_matches(user.email.as_deref(), &d.typed),
+        ..d.clone()
+      }),
     }))
   }
 
@@ -636,6 +671,7 @@ impl SettingsView {
       path: path.clone(),
       key: None,
       editing: false,
+      focus: false,
       draft: String::new(),
       saving: false,
     });
@@ -741,8 +777,10 @@ impl SettingsView {
     if signed_in {
       self.account.callback_url.clear();
       self.account.callback_error = None;
+      self.account.farewell = false;
     } else {
       self.account.github = None;
+      LAST_GITHUB.with(|last| *last.borrow_mut() = None);
       self.account.cloud_read = false;
     }
     self.sync_avatar(cx);
@@ -759,28 +797,46 @@ impl SettingsView {
     }
   }
 
+  /// Reads the GitHub repositories. Those read last time show meanwhile,
+  /// so reopening the tab has no spinner.
   fn load_github(&mut self, cx: &mut Context<Self>) {
-    self.account.github = Some(GithubRoute {
-      loading: true,
-      ..GithubRoute::default()
+    let last = LAST_GITHUB.with(|last| last.borrow().clone());
+    self.account.github = Some(match last.clone() {
+      Some(repositories) => GithubRoute {
+        loading: false,
+        failed: false,
+        repositories,
+      },
+      None => GithubRoute {
+        loading: true,
+        ..GithubRoute::default()
+      },
     });
     self.spawn(
       cx,
       |host| host.github_repositories(),
-      |view, result, _| {
+      move |view, result, _| {
         view.account.github = Some(match result {
-          Ok(repositories) => GithubRoute {
-            loading: false,
-            failed: false,
-            repositories: repositories
+          Ok(repositories) => {
+            let repositories: Vec<GithubRepo> = repositories
               .into_iter()
               .map(|r| GithubRepo {
                 id: r.id,
                 full_name: r.full_name,
                 private: r.private,
               })
-              .collect(),
-          },
+              .collect();
+            LAST_GITHUB.with(|last| *last.borrow_mut() = Some(repositories.clone()));
+            GithubRoute {
+              loading: false,
+              failed: false,
+              repositories,
+            }
+          }
+          Err(error) if last.is_some() => {
+            log::warn!("reading the GitHub repositories failed: {error}");
+            return;
+          }
           Err(error) => {
             log::warn!("reading the GitHub repositories failed: {error}");
             GithubRoute {
@@ -808,6 +864,45 @@ impl SettingsView {
           loading: false,
           error: result.err(),
         };
+      },
+    );
+  }
+
+  /// Deletes the account once the typed email matches. On success the
+  /// account signs out and the tab falls back to "Sign in"; a refusal stays
+  /// in the dialog with the server's reason.
+  fn delete_account(&mut self, cx: &mut Context<Self>) {
+    let email = self
+      .account_route()
+      .and_then(|a| a.user)
+      .and_then(|u| u.email);
+    let Some(dialog) = &mut self.account.delete_account else {
+      return;
+    };
+    if dialog.deleting || !email_matches(email.as_deref(), &dialog.typed) {
+      return;
+    }
+    dialog.deleting = true;
+    dialog.error = None;
+    self.spawn(
+      cx,
+      |host| host.delete_account(),
+      |view, result, _| match result {
+        Ok(()) => {
+          view.account.delete_account = None;
+          view.account.farewell = true;
+          view.host.notify(toast(
+            ToastTone::Success,
+            "Account deleted",
+            "Your Treq account and its data have been deleted.",
+          ));
+        }
+        Err(error) => {
+          if let Some(dialog) = &mut view.account.delete_account {
+            dialog.deleting = false;
+            dialog.error = Some(error.message);
+          }
+        }
       },
     );
   }
@@ -870,6 +965,19 @@ impl SettingsView {
         Err(err) => self.account.callback_error = Some(err),
       },
       "account.signOut" => self.host.sign_out(),
+      "account.delete.ask" => self.account.delete_account = Some(DeleteAccountDialog::default()),
+      "account.delete.cancel" => {
+        if !self
+          .account
+          .delete_account
+          .as_ref()
+          .is_some_and(|d| d.deleting)
+        {
+          self.account.delete_account = None;
+        }
+      }
+      "account.delete.confirm" => self.delete_account(cx),
+      "account.farewell.dismiss" => self.account.farewell = false,
       "linear.oauth" => self.start_linear_oauth(cx),
       "cloud.provision" => self.host.cloud_action(CloudAction::Provision),
       "cloud.wake" => self.host.cloud_action(CloudAction::Wake),
@@ -892,7 +1000,14 @@ impl SettingsView {
       "linear.apiKey.edit" => {
         if let Some(linear) = &mut self.account.linear {
           linear.editing = true;
+          linear.focus = true;
           linear.draft = linear.key.clone().unwrap_or_default();
+        }
+      }
+      "linear.apiKey.cancel" => {
+        if let Some(linear) = &mut self.account.linear {
+          linear.editing = false;
+          linear.draft.clear();
         }
       }
       "linear.apiKey.save" => self.save_linear_key(cx),
@@ -906,6 +1021,11 @@ impl SettingsView {
     let text = value.as_str().unwrap_or_default().to_string();
     match field {
       "account.callbackUrl" => self.account.callback_url = text,
+      "account.delete.email" => {
+        if let Some(dialog) = &mut self.account.delete_account {
+          dialog.typed = text;
+        }
+      }
       "linear.apiKey" => {
         if let Some(linear) = &mut self.account.linear {
           linear.draft = text;
@@ -915,6 +1035,11 @@ impl SettingsView {
     }
     true
   }
+}
+
+/// The typed confirmation names the account's email.
+fn email_matches(email: Option<&str>, typed: &str) -> bool {
+  email.is_some_and(|email| !email.is_empty() && typed.trim().eq_ignore_ascii_case(email))
 }
 
 /// The image format `bytes` start with.
@@ -1347,11 +1472,29 @@ impl SettingsView {
             .child("Signing you in…"),
         )
         .into_any_element(),
-      AccountTab::SignedOut { error, dev } => {
+      AccountTab::SignedOut {
+        error,
+        dev,
+        farewell,
+      } => {
         let dev = dev
           .as_ref()
           .map(|dev| self.dev_callback(dev, p, window, cx));
+        let farewell = farewell.then(|| {
+          div().w_full().max_w(zpx(448.)).child(
+            ui::Alert::new("account-farewell", "Sorry to see you go", p)
+              .message("Your Treq account and its data have been deleted. You can create a new account anytime.")
+              .action(
+                Button::new("account-farewell-dismiss", p)
+                  .variant(Variant::Outline)
+                  .size(Size::Sm)
+                  .label("Dismiss")
+                  .on_click(self.press("account.farewell.dismiss")),
+              ),
+          )
+        });
         centered(16.)
+          .children(farewell)
           .child(
             div()
               .size(zpx(64.))
@@ -1581,6 +1724,159 @@ impl SettingsView {
             .on_click(self.press("account.signOut")),
         ),
       )
+      .child(
+        div()
+          .id("account-delete-section")
+          .flex()
+          .flex_col()
+          .gap_1()
+          .p_4()
+          .rounded(radius::MD)
+          .border_1()
+          .border_color(Tone::Danger.border(p))
+          .child(ui::text(div(), TextSize::Sm).font_weight(FontWeight::MEDIUM).child("Delete account"))
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .text_color(p.muted_foreground)
+              .child("Permanently deletes your Treq account, cancels any subscription immediately, and deletes your cloud workspace."),
+          )
+          .child(
+            div().mt_2().flex().child(
+              Button::new("account-delete", p)
+                .variant(Variant::Outline)
+                .size(Size::Sm)
+                .text_color(p.destructive)
+                .child(ui::icon(theme::ICON_TRASH, 16., p.destructive))
+                .label("Delete Account")
+                .on_click(self.press("account.delete.ask")),
+            ),
+          ),
+      )
+  }
+
+  /// "Delete your Treq account?", typed-email confirmation.
+  pub(super) fn delete_account_dialog(
+    &mut self,
+    dialog: &DeleteAccountDialog,
+    email: &str,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let input = self
+      .controls
+      .input("account.delete.email", &dialog.typed, email, window, cx);
+    div()
+      .id("account-delete-dialog-backdrop")
+      .absolute()
+      .inset_0()
+      .flex()
+      .items_center()
+      .justify_center()
+      .bg(p.scrim())
+      .occlude()
+      .child(
+        div()
+          .id("account-delete-dialog")
+          .debug_selector(|| "account-delete-dialog".into())
+          .role(gpui::Role::Dialog)
+          .aria_label(SharedString::from("Delete your Treq account?"))
+          .test_support()
+          .w_full()
+          .max_w(zpx(512.))
+          .mx_4()
+          .flex()
+          .flex_col()
+          .gap_4()
+          .p_6()
+          .rounded(radius::MD)
+          .border_1()
+          .border_color(p.border)
+          .bg(p.background)
+          .shadow_lg()
+          .child(
+            div()
+              .flex()
+              .flex_col()
+              .gap_2()
+              .child(heading("Delete your Treq account?"))
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .text_color(p.muted_foreground)
+                  .child("This cannot be undone. Deleting your account:"),
+              )
+              .child(
+                div().flex().flex_col().gap_1().children(
+                  [
+                    "Cancels your subscription immediately, without a refund for the rest of the period.",
+                    "Deletes your cloud workspace and everything on it.",
+                    "Disconnects Linear and forgets your GitHub App installations.",
+                    "Keeps billing records for tax and accounting.",
+                  ]
+                  .map(|item| {
+                    div()
+                      .flex()
+                      .gap_2()
+                      .child(ui::text(div().flex_none(), TextSize::Sm).text_color(p.muted_foreground).child("•"))
+                      .child(ui::text(div().min_w_0(), TextSize::Sm).text_color(p.muted_foreground).child(item))
+                  }),
+                ),
+              )
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .text_color(p.muted_foreground)
+                  .child("If you are the last owner of an organization, make another member an owner or delete the organization first."),
+              ),
+          )
+          .child(
+            div()
+              .flex()
+              .flex_col()
+              .gap_2()
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .font_weight(FontWeight::MEDIUM)
+                  .child(format!("Type {email} to confirm")),
+              )
+              .child(form::input_field(
+                "account-delete-email",
+                &input,
+                false,
+                dialog.deleting,
+              ))
+              .when_some(dialog.error.clone(), |this, error| {
+                this.child(
+                  ui::text(div(), TextSize::Sm)
+                    .id("account-delete-error")
+                    .role(gpui::Role::Alert)
+                    .aria_label(SharedString::from(error.clone()))
+                    .text_color(Tone::Danger.color(p))
+                    .child(error)
+                    .test_support(),
+                )
+              }),
+          )
+          .child(
+            div()
+              .flex()
+              .justify_end()
+              .gap_2()
+              .child(
+                Button::new("account-delete-cancel", p)
+                  .variant(Variant::Outline)
+                  .disabled(dialog.deleting)
+                  .label("Cancel")
+                  .on_click(self.press("account.delete.cancel")),
+              )
+              .child(
+                Button::new("account-delete-confirm", p)
+                  .variant(Variant::Destructive)
+                  .disabled(!dialog.can_confirm)
+                  .label(if dialog.deleting { "Deleting…" } else { "Delete Account" })
+                  .on_click(self.press("account.delete.confirm")),
+              ),
+          ),
+      )
   }
 
   /// `CloudWorkspaceCard`.
@@ -1699,10 +1995,13 @@ impl SettingsView {
         .into_any_element();
     }
     let key_control: AnyElement = if linear.editing {
-      let input =
-        self
-          .controls
-          .password("linear.apiKey", &linear.draft, "linear_api_...", window, cx);
+      let input = self
+        .controls
+        .password("linear.apiKey", &linear.draft, "lin_api_...", window, cx);
+      if let Some(state) = self.account.linear.as_mut().filter(|l| l.focus) {
+        state.focus = false;
+        input.read(cx).focus_handle(cx).focus(window, cx);
+      }
       div()
         .flex()
         .flex_none()
@@ -1713,6 +2012,14 @@ impl SettingsView {
           false,
           linear.saving,
         )))
+        .child(
+          Button::new("linear-api-key-cancel", p)
+            .size(Size::Sm)
+            .variant(Variant::Ghost)
+            .disabled(linear.saving)
+            .label("Cancel")
+            .on_click(self.press("linear.apiKey.cancel")),
+        )
         .child(
           Button::new("linear-api-key-save", p)
             .size(Size::Sm)
@@ -1753,7 +2060,7 @@ impl SettingsView {
     });
     div()
       .child(section_header(
-        theme::ICON_ZAP,
+        theme::ICON_LINEAR,
         "Linear",
         "Issue tracker integration",
         p,

@@ -8,10 +8,11 @@
 //! its diff changes.
 
 use std::{
-  collections::{HashMap, HashSet},
+  collections::{BTreeSet, HashMap, HashSet},
   ops::Range,
   rc::Rc,
   sync::Arc,
+  time::{Duration, Instant},
 };
 
 use tauri_plugin_gpui::gpui::{
@@ -28,7 +29,8 @@ use crate::{
         body, conflict_lines, conflicts, is_collapsed, line_counts, new_lines, Body, BodyInput,
         Conflict, FileHunks,
       },
-      commits_data::line_numbers,
+      changes_review::FILE_HUNK,
+      commits_data::{line_number, line_numbers},
       highlight, intraline,
     },
     theme::{self, Palette},
@@ -122,6 +124,32 @@ pub(super) struct DiffRows {
   prepared: HashMap<(String, bool), Rc<Prepared>>,
   /// The rem size the rows were measured at.
   rem: Pixels,
+  /// What the rows were laid out from, so an unchanged frame keeps them.
+  key: Option<Key>,
+  /// Bumped each time the rows are laid out again: the find index and the
+  /// placed threads are derived from the same inputs and follow it.
+  pub(super) revision: u64,
+  /// How long the last layout of the rows took.
+  pub(super) layout_cost: Duration,
+}
+
+/// Every input of `layout_rows`. The snapshot, the hunks and the lines read
+/// around them are too large to compare, so `ChangesView::layout_gen`
+/// stands for them: it is bumped wherever any of them changes.
+#[derive(PartialEq)]
+struct Key {
+  generation: u64,
+  pr_error: bool,
+  changeset_expanded: bool,
+  show_committed: Option<bool>,
+  /// Generated files the filter keeps because they are staged; `None`
+  /// with the filter off.
+  kept_generated: Option<BTreeSet<String>>,
+  collapsed: HashSet<String>,
+  expanded_large: HashSet<String>,
+  loaded_generated: HashSet<String>,
+  /// Files with a file comment or one being written.
+  file_comments: BTreeSet<String>,
 }
 
 impl Default for DiffRows {
@@ -134,6 +162,9 @@ impl Default for DiffRows {
       cards: Vec::new(),
       prepared: HashMap::new(),
       rem: px(0.),
+      key: None,
+      revision: 0,
+      layout_cost: Duration::ZERO,
     }
   }
 }
@@ -155,6 +186,42 @@ impl ChangesView {
         .as_ref()
         .and_then(|s| s.committed_hunks.get(path))
     })
+  }
+
+  fn layout_key(&self) -> Key {
+    let review = &self.review;
+    Key {
+      generation: self.layout_gen,
+      pr_error: self.pr.as_ref().is_some_and(|pr| pr.error.is_some()),
+      changeset_expanded: self.changeset_expanded,
+      show_committed: self.options.show_committed,
+      kept_generated: self.hide_generated.then(|| {
+        self
+          .snapshot
+          .iter()
+          .flat_map(|s| &s.generated)
+          .filter(|p| self.staging.staged.contains(*p))
+          .cloned()
+          .collect()
+      }),
+      collapsed: self.collapsed_files.clone(),
+      expanded_large: self.expanded_large.clone(),
+      loaded_generated: self.loaded_generated.clone(),
+      file_comments: review
+        .comments
+        .iter()
+        .filter(|c| c.is_file())
+        .map(|c| &c.file_path)
+        .chain(
+          review
+            .draft
+            .iter()
+            .filter(|d| d.hunk_id == FILE_HUNK)
+            .map(|d| &d.file_path),
+        )
+        .cloned()
+        .collect(),
+    }
   }
 
   /// The cards and rows the diff shows now. None while the tab shows a
@@ -288,12 +355,20 @@ impl ChangesView {
   /// Brings the list up to date with the rows, keeping the measured
   /// heights of the rows that did not change.
   pub(super) fn sync_rows(&mut self, window: &mut Window) {
-    let (cards, rows) = self.layout_rows();
     let rem = window.rem_size();
     if rem != self.diff.rem {
       self.diff.rem = rem;
       self.diff.list.remeasure();
     }
+    let key = self.layout_key();
+    if self.diff.key.as_ref() == Some(&key) {
+      return;
+    }
+    let started = Instant::now();
+    let (cards, rows) = self.layout_rows();
+    self.diff.layout_cost = started.elapsed();
+    self.diff.key = Some(key);
+    self.diff.revision += 1;
     let old = (&self.diff.rows, &self.diff.cards);
     let same = |a: Row, b: Row| a == b && card_key(old.1, a) == card_key(&cards, b);
     if old.0.len() == rows.len() && old.0.iter().zip(&rows).all(|(a, b)| same(*a, *b)) {
@@ -320,6 +395,12 @@ impl ChangesView {
       .splice(prefix..old.0.len() - suffix, rows.len() - prefix - suffix);
     self.diff.rows = rows;
     self.diff.cards = cards;
+  }
+
+  /// How many times the rows were laid out.
+  #[cfg(test)]
+  pub(in crate::gpui_shell::screen) fn layout_revision(&self) -> u64 {
+    self.diff.revision
   }
 
   /// The row of a file's card.
@@ -515,6 +596,12 @@ impl ChangesView {
         context_row(n, line, language, p).into_any_element()
       }
       Row::Line(_, _, l) => {
+        // Numbered with the card's other lines, not by counting up to this one.
+        let numbers = card
+          .prepared
+          .as_ref()
+          .and_then(|prep| prep.numbers.get(h)?.get(l).copied())
+          .unwrap_or_else(|| line_number(hunk, l));
         let changed = card
           .prepared
           .as_ref()
@@ -523,13 +610,24 @@ impl ChangesView {
         div()
           .child(
             self
-              .diff_line(path, hunks, h, l, changed, language, card.conflicted, p, cx)
+              .diff_line(
+                path,
+                hunks,
+                h,
+                l,
+                numbers,
+                changed,
+                language,
+                card.conflicted,
+                p,
+                cx,
+              )
               .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|view, e: &gpui::MouseDownEvent, _, cx| view.line_menu(e.position, cx)),
               ),
           )
-          .children(self.line_extras(path, hunks, h, l, p, cx))
+          .children(self.line_extras(path, hunks, h, l, numbers, p, cx))
           .into_any_element()
       }
       Row::Below(..) => {

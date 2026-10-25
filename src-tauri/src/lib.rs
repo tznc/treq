@@ -1,3 +1,12 @@
+#![cfg_attr(
+  test,
+  allow(
+    clippy::let_underscore_must_use,
+    clippy::string_slice,
+    reason = "test code drops Results freely and slices fixed literals at known offsets"
+  )
+)]
+
 // The app side of dispatch (listener, responses) is unused by the headless CLI.
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 mod agent_dispatch;
@@ -37,13 +46,21 @@ pub(crate) mod open_new_window;
 #[cfg(feature = "gui")]
 pub mod pr_status;
 pub mod pty;
+pub mod pty_stream;
 pub mod repo_config;
+pub mod result_ext;
 pub mod review_aggregate;
 pub mod send_dispatch;
+#[cfg(feature = "gui")]
+pub(crate) mod startup;
 pub mod telemetry;
 pub mod tracker;
 pub mod unified_patch;
 
+#[cfg(feature = "gui")]
+use crate::lock_ext::LockExt;
+#[cfg(feature = "gui")]
+use crate::result_ext::ResultExt;
 #[cfg(feature = "gui")]
 use agent_runtime::{
   parse_agent_request_from_url, route_agent_deep_link, route_agent_dispatch_request,
@@ -123,6 +140,32 @@ fn repo_windows(app: &AppHandle) -> HashMap<String, tauri::Window> {
     .into_iter()
     .filter(|(label, _)| !label.starts_with("gpui-popup-"))
     .collect()
+}
+
+/// Stops the PR poller watching repos no window shows, as a main or a
+/// supporting repo, after a window closed or switched repo.
+#[cfg(feature = "gui")]
+pub(crate) fn unwatch_unshown_repos(app: &AppHandle) {
+  let Some(state) = app.try_state::<AppState>() else {
+    return;
+  };
+  // Normalized on both sides: reads watch a repo by whichever spelling they
+  // were given, and a mismatch would unwatch then re-watch (a full poll).
+  let normalize = agent_dispatch::normalize_repo_path;
+  let mut shown: std::collections::HashSet<String> = state
+    .window_repo_paths
+    .lock_or_recover()
+    .values()
+    .map(|path| normalize(path))
+    .collect();
+  for paths in state
+    .window_supporting_repo_paths
+    .lock_or_recover()
+    .values()
+  {
+    shown.extend(paths.iter().map(|path| normalize(path)));
+  }
+  pr_status::global().retain_watched(|repo| shown.contains(&normalize(repo)));
 }
 
 /// Whether closing window `closed` leaves no repo window open, given the
@@ -226,9 +269,9 @@ fn focus_target_window(app: &AppHandle) {
   let Some(window) = resolve_menu_target_label(app).and_then(|l| app.get_window(&l)) else {
     return;
   };
-  let _ = window.unminimize();
-  let _ = window.show();
-  let _ = window.set_focus();
+  window.unminimize().ignore_closed();
+  window.show().ignore_closed();
+  window.set_focus().ignore_closed();
 }
 
 /// `treq://skill/install?id=...`: the focused window shows the install
@@ -353,25 +396,32 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
       let app_for_init = app;
       tauri::async_runtime::spawn(async move {
         let path_for_init = path.clone();
-        let init_ok = tauri::async_runtime::spawn_blocking(move || core::init(&path_for_init))
-          .await
-          .ok()
-          .and_then(Result::ok)
-          .unwrap_or(false);
+        // The rebase pass runs behind the window, which opens at once.
+        let init_ok =
+          tauri::async_runtime::spawn_blocking(move || core::init_deferring_rebase(&path_for_init))
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or(false);
         if !init_ok {
           menu_to_focused(&app_for_init, "menu-open-in-new-window-invalid");
           open_new_window::OPEN_NEW_WINDOW_GATE.end();
           return;
         }
+        // The window's `prepare_repo` must not set the repository up again.
+        #[cfg(feature = "gpui-shell")]
+        gpui_shell::note_just_initialized(&path);
         let label = open_new_window::new_repo_window_label();
         let title = open_new_window::new_repo_window_title(&path);
         let app_for_window = app_for_init.clone();
         // The GPUI shell builds windows on the main thread.
-        let _ = app_for_init.run_on_main_thread(move || {
-          if let Err(err) = open_repo_window(&app_for_window, &label, Some(path), &title) {
-            log::error!("failed to open repo window: {err}");
-          }
-        });
+        app_for_init
+          .run_on_main_thread(move || {
+            if let Err(err) = open_repo_window(&app_for_window, &label, Some(path), &title) {
+              log::error!("failed to open repo window: {err}");
+            }
+          })
+          .ignore_closed();
         open_new_window::OPEN_NEW_WINDOW_GATE.end();
       });
     });
@@ -384,11 +434,13 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
 fn open_overview_window(app: &AppHandle) {
   let label = open_new_window::new_repo_window_label();
   let handle = app.clone();
-  let _ = app.run_on_main_thread(move || {
-    if let Err(err) = open_repo_window(&handle, &label, None, "Treq - Overview") {
-      log::error!("failed to open overview window: {err}");
-    }
-  });
+  app
+    .run_on_main_thread(move || {
+      if let Err(err) = open_repo_window(&handle, &label, None, "Treq - Overview") {
+        log::error!("failed to open overview window: {err}");
+      }
+    })
+    .ignore_closed();
 }
 
 /// Opens a window on repository `repo` (`None`: the start screen) in the
@@ -484,12 +536,19 @@ where
   clippy::exit,
   reason = "a CLI invocation hands its exit code to the shell, and `tauri::generate_context!` expands to an exit"
 )]
+#[allow(
+  clippy::expect_used,
+  reason = "a Tauri build failure at startup is unrecoverable"
+)]
 pub fn run() {
+  startup::mark("run");
   telemetry::install_panic_hook();
   // CLI invocations never start Tauri: see `cli::args` for why.
   #[cfg(desktop)]
   if is_cli_process(std::env::args_os()) {
-    std::process::exit(cli::args::run(std::env::args_os()));
+    let code = cli::args::run(std::env::args_os());
+    local_db::close_idle_connections();
+    std::process::exit(code);
   }
   #[cfg(feature = "gpui-shell")]
   #[cfg(desktop)]
@@ -533,6 +592,12 @@ pub fn run() {
   let builder = builder.plugin(tauri_plugin_cli::init());
   builder
     .on_window_event(|window, event| {
+      // Any window counts toward the app being in front, a modal one too.
+      #[cfg(feature = "gpui-shell")]
+      #[cfg(desktop)]
+      if let tauri::WindowEvent::Focused(focused) = event {
+        gpui_shell::window_focused(window.app_handle(), window.label(), *focused);
+      }
       // A shell window losing focus closes its tooltips and menus, as
       // native ones would; its toasts follow it as it moves or resizes.
       #[cfg(feature = "gpui-shell")]
@@ -540,10 +605,7 @@ pub fn run() {
       if !window.label().starts_with("gpui-popup-") {
         match event {
           tauri::WindowEvent::Focused(false) => gpui_shell::hide_popups(window.app_handle()),
-          tauri::WindowEvent::Focused(true) => {
-            commands::cloud::window_focused(window.app_handle());
-            gpui_shell::window_focused(window.app_handle(), window.label());
-          }
+          tauri::WindowEvent::Focused(true) => commands::cloud::window_focused(window.app_handle()),
           tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
             gpui_shell::place_toasts(window.app_handle(), window.label())
           }
@@ -557,11 +619,23 @@ pub fn run() {
       // every terminal.
       if let tauri::WindowEvent::Destroyed = event {
         let label = window.label().to_string();
+        core::agent_launch::forget_window(&label);
         #[cfg(feature = "gpui-shell")]
         #[cfg(desktop)]
         gpui_shell::forget_window(&label);
         let app_handle = window.app_handle().clone();
+        if let Some(state) = app_handle.try_state::<AppState>() {
+          state.window_repo_paths.lock_or_recover().remove(&label);
+          state
+            .window_supporting_repo_paths
+            .lock_or_recover()
+            .remove(&label);
+        }
+        unwatch_unshown_repos(&app_handle);
         if is_last_repo_window(&label, repo_windows(&app_handle).keys()) {
+          #[cfg(feature = "gpui-shell")]
+          #[cfg(desktop)]
+          gpui_shell::forget_terminals();
           if let Some(state) = app_handle.try_state::<AppState>() {
             state.pty_manager.close_all();
           }
@@ -574,37 +648,50 @@ pub fn run() {
       }
     })
     .setup(move |app| {
-      let log_dir = app.path().app_log_dir().expect("Failed to get app log dir");
-      let telemetry = telemetry::init(&log_dir).expect("Failed to initialize telemetry");
+      startup::mark("tauri built, setup begins");
+      let log_dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|e| format!("Failed to get app log dir: {e}"))?;
+      let telemetry =
+        telemetry::init(&log_dir).map_err(|e| format!("Failed to initialize telemetry: {e}"))?;
 
+      startup::mark("telemetry");
       let app_dir = app
         .path()
         .app_data_dir()
-        .expect("Failed to get app data dir");
-      std::fs::create_dir_all(&app_dir).expect("Failed to create app data directory");
+        .map_err(|e| format!("Failed to get app data dir: {e}"))?;
+      std::fs::create_dir_all(&app_dir)
+        .map_err(|e| format!("Failed to create app data directory: {e}"))?;
       std::env::set_var("TREQ_APP_DATA_DIR", app_dir.to_string_lossy().to_string());
       let db_path = app_dir.join(crate::core::APP_DB_FILE_NAME);
 
-      let db = Database::new(db_path).expect("Failed to open database");
-      db.init().expect("Failed to initialize database");
+      let db = Database::new(db_path).map_err(|e| format!("Failed to open database: {e}"))?;
+      db.init()
+        .map_err(|e| format!("Failed to initialize database: {e}"))?;
 
+      startup::mark("database");
       // The saved repo opens with the window (avoids Onboarding flash).
       let saved_repo_path = db.get_setting("last_opened_repo_path").ok().flatten();
       // The e2e suite opens its fixture repository instead.
       #[cfg(feature = "e2e")]
       let saved_repo_path = gpui_shell::e2e::repo().or(saved_repo_path);
 
-      // Load cached binary paths and initialize in-memory cache
-      let binary_paths = commands::load_cached_binary_paths(&db);
-      binary_paths::init_binary_paths_cache(binary_paths);
-      // Resolve the login-shell PATH off the main thread so the first terminal
-      // doesn't wait on shell startup.
+      // Resolve the login-shell PATH off the main thread, before anything
+      // else can wait on it, so the first terminal doesn't wait on shell
+      // startup.
       std::thread::spawn(binary_paths::get_extended_path);
 
-      // Load cached editor apps and initialize in-memory cache
-      let editor_apps = commands::load_cached_editor_apps(&db);
-      binary_paths::init_editor_apps_cache(editor_apps);
+      // Cached paths and editors are read from the database here; what was
+      // never looked for is detected in the background once the state is
+      // managed (`detect_binaries`, and the window's `detect_editors`).
+      let (binary_paths, undetected_binaries) = commands::load_cached_binary_paths(&db);
+      binary_paths::init_binary_paths_cache(binary_paths);
+      if let Some(editor_apps) = commands::load_cached_editor_apps(&db) {
+        binary_paths::init_editor_apps_cache(editor_apps);
+      }
 
+      startup::mark("binary caches");
       let pty_manager = PtyManager::new();
 
       // Background PR-status poller (sidebar reads from its cache)
@@ -634,6 +721,13 @@ pub fn run() {
       );
 
       app.manage(app_state);
+      startup::mark("state managed");
+      if !undetected_binaries.is_empty() {
+        let handle = app.handle().clone();
+        std::thread::spawn(move || {
+          commands::binary::detect_binaries(&handle.state::<AppState>().db, &undetected_binaries);
+        });
+      }
       #[cfg(not(mobile))]
       let remote_exec_state = commands::remote_control::RemoteExecState::default();
       // Mobile authenticates with the device key held in the OS
@@ -654,16 +748,22 @@ pub fn run() {
       #[cfg(feature = "gpui-shell")]
       #[cfg(desktop)]
       match gpui_shell::init(app) {
-        Ok(()) => open_repo_window(app.handle(), "main", saved_repo_path, "Treq - Stacking ADE")?,
+        Ok(()) => {
+          startup::mark("gpui init");
+          open_repo_window(app.handle(), "main", saved_repo_path, "Treq - Stacking ADE")?;
+          startup::mark("main window open");
+        }
         Err(err) => quit_without_gpui(app.handle(), &err),
       }
       // Rust owns the Supabase session; the windows draw the account.
       commands::cloud::start(app.handle());
+      startup::mark("cloud");
       start_agent_ipc_listener(app.handle().clone(), dispatch_listener);
       start_instance_registry_heartbeat(app.handle().clone());
       crate::core::app_setup_script::spawn_run_if_needed(
         crate::core::app_setup_script::Trigger::Startup,
       );
+      startup::mark("background services");
 
       // Deep links: sign-in callbacks and agent starts.
       #[cfg(desktop)]
@@ -671,9 +771,16 @@ pub fn run() {
         use tauri_plugin_deep_link::DeepLinkExt;
         // Installers register `treq://` with the OS. An AppImage or a dev
         // build is not installed, so it registers itself at startup.
+        // It rewrites a launcher entry and runs `xdg-mime`, so it stays off
+        // the startup path.
         #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
-        if let Err(err) = app.deep_link().register_all() {
-          log::warn!("failed to register deep link schemes: {err}");
+        {
+          let handle = app.handle().clone();
+          std::thread::spawn(move || {
+            if let Err(err) = handle.deep_link().register_all() {
+              log::warn!("failed to register deep link schemes: {err}");
+            }
+          });
         }
         let handle = app.handle().clone();
         app.deep_link().on_open_url(move |event| {
@@ -954,7 +1061,7 @@ pub fn run() {
           "close_window" => {
             for (_, window) in repo_windows(app) {
               if window.is_focused().unwrap_or(false) {
-                let _ = window.close();
+                window.close().ignore_closed();
                 break;
               }
             }
@@ -970,17 +1077,24 @@ pub fn run() {
               let _ = keystroke;
             } else if let Some(url) = menu_item_url(id) {
               use tauri_plugin_opener::OpenerExt;
-              let _ = app.opener().open_url(url, None::<&str>);
+              app
+                .opener()
+                .open_url(url, None::<&str>)
+                .warn_on_err("open menu url");
             }
           }
         });
       } // #[cfg(desktop)]
 
+      startup::mark("setup done");
       Ok(())
     })
     .build(tauri::generate_context!())
     .expect("error while building tauri application")
     .run(|app_handle, event| {
+      if let tauri::RunEvent::Ready = event {
+        startup::mark("event loop ready");
+      }
       // Local and remote PTY children (and their reader threads) are
       // otherwise only closed by an explicit `pty_close`/`remote_pty_close`
       // call from the frontend. Neither happens when a window is closed
@@ -994,6 +1108,7 @@ pub fn run() {
         if let Some(state) = app_handle.try_state::<AppState>() {
           state.pty_manager.close_all();
         }
+        local_db::close_idle_connections();
         if let Some(state) = app_handle.try_state::<commands::remote_pty_commands::RemotePtyState>()
         {
           tauri::async_runtime::block_on(state.0.close_all());
@@ -1007,7 +1122,9 @@ pub fn run() {
 #[allow(clippy::exit, reason = "the CLI hands its exit code to the shell")]
 pub fn run() {
   telemetry::install_panic_hook();
-  std::process::exit(cli::args::run(std::env::args_os()));
+  let code = cli::args::run(std::env::args_os());
+  local_db::close_idle_connections();
+  std::process::exit(code);
 }
 
 #[cfg(all(test, feature = "gui"))]

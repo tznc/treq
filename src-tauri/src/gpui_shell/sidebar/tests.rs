@@ -8,6 +8,7 @@ fn row(id: i64, title: &str, depth: u32) -> SidebarRow {
   SidebarRow {
     id,
     title: title.into(),
+    name: None,
     depth,
     selected: false,
     conflicted: false,
@@ -198,6 +199,7 @@ fn parses_snapshot_from_react() {
   assert!(rows[0].conflicted);
   assert_eq!(rows[0].pr, Some(PrState::Draft));
   assert_eq!(rows[0].queue.as_deref(), Some("testing"));
+  assert_eq!(rows[0].name, None, "rows from before titles have none");
   // Optional row fields default when React leaves them out.
   assert!(!rows[1].conflicted && !rows[1].archiving && rows[1].queue.is_none());
 }
@@ -552,6 +554,7 @@ fn workspace_tooltip_opens_a_popup_beside_the_row(cx: &mut TestAppContext) {
       anchor: row,
       side: Side::Right,
       content: TooltipContent::Branch {
+        name: None,
         title: "feat-a".into(),
         conflicted: false,
         pr: None,
@@ -559,6 +562,35 @@ fn workspace_tooltip_opens_a_popup_beside_the_row(cx: &mut TestAppContext) {
       dark: false,
     }]
   );
+}
+
+#[gpui::test]
+fn titled_row_shows_its_title_and_keeps_the_branch_in_the_tooltip(cx: &mut TestAppContext) {
+  let mut titled = row(7, "zn/blissful-shannon", 0);
+  titled.name = Some("feat(spool): fail readiness".into());
+  let mut h = Harness::new(cx, snapshot(vec![titled]));
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  use gpui_testing_library::prelude::*;
+  expect(screen.get_by_text("feat(spool): fail readiness")).to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("feat(spool): fail readiness")))
+    .to_be_visible();
+  assert!(
+    screen.query_by_text("zn/blissful-shannon").is_none(),
+    "the branch moves to the tooltip"
+  );
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  assert!(matches!(
+    h.popups.borrow().as_slice(),
+    [PopupRequest::ShowTooltip {
+      content: TooltipContent::Branch { name: Some(name), title, .. },
+      ..
+    }] if name.as_ref() == "feat(spool): fail readiness" && title.as_ref() == "zn/blissful-shannon"
+  ));
 }
 
 #[gpui::test]
@@ -843,4 +875,200 @@ fn parses_repo_labels_with_defaults() {
   let repo: RepoSection = serde_json::from_str(json).expect("parse");
   assert_eq!(repo.label.as_deref(), Some("lib"));
   assert!(repo.missing && !repo.collapsed);
+}
+
+/// Resting on another workspace's row asks for it to be read ahead;
+/// passing over it, or resting on the selected row, does not.
+#[gpui::test]
+fn resting_on_a_workspace_row_reads_it_ahead(cx: &mut TestAppContext) {
+  use crate::gpui_shell::screen::prefetch::HOVER_INTENT;
+  let mut selected = row(8, "feat-b", 0);
+  selected.selected = true;
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0), selected]));
+  let prefetches = |h: &Harness| {
+    h.sent()
+      .into_iter()
+      .filter(|a| matches!(a, SidebarAction::PrefetchWorkspace { .. }))
+      .collect::<Vec<_>>()
+  };
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(HOVER_INTENT / 2);
+  h.hover("workspace-8");
+  h.cx.executor().advance_clock(HOVER_INTENT * 2);
+  h.cx.run_until_parked();
+  assert!(prefetches(&h).is_empty());
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(HOVER_INTENT);
+  h.cx.run_until_parked();
+  assert_eq!(prefetches(&h), [SidebarAction::PrefetchWorkspace { id: 7 }]);
+}
+
+#[gpui::test]
+fn a_long_list_draws_only_the_rows_on_screen_and_keeps_its_scroll(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(many_rows(200)));
+  assert!(h.bounds("workspace-0").is_some());
+  assert!(h.bounds("workspace-199").is_none(), "far below the window");
+  let at = h.bounds("workspaces").expect("list").center();
+  for _ in 0..40 {
+    h.cx.simulate_event(gpui::ScrollWheelEvent {
+      position: at,
+      delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-400.))),
+      modifiers: Modifiers::none(),
+      touch_phase: gpui::TouchPhase::Moved,
+    });
+  }
+  assert!(h.bounds("workspace-199").is_some(), "scrolled to the end");
+  assert!(h.bounds("workspace-0").is_none());
+  h.update(|s| s.repos[0].workspaces.insert(0, row(500, "feat/new", 0)));
+  // As a scrolled div did, the rows below the new one move down a row.
+  assert!(
+    h.bounds("workspace-190").is_some(),
+    "a new row keeps the scroll"
+  );
+  h.click("workspace-190");
+  assert_eq!(
+    h.sent().last(),
+    Some(&SidebarAction::SelectWorkspace {
+      id: 190,
+      shift: false,
+      toggle: false
+    })
+  );
+}
+
+/// `n` workspaces in stacks of three, some with changes, one streaming.
+fn many_rows(n: i64) -> Vec<SidebarRow> {
+  (0..n)
+    .map(|i| {
+      let mut r = row(i, &format!("feat/workspace-{i}"), (i % 3) as u32);
+      r.status = (i % 4 == 0).then_some(RowStatus {
+        color: StatusColor::Yellow,
+        spin: false,
+      });
+      r.pr = (i % 5 == 0).then_some(PrState::Open);
+      r
+    })
+    .collect()
+}
+
+fn draw(h: &mut Harness, refresh: bool) -> std::time::Duration {
+  h.cx.run_until_parked();
+  h.cx.update(|window, cx| {
+    let start = std::time::Instant::now();
+    if refresh {
+      window.refresh();
+    }
+    window.draw(cx).clear(cx);
+    start.elapsed()
+  })
+}
+
+fn report(name: &str, samples: &mut [std::time::Duration]) {
+  samples.sort();
+  let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.;
+  let mean = samples.iter().map(|d| ms(*d)).sum::<f64>() / samples.len() as f64;
+  println!(
+    "{name:<34} n={:<3} mean={mean:>8.2}ms  p50={:>8.2}ms  max={:>8.2}ms",
+    samples.len(),
+    ms(samples[samples.len() / 2]),
+    ms(samples[samples.len() - 1]),
+  );
+}
+
+/// The sidebar's frame cost with many workspaces (ignored):
+/// `cargo test --features gpui-shell --lib sidebar_perf -- --ignored --nocapture --test-threads=1`.
+#[gpui::test]
+#[ignore = "perf report"]
+fn sidebar_perf(cx: &mut TestAppContext) {
+  for count in [50, 200] {
+    let mut h = Harness::new(cx, snapshot(many_rows(count)));
+    for _ in 0..3 {
+      draw(&mut h, true);
+    }
+    let mut full: Vec<_> = (0..20).map(|_| draw(&mut h, true)).collect();
+    report(&format!("{count} rows: full frame"), &mut full);
+    // The pointer moves down the rows: each crossing redraws.
+    let centers: Vec<_> = (0..20)
+      .map(|i| {
+        let selector: &'static str = Box::leak(format!("workspace-{i}").into_boxed_str());
+        h.bounds(selector).expect("row drawn").center()
+      })
+      .collect();
+    let mut hover: Vec<_> = centers
+      .iter()
+      .map(|&at| {
+        let start = std::time::Instant::now();
+        h.cx.simulate_mouse_move(at, None, Modifiers::none());
+        draw(&mut h, false);
+        start.elapsed()
+      })
+      .collect();
+    report(&format!("{count} rows: hover next row"), &mut hover);
+    // A selection moves: the model sends a new snapshot.
+    let mut select: Vec<_> = (0..20)
+      .map(|i| {
+        let start = std::time::Instant::now();
+        h.update(|s| {
+          for r in &mut s.repos[0].workspaces {
+            r.selected = r.id == i;
+          }
+        });
+        draw(&mut h, false);
+        start.elapsed()
+      })
+      .collect();
+    report(&format!("{count} rows: select"), &mut select);
+    // Another view beside the sidebar redraws (a terminal's output, a
+    // hover in the screen), as in the shell.
+    for cached in [false, true] {
+      let sidebar = h.sidebar.clone();
+      let (shell, vcx) = cx.add_window_view(|_, cx| Beside {
+        sidebar,
+        other: cx.new(|_| Other),
+        cached,
+      });
+      vcx.run_until_parked();
+      let other = shell.read_with(vcx, |s, _| s.other.clone());
+      let mut frames: Vec<_> = (0..20)
+        .map(|_| {
+          other.update(vcx, |_, cx| cx.notify());
+          vcx.update(|window, cx| {
+            let start = std::time::Instant::now();
+            window.draw(cx).clear(cx);
+            start.elapsed()
+          })
+        })
+        .collect();
+      let how = if cached { "cached" } else { "uncached" };
+      report(&format!("{count} rows: other view, {how}"), &mut frames);
+    }
+  }
+}
+
+/// The shell's layout in short: the sidebar beside another view.
+struct Beside {
+  sidebar: Entity<Sidebar>,
+  other: Entity<Other>,
+  cached: bool,
+}
+
+impl Render for Beside {
+  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    div()
+      .size_full()
+      .flex()
+      .map(|this| match self.cached {
+        true => this.child(Sidebar::element(&self.sidebar, cx)),
+        false => this.child(self.sidebar.clone()),
+      })
+      .child(div().flex_1().child(self.other.clone()))
+  }
+}
+
+struct Other;
+
+impl Render for Other {
+  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    div().size_full().child("screen")
+  }
 }

@@ -3,6 +3,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
@@ -93,11 +94,7 @@ fn line_prefix(line: &str) -> &'static str {
 
 /// A diff line without its `+`, `-` or space marker.
 fn line_text(line: &str) -> &str {
-  if line.starts_with(['+', '-', ' ']) {
-    &line[1..]
-  } else {
-    line
-  }
+  line.strip_prefix(['+', '-', ' ']).unwrap_or(line)
 }
 
 /// `files_changed.length` as the list writes it.
@@ -156,18 +153,20 @@ impl StashView {
           log::warn!("Failed to list stashes: {err}");
           Vec::new()
         });
-      let _ = this.update(cx, |view, cx| {
-        if view.route.repo_path != key {
-          return;
-        }
-        let selected_exists = entries.iter().any(|e| Some(e.id) == view.selected);
-        if view.selected.is_none() || !selected_exists {
-          view.selected = entries.first().map(|e| e.id);
-        }
-        view.entries = Some(entries);
-        view.load_diff(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.route.repo_path != key {
+            return;
+          }
+          let selected_exists = entries.iter().any(|e| Some(e.id) == view.selected);
+          if view.selected.is_none() || !selected_exists {
+            view.selected = entries.first().map(|e| e.id);
+          }
+          view.entries = Some(entries);
+          view.load_diff(cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -189,13 +188,15 @@ impl StashView {
         .await
         .map_err(|err| log::warn!("Failed to load the stash diff: {err}"))
         .ok();
-      let _ = this.update(cx, |view, cx| {
-        if view.selected == Some(id) {
-          view.rows = Rows::default();
-          view.diff = Some(LoadedDiff { id, diff });
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.selected == Some(id) {
+            view.rows = Rows::default();
+            view.diff = Some(LoadedDiff { id, diff });
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -319,19 +320,21 @@ impl StashView {
       let patch = cx
         .background_spawn(async move { host.stash_patch(&repo, id) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.pending = None;
-        match patch {
-          Ok(patch) => {
-            cx.write_to_clipboard(ClipboardItem::new_string(patch));
-            view.env.toast(ToastTone::Success, "Patch copied", "");
+      this
+        .update(cx, |view, cx| {
+          view.pending = None;
+          match patch {
+            Ok(patch) => {
+              cx.write_to_clipboard(ClipboardItem::new_string(patch));
+              view.env.toast(ToastTone::Success, "Patch copied", "");
+            }
+            Err(err) => view
+              .env
+              .toast(ToastTone::Error, "Failed to copy patch", err),
           }
-          Err(err) => view
-            .env
-            .toast(ToastTone::Error, "Failed to copy patch", err),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -351,24 +354,26 @@ impl StashView {
           async move { host.delete_stash(&repo, id) }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.pending = None;
-        match result {
-          Ok(()) => {
-            if view.selected == Some(id) {
-              view.selected = None;
-              view.diff = None;
+      this
+        .update(cx, |view, cx| {
+          view.pending = None;
+          match result {
+            Ok(()) => {
+              if view.selected == Some(id) {
+                view.selected = None;
+                view.diff = None;
+              }
+              view.env.workspace_changed(&repo);
+              view.load(cx);
+              view.env.toast(ToastTone::Success, "Stash deleted", "");
             }
-            view.env.workspace_changed(&repo);
-            view.load(cx);
-            view.env.toast(ToastTone::Success, "Stash deleted", "");
+            Err(err) => view
+              .env
+              .toast(ToastTone::Error, "Failed to delete stash", err),
           }
-          Err(err) => view
-            .env
-            .toast(ToastTone::Error, "Failed to delete stash", err),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -390,19 +395,21 @@ impl StashView {
           async move { host.apply_stash(&repo, id, &target) }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.pending = None;
-        match result {
-          Ok(()) => {
-            view.env.workspace_changed(&repo);
-            view.env.toast(ToastTone::Success, "Stash applied", "");
+      this
+        .update(cx, |view, cx| {
+          view.pending = None;
+          match result {
+            Ok(()) => {
+              view.env.workspace_changed(&repo);
+              view.env.toast(ToastTone::Success, "Stash applied", "");
+            }
+            Err(err) => view
+              .env
+              .toast(ToastTone::Error, "Failed to apply stash", err),
           }
-          Err(err) => view
-            .env
-            .toast(ToastTone::Error, "Failed to apply stash", err),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -639,7 +646,11 @@ impl StashView {
         Some(diff) => self.diff_pane(diff, p, cx),
         None => div().into_any_element(),
       },
-      _ => message("stash-diff-loading", "Loading diff...", p).into_any_element(),
+      _ => ui::delayed(
+        "stash-diff-loading",
+        message("stash-diff-loading", "Loading diff...", p),
+      )
+      .into_any_element(),
     };
     pane.gap_3().child(header).child(
       // The diff's list scrolls itself.
@@ -956,7 +967,11 @@ impl Render for StashView {
     );
     let entries = self.entries.clone();
     let body = match &entries {
-      None => message("stash-loading", "Loading stashes...", &p).into_any_element(),
+      None => ui::delayed(
+        "stash-loading",
+        message("stash-loading", "Loading stashes...", &p),
+      )
+      .into_any_element(),
       Some(entries) if entries.is_empty() => message(
         "stash-empty",
         "No stashed changes yet. Stash working-copy changes from the Changes panel to save them here.",

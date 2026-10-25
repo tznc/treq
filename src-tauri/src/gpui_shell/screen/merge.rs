@@ -19,11 +19,17 @@ use tauri_plugin_gpui::gpui::{
   self, deferred, div, prelude::*, relative, App, Context, FontWeight, SharedString, Window,
 };
 
-pub use crate::core::merge_preview::Preview;
+pub use crate::core::merge_preview::{GithubPr, Preview};
+
+use crate::result_ext::ResultExt;
 
 use super::{rows::Rows, workspace_data::WorkspaceHost, ActionSink, ScreenAction};
 use crate::{
-  core::{self, merge_preview::target_branch, MergeCommit},
+  core::{
+    self, merge_preview::target_branch, LocalMergeOptions, MergeCommit, MergeLandingPlan,
+    MergeResult,
+  },
+  github::GhMergeMethod,
   gpui_shell::{
     form::{self, Controls},
     native::{Backend, NativeEvent, ToastTone},
@@ -72,18 +78,55 @@ impl Strategy {
       Strategy::Rebase => MergeCommit::RebaseAndMerge,
     }
   }
+
+  fn github(self) -> GhMergeMethod {
+    match self {
+      Strategy::Merge => GhMergeMethod::Merge,
+      Strategy::Squash => GhMergeMethod::Squash,
+      Strategy::Rebase => GhMergeMethod::Rebase,
+    }
+  }
+
+  fn from_github(method: GhMergeMethod) -> Self {
+    match method {
+      GhMergeMethod::Merge => Strategy::Merge,
+      GhMergeMethod::Squash => Strategy::Squash,
+      GhMergeMethod::Rebase => Strategy::Rebase,
+    }
+  }
+}
+
+/// A merge of the workspace's PR on GitHub.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GithubMerge {
+  pub repo_full_name: String,
+  pub pr_number: u64,
+  pub method: Strategy,
+  /// `None` keeps GitHub's own message.
+  pub subject: Option<String>,
+  pub body: Option<String>,
 }
 
 /// What the merge preview asks of the backend; faked in tests.
 pub trait MergeHost: WorkspaceHost {
-  fn merge_preview(&self, repo_path: &str, workspace_id: i64) -> Preview;
+  /// With `rollup`, the commits and diff of the whole stack into its root.
+  fn merge_preview(&self, repo_path: &str, workspace_id: i64, rollup: bool) -> Preview;
   fn merge(
     &self,
     repo_path: &str,
     workspace_id: i64,
     message: &str,
     strategy: Strategy,
-  ) -> Result<(), String>;
+    options: LocalMergeOptions,
+  ) -> Result<MergeResult, String>;
+  fn merge_on_github(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+    request: &GithubMerge,
+  ) -> Result<MergeResult, String>;
+  /// After the PR was merged on GitHub: sync the target and the stack.
+  fn sync_merged(&self, repo_path: &str, workspace_id: i64) -> Result<MergeResult, String>;
 }
 
 /// `getFullWorkspacePath`.
@@ -92,8 +135,13 @@ pub(super) fn full_path(workspace: &Workspace) -> String {
 }
 
 impl MergeHost for Backend {
-  fn merge_preview(&self, repo_path: &str, workspace_id: i64) -> Preview {
-    core::merge_preview::merge_preview(repo_path, workspace_id)
+  fn merge_preview(&self, repo_path: &str, workspace_id: i64, rollup: bool) -> Preview {
+    let mut preview = core::merge_preview::merge_preview(repo_path, workspace_id, rollup);
+    preview.github = preview
+      .workspace
+      .as_ref()
+      .and_then(|ws| github_pr(repo_path, &ws.branch_name));
+    preview
   }
 
   fn merge(
@@ -102,9 +150,75 @@ impl MergeHost for Backend {
     workspace_id: i64,
     message: &str,
     strategy: Strategy,
-  ) -> Result<(), String> {
-    core::merge_workspace(repo_path, workspace_id, message, strategy.commit())
+    options: LocalMergeOptions,
+  ) -> Result<MergeResult, String> {
+    let plan = core::merge_workspace_with_options_removing_directory_later(
+      repo_path,
+      workspace_id,
+      message,
+      strategy.commit(),
+      options,
+    )?;
+    // Child PRs only follow the target once it is on the remote.
+    Ok(finish(repo_path, plan, options.push))
   }
+
+  fn merge_on_github(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+    request: &GithubMerge,
+  ) -> Result<MergeResult, String> {
+    let gh = gh_path().ok_or("gh CLI not found")?;
+    let plan = core::merge_workspace_on_github(
+      repo_path,
+      workspace_id,
+      &gh,
+      &crate::binary_paths::get_extended_path(),
+      &request.repo_full_name,
+      request.pr_number,
+      request.method.github(),
+      request.subject.as_deref(),
+      request.body.as_deref(),
+    )?;
+    Ok(finish(repo_path, plan, true))
+  }
+
+  fn sync_merged(&self, repo_path: &str, workspace_id: i64) -> Result<MergeResult, String> {
+    let plan = core::sync_after_remote_merge(repo_path, workspace_id)?;
+    Ok(finish(repo_path, plan, true))
+  }
+}
+
+/// The branch's PR from the PR cache, as the merge page shows it.
+fn github_pr(repo_path: &str, branch: &str) -> Option<GithubPr> {
+  let cached = crate::pr_status::global()
+    .get_cached(repo_path, branch)
+    .flatten();
+  core::merge_preview::github_pr(repo_path, cached)
+}
+
+fn gh_path() -> Option<String> {
+  crate::binary_paths::get_binary_path("gh").or_else(|| crate::binary_paths::detect_binary("gh"))
+}
+
+/// Every merge's tail: move child PRs onto the new base, and refresh the PR
+/// status of each branch the merge landed or moved.
+fn finish(repo_path: &str, plan: MergeLandingPlan, retarget_prs: bool) -> MergeResult {
+  let notes = if retarget_prs {
+    core::retarget_child_prs(repo_path, &plan)
+  } else {
+    Vec::new()
+  };
+  let poller = crate::pr_status::global();
+  for branch in plan
+    .landed_branches
+    .iter()
+    .chain(plan.retargeted.iter().map(|r| &r.branch_name))
+  {
+    poller.queue_branch_refresh(repo_path.to_string(), branch.clone());
+  }
+  MergeResult { plan, notes }
 }
 
 /// The message the box starts with for `strategy`.
@@ -142,6 +256,13 @@ pub struct MergeView {
   /// `None` while loading.
   pub(super) preview: Option<Rc<Preview>>,
   pub(super) strategy: Strategy,
+  /// The local strategy, kept while the GitHub method is shown.
+  local_strategy: Strategy,
+  /// Merging the PR on GitHub rather than locally.
+  pub(super) on_github: bool,
+  pub(super) rollup: bool,
+  /// Push the target after a local merge.
+  pub(super) push: bool,
   /// What was typed in the message box, over the default.
   pub(super) draft: Option<String>,
   pub(super) merging: bool,
@@ -181,7 +302,9 @@ impl MergeView {
     let sink: ActionSink = Rc::new(move |action, cx| {
       let view = view.clone();
       cx.defer(move |cx| {
-        let _ = view.update(cx, |view, cx| view.handle(action, cx));
+        view
+          .update(cx, |view, cx| view.handle(action, cx))
+          .ignore_closed();
       });
     });
     let mut this = Self {
@@ -193,6 +316,10 @@ impl MergeView {
       dark,
       preview: None,
       strategy: Strategy::default(),
+      local_strategy: Strategy::default(),
+      on_github: false,
+      rollup: false,
+      push: true,
       draft: None,
       merging: false,
       menu_open: false,
@@ -209,6 +336,10 @@ impl MergeView {
       self.route = route;
       self.preview = None;
       self.strategy = Strategy::default();
+      self.local_strategy = Strategy::default();
+      self.on_github = false;
+      self.rollup = false;
+      self.push = true;
       self.draft = None;
       self.collapsed.clear();
       self.load(cx);
@@ -222,24 +353,27 @@ impl MergeView {
   fn load(&mut self, cx: &mut Context<Self>) {
     let host = self.host.clone();
     let route = self.route.clone();
+    let rollup = self.rollup;
     cx.spawn(async move |this, cx| {
       let preview = cx
         .background_spawn({
           let route = route.clone();
-          async move { host.merge_preview(&route.repo_path, route.workspace_id) }
+          async move { host.merge_preview(&route.repo_path, route.workspace_id, rollup) }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.route != route {
-          return;
-        }
-        if let Some(err) = &preview.error {
-          view.toast(ToastTone::Error, "Failed to load merge preview", err);
-        }
-        view.preview = Some(Rc::new(preview));
-        view.rows = Rows::default();
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.route != route || view.rollup != rollup {
+            return;
+          }
+          if let Some(err) = &preview.error {
+            view.toast(ToastTone::Error, "Failed to load merge preview", err);
+          }
+          view.preview = Some(Rc::new(preview));
+          view.rows = Rows::default();
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -260,9 +394,139 @@ impl MergeView {
   pub(super) fn message(&self) -> String {
     match (&self.draft, self.workspace()) {
       (Some(draft), _) => draft.clone(),
+      // An empty GitHub message keeps GitHub's own.
+      (None, _) if self.on_github => String::new(),
       (None, Some(ws)) => default_message(ws, self.strategy),
       (None, None) => String::new(),
     }
+  }
+
+  /// The message box's placeholder as drawn.
+  #[cfg(test)]
+  pub(super) fn message_placeholder(&self) -> String {
+    self
+      .controls
+      .textarea_placeholder("merge.message")
+      .unwrap_or_default()
+      .to_string()
+  }
+
+  fn plan(&self) -> Option<&MergeLandingPlan> {
+    self.preview.as_ref()?.plan.as_ref()
+  }
+
+  /// Where the merge lands: the plan's target, else the workspace's.
+  fn target(&self) -> String {
+    self
+      .plan()
+      .map(|p| p.target_branch.clone())
+      .or_else(|| self.workspace().map(|w| target_branch(w).to_string()))
+      .unwrap_or_else(|| "main".into())
+  }
+
+  fn github(&self) -> Option<&GithubPr> {
+    self.preview.as_ref()?.github.as_ref()
+  }
+
+  /// The PR, when it is open and can be merged on GitHub.
+  fn open_pr(&self) -> Option<&GithubPr> {
+    self.github().filter(|g| g.pr.state == "OPEN")
+  }
+
+  fn merged_pr(&self) -> Option<&GithubPr> {
+    self.github().filter(|g| g.pr.state == "MERGED")
+  }
+
+  fn can_push(&self) -> bool {
+    !self.on_github && self.preview.as_ref().is_some_and(|p| p.can_push)
+  }
+
+  fn can_rollup(&self) -> bool {
+    !self.on_github
+      && self
+        .preview
+        .as_ref()
+        .is_some_and(|p| p.rollup_root.is_some())
+  }
+
+  /// The strategies the menu offers: the repository's allowed methods on
+  /// GitHub, all three locally.
+  fn strategies(&self) -> Vec<Strategy> {
+    match self.open_pr().and_then(|g| g.settings.as_ref()) {
+      Some(settings) if self.on_github => settings
+        .allowed_methods
+        .iter()
+        .copied()
+        .map(Strategy::from_github)
+        .collect(),
+      _ => Strategy::ALL.to_vec(),
+    }
+  }
+
+  /// Why GitHub may refuse the merge, from the PR's cached merge state.
+  pub(super) fn warnings(&self) -> Vec<String> {
+    let Some(GithubPr { pr, .. }) = self.open_pr().filter(|_| self.on_github) else {
+      return Vec::new();
+    };
+    let target = self.target();
+    let mut warnings = Vec::new();
+    if pr.base_ref_name != target {
+      warnings.push(format!(
+        "The pull request targets {}, but this workspace targets {target}. Retarget one of them before merging on GitHub.",
+        pr.base_ref_name
+      ));
+    }
+    if pr.is_draft {
+      warnings
+        .push("This pull request is a draft. Mark it ready for review before merging.".into());
+    }
+    match pr.merge_state_status.as_deref() {
+      Some("DIRTY") => warnings.push(
+        "This pull request has merge conflicts on GitHub. Resolve them before merging.".into(),
+      ),
+      Some("BLOCKED") => warnings.push(
+        "GitHub is blocking this merge: required checks or reviews are not satisfied.".into(),
+      ),
+      Some("BEHIND") => warnings.push(format!(
+        "The pull request branch is behind {}. GitHub may require updating it first.",
+        pr.base_ref_name
+      )),
+      Some("UNSTABLE") => warnings.push("Some checks are failing on this pull request.".into()),
+      _ => {}
+    }
+    warnings
+  }
+
+  /// The landing panel's sentences: what lands where, then each stacked
+  /// workspace the merge moves.
+  pub(super) fn landing_lines(&self) -> Vec<String> {
+    let Some(plan) = self.plan() else {
+      return Vec::new();
+    };
+    let landed = &plan.landed_branches;
+    let mut first = match landed.as_slice() {
+      [one] => format!("{one} lands in {}.", plan.target_branch),
+      [rest @ .., last] => format!(
+        "{} and {last} land in {}.",
+        rest.join(", "),
+        plan.target_branch
+      ),
+      [] => String::new(),
+    };
+    if self.on_github {
+      first.push_str(&format!(
+        " Then {} is synced from origin.",
+        plan.target_branch
+      ));
+    }
+    std::iter::once(first)
+      .chain(plan.retargeted.iter().map(|r| {
+        format!(
+          "{} is retargeted onto {} (was {})",
+          r.branch_name, r.to_branch, r.from_branch
+        )
+      }))
+      .collect()
   }
 
   fn can_merge(&self) -> bool {
@@ -271,6 +535,12 @@ impl MergeView {
       .as_ref()
       .and_then(|p| p.commits.as_ref())
       .is_some_and(|c| c.total_count > 0);
+    if self.on_github {
+      return ahead
+        && self
+          .open_pr()
+          .is_some_and(|g| g.pr.base_ref_name == self.target());
+    }
     ahead && (self.strategy == Strategy::Rebase || !self.message().trim().is_empty())
   }
 
@@ -293,6 +563,31 @@ impl MergeView {
         }
         "merge.menu.close" => {}
         "merge.confirm" => self.merge(cx),
+        "merge.sync" => self.sync(cx),
+        "merge.push" => self.push = !self.push,
+        "merge.rollup" => {
+          self.rollup = !self.rollup;
+          self.collapsed.clear();
+          self.load(cx);
+        }
+        "merge.location:local" if self.on_github => {
+          self.on_github = false;
+          self.strategy = self.local_strategy;
+          self.draft = None;
+          self.menu_open = false;
+        }
+        "merge.location:github" if !self.on_github && self.open_pr().is_some() => {
+          self.on_github = true;
+          self.rollup = false;
+          self.local_strategy = self.strategy;
+          self.strategy = self
+            .open_pr()
+            .and_then(|g| g.settings.as_ref())
+            .map_or(Strategy::Merge, |s| Strategy::from_github(s.default_method));
+          self.draft = None;
+          self.menu_open = false;
+        }
+        id if id.starts_with("merge.location:") => {}
         id => {
           if let Some(strategy) = id.strip_prefix("merge.strategy:").and_then(Strategy::parse) {
             self.strategy = strategy;
@@ -312,52 +607,150 @@ impl MergeView {
   }
 
   fn merge(&mut self, cx: &mut Context<Self>) {
-    if self.merging {
+    if self.merging || !self.can_merge() {
       return;
     }
     let Some(ws) = self.workspace().cloned() else {
       return;
     };
     let message = self.message();
-    if self.strategy != Strategy::Rebase && message.trim().is_empty() {
+    if !self.on_github && self.strategy != Strategy::Rebase && message.trim().is_empty() {
       self.toast(ToastTone::Error, "Commit message required", "");
       return;
     }
+    let github = self.open_pr().filter(|_| self.on_github).map(|g| {
+      let message = message.trim();
+      let (subject, body) = message.split_once('\n').unwrap_or((message, ""));
+      GithubMerge {
+        repo_full_name: g.repo_full_name.clone(),
+        pr_number: g.pr.number,
+        method: self.strategy,
+        subject: Some(subject.trim().to_string()).filter(|s| !s.is_empty()),
+        body: Some(body.trim().to_string()).filter(|b| !b.is_empty()),
+      }
+    });
+    let options = LocalMergeOptions {
+      rollup: self.rollup && self.can_rollup(),
+      push: self.push && self.can_push(),
+    };
     self.merging = true;
     let (host, strategy, route) = (self.host.clone(), self.strategy, self.route.clone());
+    let target = self.target();
     cx.spawn(async move |this, cx| {
       let result = cx
-        .background_spawn(async move {
-          host.merge(&route.repo_path, route.workspace_id, &message, strategy)
+        .background_spawn({
+          let github = github.clone();
+          async move {
+            match &github {
+              Some(request) => host.merge_on_github(&route.repo_path, route.workspace_id, request),
+              None => host.merge(
+                &route.repo_path,
+                route.workspace_id,
+                &message,
+                strategy,
+                options,
+              ),
+            }
+          }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.merging = false;
-        match result {
-          Ok(()) => {
-            (view.react)(
-              ScreenAction::Press {
-                id: "mergePreview.merged".into(),
-              },
-              cx,
-            );
-            let (title, done) = match strategy {
-              Strategy::Squash => ("Workspace squashed", "squashed"),
-              Strategy::Rebase => ("Workspace rebased", "rebased"),
-              Strategy::Merge => ("Workspace merged", "merged"),
-            };
-            view.toast(
-              ToastTone::Success,
-              title,
-              format!("{} {done} into {}", ws.branch_name, target_branch(&ws)),
-            );
+      this
+        .update(cx, |view, cx| {
+          view.merging = false;
+          match result {
+            Ok(result) => {
+              view.merged(cx);
+              match &github {
+                Some(request) => view.toast(
+                  ToastTone::Success,
+                  "Pull request merged",
+                  format!(
+                    "Merged PR #{} on GitHub and synced {target}",
+                    request.pr_number
+                  ),
+                ),
+                None => {
+                  let (title, done) = match strategy {
+                    Strategy::Squash => ("Workspace squashed", "squashed"),
+                    Strategy::Rebase => ("Workspace rebased", "rebased"),
+                    Strategy::Merge => ("Workspace merged", "merged"),
+                  };
+                  let pushed = if options.push { " and pushed it" } else { "" };
+                  view.toast(
+                    ToastTone::Success,
+                    title,
+                    format!("{} {done} into {target}{pushed}", ws.branch_name),
+                  );
+                }
+              }
+              view.report_notes(&result);
+            }
+            Err(err) => view.toast(ToastTone::Error, "Merge failed", err),
           }
-          Err(err) => view.toast(ToastTone::Error, "Merge failed", err),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
+  }
+
+  /// Sync a PR that was already merged on GitHub.
+  fn sync(&mut self, cx: &mut Context<Self>) {
+    if self.merging || self.merged_pr().is_none() {
+      return;
+    }
+    self.merging = true;
+    let (host, route) = (self.host.clone(), self.route.clone());
+    cx.spawn(async move |this, cx| {
+      let result = cx
+        .background_spawn(async move { host.sync_merged(&route.repo_path, route.workspace_id) })
+        .await;
+      this
+        .update(cx, |view, cx| {
+          view.merging = false;
+          match result {
+            Ok(result) => {
+              view.merged(cx);
+              view.toast(
+                ToastTone::Success,
+                "Workspace synced",
+                format!("Synced {} from origin", result.plan.target_branch),
+              );
+              view.report_notes(&result);
+            }
+            Err(err) => view.toast(ToastTone::Error, "Sync failed", err),
+          }
+          cx.notify();
+        })
+        .ignore_closed();
+    })
+    .detach();
+  }
+
+  /// Tell React the merge landed, so it leaves the page.
+  fn merged(&self, cx: &mut Context<Self>) {
+    (self.react)(
+      ScreenAction::Press {
+        id: "mergePreview.merged".into(),
+      },
+      cx,
+    );
+  }
+
+  fn report_notes(&self, result: &MergeResult) {
+    if result.notes.is_empty() {
+      return;
+    }
+    let tone = if result.notes.iter().any(|n| n.starts_with("Could not")) {
+      ToastTone::Warning
+    } else {
+      ToastTone::Success
+    };
+    self.toast(
+      tone,
+      "Stacked pull requests updated",
+      result.notes.join("\n"),
+    );
   }
 
   fn press(&self, id: impl Into<String>) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) {
@@ -407,11 +800,7 @@ impl Render for MergeView {
         .child(ui::spinner("merge-loading", 32., p.muted_foreground))
         .into_any_element();
     };
-    let target = preview
-      .workspace
-      .as_ref()
-      .map_or("main", target_branch)
-      .to_string();
+    let target = self.target();
     let branch = preview
       .workspace
       .as_ref()
@@ -488,19 +877,29 @@ impl MergeView {
     let textarea = self.controls.textarea(
       "merge.message",
       &message,
-      "Enter merge commit message...",
+      if self.on_github {
+        "Leave empty to use GitHub's default message"
+      } else {
+        "Enter merge commit message..."
+      },
       3,
       window,
       cx,
     );
     let disabled = !self.can_merge() || self.merging;
     let label = if self.merging {
-      "Merging..."
+      "Merging...".to_string()
     } else {
-      match self.strategy {
+      let base = match self.strategy {
         Strategy::Squash => "Squash and merge",
         Strategy::Rebase => "Rebase and merge",
+        Strategy::Merge if self.on_github => "Merge",
         Strategy::Merge => "Confirm merge",
+      };
+      if self.on_github {
+        format!("{base} on GitHub")
+      } else {
+        base.to_string()
       }
     };
     let green = Tone::Success.color(p);
@@ -549,10 +948,33 @@ impl MergeView {
         .flex()
         .flex_col()
         .gap_4()
+        .when_some(self.location_toggle(p), |this, toggle| this.child(toggle))
+        .when_some(self.merged_banner(p), |this, banner| this.child(banner))
+        .children(self.warnings().into_iter().enumerate().map(|(i, warning)| {
+          let selector = format!("merge-warning-{i}");
+          ui::text(div(), TextSize::Sm)
+            .debug_selector(move || selector)
+            .flex()
+            .items_start()
+            .gap_2()
+            .p_2()
+            .rounded(radius::MD)
+            .border_1()
+            .border_color(Tone::Warning.color(p).opacity(0.4))
+            .bg(Tone::Warning.tint(p))
+            .child(ui::icon(
+              theme::ICON_TRIANGLE_ALERT,
+              16.,
+              Tone::Warning.color(p),
+            ))
+            .child(warning)
+        }))
         .child(
           div()
             .child(heading(if rebase {
               "Commit Message (not used for rebase)"
+            } else if self.on_github {
+              "Merge Commit Message (optional)"
             } else {
               "Merge Commit Message"
             }))
@@ -574,7 +996,195 @@ impl MergeView {
               )
             }),
         )
+        .when(self.can_push(), |this| {
+          let sink = self.sink.clone();
+          this.child(
+            ui::text(div(), TextSize::Sm)
+              .flex()
+              .items_center()
+              .gap_2()
+              .child(form::switch(
+                "merge-push",
+                "Push after merging",
+                self.push,
+                self.merging,
+                p,
+                move |_, _, cx| {
+                  sink(
+                    ScreenAction::Press {
+                      id: "merge.push".into(),
+                    },
+                    cx,
+                  )
+                },
+              ))
+              .child(format!("Push {target} to origin after merging")),
+          )
+        })
         .child(div().flex().justify_start().child(buttons)),
+    )
+  }
+
+  /// Locally / On GitHub (#N), when the workspace has an open PR.
+  fn location_toggle(&self, p: &Palette) -> Option<impl IntoElement> {
+    let pr = self.open_pr()?.pr.number;
+    let option = |id: &'static str, value: &str, label: String, selected: bool| {
+      Button::new(id, p)
+        .variant(if selected {
+          Variant::Secondary
+        } else {
+          Variant::Ghost
+        })
+        .size(Size::Sm)
+        .label(label)
+        .on_click(self.press(format!("merge.location:{value}")))
+    };
+    Some(
+      div()
+        .flex()
+        .gap_1()
+        .child(option(
+          "merge-location-local",
+          "local",
+          "Locally".into(),
+          !self.on_github,
+        ))
+        .child(option(
+          "merge-location-github",
+          "github",
+          format!("On GitHub (#{pr})"),
+          self.on_github,
+        )),
+    )
+  }
+
+  /// The PR already merged on GitHub: sync instead of merging again.
+  fn merged_banner(&self, p: &Palette) -> Option<impl IntoElement> {
+    let github = self.merged_pr()?;
+    Some(
+      ui::text(div(), TextSize::Sm)
+        .flex()
+        .items_center()
+        .gap_3()
+        .p_3()
+        .rounded(radius::MD)
+        .border_1()
+        .border_color(p.border)
+        .child(ui::icon(theme::ICON_MERGE, 16., Tone::GitMerged.color(p)))
+        .child(div().flex_1().min_w_0().child(format!(
+          "PR #{} was already merged on GitHub. Sync to update {} locally and clean up this workspace.",
+          github.pr.number,
+          self.target()
+        )))
+        .child(
+          Button::new("merge-sync", p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .disabled(self.merging)
+            .label("Sync merged PR")
+            .on_click(self.press("merge.sync")),
+        ),
+    )
+  }
+
+  /// What lands where: the landed branches, the route, the target, and the
+  /// stacked workspaces the merge moves.
+  fn landing(&self, p: &Palette) -> Option<impl IntoElement> {
+    let plan = self.plan()?;
+    let chip = |name: &str| {
+      ui::text(div(), TextSize::Sm)
+        .flex()
+        .items_center()
+        .gap_1()
+        .px_2()
+        .py_0p5()
+        .rounded(radius::MD)
+        .border_1()
+        .border_color(p.border)
+        .bg(p.muted.opacity(0.5))
+        .font_family(theme::MONO_FONT)
+        .child(ui::icon(theme::ICON_BRANCH_BOLD, 12., p.muted_foreground))
+        .child(name.to_string())
+    };
+    let route = match self.open_pr().filter(|_| self.on_github) {
+      Some(g) => format!("PR #{} on GitHub", g.pr.number),
+      None if self.push && self.can_push() => "merged locally, then pushed".into(),
+      None => "merged locally".into(),
+    };
+    let lines = self.landing_lines();
+    let root = self
+      .preview
+      .as_ref()
+      .and_then(|p| p.rollup_root.clone())
+      .filter(|_| self.can_rollup());
+    let sink = self.sink.clone();
+    Some(
+      div().flex().justify_center().px_4().child(
+        div()
+          .w(relative(0.75))
+          .child(heading("What lands where"))
+          .child(
+            div()
+              .debug_selector(|| "merge-landing".into())
+              .border_1()
+              .border_color(p.border)
+              .rounded(radius::LG)
+              .p_4()
+              .flex()
+              .flex_col()
+              .gap_3()
+              .child(
+                div()
+                  .flex()
+                  .flex_col()
+                  .items_start()
+                  .gap_1p5()
+                  .child(
+                    div()
+                      .flex()
+                      .flex_wrap()
+                      .gap_1p5()
+                      .children(plan.landed_branches.iter().map(|b| chip(b))),
+                  )
+                  .child(
+                    ui::text(div(), TextSize::Sm)
+                      .pl_2()
+                      .text_color(p.muted_foreground)
+                      .child(format!("\u{2193} {route}")),
+                  )
+                  .child(chip(&plan.target_branch)),
+              )
+              .children(lines.into_iter().enumerate().map(|(i, line)| {
+                ui::text(div(), TextSize::Sm)
+                  .when(i > 0, |this| this.text_color(p.muted_foreground))
+                  .child(line)
+              }))
+              .when_some(root, |this, root| {
+                this.child(
+                  ui::text(div(), TextSize::Sm)
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(form::switch(
+                      "merge-rollup",
+                      "Merge the whole stack",
+                      self.rollup,
+                      self.merging,
+                      p,
+                      move |_, _, cx| {
+                        sink(
+                          ScreenAction::Press {
+                            id: "merge.rollup".into(),
+                          },
+                          cx,
+                        )
+                      },
+                    ))
+                    .child(format!("Merge the whole stack into {root}")),
+                )
+              }),
+          ),
+      ),
     )
   }
 
@@ -609,6 +1219,7 @@ impl MergeView {
       ),
     ];
     let p = *p;
+    let allowed = self.strategies();
     deferred(
       div()
         .id("merge-strategy-menu")
@@ -636,53 +1247,58 @@ impl MergeView {
           cx.notify();
           open
         })
-        .children(items.into_iter().map(|(strategy, icon, title, detail)| {
-          let id = SharedString::from(format!("merge-strategy-{}", strategy.value()));
-          let selector = id.to_string();
-          ui::text(div(), TextSize::Sm)
-            .id(id)
-            .debug_selector(move || selector)
-            .relative()
-            .flex()
-            .flex_col()
-            .items_start()
-            .py_3()
-            .pl_8()
-            .pr_2()
-            .rounded(radius::MD)
-            .cursor_pointer()
-            .hover(move |s| s.bg(p.menu_accent))
-            .child(
-              div()
-                .absolute()
-                .left_2()
-                .top_3()
-                .size_4()
+        .children(
+          items
+            .into_iter()
+            .filter(|(strategy, ..)| allowed.contains(strategy))
+            .map(|(strategy, icon, title, detail)| {
+              let id = SharedString::from(format!("merge-strategy-{}", strategy.value()));
+              let selector = id.to_string();
+              ui::text(div(), TextSize::Sm)
+                .id(id)
+                .debug_selector(move || selector)
+                .relative()
                 .flex()
-                .items_center()
-                .justify_center()
-                .when(strategy == self.strategy, |this| {
-                  this.child(div().size_2().rounded_full().bg(p.popover_foreground))
-                }),
-            )
-            .child(
-              div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(ui::icon(icon, 16., p.popover_foreground))
-                .child(title),
-            )
-            .child(
-              ui::text(div(), TextSize::Xs)
-                .mt_1()
-                .pl_6()
-                .text_color(p.muted_foreground)
-                .child(detail),
-            )
-            .on_click(self.press(format!("merge.strategy:{}", strategy.value())))
-        })),
+                .flex_col()
+                .items_start()
+                .py_3()
+                .pl_8()
+                .pr_2()
+                .rounded(radius::MD)
+                .cursor_pointer()
+                .hover(move |s| s.bg(p.menu_accent))
+                .child(
+                  div()
+                    .absolute()
+                    .left_2()
+                    .top_3()
+                    .size_4()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(strategy == self.strategy, |this| {
+                      this.child(div().size_2().rounded_full().bg(p.popover_foreground))
+                    }),
+                )
+                .child(
+                  div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(ui::icon(icon, 16., p.popover_foreground))
+                    .child(title),
+                )
+                .child(
+                  ui::text(div(), TextSize::Xs)
+                    .mt_1()
+                    .pl_6()
+                    .text_color(p.muted_foreground)
+                    .child(detail),
+                )
+                .on_click(self.press(format!("merge.strategy:{}", strategy.value())))
+            }),
+        ),
     )
     .with_priority(1)
   }
@@ -717,11 +1333,7 @@ impl MergeView {
       return div().into_any_element();
     };
     let p = theme::palette(self.dark);
-    let target = preview
-      .workspace
-      .as_ref()
-      .map_or("main", target_branch)
-      .to_string();
+    let target = self.target();
     let files = preview
       .diff
       .as_ref()
@@ -742,6 +1354,7 @@ impl MergeView {
           .flex_col()
           .gap_6()
           .child(self.message_card(&preview, &target, &p, window, cx))
+          .when_some(self.landing(&p), |this, landing| this.child(landing))
           .child(commits(&preview, &target, &p))
           .child(
             div()
@@ -852,9 +1465,9 @@ impl MergeView {
 /// A line of a hunk's `<pre className="p-2 text-xs font-mono">`, clipped
 /// at the card's edge like the other diffs.
 fn hunk_line(line: &str, p: &Palette) -> impl IntoElement {
-  let bg = if line.starts_with('+') && !line.starts_with("+++") {
+  let bg = if line.starts_with('+') {
     Some(Tone::GitOpen.tint(p))
-  } else if line.starts_with('-') && !line.starts_with("---") {
+  } else if line.starts_with('-') {
     Some(Tone::GitClosed.tint(p))
   } else {
     None

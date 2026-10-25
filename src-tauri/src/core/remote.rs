@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -165,6 +166,17 @@ pub enum TreqCommandRequest {
     workspace: Option<String>,
     path: String,
   },
+  /// `DiffFile` for several files at once, from the trees `token` (a
+  /// `working_copy_token` from `WorkspaceDiff`) names when given, else from
+  /// a snapshot. Answers a `WorkspaceFileHunksBatch`; a host older than it
+  /// fails, so callers fall back to `DiffFile`.
+  DiffFiles {
+    repo: String,
+    workspace: Option<String>,
+    paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    token: Option<String>,
+  },
   ReadFile {
     repo: String,
     workspace: Option<String>,
@@ -199,6 +211,15 @@ pub enum TreqCommandRequest {
     repo: String,
     workspace: Option<String>,
     revision: String,
+    path: String,
+  },
+  /// One directory of the workspace's files (Git-ignored entries left out),
+  /// directories first; `path` is relative to the workspace, empty for its
+  /// root. See [`RemoteFileEntry`].
+  ListFiles {
+    repo: String,
+    workspace: Option<String>,
+    #[serde(default)]
     path: String,
   },
   /// Fuzzy file-name search over the workspace file index.
@@ -460,6 +481,24 @@ pub enum TreqCommandRequest {
     workspace: Option<String>,
     idempotency_key: String,
   },
+  /// The workspace branch's GitHub pull request and its checks, read with
+  /// the host's `gh`.
+  WorkspacePullRequest {
+    repo: String,
+    workspace: String,
+  },
+  /// Pushes the workspace, then opens a pull request from its branch into
+  /// its target branch with the host's `gh`.
+  CreatePullRequest {
+    repo: String,
+    workspace: String,
+    title: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    draft: bool,
+    idempotency_key: String,
+  },
   // -- Phase 5: agent lifecycle (VM-local supervisor) -----------------------------
   AgentStart {
     repo: String,
@@ -512,6 +551,13 @@ pub enum TreqCommandRequest {
     workspace: String,
     label: String,
   },
+  /// Names a persistent PTY session; an empty title clears it. Idempotent.
+  PtyRename {
+    repo: String,
+    workspace: String,
+    label: String,
+    title: String,
+  },
   /// Returns the literal command line an SSH PTY channel should exec to
   /// attach (creating first if necessary) to a persistent session.
   PtyAttachCommand {
@@ -523,6 +569,66 @@ pub enum TreqCommandRequest {
     cols: u16,
     rows: u16,
   },
+  /// Pastes `text` into a running persistent session as one bracketed
+  /// paste, then presses Enter when `submit`: how a review reaches an
+  /// agent's terminal.
+  PtyPaste {
+    repo: String,
+    workspace: String,
+    label: String,
+    text: String,
+    submit: bool,
+    idempotency_key: String,
+  },
+  /// The review a workspace's page left unsent on the host (empty if none).
+  ReviewLoad {
+    repo: String,
+    workspace: String,
+    scope: ReviewScope,
+  },
+  /// Keeps a workspace's unsent review on the host. Overwrites.
+  ReviewSave {
+    repo: String,
+    workspace: String,
+    scope: ReviewScope,
+    review: crate::core::review::Stored,
+  },
+  /// Drops a workspace's unsent review, once it is sent or discarded.
+  ReviewClear {
+    repo: String,
+    workspace: String,
+    scope: ReviewScope,
+  },
+}
+
+/// Which page a pending review belongs to: each keeps its own, as on
+/// desktop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewScope {
+  /// The Changes tab's diff.
+  Changes,
+  /// The file browser.
+  Files,
+}
+
+impl ReviewScope {
+  pub fn as_str(self) -> &'static str {
+    match self {
+      Self::Changes => "changes",
+      Self::Files => "files",
+    }
+  }
+
+  pub fn parse(value: &str) -> Result<Self, String> {
+    match value {
+      "changes" => Ok(Self::Changes),
+      "files" => Ok(Self::Files),
+      other => Err(format!(
+        "invalid_arguments: review scope must be changes or files, not '{other}'"
+      )),
+    }
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -560,6 +666,7 @@ impl TreqCommandRequest {
       | Self::InspectWorkspace { .. }
       | Self::ListChanges { .. }
       | Self::DiffFile { .. }
+      | Self::DiffFiles { .. }
       | Self::ReadFile { .. }
       | Self::ListCommits { .. }
       | Self::ListConflicts { .. }
@@ -567,8 +674,10 @@ impl TreqCommandRequest {
       | Self::CommitDiff { .. }
       | Self::CommitFileDiff { .. }
       | Self::SearchFiles { .. }
+      | Self::ListFiles { .. }
       | Self::ProbeRepo { .. }
       | Self::GitRemoteInfo { .. }
+      | Self::WorkspacePullRequest { .. }
       | Self::AgentStatus { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
@@ -576,7 +685,8 @@ impl TreqCommandRequest {
       | Self::WorkspaceChangeMarker { .. }
       | Self::MachineUsage { .. }
       | Self::MachineTools { .. }
-      | Self::ListDirectories { .. } => false,
+      | Self::ListDirectories { .. }
+      | Self::ReviewLoad { .. } => false,
       Self::HostCheck { .. } => false,
       // -- Mutations -----------------------------------------------------------
       Self::CloneRepo { .. }
@@ -609,11 +719,16 @@ impl TreqCommandRequest {
       | Self::PullWorkspace { .. }
       | Self::GitBookmarkTrack { .. }
       | Self::GitPush { .. }
+      | Self::CreatePullRequest { .. }
       | Self::AgentStart { .. }
       | Self::AgentInput { .. }
       | Self::AgentStop { .. }
       | Self::PtyStart { .. }
-      | Self::PtyStop { .. } => true,
+      | Self::PtyStop { .. }
+      | Self::PtyRename { .. }
+      | Self::PtyPaste { .. }
+      | Self::ReviewSave { .. }
+      | Self::ReviewClear { .. } => true,
     }
   }
 
@@ -639,9 +754,11 @@ impl TreqCommandRequest {
       | Self::RevertCommit { .. }
       | Self::ResolveConflict { .. }
       | Self::GitPush { .. }
+      | Self::CreatePullRequest { .. }
       | Self::AgentStart { .. }
       | Self::AgentInput { .. }
-      | Self::PtyStart { .. } => true,
+      | Self::PtyStart { .. }
+      | Self::PtyPaste { .. } => true,
       Self::InspectRepository { .. }
       | Self::RepositoryStatus { .. }
       | Self::ListBranches { .. }
@@ -651,6 +768,7 @@ impl TreqCommandRequest {
       | Self::InspectWorkspace { .. }
       | Self::ListChanges { .. }
       | Self::DiffFile { .. }
+      | Self::DiffFiles { .. }
       | Self::ReadFile { .. }
       | Self::ListCommits { .. }
       | Self::ListConflicts { .. }
@@ -658,6 +776,7 @@ impl TreqCommandRequest {
       | Self::CommitDiff { .. }
       | Self::CommitFileDiff { .. }
       | Self::SearchFiles { .. }
+      | Self::ListFiles { .. }
       | Self::WorkspaceChangeMarker { .. }
       | Self::MachineUsage { .. }
       | Self::MachineTools { .. }
@@ -679,12 +798,17 @@ impl TreqCommandRequest {
       | Self::PullWorkspace { .. }
       | Self::GitBookmarkTrack { .. }
       | Self::GitRemoteInfo { .. }
+      | Self::WorkspacePullRequest { .. }
       | Self::AgentStatus { .. }
       | Self::AgentStop { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
       | Self::PtyStop { .. }
-      | Self::PtyAttachCommand { .. } => false,
+      | Self::PtyRename { .. }
+      | Self::PtyAttachCommand { .. }
+      | Self::ReviewLoad { .. }
+      | Self::ReviewSave { .. }
+      | Self::ReviewClear { .. } => false,
     }
   }
 
@@ -699,6 +823,7 @@ impl TreqCommandRequest {
       Self::InspectWorkspace { .. } => "InspectWorkspace",
       Self::ListChanges { .. } => "ListChanges",
       Self::DiffFile { .. } => "DiffFile",
+      Self::DiffFiles { .. } => "DiffFiles",
       Self::ReadFile { .. } => "ReadFile",
       Self::ListCommits { .. } => "ListCommits",
       Self::ListConflicts { .. } => "ListConflicts",
@@ -706,6 +831,7 @@ impl TreqCommandRequest {
       Self::CommitDiff { .. } => "CommitDiff",
       Self::CommitFileDiff { .. } => "CommitFileDiff",
       Self::SearchFiles { .. } => "SearchFiles",
+      Self::ListFiles { .. } => "ListFiles",
       Self::WorkspaceChangeMarker { .. } => "WorkspaceChangeMarker",
       Self::MachineUsage { .. } => "MachineUsage",
       Self::MachineTools { .. } => "MachineTools",
@@ -743,6 +869,8 @@ impl TreqCommandRequest {
       Self::GitBookmarkTrack { .. } => "GitBookmarkTrack",
       Self::GitRemoteInfo { .. } => "GitRemoteInfo",
       Self::GitPush { .. } => "GitPush",
+      Self::WorkspacePullRequest { .. } => "WorkspacePullRequest",
+      Self::CreatePullRequest { .. } => "CreatePullRequest",
       Self::AgentStart { .. } => "AgentStart",
       Self::AgentInput { .. } => "AgentInput",
       Self::AgentStatus { .. } => "AgentStatus",
@@ -751,7 +879,12 @@ impl TreqCommandRequest {
       Self::PtyStart { .. } => "PtyStart",
       Self::PtyList { .. } => "PtyList",
       Self::PtyStop { .. } => "PtyStop",
+      Self::PtyRename { .. } => "PtyRename",
       Self::PtyAttachCommand { .. } => "PtyAttachCommand",
+      Self::PtyPaste { .. } => "PtyPaste",
+      Self::ReviewLoad { .. } => "ReviewLoad",
+      Self::ReviewSave { .. } => "ReviewSave",
+      Self::ReviewClear { .. } => "ReviewClear",
     }
   }
 
@@ -767,6 +900,7 @@ impl TreqCommandRequest {
     "InspectWorkspace",
     "ListChanges",
     "DiffFile",
+    "DiffFiles",
     "ReadFile",
     "ListCommits",
     "ListConflicts",
@@ -815,11 +949,19 @@ impl TreqCommandRequest {
     "PtyStart",
     "PtyList",
     "PtyStop",
+    "PtyRename",
     "PtyAttachCommand",
+    "PtyPaste",
+    "ReviewLoad",
+    "ReviewSave",
+    "ReviewClear",
     "WorkspaceDiff",
     "CommitDiff",
     "CommitFileDiff",
     "SearchFiles",
+    "ListFiles",
+    "WorkspacePullRequest",
+    "CreatePullRequest",
   ];
 }
 
@@ -1376,6 +1518,10 @@ pub fn with_verification_baseline(
 /// repo-wide; this narrow helper only needs to survive a single retry path,
 /// so it round-trips through JSON rather than widening the enum's derive
 /// list for one caller.
+#[allow(
+  clippy::expect_used,
+  reason = "the request round-trips through its own JSON shape"
+)]
 fn clone_request(request: &TreqCommandRequest) -> TreqCommandRequest {
   serde_json::from_value(serde_json::to_value(request).expect("TreqCommandRequest serializes"))
     .expect("TreqCommandRequest round-trips through its own JSON shape")
@@ -1392,6 +1538,10 @@ pub struct PtyLaunchPayload {
   pub rows: u16,
 }
 
+#[allow(
+  clippy::expect_used,
+  reason = "the payload is plain data that always serializes"
+)]
 fn pty_launch_payload(
   remote_dir: &str,
   launch: &crate::core::remote_pty::PtyLaunchSpec,
@@ -1631,6 +1781,18 @@ impl TreqCommandRequest {
         }
         ("file", "search", repo)
       }
+      Self::ListFiles {
+        repo,
+        workspace,
+        path,
+      } => {
+        fields.workspace = workspace.as_deref();
+        // The workspace root is an empty path, which `--path` refuses.
+        if !path.is_empty() {
+          fields.path = Some(path);
+        }
+        ("file", "list", repo)
+      }
       Self::DiffFile {
         repo,
         workspace,
@@ -1639,6 +1801,21 @@ impl TreqCommandRequest {
         fields.workspace = workspace.as_deref();
         fields.path = Some(path);
         ("changes", "diff", repo)
+      }
+      Self::DiffFiles {
+        repo,
+        workspace,
+        paths,
+        token,
+      } => {
+        fields.workspace = workspace.as_deref();
+        // JSON, as paths may hold commas.
+        let paths = serde_json::to_string(paths).map_err(|e| e.to_string())?;
+        fields.extra.push(("paths", paths));
+        if let Some(token) = token {
+          fields.extra.push(("token", token.clone()));
+        }
+        ("changes", "diff-files", repo)
       }
       Self::ReadFile {
         repo,
@@ -1848,6 +2025,27 @@ impl TreqCommandRequest {
         fields.idempotency_key = Some(idempotency_key);
         ("git", "push", repo)
       }
+      Self::WorkspacePullRequest { repo, workspace } => {
+        fields.workspace = Some(workspace);
+        ("git", "pr", repo)
+      }
+      Self::CreatePullRequest {
+        repo,
+        workspace,
+        title,
+        body,
+        draft,
+        idempotency_key,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.value = Some(body.clone());
+        fields.extra.push(("title", title.clone()));
+        if *draft {
+          fields.extra.push(("draft", "true".into()));
+        }
+        fields.idempotency_key = Some(idempotency_key);
+        ("git", "pr-create", repo)
+      }
       Self::AgentStart {
         repo,
         workspace,
@@ -1913,6 +2111,17 @@ impl TreqCommandRequest {
         fields.target = Some(label);
         ("pty-remote", "stop", repo)
       }
+      Self::PtyRename {
+        repo,
+        workspace,
+        label,
+        title,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(label);
+        fields.value = Some(title.clone());
+        ("pty-remote", "rename", repo)
+      }
       Self::PtyAttachCommand {
         repo,
         workspace,
@@ -1926,6 +2135,53 @@ impl TreqCommandRequest {
         fields.target = Some(label);
         fields.value = Some(pty_launch_payload(remote_dir, launch, *cols, *rows));
         ("pty-remote", "attach-command", repo)
+      }
+      Self::PtyPaste {
+        repo,
+        workspace,
+        label,
+        text,
+        submit,
+        idempotency_key,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(label);
+        fields.value = Some(text.clone());
+        fields.idempotency_key = Some(idempotency_key);
+        if *submit {
+          fields.extra.push(("submit", "true".into()));
+        }
+        ("pty-remote", "paste", repo)
+      }
+      Self::ReviewLoad {
+        repo,
+        workspace,
+        scope,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(scope.as_str());
+        ("changes", "review", repo)
+      }
+      Self::ReviewSave {
+        repo,
+        workspace,
+        scope,
+        review,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(scope.as_str());
+        fields.value =
+          Some(serde_json::to_string(review).map_err(|e| format!("Failed to encode review: {e}"))?);
+        ("changes", "review-save", repo)
+      }
+      Self::ReviewClear {
+        repo,
+        workspace,
+        scope,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(scope.as_str());
+        ("changes", "review-clear", repo)
       }
     };
     validate_remote_path(repo)?;
@@ -2103,7 +2359,9 @@ where
   // Best-effort, bounded retention: opportunistically sweep old completed
   // records on the same connection rather than running a separate cleanup
   // process. A failure here must never mask the mutation's own outcome.
-  let _ = store.cleanup(crate::core::idempotency_store::DEFAULT_RETENTION);
+  store
+    .cleanup(crate::core::idempotency_store::DEFAULT_RETENTION)
+    .warn_on_err("cleanup");
   outcome
 }
 
@@ -2158,6 +2416,10 @@ fn workspace_id(value: Option<&String>) -> Result<Option<i64>, String> {
 }
 
 /// Dispatches typed CLI requests to the same core functions used by Tauri.
+#[allow(
+  clippy::expect_used,
+  reason = "every mutation request carries a snapshot"
+)]
 pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::Value, String> {
   request.cli_args()?;
   fn json<T: Serialize>(result: Result<T, String>) -> Result<serde_json::Value, String> {
@@ -2223,6 +2485,19 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       workspace_id(workspace.as_ref())?,
       &path,
       "git",
+    )),
+    // The marker style `WorkspaceDiff` names its token with on a host.
+    TreqCommandRequest::DiffFiles {
+      repo,
+      workspace,
+      paths,
+      token,
+    } => json(crate::core::changes::list_file_hunks_batch(
+      &repo,
+      workspace_id(workspace.as_ref())?,
+      paths,
+      crate::core::DEFAULT_CONFLICT_MARKER_STYLE,
+      token.as_deref(),
     )),
     TreqCommandRequest::ReadFile {
       repo,
@@ -2307,6 +2582,15 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       workspace_id(workspace.as_ref())?,
       &query,
       limit.unwrap_or(50),
+    )),
+    TreqCommandRequest::ListFiles {
+      repo,
+      workspace,
+      path,
+    } => json(list_workspace_files(
+      &repo,
+      workspace_id(workspace.as_ref())?,
+      &path,
     )),
     TreqCommandRequest::ProbeRepo { repo } => json(probe_repo_path(&repo)),
     TreqCommandRequest::InitRepo {
@@ -2800,6 +3084,34 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
         ))
       },
     ),
+    TreqCommandRequest::WorkspacePullRequest { repo, workspace } => json(workspace_pull_request(
+      &repo,
+      workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?,
+    )),
+    TreqCommandRequest::CreatePullRequest {
+      repo,
+      workspace,
+      title,
+      body,
+      draft,
+      idempotency_key,
+    } => with_idempotency_key(
+      &repo,
+      "git.pr-create",
+      Some(idempotency_key.as_str()),
+      request_snapshot
+        .as_ref()
+        .expect("CreatePullRequest is a mutation"),
+      || {
+        json(create_pull_request(
+          &repo,
+          workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?,
+          &title,
+          &body,
+          draft,
+        ))
+      },
+    ),
     TreqCommandRequest::AgentStart {
       repo,
       workspace,
@@ -2885,6 +3197,14 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
     } => json(crate::core::pty_remote_supervisor::stop_session(
       &repo, &workspace, &label,
     )),
+    TreqCommandRequest::PtyRename {
+      repo,
+      workspace,
+      label,
+      title,
+    } => json(crate::core::pty_remote_supervisor::rename_session(
+      &repo, &workspace, &label, &title,
+    )),
     TreqCommandRequest::PtyAttachCommand {
       repo,
       workspace,
@@ -2902,6 +3222,102 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       cols,
       rows,
     )),
+    TreqCommandRequest::PtyPaste {
+      repo,
+      workspace,
+      label,
+      text,
+      submit,
+      idempotency_key,
+    } => with_idempotency_key(
+      &repo,
+      "pty.paste",
+      Some(idempotency_key.as_str()),
+      request_snapshot.as_ref().expect("PtyPaste is a mutation"),
+      || {
+        json(crate::core::pty_remote_supervisor::paste_text(
+          &repo, &workspace, &label, &text, submit,
+        ))
+      },
+    ),
+    TreqCommandRequest::ReviewLoad {
+      repo,
+      workspace,
+      scope,
+    } => {
+      let id = review_workspace_id(&workspace)?;
+      json(load_review(&repo, id, scope))
+    }
+    TreqCommandRequest::ReviewSave {
+      repo,
+      workspace,
+      scope,
+      review,
+    } => {
+      let id = review_workspace_id(&workspace)?;
+      json(save_review(&repo, id, scope, &review))
+    }
+    TreqCommandRequest::ReviewClear {
+      repo,
+      workspace,
+      scope,
+    } => {
+      let id = review_workspace_id(&workspace)?;
+      json(match scope {
+        ReviewScope::Changes => crate::core::review_drafts::clear_pending_review(&repo, id),
+        ReviewScope::Files => crate::core::review_drafts::clear_file_browser_review(&repo, id),
+      })
+    }
+  }
+}
+
+fn review_workspace_id(workspace: &String) -> Result<i64, String> {
+  workspace_id(Some(workspace))?.ok_or_else(|| "invalid_arguments: workspace is required".into())
+}
+
+/// `ReviewLoad`: the host's kept review, empty when there is none.
+fn load_review(
+  repo: &str,
+  workspace_id: i64,
+  scope: ReviewScope,
+) -> Result<crate::core::review::Stored, String> {
+  use crate::core::{review::Stored, review_drafts};
+  Ok(match scope {
+    ReviewScope::Changes => review_drafts::pending_review(repo, workspace_id)?
+      .map(|review| Stored::parse(&review))
+      .unwrap_or_default(),
+    ReviewScope::Files => review_drafts::file_browser_review(repo, workspace_id)?
+      .map(|review| Stored {
+        comments: serde_json::from_str(&review.comments).unwrap_or_default(),
+        summary: review.summary_text.unwrap_or_default(),
+        notes: vec![],
+      })
+      .unwrap_or_default(),
+  })
+}
+
+/// `ReviewSave`: an empty review clears what the host kept.
+fn save_review(
+  repo: &str,
+  workspace_id: i64,
+  scope: ReviewScope,
+  review: &crate::core::review::Stored,
+) -> Result<(), String> {
+  use crate::core::review_drafts;
+  let (comments, summary, notes) = review.to_save();
+  match (scope, review.is_empty()) {
+    (ReviewScope::Changes, true) => review_drafts::clear_pending_review(repo, workspace_id),
+    (ReviewScope::Files, true) => review_drafts::clear_file_browser_review(repo, workspace_id),
+    (ReviewScope::Changes, false) => review_drafts::save_pending_review(
+      repo,
+      workspace_id,
+      &comments,
+      summary.as_deref(),
+      notes.as_deref(),
+    ),
+    (ReviewScope::Files, false) => {
+      review_drafts::save_file_browser_review(repo, workspace_id, &comments, summary.as_deref())
+    }
   }
 }
 
@@ -2985,6 +3401,152 @@ fn search_files_local(
       .map(|f| RemoteFileSearchResult {
         file_path: f.file_path,
         relative_path: f.relative_path,
+      })
+      .collect(),
+  )
+}
+
+/// [`TreqCommandRequest::WorkspacePullRequest`]'s result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemotePullRequestStatus {
+  /// The repository's GitHub `owner/name`; absent when it has no GitHub
+  /// remote, so no pull request can be made.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub github_repo: Option<String>,
+  /// The branch's pull request, when it has one.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub pull_request: Option<crate::github::PrInfo>,
+  /// Its checks, once any are reported.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub checks: Option<crate::github::PrCiStatus>,
+}
+
+/// [`TreqCommandRequest::CreatePullRequest`]'s result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreatedPullRequest {
+  pub number: u64,
+  pub url: String,
+}
+
+fn workspace_record(repo: &str, id: i64) -> Result<crate::local_db::Workspace, String> {
+  crate::local_db::get_workspace_by_id(repo, id)?
+    .ok_or_else(|| format!("workspace_not_found: Workspace {id} was not found"))
+}
+
+/// [`TreqCommandRequest::WorkspacePullRequest`]. A repository without a
+/// GitHub remote reads as no pull request, without running `gh`.
+fn workspace_pull_request(repo: &str, id: i64) -> Result<RemotePullRequestStatus, String> {
+  let workspace = workspace_record(repo, id)?;
+  let Some(remote) = crate::github::get_git_remote_url_impl(repo)? else {
+    return Ok(RemotePullRequestStatus {
+      github_repo: None,
+      pull_request: None,
+      checks: None,
+    });
+  };
+  let dir = resolve_workspace_path(repo, Some(id))?;
+  let gh = crate::core::github_cli::gh_path()?;
+  let path = crate::binary_paths::get_extended_path();
+  let branch = &workspace.branch_name;
+  let pull_request = crate::github::get_pr_info_via_gh_impl(&gh, &dir, branch, &path)?;
+  let checks = match &pull_request {
+    Some(_) => crate::github::get_pr_checks_via_gh_impl(&gh, &dir, branch, &path)?,
+    None => None,
+  };
+  Ok(RemotePullRequestStatus {
+    github_repo: Some(remote.full_name),
+    pull_request,
+    checks,
+  })
+}
+
+/// [`TreqCommandRequest::CreatePullRequest`]: pushes first, since GitHub
+/// needs the branch, then opens the pull request into the target branch.
+fn create_pull_request(
+  repo: &str,
+  id: i64,
+  title: &str,
+  body: &str,
+  draft: bool,
+) -> Result<CreatedPullRequest, String> {
+  let title = title.trim();
+  if title.is_empty() {
+    return Err("invalid_arguments: a pull request needs a title".into());
+  }
+  let workspace = workspace_record(repo, id)?;
+  let remote = crate::github::get_git_remote_url_impl(repo)?
+    .ok_or("invalid_arguments: this repository has no GitHub remote")?;
+  let gh = crate::core::github_cli::gh_path()?;
+  crate::core::workspaces::push_workspace_to_remote(repo, Some(id))?;
+  let base = workspace.target_branch.as_deref().unwrap_or("main");
+  let number = crate::github::gh_create_pr_impl(
+    &gh,
+    &remote.full_name,
+    title,
+    body,
+    base,
+    &workspace.branch_name,
+    draft,
+    &crate::binary_paths::get_extended_path(),
+  )?;
+  Ok(CreatedPullRequest {
+    number,
+    url: format!("https://github.com/{}/pull/{number}", remote.full_name),
+  })
+}
+
+/// An entry of [`TreqCommandRequest::ListFiles`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteFileEntry {
+  pub name: String,
+  /// Relative to the workspace, with `/` separators.
+  pub path: String,
+  pub is_directory: bool,
+  /// "conflict", "workingCopy" or "committed" (for a directory, the most
+  /// severe among its files); absent when untouched.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub status: Option<String>,
+}
+
+/// [`TreqCommandRequest::ListFiles`]: one directory of the workspace, with
+/// hidden directories (`.git`, `.jj`) left out as the desktop tree does.
+fn list_workspace_files(
+  repo: &str,
+  workspace: Option<i64>,
+  path: &str,
+) -> Result<Vec<RemoteFileEntry>, String> {
+  let path = path.trim().trim_matches('/');
+  if Path::new(path)
+    .components()
+    .any(|c| !matches!(c, std::path::Component::Normal(_)))
+  {
+    return Err(format!(
+      "invalid_arguments: {path} is not a path inside the workspace"
+    ));
+  }
+  let root = resolve_workspace_path(repo, workspace)?;
+  let dir = Path::new(&root).join(path);
+  let mut entries: Vec<_> = crate::core::list_directory(&dir.to_string_lossy())?
+    .into_iter()
+    .filter(|e| !(e.is_directory && e.name.starts_with('.')))
+    .collect();
+  let target = crate::local_db::get_workspace_by_id(repo, workspace.unwrap_or(0))
+    .ok()
+    .flatten()
+    .and_then(|w| w.target_branch);
+  crate::core::files::annotate_entry_statuses(&root, &mut entries, target.as_deref());
+  Ok(
+    entries
+      .into_iter()
+      .map(|e| RemoteFileEntry {
+        path: if path.is_empty() {
+          e.name.clone()
+        } else {
+          format!("{path}/{}", e.name)
+        },
+        name: e.name,
+        is_directory: e.is_directory,
+        status: e.status,
       })
       .collect(),
   )
@@ -3288,11 +3850,12 @@ fn clone_repo_local(repo_url: &str, destination: &str) -> Result<RepositoryInspe
   inspect_repository_path(destination)
 }
 
-/// Applies a base64-encoded unified diff to `path` inside the given
-/// workspace (or the repo root) using `git apply`. Base64 keeps the exec
-/// argument vector a plain string even though the payload contains newlines.
+/// Fails with the same errors as `inspect_repository_path` for a missing or
+/// non-repository path, but only stats the path: no jj load, ref import or
+/// working-copy snapshot (which writes an op), so read commands stay read-only.
 fn require_existing_repo(repo: &str) -> Result<(), String> {
-  inspect_repository_path(repo).map(|_| ())
+  let root = validate_repository_path(repo)?;
+  detect_repository_type(&root).map(|_| ())
 }
 
 /// Applies a base64-encoded unified diff to `path` inside the given
@@ -3470,6 +4033,39 @@ pub async fn execute_remote_command<T: DeserializeOwned>(
       })?;
   serde_json::from_slice::<T>(&output.stdout)
     .map_err(|error| RemoteCommandError::InvalidJson(error.to_string()))
+}
+
+impl RemoteCommandError {
+  /// Whether the command failed because the pooled connection was dead
+  /// without being known to be: a channel error (closed session, relay
+  /// recycled), a channel that never opened, or the deadline. A read is safe
+  /// to send again on a fresh connection.
+  pub fn is_stale_connection(&self) -> bool {
+    use crate::core::remote_ssh_transport::SshTransportError;
+    matches!(self, Self::Transport(message)
+      if message.starts_with(&SshTransportError::ChannelError(String::new()).to_string())
+        || *message == SshTransportError::DeadlineExceeded.to_string())
+  }
+}
+
+/// [`execute_remote_command`] for a read: after a stale-connection failure
+/// (see [`RemoteCommandError::is_stale_connection`]) the dead connection is
+/// dropped and the read is sent once more on a fresh one. Mutations never go
+/// through here; they verify before any retry ([`retry_after_reconnect`]).
+pub async fn execute_remote_read<T: DeserializeOwned>(
+  pool: &crate::core::remote_ssh_transport::SshConnectionPool,
+  endpoint: &crate::core::remote_control_plane::SshEndpoint,
+  request: TreqCommandRequest,
+  limits: crate::core::remote_ssh_transport::ExecLimits,
+  cancellation: &crate::core::remote_ssh_transport::CancellationToken,
+) -> Result<T, RemoteCommandError> {
+  match execute_remote_command::<T>(pool, endpoint, request.clone(), limits, cancellation).await {
+    Err(error) if error.is_stale_connection() => {
+      pool.mark_dead(endpoint).await;
+      execute_remote_command::<T>(pool, endpoint, request, limits, cancellation).await
+    }
+    result => result,
+  }
 }
 
 impl TransportError {
@@ -3666,6 +4262,114 @@ fn validate_remote_path(path: &str) -> Result<(), String> {
 mod tests {
   use super::*;
   use std::process::Command;
+
+  #[test]
+  fn reviews_round_trip_per_page_and_an_empty_save_clears() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let id = crate::local_db::add_workspace(
+      repo,
+      "ws".into(),
+      format!("{repo}/.treq/workspaces/ws"),
+      "ws".into(),
+      None,
+      None,
+      None,
+    )
+    .unwrap();
+    let review = |summary: &str| crate::core::review::Stored {
+      comments: vec![crate::core::review::Pending::file("a.rs").comment(
+        "tidy",
+        "c1".into(),
+        "now".into(),
+      )],
+      summary: summary.into(),
+      notes: vec![],
+    };
+
+    save_review(repo, id, ReviewScope::Changes, &review("changes")).unwrap();
+    save_review(repo, id, ReviewScope::Files, &review("files")).unwrap();
+    assert_eq!(
+      load_review(repo, id, ReviewScope::Changes).unwrap(),
+      review("changes")
+    );
+    assert_eq!(
+      load_review(repo, id, ReviewScope::Files).unwrap(),
+      review("files")
+    );
+
+    save_review(repo, id, ReviewScope::Files, &Default::default()).unwrap();
+    assert!(load_review(repo, id, ReviewScope::Files)
+      .unwrap()
+      .is_empty());
+    assert!(!load_review(repo, id, ReviewScope::Changes)
+      .unwrap()
+      .is_empty());
+  }
+
+  #[test]
+  fn create_pull_request_needs_a_title_before_touching_the_repo() {
+    let error = create_pull_request("/nonexistent", 1, "  ", "", false).unwrap_err();
+    assert!(error.contains("needs a title"), "{error}");
+  }
+
+  #[test]
+  fn list_files_lists_one_directory_without_ignored_or_hidden_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::process::Command::new("git")
+      .args(["init", "-q"])
+      .current_dir(root)
+      .status()
+      .unwrap();
+    for sub in ["src/ui", "target", ".github"] {
+      fs::create_dir_all(root.join(sub)).unwrap();
+    }
+    fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    fs::write(root.join("README.md"), "").unwrap();
+    fs::write(root.join("src/main.rs"), "").unwrap();
+    let repo = root.to_str().unwrap().to_string();
+
+    let names = |path: &str| -> Vec<(String, String, bool)> {
+      let value = execute_local_request(TreqCommandRequest::ListFiles {
+        repo: repo.clone(),
+        workspace: None,
+        path: path.into(),
+      })
+      .unwrap();
+      serde_json::from_value::<Vec<RemoteFileEntry>>(value)
+        .unwrap()
+        .into_iter()
+        .map(|e| (e.name, e.path, e.is_directory))
+        .collect()
+    };
+    assert_eq!(
+      names(""),
+      vec![
+        ("src".into(), "src".into(), true),
+        (".gitignore".into(), ".gitignore".into(), false),
+        ("README.md".into(), "README.md".into(), false),
+      ]
+    );
+    assert_eq!(
+      names("src/"),
+      vec![
+        ("ui".into(), "src/ui".into(), true),
+        ("main.rs".into(), "src/main.rs".into(), false),
+      ]
+    );
+    for outside in ["..", "../etc", "/etc", "src/../.."] {
+      assert!(
+        execute_local_request(TreqCommandRequest::ListFiles {
+          repo: repo.clone(),
+          workspace: None,
+          path: outside.into(),
+        })
+        .is_err(),
+        "{outside}"
+      );
+    }
+  }
 
   #[cfg(unix)]
   #[test]
@@ -5010,7 +5714,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 62);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 71);
   }
 
   #[test]

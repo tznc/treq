@@ -7,10 +7,13 @@ use std::sync::{Arc, LazyLock};
 use regex::Regex;
 
 use super::code_data::CodeHost;
+pub use crate::core::review::{
+  line_label, line_number, line_numbers, numbered, selection, LineRef,
+};
 use crate::{
   core::{self, ResolveConflictsSession},
   gpui_shell::{native::Backend, remote_repo::unsupported},
-  jj::{JjDiffHunk, JjFileDiff, JjLogCommit, JjLogResult, JjRevisionDiff},
+  jj::{JjFileDiff, JjLogCommit, JjLogResult, JjRevisionDiff},
 };
 
 /// Target-branch commits listed before "Load more commits" (`targetBranchLimit`).
@@ -431,6 +434,11 @@ pub fn revisions(commit_id: &str, change_id: Option<&str>) -> Vec<String> {
   out
 }
 
+/// Whether a revision's diff has something in it to show.
+pub fn has_content(diff: &JjRevisionDiff) -> bool {
+  diff.too_large_to_render || !diff.committed_files.is_empty() || !diff.hunks_by_file.is_empty()
+}
+
 /// `loadCommitDiff`: the first revision whose diff has something in it,
 /// else an empty diff, or the last error when every read failed.
 pub fn first_diff(
@@ -440,13 +448,7 @@ pub fn first_diff(
   let mut error = None;
   for revision in revisions {
     match read(revision) {
-      Ok(diff)
-        if diff.too_large_to_render
-          || !diff.committed_files.is_empty()
-          || !diff.hunks_by_file.is_empty() =>
-      {
-        return Ok(diff)
-      }
+      Ok(diff) if has_content(&diff) => return Ok(diff),
       Ok(_) => {}
       Err(err) => error = Some(err),
     }
@@ -465,6 +467,7 @@ pub fn empty_diff() -> JjRevisionDiff {
     conflicted_files: Vec::new(),
     too_large_to_render: false,
     render_block_reason: None,
+    working_copy_token: None,
   }
 }
 
@@ -483,45 +486,6 @@ pub fn first_file_diff(
   Err(error.unwrap_or_else(|| "Failed to load commit file diff".into()))
 }
 
-static HUNK_HEADER: LazyLock<Regex> = LazyLock::new(|| {
-  Regex::new(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@").expect("hunk header regex")
-});
-
-/// `parseHunkHeader`: `(old_start, new_start)`.
-pub fn hunk_starts(header: &str) -> (u32, u32) {
-  HUNK_HEADER
-    .captures(header)
-    .map(|c| (c[1].parse().unwrap_or(1), c[2].parse().unwrap_or(1)))
-    .unwrap_or((1, 1))
-}
-
-/// `computeHunkLineNumbers`: each line's `(old, new)` number.
-pub fn line_numbers(hunk: &JjDiffHunk) -> Vec<(Option<u32>, Option<u32>)> {
-  numbered(hunk).collect()
-}
-
-/// Line `l`'s `(old, new)` number, counting only the lines before it.
-pub fn line_number(hunk: &JjDiffHunk, l: usize) -> (Option<u32>, Option<u32>) {
-  numbered(hunk).nth(l).unwrap_or((None, None))
-}
-
-fn numbered(hunk: &JjDiffHunk) -> impl Iterator<Item = (Option<u32>, Option<u32>)> + '_ {
-  let (mut old, mut new) = hunk_starts(&hunk.header);
-  hunk.lines.iter().map(move |line| {
-    if line.starts_with('+') {
-      new += 1;
-      (None, Some(new - 1))
-    } else if line.starts_with('-') {
-      old += 1;
-      (Some(old - 1), None)
-    } else {
-      old += 1;
-      new += 1;
-      (Some(old - 1), Some(new - 1))
-    }
-  })
-}
-
 /// A diff line's kind, from its prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineKind {
@@ -538,35 +502,6 @@ pub fn line_kind(line: &str) -> LineKind {
   } else {
     LineKind::Context
   }
-}
-
-/// A line of a file's diff: its hunk and index in it.
-pub type LineRef = (usize, usize);
-
-/// The lines from `from` to `to`, inclusive and in order, across hunks.
-pub fn selection(hunks: &[JjDiffHunk], from: LineRef, to: LineRef) -> Vec<LineRef> {
-  let global = |(h, l): LineRef| {
-    hunks[..h.min(hunks.len())]
-      .iter()
-      .map(|h| h.lines.len())
-      .sum::<usize>()
-      + l
-  };
-  let (start, end) = {
-    let (a, b) = (global(from), global(to));
-    (a.min(b), a.max(b))
-  };
-  let mut out = Vec::new();
-  let mut index = 0;
-  for (h, hunk) in hunks.iter().enumerate() {
-    for l in 0..hunk.lines.len() {
-      if (start..=end).contains(&index) {
-        out.push((h, l));
-      }
-      index += 1;
-    }
-  }
-  out
 }
 
 /// The lines a comment is about.
@@ -606,15 +541,6 @@ pub fn comment_target(file: &JjFileDiff, lines: &[LineRef]) -> Option<CommentTar
     t.lines.push(content);
   }
   target
-}
-
-/// `L12` or `L12-14`, as the comment box labels its lines.
-pub fn line_label(start: u32, end: u32) -> String {
-  if start == end {
-    format!("L{start}")
-  } else {
-    format!("L{start}-{end}")
-  }
 }
 
 /// `handleCreateAgentWithComment`'s prompt: the reference, the lines and
@@ -658,10 +584,12 @@ impl Default for ShiftForm {
 
 impl ShiftForm {
   /// The shift to apply, or `None` while the form can't be submitted.
+  #[allow(clippy::expect_used, reason = "constant pattern")]
   pub fn shift(&self) -> Option<TimeShift> {
     if self.to_day {
-      let re = Regex::new(r"^\d{4}-\d{2}-\d{2}$").expect("day regex");
-      return re
+      static DAY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").expect("day regex"));
+      return DAY
         .is_match(&self.day)
         .then(|| TimeShift::ToDay(self.day.clone()));
     }
@@ -703,6 +631,7 @@ pub fn resolve_session_name(session: &ResolveConflictsSession) -> Option<String>
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::{core::review::hunk_starts, jj::JjDiffHunk};
 
   fn commit(id: &str) -> JjLogCommit {
     serde_json::from_value(serde_json::json!({

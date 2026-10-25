@@ -3,8 +3,10 @@
 //! [`Root`] owns the stack and the app-wide [`AppModel`] (sign-in and
 //! connection state). Screens push and pop pages through [`nav`].
 
+mod hold;
 mod home;
 mod load;
+mod review;
 mod screens;
 pub mod sheet;
 mod terminal_view;
@@ -142,6 +144,8 @@ pub struct Root {
   model: Entity<AppModel>,
   stack: Vec<Page>,
   sheet: Option<sheet::Sheet>,
+  /// Set briefly after a sheet closes; see [`sheet::dismiss`].
+  tap_guard: bool,
 }
 
 pub(crate) struct Nav {
@@ -235,6 +239,15 @@ pub mod nav {
     });
   }
 
+  /// Whether the page showing `view` is the one on screen.
+  pub fn is_top(view: EntityId, cx: &App) -> bool {
+    cx.global::<Nav>()
+      .root
+      .upgrade()
+      .and_then(|root| root.read(cx).stack.last().map(|p| p.view.entity_id()))
+      == Some(view)
+  }
+
   pub fn pop(cx: &mut App) {
     update(cx, |root, cx| {
       if root.stack.len() > 1 {
@@ -285,8 +298,8 @@ impl Root {
     tauri_plugin_gpui::on_back(move |cx| {
       weak
         .update(cx, |root, cx| {
-          if root.sheet.take().is_some() {
-            cx.notify();
+          if root.sheet.is_some() {
+            sheet::dismiss(root, cx);
           } else if root.stack.len() > 1 {
             root.stack.pop();
             root.stack_changed(cx);
@@ -317,6 +330,7 @@ impl Root {
         location: Location::default(),
       }],
       sheet: None,
+      tap_guard: false,
     };
     restore(cx);
     root
@@ -472,6 +486,7 @@ impl Render for Root {
       .when_some(self.sheet.as_ref(), |root, sheet| {
         root.child(sheet::render(sheet, viewport.height - visible.bottom(), cx))
       })
+      .when(self.tap_guard, |root| root.child(sheet::tap_guard()))
   }
 }
 
@@ -559,6 +574,7 @@ pub fn sign_out(cx: &mut App) {
     }
     backend.pool.set_relay_access_token(None);
     backend.auth.sign_out().await;
+    remote::forget_reads();
   });
   cx.spawn(async move |cx| {
     let _ = done.await;
@@ -614,6 +630,10 @@ pub fn connect(machine: Machine, open: bool, cx: &mut App) {
     cx.notify();
   });
   let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded::<&'static str>();
+  // The pages a restore reopens; otherwise `open` shows the last repository.
+  let snapshot = (open && model.read(cx).restoring)
+    .then(store::session_snapshot)
+    .flatten();
   let result = backend::spawn(async move {
     let connection = match machine {
       Machine::Host(record) => {
@@ -634,6 +654,10 @@ pub fn connect(machine: Machine, open: bool, cx: &mut App) {
         .await?
       }
     };
+    if open {
+      // Read alongside the host check, so the pages open on content.
+      screens::prefetch_location(&connection.endpoint, snapshot.as_ref());
+    }
     let _ = progress_tx.unbounded_send("Checking the machine");
     let check = remote::host_check(&connection.endpoint).await?;
     Ok::<_, String>((connection, check))
@@ -753,6 +777,7 @@ pub fn show_machines(cx: &mut App) {
 /// Removes a saved SSH host and drops its connection and terminals.
 pub fn forget_host(id: &str, cx: &mut App) {
   store::remove_user_managed_endpoint(id);
+  remote::forget_reads();
   if let Some(connection) = backend::get().remove_connection(id) {
     backend::spawn_detached(async move {
       let backend = backend::get();
@@ -806,32 +831,39 @@ pub fn reauthenticate(cx: &mut App) {
   .detach();
 }
 
-/// On return to the foreground: rebuild a stale managed connection, then
-/// have every screen refetch (PRD mobile acceptance criterion 7).
+/// How long the pooled connection gets to answer on return to the
+/// foreground before it counts as dead.
+const RESUME_PROBE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// On return to the foreground: check the pooled connection (a silent one is
+/// dropped, so the refetch reconnects at once instead of waiting out a channel
+/// open), have every screen refetch (PRD mobile acceptance criterion 7), and
+/// rebuild a stale Treq Cloud connection. The staleness check runs alongside
+/// the refetch; the rebuild refetches again.
 fn resume(cx: &mut App) {
   let model = model(cx);
+  let probe = backend::get().endpoint().ok().map(|endpoint| {
+    backend::spawn(async move { backend::get().pool.probe(&endpoint, RESUME_PROBE).await })
+  });
   // The Treq Cloud machine may have slept, or its certificate lapsed, while
   // the app was in the background. Only a ready one is rechecked.
   let managed = model.read(cx).machine(MANAGED_MACHINE).status == MachineStatus::Ready;
-  if managed {
-    let stale = backend::spawn(managed::is_stale());
-    cx.spawn(async move |cx| {
-      if let Ok(true) = stale.await {
-        cx.update(|cx| connect(Machine::Managed, false, cx));
-      } else {
-        model.update(cx, |m, cx| {
-          m.epoch += 1;
-          cx.notify();
-        });
-      }
-    })
-    .detach();
-  } else {
+  let stale = managed.then(|| backend::spawn(managed::is_stale()));
+  cx.spawn(async move |cx| {
+    if let Some(probe) = probe {
+      let _ = probe.await;
+    }
     model.update(cx, |m, cx| {
       m.epoch += 1;
       cx.notify();
     });
-  }
+    if let Some(stale) = stale {
+      if let Ok(true) = stale.await {
+        cx.update(|cx| connect(Machine::Managed, false, cx));
+      }
+    }
+  })
+  .detach();
 }
 
 /// Restores the Supabase session, then the last endpoint, repository and
@@ -841,8 +873,15 @@ fn restore(cx: &mut Context<Root>) {
   model.update(cx, |m, _| m.restoring = true);
   let restored = backend::spawn(async { backend::get().auth.restore().await });
   cx.spawn(async move |_, cx| {
-    let _ = restored.await;
     let snapshot = store::session_snapshot();
+    // Only Treq Cloud needs the session: an SSH host connects without
+    // waiting for its refresh, a network round trip.
+    if !matches!(
+      snapshot.as_ref().map(|s| &s.endpoint),
+      Some(store::SessionEndpoint::UserManaged { .. })
+    ) {
+      let _ = restored.await;
+    }
     let Some(snapshot) = snapshot else {
       model.update(cx, |m, _| m.restoring = false);
       return;
@@ -859,29 +898,22 @@ fn restore(cx: &mut Context<Root>) {
       return;
     };
     let id = machine.id().to_string();
-    cx.update(|cx| connect(machine, true, cx));
-    // Wait for the connect to finish.
-    loop {
-      let state = cx.update(|cx| {
-        let m = model.read(cx);
-        (
-          m.machine(&id).status.is_connecting(),
-          m.connection.is_some(),
-        )
-      });
-      match state {
-        (true, _) => {
-          cx.background_executor()
-            .timer(std::time::Duration::from_millis(200))
-            .await
-        }
-        (false, connected) => {
-          if connected {
-            cx.update(|cx| screens::restore_pages(&snapshot, cx));
+    // Woken when the connect finishes, rather than polling for it.
+    let (done_tx, done_rx) = futures::channel::oneshot::channel();
+    let mut done_tx = Some(done_tx);
+    let _finished = cx.update(|cx| {
+      connect(machine, true, cx);
+      cx.observe(&model, move |model, cx| {
+        if !model.read(cx).machine(&id).status.is_connecting() {
+          if let Some(done) = done_tx.take() {
+            let _ = done.send(());
           }
-          break;
         }
-      }
+      })
+    });
+    let _ = done_rx.await;
+    if cx.update(|cx| model.read(cx).connection.is_some()) {
+      cx.update(|cx| screens::restore_pages(&snapshot, cx));
     }
     model.update(cx, |m, _| m.restoring = false);
   })

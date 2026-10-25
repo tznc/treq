@@ -5,7 +5,13 @@
 //! disk for a local one, and has nothing of what only a local checkout
 //! has (pull requests, supporting repositories).
 
-use std::{collections::HashMap, path::Path, time::Duration};
+use crate::result_ext::ResultExt;
+use std::{
+  collections::{HashMap, HashSet},
+  path::{Path, PathBuf},
+  sync::{Arc, Mutex},
+  time::Duration,
+};
 
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 
@@ -27,6 +33,7 @@ use crate::{
     remote_records::{self, RestoreFailure, RestoreSteps, SavedRepository, UserManagedEndpoint},
     repo::RepoBranch,
     supporting_repos::{self, SupportingRepo},
+    workspaces::WorkspaceSummary,
     SingleRebaseResult, WorkspaceSidebarStatus,
   },
   github::{GitRemoteInfo, PrInfo},
@@ -51,9 +58,33 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn statuses(&self, repo: &str) -> Result<Vec<WorkspaceSidebarStatus>, String>;
   /// `has_changes` of `useWorkspaceGitDetail`.
   fn has_changes(&self, repo: &str, workspace_id: i64) -> Option<bool>;
+  /// `has_changes` of each of `workspaces`, read together.
+  fn has_changes_of(&self, repo: &str, workspaces: &[Workspace]) -> HashMap<i64, bool> {
+    workspaces
+      .iter()
+      .filter_map(|w| self.has_changes(repo, w.id).map(|c| (w.id, c)))
+      .collect()
+  }
+  /// Every workspace's sidebar status and uncommitted changes in one read,
+  /// for a repository where that is one round trip. `None` falls back to
+  /// `workspaces`, `statuses` and `has_changes`.
+  fn summaries(&self, _repo: &str) -> Option<Vec<WorkspaceSummary>> {
+    None
+  }
+  /// The workspaces the local database lists, with no jj or network read,
+  /// so a window draws its rows before `statuses` and `has_changes` finish.
+  /// `None` where there is no such read (a repository over SSH).
+  fn listed_workspaces(&self, _repo: &str) -> Option<Vec<Workspace>> {
+    None
+  }
   fn sessions(&self, repo: &str) -> Vec<Session>;
   fn branch(&self, repo: &str) -> Option<RepoBranch>;
   fn default_branch(&self, repo: &str) -> Option<String>;
+  /// [`Self::branch`] and [`Self::default_branch`], for a repository where
+  /// one read answers both.
+  fn branches(&self, repo: &str) -> (Option<RepoBranch>, Option<String>) {
+    (self.branch(repo), self.default_branch(repo))
+  }
   fn remote(&self, repo: &str) -> Option<GitRemoteInfo>;
   /// The pull request poller's cache, by branch.
   fn prs(&self, repo: &str) -> HashMap<String, Option<PrInfo>>;
@@ -108,32 +139,50 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
     ..RepoRead::default()
   };
   if read.workspaces {
-    let workspaces = host.workspaces(repo).ok();
-    let statuses = host.statuses(repo).ok();
-    let open: Vec<i64> = match (&workspaces, &statuses) {
-      (Some(workspaces), statuses) => workspaces
-        .iter()
-        .filter(|w| {
-          !statuses
+    let summaries = host.summaries(repo);
+    let (workspaces, statuses) = match &summaries {
+      Some(summaries) => (
+        Some(summaries.iter().map(|s| s.workspace.clone()).collect()),
+        Some(
+          summaries
             .iter()
-            .flatten()
-            .any(|s| s.current.id == w.id && s.has_conflicts)
-        })
-        .map(|w| w.id)
-        .collect(),
-      _ => Vec::new(),
+            .map(|s| WorkspaceSidebarStatus {
+              current: s.workspace.clone(),
+              has_conflicts: s.has_conflicts,
+              last_activity_at: s.last_activity_at.clone(),
+            })
+            .collect::<Vec<_>>(),
+        ),
+      ),
+      None => (host.workspaces(repo).ok(), host.statuses(repo).ok()),
     };
-    let mut sorted = open.clone();
+    let conflicted: HashSet<i64> = statuses
+      .iter()
+      .flatten()
+      .filter(|s| s.has_conflicts)
+      .map(|s| s.current.id)
+      .collect();
+    let open: Vec<&Workspace> = workspaces
+      .iter()
+      .flatten()
+      .filter(|w| !conflicted.contains(&w.id))
+      .collect();
+    let mut sorted: Vec<i64> = open.iter().map(|w| w.id).collect();
     sorted.sort_unstable();
     let mut was = known.to_vec();
     was.sort_unstable();
     if read.detail || sorted != was {
-      out.has_changes = Some(
-        open
+      out.has_changes = Some(match &summaries {
+        Some(summaries) => summaries
           .iter()
-          .filter_map(|id| host.has_changes(repo, *id).map(|c| (*id, c)))
+          .filter(|s| sorted.binary_search(&s.workspace.id).is_ok())
+          .map(|s| (s.workspace.id, s.has_changes))
           .collect(),
-      );
+        None => {
+          let open: Vec<Workspace> = open.into_iter().cloned().collect();
+          host.has_changes_of(repo, &open)
+        }
+      });
     }
     out.workspaces = workspaces;
     out.statuses = statuses;
@@ -142,11 +191,87 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
     out.sessions = Some(host.sessions(repo));
   }
   if read.detail {
-    out.branch = Some(host.branch(repo));
-    out.default_branch = Some(host.default_branch(repo));
-    out.remote = Some(host.remote(repo));
+    read_detail(host, repo, &mut out);
   }
   out
+}
+
+/// The repository's branch, default branch and remote.
+pub fn read_detail(host: &dyn WindowHost, repo: &str, out: &mut RepoRead) {
+  // Side by side: for a remote repository each is a round trip.
+  let ((branch, default_branch), remote) = std::thread::scope(|scope| {
+    let remote = scope.spawn(|| host.remote(repo));
+    let branches = host.branches(repo);
+    (
+      branches,
+      remote
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+    )
+  });
+  out.branch = Some(branch);
+  out.default_branch = Some(default_branch);
+  out.remote = Some(remote);
+}
+
+/// Repositories `open_in_new_window` initialized for the window it opens,
+/// so that window's `prepare_repo` doesn't initialize them again.
+static JUST_INITIALIZED: std::sync::Mutex<Vec<(String, std::time::Instant)>> =
+  std::sync::Mutex::new(Vec::new());
+
+/// How long a window may take to open after its repository was initialized
+/// for it.
+const JUST_INITIALIZED_FOR: Duration = Duration::from_secs(30);
+
+pub(crate) fn note_just_initialized(repo: &str) {
+  let mut noted = JUST_INITIALIZED.lock_or_recover();
+  noted.retain(|(_, at)| at.elapsed() < JUST_INITIALIZED_FOR);
+  noted.push((repo.to_string(), std::time::Instant::now()));
+}
+
+/// Whether `repo` was initialized for the window being prepared; a note
+/// serves one window.
+fn take_just_initialized(repo: &str) -> bool {
+  let mut noted = JUST_INITIALIZED.lock_or_recover();
+  noted.retain(|(_, at)| at.elapsed() < JUST_INITIALIZED_FOR);
+  match noted.iter().position(|(noted, _)| noted == repo) {
+    Some(index) => {
+      noted.remove(index);
+      true
+    }
+    None => false,
+  }
+}
+
+/// When this process last initialized each repository for a window.
+static PREPARED: std::sync::Mutex<Vec<(String, std::time::Instant)>> =
+  std::sync::Mutex::new(Vec::new());
+
+/// How long a repository's init and rebase pass count for further windows.
+const PREPARED_FOR: Duration = Duration::from_secs(60);
+
+fn note_prepared(repo: &str) {
+  let mut prepared = PREPARED.lock_or_recover();
+  prepared.retain(|(path, at)| path != repo && at.elapsed() < PREPARED_FOR);
+  prepared.push((repo.to_string(), std::time::Instant::now()));
+}
+
+fn prepared_recently(repo: &str) -> bool {
+  let mut prepared = PREPARED.lock_or_recover();
+  prepared.retain(|(_, at)| at.elapsed() < PREPARED_FOR);
+  prepared.iter().any(|(path, _)| path == repo)
+}
+
+/// The branch an `InspectRepository` answer shows.
+fn repo_branch(inspection: RepositoryInspection) -> RepoBranch {
+  RepoBranch {
+    display_ref: inspection
+      .current_branch
+      .clone()
+      .unwrap_or_else(|| inspection.current_change_id.chars().take(8).collect()),
+    is_detached: inspection.current_branch.is_none(),
+    current_branch: inspection.current_branch,
+  }
 }
 
 impl Backend {
@@ -174,30 +299,51 @@ impl WindowHost for Backend {
       return core::list_workspace_statuses(repo);
     };
     // The host has no sidebar listing: each workspace's own inspection.
-    Ok(
-      remote
-        .workspaces()?
-        .into_iter()
-        .map(|workspace| {
-          let has_conflicts = remote
-            .status(Some(workspace.id))
-            .is_ok_and(|s| !s.conflicted_files.is_empty());
-          WorkspaceSidebarStatus {
-            current: workspace,
-            has_conflicts,
-            last_activity_at: None,
-          }
-        })
-        .collect(),
-    )
+    Ok(remote_repo::parallel_map(
+      remote.workspaces()?,
+      |workspace| {
+        let has_conflicts = remote
+          .status(Some(workspace.id))
+          .is_ok_and(|s| !s.conflicted_files.is_empty());
+        WorkspaceSidebarStatus {
+          current: workspace,
+          has_conflicts,
+          last_activity_at: None,
+        }
+      },
+    ))
   }
 
   fn has_changes(&self, repo: &str, workspace_id: i64) -> Option<bool> {
-    let status = match self.remote(repo) {
-      Some(remote) => remote.status(Some(workspace_id)),
-      None => core::workspace_status(repo, Some(workspace_id)),
-    };
-    status.ok().map(|status| status.partial.has_changes)
+    match self.remote(repo) {
+      Some(remote) => remote
+        .status(Some(workspace_id))
+        .ok()
+        .map(|status| status.partial.has_changes),
+      None => core::workspace_has_changes(repo, workspace_id).ok(),
+    }
+  }
+
+  fn listed_workspaces(&self, repo: &str) -> Option<Vec<Workspace>> {
+    match self.remote(repo) {
+      Some(_) => None,
+      None => core::list_workspaces(repo).ok(),
+    }
+  }
+
+  fn has_changes_of(&self, repo: &str, workspaces: &[Workspace]) -> HashMap<i64, bool> {
+    if self.remote(repo).is_some() {
+      return workspaces
+        .iter()
+        .filter_map(|w| self.has_changes(repo, w.id).map(|c| (w.id, c)))
+        .collect();
+    }
+    core::workspaces_have_changes(repo, workspaces)
+  }
+
+  fn summaries(&self, repo: &str) -> Option<Vec<WorkspaceSummary>> {
+    let remote = self.remote(repo)?;
+    remote.workspace_summaries_if_supported()
   }
 
   fn sessions(&self, repo: &str) -> Vec<Session> {
@@ -206,17 +352,19 @@ impl WindowHost for Backend {
 
   fn branch(&self, repo: &str) -> Option<RepoBranch> {
     if self.remote(repo).is_some() {
-      let inspection = self.inspect_remote(repo)?;
-      return Some(RepoBranch {
-        display_ref: inspection
-          .current_branch
-          .clone()
-          .unwrap_or_else(|| inspection.current_change_id.chars().take(8).collect()),
-        is_detached: inspection.current_branch.is_none(),
-        current_branch: inspection.current_branch,
-      });
+      return self.inspect_remote(repo).map(repo_branch);
     }
     core::repo::get_repo_current_branch(repo).ok()
+  }
+
+  fn branches(&self, repo: &str) -> (Option<RepoBranch>, Option<String>) {
+    if Backend::remote(self, repo).is_some() {
+      // One `InspectRepository` answers both.
+      let inspection = self.inspect_remote(repo);
+      let default_branch = inspection.as_ref().map(|i| i.default_branch.clone());
+      return (inspection.map(repo_branch), default_branch);
+    }
+    (self.branch(repo), self.default_branch(repo))
   }
 
   fn default_branch(&self, repo: &str) -> Option<String> {
@@ -275,11 +423,19 @@ impl WindowHost for Backend {
   }
 
   fn prepare_repo(&self, main_repo: &str) {
-    if let Err(err) = core::init(main_repo) {
-      log::error!("Failed to init repo: {err}");
+    // Another window prepared this repo moments ago: the init and the
+    // rebase pass would repeat its work, and the poll keeps the state fresh.
+    let skip = take_just_initialized(main_repo) | prepared_recently(main_repo);
+    if !skip {
+      match core::init_deferring_rebase(main_repo) {
+        Ok(true) => note_prepared(main_repo),
+        Ok(false) => {}
+        Err(err) => log::error!("Failed to init repo: {err}"),
+      }
     }
     self.set_window_repo_path(main_repo);
     crate::pr_status::global().watch_repo(main_repo);
+    crate::unwatch_unshown_repos(self.app());
   }
 
   fn set_supporting_paths(&self, paths: Vec<String>) {
@@ -293,6 +449,8 @@ impl WindowHost for Backend {
       }
       map.insert(self.label().to_string(), paths);
     }
+    drop(map);
+    crate::unwatch_unshown_repos(self.app());
   }
 
   fn pick_folder(&self) -> Option<String> {
@@ -312,7 +470,7 @@ impl WindowHost for Backend {
   }
 
   fn open_in_new_window(&self, path: &str) {
-    if !core::init(path).unwrap_or(false) {
+    if !core::init_deferring_rebase(path).unwrap_or(false) {
       self.toast(
         ToastTone::Error,
         "Not a Git Repository",
@@ -320,14 +478,19 @@ impl WindowHost for Backend {
       );
       return;
     }
+    note_just_initialized(path);
+    note_prepared(path);
     let label = crate::open_new_window::new_repo_window_label();
     let title = crate::open_new_window::new_repo_window_title(path);
     let (app, path) = (self.app().clone(), path.to_string());
-    let _ = self.app().run_on_main_thread(move || {
-      if let Err(err) = crate::gpui_shell::open_window(&app, &label, Some(path), &title) {
-        log::error!("failed to open repo window: {err}");
-      }
-    });
+    self
+      .app()
+      .run_on_main_thread(move || {
+        if let Err(err) = crate::gpui_shell::open_window(&app, &label, Some(path), &title) {
+          log::error!("failed to open repo window: {err}");
+        }
+      })
+      .ignore_closed();
   }
 
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String> {
@@ -357,17 +520,33 @@ impl WindowHost for Backend {
       return None;
     }
     let (tx, changes) = unbounded();
-    let mut watcher = notify_debouncer_full::new_debouncer(
+    let mut gitignore = GitignoreFilter::new(Path::new(path));
+    let watcher: Arc<Mutex<Option<CheckoutWatcher>>> = Arc::default();
+    let weak = Arc::downgrade(&watcher);
+    let debouncer = notify_debouncer_full::new_debouncer(
       WATCH_SETTLE,
       None,
       move |result: notify_debouncer_full::DebounceEventResult| match result {
         Ok(events) => {
-          if events
-            .iter()
-            .flat_map(|e| e.paths.iter())
-            .any(|p| !is_ignored(p))
-          {
-            let _ = tx.unbounded_send(());
+          let mut changed = false;
+          for path in events.iter().flat_map(|e| e.paths.iter()) {
+            if is_ignored(path) || gitignore.ignores(path) {
+              continue;
+            }
+            changed = true;
+            // inotify watches one directory each: a directory created or
+            // moved in needs its own.
+            #[cfg(target_os = "linux")]
+            if path.is_dir() {
+              if let Some(watcher) = weak.upgrade() {
+                if let Some(watcher) = watcher.lock_or_recover().as_mut() {
+                  watcher.watch_tree(path);
+                }
+              }
+            }
+          }
+          if changed {
+            tx.unbounded_send(()).ignore_closed();
           }
         }
         Err(errors) => log::warn!("File watch errors: {errors:?}"),
@@ -375,10 +554,18 @@ impl WindowHost for Backend {
     )
     .map_err(|err| log::warn!("Failed to create a file watcher: {err}"))
     .ok()?;
-    watcher
-      .watch(Path::new(path), notify::RecursiveMode::Recursive)
-      .map_err(|err| log::warn!("Failed to watch {path}: {err}"))
-      .ok()?;
+    #[cfg(not(target_os = "linux"))]
+    drop(weak);
+    let mut checkout = CheckoutWatcher {
+      debouncer,
+      watched: HashSet::new(),
+    };
+    checkout.watch_tree(Path::new(path));
+    if checkout.watched.is_empty() {
+      log::warn!("Failed to watch {path}");
+      return None;
+    }
+    *watcher.lock_or_recover() = Some(checkout);
     Some(FileWatch {
       changes,
       _watcher: Box::new(watcher),
@@ -631,9 +818,224 @@ fn is_ignored(path: &Path) -> bool {
     .is_some_and(|p| p.ends_with(".swp") || p.ends_with('~'))
 }
 
+type CheckoutDebouncer = notify_debouncer_full::Debouncer<
+  notify::RecommendedWatcher,
+  notify_debouncer_full::RecommendedCache,
+>;
+
+/// A checkout's file watcher. Linux's inotify costs a kernel watch per
+/// directory, so there each directory outside ignored trees (`node_modules`,
+/// `target`, gitignored output) is watched on its own instead of the whole
+/// tree recursively; elsewhere the platform watches the tree in one call.
+struct CheckoutWatcher {
+  debouncer: CheckoutDebouncer,
+  watched: HashSet<PathBuf>,
+}
+
+impl CheckoutWatcher {
+  /// Watches `root` and, on Linux, every watchable directory beneath it.
+  fn watch_tree(&mut self, root: &Path) {
+    #[cfg(target_os = "linux")]
+    for dir in watchable_dirs(root) {
+      if !self.watched.contains(&dir) {
+        match self
+          .debouncer
+          .watch(&dir, notify::RecursiveMode::NonRecursive)
+        {
+          Ok(()) => {
+            self.watched.insert(dir);
+          }
+          Err(err) => log::warn!("Failed to watch {}: {err}", dir.display()),
+        }
+      }
+    }
+    #[cfg(not(target_os = "linux"))]
+    if self
+      .debouncer
+      .watch(root, notify::RecursiveMode::Recursive)
+      .map_err(|err| log::warn!("Failed to watch {}: {err}", root.display()))
+      .is_ok()
+    {
+      self.watched.insert(root.to_path_buf());
+    }
+  }
+}
+
+/// `root` and the directories beneath it that a file change can matter in:
+/// not `.git`, `.jj`, `node_modules`, `target` or anything gitignored.
+#[cfg(target_os = "linux")]
+fn watchable_dirs(root: &Path) -> Vec<PathBuf> {
+  ignore::WalkBuilder::new(root)
+    .standard_filters(false)
+    .git_ignore(true)
+    .git_global(true)
+    .git_exclude(true)
+    .require_git(false)
+    .hidden(false)
+    .filter_entry(|entry| !is_ignored(entry.path()))
+    .build()
+    .filter_map(Result::ok)
+    .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_dir()))
+    .map(ignore::DirEntry::into_path)
+    .collect()
+}
+
+/// Applies the checkout's gitignore rules, so `dist/`, `.next/` and other
+/// ignored output stop triggering reloads of the Changes tab. Rules come from
+/// every `.gitignore` between the changed path and the root, plus
+/// `.git/info/exclude` and the user's global ignore file, with git's
+/// precedence (deeper files win).
+struct GitignoreFilter {
+  root: PathBuf,
+  /// Lowest precedence first: global ignore file, then `.git/info/exclude`.
+  base: Vec<ignore::gitignore::Gitignore>,
+  /// Each directory's own `.gitignore`, read on first use.
+  dirs: HashMap<PathBuf, Option<ignore::gitignore::Gitignore>>,
+}
+
+impl GitignoreFilter {
+  fn new(root: &Path) -> Self {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let mut exclude = ignore::gitignore::GitignoreBuilder::new(&root);
+    exclude.add(root.join(".git").join("info").join("exclude"));
+    let base = [
+      Some(ignore::gitignore::Gitignore::global().0),
+      exclude.build().ok(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    Self {
+      root,
+      base,
+      dirs: HashMap::new(),
+    }
+  }
+
+  fn ignores(&mut self, path: &Path) -> bool {
+    if path.file_name().is_some_and(|name| name == ".gitignore") {
+      // The rules themselves changed: drop what was read and let it reload.
+      self.dirs.clear();
+      return false;
+    }
+    let Ok(relative) = path.strip_prefix(&self.root) else {
+      return false;
+    };
+    let is_dir = path.is_dir();
+    // Deepest directory first: its rules override its ancestors'.
+    let dirs: Vec<PathBuf> = relative
+      .ancestors()
+      .skip(1)
+      .map(|dir| self.root.join(dir))
+      .collect();
+    for dir in dirs {
+      let matcher = self.dirs.entry(dir.clone()).or_insert_with(|| {
+        let mut builder = ignore::gitignore::GitignoreBuilder::new(&dir);
+        builder.add(dir.join(".gitignore"));
+        builder.build().ok()
+      });
+      if let Some(matcher) = matcher {
+        match matcher.matched_path_or_any_parents(path, is_dir) {
+          ignore::Match::Ignore(_) => return true,
+          ignore::Match::Whitelist(_) => return false,
+          ignore::Match::None => {}
+        }
+      }
+    }
+    for matcher in self.base.iter().rev() {
+      match matcher.matched_path_or_any_parents(path, is_dir) {
+        ignore::Match::Ignore(_) => return true,
+        ignore::Match::Whitelist(_) => return false,
+        ignore::Match::None => {}
+      }
+    }
+    false
+  }
+}
+
 #[cfg(test)]
 mod watch_tests {
   use super::*;
+
+  #[test]
+  fn a_repo_prepared_moments_ago_is_not_prepared_again() {
+    let repo = "/tmp/prepared-recently-test";
+    assert!(!prepared_recently(repo));
+    note_prepared(repo);
+    assert!(prepared_recently(repo));
+    assert!(!prepared_recently("/tmp/some-other-repo"));
+  }
+
+  /// inotify watches a checkout with `node_modules` and `target` trees:
+  /// directories watched recursively vs. per non-ignored directory.
+  #[cfg(target_os = "linux")]
+  #[test]
+  #[ignore = "measurement"]
+  fn watch_count_with_ignored_trees() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    for i in 0..20 {
+      std::fs::create_dir_all(root.join(format!("src/m{i}/inner"))).unwrap();
+    }
+    for i in 0..500 {
+      std::fs::create_dir_all(root.join(format!("node_modules/p{i}/lib"))).unwrap();
+      std::fs::create_dir_all(root.join(format!("target/debug/d{i}"))).unwrap();
+    }
+    let all = walkdir_count(&root);
+    println!(
+      "recursive: {all} watches, per directory: {}",
+      watchable_dirs(&root).len()
+    );
+  }
+
+  #[cfg(target_os = "linux")]
+  fn walkdir_count(dir: &Path) -> usize {
+    1 + std::fs::read_dir(dir)
+      .unwrap()
+      .filter_map(Result::ok)
+      .filter(|e| e.path().is_dir())
+      .map(|e| walkdir_count(&e.path()))
+      .sum::<usize>()
+  }
+
+  #[cfg(target_os = "linux")]
+  #[test]
+  fn watchable_dirs_skip_ignored_trees() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    for sub in [
+      "src/ui",
+      "node_modules/dep",
+      "target/debug",
+      "dist/js",
+      ".git/refs",
+    ] {
+      std::fs::create_dir_all(root.join(sub)).unwrap();
+    }
+    std::fs::write(root.join(".gitignore"), "dist/\n").unwrap();
+    let mut dirs = watchable_dirs(&root);
+    dirs.sort();
+    assert_eq!(dirs, [root.clone(), root.join("src"), root.join("src/ui")]);
+  }
+
+  #[test]
+  fn gitignore_filter_follows_nested_rules() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("sub/dist")).unwrap();
+    std::fs::write(root.join(".gitignore"), "dist/\n*.log\n").unwrap();
+    std::fs::write(root.join("sub/.gitignore"), "!keep.log\n").unwrap();
+    let mut filter = GitignoreFilter::new(&root);
+    assert!(filter.ignores(&root.join("dist/app.js")));
+    assert!(filter.ignores(&root.join("sub/dist/app.js")));
+    assert!(filter.ignores(&root.join("debug.log")));
+    assert!(!filter.ignores(&root.join("sub/keep.log")));
+    assert!(!filter.ignores(&root.join("src/main.rs")));
+    // Editing a `.gitignore` is a change worth reloading for.
+    assert!(!filter.ignores(&root.join(".gitignore")));
+    // Paths outside the root are never filtered out.
+    assert!(!filter.ignores(Path::new("/elsewhere/dist/app.js")));
+  }
 
   #[test]
   fn ignores_vcs_state_and_build_output() {

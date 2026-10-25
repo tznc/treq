@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use super::{
   changes_review::{number_and_side, Side},
-  commits_data::line_numbers,
+  commits_data::{line_numbers, numbered},
 };
 use crate::{github::GhReviewThread, jj::JjDiffHunk, local_db::AgentReviewComment};
 
@@ -17,11 +17,25 @@ pub const WORKSPACE_DIFF: &str = "workspace_diff";
 /// A thread's or comment's line: file, hunk id, number and side.
 pub type LineKey = (String, String, u32, Side);
 
-/// Threads anchored on a line of the diff, and those that are not.
+/// Threads anchored on a line of the diff, and those that are not, as
+/// indices into the threads placed.
 #[derive(Default, Clone)]
 pub struct Placed {
-  pub by_line: HashMap<LineKey, Vec<GhReviewThread>>,
-  pub unplaced: HashMap<String, Vec<GhReviewThread>>,
+  pub by_line: HashMap<LineKey, Vec<usize>>,
+  pub unplaced: HashMap<String, Vec<usize>>,
+}
+
+/// The first hunk of a file that has a line, by number and side.
+type LineIndex = HashMap<(u32, Side), usize>;
+
+fn line_index(hunks: &[JjDiffHunk]) -> LineIndex {
+  let mut index = LineIndex::new();
+  for (h, hunk) in hunks.iter().enumerate() {
+    for (l, n) in numbered(hunk).enumerate() {
+      index.entry(number_and_side(n, l)).or_insert(h);
+    }
+  }
+  index
 }
 
 /// `placeGithubReviewThreads`: a thread sits on the first hunk that has
@@ -32,49 +46,55 @@ pub fn place_threads(
   maps: &[&HashMap<String, &[JjDiffHunk]>],
 ) -> Placed {
   let mut placed = Placed::default();
-  for thread in threads {
-    match place(thread, maps) {
-      Some(key) => placed.by_line.entry(key).or_default().push(thread.clone()),
+  // A file's lines are numbered once for all the threads on it.
+  let mut indexes: HashMap<(usize, &str), LineIndex> = HashMap::new();
+  for (i, thread) in threads.iter().enumerate() {
+    match place(thread, maps, &mut indexes) {
+      Some(key) => placed.by_line.entry(key).or_default().push(i),
       None => placed
         .unplaced
         .entry(thread.path.clone())
         .or_default()
-        .push(thread.clone()),
+        .push(i),
     }
   }
   placed
 }
 
-fn place(thread: &GhReviewThread, maps: &[&HashMap<String, &[JjDiffHunk]>]) -> Option<LineKey> {
+fn place<'a>(
+  thread: &'a GhReviewThread,
+  maps: &[&HashMap<String, &[JjDiffHunk]>],
+  indexes: &mut HashMap<(usize, &'a str), LineIndex>,
+) -> Option<LineKey> {
   let line = u32::try_from(thread.line?).ok()?;
   let side = if thread.diff_side == "LEFT" {
     Side::Old
   } else {
     Side::New
   };
-  for map in maps {
+  for (m, map) in maps.iter().enumerate() {
     let Some(hunks) = map.get(&thread.path) else {
       continue;
     };
-    for hunk in hunks.iter() {
-      let hit = line_numbers(hunk)
-        .into_iter()
-        .enumerate()
-        .any(|(l, n)| number_and_side(n, l) == (line, side));
-      if hit {
-        return Some((thread.path.clone(), hunk.id.clone(), line, side));
-      }
+    let index = indexes
+      .entry((m, thread.path.as_str()))
+      .or_insert_with(|| line_index(hunks));
+    if let Some(&h) = index.get(&(line, side)) {
+      return Some((thread.path.clone(), hunks[h].id.clone(), line, side));
     }
   }
   None
 }
 
-/// Open agent comments by the last line of their range and side.
-pub fn agent_by_line(
-  comments: &[AgentReviewComment],
-) -> HashMap<(String, u32, Side), Vec<AgentReviewComment>> {
+/// Open agent comments by the last line of their range and side, as
+/// indices into `comments`.
+pub fn agent_by_line(comments: &[AgentReviewComment]) -> HashMap<(String, u32, Side), Vec<usize>> {
   let mut out: HashMap<_, Vec<_>> = HashMap::new();
-  for c in comments.iter().filter(|c| c.status != "resolved") {
+  for (i, c) in comments
+    .iter()
+    .enumerate()
+    .filter(|(_, c)| c.status != "resolved")
+  {
     let side = if c.side.as_deref() == Some("old") {
       Side::Old
     } else {
@@ -86,7 +106,7 @@ pub fn agent_by_line(
     out
       .entry((c.file_path.clone(), end, side))
       .or_default()
-      .push(c.clone());
+      .push(i);
   }
   out
 }
@@ -198,6 +218,7 @@ fn diff_tokens<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(ChangeTag, &'a str)
 }
 
 /// Runs of whitespace and of everything else, as `diffWords` splits them.
+#[allow(clippy::string_slice, reason = "offsets come from char_indices()")]
 fn words(text: &str) -> Vec<&str> {
   let mut out = Vec::new();
   let mut start = 0;

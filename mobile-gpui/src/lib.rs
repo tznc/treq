@@ -5,10 +5,12 @@
 //! connected host through treq's own SSH transport and remote command
 //! protocol, linked directly from `treq_lib` instead of going through IPC.
 
+mod assets;
 mod backend;
 mod config;
 mod errors;
 mod managed;
+mod reads;
 mod remote;
 mod store;
 mod terminal;
@@ -69,15 +71,13 @@ pub fn run() {
       listen_for_deep_links(app);
       tauri_plugin_gpui::init_with(
         app,
-        GpuiConfig::new()
-          .assets(gpui_kit::assets::Assets)
-          .on_launch(|cx| {
-            // Initializes gpui-kit too.
-            ui::theme::init(cx);
-            // tauri-plugin-gpui draws Android's own selection toolbar and handles.
-            #[cfg(target_os = "android")]
-            gpui_kit::component::input::set_native_touch_selection(true, cx);
-          }),
+        GpuiConfig::new().assets(assets::AppAssets).on_launch(|cx| {
+          // Initializes gpui-kit too.
+          ui::theme::init(cx);
+          // tauri-plugin-gpui draws Android's own selection toolbar and handles.
+          #[cfg(target_os = "android")]
+          gpui_kit::component::input::set_native_touch_selection(true, cx);
+        }),
       )?;
       let window = tauri::WindowBuilder::new(app, "main")
         .title("Treq")
@@ -92,9 +92,23 @@ pub fn run() {
     })
     .build(tauri::generate_context!())
     .expect("error while building the Treq GPUI app");
-  app.run(|_, event| {
-    if let (tauri::RunEvent::Resumed, Some(backend)) = (event, backend::try_get()) {
-      backend.emit(backend::AppEvent::Resumed);
+  app.run(|_, event| match event {
+    tauri::RunEvent::Resumed => {
+      backend::set_foreground(true);
+      if let Some(backend) = backend::try_get() {
+        backend.emit(backend::AppEvent::Resumed);
+      }
     }
+    #[cfg(mobile)]
+    tauri::RunEvent::WindowEvent {
+      event: tauri::WindowEvent::Suspended,
+      ..
+    } => backend::set_foreground(false),
+    #[cfg(mobile)]
+    tauri::RunEvent::WindowEvent {
+      event: tauri::WindowEvent::Resumed,
+      ..
+    } => backend::set_foreground(true),
+    _ => {}
   });
 }

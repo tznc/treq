@@ -46,7 +46,7 @@ pub fn handle(
   label: &str,
   snapshot: &SidebarSnapshot,
   action: &SidebarAction,
-  _: &mut App,
+  cx: &mut App,
 ) -> bool {
   let backend = Arc::new(Backend::new(app.clone(), label.to_string()));
   let Some(active) = snapshot.repos.iter().find(|r| r.active) else {
@@ -68,10 +68,10 @@ pub fn handle(
       true
     }
     SidebarAction::WorkspaceMenu { id } => {
-      workspace_menu(app, label, backend, &active.path, *id, true)
+      workspace_menu(app, label, backend, &active.path, *id, true, cx)
     }
     SidebarAction::RepoWorkspaceMenu { repo_path, id } => {
-      workspace_menu(app, label, backend, repo_path, *id, false)
+      workspace_menu(app, label, backend, repo_path, *id, false, cx)
     }
     SidebarAction::BulkArchive => {
       let ids: Vec<i64> = active
@@ -186,9 +186,10 @@ fn editors(host: &dyn ChangesHost) -> EditorApps {
 }
 
 /// `workspaceMenuEntries` for workspace `id` of `repo_path`, which may be
-/// a repository that is not on screen (`archive` false). A remote
-/// repository's workspace is read off the main thread, and has no pull
-/// request poller.
+/// a repository that is not on screen (`archive` false). The workspace
+/// comes from what the window last read; one it has not read (and a remote
+/// repository's, which has no pull request poller) is read off the main
+/// thread, so the menu never waits on the repository or SSH.
 fn workspace_menu(
   app: &AppHandle,
   label: &str,
@@ -196,41 +197,45 @@ fn workspace_menu(
   repo_path: &str,
   id: i64,
   archive: bool,
+  cx: &App,
 ) -> bool {
-  if backend.remote(repo_path).is_some() {
-    let (app, label, repo_path) = (app.clone(), label.to_string(), repo_path.to_string());
-    std::thread::spawn(move || {
-      let Some(workspace) = workspace_or_toast(
-        &backend,
-        &repo_path,
-        id,
-        "Failed to load the workspace menu",
-      ) else {
-        return;
-      };
-      super::defer_main(&app.clone(), move |app| {
-        let items =
-          context_menu::workspace_items(&workspace, &repo_path, None, editors(&*backend), archive);
-        show(app, &label, backend, items);
-      });
-    });
-    return true;
+  let remote = backend.remote(repo_path).is_some();
+  if !remote {
+    if let Some(workspace) = super::window::workspace(label, repo_path, id, cx) {
+      let pr_url = pr_url(repo_path, &workspace);
+      let items = context_menu::workspace_items(
+        &workspace,
+        repo_path,
+        pr_url.as_deref(),
+        editors(&*backend),
+        archive,
+      );
+      show(app, label, backend, items);
+      return true;
+    }
   }
-  let Some(workspace) = core::list_workspaces(repo_path)
-    .ok()
-    .and_then(|list| list.into_iter().find(|w| w.id == id))
-  else {
-    return false;
-  };
-  let pr_url = pr_url(repo_path, &workspace);
-  let items = context_menu::workspace_items(
-    &workspace,
-    repo_path,
-    pr_url.as_deref(),
-    editors(&*backend),
-    archive,
-  );
-  show(app, label, backend, items);
+  let (app, label, repo_path) = (app.clone(), label.to_string(), repo_path.to_string());
+  std::thread::spawn(move || {
+    let Some(workspace) = workspace_or_toast(
+      &backend,
+      &repo_path,
+      id,
+      "Failed to load the workspace menu",
+    ) else {
+      return;
+    };
+    let pr_url = (!remote).then(|| pr_url(&repo_path, &workspace)).flatten();
+    super::defer_main(&app.clone(), move |app| {
+      let items = context_menu::workspace_items(
+        &workspace,
+        &repo_path,
+        pr_url.as_deref(),
+        editors(&*backend),
+        archive,
+      );
+      show(app, &label, backend, items);
+    });
+  });
   true
 }
 

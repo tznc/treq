@@ -95,11 +95,8 @@ pub fn default_ssh_config_paths() -> Vec<PathBuf> {
   paths
 }
 
-/// One line already tagged with the directory its file lives in, so a
-/// relative `IdentityFile` or `Include` path resolves against the file that
-/// declared it, not the top-level config.
+/// One directive line of the flattened config (Includes already inlined).
 struct SourcedLine {
-  dir: PathBuf,
   text: String,
 }
 
@@ -132,7 +129,6 @@ fn load_lines(path: &Path, seen: &mut HashSet<PathBuf>) -> Vec<SourcedLine> {
       continue;
     }
     out.push(SourcedLine {
-      dir: dir.clone(),
       text: trimmed.to_string(),
     });
   }
@@ -200,10 +196,8 @@ fn split_directive(line: &str) -> (&str, &str) {
   let sep_index = line
     .find(|c: char| c.is_whitespace() || c == '=')
     .unwrap_or(line.len());
-  let keyword = &line[..sep_index];
-  let rest = line[sep_index..]
-    .trim_start_matches(['=', ' ', '\t'])
-    .trim();
+  let (keyword, rest) = line.split_at(sep_index);
+  let rest = rest.trim_start_matches(['=', ' ', '\t']).trim();
   (keyword, rest)
 }
 
@@ -343,7 +337,6 @@ pub fn resolve_alias_from_paths(
     // this resolver only ever *uses* the supported fields above to build a
     // connection, so an ignored directive can never widen trust or change
     // what gets connected to.
-    let _ = line.dir.as_path();
   }
 
   if !matched_any_block {

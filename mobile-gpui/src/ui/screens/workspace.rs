@@ -1,8 +1,8 @@
-//! One workspace: its branch and status over three tabs (Terminals,
-//! Changes, Commits), with the workspace's actions in the ⋯ menu and a
+//! One workspace: its branch and status over four tabs (Terminals,
+//! Changes, Commits, Code), with the workspace's actions in the ⋯ menu and a
 //! switcher to its siblings on the title.
 
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{cell::RefCell, collections::HashSet, rc::Rc, time::Duration};
 
 use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -19,7 +19,8 @@ use gpui_kit::{
 use serde::Deserialize;
 use treq_lib::{
   core::{
-    remote::TreqCommandRequest,
+    remote::{CreatedPullRequest, RemotePullRequestStatus, ReviewScope, TreqCommandRequest},
+    remote_control_plane::SshEndpoint,
     workspaces::{WorkspaceStatus, WorkspaceSummary},
   },
   jj::{JjBranch, JjFileChange, JjRevisionDiff},
@@ -31,14 +32,22 @@ use treq_ui::{
 };
 
 use super::{
-  commits::CommitsScreen, conflicts, diff, mutation_message, on_epoch, terminal::Sessions,
+  code::CodeView,
+  commits::{self, CommitsScreen},
+  conflicts, mutation_message, on_epoch,
+  pull_request::{self, CreateSheet, PullRequestSheet},
+  terminal::Sessions,
   workspaces,
 };
 use crate::{
   errors,
   remote::{self, IdempotencyKeys, Mutation},
   store::SnapshotWorkspace,
-  ui::{self, load, nav, sheet, widgets, Load, Location},
+  ui::{
+    self, load, nav,
+    review::{self, Review},
+    sheet, widgets, Load, Location,
+  },
 };
 
 /// How often the change marker is polled to notice remote edits.
@@ -109,9 +118,10 @@ enum View {
   Terminals,
   Changes,
   Commits,
+  Code,
 }
 
-const VIEWS: [View; 3] = [View::Terminals, View::Changes, View::Commits];
+const VIEWS: [View; 4] = [View::Terminals, View::Changes, View::Commits, View::Code];
 
 #[derive(Deserialize)]
 struct ChangeMarker {
@@ -125,6 +135,32 @@ fn counted(tab: Tab, count: usize) -> Tab {
   } else {
     tab
   }
+}
+
+fn status_request(target: &Target) -> TreqCommandRequest {
+  TreqCommandRequest::InspectWorkspace {
+    repo: target.repo.clone(),
+    workspace: target.id.clone(),
+  }
+}
+
+fn diff_request(target: &Target) -> TreqCommandRequest {
+  TreqCommandRequest::WorkspaceDiff {
+    repo: target.repo.clone(),
+    workspace: target.id.clone(),
+  }
+}
+
+/// Starts reading workspace `id`'s status and changes on `endpoint`, for a
+/// screen about to open.
+pub fn prefetch(endpoint: &SshEndpoint, repo: &str, id: &str) {
+  let target = Target {
+    repo: repo.to_string(),
+    id: id.to_string(),
+    name: String::new(),
+  };
+  remote::prefetch_on::<WorkspaceStatus>(endpoint.clone(), status_request(&target));
+  remote::prefetch_on::<JjRevisionDiff>(endpoint.clone(), diff_request(&target));
 }
 
 /// "M" → "Modified", for a changed file's row.
@@ -154,15 +190,29 @@ fn change_detail(change: &JjFileChange) -> String {
   detail
 }
 
+mod changes;
+
 pub struct WorkspaceScreen {
   target: Target,
   view: View,
   status: Load<WorkspaceStatus>,
   diff: Load<JjRevisionDiff>,
+  /// The branch's pull request, read with the host's `gh`.
+  pr: Load<RemotePullRequestStatus>,
   marker: Option<String>,
   sessions: Entity<Sessions>,
+  /// The Changes tab's review, kept on the host.
+  review: Entity<Review>,
+  /// The uncommitted files' diffs, shown inline on the Changes tab.
+  hunks: changes::FileHunks,
+  /// Large files the user asked to see.
+  opened: HashSet<String>,
+  /// Lines picked for a comment.
+  picked: Option<changes::PickedLines>,
   /// Made when the Commits tab is first shown.
   commits: Option<Entity<CommitsScreen>>,
+  /// Made when the Code tab is first shown.
+  code: Option<Entity<CodeView>>,
   commit_message: Entity<InputState>,
   /// The action running from this screen, by name.
   busy: Option<&'static str>,
@@ -185,7 +235,15 @@ impl WorkspaceScreen {
     on_epoch(cx, |this, cx| this.reload(cx));
     let poll = cx.spawn(async move |this, cx| loop {
       cx.background_executor().timer(MARKER_POLL).await;
-      if this.update(cx, |this, cx| this.poll_marker(cx)).is_err() {
+      let polled = this.update(cx, |this, cx| {
+        // Nothing shows the result under another page or in the
+        // background. The next tick once shown catches up, and a return
+        // to the foreground refetches at once.
+        if crate::backend::in_foreground() && nav::is_top(cx.entity_id(), cx) {
+          this.poll_marker(cx);
+        }
+      });
+      if polled.is_err() {
         break;
       }
     });
@@ -196,16 +254,38 @@ impl WorkspaceScreen {
       }
     })
     .detach();
-    let sessions = cx.new(|_| Sessions::new(target.clone()));
+    // Shown at once when this workspace was open before; refetched either way.
+    let status = remote::last::<WorkspaceStatus>(&status_request(&target));
+    // The record names the workspace's sessions. The last status or the
+    // list's summary has it, so sessions are listed without waiting for
+    // this status (a round trip on the default tab).
+    let workspace = status
+      .as_ref()
+      .map(|s| s.partial.current.clone())
+      .or_else(|| {
+        remote::last::<Vec<WorkspaceSummary>>(&workspaces::summaries_request(&target.repo))?
+          .into_iter()
+          .find(|s| s.workspace.id.to_string() == target.id)
+          .map(|s| s.workspace)
+      });
+    let sessions = cx.new(|cx| Sessions::new(target.clone(), workspace, cx));
     cx.observe(&sessions, |_, _, cx| cx.notify()).detach();
+    let review = cx.new(|cx| Review::new(target.clone(), ReviewScope::Changes, cx));
+    cx.observe(&review, |_, _, cx| cx.notify()).detach();
     let mut this = Self {
-      target,
       view: View::Terminals,
-      status: Load::Idle,
-      diff: Load::Idle,
+      status: status.map_or(Load::Idle, Load::Ready),
+      diff: remote::last(&diff_request(&target)).map_or(Load::Idle, Load::Ready),
+      pr: remote::last(&pull_request::status_request(&target)).map_or(Load::Idle, Load::Ready),
+      target,
       marker: None,
       sessions,
+      review,
+      hunks: Default::default(),
+      opened: HashSet::new(),
+      picked: None,
       commits: None,
+      code: None,
       commit_message: cx.new(|cx| InputState::new(window, cx).placeholder("Commit message")),
       busy: None,
       message: None,
@@ -213,54 +293,75 @@ impl WorkspaceScreen {
       changed: false,
       _poll: poll,
     };
-    this.reload(cx);
+    this.load_hunks(cx);
+    this.fetch(true, cx);
+    this.poll_marker(cx);
     this
   }
 
   fn reload(&mut self, cx: &mut Context<Self>) {
+    self.fetch(false, cx);
+    self.poll_marker(cx);
+  }
+
+  /// Reads the workspace's status, changes and sessions. `join` as in
+  /// [`remote::read_cached`].
+  fn fetch(&mut self, join: bool, cx: &mut Context<Self>) {
     if self.status.ready().is_none() {
       self.status = Load::Loading;
     }
     if self.diff.ready().is_none() {
       self.diff = Load::Loading;
     }
-    let Target { repo, id, .. } = self.target.clone();
-    let (r, w) = (repo.clone(), id.clone());
+    let first = join;
     load::run(
       cx,
-      async move {
-        remote::read::<WorkspaceStatus>(TreqCommandRequest::InspectWorkspace {
-          repo: r,
-          workspace: w,
-        })
-        .await
-      },
-      |this, result, cx| {
+      remote::read_cached::<WorkspaceStatus>(status_request(&self.target), join),
+      move |this, result, cx| {
         if let Ok(status) = &result {
           let workspace = status.partial.current.clone();
           this
             .sessions
             .update(cx, |sessions, cx| sessions.set_workspace(workspace, cx));
+          // Once the tab's own reads are back, the Commits tab's is
+          // started so that tab opens on content.
+          if first && this.commits.is_none() {
+            commits::prefetch(&this.target);
+          }
         }
         this.status = Load::from_result(result);
       },
     );
     load::run(
       cx,
-      async move {
-        remote::read::<JjRevisionDiff>(TreqCommandRequest::WorkspaceDiff {
-          repo,
-          workspace: id,
-        })
-        .await
+      remote::read_cached::<JjRevisionDiff>(diff_request(&self.target), join),
+      |this, result, cx| {
+        this.diff = Load::from_result(result);
+        this.load_hunks(cx);
       },
-      |this, result, _| this.diff = Load::from_result(result),
     );
-    self.sessions.update(cx, |sessions, cx| sessions.reload(cx));
-    if let Some(commits) = &self.commits {
-      commits.update(cx, |commits, cx| commits.reload(cx));
+    // GitHub is slow and optional: a failed read keeps the last answer.
+    load::run(
+      cx,
+      remote::read_cached::<RemotePullRequestStatus>(
+        pull_request::status_request(&self.target),
+        join,
+      ),
+      |this, result, _| match result {
+        Ok(status) => this.pr = Load::Ready(status),
+        Err(error) if this.pr.ready().is_none() => this.pr = Load::Failed(error),
+        Err(_) => {}
+      },
+    );
+    if !join {
+      self.sessions.update(cx, |sessions, cx| sessions.reload(cx));
+      if let Some(commits) = &self.commits {
+        commits.update(cx, |commits, cx| commits.reload(cx));
+      }
+      if let Some(code) = &self.code {
+        code.update(cx, |code, cx| code.reload(cx));
+      }
     }
-    self.poll_marker(cx);
   }
 
   /// Refetches when the workspace changed on the host since the last poll.
@@ -280,18 +381,31 @@ impl WorkspaceScreen {
           let changed = this.marker.is_some() && this.marker != marker.operation_id;
           this.marker = marker.operation_id;
           if changed {
-            this.reload(cx);
+            // The marker was just read: refetch the rest only.
+            this.fetch(false, cx);
           }
         }
       },
     );
   }
 
-  fn select(&mut self, view: View, cx: &mut Context<Self>) {
+  fn select(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
     self.view = view;
     if view == View::Commits && self.commits.is_none() {
       let target = self.target.clone();
       self.commits = Some(cx.new(|cx| CommitsScreen::new(target, cx)));
+    }
+    if view == View::Code && self.code.is_none() {
+      let (target, sessions) = (self.target.clone(), self.sessions.clone());
+      let screen = cx.weak_entity();
+      // From the file viewer, above this page: back here, on Changes.
+      let show_changes: review::Handler = Rc::new(move |window, cx| {
+        nav::pop(cx);
+        screen
+          .update(cx, |screen, cx| screen.select(View::Changes, window, cx))
+          .ok();
+      });
+      self.code = Some(cx.new(|cx| CodeView::new(target, sessions, show_changes, window, cx)));
     }
     cx.notify();
   }
@@ -325,7 +439,7 @@ impl WorkspaceScreen {
     let (stack_repo, stack_branch) = (repo.clone(), branch.clone());
     let (rename_repo, rename_ws) = (repo.clone(), workspace.clone());
     let reload = this.clone();
-    let entries = vec![
+    let mut entries = vec![
       sheet::MenuEntry::new("menu-push", "Push", on(Self::confirm_push)),
       sheet::MenuEntry::new(
         "menu-rebase",
@@ -367,7 +481,101 @@ impl WorkspaceScreen {
       sheet::MenuEntry::new("menu-archive", "Archive", on(Self::confirm_archive)),
       sheet::MenuEntry::new("menu-delete", "Delete…", on(Self::confirm_delete)).danger(),
     ];
+    let pr_entry = match &self.pr {
+      Load::Ready(RemotePullRequestStatus {
+        pull_request: Some(pr),
+        ..
+      }) => Some(sheet::MenuEntry::new(
+        "menu-pr",
+        format!("Pull request #{}", pr.number),
+        on(Self::show_pr),
+      )),
+      Load::Ready(RemotePullRequestStatus {
+        github_repo: None, ..
+      }) => None,
+      _ => Some(sheet::MenuEntry::new(
+        "menu-pr",
+        "Create pull request…",
+        on(Self::create_pr_sheet),
+      )),
+    };
+    if let Some(entry) = pr_entry {
+      entries.insert(1, entry);
+    }
     sheet::menu(workspaces::title_of(&workspace), entries, cx);
+  }
+
+  fn show_pr(&mut self, cx: &mut Context<Self>) {
+    let Some(status) = self.pr.ready().cloned() else {
+      return;
+    };
+    sheet::open(Some("Pull request".into()), cx, move |_, cx| {
+      cx.new(|_| PullRequestSheet::new(status))
+    });
+  }
+
+  fn create_pr_sheet(&mut self, cx: &mut Context<Self>) {
+    if let Load::Failed(error) = &self.pr {
+      self.message = Some((false, errors::describe(error).message));
+      return cx.notify();
+    }
+    let Some(workspace) = self.workspace() else {
+      return;
+    };
+    let title = workspaces::title_of(workspace);
+    let body = workspace.description.clone().unwrap_or_default();
+    let into = self.target_branch();
+    let this = cx.weak_entity();
+    let on_create: pull_request::OnCreate = Box::new(move |title, body, draft, cx| {
+      this
+        .update(cx, |screen, cx| screen.create_pr(title, body, draft, cx))
+        .ok();
+    });
+    sheet::open(Some("New pull request".into()), cx, move |window, cx| {
+      cx.new(|cx| CreateSheet::new(title, body, into, on_create, window, cx))
+    });
+  }
+
+  fn create_pr(&mut self, title: String, body: String, draft: bool, cx: &mut Context<Self>) {
+    if self.busy.is_some() {
+      return;
+    }
+    let Target { repo, id, .. } = self.target.clone();
+    let inputs = vec![repo.clone(), id.clone(), title.clone()];
+    let key = self.keys.key_for("pr", &[&repo, &id, &title]);
+    self.busy = Some("pr");
+    self.message = None;
+    let request = TreqCommandRequest::CreatePullRequest {
+      repo,
+      workspace: id,
+      title,
+      body,
+      draft,
+      idempotency_key: key,
+    };
+    load::run(cx, remote::mutate(request), move |this, outcome, cx| {
+      this.busy = None;
+      let refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
+      this.keys.settle("pr", &refs, &outcome);
+      this.message = Some(match &outcome {
+        Ok(Mutation::Applied(value)) => {
+          this.changed = true;
+          let created = serde_json::from_value::<CreatedPullRequest>(value.clone()).ok();
+          (
+            true,
+            created.map_or("Pull request created.".into(), |pr| {
+              format!("Pull request #{} created.", pr.number)
+            }),
+          )
+        }
+        other => (
+          false,
+          errors::describe(&mutation_message(other, "").1).message,
+        ),
+      });
+      this.reload(cx);
+    });
+    cx.notify();
   }
 
   fn confirm_push(&mut self, cx: &mut Context<Self>) {
@@ -615,8 +823,8 @@ impl WorkspaceScreen {
     cx.notify();
   }
 
-  fn header(&self, cx: &App) -> impl IntoElement {
-    let theme = cx.theme();
+  fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let muted = cx.theme().muted_foreground;
     let Some(status) = self.status.ready() else {
       return match &self.status {
         Load::Failed(error) => widgets::error_text(errors::describe(error).message, cx),
@@ -641,10 +849,10 @@ impl WorkspaceScreen {
               .min_w_0()
               .truncate(),
           )
-          .child(div().text_color(theme.muted_foreground).child("→"))
+          .child(div().text_color(muted).child("→"))
           .child(
             widgets::mono(self.target_branch(), cx)
-              .text_color(theme.muted_foreground)
+              .text_color(muted)
               .truncate(),
           ),
       )
@@ -668,6 +876,14 @@ impl WorkspaceScreen {
               Tag::secondary()
                 .small()
                 .child(format!("↑{} ahead", partial.commits_ahead)),
+            )
+          })
+          .when_some(self.pr.ready().and_then(pull_request::tag), |row, tag| {
+            row.child(
+              div()
+                .id("pr-tag")
+                .child(tag)
+                .on_click(cx.listener(|this, _, _, cx| this.show_pr(cx))),
             )
           }),
       )
@@ -697,10 +913,11 @@ impl WorkspaceScreen {
           }
         })
         .tab(counted(Tab::new("tab-commits", "Commits"), ahead))
+        .tab(Tab::new("tab-code", "Code"))
         .selected(VIEWS.iter().position(|v| *v == view).unwrap_or(0))
-        .on_select(move |ix, _, cx| {
+        .on_select(move |ix, window, cx| {
           this
-            .update(cx, |screen, cx| screen.select(VIEWS[ix], cx))
+            .update(cx, |screen, cx| screen.select(VIEWS[ix], window, cx))
             .ok();
         }),
     )
@@ -723,14 +940,6 @@ impl WorkspaceScreen {
     };
     let target = self.target.clone();
     let committing = self.busy == Some("commit");
-    let file_row = |id: (&'static str, usize), change: &JjFileChange, cx: &App| {
-      widgets::row(
-        id,
-        change.path.clone(),
-        Some(change_detail(change).into()),
-        cx,
-      )
-    };
     v_flex()
       .gap_4()
       .when(!diff.conflicted_files.is_empty(), |list| {
@@ -747,24 +956,15 @@ impl WorkspaceScreen {
         )
       })
       .child(
-        widgets::section("Uncommitted", cx).child(
-          widgets::card(cx)
-            .when(diff.uncommitted_files.is_empty(), |card| {
-              card.child(widgets::centered_message("No uncommitted changes.", cx))
-            })
-            .children(
-              diff
-                .uncommitted_files
-                .iter()
-                .enumerate()
-                .map(|(i, change)| {
-                  let (t, path) = (target.clone(), change.path.clone());
-                  file_row(("uncommitted", i), change, cx)
-                    .on_click(move |_, _, cx| diff::open(t.clone(), path.clone(), cx))
-                }),
+        widgets::section("Uncommitted", cx)
+          .when(diff.uncommitted_files.is_empty(), |section| {
+            section.child(
+              widgets::card(cx).child(widgets::centered_message("No uncommitted changes.", cx)),
             )
-            .when(!diff.uncommitted_files.is_empty(), |card| {
-              card.child(
+          })
+          .when(!diff.uncommitted_files.is_empty(), |section| {
+            section.child(
+              widgets::card(cx).child(
                 h_flex()
                   .p_3()
                   .gap_2()
@@ -777,29 +977,29 @@ impl WorkspaceScreen {
                       .disabled(self.busy.is_some())
                       .on_click(cx.listener(|this, _, window, cx| this.commit(window, cx))),
                   ),
-              )
-            }),
-        ),
+              ),
+            )
+          })
+          .children(
+            diff
+              .uncommitted_files
+              .iter()
+              .map(|change| self.file_block(change, false, diff, cx)),
+          ),
       )
       .child(
-        widgets::section(format!("On this branch · vs {}", self.target_branch()), cx).child(
-          widgets::card(cx)
-            .when(diff.committed_files.is_empty(), |card| {
-              card.child(widgets::centered_message("No committed changes yet.", cx))
-            })
-            .children(diff.committed_files.iter().enumerate().map(|(i, change)| {
-              let (t, path) = (target.clone(), change.path.clone());
-              let hunks = diff
-                .hunks_by_file
-                .iter()
-                .find(|f| f.path == change.path)
-                .map(|f| f.hunks.clone())
-                .unwrap_or_default();
-              file_row(("committed", i), change, cx).on_click(move |_, _, cx| {
-                diff::open_hunks(t.clone(), path.clone(), hunks.clone(), cx)
-              })
-            })),
-        ),
+        widgets::section(format!("On this branch · vs {}", self.target_branch()), cx)
+          .when(diff.committed_files.is_empty(), |section| {
+            section.child(
+              widgets::card(cx).child(widgets::centered_message("No committed changes yet.", cx)),
+            )
+          })
+          .children(
+            diff
+              .committed_files
+              .iter()
+              .map(|change| self.file_block(change, true, diff, cx)),
+          ),
       )
       .into_any_element()
   }
@@ -814,14 +1014,24 @@ impl Render for WorkspaceScreen {
         .overflow_y_scroll()
         .child(widgets::page().child(self.sessions.clone()))
         .into_any_element(),
-      View::Changes => div()
-        .id("changes")
+      View::Changes => v_flex()
         .size_full()
-        .overflow_y_scroll()
-        .child(widgets::page().child(self.changes(cx)))
+        .child(
+          div()
+            .id("changes")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(widgets::page().child(self.changes(cx))),
+        )
+        .children(self.changes_footer(cx))
         .into_any_element(),
       View::Commits => match &self.commits {
         Some(commits) => commits.clone().into_any_element(),
+        None => div().into_any_element(),
+      },
+      View::Code => match &self.code {
+        Some(code) => code.clone().into_any_element(),
         None => div().into_any_element(),
       },
     };
@@ -848,6 +1058,7 @@ impl Render for WorkspaceScreen {
             "target" => "Changing target…",
             "archive" => "Archiving…",
             "delete" => "Deleting…",
+            "pr" => "Pushing and opening the pull request…",
             _ => "Working…",
           },
           cx,
@@ -937,16 +1148,19 @@ fn switcher(repo: String, current: String, cx: &mut App) {
     cx.new(|cx| {
       load::run(
         cx,
-        workspaces::load_summaries(repo.clone()),
+        workspaces::load_summaries(repo.clone(), true),
         |this: &mut Switcher, result, cx| {
           this.list = Load::from_result(result);
           cx.notify();
         },
       );
+      // The list as last read shows until the fresh one is back.
+      let list =
+        remote::last(&workspaces::summaries_request(&repo)).map_or(Load::Loading, Load::Ready);
       Switcher {
         repo,
         current,
-        list: Load::Loading,
+        list,
       }
     })
   });
@@ -1012,6 +1226,7 @@ mod tests {
       previous_path: previous.map(str::to_string),
       changed_line_count: lines,
       diff_deferred: false,
+      content_id: None,
     }
   }
 

@@ -12,7 +12,7 @@ use super::*;
 use crate::{
   github::{GhReviewComment, GhReviewThread},
   gpui_shell::screen::{
-    changes_review::{count_label, line_at, Pending, Quote, Side},
+    changes_review::{count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
       agent_by_line, comment_date, original_text, place_threads, preview, suggestion_diff, Placed,
       RowKind,
@@ -38,7 +38,12 @@ pub(in crate::gpui_shell::screen) struct Threads {
   /// Agent comments with an action running.
   busy: HashSet<String>,
   placed: Placed,
-  agent_lines: HashMap<(String, u32, Side), Vec<AgentReviewComment>>,
+  /// Indices into `agent`.
+  agent_lines: HashMap<(String, u32, Side), Vec<usize>>,
+  /// Bumped when `github` or `agent` reads back changed.
+  pub(in crate::gpui_shell::screen) revision: u64,
+  /// The rows' and the threads' revisions `placed` was derived from.
+  placed_for: Option<(u64, u64)>,
   poll: Option<Task<()>>,
   /// The review comment whose reaction picker is open.
   reaction_picker: Option<String>,
@@ -48,6 +53,12 @@ impl ChangesView {
   /// Reads the threads and agent comments now and on a timer.
   pub(super) fn watch_threads(&mut self, cx: &mut Context<Self>) {
     self.threads = Threads::default();
+    self.poll_threads(cx);
+  }
+
+  /// Reads the threads and agent comments now and on a timer, keeping
+  /// what was read.
+  pub(super) fn poll_threads(&mut self, cx: &mut Context<Self>) {
     if self.parent.workspace.is_none() {
       return;
     }
@@ -67,6 +78,10 @@ impl ChangesView {
     }));
   }
 
+  pub(super) fn stop_threads(&mut self) {
+    self.threads.poll = None;
+  }
+
   fn read_threads(&mut self, github: bool, cx: &mut Context<Self>) {
     self.read_agent(cx);
     if !github {
@@ -78,11 +93,19 @@ impl ChangesView {
       .as_ref()
       .map(|w| w.branch_name.clone())
       .unwrap_or_default();
-    self.run(
+    // Each poll redraws only when it read something new.
+    self.run_changed(
       move |host, parent| host.review_threads(&parent.repo_path, &branch),
       |view, result, _| match result {
-        Ok(threads) => view.set_github_threads(threads),
-        Err(err) => log::warn!("Failed to read review threads: {err}"),
+        Ok(threads) if threads == view.threads.github => false,
+        Ok(threads) => {
+          view.set_github_threads(threads);
+          true
+        }
+        Err(err) => {
+          log::warn!("Failed to read review threads: {err}");
+          false
+        }
       },
       cx,
     );
@@ -96,17 +119,26 @@ impl ChangesView {
       }
     }
     self.threads.github = threads;
+    self.threads.revision += 1;
   }
 
   fn read_agent(&mut self, cx: &mut Context<Self>) {
     let Some(id) = self.parent.workspace_id() else {
       return;
     };
-    self.run(
+    self.run_changed(
       move |host, parent| host.agent_comments(&parent.repo_path, id),
       |view, result, _| match result {
-        Ok(comments) => view.threads.agent = comments,
-        Err(err) => log::warn!("Failed to read agent review comments: {err}"),
+        Ok(comments) if comments == view.threads.agent => false,
+        Ok(comments) => {
+          view.threads.agent = comments;
+          view.threads.revision += 1;
+          true
+        }
+        Err(err) => {
+          log::warn!("Failed to read agent review comments: {err}");
+          false
+        }
       },
       cx,
     );
@@ -114,7 +146,13 @@ impl ChangesView {
 
   /// Anchors the threads and comments on the diff as it is now.
   pub(super) fn place_threads(&mut self) {
-    // Runs every frame: only the files a thread is on are looked at.
+    // The rows' revision follows the hunks and the snapshot.
+    let key = (self.diff.revision, self.threads.revision);
+    if self.threads.placed_for == Some(key) {
+      return;
+    }
+    self.threads.placed_for = Some(key);
+    // Only the files a thread is on are looked at.
     let paths: HashSet<&str> = self
       .threads
       .github
@@ -241,17 +279,22 @@ impl ChangesView {
     })
   }
 
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   pub(super) fn line_threads(
     &self,
     path: &str,
     hunks: &[JjDiffHunk],
     h: usize,
     l: usize,
+    numbers: (Option<u32>, Option<u32>),
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> Vec<AnyElement> {
     let hunk = &hunks[h];
-    let (number, side) = line_at(hunk, l);
+    let (number, side) = number_and_side(numbers, l);
     let mut out = Vec::new();
     if let Some(comments) = self
       .threads
@@ -269,7 +312,7 @@ impl ChangesView {
         .flex_col()
         .gap_2()
         .font_family(theme::SANS_FONT);
-      for c in comments {
+      for c in comments.iter().filter_map(|&i| self.threads.agent.get(i)) {
         list = list.child(self.agent_card(c, original_text(c, hunk), p, cx));
       }
       out.push(list.into_any_element());
@@ -284,7 +327,7 @@ impl ChangesView {
         .flex()
         .flex_col()
         .gap_2();
-      for t in threads {
+      for t in threads.iter().filter_map(|&i| self.threads.github.get(i)) {
         let anchor = Some((hunk.id.clone(), (h, l)));
         list = list.child(self.thread_card(t, path, anchor, number, side, p, cx));
       }
@@ -311,7 +354,7 @@ impl ChangesView {
       .flex()
       .flex_col()
       .gap_3();
-    for t in threads {
+    for t in threads.iter().filter_map(|&i| self.threads.github.get(i)) {
       let line = t.line.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
       section = section.child(self.thread_card(t, path, None, line, Side::New, p, cx));
     }

@@ -53,9 +53,27 @@ fn random_default_branch_name() -> String {
   format!("branch-{nanos}-{seq}")
 }
 
+/// The repo's `TempDir`. Closes the pooled SQLite connections to databases
+/// in it first, since Windows cannot delete files that are still open.
+pub struct RepoTempDir(TempDir);
+
+impl std::ops::Deref for RepoTempDir {
+  type Target = TempDir;
+
+  fn deref(&self) -> &TempDir {
+    &self.0
+  }
+}
+
+impl Drop for RepoTempDir {
+  fn drop(&mut self) {
+    treq_lib::local_db::release_connections_under(self.0.path());
+  }
+}
+
 #[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
 pub struct TestRepo {
-  pub temp_dir: TempDir,
+  pub temp_dir: RepoTempDir,
   pub repo_path: String,
   default_branch: String,
   remote_temp_dir: Option<TempDir>,
@@ -117,7 +135,7 @@ impl TestRepo {
     }
 
     Ok(TestRepo {
-      temp_dir,
+      temp_dir: RepoTempDir(temp_dir),
       repo_path,
       default_branch,
       remote_temp_dir: None,
@@ -1037,6 +1055,53 @@ impl TestRepo {
     )?;
     Self::run_git(&clone_path_str, &["push", "origin", branch_name])?;
     Self::run_git(&clone_path_str, &["rev-parse", "HEAD"])
+  }
+
+  /// Pushes `branch_name` to the remote, one commit adding `relative_path`
+  /// on top of `base_branch`, from a throwaway clone. The local repo only
+  /// sees the branch after a fetch, and never gets a local bookmark for it.
+  pub fn remote_branch_on(
+    &self,
+    branch_name: &str,
+    base_branch: &str,
+    relative_path: &str,
+    content: &str,
+  ) -> Result<(), String> {
+    let remote_fixture_dir = self.remote_fixture_dir();
+    let remote_path = self.remote_path();
+    let clone_path = unique_remote_clone_path(&remote_fixture_dir, "remote_clone_branch");
+    let clone_path_str = clone_path.to_string_lossy().to_string();
+
+    Self::run_git(
+      &remote_fixture_dir.to_string_lossy(),
+      &[
+        "clone",
+        remote_path.to_str().unwrap(),
+        clone_path.to_str().unwrap(),
+      ],
+    )?;
+    Self::run_git(
+      &clone_path_str,
+      &["config", "user.email", "test@example.com"],
+    )?;
+    Self::run_git(&clone_path_str, &["config", "user.name", "Test User"])?;
+    Self::run_git(
+      &clone_path_str,
+      &[
+        "checkout",
+        "-b",
+        branch_name,
+        &format!("origin/{base_branch}"),
+      ],
+    )?;
+    Self::write_file_at_path(clone_path.join(relative_path), content, false)?;
+    Self::run_git(&clone_path_str, &["add", "-A"])?;
+    Self::run_git(
+      &clone_path_str,
+      &["commit", "-m", &format!("Add {relative_path}")],
+    )?;
+    Self::run_git(&clone_path_str, &["push", "origin", branch_name])?;
+    Ok(())
   }
 
   /// Get the path to the .treq directory.

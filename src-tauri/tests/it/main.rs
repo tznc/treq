@@ -4,7 +4,13 @@
 //! `core_workspaces_create_workspace_test` (sets `TREQ_APP_DATA_DIR` for the
 //! whole process) stay separate binaries.
 
-#![allow(clippy::unwrap_used, reason = "test code")]
+#![allow(
+  clippy::unwrap_used,
+  clippy::let_underscore_must_use,
+  clippy::expect_used,
+  clippy::string_slice,
+  reason = "test code"
+)]
 
 #[path = "../common/mod.rs"]
 mod common;
@@ -39,6 +45,7 @@ mod core_workspaces_files_test;
 mod core_workspaces_list_workspace_statuses_test;
 mod core_workspaces_merge_workspaces_test;
 mod core_workspaces_move_workspace_changes_test;
+mod core_workspaces_pr_stack_test;
 mod core_workspaces_push_test;
 mod core_workspaces_recreate_existing_test;
 mod core_workspaces_snapshot_restore_test;

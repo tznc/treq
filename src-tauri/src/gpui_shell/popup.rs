@@ -9,6 +9,7 @@
 
 use crate::gpui_shell::ui::zpx;
 use crate::gpui_shell::ui::{self, radius, TextSize};
+use crate::result_ext::ResultExt;
 use std::{
   cell::{Cell, RefCell},
   collections::HashMap,
@@ -47,6 +48,8 @@ const TEXT_SIZE: f32 = 13.;
 const LINE_HEIGHT: f32 = 20.;
 /// A text tooltip's widest box: `max-w-xs`. Longer text wraps.
 const TOOLTIP_MAX_WIDTH: f32 = 320.;
+/// A branch tooltip's title wraps inside `max-w-xs`, less `px-3` and the border.
+const BRANCH_NAME_MAX_WIDTH: f32 = TOOLTIP_MAX_WIDTH - 24. - 2.;
 /// A [`TooltipContent::List`] row: `text-xs`.
 const LIST_ITEM_SIZE: f32 = 11.;
 const LIST_ITEM_LINE: f32 = 16.;
@@ -88,8 +91,10 @@ const COMPACT_CHROME: f32 = 2. + 32. + 16. + 12.;
 pub enum TooltipContent {
   Text(SharedString),
   /// A branch in mono with its icon, and its conflict and PR state below,
-  /// like the React sidebar's row tooltips.
+  /// like the React sidebar's row tooltips. A titled workspace's `name`
+  /// sits above the branch.
   Branch {
+    name: Option<SharedString>,
     title: SharedString,
     conflicted: bool,
     pr: Option<PrState>,
@@ -384,6 +389,7 @@ pub enum MenuIcon {
   GitBranch,
   Link,
   Pencil,
+  RotateCcw,
   Settings,
   #[serde(rename = "trash-2")]
   Trash2,
@@ -404,6 +410,7 @@ impl MenuIcon {
       MenuIcon::GitBranch => theme::ICON_BRANCH,
       MenuIcon::Link => theme::ICON_LINK,
       MenuIcon::Pencil => theme::ICON_PENCIL,
+      MenuIcon::RotateCcw => theme::ICON_ROTATE_CCW,
       MenuIcon::Settings => theme::ICON_SETTINGS,
       MenuIcon::Trash2 => theme::ICON_TRASH,
     }
@@ -559,6 +566,8 @@ fn wrap_lines(text: &str, max: f32, width: impl Fn(&str) -> f32) -> (f32, usize)
 
 /// The tooltip box's size: `px-3 py-1.5` and a border around its lines.
 fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
+  // The height of wrapped lines past each row's first.
+  let mut flush = 0.;
   let (width, lines) = match content {
     TooltipContent::Text(text) => {
       // Wrapped lines sit flush, without the `gap-1` between rows below.
@@ -577,6 +586,7 @@ fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
       )
     }
     TooltipContent::Branch {
+      name,
       title,
       conflicted,
       pr,
@@ -584,6 +594,13 @@ fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
       // `gap-1.5` after a `w-3` icon.
       let mut width = 12. + 6. + text_width(cx, title, theme::MONO_FONT);
       let mut lines = 1;
+      if let Some(name) = name {
+        // A long title wraps; its lines sit flush, without the `gap-1`.
+        let (name_width, name_lines) = wrapped_text(cx, name, BRANCH_NAME_MAX_WIDTH);
+        width = width.max(name_width);
+        lines += 1;
+        flush = LINE_HEIGHT * (name_lines - 1) as f32;
+      }
       if *conflicted {
         width = width.max(text_width(cx, "Conflicts detected", theme::SANS_FONT));
         lines += 1;
@@ -608,7 +625,7 @@ fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
   let lines = lines as f32;
   (
     (width + 24. + 2.).ceil(),
-    LINE_HEIGHT * lines + 4. * (lines - 1.) + 12. + 2.,
+    LINE_HEIGHT * lines + 4. * (lines - 1.) + flush + 12. + 2.,
   )
 }
 
@@ -868,6 +885,7 @@ impl PopupView {
         )
         .into_any_element(),
       TooltipContent::Branch {
+        name,
         title,
         conflicted,
         pr,
@@ -875,6 +893,15 @@ impl PopupView {
         .flex()
         .flex_col()
         .gap_1()
+        .when_some(name.as_ref(), |this, name| {
+          let one_line = wrapped_text(cx, name, BRANCH_NAME_MAX_WIDTH).1 == 1;
+          this.child(
+            div()
+              .max_w(zpx(BRANCH_NAME_MAX_WIDTH))
+              .when(one_line, |this| this.whitespace_nowrap())
+              .child(name.clone()),
+          )
+        })
         .child(
           div()
             .flex()
@@ -1433,7 +1460,7 @@ fn popup_window(
     .map_err(|err| log::warn!("failed to build a GPUI popup window: {err}"))
     .ok()?;
   // On Linux every window gets the app's menu bar.
-  let _ = window.remove_menu();
+  window.remove_menu().ignore_closed();
   // Mark it a tooltip or menu so X11 window managers neither place nor
   // decorate it.
   #[cfg(target_os = "linux")]
@@ -1465,7 +1492,7 @@ fn popup_window(
   );
   if let Err(err) = attached {
     log::warn!("failed to attach GPUI to a popup window: {err}");
-    let _ = window.destroy();
+    window.destroy().ignore_closed();
     return None;
   }
   let view = view.borrow_mut().take()?;
@@ -1475,8 +1502,8 @@ fn popup_window(
   // it is still 1x1 settles that, so the first real show draws like the rest.
   #[cfg(target_os = "linux")]
   {
-    let _ = window.show();
-    let _ = window.hide();
+    window.show().ignore_closed();
+    window.hide().ignore_closed();
   }
   WINDOWS.with(|windows| {
     windows.borrow_mut().insert(
@@ -1520,13 +1547,15 @@ fn show(
     };
     let bounds = Bounds::new(origin, gpui::size(px(size.0), px(size.1)));
     *placed.borrow_mut() = Some((bounds, zoom));
-    let _ = view.update(cx, |view, cx| {
-      view.content = content;
-      view.palette = palette;
-      view.owner = owner;
-      view.frame = bounds;
-      cx.notify();
-    });
+    view
+      .update(cx, |view, cx| {
+        view.content = content;
+        view.palette = palette;
+        view.owner = owner;
+        view.frame = bounds;
+        cx.notify();
+      })
+      .ignore_closed();
   });
   let Some((bounds, zoom)) = frame.borrow_mut().take().filter(|_| updated.is_ok()) else {
     return;
@@ -1536,7 +1565,7 @@ fn show(
     f32::from(bounds.size.width + margin * 2.),
     f32::from(bounds.size.height + margin * 2.),
   );
-  let _ = window.set_size(size);
+  window.set_size(size).ignore_closed();
   // GTK keeps a hidden, fixed-size window at its first size otherwise.
   #[cfg(target_os = "linux")]
   if let Ok(gtk_window) = window.gtk_window() {
@@ -1545,11 +1574,13 @@ fn show(
     gtk_window.set_size_request(width, height);
     gtk_window.resize(width, height);
   }
-  let _ = window.set_position(LogicalPosition::new(
-    f32::from(bounds.origin.x - margin),
-    f32::from(bounds.origin.y - margin),
-  ));
-  let _ = window.show();
+  window
+    .set_position(LogicalPosition::new(
+      f32::from(bounds.origin.x - margin),
+      f32::from(bounds.origin.y - margin),
+    ))
+    .ignore_closed();
+  window.show().ignore_closed();
 }
 
 /// Hides the popup for `slot` (a tooltip or menu). Main thread only.
@@ -1563,7 +1594,7 @@ fn hide(slot: Slot) {
 fn hide_label(label: &str) {
   let window = WINDOWS.with(|windows| windows.borrow().get(label).map(|p| p.window.clone()));
   if let Some(window) = window {
-    let _ = window.hide();
+    window.hide().ignore_closed();
   }
 }
 
@@ -1818,10 +1849,12 @@ pub fn place_owner_toasts(app: &AppHandle, owner: &str) {
     let size = (f32::from(frame.size.width), f32::from(frame.size.height));
     let origin = place_toasts(size, client);
     let margin = px(shadow_margin() * zoom);
-    let _ = window.set_position(LogicalPosition::new(
-      f32::from(origin.x - margin),
-      f32::from(origin.y - margin),
-    ));
+    window
+      .set_position(LogicalPosition::new(
+        f32::from(origin.x - margin),
+        f32::from(origin.y - margin),
+      ))
+      .ignore_closed();
   }
 }
 
@@ -1830,7 +1863,7 @@ pub fn place_owner_toasts(app: &AppHandle, owner: &str) {
 pub fn forget_owner(owner: &str) {
   let label = Slot::Toasts.label(owner);
   if let Some(popup) = WINDOWS.with(|windows| windows.borrow_mut().remove(&label)) {
-    let _ = popup.window.destroy();
+    popup.window.destroy().ignore_closed();
   }
 }
 
@@ -1946,6 +1979,27 @@ mod tests {
     assert_eq!(toasts[0].kind, ToastKind::Success);
     assert_eq!(toasts[0].description, None);
     assert_eq!(toasts[1].action.as_deref(), Some("Retry"));
+  }
+
+  #[gpui::test]
+  fn sizes_a_titled_branch_tooltip(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+      theme::init(cx);
+      let branch = |name: Option<&str>| TooltipContent::Branch {
+        name: name.map(|n| n.to_string().into()),
+        title: "zn/blissful-shannon".into(),
+        conflicted: false,
+        pr: None,
+      };
+      let (_, bare) = tooltip_size(cx, &branch(None));
+      // The title sits above the branch, `gap-1` apart.
+      let (_, titled) = tooltip_size(cx, &branch(Some("Fix spool")));
+      assert_eq!(titled, bare + LINE_HEIGHT + 4.);
+      // A long title wraps at `max-w-xs`, its lines flush.
+      let (width, long) = tooltip_size(cx, &branch(Some(&"word ".repeat(40))));
+      assert!(width <= TOOLTIP_MAX_WIDTH);
+      assert!(long >= titled + 2. * LINE_HEIGHT);
+    });
   }
 
   #[gpui::test]

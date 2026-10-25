@@ -1,44 +1,12 @@
-//! A changed file's diff hunks, and its working-copy content.
+//! Diff lines: their colours, and picking them for a comment.
 
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{
-  component::{button::Button, v_flex, ActiveTheme, Sizable},
-  *,
-};
+use gpui_kit::{component::ActiveTheme, *};
 use treq_lib::{
-  core::remote::{FileRevision, TreqCommandRequest},
-  jj::{JjDiffHunk, JjFileLines},
+  core::review::{selection, LineRef},
+  jj::JjDiffHunk,
 };
 
-use super::{on_epoch, workspace::Target};
-use crate::{
-  remote,
-  ui::{load, nav, widgets, Load},
-};
-
-/// A working-copy file's diff, fetched from the host.
-pub fn open(target: Target, path: String, cx: &mut App) {
-  push(target, path, None, cx)
-}
-
-/// A file's diff on the workspace's branch, from hunks already fetched.
-pub fn open_hunks(target: Target, path: String, hunks: Vec<JjDiffHunk>, cx: &mut App) {
-  push(target, path, Some(hunks), cx)
-}
-
-fn push(target: Target, path: String, hunks: Option<Vec<JjDiffHunk>>, cx: &mut App) {
-  let title = path.rsplit('/').next().unwrap_or(&path).to_string();
-  let location = crate::ui::Location {
-    repo: Some(target.repo.clone()),
-    workspace: Some(crate::store::SnapshotWorkspace {
-      id: target.id.clone(),
-      name: target.name.clone(),
-    }),
-  };
-  nav::push(title, location, cx, move |_, cx| {
-    cx.new(|cx| DiffScreen::new(target, path, hunks, cx))
-  });
-}
+use crate::ui::widgets;
 
 /// How a diff line is coloured.
 #[derive(Debug, PartialEq)]
@@ -49,87 +17,41 @@ pub enum LineKind {
 }
 
 pub fn line_kind(line: &str) -> LineKind {
-  if line.starts_with('+') && !line.starts_with("+++") {
+  if line.starts_with('+') {
     LineKind::Added
-  } else if line.starts_with('-') && !line.starts_with("---") {
+  } else if line.starts_with('-') {
     LineKind::Removed
   } else {
     LineKind::Context
   }
 }
 
-pub struct DiffScreen {
-  target: Target,
-  path: String,
-  hunks: Load<Vec<JjDiffHunk>>,
-  content: Load<JjFileLines>,
-  show_content: bool,
-  /// Set when the hunks came with the page, which then never refetches.
-  fixed: bool,
-  scroll: ScrollHandle,
+/// Diff lines picked for a comment: tap one, then tap another to take the
+/// lines between.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Picked {
+  pub anchor: LineRef,
+  pub lines: Vec<LineRef>,
 }
 
-impl DiffScreen {
-  fn new(
-    target: Target,
-    path: String,
-    hunks: Option<Vec<JjDiffHunk>>,
-    cx: &mut Context<Self>,
-  ) -> Self {
-    on_epoch(cx, |this, cx| this.reload(cx));
-    let fixed = hunks.is_some();
-    let mut this = Self {
-      target,
-      path,
-      hunks: hunks.map_or(Load::Idle, Load::Ready),
-      content: Load::Idle,
-      show_content: false,
-      fixed,
-      scroll: ScrollHandle::new(),
-    };
-    this.reload(cx);
-    this
-  }
-
-  fn reload(&mut self, cx: &mut Context<Self>) {
-    if self.fixed {
-      return;
-    }
-    self.hunks = Load::Loading;
-    let request = TreqCommandRequest::DiffFile {
-      repo: self.target.repo.clone(),
-      workspace: Some(self.target.id.clone()),
-      path: self.path.clone(),
-    };
-    load::run(
-      cx,
-      remote::read::<Vec<JjDiffHunk>>(request),
-      |this, result, _| this.hunks = Load::from_result(result),
-    );
-    if self.show_content {
-      self.load_content(cx);
-    }
-  }
-
-  fn load_content(&mut self, cx: &mut Context<Self>) {
-    self.content = Load::Loading;
-    let request = TreqCommandRequest::ReadFile {
-      repo: self.target.repo.clone(),
-      workspace: Some(self.target.id.clone()),
-      path: self.path.clone(),
-      revision: FileRevision::WorkingCopy,
-      start_line: None,
-      end_line: None,
-    };
-    load::run(
-      cx,
-      remote::read::<JjFileLines>(request),
-      |this, result, _| this.content = Load::from_result(result),
-    );
+/// The lines picked after tapping `at`: a first tap picks a line, a second
+/// extends to `at` (or, on the same line, drops it), and a tap after a
+/// range starts over.
+pub fn tap(picked: Option<&Picked>, hunks: &[JjDiffHunk], at: LineRef) -> Option<Picked> {
+  match picked {
+    Some(p) if p.lines.len() == 1 && p.anchor == at => None,
+    Some(p) if p.lines.len() == 1 => Some(Picked {
+      anchor: p.anchor,
+      lines: selection(hunks, p.anchor, at),
+    }),
+    _ => Some(Picked {
+      anchor: at,
+      lines: vec![at],
+    }),
   }
 }
 
-fn diff_line(line: &str, cx: &App) -> Div {
+pub fn diff_line(line: &str, cx: &App) -> Div {
   let theme = cx.theme();
   let (bg, fg) = match line_kind(line) {
     LineKind::Added => (theme.success.opacity(0.15), theme.success),
@@ -149,93 +71,46 @@ fn diff_line(line: &str, cx: &App) -> Div {
   .text_color(fg)
 }
 
-impl Render for DiffScreen {
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let hunks = match &self.hunks {
-      Load::Idle | Load::Loading => v_flex().child(widgets::centered_message("Loading diff…", cx)),
-      Load::Failed(error) => v_flex().child(widgets::error_text(error.clone(), cx)),
-      Load::Ready(hunks) if hunks.is_empty() => v_flex().child(widgets::centered_message(
-        "No diff available for this file.",
-        cx,
-      )),
-      Load::Ready(hunks) => v_flex()
-        .gap_3()
-        .children(hunks.iter().enumerate().map(|(i, hunk)| {
-          widgets::card(cx).child(
-            div().id(("hunk", i)).overflow_x_scroll().child(
-              v_flex()
-                .py_1()
-                .child(
-                  widgets::mono(hunk.header.clone(), cx)
-                    .px_2()
-                    .text_color(cx.theme().muted_foreground),
-                )
-                .children(hunk.lines.iter().map(|line| diff_line(line, cx))),
-            ),
-          )
-        })),
-    };
-    let content = self.show_content.then(|| match &self.content {
-      Load::Idle | Load::Loading => widgets::muted("Loading…", cx).into_any_element(),
-      Load::Failed(error) => widgets::error_text(error.clone(), cx).into_any_element(),
-      Load::Ready(file) => widgets::card(cx)
-        .child(
-          div()
-            .id("content")
-            .overflow_x_scroll()
-            .child(
-              v_flex()
-                .py_1()
-                .children(file.lines.iter().enumerate().map(|(i, line)| {
-                  widgets::mono(format!("{:>5}  {line}", file.start_line + i), cx).px_2()
-                })),
-            ),
-        )
-        .into_any_element(),
-    });
-    div()
-      .id("diff")
-      .size_full()
-      .overflow_y_scroll()
-      .track_scroll(&self.scroll)
-      .child(
-        widgets::page()
-          .child(widgets::muted(self.path.clone(), cx))
-          .child(hunks)
-          .when(!self.fixed, |page| {
-            page.child(
-              Button::new("toggle-content")
-                .outline()
-                .small()
-                .label(if self.show_content {
-                  "Hide working-copy content"
-                } else {
-                  "Show working-copy content"
-                })
-                .on_click(cx.listener(|this, _, _, cx| {
-                  this.show_content = !this.show_content;
-                  if this.show_content && this.content.ready().is_none() {
-                    this.load_content(cx);
-                  }
-                  cx.notify();
-                })),
-            )
-          })
-          .children(content),
-      )
-  }
-}
-
 #[cfg(test)]
 mod tests {
-  use super::{line_kind, LineKind};
+  use super::{line_kind, tap, LineKind, Picked};
+  use treq_lib::jj::JjDiffHunk;
+
+  fn hunk(lines: &[&str]) -> JjDiffHunk {
+    serde_json::from_value(serde_json::json!({
+      "id": "h", "header": "@@ -1,3 +1,3 @@", "lines": lines, "patch": ""
+    }))
+    .unwrap()
+  }
 
   #[test]
-  fn colours_added_and_removed_lines_but_not_file_headers() {
+  fn taps_pick_a_line_then_a_range_then_start_over() {
+    let hunks = [hunk(&[" a", "+b", "+c", " d"])];
+    let one = tap(None, &hunks, (0, 1)).unwrap();
+    assert_eq!(one.lines, [(0, 1)]);
+    let range = tap(Some(&one), &hunks, (0, 3)).unwrap();
+    assert_eq!(range.lines, [(0, 1), (0, 2), (0, 3)]);
+    let backwards = tap(Some(&one), &hunks, (0, 0)).unwrap();
+    assert_eq!(backwards.lines, [(0, 0), (0, 1)]);
+    assert_eq!(tap(Some(&one), &hunks, (0, 1)), None);
+    assert_eq!(
+      tap(Some(&range), &hunks, (0, 2)),
+      Some(Picked {
+        anchor: (0, 2),
+        lines: vec![(0, 2)]
+      })
+    );
+  }
+
+  #[test]
+  fn colours_lines_by_their_first_character() {
     assert_eq!(line_kind("+added"), LineKind::Added);
     assert_eq!(line_kind("-removed"), LineKind::Removed);
-    assert_eq!(line_kind("+++ b/file"), LineKind::Context);
-    assert_eq!(line_kind("--- a/file"), LineKind::Context);
+    // Hunk lines carry no file headers: these are a removed `-- comment`
+    // and `---` (Markdown front matter), and an added `++count`.
+    assert_eq!(line_kind("--- comment"), LineKind::Removed);
+    assert_eq!(line_kind("----"), LineKind::Removed);
+    assert_eq!(line_kind("+++count"), LineKind::Added);
     assert_eq!(line_kind(" context"), LineKind::Context);
   }
 }

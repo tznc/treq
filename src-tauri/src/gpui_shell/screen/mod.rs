@@ -7,6 +7,7 @@
 //! navigating) goes back as [`ScreenAction`]s; what it changed itself goes
 //! as native events (`native::NativeEvent`), so the model's data follows.
 
+use crate::result_ext::ResultExt;
 use std::{rc::Rc, sync::Arc};
 
 use serde::{Deserialize, Serialize};
@@ -14,7 +15,7 @@ use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Windo
 
 pub(super) use changes_data::ChangesHost;
 pub use modal::Modal;
-pub use terminal::TERMINAL_CONTEXT;
+pub use terminal::{forget_kept as forget_terminals, TERMINAL_CONTEXT};
 pub(super) use workspace_data::WorkspaceHost;
 
 use super::{
@@ -34,6 +35,7 @@ mod changes_threads;
 pub(super) mod checklist;
 mod code;
 mod code_data;
+pub(super) use code_data::display_title;
 mod commits;
 mod commits_data;
 mod environment;
@@ -43,6 +45,8 @@ pub(super) mod file_picker;
 mod github;
 mod github_data;
 mod highlight;
+mod integrations_cache;
+pub(crate) use highlight::warm as warm_highlighting;
 mod intraline;
 pub(super) mod launch_data;
 mod linear;
@@ -58,11 +62,12 @@ mod onboarding;
 mod open_workspaces;
 mod open_workspaces_data;
 mod reactions;
-mod rows;
+pub(in crate::gpui_shell) mod rows;
 pub(super) use onboarding::open_repo_at;
 mod onboarding_remote;
 mod pr_review;
 mod pr_review_data;
+pub(super) mod prefetch;
 mod remote;
 pub(super) mod remote_chrome;
 mod remote_data;
@@ -222,7 +227,13 @@ pub struct Screen {
   _file_picker: Option<gpui::Subscription>,
   /// The open confirmation (the palette's Delete Workspace).
   confirm: Option<confirm::Pending<Self>>,
+  /// Draws the screen again each minute, for its relative times ("3
+  /// minutes ago", "Today"), which a cached screen would otherwise keep.
+  _clock: gpui::Task<()>,
 }
+
+/// How often the screen's relative times are drawn again.
+const CLOCK: std::time::Duration = std::time::Duration::from_secs(60);
 
 impl Screen {
   pub fn new(
@@ -249,6 +260,12 @@ impl Screen {
         }
       });
     });
+    let clock = cx.spawn(async move |this, cx| loop {
+      cx.background_executor().timer(CLOCK).await;
+      if this.update(cx, |_, cx| cx.notify()).is_err() {
+        break;
+      }
+    });
     Self {
       snapshot,
       sink,
@@ -273,6 +290,7 @@ impl Screen {
       file_picker: None,
       _file_picker: None,
       confirm: None,
+      _clock: clock,
     }
   }
 
@@ -322,6 +340,16 @@ impl Screen {
 
   pub fn snapshot(&self) -> &ScreenSnapshot {
     &self.snapshot
+  }
+
+  /// The screen as the shell lays it out, cached: a frame another view
+  /// asks for (the sidebar's hover or spinning status dot) reuses the last
+  /// drawing instead of rendering the whole screen again. The screen and
+  /// the views inside it notify themselves for everything they draw.
+  pub fn element(this: &Entity<Self>) -> impl IntoElement {
+    this
+      .clone()
+      .cached(gpui::StyleRefinement::default().size_full())
   }
 
   /// Whether the screen may run `action` itself ([`Screen::run`]).
@@ -375,15 +403,17 @@ impl Screen {
         return;
       };
       let workspace = workspace_ops::Removed::of(&workspace);
-      let _ = this.update(cx, |screen, cx| {
-        let question = workspace_ops::delete_question(&workspace);
-        confirm::ask(
-          &mut screen.confirm,
-          question,
-          move |screen, cx| screen.delete_confirmed(workspace, cx),
-          cx,
-        );
-      });
+      this
+        .update(cx, |screen, cx| {
+          let question = workspace_ops::delete_question(&workspace);
+          confirm::ask(
+            &mut screen.confirm,
+            question,
+            move |screen, cx| screen.delete_confirmed(workspace, cx),
+            cx,
+          );
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -396,10 +426,20 @@ impl Screen {
         .background_spawn(async move { workspace_ops::delete(&*host, &workspace) })
         .await;
       if gone {
-        let _ = this.update(cx, |screen, cx| screen.close_terminals(path, cx));
+        this
+          .update(cx, |screen, cx| screen.close_terminals(path, cx))
+          .ignore_closed();
       }
     })
     .detach();
+  }
+
+  /// Reads ahead what showing workspace `route` would read, as the pointer
+  /// rests on its row in the sidebar. Nothing on screen changes.
+  pub fn prefetch_workspace(&mut self, route: workspace_data::Route, cx: &mut Context<Self>) {
+    if let Some(workspace) = &self.workspace {
+      workspace.update(cx, |workspace, cx| workspace.prefetch(route, cx));
+    }
   }
 
   /// Closes the terminals of a workspace GPUI removed.
@@ -753,4 +793,11 @@ impl Screen {
       }),
     }
   }
+}
+
+/// A scoped thread's result, its panic carried on to the caller.
+pub(super) fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
+  handle
+    .join()
+    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }

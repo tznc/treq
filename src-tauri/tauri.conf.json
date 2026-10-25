@@ -393,7 +393,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: list, workspace-diff, diff"
+              "description": "Action: list, workspace-diff, diff, diff-files, review, review-save, review-clear"
             },
             {
               "name": "repo",
@@ -410,6 +410,26 @@
               "name": "path",
               "takesValue": true,
               "description": "Repository-relative file path"
+            },
+            {
+              "name": "paths",
+              "takesValue": true,
+              "description": "diff-files: the repository-relative paths, as a JSON list"
+            },
+            {
+              "name": "token",
+              "takesValue": true,
+              "description": "diff-files: the working-copy token of the workspace diff to read from"
+            },
+            {
+              "name": "target",
+              "takesValue": true,
+              "description": "review, review-save, review-clear: the review's page, changes or files"
+            },
+            {
+              "name": "value",
+              "takesValue": true,
+              "description": "review-save: the review as JSON {comments, summary, notes}"
             },
             {
               "name": "format",
@@ -427,7 +447,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: search, read, restore, patch"
+              "description": "Action: list, search, read, restore, patch"
             },
             {
               "name": "repo",
@@ -443,8 +463,7 @@
             {
               "name": "path",
               "takesValue": true,
-              "required": true,
-              "description": "Repository-relative file path"
+              "description": "Repository-relative file path (read, restore, patch), or directory for list (default: the root)"
             },
             {
               "name": "revision",
@@ -582,7 +601,7 @@
           ]
         },
         "git": {
-          "description": "Git fetch, bookmark tracking, and push",
+          "description": "Git fetch, bookmark tracking, push and GitHub pull requests",
           "afterHelp": "Example:\n  treq git push --repo . --workspace 1 --idempotency-key k1",
           "args": [
             {
@@ -590,7 +609,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Command action: fetch, pull, remote-info, bookmark-track, push"
+              "description": "Command action: fetch, pull, remote-info, bookmark-track, push, pr, pr-create"
             },
             {
               "name": "repo",
@@ -611,12 +630,22 @@
             {
               "name": "value",
               "takesValue": true,
-              "description": "Bookmark name for bookmark-track"
+              "description": "Bookmark name for bookmark-track, or the pull request body for pr-create"
             },
             {
               "name": "idempotency-key",
               "takesValue": true,
               "description": "Idempotency key for mutations where a retry could duplicate work"
+            },
+            {
+              "name": "title",
+              "takesValue": true,
+              "description": "Pull request title for pr-create"
+            },
+            {
+              "name": "draft",
+              "takesValue": true,
+              "description": "true to open the pull request as a draft (pr-create)"
             },
             {
               "name": "format",
@@ -742,7 +771,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Command action: start, list, stop, attach-command"
+              "description": "Command action: start, list, stop, rename, attach-command, paste"
             },
             {
               "name": "repo",
@@ -763,7 +792,12 @@
             {
               "name": "value",
               "takesValue": true,
-              "description": "JSON-encoded {remote_dir, command, cols, rows} launch payload for start/attach-command"
+              "description": "JSON-encoded {remote_dir, command, cols, rows} launch payload for start/attach-command; the title for rename (empty clears it); the text for paste"
+            },
+            {
+              "name": "submit",
+              "takesValue": true,
+              "description": "paste: true to press Enter after the text"
             },
             {
               "name": "idempotency-key",

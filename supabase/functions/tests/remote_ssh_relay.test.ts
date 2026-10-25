@@ -316,9 +316,10 @@ function bytes(...values: number[]): ArrayBuffer {
 
 Deno.test("upstream handshake sends the target and authenticates with the org token header", async () => {
   const upstream = new FakeSocket();
-  let seen: { url: string; headers: Record<string, string> } | null = null;
+  const seen: { url?: string; headers?: Record<string, string> } = {};
   const pending = openUpstream(CONFIG, TARGET, (url, headers) => {
-    seen = { url, headers };
+    seen.url = url;
+    seen.headers = headers;
     return upstream;
   });
   upstream.open();
@@ -331,10 +332,10 @@ Deno.test("upstream handshake sends the target and authenticates with the org to
   const connection = await pending;
   assert(connection.socket === upstream);
   assertEquals(
-    seen!.url,
+    seen.url,
     "wss://api.sprites.dev/v1/sprites/dev-treq-user-1/proxy",
   );
-  assertEquals(seen!.headers, { Authorization: "Bearer org-token" });
+  assertEquals(seen.headers, { Authorization: "Bearer org-token" });
   assertEquals(upstream.binaryType, "arraybuffer");
 });
 

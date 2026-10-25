@@ -10,8 +10,9 @@
 //! it through [`Remote`] instead of running it on this machine.
 
 use std::{
-  collections::HashMap,
-  sync::{Arc, Mutex},
+  collections::{HashMap, VecDeque},
+  sync::{Arc, Condvar, Mutex},
+  time::{Duration, Instant},
 };
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -22,6 +23,7 @@ use crate::{
     remote::{FileRevision, TreqCommandRequest},
     remote_control_plane::SshEndpoint,
     remote_idempotency::{self, Outcome},
+    workspaces::WorkspaceSummary,
     PullWorkspaceResult, WorkspaceFileHunksBatch, WorkspaceFileHunksBatchFile, WorkspaceStatus,
   },
   github::GitRemoteInfo,
@@ -221,6 +223,192 @@ pub trait Transport: Send + Sync {
   fn report(&self, mutation: &Mutation);
   /// `noteCutoffFromError`: React blocks the endpoint behind reauthentication.
   fn cut_off(&self, endpoint_id: &str, cutoff: Cutoff);
+  /// What reads through this transport share, where a [`Remote`] is made
+  /// anew for every call.
+  fn reads(&self) -> &Reads;
+}
+
+/// The result of one read in flight, for a caller that asks the same thing
+/// meanwhile.
+type Flight = Arc<(Mutex<Option<Result<Value, String>>>, Condvar)>;
+
+/// What reads share across [`Remote`]s: identical reads in flight (the
+/// header and the Changes tab both ask for a workspace's diff as it
+/// opens), and the workspaces last listed.
+#[derive(Default)]
+pub struct Reads {
+  /// By endpoint and request; cleared for an endpoint when a change to it
+  /// ends, so a read made after a change never joins one begun before it.
+  flights: Mutex<HashMap<String, Flight>>,
+  /// `(workspace_path, id)` of each repository's last listing, by cache
+  /// key: `location` finds a workspace without another round trip.
+  workspaces: Mutex<HashMap<String, Vec<(String, i64)>>>,
+  /// When each repository's host last failed a `DiffFiles` (an older
+  /// `treq`), by cache key: its batches read file by file for a while.
+  no_diff_files: Mutex<HashMap<String, Instant>>,
+}
+
+/// Ends a [`Flight`] when the read that leads it returns or panics.
+struct Leading<'a> {
+  reads: &'a Reads,
+  key: String,
+  flight: Flight,
+}
+
+impl Leading<'_> {
+  fn finish(&self, result: Result<Value, String>) {
+    *self.flight.0.lock_or_recover() = Some(result);
+    self.flight.1.notify_all();
+  }
+}
+
+impl Drop for Leading<'_> {
+  fn drop(&mut self) {
+    let mut flights = self.reads.flights.lock_or_recover();
+    if flights
+      .get(&self.key)
+      .is_some_and(|f| Arc::ptr_eq(f, &self.flight))
+    {
+      flights.remove(&self.key);
+    }
+    drop(flights);
+    // A panic before `finish`: nobody waits for ever.
+    let mut result = self.flight.0.lock_or_recover();
+    if result.is_none() {
+      *result = Some(Err("remote read abandoned".into()));
+      self.flight.1.notify_all();
+    }
+  }
+}
+
+impl Reads {
+  /// `read` once for every caller asking `request` of `endpoint` at the
+  /// same time.
+  fn single_flight(
+    &self,
+    endpoint: &SshEndpoint,
+    request: TreqCommandRequest,
+    read: impl FnOnce(TreqCommandRequest) -> Result<Value, String>,
+  ) -> Result<Value, String> {
+    let Ok(json) = serde_json::to_string(&request) else {
+      return read(request);
+    };
+    let key = format!("{}\0{json}", endpoint.id);
+    let (flight, leads) = {
+      let mut flights = self.flights.lock_or_recover();
+      match flights.get(&key) {
+        Some(flight) => (flight.clone(), false),
+        None => {
+          let flight = Flight::default();
+          flights.insert(key.clone(), flight.clone());
+          (flight, true)
+        }
+      }
+    };
+    if leads {
+      let leading = Leading {
+        reads: self,
+        key,
+        flight,
+      };
+      let result = read(request);
+      leading.finish(result.clone());
+      return result;
+    }
+    let mut result = flight.0.lock_or_recover();
+    while result.is_none() {
+      result = flight
+        .1
+        .wait(result)
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    }
+    result.clone().unwrap_or_else(|| Err(String::new()))
+  }
+
+  /// A change to `endpoint` ended: reads from here on start afresh.
+  fn changed(&self, endpoint: &SshEndpoint) {
+    let prefix = format!("{}\0", endpoint.id);
+    self
+      .flights
+      .lock_or_recover()
+      .retain(|key, _| !key.starts_with(&prefix));
+  }
+
+  fn remember_workspaces<'a>(&self, cache_key: &str, listed: impl Iterator<Item = (&'a str, i64)>) {
+    let listed = listed.map(|(path, id)| (path.to_string(), id)).collect();
+    self
+      .workspaces
+      .lock_or_recover()
+      .insert(cache_key.to_string(), listed);
+  }
+
+  fn forget_workspace(&self, cache_key: &str, id: i64) {
+    if let Some(listed) = self.workspaces.lock_or_recover().get_mut(cache_key) {
+      listed.retain(|(_, known)| *known != id);
+    }
+  }
+
+  /// Whether `DiffFiles` is worth asking of the host: it has not failed
+  /// within the last few minutes.
+  fn asks_diff_files(&self, cache_key: &str) -> bool {
+    const RETRY_AFTER: Duration = Duration::from_secs(300);
+    self
+      .no_diff_files
+      .lock_or_recover()
+      .get(cache_key)
+      .is_none_or(|at| at.elapsed() >= RETRY_AFTER)
+  }
+
+  fn diff_files_failed(&self, cache_key: &str) {
+    self
+      .no_diff_files
+      .lock_or_recover()
+      .insert(cache_key.to_string(), Instant::now());
+  }
+
+  fn known_workspace(&self, cache_key: &str, path: &str) -> Option<i64> {
+    self
+      .workspaces
+      .lock_or_recover()
+      .get(cache_key)?
+      .iter()
+      .find(|(known, _)| known == path)
+      .map(|(_, id)| *id)
+  }
+}
+
+/// Reads at once on one connection: its channels are multiplexed, and a
+/// host's sshd allows ten sessions by default, shared with its terminals.
+const PARALLEL_READS: usize = 4;
+
+/// `f` over `items`, [`PARALLEL_READS`] at a time, the results in order.
+pub fn parallel_map<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync) -> Vec<R> {
+  let count = items.len();
+  let queue = Mutex::new(items.into_iter().enumerate().collect::<VecDeque<_>>());
+  let done = Mutex::new(Vec::with_capacity(count));
+  std::thread::scope(|scope| {
+    for _ in 1..PARALLEL_READS.min(count) {
+      scope.spawn(|| work(&queue, &done, &f));
+    }
+    work(&queue, &done, &f);
+  });
+  let mut done = done.into_inner().unwrap_or_else(|e| e.into_inner());
+  done.sort_unstable_by_key(|(index, _)| *index);
+  done.into_iter().map(|(_, result)| result).collect()
+}
+
+fn work<T, R>(
+  queue: &Mutex<VecDeque<(usize, T)>>,
+  done: &Mutex<Vec<(usize, R)>>,
+  f: &impl Fn(T) -> R,
+) {
+  loop {
+    // Not `while let`: its guard would live through the read.
+    let next = queue.lock_or_recover().pop_front();
+    let Some((index, item)) = next else { break };
+    let result = f(item);
+    done.lock_or_recover().push((index, result));
+  }
 }
 
 /// How a change's attempt ended, for its idempotency key.
@@ -325,17 +513,22 @@ impl Remote {
     let endpoint = self.endpoint()?;
     let value = self
       .transport
-      .read(endpoint, request)
+      .reads()
+      .single_flight(endpoint, request, |request| {
+        self.transport.read(endpoint, request)
+      })
       .map_err(|e| self.note_cutoff(e))?;
     parse(value)
   }
 
   fn dispatch_mutation(&self, request: TreqCommandRequest) -> Result<Mutation, String> {
     let endpoint = self.endpoint()?;
-    self
+    let mutation = self
       .transport
       .mutate(endpoint, request)
-      .map_err(|e| self.note_cutoff(e))
+      .map_err(|e| self.note_cutoff(e));
+    self.transport.reads().changed(endpoint);
+    mutation
   }
 
   /// `finishMutation`: the value when the change ran in this call, `None`
@@ -391,13 +584,25 @@ impl Remote {
       });
     };
     let (dir, tail) = below.split_once('/').unwrap_or((below, ""));
-    let found = self
-      .workspaces()?
-      .into_iter()
-      .find(|w| w.workspace_path == dir)
-      .ok_or_else(|| format!("workspace_not_found: no remote workspace at {dir}"))?;
+    // Ids are never reused, so a workspace deleted since the last listing
+    // fails on the host rather than naming another.
+    let id = match self
+      .transport
+      .reads()
+      .known_workspace(&self.repo.cache_key, dir)
+    {
+      Some(id) => id,
+      None => {
+        self
+          .workspaces()?
+          .into_iter()
+          .find(|w| w.workspace_path == dir)
+          .ok_or_else(|| format!("workspace_not_found: no remote workspace at {dir}"))?
+          .id
+      }
+    };
     Ok(Location {
-      workspace: Some(found.id.to_string()),
+      workspace: Some(id.to_string()),
       relative: tail.to_string(),
     })
   }
@@ -405,9 +610,54 @@ impl Remote {
   // -- Reads (`repository-adapter.ts`) ---------------------------------------
 
   pub fn workspaces(&self) -> Result<Vec<Workspace>, String> {
-    self.read(TreqCommandRequest::ListWorkspaces {
+    let listed: Vec<Workspace> = self.read(TreqCommandRequest::ListWorkspaces {
       repo: self.repo_arg(),
-    })
+    })?;
+    self.transport.reads().remember_workspaces(
+      &self.repo.cache_key,
+      listed.iter().map(|w| (w.workspace_path.as_str(), w.id)),
+    );
+    Ok(listed)
+  }
+
+  /// `WorkspaceSummaries`: every workspace with its sidebar status and
+  /// uncommitted changes, in one round trip.
+  pub fn workspace_summaries(&self) -> Result<Vec<WorkspaceSummary>, String> {
+    let listed: Vec<WorkspaceSummary> = self.read(TreqCommandRequest::WorkspaceSummaries {
+      repo: self.repo_arg(),
+    })?;
+    self.transport.reads().remember_workspaces(
+      &self.repo.cache_key,
+      listed
+        .iter()
+        .map(|s| (s.workspace.workspace_path.as_str(), s.workspace.id)),
+    );
+    Ok(listed)
+  }
+
+  /// [`Self::workspace_summaries`], or `None` when the host does not answer
+  /// it (an older `treq`), so the caller reads workspace by workspace. A
+  /// failure is remembered for a while rather than retried on every poll.
+  pub fn workspace_summaries_if_supported(&self) -> Option<Vec<WorkspaceSummary>> {
+    static FAILED: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+    const RETRY_AFTER: Duration = Duration::from_secs(300);
+    let key = self.repo_arg();
+    let recently_failed = FAILED
+      .lock_or_recover()
+      .get_or_insert_with(HashMap::new)
+      .get(&key)
+      .is_some_and(|at| at.elapsed() < RETRY_AFTER);
+    if recently_failed {
+      return None;
+    }
+    let summaries = self.workspace_summaries().ok();
+    if summaries.is_none() {
+      FAILED
+        .lock_or_recover()
+        .get_or_insert_with(HashMap::new)
+        .insert(key, Instant::now());
+    }
+    summaries
   }
 
   // -- Workspace lifecycle (`useWorkspaceDeletion`) ----------------------------
@@ -419,7 +669,12 @@ impl Remote {
         repo: self.repo_arg(),
         workspace: workspace_id.to_string(),
       })
-      .map(drop)
+      .map(drop)?;
+    self
+      .transport
+      .reads()
+      .forget_workspace(&self.repo.cache_key, workspace_id);
+    Ok(())
   }
 
   /// `archive_workspace`: removes the directory but keeps the record.
@@ -429,7 +684,12 @@ impl Remote {
         repo: self.repo_arg(),
         workspace: workspace_id.to_string(),
       })
-      .map(drop)
+      .map(drop)?;
+    self
+      .transport
+      .reads()
+      .forget_workspace(&self.repo.cache_key, workspace_id);
+    Ok(())
   }
 
   pub fn status(&self, workspace_id: Option<i64>) -> Result<WorkspaceStatus, String> {
@@ -503,24 +763,42 @@ impl Remote {
     Ok(hunks.unwrap_or_default())
   }
 
-  /// `transportGetWorkspaceFileHunksBatch`: one `DiffFile` per path.
+  /// `transportGetWorkspaceFileHunksBatch`: one `DiffFiles` read from the
+  /// trees `token` names (see `core::list_file_hunks_batch`); a host that
+  /// fails it (older than `DiffFiles`) is asked one `DiffFile` per path, a
+  /// few at a time.
   pub fn file_hunks_batch(
     &self,
     workspace_id: Option<i64>,
     paths: Vec<String>,
+    token: Option<&str>,
   ) -> Result<WorkspaceFileHunksBatch, String> {
-    let files = paths
-      .into_iter()
-      .map(|path| {
-        let hunks = self.file_hunks(workspace_id, &path)?;
-        Ok(WorkspaceFileHunksBatchFile {
-          path,
-          content_hash: String::new(),
-          hunks,
-          error: None,
-        })
+    let reads = self.transport.reads();
+    if reads.asks_diff_files(&self.repo.cache_key) {
+      let batch = self.read::<WorkspaceFileHunksBatch>(TreqCommandRequest::DiffFiles {
+        repo: self.repo_arg(),
+        workspace: workspace_arg(workspace_id),
+        paths: paths.clone(),
+        token: token.map(str::to_string),
+      });
+      match batch {
+        Ok(batch) => return Ok(batch),
+        Err(err) => {
+          log::info!("DiffFiles failed, reading file by file: {err}");
+          reads.diff_files_failed(&self.repo.cache_key);
+        }
+      }
+    }
+    let files = parallel_map(paths, |path| {
+      let hunks = self.file_hunks(workspace_id, &path)?;
+      Ok(WorkspaceFileHunksBatchFile {
+        path,
+        hunks,
+        error: None,
       })
-      .collect::<Result<_, String>>()?;
+    })
+    .into_iter()
+    .collect::<Result<_, String>>()?;
     Ok(WorkspaceFileHunksBatch {
       snapshot_token: "remote".into(),
       files,
@@ -863,6 +1141,11 @@ pub(crate) mod tests {
     pub sent: Mutex<Vec<TreqCommandRequest>>,
     pub reported: Mutex<Vec<&'static str>>,
     pub cutoffs: Mutex<Vec<(String, Cutoff)>>,
+    /// How long each read takes, to overlap reads in a test.
+    pub latency: Mutex<Duration>,
+    pub reading: std::sync::atomic::AtomicUsize,
+    pub most_reading: std::sync::atomic::AtomicUsize,
+    reads: Reads,
   }
 
   impl FakeTransport {
@@ -877,8 +1160,14 @@ pub(crate) mod tests {
 
   impl Transport for FakeTransport {
     fn read(&self, _: &SshEndpoint, request: TreqCommandRequest) -> Result<Value, String> {
+      use std::sync::atomic::Ordering::SeqCst;
       let kind = request.kind_name();
       self.sent.lock().unwrap().push(request);
+      let now = self.reading.fetch_add(1, SeqCst) + 1;
+      self.most_reading.fetch_max(now, SeqCst);
+      let latency = *self.latency.lock().unwrap();
+      std::thread::sleep(latency);
+      self.reading.fetch_sub(1, SeqCst);
       self
         .answers
         .lock()
@@ -912,6 +1201,10 @@ pub(crate) mod tests {
         .lock()
         .unwrap()
         .push((endpoint_id.to_string(), cutoff));
+    }
+
+    fn reads(&self) -> &Reads {
+      &self.reads
     }
   }
 
@@ -1029,6 +1322,184 @@ pub(crate) mod tests {
       .location("/srv/app/.treq/workspaces/gone")
       .unwrap_err()
       .starts_with("workspace_not_found"));
+  }
+
+  /// A remote whose every read takes `latency`.
+  fn slow_remote(latency: Duration) -> (Remote, Arc<FakeTransport>) {
+    let (remote, transport) = remote();
+    *transport.latency.lock().unwrap() = latency;
+    (remote, transport)
+  }
+
+  #[test]
+  fn a_hunk_batch_reads_a_few_files_at_once_in_order() {
+    let (remote, transport) = slow_remote(Duration::from_millis(30));
+    transport.answer("DiffFile", serde_json::json!([]));
+    // An older host.
+    transport.answers.lock().unwrap().insert(
+      "DiffFiles",
+      Err("unknown changes action 'diff-files'".into()),
+    );
+    let paths: Vec<String> = (0..12).map(|i| format!("f{i}.rs")).collect();
+    let started = Instant::now();
+    let batch = remote
+      .file_hunks_batch(Some(1), paths.clone(), None)
+      .unwrap();
+    let took = started.elapsed();
+    let got: Vec<&str> = batch.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(got, paths.iter().map(String::as_str).collect::<Vec<_>>());
+    assert_eq!(transport.sent().len(), 1 + 12);
+    let most = transport
+      .most_reading
+      .load(std::sync::atomic::Ordering::SeqCst);
+    assert!((2..=PARALLEL_READS).contains(&most), "{most} at once");
+    // 12 serial reads would take 360 ms, after the failed `DiffFiles`.
+    assert!(took < Duration::from_millis(330), "{took:?}");
+  }
+
+  #[test]
+  fn a_hunk_batch_is_one_read_of_the_diffs_trees() {
+    let (remote, transport) = remote();
+    transport.answer(
+      "DiffFiles",
+      serde_json::json!({
+        "snapshotToken": "p..t:git",
+        "files": [
+          {"path": "a.rs", "hunks": [{"id": "h", "header": "@@", "lines": ["+a"], "patch": ""}]},
+          {"path": "b.rs", "hunks": [], "error": "gone"}
+        ]
+      }),
+    );
+    let paths = vec!["a.rs".to_string(), "b.rs".to_string()];
+
+    let batch = remote
+      .file_hunks_batch(Some(1), paths.clone(), Some("p..t:git"))
+      .unwrap();
+
+    assert_eq!(
+      transport.sent(),
+      [TreqCommandRequest::DiffFiles {
+        repo: "/srv/app".into(),
+        workspace: Some("1".into()),
+        paths,
+        token: Some("p..t:git".into()),
+      }]
+    );
+    assert_eq!(batch.snapshot_token, "p..t:git");
+    assert_eq!(batch.files[0].hunks[0].lines, ["+a"]);
+    assert_eq!(batch.files[1].error.as_deref(), Some("gone"));
+  }
+
+  #[test]
+  fn an_older_host_is_asked_file_by_file_for_a_while() {
+    let (remote, transport) = remote();
+    transport.answer("DiffFile", serde_json::json!([]));
+    transport.answers.lock().unwrap().insert(
+      "DiffFiles",
+      Err("unknown changes action 'diff-files'".into()),
+    );
+    let kinds = |transport: &FakeTransport| {
+      transport
+        .sent()
+        .iter()
+        .map(|r| r.kind_name())
+        .collect::<Vec<_>>()
+    };
+
+    let first = remote
+      .file_hunks_batch(None, vec!["a.rs".into()], Some("t"))
+      .unwrap();
+    assert_eq!(kinds(&transport), ["DiffFiles", "DiffFile"]);
+    assert_eq!(
+      first.snapshot_token, "remote",
+      "no token: not the diff's trees"
+    );
+    remote
+      .file_hunks_batch(None, vec!["b.rs".into()], Some("t"))
+      .unwrap();
+    assert_eq!(
+      kinds(&transport),
+      ["DiffFiles", "DiffFile", "DiffFile"],
+      "not asked again right away"
+    );
+  }
+
+  #[test]
+  fn a_failed_hunk_read_fails_the_batch() {
+    let (remote, transport) = remote();
+    transport
+      .answers
+      .lock()
+      .unwrap()
+      .insert("DiffFile", Err("boom".into()));
+    let result = remote.file_hunks_batch(None, vec!["a".into(), "b".into()], None);
+    assert_eq!(result.err().as_deref(), Some("boom"));
+  }
+
+  #[test]
+  fn identical_reads_in_flight_share_one_round_trip() {
+    let (remote, transport) = slow_remote(Duration::from_millis(80));
+    transport.answer("WorkspaceDiff", serde_json::json!(null));
+    let asked = |remote: &Remote| remote.read::<Value>(workspace_diff_request());
+    std::thread::scope(|scope| {
+      let first = scope.spawn(|| asked(&remote));
+      std::thread::sleep(Duration::from_millis(20));
+      let second = scope.spawn(|| asked(&remote));
+      assert!(first.join().unwrap().is_ok());
+      assert!(second.join().unwrap().is_ok());
+    });
+    assert_eq!(transport.sent().len(), 1);
+    // Once it has landed, the next read asks again.
+    assert!(asked(&remote).is_ok());
+    assert_eq!(transport.sent().len(), 2);
+  }
+
+  #[test]
+  fn a_change_ends_the_reads_in_flight() {
+    let (remote, transport) = slow_remote(Duration::from_millis(80));
+    std::thread::scope(|scope| {
+      let before = scope.spawn(|| remote.read::<Value>(workspace_diff_request()));
+      std::thread::sleep(Duration::from_millis(20));
+      remote.delete_workspace(3).unwrap();
+      // The change is over: this read must not join the one begun before it.
+      let after = remote.read::<Value>(workspace_diff_request());
+      assert!(after.is_ok());
+      assert!(before.join().unwrap().is_ok());
+    });
+    let reads = transport
+      .sent()
+      .iter()
+      .filter(|r| r.kind_name() == "WorkspaceDiff")
+      .count();
+    assert_eq!(reads, 2);
+  }
+
+  fn workspace_diff_request() -> TreqCommandRequest {
+    TreqCommandRequest::WorkspaceDiff {
+      repo: "/srv/app".into(),
+      workspace: "3".into(),
+    }
+  }
+
+  #[test]
+  fn a_listed_workspace_resolves_without_another_round_trip() {
+    let (remote, transport) = remote();
+    transport.answer(
+      "ListWorkspaces",
+      serde_json::json!([workspace_json(7, "feat-x", "feat/x")]),
+    );
+    remote.workspaces().unwrap();
+    let path = "/srv/app/.treq/workspaces/feat-x/a.rs";
+    assert_eq!(
+      remote.location(path).unwrap().workspace.as_deref(),
+      Some("7")
+    );
+    assert_eq!(transport.sent().len(), 1);
+    // A deleted workspace is forgotten, so it is read for again.
+    transport.answer("ListWorkspaces", serde_json::json!([]));
+    remote.delete_workspace(7).unwrap();
+    assert!(remote.location(path).is_err());
+    assert_eq!(transport.sent().len(), 3);
   }
 
   #[test]

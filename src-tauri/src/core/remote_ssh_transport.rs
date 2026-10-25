@@ -22,6 +22,7 @@
 //!
 //! SFTP and port forwarding are out of scope, per the PRD.
 
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -730,7 +731,7 @@ fn is_managed(endpoint: &SshEndpoint) -> bool {
 }
 
 struct PooledConnection {
-  handle: Arc<AsyncMutex<Handle<TreqSshClientHandler>>>,
+  handle: Arc<Handle<TreqSshClientHandler>>,
   last_used: Instant,
   alive: Arc<AtomicBool>,
 }
@@ -748,6 +749,11 @@ pub struct SshConnectionPool {
   /// Bounds the dial (TCP or relay plus key exchange) and, separately,
   /// authentication, so an unresponsive host cannot hang a caller.
   connect_timeout: Duration,
+  /// Bounds opening a channel on a pooled connection. The server answers in
+  /// one round trip, so a longer wait means the path went silent (NAT
+  /// mapping gone, no FIN or RST) and the connection is treated as dead
+  /// instead of holding the caller for the whole command deadline.
+  channel_open_timeout: Duration,
   idle_timeout: Duration,
   pub metrics: Arc<SshTransportMetrics>,
   /// Endpoint IDs currently under hard cutoff (PRD "Hard cutoff on
@@ -781,6 +787,7 @@ impl SshConnectionPool {
       connecting: AsyncMutex::new(HashMap::new()),
       keepalive_interval: Duration::from_secs(30),
       connect_timeout: Duration::from_secs(20),
+      channel_open_timeout: CHANNEL_OPEN_TIMEOUT,
       idle_timeout: Duration::from_secs(600),
       metrics: Arc::new(SshTransportMetrics::default()),
       cutoffs: AsyncMutex::new(HashMap::new()),
@@ -811,6 +818,12 @@ impl SshConnectionPool {
       Ok(guard) => guard.clone(),
       Err(poisoned) => poisoned.into_inner().clone(),
     }
+  }
+
+  #[cfg(test)]
+  fn with_channel_open_timeout(mut self, timeout: Duration) -> Self {
+    self.channel_open_timeout = timeout;
+    self
   }
 
   #[cfg(test)]
@@ -849,14 +862,15 @@ impl SshConnectionPool {
       let removed = { self.connections.lock().await.remove(&key) };
       if let Some(pooled) = removed {
         pooled.alive.store(false, Ordering::SeqCst);
-        let handle = pooled.handle.lock().await;
-        let _ = handle
+        pooled
+          .handle
           .disconnect(
             Disconnect::ByApplication,
             "credential revoked or expired",
             "en",
           )
-          .await;
+          .await
+          .ignore_closed();
       }
     }
     tracing::warn!(endpoint_id = %endpoint_id, reason = %reason, "ssh endpoint credential cut off");
@@ -916,7 +930,7 @@ impl SshConnectionPool {
   async fn get_or_connect(
     &self,
     endpoint: &SshEndpoint,
-  ) -> Result<Arc<AsyncMutex<Handle<TreqSshClientHandler>>>, SshTransportError> {
+  ) -> Result<Arc<Handle<TreqSshClientHandler>>, SshTransportError> {
     let managed_cutoff = if is_managed(endpoint) {
       *self
         .managed_cutoff
@@ -973,28 +987,36 @@ impl SshConnectionPool {
         alive,
       },
     );
+    drop(connections);
     Ok(handle)
   }
 
   /// The pooled connection for `key`, when it is still alive.
-  async fn reuse(&self, key: &PoolKey) -> Option<Arc<AsyncMutex<Handle<TreqSshClientHandler>>>> {
+  async fn reuse(&self, key: &PoolKey) -> Option<Arc<Handle<TreqSshClientHandler>>> {
     let mut connections = self.connections.lock().await;
     let existing = connections.get_mut(key)?;
+    // A session that ended (peer closed, relay worker recycled) is known
+    // closed before any command fails on it.
+    if existing.handle.is_closed() {
+      existing.alive.store(false, Ordering::SeqCst);
+    }
     if !existing.alive.load(Ordering::SeqCst) {
       return None;
     }
     existing.last_used = Instant::now();
+    let handle = existing.handle.clone();
+    drop(connections);
     self
       .metrics
       .pooled_connection_reuse_count
       .fetch_add(1, Ordering::Relaxed);
-    Some(existing.handle.clone())
+    Some(handle)
   }
 
   async fn connect(
     &self,
     endpoint: &SshEndpoint,
-  ) -> Result<Arc<AsyncMutex<Handle<TreqSshClientHandler>>>, SshTransportError> {
+  ) -> Result<Arc<Handle<TreqSshClientHandler>>, SshTransportError> {
     let verifier = HostKeyVerifier::new(endpoint.id.clone(), &endpoint.host_keys);
     let handler = TreqSshClientHandler {
       verifier,
@@ -1004,6 +1026,9 @@ impl SshConnectionPool {
     let config = russh::client::Config {
       keepalive_interval: Some(self.keepalive_interval),
       keepalive_max: 3,
+      // Nagle plus delayed ACK stalls the small kex/auth writes by ~40 ms and
+      // delays terminal echo; the relay stream already disables it.
+      nodelay: true,
       ..Default::default()
     };
     let config = Arc::new(config);
@@ -1073,7 +1098,7 @@ impl SshConnectionPool {
       .record(auth_started.elapsed());
 
     tracing::info!(endpoint_id = %endpoint.id, "ssh connection established and authenticated");
-    Ok(Arc::new(AsyncMutex::new(handle)))
+    Ok(Arc::new(handle))
   }
 
   /// Marks the pooled connection for `endpoint` dead, e.g. after an I/O
@@ -1085,6 +1110,37 @@ impl SshConnectionPool {
     if let Some(pooled) = connections.get(&key) {
       pooled.alive.store(false, Ordering::SeqCst);
     }
+  }
+
+  /// Checks that the pooled connection for `endpoint`, if any, still carries
+  /// traffic: a closed session, or a channel that does not open within
+  /// `timeout`, marks it dead so the next command reconnects at once instead
+  /// of waiting out [`CHANNEL_OPEN_TIMEOUT`]. Used when the app returns from
+  /// the background. Returns whether a live connection remains.
+  pub async fn probe(&self, endpoint: &SshEndpoint, timeout: Duration) -> bool {
+    let key = PoolKey::for_endpoint(endpoint);
+    let handle = {
+      let connections = self.connections.lock().await;
+      match connections.get(&key) {
+        Some(pooled) if pooled.alive.load(Ordering::SeqCst) => pooled.handle.clone(),
+        _ => return false,
+      }
+    };
+    let probed = if handle.is_closed() {
+      false
+    } else {
+      match tokio::time::timeout(timeout, handle.channel_open_session()).await {
+        Ok(Ok(channel)) => {
+          channel.close().await.ignore_closed();
+          true
+        }
+        _ => false,
+      }
+    };
+    if !probed {
+      self.mark_dead(endpoint).await;
+    }
+    probed
   }
 
   /// Drops idle pooled connections that have exceeded the idle timeout,
@@ -1107,10 +1163,11 @@ impl SshConnectionPool {
         .collect()
     };
     for pooled in stale {
-      let handle = pooled.handle.lock().await;
-      let _ = handle
+      pooled
+        .handle
         .disconnect(Disconnect::ByApplication, "idle timeout", "en")
-        .await;
+        .await
+        .ignore_closed();
     }
   }
 
@@ -1172,6 +1229,25 @@ impl CancellationToken {
   }
 }
 
+/// How long opening a channel on a pooled connection may take (see
+/// [`SshConnectionPool::channel_open_timeout`]).
+pub const CHANNEL_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Opens a session channel, failing as a channel error (which marks the
+/// connection dead) when the server does not answer within `timeout`.
+async fn open_session(
+  handle: &Handle<TreqSshClientHandler>,
+  timeout: Duration,
+) -> Result<russh::Channel<russh::client::Msg>, SshTransportError> {
+  match tokio::time::timeout(timeout, handle.channel_open_session()).await {
+    Ok(opened) => opened.map_err(|error| SshTransportError::ChannelError(error.to_string())),
+    Err(_) => Err(SshTransportError::ChannelError(format!(
+      "channel open timed out after {}s",
+      timeout.as_secs_f32()
+    ))),
+  }
+}
+
 /// Bounds applied to every exec channel invocation.
 #[derive(Debug, Clone, Copy)]
 pub struct ExecLimits {
@@ -1211,12 +1287,9 @@ pub async fn exec_command(
   let handle = pool.get_or_connect(endpoint).await?;
 
   let run = async {
-    let session = handle.lock().await;
-    let mut channel = session
-      .channel_open_session()
-      .await
-      .map_err(|error| SshTransportError::ChannelError(error.to_string()))?;
-    drop(session);
+    // `Handle` methods take `&self`, so concurrent callers open their channels
+    // in parallel instead of queueing one round trip each behind a lock.
+    let mut channel = open_session(&handle, pool.channel_open_timeout).await?;
 
     let command = build_remote_command_line(args);
     // The command line is assembled from separate typed arguments (see
@@ -1375,11 +1448,13 @@ impl RemotePtyChannel {
     working_directory: Option<&str>,
   ) -> Result<Self, SshTransportError> {
     let handle = pool.get_or_connect(endpoint).await?;
-    let session = handle.lock().await;
-    let channel = session
-      .channel_open_session()
-      .await
-      .map_err(|error| SshTransportError::ChannelError(error.to_string()))?;
+    let channel = match open_session(&handle, pool.channel_open_timeout).await {
+      Ok(channel) => channel,
+      Err(error) => {
+        pool.mark_dead(endpoint).await;
+        return Err(error);
+      }
+    };
     channel
       .request_pty(true, term, cols as u32, rows as u32, 0, 0, &[])
       .await
@@ -1446,7 +1521,10 @@ impl RemotePtyChannel {
         Some(ChannelMsg::ExitStatus { exit_status }) => {
           return Ok(PtyReadEvent::ExitStatus(exit_status))
         }
-        Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => return Ok(PtyReadEvent::Closed),
+        // Servers send `Eof` before the `ExitStatus` request (see
+        // `exec_command`), so only `Close` ends the channel.
+        Some(ChannelMsg::Eof) => continue,
+        Some(ChannelMsg::Close) | None => return Ok(PtyReadEvent::Closed),
         Some(_) => continue,
       }
     }
@@ -1811,6 +1889,13 @@ mod tests {
             session.data(channel, bytes::Bytes::from(body.as_bytes().to_vec()))?;
             session.exit_status_request(channel, 0)?;
           }
+        }
+        6 => {
+          // A real sshd's order for a process that exits: output, `Eof`,
+          // then the exit status.
+          session.data(channel, bytes::Bytes::from_static(b"bye"))?;
+          session.eof(channel)?;
+          session.exit_status_request(channel, 7)?;
         }
         _ => {
           let response = format!("{{\"echo\":\"{command}\"}}");
@@ -2637,6 +2722,28 @@ mod tests {
   }
 
   #[tokio::test]
+  async fn pty_read_event_reports_an_exit_status_sent_after_eof() {
+    let (addr, host_key) = start_mock_server(6).await;
+    let client_key = test_host_key();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let key_reference = write_client_key(temp_dir.path(), &client_key);
+    let endpoint = test_endpoint(addr, &host_key, key_reference);
+
+    let pool = SshConnectionPool::new();
+    let pty = RemotePtyChannel::open(&pool, &endpoint, "xterm", 80, 24, Some("exit 7"))
+      .await
+      .unwrap();
+    assert!(matches!(
+      pty.read_event().await.unwrap(),
+      PtyReadEvent::Data(_)
+    ));
+    assert!(matches!(
+      pty.read_event().await.unwrap(),
+      PtyReadEvent::ExitStatus(7)
+    ));
+  }
+
+  #[tokio::test]
   async fn pty_open_and_close_record_start_and_exit_counts() {
     let (addr, host_key) = start_mock_server(0).await;
     let client_key = test_host_key();
@@ -2720,6 +2827,430 @@ mod tests {
     .unwrap();
     assert!(output.success());
     assert_eq!(pool.pooled_connection_count().await, 1);
+    assert_eq!(pool.metrics_snapshot().reconnect_attempts, 1);
+  }
+
+  /// TCP proxy that delays every chunk by `one_way` in each direction.
+  async fn delay_proxy(target: std::net::SocketAddr, one_way: Duration) -> std::net::SocketAddr {
+    delay_proxy_with(target, one_way, Arc::new(AtomicBool::new(false))).await
+  }
+
+  /// [`delay_proxy`] that silently drops everything while `blackhole` is set
+  /// (a NAT mapping that expired: no FIN, no RST).
+  async fn delay_proxy_with(
+    target: std::net::SocketAddr,
+    one_way: Duration,
+    blackhole: Arc<AtomicBool>,
+  ) -> std::net::SocketAddr {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+      loop {
+        let Ok((client, _)) = listener.accept().await else {
+          break;
+        };
+        let Ok(server) = tokio::net::TcpStream::connect(target).await else {
+          break;
+        };
+        let (mut cr, mut cw) = client.into_split();
+        let (mut sr, mut sw) = server.into_split();
+        let (blackhole_a, blackhole_b) = (blackhole.clone(), blackhole.clone());
+        let (a_tx, mut a_rx) = tokio::sync::mpsc::unbounded_channel::<(Instant, Vec<u8>)>();
+        let (b_tx, mut b_rx) = tokio::sync::mpsc::unbounded_channel::<(Instant, Vec<u8>)>();
+        tokio::spawn(async move {
+          let mut buf = vec![0u8; 16384];
+          while let Ok(n) = cr.read(&mut buf).await {
+            if blackhole_a.load(Ordering::SeqCst) {
+              continue;
+            }
+            if n == 0 || a_tx.send((Instant::now(), buf[..n].to_vec())).is_err() {
+              break;
+            }
+          }
+        });
+        tokio::spawn(async move {
+          while let Some((at, data)) = a_rx.recv().await {
+            tokio::time::sleep_until((at + one_way).into()).await;
+            if sw.write_all(&data).await.is_err() {
+              break;
+            }
+          }
+        });
+        tokio::spawn(async move {
+          let mut buf = vec![0u8; 16384];
+          while let Ok(n) = sr.read(&mut buf).await {
+            if blackhole_b.load(Ordering::SeqCst) {
+              continue;
+            }
+            if n == 0 || b_tx.send((Instant::now(), buf[..n].to_vec())).is_err() {
+              break;
+            }
+          }
+        });
+        tokio::spawn(async move {
+          while let Some((at, data)) = b_rx.recv().await {
+            tokio::time::sleep_until((at + one_way).into()).await;
+            if cw.write_all(&data).await.is_err() {
+              break;
+            }
+          }
+        });
+      }
+    });
+    addr
+  }
+
+  /// Round 6 measurement: parallel exec reads on one pooled connection at a
+  /// 150 ms RTT (75 ms each way). Prints wall time for 1, 2, 4 and 6
+  /// concurrent reads after the connection is warm.
+  #[tokio::test]
+  #[ignore = "measurement"]
+  async fn r6_parallel_exec_at_mobile_rtt() {
+    let (addr, host_key) = start_mock_server(0).await;
+    let proxy = delay_proxy(addr, Duration::from_millis(75)).await;
+    let client_key = test_host_key();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let key_reference = write_client_key(temp_dir.path(), &client_key);
+    let endpoint = test_endpoint(proxy, &host_key, key_reference);
+    let pool = Arc::new(SshConnectionPool::new());
+    let args = ["repo".to_string(), "inspect".to_string()];
+    let started = Instant::now();
+    pool.get_or_connect(&endpoint).await.unwrap();
+    println!(
+      "R6 connect (kex+auth) at 150ms RTT: {:?}",
+      started.elapsed()
+    );
+    for n in [1usize, 2, 4, 6] {
+      let started = Instant::now();
+      let mut tasks = Vec::new();
+      for _ in 0..n {
+        let (pool, endpoint, args) = (pool.clone(), endpoint.clone(), args.clone());
+        tasks.push(tokio::spawn(async move {
+          exec_command(
+            &pool,
+            &endpoint,
+            &args,
+            ExecLimits::default(),
+            &CancellationToken::new(),
+          )
+          .await
+          .unwrap();
+          Instant::now()
+        }));
+      }
+      let mut done = Vec::new();
+      for task in tasks {
+        done.push(task.await.unwrap().duration_since(started));
+      }
+      println!(
+        "R6 {n} parallel exec: last done after {:?}, each {:?}",
+        started.elapsed(),
+        done
+      );
+    }
+  }
+
+  /// Round 6: connect plus first exec, repeated, on loopback (Nagle/delayed-ACK stalls).
+  #[tokio::test]
+  #[ignore = "measurement"]
+  async fn r6_connect_and_first_exec_loop() {
+    let (addr, host_key) = start_mock_server(0).await;
+    let client_key = test_host_key();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let key_reference = write_client_key(temp_dir.path(), &client_key);
+    let endpoint = test_endpoint(addr, &host_key, key_reference);
+    let args = ["repo".to_string(), "inspect".to_string()];
+    let mut times = Vec::new();
+    for _ in 0..30 {
+      let pool = SshConnectionPool::new();
+      let started = Instant::now();
+      exec_command(
+        &pool,
+        &endpoint,
+        &args,
+        ExecLimits::default(),
+        &CancellationToken::new(),
+      )
+      .await
+      .unwrap();
+      times.push(started.elapsed().as_millis());
+    }
+    times.sort();
+    println!(
+      "R6 connect+exec ms: min {} median {} p90 {} max {}",
+      times[0], times[15], times[27], times[29]
+    );
+  }
+
+  /// Round 6: the path goes silent (NAT expiry, network change) without a
+  /// FIN or RST. Prints how long the first command takes to fail and how.
+  #[tokio::test]
+  #[ignore = "measurement"]
+  async fn r6_first_command_on_a_silent_connection() {
+    let (addr, host_key) = start_mock_server(0).await;
+    let blackhole = Arc::new(AtomicBool::new(false));
+    let proxy = delay_proxy_with(addr, Duration::from_millis(5), blackhole.clone()).await;
+    let client_key = test_host_key();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let key_reference = write_client_key(temp_dir.path(), &client_key);
+    let endpoint = test_endpoint(proxy, &host_key, key_reference);
+    let pool = SshConnectionPool::new();
+    let args = ["repo".to_string(), "inspect".to_string()];
+    exec_command(
+      &pool,
+      &endpoint,
+      &args,
+      ExecLimits::default(),
+      &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    blackhole.store(true, Ordering::SeqCst);
+    let started = Instant::now();
+    let result = exec_command(
+      &pool,
+      &endpoint,
+      &args,
+      ExecLimits::default(),
+      &CancellationToken::new(),
+    )
+    .await;
+    println!(
+      "R6 silent path: first exec failed after {:?}: {:?}",
+      started.elapsed(),
+      result.err().map(|e| e.to_string())
+    );
+  }
+
+  /// Round 6 measurement: a pooled connection whose session ended (relay
+  /// worker recycled, network switch) is not noticed until a command fails.
+  /// Prints how the first command after the drop behaves.
+  #[tokio::test]
+  #[ignore = "measurement"]
+  async fn r6_first_command_after_session_drop() {
+    let (addr, host_key) = start_mock_server(0).await;
+    let client_key = test_host_key();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let key_reference = write_client_key(temp_dir.path(), &client_key);
+    let endpoint = test_endpoint(addr, &host_key, key_reference);
+    let pool = SshConnectionPool::new();
+    let cancellation = CancellationToken::new();
+    let args = ["repo".to_string(), "inspect".to_string()];
+    exec_command(
+      &pool,
+      &endpoint,
+      &args,
+      ExecLimits::default(),
+      &cancellation,
+    )
+    .await
+    .unwrap();
+    // The session ends without the pool being told.
+    {
+      let key = PoolKey::for_endpoint(&endpoint);
+      let connections = pool.connections.lock().await;
+      let handle = connections.get(&key).unwrap().handle.clone();
+      drop(connections);
+      let _ = handle
+        .disconnect(Disconnect::ByApplication, "test", "en")
+        .await;
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    for attempt in 1..=3 {
+      let started = Instant::now();
+      let result = exec_command(
+        &pool,
+        &endpoint,
+        &args,
+        ExecLimits::default(),
+        &cancellation,
+      )
+      .await;
+      println!(
+        "R6 attempt {attempt}: ok={} err={:?} in {:?} reconnects={}",
+        result.is_ok(),
+        result.as_ref().err().map(|e| e.to_string()),
+        started.elapsed(),
+        pool.metrics_snapshot().reconnect_attempts
+      );
+    }
+  }
+
+  #[tokio::test]
+  async fn an_unanswered_channel_open_fails_fast_and_the_next_command_reconnects() {
+    let (addr, host_key) = start_mock_server(0).await;
+    let blackhole = Arc::new(AtomicBool::new(false));
+    let proxy = delay_proxy_with(addr, Duration::from_millis(1), blackhole.clone()).await;
+    let client_key = test_host_key();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let key_reference = write_client_key(temp_dir.path(), &client_key);
+    let endpoint = test_endpoint(proxy, &host_key, key_reference);
+    let pool = SshConnectionPool::new().with_channel_open_timeout(Duration::from_millis(300));
+    let args = ["repo".to_string(), "inspect".to_string()];
+    let cancellation = CancellationToken::new();
+    exec_command(
+      &pool,
+      &endpoint,
+      &args,
+      ExecLimits::default(),
+      &cancellation,
+    )
+    .await
+    .unwrap();
+
+    blackhole.store(true, Ordering::SeqCst);
+    let started = Instant::now();
+    let error = exec_command(
+      &pool,
+      &endpoint,
+      &args,
+      ExecLimits::default(),
+      &cancellation,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+      matches!(&error, SshTransportError::ChannelError(m) if m.contains("timed out")),
+      "{error}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(5));
+
+    blackhole.store(false, Ordering::SeqCst);
+    exec_command(
+      &pool,
+      &endpoint,
+      &args,
+      ExecLimits::default(),
+      &cancellation,
+    )
+    .await
+    .unwrap();
+    assert_eq!(pool.metrics_snapshot().reconnect_attempts, 1);
+  }
+
+  #[tokio::test]
+  async fn a_closed_session_is_never_handed_out_again() {
+    let (addr, host_key) = start_mock_server(0).await;
+    let client_key = test_host_key();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let key_reference = write_client_key(temp_dir.path(), &client_key);
+    let endpoint = test_endpoint(addr, &host_key, key_reference);
+    let pool = SshConnectionPool::new();
+    let args = ["repo".to_string(), "inspect".to_string()];
+    let cancellation = CancellationToken::new();
+    exec_command(
+      &pool,
+      &endpoint,
+      &args,
+      ExecLimits::default(),
+      &cancellation,
+    )
+    .await
+    .unwrap();
+    let handle = pool.get_or_connect(&endpoint).await.unwrap();
+    let _ = handle
+      .disconnect(Disconnect::ByApplication, "test", "en")
+      .await;
+    while !handle.is_closed() {
+      tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    // The next command succeeds without first failing on the dead session.
+    exec_command(
+      &pool,
+      &endpoint,
+      &args,
+      ExecLimits::default(),
+      &cancellation,
+    )
+    .await
+    .unwrap();
+    assert_eq!(pool.metrics_snapshot().reconnect_attempts, 1);
+  }
+
+  #[tokio::test]
+  async fn probe_marks_a_silent_connection_dead_and_keeps_a_healthy_one() {
+    let (addr, host_key) = start_mock_server(0).await;
+    let blackhole = Arc::new(AtomicBool::new(false));
+    let proxy = delay_proxy_with(addr, Duration::from_millis(1), blackhole.clone()).await;
+    let client_key = test_host_key();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let key_reference = write_client_key(temp_dir.path(), &client_key);
+    let endpoint = test_endpoint(proxy, &host_key, key_reference);
+    let pool = SshConnectionPool::new();
+    assert!(!pool.probe(&endpoint, Duration::from_millis(300)).await);
+    pool.get_or_connect(&endpoint).await.unwrap();
+    assert!(pool.probe(&endpoint, Duration::from_millis(300)).await);
+
+    blackhole.store(true, Ordering::SeqCst);
+    assert!(!pool.probe(&endpoint, Duration::from_millis(300)).await);
+    blackhole.store(false, Ordering::SeqCst);
+    pool.get_or_connect(&endpoint).await.unwrap();
+    assert_eq!(pool.metrics_snapshot().reconnect_attempts, 1);
+  }
+
+  #[test]
+  fn stale_connection_covers_channel_errors_and_the_deadline_only() {
+    use crate::core::remote::RemoteCommandError;
+    let transport = |e: SshTransportError| RemoteCommandError::Transport(e.to_string());
+    assert!(
+      transport(SshTransportError::ChannelError("Channel send error".into())).is_stale_connection()
+    );
+    assert!(transport(SshTransportError::DeadlineExceeded).is_stale_connection());
+    assert!(
+      !transport(SshTransportError::ConnectionFailed("refused".into())).is_stale_connection()
+    );
+    assert!(!transport(SshTransportError::Cancelled).is_stale_connection());
+    assert!(!RemoteCommandError::Command {
+      code: "treq_command_failed".into(),
+      message: "nope".into()
+    }
+    .is_stale_connection());
+  }
+
+  #[tokio::test]
+  async fn a_read_is_sent_again_once_on_a_fresh_connection_after_a_silent_drop() {
+    use crate::core::remote::{execute_remote_read, TreqCommandRequest};
+    let (addr, host_key) = start_mock_server(0).await;
+    let blackhole = Arc::new(AtomicBool::new(false));
+    let proxy = delay_proxy_with(addr, Duration::from_millis(1), blackhole.clone()).await;
+    let client_key = test_host_key();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let key_reference = write_client_key(temp_dir.path(), &client_key);
+    let endpoint = test_endpoint(proxy, &host_key, key_reference);
+    let pool =
+      Arc::new(SshConnectionPool::new().with_channel_open_timeout(Duration::from_millis(300)));
+    let cancellation = CancellationToken::new();
+    let request = TreqCommandRequest::HostCheck { root: "~".into() };
+    execute_remote_read::<serde_json::Value>(
+      &pool,
+      &endpoint,
+      request.clone(),
+      ExecLimits::default(),
+      &cancellation,
+    )
+    .await
+    .unwrap();
+
+    // The path goes silent and recovers before the first attempt gives up.
+    blackhole.store(true, Ordering::SeqCst);
+    let lift = blackhole.clone();
+    tokio::spawn(async move {
+      tokio::time::sleep(Duration::from_millis(200)).await;
+      lift.store(false, Ordering::SeqCst);
+    });
+    let started = Instant::now();
+    execute_remote_read::<serde_json::Value>(
+      &pool,
+      &endpoint,
+      request,
+      ExecLimits::default(),
+      &cancellation,
+    )
+    .await
+    .unwrap();
+    assert!(started.elapsed() < Duration::from_secs(5));
     assert_eq!(pool.metrics_snapshot().reconnect_attempts, 1);
   }
 

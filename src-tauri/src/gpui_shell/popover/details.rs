@@ -3,6 +3,7 @@
 //! `w-96`).
 
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, ClipboardItem, Context, Div, FontWeight, SharedString,
 };
@@ -61,12 +62,14 @@ impl Popover {
       let prompt = cx
         .background_spawn(async move { host.starting_prompt(&repo, id) })
         .await;
-      let _ = this.update(cx, |this, cx| {
-        if let super::Content::Details(state) = &mut this.content {
-          state.prompt = prompt;
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |this, cx| {
+          if let super::Content::Details(state) = &mut this.content {
+            state.prompt = prompt;
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     }));
   }
 

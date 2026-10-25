@@ -1,10 +1,13 @@
 //! Pages below home: hosts, repositories, workspaces and their views.
 
 pub mod add_host;
+pub mod code;
 pub mod commits;
 pub mod conflicts;
 pub mod diff;
+pub mod file;
 pub mod new_workspaces;
+pub mod pull_request;
 pub mod repos;
 pub mod terminal;
 pub mod workspace;
@@ -12,8 +15,10 @@ pub mod workspaces;
 
 use gpui_kit::{App, Context};
 
+use treq_lib::core::{remote_control_plane::SshEndpoint, workspaces::WorkspaceSummary};
+
 use super::{model, nav};
-use crate::store::SessionSnapshot;
+use crate::{remote, store::SessionSnapshot};
 
 /// Reopens the pages a snapshot names, after reconnecting.
 pub fn restore_pages(snapshot: &SessionSnapshot, cx: &mut App) {
@@ -29,6 +34,24 @@ pub fn restore_pages(snapshot: &SessionSnapshot, cx: &mut App) {
         cx,
       );
     }
+  }
+}
+
+/// Starts the reads of the pages that opening a machine shows (the restored
+/// location, or else its last repository's workspaces), so they overlap the
+/// connect's host check instead of following it.
+pub fn prefetch_location(endpoint: &SshEndpoint, snapshot: Option<&SessionSnapshot>) {
+  let repo = match snapshot {
+    Some(snapshot) => snapshot.repo_path.clone(),
+    None => super::last_repository_on(endpoint),
+  };
+  let Some(repo) = repo else { return };
+  remote::prefetch_on::<Vec<WorkspaceSummary>>(
+    endpoint.clone(),
+    workspaces::summaries_request(&repo),
+  );
+  if let Some(open) = snapshot.and_then(|s| s.workspace.as_ref()) {
+    workspace::prefetch(endpoint, &repo, &open.id);
   }
 }
 

@@ -696,3 +696,88 @@ fn test_workspace_diff_ignores_target_advance_before_rebase() {
     "committed diff should be measured from the fork point, not the moved target tip"
   );
 }
+
+#[test]
+fn test_workspace_diff_updates_stale_working_copy_before_snapshotting() {
+  let repo = TestRepo::new().unwrap();
+  let ws = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/stale-reload",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .unwrap();
+  workspace_write_file(&repo, &ws, "workspace.txt", "workspace change\n");
+  treq_lib::core::commit_workspace(&repo.repo_path, ws.id, "workspace change").unwrap();
+  repo
+    .commit_file("advanced.txt", "advanced main\n", "advance main")
+    .unwrap();
+  // Rebases the workspace's commits without checking them out: its disk is
+  // now behind its working-copy commit.
+  let ws_dir = repo.workspace_full_path(&ws);
+  treq_lib::jj::jj_rebase_workspace_bookmark_onto_deferred_checkout(
+    &ws_dir,
+    &ws.branch_name,
+    repo.default_branch(),
+  )
+  .unwrap();
+
+  init_test_app_db(&repo, Some("git"));
+  let diff = treq_lib::core::workspace_diff(&repo.repo_path, ws.id).unwrap();
+
+  assert!(
+    diff.uncommitted_files.is_empty(),
+    "a stale working copy must not be snapshotted as a revert: {:?}",
+    diff.uncommitted_files
+  );
+  assert!(Path::new(&ws_dir).join("advanced.txt").exists());
+}
+
+#[test]
+fn test_workspace_diff_rereads_the_committed_part_only_when_a_commit_moved() {
+  let repo = TestRepo::new().unwrap();
+  repo.commit_file("base.txt", "base", "base").unwrap();
+  let ws = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/cached-committed",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .unwrap();
+  workspace_write_file(&repo, &ws, "one.txt", "one\n");
+  treq_lib::core::commit_workspace(&repo.repo_path, ws.id, "add one").unwrap();
+  init_test_app_db(&repo, Some("git"));
+
+  let read = || treq_lib::core::workspace_diff(&repo.repo_path, ws.id).unwrap();
+  let first = read();
+  let hunks_of = |diff: &treq_lib::jj::JjRevisionDiff| {
+    diff
+      .hunks_by_file
+      .iter()
+      .map(|f| (f.path.clone(), f.hunks.clone()))
+      .collect::<Vec<_>>()
+  };
+  assert_eq!(hunks_of(&read()), hunks_of(&first), "nothing moved");
+
+  // A working-copy edit leaves the committed files alone.
+  workspace_write_file(&repo, &ws, "wip.txt", "wip\n");
+  let edited = read();
+  assert_eq!(hunks_of(&edited), hunks_of(&first));
+  assert_eq!(edited.uncommitted_files.len(), 1);
+
+  // A new commit changes the pair of commits, so it is read again.
+  treq_lib::core::commit_workspace(&repo.repo_path, ws.id, "add wip").unwrap();
+  let paths: Vec<String> = read()
+    .committed_files
+    .iter()
+    .map(|f| f.path.clone())
+    .collect();
+  assert!(paths.contains(&"one.txt".to_string()));
+  assert!(paths.contains(&"wip.txt".to_string()));
+}

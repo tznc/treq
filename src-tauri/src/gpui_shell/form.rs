@@ -59,6 +59,8 @@ pub struct Controls {
   sink: ActionSink,
   inputs: HashMap<String, Entity<InputState>>,
   textareas: HashMap<String, Entity<TextareaState>>,
+  /// Each textarea's placeholder, so a changed one is set again.
+  placeholders: HashMap<String, String>,
   selects: HashMap<String, (Options, Entity<SelectState<Options>>)>,
   sliders: HashMap<String, Entity<SliderState>>,
   _subscriptions: Vec<Subscription>,
@@ -70,6 +72,7 @@ impl Controls {
       sink,
       inputs: HashMap::new(),
       textareas: HashMap::new(),
+      placeholders: HashMap::new(),
       selects: HashMap::new(),
       sliders: HashMap::new(),
       _subscriptions: Vec::new(),
@@ -144,6 +147,12 @@ impl Controls {
     state
   }
 
+  /// The placeholder the textarea for `field` shows, once drawn.
+  #[cfg(test)]
+  pub fn textarea_placeholder(&self, field: &str) -> Option<&str> {
+    self.placeholders.get(field).map(String::as_str)
+  }
+
   /// `ui/textarea.tsx` with `rows` lines.
   pub fn textarea<V: 'static>(
     &mut self,
@@ -158,8 +167,19 @@ impl Controls {
       if !state.read(cx).focus_handle(cx).is_focused(window) && state.read(cx).value() != value {
         state.update(cx, |s, cx| s.set_value(value.to_string(), window, cx));
       }
+      if self.placeholders.get(field).map(String::as_str) != Some(placeholder) {
+        state.update(cx, |s, cx| {
+          s.set_placeholder(placeholder.to_string(), window, cx)
+        });
+        self
+          .placeholders
+          .insert(field.to_string(), placeholder.to_string());
+      }
       return state;
     }
+    self
+      .placeholders
+      .insert(field.to_string(), placeholder.to_string());
     let state = cx.new(|cx| {
       TextareaState::new(window, cx)
         .rows(rows)

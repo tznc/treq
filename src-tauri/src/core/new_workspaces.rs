@@ -3,7 +3,9 @@
 //! stacked on the line above. [`plan`] says what each line would do;
 //! [`run`] does it, in line order, so a stacked line's base exists first.
 
+use crate::result_ext::ResultExt;
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -17,21 +19,33 @@ const LINK_LINE: &str = "Paste the branch name; links open from the desktop app"
 /// A title's branch until the repository sets its own pattern.
 pub const DEFAULT_BRANCH_PATTERN: &str = "treq/{name}";
 
+#[allow(clippy::expect_used, reason = "constant pattern")]
+static WHITESPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
+static DASH_RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new("-+").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
+static TRAILING_DASH_LETTER: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new("-[a-z]$").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
+static TRAILING_SEPARATOR_LETTER: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"[/.\-][a-z]$").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
+static TRAILING_SEPARATORS: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"[/.\-]+$").expect("regex"));
+
 /// `sanitizeForBranchName`.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 fn sanitize_for_branch_name(text: &str) -> String {
   let lower: String = text
     .to_lowercase()
     .chars()
     .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c.is_whitespace() || *c == '-')
     .collect();
-  let dashed = Regex::new(r"\s+").expect("regex").replace_all(&lower, "-");
-  let single = Regex::new("-+").expect("regex").replace_all(&dashed, "-");
+  let dashed = WHITESPACE.replace_all(&lower, "-");
+  let single = DASH_RUN.replace_all(&dashed, "-");
   let cut: String = single.chars().take(50).collect();
   let trimmed = cut.trim_matches('-');
-  let sanitized = Regex::new("-[a-z]$")
-    .expect("regex")
-    .replace(trimmed, "")
-    .to_string();
+  let sanitized = TRAILING_DASH_LETTER.replace(trimmed, "").to_string();
   if sanitized.is_empty() {
     "unnamed".into()
   } else {
@@ -40,9 +54,10 @@ fn sanitize_for_branch_name(text: &str) -> String {
 }
 
 /// `cleanBranchNameTrailing`.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 fn clean_branch_name_trailing(name: &str) -> String {
-  let single = Regex::new(r"[/.\-][a-z]$").expect("regex");
-  let separators = Regex::new(r"[/.\-]+$").expect("regex");
+  let single = &*TRAILING_SEPARATOR_LETTER;
+  let separators = &*TRAILING_SEPARATORS;
   let mut result = name.to_string();
   loop {
     let next = separators
@@ -204,12 +219,14 @@ fn plan_rows(
       .get(&line)
       .and_then(|p| index.get(p))
       .map(|&i| rows[i].clone());
-    let checked = check(&parsed).and_then(|checked| match &parent {
-      Some(parent) if parent.step.is_none() => {
-        Err("Stacks on a line that can't be opened".to_string())
-      }
-      _ => Ok(checked),
-    });
+    let checked = check(&parsed)
+      .map(|checked| unique_title_branch(checked, &rows, &check))
+      .and_then(|checked| match &parent {
+        Some(parent) if parent.step.is_none() => {
+          Err("Stacks on a line that can't be opened".to_string())
+        }
+        _ => Ok(checked),
+      });
     let base = parent
       .as_ref()
       .and_then(|p| p.branch.clone())
@@ -241,6 +258,35 @@ fn plan_rows(
     rows.push(row);
   }
   rows
+}
+
+/// A new branch named after a title, made unique among the rows above:
+/// titles that differ only past the branch name's cut ("Fix the page A",
+/// "Fix the page B") would otherwise plan one branch twice, and only the
+/// first could be made.
+fn unique_title_branch(
+  checked: Checked,
+  rows: &[NewWorkspaceRow],
+  check: &impl Fn(&Line) -> Result<Checked, String>,
+) -> Checked {
+  let taken = |branch: &str| rows.iter().any(|r| r.branch.as_deref() == Some(branch));
+  if checked.title.is_none() || checked.step != NewWorkspaceStep::Create || !taken(&checked.branch)
+  {
+    return checked;
+  }
+  (2..100)
+    .map(|n| format!("{}-{n}", checked.branch))
+    .filter(|branch| !taken(branch))
+    .find_map(|branch| {
+      check(&Line::Branch(branch))
+        .ok()
+        .filter(|c| c.step == NewWorkspaceStep::Create)
+    })
+    .map(|c| Checked {
+      title: checked.title.clone(),
+      ..c
+    })
+    .unwrap_or(checked)
 }
 
 /// The repository's branch name pattern, from the app settings on this
@@ -350,7 +396,8 @@ pub fn run(
 ) -> Result<Vec<NewWorkspaceRow>, String> {
   workspaces::sync_workspaces(repo_path)?;
   // Remote branches named in the text must be visible before they open.
-  let _ = jj::jj_git_fetch(repo_path);
+  jj::jj_git_fetch_unless_recent(repo_path, workspaces::RECENT_FETCH)
+    .warn_on_err("jj git fetch unless recent");
   let mut rows = plan(repo_path, text, stack_on)?;
   let default = super::get_repo_default_branch(repo_path)?;
   let copy_files = included_copy_files(repo_path);
@@ -376,6 +423,7 @@ pub fn run(
           base_branch: base.clone(),
           title: row.title.clone(),
           description: None,
+          pr_number: None,
         },
       )
       .map(|(w, _)| w.id),
@@ -421,8 +469,15 @@ fn create(
     metadata,
     copy_files,
   )?;
-  if stacked {
-    workspaces::apply_workspace_target_branch(repo_path, workspace.id, base)?;
+  // Stacked on a workspace's branch, creation already targets it (and starts
+  // on its tip); only a plain branch as the base needs the retarget.
+  if stacked && workspace.target_branch.as_deref() != Some(base) {
+    workspaces::apply_workspace_target_branch_after(
+      repo_path,
+      workspace.id,
+      base,
+      workspaces::RECENT_FETCH,
+    )?;
   }
   Ok(workspace.id)
 }
@@ -506,6 +561,27 @@ mod tests {
       rows[1].error.as_deref(),
       Some("Stacks on a line that can't be opened")
     );
+  }
+
+  #[test]
+  fn titles_that_share_a_branch_get_numbered_branches() {
+    // The branch name drops a trailing single letter, so both titles
+    // would be treq/fix-the-page.
+    let rows = plan_rows(
+      "Fix the page A\nFix the page B\n  Add tests\n",
+      "main",
+      fake,
+    );
+    assert_eq!(
+      summary(&rows),
+      vec![
+        (0, Some("treq/fix-the-page"), Some("main")),
+        (0, Some("treq/fix-the-page-2"), Some("main")),
+        (1, Some("treq/add-tests"), Some("treq/fix-the-page-2")),
+      ]
+    );
+    assert_eq!(rows[1].title.as_deref(), Some("Fix the page B"));
+    assert_eq!(rows[1].step, Some(NewWorkspaceStep::Create));
   }
 
   #[test]

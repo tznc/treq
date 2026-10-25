@@ -21,6 +21,8 @@ pub(super) struct Fake {
   mine: Vec<GhPullRequest>,
   /// Everyone's.
   all: Vec<GhPullRequest>,
+  /// Those assigned to the user, which `assignee:@me` searches.
+  assigned: Vec<GhPullRequest>,
 }
 
 impl OpenWorkspacesHost for FakeHost {
@@ -31,10 +33,13 @@ impl OpenWorkspacesHost for FakeHost {
   fn open_prs(&self, repo: &str, mine: bool, query: &str) -> Result<Vec<GhPullRequest>, String> {
     let whose = if mine { "mine" } else { "all" };
     self.record(format!("read open prs {repo} {whose} {query:?}"));
-    let prs = if mine {
-      &self.open_workspaces.mine
-    } else {
-      &self.open_workspaces.all
+    if self.failing.contains(&"open_prs") {
+      return Err("gh: API rate limit exceeded".into());
+    }
+    let (prs, query) = match query.strip_prefix("assignee:@me") {
+      Some(rest) => (&self.open_workspaces.assigned, rest.trim()),
+      None if mine => (&self.open_workspaces.mine, query),
+      None => (&self.open_workspaces.all, query),
     };
     Ok(
       prs
@@ -255,6 +260,124 @@ fn the_pull_request_list_shows_the_users_own_first(cx: &mut TestAppContext) {
   assert!(host
     .calls()
     .contains(&"read open prs acme/treq all \"6\"".to_string()));
+}
+
+/// The input's spinner while a search waits or runs.
+fn searching(screen: &gpui_testing_library::Screen) -> bool {
+  screen
+    .query_by_role(by::role(Role::ProgressIndicator).name("Searching pull requests"))
+    .is_some()
+}
+
+#[gpui::test]
+fn a_search_shows_a_spinner_until_its_results_arrive(cx: &mut TestAppContext) {
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.open_workspaces.all = vec![pr(5, "feat/a", "main"), pr(6, "feat/b", "main")];
+  let (mut h, _) = dialog(host, cx);
+  let screen = screen(&mut h);
+  assert!(!searching(&screen));
+
+  // Typing shows the spinner at once, over the old list, before the debounce.
+  screen
+    .user()
+    .type_text(&screen.get_by_label_text("Search pull requests"), "6");
+  screen.redraw();
+  assert!(searching(&screen));
+  expect(screen.get_by_role(by::role(Role::CheckBox).name("#5 Change 5"))).to_be_visible();
+
+  let screen = self::screen(&mut h);
+  assert!(!searching(&screen));
+  expect(screen.get_by_role(by::role(Role::CheckBox).name("#6 Change 6"))).to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::CheckBox).name("#5 Change 5"))
+    .is_none());
+}
+
+#[gpui::test]
+fn a_search_with_no_matches_says_so(cx: &mut TestAppContext) {
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.open_workspaces.all = vec![pr(5, "feat/a", "main")];
+  let (mut h, _) = dialog(host, cx);
+  let screen = screen(&mut h);
+  screen
+    .user()
+    .type_text(&screen.get_by_label_text("Search pull requests"), "zzz");
+  let screen = self::screen(&mut h);
+  assert!(!searching(&screen));
+  // The empty states carry no accessible text; their ids tell them apart.
+  assert!(h
+    .cx
+    .debug_bounds("open-workspaces-no-matching-pull-requests")
+    .is_some());
+  assert!(h
+    .cx
+    .debug_bounds("open-workspaces-no-open-pull-requests")
+    .is_none());
+}
+
+#[gpui::test]
+fn a_failed_search_shows_its_error(cx: &mut TestAppContext) {
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.failing = vec!["open_prs"];
+  let (mut h, _) = dialog(host, cx);
+  let screen = screen(&mut h);
+  screen
+    .user()
+    .type_text(&screen.get_by_label_text("Search pull requests"), "6");
+  let screen = self::screen(&mut h);
+  assert!(!searching(&screen));
+  assert!(h.cx.debug_bounds("open-workspaces-prs-error").is_some());
+  expect(screen.get_by_role(by::role(Role::Button).name("Try again"))).to_be_visible();
+}
+
+#[gpui::test]
+fn assigned_to_me_searches_the_users_assigned_pull_requests(cx: &mut TestAppContext) {
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.open_workspaces.mine = vec![pr(5, "feat/mine", "main")];
+  host.open_workspaces.all = vec![pr(5, "feat/mine", "main"), pr(6, "feat/theirs", "main")];
+  host.open_workspaces.assigned = vec![pr(6, "feat/theirs", "main"), pr(7, "feat/other", "main")];
+  let (mut h, host) = dialog(host, cx);
+  let screen = screen(&mut h);
+  let toggle = || by::role(Role::Button).name("Assigned to me");
+  expect(screen.get_by_role(toggle())).not().to_be_pressed();
+
+  screen.user().click(&screen.get_by_role(toggle()));
+  let screen = self::screen(&mut h);
+  expect(screen.get_by_role(toggle())).to_be_pressed();
+  expect(screen.get_by_role(by::role(Role::Heading).name("Assigned to you"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::CheckBox).name("#7 Change 7"))).to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::CheckBox).name("#5 Change 5"))
+    .is_none());
+  assert!(host
+    .calls()
+    .contains(&"read open prs acme/treq all \"assignee:@me\"".to_string()));
+
+  // It narrows a search too.
+  screen
+    .user()
+    .type_text(&screen.get_by_label_text("Search pull requests"), "6");
+  let screen = self::screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::CheckBox).name("#6 Change 6"))).to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::CheckBox).name("#7 Change 7"))
+    .is_none());
+  assert!(host
+    .calls()
+    .contains(&"read open prs acme/treq all \"assignee:@me 6\"".to_string()));
+
+  // Off again, the search covers everyone's.
+  screen.user().click(&screen.get_by_role(toggle()));
+  let screen = self::screen(&mut h);
+  expect(screen.get_by_role(toggle())).not().to_be_pressed();
+  assert_eq!(
+    host.calls().last().map(String::as_str),
+    Some("read open prs acme/treq all \"6\"")
+  );
 }
 
 #[gpui::test]
@@ -489,4 +612,128 @@ fn tab_indents_the_selected_lines(cx: &mut TestAppContext) {
     screen.get_by_label_text("Workspaces").value().as_deref(),
     Some("feat/a\nfeat/b\nfeat/x")
   );
+}
+
+#[gpui::test]
+fn reopening_the_dialog_does_not_draw_the_assigned_list_as_the_users_own(cx: &mut TestAppContext) {
+  use super::kept_tabs::first_frame;
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.open_workspaces.mine = vec![pr(5, "feat/mine", "main")];
+  host.open_workspaces.assigned = vec![pr(7, "feat/other", "main")];
+  let (mut h, _) = dialog(host, cx);
+  let screen = screen(&mut h);
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Assigned to me")));
+  let _ = self::screen(&mut h);
+
+  let modal = h.screen.read_with(&h.cx, |s, _| s.snapshot().modal.clone());
+  h.update(|s| s.modal = None);
+  h.cx.run_until_parked();
+  h.update(|s| s.modal = modal);
+  // The toggle is off again, so the first frame is the user's own list.
+  first_frame(&mut h);
+  let window = h.cx.update(|window, _| window.window_handle());
+  let first = gpui_testing_library::Screen::new(&h.cx, window);
+  first.redraw();
+  expect(first.get_by_role(by::role(Role::Button).name("Assigned to me")))
+    .not()
+    .to_be_pressed();
+  expect(first.get_by_role(by::role(Role::CheckBox).name("#5 Change 5"))).to_be_visible();
+  assert!(first
+    .query_by_role(by::role(Role::CheckBox).name("#7 Change 7"))
+    .is_none());
+}
+
+#[gpui::test]
+fn reopening_the_dialog_draws_the_pull_requests_it_read_last(cx: &mut TestAppContext) {
+  use super::kept_tabs::{drawn_now, first_frame, reads};
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.open_workspaces.mine = vec![pr(5, "feat/mine", "main")];
+  let (mut h, host) = dialog(host, cx);
+  let _ = screen(&mut h);
+  assert_eq!(reads(&host, "read open prs"), 1);
+
+  let modal = h.screen.read_with(&h.cx, |s, _| s.snapshot().modal.clone());
+  h.update(|s| s.modal = None);
+  h.cx.run_until_parked();
+  h.update(|s| s.modal = modal);
+  // Before any read lands, the first frame has the rows.
+  first_frame(&mut h);
+  let window = h.cx.update(|window, _| window.window_handle());
+  let first = gpui_testing_library::Screen::new(&h.cx, window);
+  first.redraw();
+  expect(first.get_by_role(by::role(Role::CheckBox).name("#5 Change 5"))).to_be_visible();
+  assert!(!drawn_now(&mut h, "open-workspaces-prs-loading-shown"));
+  // And the list is read again behind them.
+  let _ = screen(&mut h);
+  assert_eq!(reads(&host, "read open prs"), 2);
+}
+
+mod pr_list {
+  use super::pr;
+  use crate::gpui_shell::screen::open_workspaces::PrList;
+
+  #[test]
+  fn an_older_answer_does_not_end_a_newer_search() {
+    let mut list = PrList::default();
+    let older = list.start();
+    let newer = list.start();
+    assert!(!list.settle(older, Ok((vec![pr(5, "feat/a", "main")], false))));
+    assert!(list.loading);
+    assert!(list.items.is_empty());
+
+    assert!(list.settle(newer, Ok((vec![pr(6, "feat/b", "main")], false))));
+    assert!(!list.loading);
+    assert_eq!(list.items[0].number, 6);
+  }
+
+  #[test]
+  fn an_empty_answer_ends_the_search_and_clears_the_list() {
+    let mut list = PrList::default();
+    let first = list.start();
+    list.settle(first, Ok((vec![pr(5, "feat/a", "main")], true)));
+    let search = list.start();
+    assert!(list.loading);
+    assert!(list.settle(search, Ok((Vec::new(), false))));
+    assert!(!list.loading);
+    assert!(list.items.is_empty());
+    assert!(!list.mine);
+  }
+
+  #[test]
+  fn an_error_ends_the_search_and_the_next_start_clears_it() {
+    let mut list = PrList::default();
+    let search = list.start();
+    assert!(list.settle(search, Err("offline".into())));
+    assert!(!list.loading);
+    assert_eq!(list.error.as_deref(), Some("offline"));
+    list.start();
+    assert!(list.error.is_none());
+  }
+}
+
+mod pr_query {
+  use crate::gpui_shell::screen::open_workspaces::{pr_query, PrQuery};
+
+  #[test]
+  fn no_search_reads_the_users_own_first() {
+    assert_eq!(pr_query("  ", false), PrQuery::MineFirst);
+  }
+
+  #[test]
+  fn a_search_reads_everyones() {
+    assert_eq!(pr_query(" fix ", false), PrQuery::Search("fix".into()));
+  }
+
+  #[test]
+  fn assigned_to_me_adds_the_assignee_qualifier() {
+    assert_eq!(pr_query("", true), PrQuery::Search("assignee:@me".into()));
+    assert_eq!(
+      pr_query(" fix ", true),
+      PrQuery::Search("assignee:@me fix".into())
+    );
+  }
 }

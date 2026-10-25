@@ -3,6 +3,7 @@
 //! the task input's agent, branch names and mentions, the stack, and the
 //! commit history column.
 
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
   sync::LazyLock,
@@ -85,7 +86,7 @@ pub const NEW_WORKSPACE_SETTING: &str = "home_task_new_workspace";
 pub const ENVIRONMENT_SETTING: &str = "environment";
 
 /// The files and README the Code tab lists.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Overview {
   pub entries: Vec<WorkspaceEntry>,
   pub readme: Option<String>,
@@ -123,7 +124,9 @@ pub struct TaskSettings {
   pub new_workspace: bool,
   /// The editor font size the file list uses (`terminal_font_size`).
   pub font_size: f32,
-  /// `None` while the devcontainers preview is off.
+  /// `None` while the devcontainers preview is off. Its `status` is left
+  /// for [`CodeHost::devcontainer_status`] to fill, a `docker ps` the
+  /// settings should not wait for.
   pub environment: Option<Environment>,
 }
 
@@ -144,7 +147,7 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     include_target: bool,
     limit: Option<usize>,
   ) -> Result<JjLogResult, String>;
-  /// Every workspace's current record (`listWorkspaceStatuses`).
+  /// Every workspace's current record, for the stack panel.
   fn workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String>;
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String>;
   fn set_description(
@@ -154,6 +157,16 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     description: &str,
   ) -> Result<(), String>;
   fn set_title(&self, repo_path: &str, workspace_id: i64, title: &str) -> Result<(), String>;
+  /// The pull request text last copied into the workspace, or `None` when
+  /// it wasn't opened from one (`core::pr_sync`).
+  fn pr_sync(&self, repo_path: &str, workspace_id: i64) -> Option<crate::local_db::PrSyncRecord>;
+  /// Copies the pull request's title and body over local edits.
+  fn resync_from_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
+  /// Sends the workspace's local title and description edits to its pull
+  /// request.
+  fn push_to_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
+  /// The pull request's title and body as GitHub has them.
+  fn pr_text(&self, repo_path: &str, workspace: &Workspace) -> Option<(String, String)>;
   /// Builds the file index the first time, then searches it.
   fn search_files(
     &self,
@@ -163,6 +176,14 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     query: &str,
     limit: usize,
   ) -> Result<Vec<String>, String>;
+  /// How long typing pauses before `search_files` runs: nothing for a local
+  /// in-memory index, a debounce for a remote host's round trip.
+  fn file_search_delay(&self, _repo_path: &str) -> std::time::Duration {
+    std::time::Duration::from_millis(150)
+  }
+  /// Builds the file index `search_files` reads, or reads the files again
+  /// when it is built: a search meanwhile uses the one it has.
+  fn warm_file_index(&self, repo_path: &str, workspace_id: Option<i64>, workspace_path: &str);
   fn devcontainers_enabled(&self) -> bool;
   fn devcontainer_status(&self, repo_path: &str) -> DevcontainerStatus;
   fn devcontainer_up(&self, repo_path: &str) -> Result<DevcontainerStatus, String>;
@@ -185,9 +206,10 @@ impl CodeHost for Backend {
     if self.remote_containing(repo_path).is_some() {
       return Err(unsupported("Browsing the file tree"));
     }
+    let (entries, readme) = core::workspace_overview(repo_path, workspace_id)?;
     Ok(Overview {
-      entries: core::ls_workspace_with_status(repo_path, workspace_id)?,
-      readme: core::get_workspace_readme(repo_path, workspace_id)?,
+      entries,
+      readme,
       unavailable: false,
     })
   }
@@ -209,12 +231,10 @@ impl CodeHost for Backend {
     if let Some(remote) = self.remote_containing(repo_path) {
       return remote.workspaces();
     }
-    Ok(
-      core::list_workspace_statuses(repo_path)?
-        .into_iter()
-        .map(|status| status.current)
-        .collect(),
-    )
+    // The stored records: the stack needs only branches and targets, and
+    // the window poll keeps them in step with jj. Statuses would rediscover
+    // every workspace under the repo's commit lock, behind any rebase.
+    core::list_all_workspaces(repo_path)
   }
 
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String> {
@@ -264,6 +284,34 @@ impl CodeHost for Backend {
     .map(|_| ())
   }
 
+  fn pr_sync(&self, repo_path: &str, workspace_id: i64) -> Option<crate::local_db::PrSyncRecord> {
+    if self.remote_containing(repo_path).is_some() {
+      return None;
+    }
+    core::pr_sync::record(repo_path, workspace_id)
+  }
+
+  fn resync_from_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Syncing from the pull request"));
+    }
+    core::pr_sync::resync_workspace(repo_path, workspace_id)
+  }
+
+  fn push_to_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Updating the pull request"));
+    }
+    core::pr_sync::push_edits_to_github(repo_path, workspace_id)
+  }
+
+  fn pr_text(&self, repo_path: &str, workspace: &Workspace) -> Option<(String, String)> {
+    if self.remote_containing(repo_path).is_some() {
+      return None;
+    }
+    core::pr_sync::github_text(repo_path, workspace)
+  }
+
   fn search_files(
     &self,
     repo_path: &str,
@@ -276,12 +324,23 @@ impl CodeHost for Backend {
     if let Some(remote) = self.remote_containing(repo_path) {
       return remote.search_files(workspace_id, query, limit);
     }
-    crate::commands::workspace::ensure_workspace_indexed(
-      repo_path.to_string(),
-      workspace_id,
-      workspace_path.to_string(),
-    )?;
-    core::search_workspace_files(repo_path, workspace_id, query, limit)
+    Ok(crate::commands::workspace::workspace_file_index(workspace_path)?.search(query, limit))
+  }
+
+  fn file_search_delay(&self, repo_path: &str) -> std::time::Duration {
+    if self.remote_containing(repo_path).is_some() {
+      return std::time::Duration::from_millis(150);
+    }
+    std::time::Duration::ZERO
+  }
+
+  fn warm_file_index(&self, repo_path: &str, _workspace_id: Option<i64>, workspace_path: &str) {
+    if self.remote_containing(repo_path).is_some() {
+      return;
+    }
+    if let Err(err) = crate::commands::workspace::refresh_workspace_file_index(workspace_path) {
+      log::warn!("file index: {err}");
+    }
   }
 
   fn devcontainers_enabled(&self) -> bool {
@@ -304,7 +363,13 @@ impl CodeHost for Backend {
 
   fn branch_names(&self, repo_path: &str) -> Result<HashSet<String>, String> {
     let (workspaces, branches) = match self.remote_containing(repo_path) {
-      Some(remote) => (remote.workspaces()?, remote.branches()?),
+      Some(remote) => {
+        let (workspaces, branches) = std::thread::scope(|scope| {
+          let branches = scope.spawn(|| remote.branches());
+          (remote.workspaces(), super::joined(branches))
+        });
+        (workspaces?, branches?)
+      }
       None => (
         core::list_workspaces(repo_path)?,
         core::list_repo_branches(repo_path)?,
@@ -360,16 +425,19 @@ impl CodeHost for Backend {
     let (tx, rx) = std::sync::mpsc::channel();
     let app = self.app().clone();
     // The dialog opens from the main thread; this waits off it.
-    let _ = self.app().run_on_main_thread(move || {
-      use tauri_plugin_dialog::DialogExt;
-      app
-        .dialog()
-        .file()
-        .set_title("Attach Files")
-        .pick_files(move |files| {
-          let _ = tx.send(files);
-        });
-    });
+    self
+      .app()
+      .run_on_main_thread(move || {
+        use tauri_plugin_dialog::DialogExt;
+        app
+          .dialog()
+          .file()
+          .set_title("Attach Files")
+          .pick_files(move |files| {
+            tx.send(files).ignore_closed();
+          });
+      })
+      .ignore_closed();
     let files = rx.recv().ok()??;
     Some(
       files
@@ -382,7 +450,9 @@ impl CodeHost for Backend {
 }
 
 /// Reads the task input's settings (`TaskInput`'s `agentSettings` and
-/// `newWorkspaceSetting`, `useRepoEnvironment`).
+/// `newWorkspaceSetting`, `useRepoEnvironment`). The environment's status
+/// is not read: the caller asks for it next, so the agent and the other
+/// settings show without waiting for `docker ps`.
 pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
   let keys = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
   let repo = host
@@ -399,7 +469,7 @@ pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
   let repo_agent = Agent::parse(get(&repo, "default_agent").as_deref());
   let environment = host.devcontainers_enabled().then(|| Environment {
     devcontainer: get(&repo, ENVIRONMENT_SETTING).as_deref() == Some("devcontainer"),
-    status: Some(host.devcontainer_status(repo_path)),
+    status: None,
   });
   TaskSettings {
     agent: repo_agent
@@ -417,10 +487,15 @@ pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
 pub use crate::core::new_workspaces::apply_branch_name_pattern;
 
 /// `taskBranchSlug`: lowercase ASCII words joined by `-`, cut on a word.
+#[allow(
+  clippy::string_slice,
+  reason = "the slug holds only [a-z0-9-], so every byte is a char boundary"
+)]
+#[allow(clippy::expect_used, reason = "constant pattern")]
 fn task_branch_slug(prompt: &str) -> String {
   const MAX: usize = 48;
-  let slug = Regex::new("[a-z0-9]+")
-    .expect("regex")
+  static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new("[a-z0-9]+").expect("regex"));
+  let slug = WORD
     .find_iter(&prompt.to_lowercase())
     .map(|m| m.as_str().to_string())
     .collect::<Vec<_>>()
@@ -450,8 +525,25 @@ pub fn task_branch_name(prompt: &str, taken: &HashSet<String>, pattern: &str) ->
 
 pub use crate::core::agent_launch::session_name;
 
+/// `text` with the bytes from `start` to `end` replaced by `insertion`. Both
+/// offsets are clamped to the text and moved back to a char boundary, so a
+/// stale offset never splits a multi-byte char.
+pub fn replace_range(text: &str, start: usize, end: usize, insertion: &str) -> String {
+  let start = text.floor_char_boundary(start);
+  let end = text.floor_char_boundary(end);
+  format!(
+    "{}{insertion}{}",
+    text.get(..start).unwrap_or_default(),
+    text.get(end.max(start)..).unwrap_or_default()
+  )
+}
+
 /// The `@` being typed before `cursor` (a byte offset): its offset and the
 /// query after it, if it starts the text or follows whitespace.
+#[allow(
+  clippy::string_slice,
+  reason = "offsets come from char_indices() and a checked get(..cursor)"
+)]
 pub fn mention_at(text: &str, cursor: usize) -> Option<(usize, String)> {
   let before = text.get(..cursor)?;
   for (i, ch) in before.char_indices().rev() {
@@ -489,6 +581,7 @@ pub fn insert_at(text: &str, cursor: usize, insertion: &str) -> (String, usize) 
 /// `looksLikeMarkdown`: block syntax at a line start, or inline emphasis,
 /// code or a link.
 pub fn looks_like_markdown(text: &str) -> bool {
+  #[allow(clippy::expect_used, reason = "constant patterns")]
   static PATTERNS: LazyLock<RegexSet> = LazyLock::new(|| {
     RegexSet::new([
       r"(?m)^#{1,6}\s",
@@ -509,6 +602,7 @@ pub fn looks_like_markdown(text: &str) -> bool {
 /// GitHub emoji shortcodes (`:robot:`) as emoji, outside code. Unknown
 /// shortcodes stay as typed.
 pub fn emojify(text: &str) -> String {
+  #[allow(clippy::expect_used, reason = "constant pattern")]
   static SHORTCODE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r":([a-z0-9_+-]+):").expect("regex"));
   let mut fenced = false;
@@ -646,8 +740,8 @@ pub fn diff_stats(commits: &[JjLogCommit]) -> (u32, u32) {
 /// `LinearCommitHistory`'s split of a log: the workspace's own commits
 /// (without the working copy, or the empty commit on top of it) and the
 /// target branch's.
-pub fn history_commits(log: &JjLogResult) -> (Vec<JjLogCommit>, Vec<JjLogCommit>) {
-  let (target, own): (Vec<_>, Vec<_>) = log.commits.iter().cloned().partition(|c| c.on_target_only);
+pub fn history_commits(log: &JjLogResult) -> (Vec<&JjLogCommit>, Vec<&JjLogCommit>) {
+  let (target, own): (Vec<_>, Vec<_>) = log.commits.iter().partition(|c| c.on_target_only);
   let own: Vec<_> = own.into_iter().filter(|c| !c.is_working_copy).collect();
   let own = match own.as_slice() {
     [first, second, ..]
@@ -664,17 +758,17 @@ pub fn history_commits(log: &JjLogResult) -> (Vec<JjLogCommit>, Vec<JjLogCommit>
 }
 
 /// `groupCommitsByDay`: runs of commits on the same local day, labelled.
-pub fn group_by_day(commits: &[JjLogCommit]) -> Vec<(String, Vec<JjLogCommit>)> {
-  let mut groups: Vec<(Option<chrono::NaiveDate>, String, Vec<JjLogCommit>)> = Vec::new();
+/// Takes the commits or references to them, and keeps what it is given.
+pub fn group_by_day<C: std::borrow::Borrow<JjLogCommit>>(
+  commits: impl IntoIterator<Item = C>,
+) -> Vec<(String, Vec<C>)> {
+  let mut groups: Vec<(Option<chrono::NaiveDate>, String, Vec<C>)> = Vec::new();
   for commit in commits {
-    let day = time::day(&commit.timestamp);
+    let timestamp = &commit.borrow().timestamp;
+    let day = time::day(timestamp);
     match groups.last_mut() {
-      Some((last, _, list)) if *last == day => list.push(commit.clone()),
-      _ => groups.push((
-        day,
-        time::day_label(&commit.timestamp),
-        vec![commit.clone()],
-      )),
+      Some((last, _, list)) if *last == day => list.push(commit),
+      _ => groups.push((day, time::day_label(timestamp), vec![commit])),
     }
   }
   groups
@@ -793,6 +887,19 @@ mod tests {
     assert_eq!(mention_at("a@b", 3), None);
     assert_eq!(mention_at("@a b", 4), None);
     assert_eq!(mention_at("@", 1), Some((0, String::new())));
+  }
+
+  #[test]
+  fn replace_range_never_splits_a_char() {
+    assert_eq!(
+      replace_range("look @ma now", 5, 8, "@main.rs "),
+      "look @main.rs  now"
+    );
+    // Offsets inside a multi-byte char used to panic the slice.
+    assert_eq!(replace_range("你好@ma", 1, 100, "@x "), "@x ");
+    assert_eq!(replace_range("😀@ma", 4, 7, "@x "), "😀@x ");
+    assert_eq!(replace_range("😀@ma", 1, 6, "@x "), "@x a");
+    assert_eq!(replace_range("é", 1, 0, "@"), "@é");
   }
 
   #[test]

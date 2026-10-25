@@ -12,7 +12,14 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
-use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
+use crate::lock_ext::LockExt as _;
+use crate::result_ext::ResultExt;
+use std::{
+  cell::Cell,
+  rc::Rc,
+  sync::Arc,
+  time::{Duration, Instant},
+};
 
 use futures::StreamExt as _;
 use gpui_kit::base::TestSupportExt as _;
@@ -360,7 +367,18 @@ pub struct TerminalView {
   /// The cell of the last mouse report, so a move within it sends none.
   reported: Option<(usize, usize)>,
   cursor_on: bool,
-  idle: u64,
+  /// The blink's timer. Only a focused cursor in the window in front
+  /// blinks, and the timer runs only while one does, so an idle terminal
+  /// wakes nothing.
+  blink: Option<Task<()>>,
+  /// Fires `Idle` once the process stops writing, started by a burst's
+  /// first output.
+  idle: Option<Task<()>>,
+  /// Between a burst's first output and `Idle`: the pane hears of the
+  /// output only when this turns on.
+  streaming: bool,
+  /// When the process last wrote, on the executor's clock.
+  last_output: Instant,
   chat_due: bool,
   search: Search,
   tooltips: Tooltips,
@@ -368,6 +386,29 @@ pub struct TerminalView {
   pub remote: RemoteState,
   _exit: Option<Listening>,
   _tasks: Vec<Task<()>>,
+  /// Temporary files of this session (an agent's prompt, settings and
+  /// skills, and images pasted in), deleted when the terminal closes.
+  session_files: Vec<String>,
+}
+
+/// Deletes a session's temporary files off the main thread.
+fn remove_files(host: Host, files: Vec<String>) {
+  #[cfg(test)]
+  host.remove_session_files(&files);
+  #[cfg(not(test))]
+  std::thread::spawn(move || host.remove_session_files(&files));
+}
+
+impl Drop for TerminalView {
+  fn drop(&mut self) {
+    if let Start::Agent { start, .. } = &self.start {
+      self.host.end_chat(&start.repo_path, start.session_id);
+    }
+    if self.session_files.is_empty() {
+      return;
+    }
+    remove_files(self.host.clone(), std::mem::take(&mut self.session_files));
+  }
 }
 
 fn now_millis() -> u128 {
@@ -410,7 +451,10 @@ impl TerminalView {
       selecting: false,
       reported: None,
       cursor_on: true,
-      idle: 0,
+      blink: None,
+      idle: None,
+      streaming: false,
+      last_output: cx.background_executor().now(),
       chat_due: false,
       search: Search::default(),
       tooltips: Tooltips::new(popups, dark),
@@ -418,6 +462,7 @@ impl TerminalView {
       remote: RemoteState::default(),
       _exit: None,
       _tasks: Vec::new(),
+      session_files: Vec::new(),
     }
   }
 
@@ -439,12 +484,14 @@ impl TerminalView {
     self._exit = Some(self.host.listen_exit(
       &self.pty,
       Box::new(move |status| {
-        let _ = tx.unbounded_send(status);
+        tx.unbounded_send(status).ignore_closed();
       }),
     ));
     self._tasks.push(cx.spawn(async move |this, cx| {
       if let Some(status) = rx.next().await {
-        let _ = this.update(cx, |view, cx| view.on_remote_exit(status, cx));
+        this
+          .update(cx, |view, cx| view.on_remote_exit(status, cx))
+          .ignore_closed();
       }
     }));
   }
@@ -465,18 +512,20 @@ impl TerminalView {
       .spawn(async move { host.remote_running(&target) });
     self._tasks.push(cx.spawn(async move |this, cx| {
       let running = task.await;
-      let _ = this.update(cx, |view, cx| {
-        if view.remote.stopping {
-          return;
-        }
-        match running {
-          Some(false) => {
-            view.remote.ended = Some(status);
-            cx.notify();
+      this
+        .update(cx, |view, cx| {
+          if view.remote.stopping {
+            return;
           }
-          _ => view.lost(None, cx),
-        }
-      });
+          match running {
+            Some(false) => {
+              view.remote.ended = Some(status);
+              cx.notify();
+            }
+            _ => view.lost(None, cx),
+          }
+        })
+        .ignore_closed();
     }));
   }
 
@@ -503,8 +552,9 @@ impl TerminalView {
     };
     let next = terminal_data::remote_pty_id(target, now_millis());
     let previous = std::mem::replace(&mut self.pty, next);
-    let _ = self.host.close_pty(&previous);
+    self.host.close_pty(&previous).ignore_closed();
     terminal_data::detach(&previous);
+    rekey_kept(&previous, &self.pty);
     self.live = None;
     self._exit = None;
     self._tasks.clear();
@@ -529,14 +579,16 @@ impl TerminalView {
       .spawn(async move { host.remote_stop(&target) });
     self._tasks.push(cx.spawn(async move |this, cx| {
       let result = task.await;
-      let _ = this.update(cx, |view, cx| {
-        view.remote.stopping = false;
-        match result {
-          Ok(()) => (view.on_event)(TermEvent::Close, cx),
-          Err(error) => view.status = Status::Failed(error),
-        }
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.remote.stopping = false;
+          match result {
+            Ok(()) => (view.on_event)(TermEvent::Close, cx),
+            Err(error) => view.status = Status::Failed(error),
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     }));
   }
 
@@ -583,7 +635,10 @@ impl TerminalView {
         // A resize while the PTY starts reaches it once it runs; otherwise
         // the program draws for a size the grid isn't.
         if self.status == Status::Ready && self.pty_size != Some((cols, rows)) {
-          let _ = self.host.resize_pty(&self.pty, rows as u16, cols as u16);
+          self
+            .host
+            .resize_pty(&self.pty, rows as u16, cols as u16)
+            .ignore_closed();
           self.pty_size = Some((cols, rows));
         }
       }
@@ -615,54 +670,93 @@ impl TerminalView {
         }
       }
     }));
-    if self._tasks.len() == 1 {
-      self._tasks.push(cx.spawn(async move |this, cx| loop {
-        cx.background_executor().timer(BLINK).await;
-        if this
-          .update(cx, |view, cx| {
-            view.cursor_on = !view.cursor_on;
-            cx.notify();
-          })
-          .is_err()
-        {
-          break;
+  }
+
+  fn blinks(&self, window: &Window) -> bool {
+    self.focus.is_focused(window) && window.is_window_active()
+  }
+
+  /// Blinks the cursor until the terminal loses focus or the window goes
+  /// to the background, then leaves it on.
+  fn blink(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.blink = Some(cx.spawn_in(window, async move |this, cx| loop {
+      cx.background_executor().timer(BLINK).await;
+      let blinking = this.update_in(cx, |view, window, cx| {
+        if view.blinks(window) {
+          view.cursor_on = !view.cursor_on;
+          cx.notify();
+          return true;
         }
-      }));
-    }
+        view.blink = None;
+        if !view.cursor_on {
+          view.cursor_on = true;
+          cx.notify();
+        }
+        false
+      });
+      if !matches!(blinking, Ok(true)) {
+        break;
+      }
+    }));
   }
 
   fn on_output(&mut self, from_process: bool, cx: &mut Context<Self>) {
-    (self.on_event)(TermEvent::Output { from_process }, cx);
     if from_process {
       // The channel works again, so its next drop gets its own attempt.
       self.remote.auto_spent = false;
-      self.idle += 1;
-      let idle = self.idle;
-      cx.spawn(async move |this, cx| {
-        cx.background_executor().timer(IDLE_AFTER).await;
-        let _ = this.update(cx, |view, cx| {
-          if view.idle == idle {
-            view.chat_due = false;
-            view.record_chat();
-            (view.on_event)(TermEvent::Idle, cx);
-          }
-        });
-      })
-      .detach();
+      self.last_output = cx.background_executor().now();
+      if !self.streaming {
+        self.streaming = true;
+        (self.on_event)(TermEvent::Output { from_process }, cx);
+        self.idle = Some(self.idle_timer(cx));
+      }
       if !self.chat_due && self.is_agent() {
         self.chat_due = true;
         cx.spawn(async move |this, cx| {
           cx.background_executor().timer(CHAT_THROTTLE).await;
-          let _ = this.update(cx, |view, _| {
-            if std::mem::take(&mut view.chat_due) {
-              view.record_chat();
-            }
-          });
+          this
+            .update(cx, |view, _| {
+              if std::mem::take(&mut view.chat_due) {
+                view.record_chat();
+              }
+            })
+            .ignore_closed();
         })
         .detach();
       }
     }
     cx.notify();
+  }
+
+  /// Fires `Idle` once the process has written nothing for `IDLE_AFTER`:
+  /// one timer per burst, which sleeps again for what is left whenever
+  /// output came in meanwhile.
+  fn idle_timer(&self, cx: &mut Context<Self>) -> Task<()> {
+    cx.spawn(async move |this, cx| {
+      let mut wait = IDLE_AFTER;
+      loop {
+        cx.background_executor().timer(wait).await;
+        let Ok(last) = this.read_with(cx, |view, _| view.last_output) else {
+          return;
+        };
+        let since = cx
+          .background_executor()
+          .now()
+          .saturating_duration_since(last);
+        if since >= IDLE_AFTER {
+          break;
+        }
+        wait = IDLE_AFTER - since;
+      }
+      this
+        .update(cx, |view, cx| {
+          view.streaming = false;
+          view.chat_due = false;
+          view.record_chat();
+          (view.on_event)(TermEvent::Idle, cx);
+        })
+        .ignore_closed();
+    })
   }
 
   /// `agentChatRecorder`: snapshots the agent's screen into its chat log.
@@ -692,15 +786,17 @@ impl TerminalView {
     }
     let task = cx.background_executor().spawn(async move {
       if host.pty_exists(&pty) {
-        let _ = host.resize_pty(&pty, rows as u16, cols as u16);
-        return Ok(None);
+        host
+          .resize_pty(&pty, rows as u16, cols as u16)
+          .ignore_closed();
+        return Ok((None, Vec::new()));
       }
-      let (spawn, warning) = match &start {
+      let (spawn, warning, files) = match &start {
         Start::Remote { target } => {
           host
             .remote_attach(&pty, target, cols as u16, rows as u16)
             .map_err(|e| (false, e))?;
-          return Ok(None);
+          return Ok((None, Vec::new()));
         }
         Start::Shell { dir } => (
           Spawn {
@@ -710,6 +806,7 @@ impl TerminalView {
             ..Spawn::default()
           },
           None,
+          Vec::new(),
         ),
         Start::Agent {
           start,
@@ -730,49 +827,56 @@ impl TerminalView {
               auto_command: Some(prepared.command),
             },
             prepared.skill_write_warning,
+            prepared.file_paths,
           )
         }
       };
       host.spawn_pty(&spawn).map_err(|e| (false, e))?;
-      let _ = host.resize_pty(&pty, rows as u16, cols as u16);
-      Ok(warning)
+      host
+        .resize_pty(&pty, rows as u16, cols as u16)
+        .ignore_closed();
+      Ok((warning, files))
     });
     self._tasks.push(cx.spawn(async move |this, cx| {
-      let result: Result<Option<String>, (bool, String)> = task.await;
-      let _ = this.update(cx, |view, cx| {
-        view.pty_size = Some((cols, rows));
-        if let (Err((false, error)), Some(_)) = (&result, view.remote_target()) {
-          view.lost(Some(error.clone()), cx);
-          return;
-        }
-        view.status = match result {
-          Ok(warning) => {
-            if let Some(description) = warning {
-              (view.on_event)(
-                TermEvent::Toast {
-                  title: "Could not write Treq skills".into(),
-                  description,
-                },
-                cx,
-              );
-            }
-            Status::Ready
+      let result: Result<(Option<String>, Vec<String>), (bool, String)> = task.await;
+      this
+        .update(cx, |view, cx| {
+          view.pty_size = Some((cols, rows));
+          if let (Err((false, error)), Some(_)) = (&result, view.remote_target()) {
+            view.lost(Some(error.clone()), cx);
+            return;
           }
-          Err((true, error)) => Status::AgentFailed(error),
-          Err((false, error)) if error.contains("Session not found") => Status::Failed(
-            "Terminal session is still initializing. Please wait a moment and try again.".into(),
-          ),
-          Err((false, error)) => Status::Failed(error),
-        };
-        cx.notify();
-      });
+          view.status = match result {
+            Ok((warning, files)) => {
+              view.session_files.extend(files);
+              if let Some(description) = warning {
+                (view.on_event)(
+                  TermEvent::Toast {
+                    title: "Could not write Treq skills".into(),
+                    description,
+                  },
+                  cx,
+                );
+              }
+              Status::Ready
+            }
+            Err((true, error)) => Status::AgentFailed(error),
+            Err((false, error)) if error.contains("Session not found") => Status::Failed(
+              "Terminal session is still initializing. Please wait a moment and try again.".into(),
+            ),
+            Err((false, error)) => Status::Failed(error),
+          };
+          cx.notify();
+        })
+        .ignore_closed();
     }));
   }
 
   /// "Try again": closes the PTY and starts over.
   fn retry(&mut self, cx: &mut Context<Self>) {
-    let _ = self.host.close_pty(&self.pty);
+    self.host.close_pty(&self.pty).ignore_closed();
     terminal_data::detach(&self.pty);
+    remove_files(self.host.clone(), std::mem::take(&mut self.session_files));
     self.live = None;
     self._tasks.clear();
     self.status = Status::Preparing;
@@ -805,7 +909,10 @@ impl TerminalView {
   fn insert(&mut self, text: &str, cx: &mut Context<Self>) {
     // React's remote panel takes no drops.
     if self.status == Status::Ready && self.remote_target().is_none() {
-      self.write(text, cx);
+      // Pasted, as a native terminal does with a drop.
+      let bracketed = self.with_emulator(|e| e.bracketed_paste()).unwrap_or(false);
+      let bytes = paste_bytes(text, bracketed);
+      self.write(&String::from_utf8_lossy(&bytes), cx);
     }
   }
 
@@ -819,6 +926,7 @@ impl TerminalView {
       if let Ok(mut emulator) = live.emulator.lock() {
         emulator.scroll_to_bottom();
       }
+      cx.notify();
     }
     if let Err(error) = self.host.write_pty(&self.pty, data) {
       log::warn!("pty write failed: {error}");
@@ -863,7 +971,29 @@ impl TerminalView {
     }
     let paste = (m.platform && k.key == "v") || (m.control && m.shift && k.key == "v");
     if paste {
-      if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+      let item = cx.read_from_clipboard();
+      let mut pasted = Vec::new();
+      // A copied image goes in as the path of a file holding it: Claude Code
+      // and Codex attach a pasted image path, and nothing else reaches them
+      // through a PTY. A remote host can't read a local file.
+      let text = item.as_ref().and_then(|item| item.text()).or_else(|| {
+        let image = item?.into_entries().find_map(|entry| match entry {
+          gpui::ClipboardEntry::Image(image) => Some(image),
+          _ => None,
+        })?;
+        if self.remote_target().is_some() {
+          return None;
+        }
+        self
+          .host
+          .write_pasted_image(&image.bytes)
+          .inspect(|path| pasted.push(path.clone()))
+          .map(|path| shell_quote(&path))
+          .inspect_err(|e| tracing::warn!("failed to save pasted image: {e}"))
+          .ok()
+      });
+      self.session_files.extend(pasted);
+      if let Some(text) = text {
         let bracketed = self.with_emulator(|e| e.bracketed_paste()).unwrap_or(false);
         let bytes = paste_bytes(&text, bracketed);
         self.write(&String::from_utf8_lossy(&bytes), cx);
@@ -945,9 +1075,10 @@ impl TerminalView {
       ctrl: modifiers.control,
     };
     if let Some(bytes) = self.with_emulator(|e| e.encode_mouse(mouse)).flatten() {
-      let _ = self
+      self
         .host
-        .write_pty(&self.pty, &String::from_utf8_lossy(&bytes));
+        .write_pty(&self.pty, &String::from_utf8_lossy(&bytes))
+        .ignore_closed();
     }
     true
   }
@@ -1056,7 +1187,7 @@ impl TerminalView {
       )
       .unwrap_or_default();
       let data = String::from_utf8_lossy(&bytes).repeat(lines.unsigned_abs() as usize);
-      let _ = self.host.write_pty(&self.pty, &data);
+      self.host.write_pty(&self.pty, &data).ignore_closed();
     } else {
       self.with_emulator(|e| e.scroll(lines));
     }
@@ -1235,7 +1366,6 @@ impl TerminalView {
           .border_color(theme::data_color(scheme.foreground))
       }
     });
-    let lines = frame.lines;
     div()
       .absolute()
       .inset_0()
@@ -1243,9 +1373,9 @@ impl TerminalView {
         gpui::canvas(
           |_, _, _| {},
           move |bounds, _, window, cx| {
-            for (row, runs) in lines.into_iter().enumerate() {
+            for (row, runs) in frame.lines.iter().enumerate() {
               let y = bounds.origin.y + px(TOP_PAD + row as f32 * h);
-              for run in runs {
+              for run in runs.iter() {
                 let x = bounds.origin.x + px(run.col as f32 * w);
                 if let Some(bg) = run.bg {
                   window.paint_quad(gpui::fill(
@@ -1256,7 +1386,7 @@ impl TerminalView {
                 if run.text.trim().is_empty() && !run.underline && !run.strike {
                   continue;
                 }
-                paint_run(&run, point(x, y), (w, h, advance), font_size, window, cx);
+                paint_run(run, point(x, y), (w, h, advance), font_size, window, cx);
               }
             }
           },
@@ -1484,6 +1614,9 @@ impl Render for TerminalView {
     self.tooltips.sync(cx);
     let p = theme::palette(self.dark);
     let focused = self.focus.is_focused(window);
+    if self.blink.is_none() && self.blinks(window) {
+      self.blink(window, cx);
+    }
     let bounds = self.bounds.clone();
     let entity = cx.entity().downgrade();
     let search = self.search_bar(&p, cx);
@@ -1583,7 +1716,75 @@ enum Drag {
   },
 }
 
+/// A column the app keeps while its PTY runs, so a pane that opens on its
+/// repository after its own pane is gone (its window closed) shows it again.
+#[derive(Clone)]
+struct Kept {
+  id: String,
+  kind: Kind,
+  start: Start,
+  /// The repository the column opened in.
+  repo: String,
+  /// The pane showing it; `None` once that pane is gone.
+  owner: Option<u64>,
+  /// When it opened, in [`NEXT_KEPT`] order.
+  opened: u64,
+}
+
+type KeptColumns = std::sync::Mutex<std::collections::HashMap<String, Kept>>;
+
+/// Kept columns by PTY id.
+#[cfg(not(test))]
+fn kept() -> &'static KeptColumns {
+  static KEPT: std::sync::OnceLock<KeptColumns> = std::sync::OnceLock::new();
+  KEPT.get_or_init(Default::default)
+}
+
+/// Each test thread keeps its own columns.
+#[cfg(test)]
+fn kept() -> &'static KeptColumns {
+  thread_local! {
+    static KEPT: &'static KeptColumns = Box::leak(Box::default());
+  }
+  KEPT.with(|kept| *kept)
+}
+
+/// A kept column's PTY now has the id `next` (a remote reattach).
+fn rekey_kept(previous: &str, next: &str) {
+  let mut kept = kept().lock_or_recover();
+  if let Some(column) = kept.remove(previous) {
+    kept.insert(next.to_string(), column);
+  }
+}
+
+/// The last window closed: its terminals with it.
+pub fn forget_kept() {
+  kept().lock_or_recover().clear();
+}
+
+/// Takes the columns of `repo` no pane shows for pane `owner`.
+fn adopt_kept(repo: &str, owner: u64) -> Vec<(String, Kept)> {
+  let mut kept = kept().lock_or_recover();
+  let mut adopted: Vec<(String, Kept)> = kept
+    .iter_mut()
+    .filter(|(_, c)| c.owner.is_none() && c.repo == repo)
+    .map(|(pty, c)| {
+      c.owner = Some(owner);
+      (pty.clone(), c.clone())
+    })
+    .collect();
+  adopted.sort_by_key(|(_, c)| c.opened);
+  adopted
+}
+
+static NEXT_PANE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+static NEXT_KEPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Counts the panes that went away leaving columns behind.
+static RELEASES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub struct TerminalPane {
+  /// Names the pane in [`Kept`] columns.
+  serial: u64,
   host: Host,
   react: ActionSink,
   popups: PopupSink,
@@ -1627,6 +1828,29 @@ pub struct TerminalPane {
   starting_devcontainer: bool,
   _environment_task: Option<Task<()>>,
   _keys: Option<Subscription>,
+  /// The repository's kept columns join the row when the pane next draws.
+  adopt_due: bool,
+  /// [`RELEASES`] when the pane last looked for kept columns.
+  releases_seen: u64,
+  /// Agent sessions being read before their columns open, by pane id.
+  opening: std::collections::HashMap<i64, Task<()>>,
+}
+
+impl Drop for TerminalPane {
+  /// The pane's terminals keep running for the next pane on their
+  /// repository.
+  fn drop(&mut self) {
+    let mut released = false;
+    for column in kept().lock_or_recover().values_mut() {
+      if column.owner == Some(self.serial) {
+        column.owner = None;
+        released = true;
+      }
+    }
+    if released {
+      RELEASES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+  }
 }
 
 impl HasTooltips for TerminalPane {
@@ -1656,6 +1880,9 @@ impl TerminalPane {
     let font_size =
       (get("terminal_font_size").unwrap_or(14.) * get("ui_zoom").unwrap_or(100.) / 100.).round();
     Self {
+      serial: NEXT_PANE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+      adopt_due: true,
+      releases_seen: 0,
       host,
       react,
       popups: popups.clone(),
@@ -1689,6 +1916,7 @@ impl TerminalPane {
       starting_devcontainer: false,
       _environment_task: None,
       _keys: None,
+      opening: Default::default(),
     }
   }
 
@@ -1733,15 +1961,21 @@ impl TerminalPane {
     }
     self.environment_repo = Some(repo.clone());
     let host = self.host.clone();
-    let task = cx
-      .background_executor()
-      .spawn(async move { code_data::task_settings(&*host, &repo).environment });
+    let task = cx.background_executor().spawn(async move {
+      let mut environment = code_data::task_settings(&*host, &repo).environment;
+      if let Some(environment) = environment.as_mut() {
+        environment.status = Some(host.devcontainer_status(&repo));
+      }
+      environment
+    });
     self._environment_task = Some(cx.spawn(async move |this, cx| {
       let environment = task.await;
-      let _ = this.update(cx, |pane, cx| {
-        pane.environment = environment;
-        cx.notify();
-      });
+      this
+        .update(cx, |pane, cx| {
+          pane.environment = environment;
+          cx.notify();
+        })
+        .ignore_closed();
     }));
   }
 
@@ -1786,18 +2020,20 @@ impl TerminalPane {
       .spawn(async move { host.devcontainer_up(&repo) });
     self._environment_task = Some(cx.spawn(async move |this, cx| {
       let result = task.await;
-      let _ = this.update(cx, |pane, cx| {
-        pane.starting_devcontainer = false;
-        match result {
-          Ok(status) => {
-            if let Some(environment) = pane.environment.as_mut() {
-              environment.status = Some(status);
+      this
+        .update(cx, |pane, cx| {
+          pane.starting_devcontainer = false;
+          match result {
+            Ok(status) => {
+              if let Some(environment) = pane.environment.as_mut() {
+                environment.status = Some(status);
+              }
             }
+            Err(error) => pane.toast("Devcontainer did not start", error, ToastTone::Error),
           }
-          Err(error) => pane.toast("Devcontainer did not start", error, ToastTone::Error),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     }));
     cx.notify();
   }
@@ -1824,6 +2060,7 @@ impl TerminalPane {
       return;
     }
     let moved = self.place.working_directory != place.working_directory;
+    self.adopt_due |= self.place.repo_path != place.repo_path;
     self.place = place;
     // A newly selected workspace's first terminal becomes the active one.
     if moved && !self.collapsed {
@@ -2183,6 +2420,9 @@ impl TerminalPane {
   }
 
   /// Opens (or focuses) the agent session with the pane id `pane_id`.
+  /// Reading the session touches the database and the repository (SSH for
+  /// a remote one), so it runs in the background and the column joins the
+  /// row once it lands.
   fn open_agent(&mut self, pane_id: i64, window: &mut Window, cx: &mut Context<Self>) {
     let id = agent_column_id(pane_id);
     if self.columns.iter().any(|c| c.id == id) {
@@ -2193,115 +2433,36 @@ impl TerminalPane {
       }
       return;
     }
-    let Some(kind_and_start) = self.agent_session(pane_id) else {
-      return;
-    };
-    let (kind, pty, start) = kind_and_start;
-    let on_event = self.on_event(id.clone(), cx);
-    let (host, font_size) = (self.host.clone(), self.font_size);
-    let (look, popups) = ((font_size, self.dark), self.popups.clone());
-    let view = cx.new(|cx| TerminalView::new(pty, start, host, look, popups, on_event, cx));
-    self.columns.push(Column {
-      id: id.clone(),
-      view,
-      kind,
-      width: None,
-      streaming: false,
-      bounds: Rc::default(),
-    });
-    self.publish(cx);
-    self.focus_column(&id, window, cx);
-  }
-
-  /// The session's column and what its terminal starts, read from the
-  /// session tables of the repository and its supporting ones.
-  fn agent_session(&self, pane_id: i64) -> Option<(Kind, String, Start)> {
     let main = match &self.route.main_repo_path {
       main if !main.is_empty() => main.clone(),
       _ => self.place.repo_path.clone(),
     };
-    let mut repos = vec![main.clone()];
-    repos.extend(self.host.supporting_repos(&main));
-    for repo in repos {
-      let sessions = self.host.sessions(&repo).unwrap_or_default();
-      let Some(session) = sessions
-        .into_iter()
-        .find(|s| terminal_data::pane_session_id(&repo, &main, s.id) == pane_id)
-      else {
-        continue;
-      };
-      // What the session starts with: the backend's, for a session it
-      // started, else React's.
-      let pending = self.host.pending_session(pane_id).or_else(|| {
-        self
-          .route
-          .pending
-          .iter()
-          .find(|p| p.session_id == pane_id)
-          .map(Pending::start)
-      });
-      let pending = pending.as_ref();
-      let workspace = session.workspace_id.and_then(|id| {
-        super::code_data::CodeHost::workspaces(&*self.host, &repo)
-          .ok()?
-          .into_iter()
-          .find(|w| w.id == id)
-      });
-      let workspace_path = pending
-        .and_then(|p| p.workspace_path.clone())
-        .or_else(|| workspace.as_ref().map(super::merge::full_path));
-      let agent = pending
-        .and_then(|p| p.agent.clone())
-        .unwrap_or_else(|| self.default_agent(&repo));
-      let pty = terminal_data::agent_pty_id(&repo, session.id);
-      let start = AgentStart {
-        agent: agent.clone(),
-        repo_path: repo.clone(),
-        workspace_path: workspace_path.clone(),
-        session_id: session.id,
-        pending_prompt: pending.and_then(|p| p.pending_prompt.clone()),
-        permission_mode: pending.and_then(|p| p.permission_mode.clone()),
-      };
-      let kind = Kind::Agent {
-        pane_id,
-        name: session.name.clone(),
-        repo_path: repo,
-        workspace_path,
-        workspace_name: workspace.map(|w| w.branch_name),
-        agent,
-      };
-      return Some((
-        kind,
-        pty,
-        Start::Agent {
-          start,
-          name: session.name,
-          workspace_id: session.workspace_id,
-          working_dir: pending.and_then(|p| p.workspace_path.clone()),
-        },
-      ));
-    }
-    None
-  }
-
-  fn default_agent(&self, repo: &str) -> String {
-    let key = vec!["default_agent".to_string()];
-    let repo_agent = self
-      .host
-      .repo_settings(repo, &key)
-      .ok()
-      .and_then(|v| v.get("default_agent").cloned().flatten())
-      .filter(|v| !v.is_empty());
-    repo_agent
-      .or_else(|| {
-        self
-          .host
-          .settings(&key)
-          .ok()
-          .and_then(|v| v.get("default_agent").cloned().flatten())
-          .filter(|v| !v.is_empty())
-      })
-      .unwrap_or_else(|| "claude".into())
+    let (host, pending) = (self.host.clone(), self.route.pending.clone());
+    let read = cx
+      .background_executor()
+      .spawn(async move { agent_session(&*host, &main, &pending, pane_id) });
+    // A newer read for the same session replaces (and drops) the older one.
+    let task = cx.spawn(async move |this, cx| {
+      let session = read.await;
+      this
+        .update(cx, |pane, cx| {
+          pane.opening.remove(&pane_id);
+          let Some((kind, pty, start)) = session else {
+            return;
+          };
+          if !pane.columns.iter().any(|c| c.id == id) {
+            pane.push_column(id.clone(), pty, kind, start, cx);
+            pane.publish(cx);
+          }
+          // Another session may have become the active one meanwhile.
+          if pane.route.active_session_id == Some(pane_id) {
+            pane.focus_next = Some(id);
+          }
+          cx.notify();
+        })
+        .ignore_closed();
+    });
+    self.opening.insert(pane_id, task);
   }
 
   /// The active terminal's directory, else the workspace's.
@@ -2337,22 +2498,8 @@ impl TerminalPane {
       millis += 1;
     }
     let id = terminal_data::shell_pty_id(&dir, millis);
-    let on_event = self.on_event(id.clone(), cx);
-    let (host, font_size, start) = (
-      self.host.clone(),
-      self.font_size,
-      Start::Shell { dir: dir.clone() },
-    );
-    let (look, popups) = ((font_size, self.dark), self.popups.clone());
-    let view = cx.new(|cx| TerminalView::new(id.clone(), start, host, look, popups, on_event, cx));
-    self.columns.push(Column {
-      id: id.clone(),
-      view,
-      kind: Kind::Shell { dir },
-      width: None,
-      streaming: false,
-      bounds: Rc::default(),
-    });
+    let start = Start::Shell { dir: dir.clone() };
+    self.push_column(id.clone(), id.clone(), Kind::Shell { dir }, start, cx);
     self.publish(cx);
     // The new shell takes focus at the end of the row, scrolled into view.
     self.focus_column(&id, window, cx);
@@ -2365,25 +2512,89 @@ impl TerminalPane {
     let millis = now_millis();
     let id = terminal_data::remote_column_id(&target.label, millis);
     let pty = terminal_data::remote_pty_id(&target, millis);
-    let on_event = self.on_event(id.clone(), cx);
-    let host = self.host.clone();
     let start = Start::Remote {
       target: target.clone(),
     };
-    let (look, popups) = ((REMOTE_FONT_SIZE, self.dark), self.popups.clone());
+    let kind = Kind::Remote {
+      target: Box::new(target),
+    };
+    self.push_column(id.clone(), pty, kind, start, cx);
+    self.publish(cx);
+    self.focus_column(&id, window, cx);
+  }
+
+  /// A column for `pty`, kept while the PTY runs.
+  fn push_column(
+    &mut self,
+    id: String,
+    pty: String,
+    kind: Kind,
+    start: Start,
+    cx: &mut Context<Self>,
+  ) {
+    kept().lock_or_recover().insert(
+      pty.clone(),
+      Kept {
+        id: id.clone(),
+        kind: kind.clone(),
+        start: start.clone(),
+        repo: self.place.repo_path.clone(),
+        owner: Some(self.serial),
+        opened: NEXT_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+      },
+    );
+    let on_event = self.on_event(id.clone(), cx);
+    let font_size = match kind {
+      Kind::Remote { .. } => REMOTE_FONT_SIZE,
+      _ => self.font_size,
+    };
+    let (host, look, popups) = (
+      self.host.clone(),
+      (font_size, self.dark),
+      self.popups.clone(),
+    );
     let view = cx.new(|cx| TerminalView::new(pty, start, host, look, popups, on_event, cx));
     self.columns.push(Column {
-      id: id.clone(),
+      id,
       view,
-      kind: Kind::Remote {
-        target: Box::new(target),
-      },
+      kind,
       width: None,
       streaming: false,
       bounds: Rc::default(),
     });
-    self.publish(cx);
-    self.focus_column(&id, window, cx);
+  }
+
+  /// Shows the repository's terminals that a closed window left running,
+  /// once the pane opens on it or draws after such a window closed.
+  /// A local one that ended meanwhile is dropped; a remote one reattaches
+  /// to its session on the host.
+  fn adopt(&mut self, cx: &mut Context<Self>) {
+    let releases = RELEASES.load(std::sync::atomic::Ordering::Relaxed);
+    let due = std::mem::take(&mut self.adopt_due) || releases != self.releases_seen;
+    self.releases_seen = releases;
+    if !due || self.place.repo_path.is_empty() {
+      return;
+    }
+    let mut shown = None;
+    for (pty, column) in adopt_kept(&self.place.repo_path, self.serial) {
+      let remote = matches!(column.kind, Kind::Remote { .. });
+      if !remote && !self.host.pty_exists(&pty) {
+        kept().lock_or_recover().remove(&pty);
+        terminal_data::detach(&pty);
+        continue;
+      }
+      if self.columns.iter().any(|c| c.id == column.id) {
+        continue;
+      }
+      shown = Some(column.id.clone());
+      self.push_column(column.id, pty, column.kind, column.start, cx);
+    }
+    if let Some(id) = shown {
+      self.collapsed = false;
+      self.reveal = Some(id.clone());
+      self.active = Some(id);
+      self.publish(cx);
+    }
   }
 
   fn close(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -2397,6 +2608,7 @@ impl TerminalPane {
       log::warn!("pty close failed: {error}");
     }
     terminal_data::detach(&pty);
+    kept().lock_or_recover().remove(&pty);
     if let Kind::Agent { pane_id, .. } = column.kind {
       self.send("terminal.closeSession", pane_id.into(), cx);
     }
@@ -3321,7 +3533,9 @@ impl TerminalPane {
               on_files.update(cx, |view, cx| view.insert(&text.join(" "), cx));
             }
           })
-          .child(view)
+          // Its own redraws (output, the blink) leave the other
+          // terminals' drawing as it was.
+          .child(view.cached(gpui::StyleRefinement::default().size_full()))
           .children(previews)
       })
       // `ring-1 ring-inset ring-primary/40` on the active remote session.
@@ -3532,7 +3746,91 @@ fn paint_run(
     };
     *line = Arc::new(snapped);
   }
-  let _ = line.paint(origin, px(height), gpui::TextAlign::Left, None, window, cx);
+  line
+    .paint(origin, px(height), gpui::TextAlign::Left, None, window, cx)
+    .best_effort();
+}
+
+/// The session's column and what its terminal starts, read from the
+/// session tables of the repository `main` and its supporting ones.
+fn agent_session(
+  host: &dyn terminal_data::TerminalHost,
+  main: &str,
+  route_pending: &[Pending],
+  pane_id: i64,
+) -> Option<(Kind, String, Start)> {
+  let mut repos = vec![main.to_string()];
+  repos.extend(host.supporting_repos(main));
+  for repo in repos {
+    let sessions = host.sessions(&repo).unwrap_or_default();
+    let Some(session) = sessions
+      .into_iter()
+      .find(|s| terminal_data::pane_session_id(&repo, main, s.id) == pane_id)
+    else {
+      continue;
+    };
+    // What the session starts with: the backend's, for a session it
+    // started, else React's.
+    let pending = host.pending_session(pane_id).or_else(|| {
+      route_pending
+        .iter()
+        .find(|p| p.session_id == pane_id)
+        .map(Pending::start)
+    });
+    let pending = pending.as_ref();
+    let workspace = session.workspace_id.and_then(|id| {
+      super::code_data::CodeHost::workspaces(host, &repo)
+        .ok()?
+        .into_iter()
+        .find(|w| w.id == id)
+    });
+    let workspace_path = pending
+      .and_then(|p| p.workspace_path.clone())
+      .or_else(|| workspace.as_ref().map(super::merge::full_path));
+    let agent = pending
+      .and_then(|p| p.agent.clone())
+      .unwrap_or_else(|| default_agent(host, &repo));
+    let pty = terminal_data::agent_pty_id(&repo, session.id);
+    let start = AgentStart {
+      agent: agent.clone(),
+      repo_path: repo.clone(),
+      workspace_path: workspace_path.clone(),
+      session_id: session.id,
+      pending_prompt: pending.and_then(|p| p.pending_prompt.clone()),
+      permission_mode: pending.and_then(|p| p.permission_mode.clone()),
+    };
+    let kind = Kind::Agent {
+      pane_id,
+      name: session.name.clone(),
+      repo_path: repo,
+      workspace_path,
+      workspace_name: workspace.map(|w| w.branch_name),
+      agent,
+    };
+    return Some((
+      kind,
+      pty,
+      Start::Agent {
+        start,
+        name: session.name,
+        workspace_id: session.workspace_id,
+        working_dir: pending.and_then(|p| p.workspace_path.clone()),
+      },
+    ));
+  }
+  None
+}
+
+fn default_agent(host: &dyn terminal_data::TerminalHost, repo: &str) -> String {
+  let key = vec!["default_agent".to_string()];
+  let read = |v: Result<super::settings_data::Values, String>| {
+    v.ok()
+      .and_then(|v| v.get("default_agent").cloned().flatten())
+      .filter(|v| !v.is_empty())
+  };
+  read(host.repo_settings(repo, &key))
+    .or_else(|| read(host.settings(&key)))
+    .unwrap_or_else(|| "claude".into())
 }
 
 /// The emulator's name for a mouse button xterm reports.
@@ -3557,6 +3855,7 @@ fn agent_icon(agent: &str) -> &'static str {
 impl Render for TerminalPane {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.watch_keys(window, cx);
+    self.adopt(cx);
     if let Some(route) = self.incoming.take() {
       self.apply_route(route, window, cx);
     }
@@ -3676,15 +3975,19 @@ impl Render for TerminalPane {
               let (moved, released) = (pane.clone(), pane);
               window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
                 if phase == gpui::DispatchPhase::Bubble {
-                  let _ = moved.update(cx, |pane, cx| pane.on_drag(e, cx));
+                  moved
+                    .update(cx, |pane, cx| pane.on_drag(e, cx))
+                    .ignore_closed();
                 }
               });
               window.on_mouse_event(move |_: &gpui::MouseUpEvent, phase, _, cx| {
                 if phase == gpui::DispatchPhase::Bubble {
-                  let _ = released.update(cx, |pane, cx| {
-                    pane.drag = None;
-                    cx.notify();
-                  });
+                  released
+                    .update(cx, |pane, cx| {
+                      pane.drag = None;
+                      cx.notify();
+                    })
+                    .ignore_closed();
                 }
               });
             },

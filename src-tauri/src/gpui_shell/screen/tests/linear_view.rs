@@ -110,6 +110,40 @@ impl linear_data::LinearHost for FakeHost {
     self.record(format!("apply linear suggestion {comment_id}"));
     Ok(())
   }
+  fn linear_create_issue(
+    &self,
+    _: &str,
+    team_id: &str,
+    title: &str,
+    description: &str,
+  ) -> Result<LinearIssue, String> {
+    self.record(format!(
+      "create linear issue {team_id} {title:?} {description:?}"
+    ));
+    let mut created = issue("9", ("Todo", "unstarted"), None);
+    created.title = title.into();
+    Ok(created)
+  }
+
+  fn linear_update_issue(
+    &self,
+    _: &str,
+    issue_id: &str,
+    title: &str,
+    description: &str,
+  ) -> Result<LinearIssue, String> {
+    self.record(format!(
+      "update linear issue {issue_id} {title:?} {description:?}"
+    ));
+    let mut updated = issue(issue_id, ("Todo", "unstarted"), None);
+    updated.title = title.into();
+    Ok(updated)
+  }
+
+  fn linear_delete_issue(&self, _: &str, issue_id: &str) -> Result<(), String> {
+    self.record(format!("delete linear issue {issue_id}"));
+    Ok(())
+  }
 }
 
 pub(super) fn user(id: &str, name: &str) -> LinearUser {
@@ -303,12 +337,20 @@ fn linear_lists_issues_and_kicks_one_off(cx: &mut TestAppContext) {
       })
     )]
   );
-  // The identifier opens the issue in Linear without expanding the row.
-  h.click("linear-issue-link-1");
+  // The agent button doesn't open the issue's page.
+  assert!(view(&mut h, |v| v.open_issue.is_none()));
+
+  // The row opens the page, which opens the issue in Linear and goes back.
+  h.click("linear-issue-1");
+  assert!(h.drawn("linear-issue-page-1"));
+  assert!(!h.drawn("linear-issue-2"));
+  h.click("linear-issue-open");
   assert!(host
     .calls()
     .contains(&"open https://linear.app/x/ENG-1".to_string()));
-  assert!(view(&mut h, |v| v.expanded.is_empty()));
+  h.click("linear-issue-back");
+  assert!(!h.drawn("linear-issue-page-1"));
+  assert!(h.drawn("linear-issue-2"));
 }
 
 #[gpui::test]
@@ -397,6 +439,11 @@ fn linear_kanban_groups_issues_by_state(cx: &mut TestAppContext) {
     &h.sent()[..],
     [ScreenAction::Field { field, value }] if field == "linear.kickoff" && value["id"] == "2"
   ));
+  assert!(view(&mut h, |v| v.open_issue.is_none()));
+  // A card opens the issue's page.
+  h.click("linear-kanban-card-2");
+  assert!(h.drawn("linear-issue-page-2"));
+  assert!(!h.drawn("linear-kanban-column-Todo"));
 }
 
 #[gpui::test]
@@ -409,7 +456,7 @@ fn linear_issue_shows_its_comments_and_starts_a_review(cx: &mut TestAppContext) 
   );
   let (mut h, host) = linear_harness(cx, host);
   h.click("linear-issue-1");
-  assert!(h.drawn("linear-issue-expanded-1"));
+  assert!(h.drawn("linear-issue-page-1"));
   assert!(host.calls().contains(&"read linear comments 1".to_string()));
   assert!(h.drawn("linear-comment-c1"));
   h.click("linear-start-review-linear_issue-1");
@@ -437,9 +484,9 @@ fn linear_issue_shows_its_comments_and_starts_a_review(cx: &mut TestAppContext) 
   assert!(!view(&mut h, |v| v
     .starting
     .contains(&linear_data::Commented::Issue("1".into()))));
-  // Folding it closes the comments.
-  h.click("linear-issue-1");
-  assert!(!h.drawn("linear-issue-expanded-1"));
+  // Back to the list closes the comments.
+  h.click("linear-issue-back");
+  assert!(!h.drawn("linear-comment-c1"));
 }
 
 #[gpui::test]
@@ -527,9 +574,10 @@ fn linear_without_a_key_says_how_to_connect(cx: &mut TestAppContext) {
       id: "linear.openSettings".into()
     }]
   );
-  h.click("linear-section-projects");
-  let page = screen(&mut h);
-  expect(page.get_by_text(crate::linear::NOT_CONNECTED)).to_be_visible();
+  // The whole view says it: no tabs to switch to, no team to pick.
+  assert!(h.drawn("linear-connection-state"));
+  assert!(!h.drawn("linear-section-projects"));
+  assert!(!h.drawn("linear-team-selector"));
 }
 
 #[gpui::test]
@@ -540,9 +588,128 @@ fn linear_shows_when_no_issues_match(cx: &mut TestAppContext) {
   assert!(h.drawn("linear-no-issues"));
 }
 
+#[gpui::test]
+fn linear_creates_an_issue_in_the_shown_team(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, linear_host());
+  h.click("linear-new-issue");
+  assert!(h.drawn("linear-new-issue-form"));
+  // No title, no create.
+  h.click("linear-new-issue-submit");
+  h.cx.run_until_parked();
+  assert!(!host.calls().iter().any(|c| c.starts_with("create")));
+  type_into(&mut h, "linear-new-issue-title", "New bug");
+  h.click("linear-new-issue-submit");
+  h.cx.run_until_parked();
+  let calls = host.calls();
+  let created = calls
+    .iter()
+    .position(|c| c == "create linear issue t1 \"New bug\" \"\"")
+    .unwrap_or_else(|| panic!("{calls:?}"));
+  // The list is read again and the new issue is the one inspected.
+  assert!(calls[created..].contains(&"read linear issues None".to_string()));
+  assert!(!h.drawn("linear-new-issue-form"));
+  assert_eq!(view(&mut h, |v| v.open_issue.clone()), Some("9".into()));
+}
+
+#[gpui::test]
+fn linear_new_issue_cancel_closes_the_form(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, linear_host());
+  h.click("linear-new-issue");
+  type_into(&mut h, "linear-new-issue-title", "Never mind");
+  h.click("linear-new-issue-cancel");
+  assert!(!h.drawn("linear-new-issue-form"));
+  assert!(!host.calls().iter().any(|c| c.starts_with("create")));
+}
+
+#[gpui::test]
+fn linear_edits_the_inspected_issue(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, linear_host());
+  h.click("linear-issue-1");
+  h.click("linear-issue-edit");
+  assert!(h.drawn("linear-issue-edit-form"));
+  type_into(&mut h, "linear-issue-edit-title", " v2");
+  h.click("linear-issue-edit-save");
+  h.cx.run_until_parked();
+  let calls = host.calls();
+  let updated = calls
+    .iter()
+    .position(|c| c == "update linear issue 1 \"Issue 1 v2\" \"Ship the API.\"")
+    .unwrap_or_else(|| panic!("{calls:?}"));
+  assert!(calls[updated..].contains(&"read linear issues None".to_string()));
+  assert!(!h.drawn("linear-issue-edit-form"));
+  assert!(h.drawn("linear-issue-page-1"));
+
+  // Cancel leaves Linear alone.
+  h.click("linear-issue-edit");
+  h.click("linear-issue-edit-cancel");
+  assert!(!h.drawn("linear-issue-edit-form"));
+  assert_eq!(
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("update"))
+      .count(),
+    1
+  );
+}
+
+#[gpui::test]
+fn linear_deletes_the_inspected_issue_after_confirming(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, linear_host());
+  h.click("linear-issue-1");
+  h.click("linear-issue-delete");
+  assert!(h.drawn("linear-delete-dialog"));
+  h.click("linear-delete-cancel");
+  assert!(!h.drawn("linear-delete-dialog"));
+  assert!(!host.calls().iter().any(|c| c.starts_with("delete")));
+
+  h.click("linear-issue-delete");
+  h.click("linear-delete-confirm");
+  h.cx.run_until_parked();
+  let calls = host.calls();
+  let deleted = calls
+    .iter()
+    .position(|c| c == "delete linear issue 1")
+    .unwrap_or_else(|| panic!("{calls:?}"));
+  assert!(calls[deleted..].contains(&"read linear issues None".to_string()));
+  assert!(!h.drawn("linear-delete-dialog"));
+  assert_eq!(view(&mut h, |v| v.open_issue.clone()), None);
+  assert!(h.drawn("linear-issue-1"));
+}
+
 #[test]
 fn linear_capitalizes_project_states() {
   assert_eq!(linear::capitalize("started"), "Started");
   assert_eq!(linear::capitalize("in progress"), "In Progress");
   assert_eq!(linear::capitalize(""), "");
+}
+
+#[gpui::test]
+fn linear_document_comments_show_at_the_paragraph_they_quote(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.linear.documents[0].content = Some("First part.\n\nSecond part.\n\nThird part.".into());
+  host
+    .linear
+    .comments
+    .push(("d1".into(), comment("c2", Some("Second part"))));
+  host
+    .linear
+    .comments
+    .push(("d1".into(), comment("c3", None)));
+  let (mut h, _) = linear_harness(cx, host);
+  h.click("linear-section-projects");
+  // A project without comments shows only its text.
+  assert!(h.drawn("linear-project-detail"));
+  assert!(!h.drawn("linear-comments-column"));
+
+  h.click("linear-document-item-d1");
+  assert!(h.drawn("linear-comment-c2"));
+  assert!(h.drawn("linear-comment-c3"));
+  let bounds = |h: &mut Harness, selector| h.cx.debug_bounds(selector).expect(selector);
+  let quoted = bounds(&mut h, "linear-comment-c2");
+  let column = bounds(&mut h, "linear-comments-column");
+  let unquoted = bounds(&mut h, "linear-comment-c3");
+  // The quoting comment sits in the text, above the comments under it.
+  assert!(quoted.bottom() <= column.top(), "{quoted:?} {column:?}");
+  assert!(column.contains(&unquoted.center()));
 }

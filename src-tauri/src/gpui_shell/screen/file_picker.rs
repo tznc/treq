@@ -4,6 +4,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{sync::Arc, time::Duration};
 
 use gpui_kit::{
@@ -20,9 +21,6 @@ use crate::gpui_shell::{
   theme,
   ui::{self, TextSize},
 };
-
-/// `useDebounce(query, 150)`.
-const DEBOUNCE: Duration = Duration::from_millis(150);
 
 /// Which files the picker searches.
 #[derive(Debug, Clone, PartialEq)]
@@ -70,12 +68,21 @@ impl FilePicker {
     this
   }
 
-  /// Searches for `query` once typing pauses (an empty one lists nothing).
+  /// Searches for `query` once typing pauses, if the host wants a pause (an
+  /// empty one searches at once: the picker opening, or the query cleared).
+  /// The shown results stay until the new ones arrive.
   pub(super) fn search(&mut self, query: String, cx: &mut Context<Self>) {
     self.query = query.clone();
     let (host, scope) = (self.host.clone(), self.scope.clone());
+    let delay = if query.trim().is_empty() {
+      Duration::ZERO
+    } else {
+      host.file_search_delay(&scope.repo_path)
+    };
     self._search = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(DEBOUNCE).await;
+      if !delay.is_zero() {
+        cx.background_executor().timer(delay).await;
+      }
       let results = cx
         .background_spawn(async move {
           host.search_files(
@@ -88,11 +95,13 @@ impl FilePicker {
         })
         .await
         .unwrap_or_default();
-      let _ = this.update(cx, |picker, cx| {
-        picker.results = results;
-        picker.selected = 0;
-        cx.notify();
-      });
+      this
+        .update(cx, |picker, cx| {
+          picker.results = results;
+          picker.selected = 0;
+          cx.notify();
+        })
+        .ignore_closed();
     }));
   }
 

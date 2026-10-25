@@ -31,7 +31,7 @@ pub enum ConflictLineRole {
   Unknown,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ConflictLineView {
   pub raw: String,
   pub kind: ConflictLineKind,
@@ -39,14 +39,14 @@ pub struct ConflictLineView {
   pub file_line: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ConflictComparisonView {
   pub left_line_indexes: Vec<usize>,
   pub base_line_indexes: Vec<usize>,
   pub right_line_indexes: Vec<usize>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ConflictRegionView {
   pub id: String,
   pub file_path: String,
@@ -63,6 +63,10 @@ pub struct ConflictRegionView {
 
 pub type ConflictRegion = ConflictRegionView;
 
+#[allow(
+  clippy::string_slice,
+  reason = "offsets come from ASCII find() and is_ascii_digit() scans of a marker line"
+)]
 fn extract_conflict_info(line: &str) -> Option<(usize, usize)> {
   let conflict_pos = line.find("Conflict ")?;
   let rest = &line[conflict_pos + 9..];

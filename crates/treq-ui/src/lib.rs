@@ -157,12 +157,52 @@ pub fn spinner(id: impl Into<ElementId>, size: f32, color: Hsla) -> impl IntoEle
   spin(id, icon(theme::ICON_SPINNER, size, color))
 }
 
+/// How often a spinner redraws. Each of its frames draws the whole window,
+/// and half the display's rate still turns smoothly.
+pub const SPIN_FPS: f32 = 30.;
+
+/// How often a pulse redraws. Its opacity moves by half in a second, so a
+/// dozen steps a second look the same as sixty, for a fifth of the frames.
+pub const PULSE_FPS: f32 = 12.;
+
 /// Spins `icon` once a second, as Tailwind's `animate-spin` does.
 pub fn spin(id: impl Into<ElementId>, icon: gpui::Svg) -> impl IntoElement {
   icon.with_animation(
     id,
-    Animation::new(Duration::from_secs(1)).repeat(),
+    Animation::new(Duration::from_secs(1))
+      .repeat()
+      .with_max_fps(SPIN_FPS),
     |svg, delta| svg.with_transformation(Transformation::rotate(gpui::percentage(delta))),
+  )
+}
+
+/// How long a load runs before its spinner or skeleton shows: one that
+/// lands sooner draws nothing rather than flashing it.
+pub const SPINNER_DELAY: Duration = Duration::from_millis(150);
+
+/// `placeholder` (a spinner, skeleton or "Loading..." line), hidden for its
+/// first [`SPINNER_DELAY`], so a fast load flashes nothing. It takes its room
+/// from the start, so nothing moves when it shows. Once shown it also
+/// answers to the debug selector `{id}-shown`.
+pub fn delayed<E>(id: impl Into<SharedString>, placeholder: E) -> gpui::AnimationElement<E>
+where
+  E: Styled + InteractiveElement + IntoElement + 'static,
+{
+  let id: SharedString = id.into();
+  let shown = format!("{id}-shown");
+  placeholder.with_animation(
+    ElementId::Name(id),
+    // One frame when the delay is up, rather than one every frame while
+    // nothing shows.
+    Animation::new(SPINNER_DELAY).with_max_fps(1. / SPINNER_DELAY.as_secs_f32()),
+    move |el, delta| {
+      if delta < 1. {
+        el.opacity(0.)
+      } else {
+        let shown = shown.clone();
+        el.debug_selector(move || shown)
+      }
+    },
   )
 }
 
@@ -175,6 +215,9 @@ pub enum Variant {
   Link,
   Outline,
   Secondary,
+  /// Filled amber: an action that brings back something that drifted
+  /// (Resync after a local edit). Not for errors; those are `Destructive`.
+  Warning,
 }
 
 /// `ui/button.tsx` sizes.
@@ -189,13 +232,6 @@ pub enum Size {
   Sm,
   Xs,
 }
-
-/// How much of a filled variant's color a disabled button keeps, as
-/// gpui-kit's own disabled buttons do. React's `disabled:opacity-40` faded
-/// the whole button as one layer; GPUI fades each primitive on its own, so
-/// element opacity let the faded fill show through a translucent label and
-/// wash it out.
-const DISABLED_FILL_OPACITY: f32 = 0.15;
 
 /// A [`Button`] child. Icons take the button's color when it renders, so
 /// they fade with it whichever order `icon` and `disabled` were called in.
@@ -219,6 +255,8 @@ pub struct Button {
   on_right_click: Option<OnRightClick>,
   on_hover: Option<OnHover>,
   selected: bool,
+  /// On or off, for a toggle.
+  pressed: Option<bool>,
   style: StyleRefinement,
   hover_bg: Option<Hsla>,
   /// The accessible name: the first label, unless set with `aria_label`.
@@ -238,6 +276,7 @@ impl Button {
       on_right_click: None,
       on_hover: None,
       selected: false,
+      pressed: None,
       style: StyleRefinement::default(),
       hover_bg: None,
       name: None,
@@ -269,6 +308,14 @@ impl Button {
   /// trigger of a menu that is open.
   pub fn selected(mut self, selected: bool) -> Self {
     self.selected = selected;
+    self
+  }
+
+  /// A toggle, on or off: drawn in the selected style while on, and read
+  /// out as pressed or not.
+  pub fn pressed(mut self, on: bool) -> Self {
+    self.pressed = Some(on);
+    self.selected = on;
     self
   }
 
@@ -325,7 +372,10 @@ impl Button {
   }
 
   fn filled(&self) -> bool {
-    matches!(self.variant, Variant::Default | Variant::Destructive)
+    matches!(
+      self.variant,
+      Variant::Default | Variant::Destructive | Variant::Warning
+    )
   }
 
   fn variant_foreground(&self) -> Hsla {
@@ -336,6 +386,7 @@ impl Button {
       Variant::Ghost | Variant::Outline => p.foreground,
       Variant::Link => p.primary,
       Variant::Secondary => p.secondary_foreground,
+      Variant::Warning => p.warning_foreground,
     }
   }
 }
@@ -357,8 +408,9 @@ impl Styled for Button {
 impl Button {
   /// The colors of each interaction state, as gpui-bootstrap's
   /// `button-variant()` takes them. A disabled button keeps its shape: a
-  /// filled one fades its fill, an unfilled one its border, and the label
-  /// goes muted.
+  /// filled one swaps its fill for the neutral muted one, whatever its
+  /// variant or a caller's fill, so no state colour shows on a control that
+  /// can't act; an unfilled one fades its border, and the label goes muted.
   fn colors(&self) -> gpui_bootstrap::ButtonColors {
     let p = &self.palette;
     let clear = gpui::transparent_black();
@@ -369,6 +421,7 @@ impl Button {
       Variant::Link => (clear, clear, clear),
       Variant::Outline => (p.background, p.input, p.accent),
       Variant::Secondary => (p.secondary, p.secondary, p.secondary.opacity(0.7)),
+      Variant::Warning => (p.warning, p.warning, p.warning.opacity(0.85)),
     };
     let hover_bg = self.hover_bg.unwrap_or(hover_bg);
     let (bg, hover_bg) = if self.selected && !self.filled() {
@@ -378,10 +431,7 @@ impl Button {
     };
     let color = self.variant_foreground();
     let (disabled_bg, disabled_border) = if self.filled() {
-      (
-        bg.opacity(DISABLED_FILL_OPACITY),
-        border.opacity(DISABLED_FILL_OPACITY),
-      )
+      (p.muted, p.muted)
     } else {
       (bg, border.opacity(0.5))
     };
@@ -403,7 +453,7 @@ impl Button {
     }
   }
 
-  /// The label color while disabled. Over a tinted fill the muted color
+  /// The label color while disabled. Over the muted fill the muted color
   /// alone reads as disabled; over the page it needs fading too, or an
   /// outline button looks enabled.
   fn disabled_foreground(&self) -> Hsla {
@@ -427,7 +477,7 @@ impl RenderOnce for Button {
       let mut style = self.style.clone();
       if filled {
         style.background = style.background.take().map(|fill| match fill {
-          gpui::Fill::Color(bg) => gpui::Fill::Color(bg.opacity(DISABLED_FILL_OPACITY)),
+          gpui::Fill::Color(_) => gpui::Fill::Color(self.palette.muted.into()),
         });
       }
       style.border_color = style.border_color.map(|c| c.opacity(0.5));
@@ -450,6 +500,13 @@ impl RenderOnce for Button {
         b.button_style(gpui_bootstrap::button::ButtonStyle::Link)
       })
       .when_some(self.name, |b, name| b.accessibility_label(name))
+      .when_some(self.pressed, |b, on| {
+        b.aria_toggled(if on {
+          gpui::accesskit::Toggled::True
+        } else {
+          gpui::accesskit::Toggled::False
+        })
+      })
       .debug_selector(move || selector)
       .whitespace_nowrap()
       .font_weight(gpui::FontWeight::MEDIUM)
@@ -717,11 +774,38 @@ mod tests {
   }
 
   #[test]
+  fn a_pressed_button_is_a_toggle_in_the_selected_style() {
+    let p = theme::palette(false);
+    let off = Button::new("off", &p).pressed(false);
+    assert_eq!(off.pressed, Some(false));
+    assert!(!off.selected);
+    let on = Button::new("on", &p)
+      .variant(Variant::Outline)
+      .pressed(true);
+    assert_eq!(on.pressed, Some(true));
+    assert_eq!(on.colors().bg, p.selected());
+    // A plain button is no toggle.
+    assert_eq!(Button::new("plain", &p).pressed, None);
+  }
+
+  #[test]
+  fn warning_button_is_filled_with_a_dark_label() {
+    let p = theme::palette(false);
+    let warning = Button::new("warning", &p).variant(Variant::Warning);
+    assert!(warning.filled());
+    assert_eq!(warning.foreground(), p.warning_foreground);
+    assert_eq!(
+      theme::palette(true).warning_foreground,
+      p.warning_foreground
+    );
+  }
+
+  #[test]
   fn disabled_button_mutes_its_label_and_icons() {
     let p = theme::palette(false);
     let primary = Button::new("primary", &p);
     assert_eq!(primary.foreground(), p.primary_foreground);
-    // An opaque label over the tinted fill, so the fill can't wash it out.
+    // An opaque label over the muted fill, so the fill can't wash it out.
     let primary = primary.disabled(true);
     assert_eq!(primary.foreground(), p.muted_foreground);
     let outline = Button::new("outline", &p)

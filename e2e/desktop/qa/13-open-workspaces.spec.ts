@@ -138,7 +138,7 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     title: "Linear tab: the user's task list",
     expectations: [
       "Linear tab selected with a '1' badge; GitHub tab keeps its '1' badge",
-      "'Your issues' lists ENG-142, ENG-139 and ENG-131 (not the done ENG-128 or hubot's ENG-125), with state, priority and project badges",
+      "'Your issues' lists ENG-143, ENG-142, ENG-139 and ENG-131 (not the done ENG-128 or hubot's ENG-125), with state, priority and project badges",
       "ENG-142 is checked; status reads '5 workspaces will be created, 1 already open'; button reads 'Create 6 Workspaces'",
     ],
   });
@@ -183,6 +183,146 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     ],
   });
   await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("heading", { name: "New Workspaces" }),
+  ).toBeHidden();
+});
+
+test("open-workspaces: the pull request search shows loading, no matches and errors", async ({
+  page,
+}) => {
+  await home(page);
+  await page.getByRole("button", { name: "New workspaces" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Your pull requests" }),
+  ).toBeVisible();
+  const search = page.getByLabel("Search pull requests");
+  const searching = page.getByRole("progressbar", {
+    name: "Searching pull requests",
+  });
+
+  // The fake gh holds a search with "slow" in it for 4s.
+  await search.fill("slow runbook");
+  await expect(searching).toBeVisible();
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-search-loading",
+    title: "Pull request search in flight",
+    expectations: [
+      "A small grey spinner sits at the right end of the 'Search pull requests' input, which reads 'slow runbook'",
+      "The previous list (octocat's PRs) still shows below, dimmed",
+    ],
+  });
+
+  await expect(searching).toBeHidden({ timeout: 10_000 });
+  await expect(
+    page.getByRole("checkbox", { name: "#409 docs: add the ingest runbook" }),
+  ).toBeVisible();
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-search-results",
+    title: "Pull request search answered",
+    expectations: [
+      "'Matching pull requests' lists only #409 at full opacity",
+      "No spinner in the search input",
+    ],
+  });
+
+  await search.fill("zzz");
+  // The empty state's text isn't exposed; the capture shows it.
+  await expect(searching).toBeHidden();
+  await expect(
+    page.getByRole("checkbox", { name: "#409 docs: add the ingest runbook" }),
+  ).toBeHidden();
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-search-empty",
+    title: "Pull request search with no matches",
+    expectations: [
+      "The list shows a PR icon and 'No pull requests match \"zzz\".', not 'No open pull requests.'",
+      "No spinner in the search input",
+    ],
+  });
+
+  await search.fill("unreachable");
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+  await expect(searching).toBeHidden();
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-search-error",
+    title: "Pull request search failed",
+    expectations: [
+      "The list shows 'Could not load pull requests' with the gh error 'HTTP 502: Bad Gateway' and a retry action",
+      "No spinner in the search input",
+    ],
+  });
+
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(
+    page.getByRole("heading", { name: "New Workspaces" }),
+  ).toBeHidden();
+});
+
+test("open-workspaces: Assigned to me narrows the pull requests to the user's assigned ones", async ({
+  page,
+}) => {
+  await home(page);
+  await page.getByRole("button", { name: "New workspaces" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Your pull requests" }),
+  ).toBeVisible();
+  const assigned = page.getByRole("button", { name: "Assigned to me" });
+  // gpui-playwright reports a toggle's state as `checked`, not `pressed`.
+  await expect(
+    page.getByRole("button", { name: "Assigned to me", checked: false }),
+  ).toBeVisible();
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-open-workspaces-assigned-off",
+    title: "Assigned to me, off",
+    expectations: [
+      "An outline 'Assigned to me' chip with a person icon sits right of the 'Search pull requests' input, the same height",
+      "'Your pull requests' lists octocat's own PRs",
+    ],
+  });
+
+  await assigned.click();
+  await expect(
+    page.getByRole("heading", { name: "Assigned to you" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Assigned to me", checked: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("checkbox", { name: "#409 docs: add the ingest runbook" }),
+  ).toBeVisible();
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-open-workspaces-assigned-on",
+    title: "Assigned to me, on",
+    expectations: [
+      "The 'Assigned to me' chip is drawn in the light selected tint",
+      "'Assigned to you' lists #421 by alice and #409 by bob, none of octocat's own",
+    ],
+  });
+
+  await page.getByLabel("Search pull requests").fill("runbook");
+  await expect(
+    page.getByRole("heading", { name: "Matching pull requests" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("checkbox", { name: /^#421 / }),
+  ).toBeHidden();
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-open-workspaces-assigned-search",
+    title: "Assigned to me with a search",
+    expectations: [
+      "The chip stays on; 'Matching pull requests' lists only #409",
+    ],
+  });
+
+  await page.getByRole("button", { name: "Cancel" }).click();
   await expect(
     page.getByRole("heading", { name: "New Workspaces" }),
   ).toBeHidden();

@@ -37,6 +37,7 @@
             "outline",
             "ghost",
             "destructive",
+            "warning",
             "secondary",
             "link"
           ],
@@ -129,6 +130,21 @@
         },
         {
           "theme": "light",
+          "key": "variant=warning,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "warning"
+          },
+          "file": "snapshots/button/playground/light/variant=warning.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "a4b99020569a28f2"
+        },
+        {
+          "theme": "light",
           "key": "variant=secondary,label=Merge,disabled=false,selected=false",
           "values": {
             "disabled": false,
@@ -170,7 +186,7 @@
           "width": 272,
           "height": 96,
           "scale": 2.0,
-          "hash": "41cf946eeb8ef710"
+          "hash": "85b7c88fad3b3717"
         },
         {
           "theme": "light",
@@ -250,6 +266,21 @@
         },
         {
           "theme": "dark",
+          "key": "variant=warning,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "warning"
+          },
+          "file": "snapshots/button/playground/dark/variant=warning.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "b3938f62e85dfb8e"
+        },
+        {
+          "theme": "dark",
           "key": "variant=secondary,label=Merge,disabled=false,selected=false",
           "values": {
             "disabled": false,
@@ -291,7 +322,7 @@
           "width": 272,
           "height": 96,
           "scale": 2.0,
-          "hash": "5ca2d2d146e5e507"
+          "hash": "f8e8ac4806ac75c9"
         },
         {
           "theme": "dark",
@@ -322,7 +353,7 @@
           "knob": "disabled"
         },
         {
-          "text": ";\ndiv().flex().flex_wrap().gap_2().children(\n  [\n    (\"Merge\", Variant::Default),\n    (\"Rename…\", Variant::Outline),\n    (\"Add\", Variant::Ghost),\n    (\"Delete\", Variant::Destructive),\n    (\"Open docs\", Variant::Link),\n  ]\n  .map(|(label, variant)| {\n    Button::new(label, &p)\n      .variant(variant)\n      .size(treq_ui::Size::Sm)\n      .label(label)\n      .disabled(disabled)\n  }),\n)"
+          "text": ";\ndiv().flex().flex_wrap().gap_2().children(\n  [\n    (\"Merge\", Variant::Default),\n    (\"Rename…\", Variant::Outline),\n    (\"Add\", Variant::Ghost),\n    (\"Delete\", Variant::Destructive),\n    (\"Resync\", Variant::Warning),\n    (\"Open docs\", Variant::Link),\n  ]\n  .map(|(label, variant)| {\n    Button::new(label, &p)\n      .variant(variant)\n      .size(treq_ui::Size::Sm)\n      .label(label)\n      .disabled(disabled)\n  }),\n)"
         }
       ],
       "knobs": [
@@ -345,10 +376,10 @@
           },
           "is_default": true,
           "file": "snapshots/button/variants/light/default.png",
-          "width": 338,
+          "width": 402,
           "height": 65,
           "scale": 2.0,
-          "hash": "dd28abf1acd7d05b"
+          "hash": "20aa52cc96d4f6d6"
         },
         {
           "theme": "light",
@@ -357,10 +388,10 @@
             "disabled": true
           },
           "file": "snapshots/button/variants/light/disabled=true.png",
-          "width": 338,
+          "width": 402,
           "height": 58,
           "scale": 2.0,
-          "hash": "386ec47b242dbff2"
+          "hash": "60ad88b89db089dc"
         },
         {
           "theme": "dark",
@@ -370,10 +401,10 @@
           },
           "is_default": true,
           "file": "snapshots/button/variants/dark/default.png",
-          "width": 338,
+          "width": 402,
           "height": 62,
           "scale": 2.0,
-          "hash": "3a1127a4b7442fca"
+          "hash": "e5911d4367c7cb4f"
         },
         {
           "theme": "dark",
@@ -382,10 +413,10 @@
             "disabled": true
           },
           "file": "snapshots/button/variants/dark/disabled=true.png",
-          "width": 338,
+          "width": 402,
           "height": 58,
           "scale": 2.0,
-          "hash": "b8ed5f2663982179"
+          "hash": "0d32e4a71cc3f1da"
         }
       ]
     },
@@ -580,7 +611,7 @@
           "width": 117,
           "height": 55,
           "scale": 2.0,
-          "hash": "9bf4b9b6d28c1502"
+          "hash": "a8d4b36016272e0c"
         },
         {
           "theme": "dark",
@@ -637,7 +668,7 @@
           "width": 117,
           "height": 55,
           "scale": 2.0,
-          "hash": "3cb9e176690a3713"
+          "hash": "7d073c3bc84d2381"
         }
       ]
     },
@@ -1331,7 +1362,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "3a33ee02e9a21626"
+          "hash": "f558e971d90172ce"
         },
         {
           "theme": "dark",
@@ -1341,7 +1372,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "41c07d4b0a122fcf"
+          "hash": "7dc60fa84bb32888"
         }
       ]
     },

@@ -865,10 +865,15 @@ impl Model {
         }
         vec![Effect::Refresh { revision: true }]
       }
+      NativeEvent::WorkspacesRemoving { repo_path, ids } => {
+        self.leave_removed(repo_path, ids, data);
+        Vec::new()
+      }
       NativeEvent::WorkspacesRemoved { repo_path, ids } => {
         self.leave_removed(repo_path, ids, data);
         vec![Effect::Refresh { revision: true }]
       }
+      NativeEvent::WorkspacesRestored { .. } => vec![Effect::Refresh { revision: true }],
       NativeEvent::Open { what } => self.open_request(what, data),
       NativeEvent::RemoteMutation { status, reason } => {
         self.remote_mutation(status, reason.as_deref())

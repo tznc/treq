@@ -143,8 +143,8 @@ fn github_comments_best_effort(repo_path: &str, workspace_id: i64) -> Vec<Normal
   let Ok(Some(workspace)) = local_db::get_workspace_by_id(repo_path, workspace_id) else {
     return Vec::new();
   };
-  let Some(gh) =
-    crate::binary_paths::get_binary_path("gh").or_else(|| crate::binary_paths::detect_binary("gh"))
+  let Some(gh) = crate::binary_paths::get_binary_path("gh")
+    .or_else(|| crate::binary_paths::detect_binary_cached("gh"))
   else {
     return Vec::new();
   };

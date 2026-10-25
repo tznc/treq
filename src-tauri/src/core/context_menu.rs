@@ -16,6 +16,7 @@ pub enum MenuIcon {
   GitBranch,
   Link,
   Pencil,
+  RotateCcw,
   Settings,
   Trash,
 }
@@ -48,6 +49,8 @@ pub enum MenuAction {
     repo_path: String,
     workspace_id: i64,
   },
+  /// Points the workspace's branch back at `origin`, dropping local work.
+  ResetToRemote,
   /// The workspace header's Create PR menu.
   CreatePr {
     draft: bool,
@@ -219,8 +222,11 @@ pub fn workspace_relative_path(workspace_path: &str, repo_path: &str) -> String 
   if !workspace_path.starts_with('/') {
     return format!(".treq/workspaces/{workspace_path}");
   }
-  match workspace_path.strip_prefix(repo_path) {
-    Some(rest) if !repo_path.is_empty() && rest.starts_with('/') => rest[1..].to_string(),
+  match workspace_path
+    .strip_prefix(repo_path)
+    .and_then(|rest| rest.strip_prefix('/'))
+  {
+    Some(rest) if !repo_path.is_empty() => rest.to_string(),
     _ => workspace_path.to_string(),
   }
 }
@@ -277,17 +283,30 @@ pub fn workspace_items(
   items
 }
 
-/// The workspace header's More menu.
-pub fn delete_workspace_items(repo_path: &str, workspace_id: i64) -> Vec<MenuItem> {
-  vec![MenuItem::item(
-    "Delete Workspace",
-    MenuAction::DeleteWorkspace {
-      repo_path: repo_path.into(),
-      workspace_id,
-    },
-  )
-  .icon(MenuIcon::Trash)
-  .destructive()]
+/// The workspace header's More menu; Reset to remote only when the branch
+/// is on `origin`.
+pub fn workspace_more_items(repo_path: &str, workspace_id: i64, on_remote: bool) -> Vec<MenuItem> {
+  let mut items = Vec::new();
+  if on_remote {
+    items.push(
+      MenuItem::item("Reset to remote", MenuAction::ResetToRemote)
+        .icon(MenuIcon::RotateCcw)
+        .destructive(),
+    );
+    items.push(MenuItem::Separator);
+  }
+  items.push(
+    MenuItem::item(
+      "Delete Workspace",
+      MenuAction::DeleteWorkspace {
+        repo_path: repo_path.into(),
+        workspace_id,
+      },
+    )
+    .icon(MenuIcon::Trash)
+    .destructive(),
+  );
+  items
 }
 
 /// `CreatePrButtonGroup`'s dropdown.
@@ -476,7 +495,11 @@ mod tests {
   #[test]
   fn builds_the_header_menus() {
     assert_eq!(
-      labels(&delete_workspace_items("/r", 4)),
+      labels(&workspace_more_items("/r", 4, true)),
+      ["Reset to remote", "---", "Delete Workspace"]
+    );
+    assert_eq!(
+      labels(&workspace_more_items("/r", 4, false)),
       ["Delete Workspace"]
     );
     assert_eq!(

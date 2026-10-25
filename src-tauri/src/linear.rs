@@ -159,6 +159,26 @@ struct LinearGraphqlResponse<T> {
 #[derive(Deserialize)]
 struct LinearGraphqlError {
   message: String,
+  #[serde(default)]
+  extensions: Option<LinearGraphqlErrorExtensions>,
+}
+
+#[derive(Deserialize)]
+struct LinearGraphqlErrorExtensions {
+  #[serde(default)]
+  code: Option<String>,
+}
+
+impl LinearGraphqlError {
+  /// Linear answers a missing, revoked or mistyped key with this error
+  /// (`AUTHENTICATION_ERROR`), whatever the HTTP status.
+  fn is_authentication(&self) -> bool {
+    self
+      .extensions
+      .as_ref()
+      .and_then(|e| e.code.as_deref())
+      .is_some_and(|code| code == "AUTHENTICATION_ERROR")
+  }
 }
 
 const LINEAR_GRAPHQL_URL: &str = "https://api.linear.app/graphql";
@@ -261,6 +281,12 @@ fn parse_graphql_response<T: DeserializeOwned>(
   };
 
   if let Some(errors) = result.errors.filter(|errors| !errors.is_empty()) {
+    // "Authentication required" says nothing about what to fix; the key is.
+    if matches!(status.as_u16(), 401 | 403)
+      || errors.iter().any(LinearGraphqlError::is_authentication)
+    {
+      return Err(auth_error(status, via_proxy));
+    }
     return Err(format!(
       "Linear API error: {}",
       errors
@@ -291,21 +317,29 @@ fn http_status_error(status: reqwest::StatusCode, text: &str, via_proxy: bool) -
     }
   }
   match status.as_u16() {
-    401 | 403 if via_proxy => {
-      format!(
-        "treq could not authenticate with the Linear proxy ({status}). Sign in to treq again."
-      )
-    }
-    401 | 403 => {
-      format!(
-        "Linear rejected the API key ({status}). Check the Linear settings for this repository."
-      )
-    }
+    401 | 403 => auth_error(status, via_proxy),
     429 => format!("Linear rate limit reached ({status}). Try again in a minute."),
     _ => {
       let body: String = text.chars().take(300).collect();
       format!("Linear API error ({status}): {body}")
     }
+  }
+}
+
+/// Whether `error` (a read's) means Linear is not connected or refuses the
+/// key, which only Settings can fix.
+pub fn needs_connection(error: &str) -> bool {
+  error == NOT_CONNECTED || error.starts_with(REJECTED_KEY) || error.starts_with(REJECTED_PROXY)
+}
+
+const REJECTED_KEY: &str = "Linear rejected the API key";
+const REJECTED_PROXY: &str = "treq could not authenticate with the Linear proxy";
+
+fn auth_error(status: reqwest::StatusCode, via_proxy: bool) -> String {
+  if via_proxy {
+    format!("{REJECTED_PROXY} ({status}). Sign in to treq again.")
+  } else {
+    format!("{REJECTED_KEY} ({status}). Check the Linear settings for this repository.")
   }
 }
 
@@ -870,6 +904,116 @@ pub async fn linear_list_document_comments_impl(
   fetch_comments_for_entity(client, CommentEntity::Document, document_id).await
 }
 
+fn create_issue_body(team_id: &str, title: &str, description: &str) -> serde_json::Value {
+  serde_json::json!({
+    "query": format!(
+      "mutation($input: IssueCreateInput!) {{ issueCreate(input: $input) {{ success issue {{ {ISSUE_FIELDS} }} }} }}"
+    ),
+    "variables": {
+      "input": { "teamId": team_id, "title": title, "description": description },
+    },
+  })
+}
+
+fn update_issue_body(issue_id: &str, title: &str, description: &str) -> serde_json::Value {
+  serde_json::json!({
+    "query": format!(
+      "mutation($id: String!, $input: IssueUpdateInput!) {{ issueUpdate(id: $id, input: $input) {{ success issue {{ {ISSUE_FIELDS} }} }} }}"
+    ),
+    "variables": {
+      "id": issue_id,
+      "input": { "title": title, "description": description },
+    },
+  })
+}
+
+fn delete_issue_body(issue_id: &str) -> serde_json::Value {
+  serde_json::json!({
+    "query": "mutation($id: String!) { issueDelete(id: $id) { success } }",
+    "variables": { "id": issue_id },
+  })
+}
+
+#[derive(Deserialize)]
+struct IssuePayload {
+  success: bool,
+  issue: Option<LinearIssueNode>,
+}
+
+fn issue_from_payload(payload: IssuePayload, action: &str) -> Result<LinearIssue, String> {
+  match payload {
+    IssuePayload {
+      success: true,
+      issue: Some(node),
+    } => Ok(map_issue_node(node)),
+    _ => Err(format!("Linear did not {action} the issue")),
+  }
+}
+
+fn require_title(title: &str) -> Result<&str, String> {
+  let title = title.trim();
+  if title.is_empty() {
+    return Err("An issue needs a title".to_string());
+  }
+  Ok(title)
+}
+
+pub async fn linear_create_issue_impl(
+  client: &LinearClientSource,
+  team_id: &str,
+  title: &str,
+  description: &str,
+) -> Result<LinearIssue, String> {
+  #[derive(Deserialize)]
+  struct Data {
+    #[serde(rename = "issueCreate")]
+    issue_create: IssuePayload,
+  }
+  let title = require_title(title)?;
+  let data: Data = linear_graphql(
+    client,
+    &create_issue_body(team_id, title, description),
+    "issue",
+  )
+  .await?;
+  issue_from_payload(data.issue_create, "create")
+}
+
+pub async fn linear_update_issue_impl(
+  client: &LinearClientSource,
+  issue_id: &str,
+  title: &str,
+  description: &str,
+) -> Result<LinearIssue, String> {
+  #[derive(Deserialize)]
+  struct Data {
+    #[serde(rename = "issueUpdate")]
+    issue_update: IssuePayload,
+  }
+  let title = require_title(title)?;
+  let data: Data = linear_graphql(
+    client,
+    &update_issue_body(issue_id, title, description),
+    "issue",
+  )
+  .await?;
+  issue_from_payload(data.issue_update, "update")
+}
+
+/// Moves the issue to Linear's trash, where it can be restored for 30 days.
+pub async fn linear_delete_issue_impl(
+  client: &LinearClientSource,
+  issue_id: &str,
+) -> Result<(), String> {
+  let data: serde_json::Value =
+    linear_graphql(client, &delete_issue_body(issue_id), "issue").await?;
+  if data["issueDelete"]["success"].as_bool() == Some(true) {
+    Ok(())
+  } else {
+    Err("Linear did not delete the issue".to_string())
+  }
+}
+
 /// Where one reviewable Linear text lives: the query root that reads it, the
 /// field holding it, the mutation that writes it, and the entity id.
 struct ReviewTextLocation {
@@ -1164,6 +1308,31 @@ mod tests {
     )
     .unwrap_err();
     assert_eq!(err, "Linear API error: Argument Validation Error");
+  }
+
+  #[test]
+  fn authentication_errors_point_at_the_key() {
+    // Linear's answer to a revoked or mistyped key.
+    let err = parse_graphql_response::<ViewerOnly>(
+      reqwest::StatusCode::BAD_REQUEST,
+      r#"{"errors":[{"message":"Authentication required, not authenticated","extensions":{"type":"authentication error","code":"AUTHENTICATION_ERROR"}}]}"#,
+      false,
+    )
+    .unwrap_err();
+    assert!(err.contains("rejected the API key"), "{err}");
+
+    let err = parse_graphql_response::<ViewerOnly>(
+      reqwest::StatusCode::UNAUTHORIZED,
+      r#"{"errors":[{"message":"Authentication required"}]}"#,
+      false,
+    )
+    .unwrap_err();
+    assert!(err.contains("rejected the API key"), "{err}");
+    assert!(needs_connection(&err));
+    assert!(needs_connection(NOT_CONNECTED));
+    assert!(!needs_connection(
+      "Linear rate limit reached (429). Try again in a minute."
+    ));
   }
 
   #[test]
@@ -1573,5 +1742,136 @@ mod tests {
 
     let err = linear_get_viewer_impl(&client).await.unwrap_err();
     assert_eq!(err, "Linear: Linear account not linked");
+  }
+
+  fn issue_node_json(title: &str, description: &str) -> serde_json::Value {
+    serde_json::json!({
+      "id": "issue-1",
+      "identifier": "ENG-1",
+      "title": title,
+      "description": description,
+      "state": { "name": "Todo", "type": "unstarted" },
+      "labels": { "nodes": [] },
+      "branchName": "eng-1",
+      "parent": null,
+      "children": { "nodes": [] },
+      "url": "https://linear.app/x/issue/ENG-1",
+      "assignee": null,
+      "priority": 0,
+      "priorityLabel": "No priority",
+      "project": null
+    })
+  }
+
+  #[test]
+  fn issue_mutation_bodies_pass_input_as_variables() {
+    let create = create_issue_body("team-1", HOSTILE, "body");
+    let query = create["query"].as_str().unwrap();
+    assert!(!query.contains(HOSTILE));
+    assert!(query.contains("issueCreate(input: $input)"));
+    assert_eq!(create["variables"]["input"]["teamId"], "team-1");
+    assert_eq!(create["variables"]["input"]["title"], HOSTILE);
+    assert_eq!(create["variables"]["input"]["description"], "body");
+
+    let update = update_issue_body(HOSTILE, "Title", "Desc");
+    let query = update["query"].as_str().unwrap();
+    assert!(!query.contains(HOSTILE));
+    assert!(query.contains("issueUpdate(id: $id, input: $input)"));
+    assert_eq!(update["variables"]["id"], HOSTILE);
+    assert_eq!(update["variables"]["input"]["title"], "Title");
+
+    let delete = delete_issue_body(HOSTILE);
+    assert!(!delete["query"].as_str().unwrap().contains(HOSTILE));
+    assert!(delete["query"]
+      .as_str()
+      .unwrap()
+      .contains("issueDelete(id: $id)"));
+    assert_eq!(delete["variables"]["id"], HOSTILE);
+  }
+
+  #[tokio::test]
+  async fn creating_an_issue_returns_the_new_issue() {
+    use wiremock::{
+      matchers::{body_partial_json, method},
+      Mock, MockServer, ResponseTemplate,
+    };
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .and(body_partial_json(serde_json::json!({
+        "variables": { "input": { "teamId": "team-1", "title": "New", "description": "Body" } }
+      })))
+      .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+        "data": { "issueCreate": { "success": true, "issue": issue_node_json("New", "Body") } }
+      })))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let _guard = use_mock_endpoint(&server, Duration::from_secs(5));
+
+    let issue = linear_create_issue_impl(&api_key("k"), "team-1", "New", "Body")
+      .await
+      .unwrap();
+    assert_eq!(issue.identifier, "ENG-1");
+    assert_eq!(issue.title, "New");
+  }
+
+  #[tokio::test]
+  async fn creating_an_issue_rejects_a_blank_title_without_calling_linear() {
+    let err = linear_create_issue_impl(&api_key("k"), "team-1", "  ", "")
+      .await
+      .unwrap_err();
+    assert!(err.contains("title"), "{err}");
+  }
+
+  #[tokio::test]
+  async fn updating_an_issue_returns_the_updated_issue() {
+    use wiremock::{
+      matchers::{body_partial_json, method},
+      Mock, MockServer, ResponseTemplate,
+    };
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .and(body_partial_json(serde_json::json!({
+        "variables": { "id": "issue-1", "input": { "title": "Renamed", "description": "D" } }
+      })))
+      .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+        "data": { "issueUpdate": { "success": true, "issue": issue_node_json("Renamed", "D") } }
+      })))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let _guard = use_mock_endpoint(&server, Duration::from_secs(5));
+
+    let issue = linear_update_issue_impl(&api_key("k"), "issue-1", "Renamed", "D")
+      .await
+      .unwrap();
+    assert_eq!(issue.title, "Renamed");
+  }
+
+  #[tokio::test]
+  async fn deleting_an_issue_succeeds_and_reports_rejection() {
+    use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+        "data": { "issueDelete": { "success": true } }
+      })))
+      .up_to_n_times(1)
+      .mount(&server)
+      .await;
+    Mock::given(method("POST"))
+      .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+        "data": { "issueDelete": { "success": false } }
+      })))
+      .mount(&server)
+      .await;
+    let _guard = use_mock_endpoint(&server, Duration::from_secs(5));
+
+    linear_delete_issue_impl(&api_key("k"), "issue-1")
+      .await
+      .unwrap();
+    assert!(linear_delete_issue_impl(&api_key("k"), "issue-1")
+      .await
+      .is_err());
   }
 }

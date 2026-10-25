@@ -16,7 +16,7 @@ use tauri_plugin_gpui::gpui;
 use super::{
   actions::{Menu, Shortcut},
   controller::{Presentation, WindowController},
-  data::{Flags, POLL, SESSIONS_POLL},
+  data::{Flags, BACKGROUND_EVERY, POLL, SESSIONS_POLL},
   host::{FileWatch, WindowHost},
   remote::{RemoteHost, UserManagedValues},
   tree::tests::workspace,
@@ -30,6 +30,7 @@ use crate::{
     remote_records::{self, RestoreFailure, SavedRepository},
     repo::RepoBranch,
     supporting_repos::SupportingRepo,
+    workspaces::WorkspaceSummary,
     SingleRebaseResult, WorkspaceSidebarStatus,
   },
   github::{GitRemoteInfo, PrInfo},
@@ -64,6 +65,10 @@ struct FakeHost {
   /// The next branch read fails, as one before `prepare_repo`'s jj init
   /// does.
   no_branch_once: std::sync::atomic::AtomicBool,
+  /// The workspaces come from a database the window can list at once.
+  from_db: bool,
+  /// What `summaries` answers, when the host reads in one round trip.
+  summaries: Mutex<Option<Vec<WorkspaceSummary>>>,
   /// Every call, in order.
   calls: Mutex<Vec<String>>,
   /// The watched checkouts, each with the sender that reports an edit.
@@ -114,6 +119,14 @@ impl WindowHost for FakeHost {
     )
   }
 
+  fn listed_workspaces(&self, repo: &str) -> Option<Vec<Workspace>> {
+    if !self.from_db {
+      return None;
+    }
+    self.record(format!("listed {repo}"));
+    self.workspaces.lock().unwrap().get(repo).cloned()
+  }
+
   fn statuses(&self, _: &str) -> Result<Vec<WorkspaceSidebarStatus>, String> {
     Ok(Vec::new())
   }
@@ -121,6 +134,11 @@ impl WindowHost for FakeHost {
   fn has_changes(&self, _: &str, id: i64) -> Option<bool> {
     self.record(format!("detail {id}"));
     Some(false)
+  }
+
+  fn summaries(&self, repo: &str) -> Option<Vec<WorkspaceSummary>> {
+    self.record(format!("summaries {repo}"));
+    self.summaries.lock().unwrap().clone()
   }
 
   fn sessions(&self, repo: &str) -> Vec<Session> {
@@ -427,7 +445,13 @@ impl Window {
     let repo = repo.map(String::from);
     let controller = cx.update(|cx| {
       cx.new(|cx| {
-        WindowController::new(host, repo, Rc::new(move |p, _| s.borrow_mut().push(p)), cx)
+        WindowController::new(
+          host,
+          repo,
+          Rc::new(move |p, _| s.borrow_mut().push(p)),
+          None,
+          cx,
+        )
       })
     });
     cx.run_until_parked();
@@ -558,6 +582,50 @@ fn opens_on_its_repository_and_draws_it(cx: &mut TestAppContext) {
   assert_eq!(window.sidebar_ids(), [1, 2]);
   assert_eq!(window.route_workspace(), None, "the home view");
   assert!(window.last().modal.is_none());
+}
+
+#[gpui::test]
+fn draws_the_rows_before_the_branch_and_the_jj_reads(cx: &mut TestAppContext) {
+  let mut host = FakeHost::on("/repo", vec![workspace(1, "a", Some("main"))]);
+  host.from_db = true;
+  let host = Arc::new(host);
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  let first_rows = window
+    .shown
+    .borrow()
+    .iter()
+    .position(|p| {
+      p.sidebar
+        .as_ref()
+        .is_some_and(|s| !s.repos[0].workspaces.is_empty())
+    })
+    .expect("rows are drawn");
+  let rows_without_branch = window.shown.borrow()[first_rows]
+    .sidebar
+    .as_ref()
+    .is_some_and(|s| s.repos[0].home_ref.is_none());
+  assert!(rows_without_branch, "the rows come before the branch");
+  assert_eq!(window.sidebar_ids(), [1]);
+  assert_eq!(
+    window.last().sidebar.unwrap().repos[0].home_ref.as_deref(),
+    Some("main")
+  );
+  let calls = host.calls();
+  let at = |call: &str| calls.iter().position(|c| c == call).expect(call);
+  assert!(at("listed /repo") < at("detail 1"));
+  assert_eq!(host.count("workspaces /repo"), 1, "listed once more, whole");
+}
+
+#[gpui::test]
+fn draws_the_saved_theme_in_the_first_presentation(cx: &mut TestAppContext) {
+  let host = repo_host();
+  host
+    .settings
+    .lock()
+    .unwrap()
+    .insert("theme".into(), "dark".into());
+  let window = Window::open(cx, host, Some("/repo"));
+  assert!(window.shown.borrow().iter().all(|p| p.dark), "never light");
 }
 
 #[gpui::test]
@@ -699,11 +767,13 @@ fn a_read_that_panics_does_not_stop_the_window_reading(cx: &mut TestAppContext) 
   host
     .panic_once
     .store(true, std::sync::atomic::Ordering::SeqCst);
-  let window = Window::open(cx, host, Some("/repo"));
-  assert!(window.sidebar_ids().is_empty(), "the first read failed");
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  // The first read failed; `prepare_repo` finishing after it reads again,
+  // and otherwise the poll does.
   cx.executor().advance_clock(POLL);
   cx.run_until_parked();
   assert_eq!(window.sidebar_ids(), [1, 2]);
+  assert!(!host.panic_once.load(std::sync::atomic::Ordering::SeqCst));
 }
 
 #[gpui::test]
@@ -732,6 +802,57 @@ fn polls_on_swr_intervals(cx: &mut TestAppContext) {
   cx.executor().advance_clock(SESSIONS_POLL - POLL);
   cx.run_until_parked();
   assert_eq!(host.count("sessions /repo"), 2);
+}
+
+/// A window in the background polls a third as often, and reads what it
+/// skipped as soon as it is back in front.
+#[gpui::test]
+fn a_background_window_polls_less_and_catches_up_on_focus(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  window.controller.update(cx, |c, _| c.blurred());
+  for _ in 0..BACKGROUND_EVERY {
+    cx.executor().advance_clock(POLL);
+    cx.run_until_parked();
+  }
+  assert_eq!(host.count("workspaces /repo"), 2, "one read in three ticks");
+  cx.executor().advance_clock(POLL);
+  cx.run_until_parked();
+  assert_eq!(host.count("workspaces /repo"), 2);
+  window.controller.update(cx, |c, cx| c.focused(cx));
+  cx.run_until_parked();
+  assert_eq!(host.count("workspaces /repo"), 3, "the skipped tick, read");
+  window.controller.update(cx, |c, cx| c.focused(cx));
+  cx.run_until_parked();
+  assert_eq!(
+    host.count("workspaces /repo"),
+    3,
+    "nothing more to catch up"
+  );
+  cx.executor().advance_clock(POLL);
+  cx.run_until_parked();
+  assert_eq!(host.count("workspaces /repo"), 4, "every tick in front");
+}
+
+#[gpui::test]
+fn a_pr_poll_that_moved_stacks_reads_the_workspaces_again(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  cx.run_until_parked();
+  window
+    .controller
+    .update(cx, |c, cx| c.prs_changed("/repo", false, cx));
+  cx.run_until_parked();
+  assert_eq!(
+    host.count("workspaces /repo"),
+    1,
+    "PR state alone reads no workspaces"
+  );
+  window
+    .controller
+    .update(cx, |c, cx| c.prs_changed("/repo", true, cx));
+  cx.run_until_parked();
+  assert_eq!(host.count("workspaces /repo"), 2);
 }
 
 #[gpui::test]
@@ -782,6 +903,30 @@ fn selects_a_workspace_from_the_sidebar(cx: &mut TestAppContext) {
   assert_eq!(window.route_workspace(), Some(2));
   let sidebar = window.last().sidebar.unwrap();
   assert!(sidebar.repos[0].workspaces[1].selected);
+}
+
+/// What a click on a workspace row would show, for reading it ahead, is
+/// the route the click then presents; the model itself does not move.
+#[gpui::test]
+fn reads_ahead_the_route_a_workspace_click_shows(cx: &mut TestAppContext) {
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  let ahead = window
+    .controller
+    .read_with(cx, |c, _| c.workspace_route(2))
+    .expect("route");
+  assert_eq!(window.route_workspace(), None);
+  assert!(window.sidebar(
+    cx,
+    SidebarAction::SelectWorkspace {
+      id: 2,
+      shift: false,
+      toggle: false
+    }
+  ));
+  match window.screen_snapshot().view {
+    View::Workspace(route) => assert_eq!(*route, ahead),
+    _ => panic!("not the workspace view"),
+  }
 }
 
 #[gpui::test]
@@ -1245,7 +1390,7 @@ fn the_folder_browser_moves_up_shows_hidden_and_uses_a_plain_folder(cx: &mut Tes
     no_repo: true,
     ..FakeHost::default()
   });
-  let window = Window::open(cx, host.clone(), None);
+  let window = Window::open(cx, host, None);
   window.press(cx, "machines.addSsh");
   window.field(
     cx,
@@ -1307,7 +1452,7 @@ fn restores_the_last_remote_repository_at_launch(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_machine_shows_its_repository_form_or_the_setup(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
-  let window = Window::open(cx, host.clone(), None);
+  let window = Window::open(cx, host, None);
   assert!(window.press(cx, &format!("machines.connect:{}", endpoint().id)));
   let View::Onboarding(route) = window.screen_snapshot().view else {
     panic!("not onboarding");
@@ -1497,6 +1642,38 @@ fn deep_links_start_on_their_branch_or_toast_that_it_is_missing() {
     .is_processed("window-test-found"));
 }
 
+/// A remote poll reads every workspace's status in one request, not one
+/// per workspace, and falls back to those reads when the host has none.
+#[test]
+fn a_summaries_read_replaces_the_per_workspace_reads() {
+  use super::{data::Read, host::read_repo};
+  let host = FakeHost::on(
+    "/repo",
+    vec![workspace(1, "a", None), workspace(2, "b", None)],
+  );
+  let summary = |id, has_conflicts, has_changes| WorkspaceSummary {
+    workspace: workspace(id, "w", None),
+    has_conflicts,
+    has_changes,
+    commits_ahead: 0,
+    terminals: 0,
+    last_activity_at: None,
+  };
+  *host.summaries.lock().unwrap() = Some(vec![summary(1, false, true), summary(2, true, true)]);
+
+  let out = read_repo(&host, "/repo", Read::ALL, &[]);
+  assert_eq!(host.calls(), ["summaries /repo", "sessions /repo"]);
+  assert_eq!(out.workspaces.unwrap().len(), 2);
+  assert_eq!(out.statuses.unwrap().len(), 2);
+  // The conflicted workspace is not "open".
+  assert_eq!(out.has_changes.unwrap(), HashMap::from([(1, true)]));
+
+  *host.summaries.lock().unwrap() = None;
+  read_repo(&host, "/repo", Read::ALL, &[]);
+  assert_eq!(host.count("workspaces /repo"), 1);
+  assert_eq!(host.count("detail 1"), 1);
+}
+
 fn session_started(workspace_id: Option<i64>, select: bool) -> NativeEvent {
   NativeEvent::AgentSessionStarted {
     session: crate::core::agent_launch::SessionStart {
@@ -1635,6 +1812,52 @@ fn archiving_the_open_workspace_lands_on_its_stack_parent(cx: &mut TestAppContex
   remove(&host, 2);
   archived(&window, cx, vec![2]);
   assert_eq!(window.route_workspace(), None);
+}
+
+fn removal(window: &Window, cx: &mut TestAppContext, event: fn(String, Vec<i64>) -> NativeEvent) {
+  window.controller.update(cx, |c, cx| {
+    c.native_event(&event("/repo".into(), vec![3]), cx)
+  });
+  cx.run_until_parked();
+}
+
+/// The row goes and the view leaves it as the removal starts, while the
+/// workspace is still listed, and a read meanwhile does not bring it back.
+#[gpui::test]
+fn a_removal_hides_the_row_before_it_finishes(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  select(&window, cx, 3, false);
+  removal(&window, cx, |repo_path, ids| {
+    NativeEvent::WorkspacesRemoving { repo_path, ids }
+  });
+  assert!(!window.sidebar_ids().contains(&3));
+  assert_eq!(window.route_workspace(), Some(1), "onto its stack parent");
+  cx.executor().advance_clock(POLL);
+  cx.run_until_parked();
+  assert!(
+    !window.sidebar_ids().contains(&3),
+    "the host still lists it"
+  );
+  remove(&host, 3);
+  removal(&window, cx, |repo_path, ids| {
+    NativeEvent::WorkspacesRemoved { repo_path, ids }
+  });
+  assert!(!window.sidebar_ids().contains(&3));
+}
+
+#[gpui::test]
+fn a_failed_removal_brings_the_row_back(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host, Some("/repo"));
+  removal(&window, cx, |repo_path, ids| {
+    NativeEvent::WorkspacesRemoving { repo_path, ids }
+  });
+  assert!(!window.sidebar_ids().contains(&3));
+  removal(&window, cx, |repo_path, ids| {
+    NativeEvent::WorkspacesRestored { repo_path, ids }
+  });
+  assert!(window.sidebar_ids().contains(&3));
 }
 
 /// The listed-ids effect: a poll that no longer lists the open workspace.
@@ -1782,4 +2005,62 @@ fn draws_a_home_row_and_group_for_each_repository(cx: &mut TestAppContext) {
   );
   assert_eq!(window.route_workspace(), None);
   assert!(window.last().sidebar.unwrap().repos[0].home_selected);
+}
+
+/// What the model costs per action and per poll with many workspaces
+/// (ignored): `cargo test --features gpui-shell --lib window_model_perf --
+/// --ignored --nocapture --test-threads=1`.
+#[gpui::test]
+#[ignore = "perf report"]
+fn window_model_perf(cx: &mut TestAppContext) {
+  fn report(name: &str, samples: &mut [std::time::Duration]) {
+    samples.sort();
+    let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.;
+    let mean = samples.iter().map(|d| ms(*d)).sum::<f64>() / samples.len() as f64;
+    println!(
+      "{name:<34} n={:<3} mean={mean:>8.3}ms  p50={:>8.3}ms  max={:>8.3}ms",
+      samples.len(),
+      ms(samples[samples.len() / 2]),
+      ms(samples[samples.len() - 1]),
+    );
+  }
+  for count in [50, 200] {
+    // Stacks of three, as agents stack work.
+    let workspaces: Vec<Workspace> = (1..=count)
+      .map(|i| {
+        let target = (i % 3 != 1).then(|| format!("feat/ws-{}", i - 1));
+        let mut w = workspace(i, &format!("feat/ws-{i}"), target.as_deref());
+        w.created_at = format!("2026-10-01T00:00:{:02}Z", i % 60);
+        w
+      })
+      .collect();
+    let host = Arc::new(FakeHost::on("/repo", workspaces));
+    let window = Window::open(cx, host, Some("/repo"));
+    let mut select: Vec<_> = (1..=30)
+      .map(|i| {
+        let start = std::time::Instant::now();
+        window.controller.update(cx, |c, cx| {
+          c.sidebar_action(
+            &SidebarAction::SelectWorkspace {
+              id: i,
+              shift: false,
+              toggle: false,
+            },
+            cx,
+          )
+        });
+        start.elapsed()
+      })
+      .collect();
+    report(&format!("{count} workspaces: select"), &mut select);
+    let mut poll: Vec<_> = (0..10)
+      .map(|_| {
+        let start = std::time::Instant::now();
+        cx.executor().advance_clock(POLL);
+        cx.run_until_parked();
+        start.elapsed()
+      })
+      .collect();
+    report(&format!("{count} workspaces: unchanged poll"), &mut poll);
+  }
 }

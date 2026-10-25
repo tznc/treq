@@ -133,6 +133,7 @@ where
   }
 }
 
+#[allow(clippy::expect_used, reason = "ring supports the default TLS versions")]
 fn tls_connector() -> Connector {
   // Built explicitly with ring so this does not depend on which rustls
   // crypto provider happens to be installed process-wide.

@@ -14,6 +14,7 @@
 //! No public network port is opened; everything here is local filesystem and
 //! process-table state, reachable only through the allow-listed CLI surface.
 
+use crate::result_ext::ResultExt;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::fs::OpenOptions;
@@ -33,6 +34,14 @@ pub struct AgentRecord {
   pub stdin_path: Option<String>,
   #[serde(default)]
   pub keeper_pid: Option<u32>,
+  /// Kernel start-time token of `pid`, captured at spawn. A later signal is
+  /// only sent while the pid still reports this token, so a pid recycled by an
+  /// unrelated process is never signalled. `None` on records written before
+  /// this field existed and on platforms without a start-time source.
+  #[serde(default)]
+  pub pid_start: Option<String>,
+  #[serde(default)]
+  pub keeper_start: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,7 +88,7 @@ fn write_record(repo_path: &str, record: &AgentRecord) -> Result<(), String> {
 }
 
 fn remove_record(repo_path: &str, workspace: &str) {
-  let _ = fs::remove_file(record_path(repo_path, workspace));
+  fs::remove_file(record_path(repo_path, workspace)).best_effort();
 }
 
 /// A process is considered alive when signal 0 can be delivered to its pid.
@@ -88,7 +97,7 @@ fn process_is_alive(pid: u32) -> bool {
   // SAFETY: kill(pid, 0) only probes for existence/permission; it never
   // sends a real signal, so this cannot terminate or otherwise disturb the
   // target process.
-  unsafe { libc_kill(pid as i32, 0) == 0 }
+  unsafe { libc::kill(pid as i32, 0) == 0 }
 }
 
 /// A process is considered alive when `tasklist` still lists its pid.
@@ -103,20 +112,69 @@ fn process_is_alive(pid: u32) -> bool {
     .unwrap_or(false)
 }
 
-#[cfg(unix)]
-extern "C" {
-  #[link_name = "kill"]
-  fn libc_kill(pid: i32, sig: i32) -> i32;
+/// Opaque, stable-for-the-process-lifetime start time of `pid` (Linux:
+/// `starttime` in `/proc/<pid>/stat`; macOS: `pbi_start_tv*` from
+/// `proc_pidinfo`). Two different processes that reuse one pid never share it.
+#[cfg(target_os = "linux")]
+fn process_start_token(pid: u32) -> Option<String> {
+  let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+  // The command name (field 2) may contain spaces and parentheses, so
+  // fields are counted from the last ')'. `starttime` is field 22, which is
+  // index 19 once pid and comm are cut off.
+  let after_comm = stat.get(stat.rfind(')')? + 1..)?;
+  after_comm.split_whitespace().nth(19).map(str::to_owned)
 }
 
-/// Terminates a running agent process. Best-effort: a failure here still
-/// lets the caller drop its own record of the process.
-fn kill_process(pid: u32) {
+#[cfg(target_os = "macos")]
+fn process_start_token(pid: u32) -> Option<String> {
+  let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+  let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+  // SAFETY: `info` is a writable buffer of exactly `size` bytes; the kernel
+  // fills it and returns the number of bytes written (<= 0 on failure).
+  let written = unsafe {
+    libc::proc_pidinfo(
+      pid as libc::c_int,
+      libc::PROC_PIDTBSDINFO,
+      0,
+      info.as_mut_ptr().cast(),
+      size,
+    )
+  };
+  if written != size {
+    return None;
+  }
+  // SAFETY: the kernel fully initialised the struct (checked above).
+  let info = unsafe { info.assume_init() };
+  Some(format!(
+    "{}.{}",
+    info.pbi_start_tvsec, info.pbi_start_tvusec
+  ))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn process_start_token(_pid: u32) -> Option<String> {
+  None
+}
+
+/// True when `pid` is alive and is the process we recorded. Records without a
+/// start token (legacy, or no platform support) fall back to the liveness probe.
+fn process_is_recorded(pid: u32, start: Option<&str>) -> bool {
+  process_is_alive(pid)
+    && start.is_none_or(|expected| process_start_token(pid).as_deref() == Some(expected))
+}
+
+/// Terminates the recorded agent process. Best-effort: a failure here still
+/// lets the caller drop its own record of the process. A pid that no longer
+/// matches the recorded start time belongs to someone else and is left alone.
+fn kill_process(pid: u32, start: Option<&str>) {
+  if !process_is_recorded(pid, start) {
+    return;
+  }
+  #[cfg(unix)]
   // SAFETY: `kill` takes plain integers and touches no Rust memory; a stale or
   // invalid pid only makes it return an error, which is ignored.
-  #[cfg(unix)]
   unsafe {
-    libc_kill(pid as i32, 15); // SIGTERM
+    libc::kill(pid as i32, libc::SIGTERM);
   }
   #[cfg(windows)]
   {
@@ -141,7 +199,7 @@ pub fn start_agent(
   prompt: &str,
 ) -> Result<AgentRecord, String> {
   if let Some(existing) = read_record(repo_path, workspace) {
-    if process_is_alive(existing.pid) {
+    if process_is_recorded(existing.pid, existing.pid_start.as_deref()) {
       return Err(format!(
         "agent_already_running: Agent '{}' is already running for workspace '{}' (pid {})",
         existing.agent, workspace, existing.pid
@@ -165,7 +223,7 @@ pub fn start_agent(
     .map_err(|e| format!("filesystem_error: Failed to duplicate agent log handle: {e}"))?;
 
   let fifo_path = stdin_fifo_path(repo_path, workspace);
-  let (agent_stdin, keeper_pid) = setup_agent_stdin(&fifo_path)?;
+  let (agent_stdin, keeper) = setup_agent_stdin(&fifo_path)?;
 
   let child = Command::new(&binary)
     .current_dir(workspace_path)
@@ -177,6 +235,9 @@ pub fn start_agent(
     .map_err(|e| format!("dependency_error: Failed to start agent '{agent}': {e}"))?;
 
   let pid = child.id();
+  // Captured while `child` is still unreaped, so the pid cannot have been
+  // recycled yet.
+  let pid_start = process_start_token(pid);
   #[allow(
     clippy::mem_forget,
     reason = "the agent must outlive this call; its pid is tracked in the record"
@@ -191,7 +252,9 @@ pub fn start_agent(
     prompt: prompt.to_string(),
     log_path: log_file_path.to_string_lossy().into_owned(),
     stdin_path: Some(fifo_path.to_string_lossy().into_owned()),
-    keeper_pid,
+    keeper_pid: keeper.as_ref().map(|(pid, _)| *pid),
+    pid_start,
+    keeper_start: keeper.and_then(|(_, start)| start),
   };
   write_record(repo_path, &record)?;
   Ok(record)
@@ -208,14 +271,17 @@ fn resolve_agent_binary(agent: &str) -> Option<String> {
     .and_then(|name| crate::binary_paths::detect_binary(name))
 }
 
+/// Pid of the stdin keeper process and its start-time token.
+type KeeperPid = (u32, Option<String>);
+
 /// Opens a FIFO (Unix) so later CLI invocations can write to the agent's
 /// stdin. A detached `sleep` process holds a write fd so the agent does not
 /// see EOF when the starting `treq` process exits.
 #[cfg(unix)]
-fn setup_agent_stdin(fifo_path: &Path) -> Result<(fs::File, Option<u32>), String> {
+fn setup_agent_stdin(fifo_path: &Path) -> Result<(fs::File, Option<KeeperPid>), String> {
   use std::os::unix::ffi::OsStrExt;
   if fifo_path.exists() {
-    let _ = fs::remove_file(fifo_path);
+    fs::remove_file(fifo_path).best_effort();
   }
   let c_path = std::ffi::CString::new(fifo_path.as_os_str().as_bytes())
     .map_err(|_| "filesystem_error: Invalid agent stdin path".to_string())?;
@@ -244,6 +310,7 @@ fn setup_agent_stdin(fifo_path: &Path) -> Result<(fs::File, Option<u32>), String
     .spawn()
     .map_err(|e| format!("filesystem_error: Failed to start stdin keeper: {e}"))?;
   let keeper_pid = keeper.id();
+  let keeper_start = process_start_token(keeper_pid);
   #[allow(
     clippy::mem_forget,
     reason = "the keeper must outlive this call; its pid is tracked in the record"
@@ -252,11 +319,11 @@ fn setup_agent_stdin(fifo_path: &Path) -> Result<(fs::File, Option<u32>), String
   let agent_stdin = fifo
     .try_clone()
     .map_err(|e| format!("filesystem_error: Failed to clone stdin fifo for agent: {e}"))?;
-  Ok((agent_stdin, Some(keeper_pid)))
+  Ok((agent_stdin, Some((keeper_pid, keeper_start))))
 }
 
 #[cfg(not(unix))]
-fn setup_agent_stdin(fifo_path: &Path) -> Result<(fs::File, Option<u32>), String> {
+fn setup_agent_stdin(fifo_path: &Path) -> Result<(fs::File, Option<KeeperPid>), String> {
   let file = OpenOptions::new()
     .create(true)
     .append(true)
@@ -279,7 +346,7 @@ pub fn send_agent_input(repo_path: &str, workspace: &str, input: &str) -> Result
     None => Err(format!(
       "agent_not_found: No agent record for workspace '{workspace}'"
     )),
-    Some(record) if process_is_alive(record.pid) => {
+    Some(record) if process_is_recorded(record.pid, record.pid_start.as_deref()) => {
       let stdin_path = record
         .stdin_path
         .ok_or_else(|| "filesystem_error: Running agent has no stdin path recorded".to_string())?;
@@ -306,14 +373,16 @@ pub fn send_agent_input(repo_path: &str, workspace: &str, input: &str) -> Result
 
 pub fn agent_status(repo_path: &str, workspace: &str) -> Result<AgentStatusResult, String> {
   match read_record(repo_path, workspace) {
-    Some(record) if process_is_alive(record.pid) => Ok(AgentStatusResult {
-      workspace: workspace.to_string(),
-      running: true,
-      agent: Some(record.agent),
-      pid: Some(record.pid),
-      started_at: Some(record.started_at),
-      should_refresh: false,
-    }),
+    Some(record) if process_is_recorded(record.pid, record.pid_start.as_deref()) => {
+      Ok(AgentStatusResult {
+        workspace: workspace.to_string(),
+        running: true,
+        agent: Some(record.agent),
+        pid: Some(record.pid),
+        started_at: Some(record.started_at),
+        should_refresh: false,
+      })
+    }
     Some(_) => {
       // Process exited since the last check: clear the stale record and
       // signal the caller a refresh is due.
@@ -349,16 +418,12 @@ pub fn stop_agent(repo_path: &str, workspace: &str) -> Result<AgentStatusResult,
       should_refresh: false,
     });
   };
-  if process_is_alive(record.pid) {
-    kill_process(record.pid);
-  }
+  kill_process(record.pid, record.pid_start.as_deref());
   if let Some(keeper_pid) = record.keeper_pid {
-    if process_is_alive(keeper_pid) {
-      kill_process(keeper_pid);
-    }
+    kill_process(keeper_pid, record.keeper_start.as_deref());
   }
   if let Some(stdin_path) = &record.stdin_path {
-    let _ = fs::remove_file(stdin_path);
+    fs::remove_file(stdin_path).best_effort();
   }
   remove_record(repo_path, workspace);
   Ok(AgentStatusResult {
@@ -510,6 +575,33 @@ mod tests {
     assert!(error.contains("agent_not_found") || error.contains("agent_not_running"));
   }
 
+  #[cfg(any(target_os = "linux", target_os = "macos"))]
+  #[test]
+  fn stop_agent_leaves_a_recycled_pid_alone() {
+    let dir = temp_repo();
+    let repo = dir.path().to_str().unwrap();
+    fs::create_dir_all(dir.path().join("ws")).unwrap();
+    let workspace_path = dir.path().join("ws").to_str().unwrap().to_string();
+    let mut record = start_test_process(repo, "demo", &workspace_path, "sleep");
+    // Pretend the recorded agent died and an unrelated process now owns the
+    // pid: the live `sleep` reports a different start time than the record.
+    record.pid_start = Some("0.0".to_string());
+    write_record(repo, &record).unwrap();
+
+    assert!(!agent_status(repo, "demo").unwrap().running);
+    write_record(repo, &record).unwrap();
+    stop_agent(repo, "demo").unwrap();
+
+    assert!(
+      process_is_alive(record.pid),
+      "unrelated process was signalled"
+    );
+    kill_process(record.pid, None);
+    if let Some(keeper_pid) = record.keeper_pid {
+      kill_process(keeper_pid, record.keeper_start.as_deref());
+    }
+  }
+
   /// Spawns a real long-lived process in place of `start_agent`'s allow-listed
   /// Windows uses `ping` because `sleep` is not a lasting executable there.
   fn start_test_process(
@@ -526,7 +618,7 @@ mod tests {
       .open(&log_file_path)
       .unwrap();
     let fifo_path = stdin_fifo_path(repo_path, workspace);
-    let (agent_stdin, keeper_pid) = setup_agent_stdin(&fifo_path).unwrap();
+    let (agent_stdin, keeper) = setup_agent_stdin(&fifo_path).unwrap();
     let mut command = if placeholder == "cat" && !cfg!(windows) {
       Command::new("cat")
     } else if cfg!(windows) {
@@ -549,11 +641,13 @@ mod tests {
       workspace: workspace.to_string(),
       agent: "sleep".to_string(),
       pid: child.id(),
+      pid_start: process_start_token(child.id()),
       started_at: chrono::Utc::now().to_rfc3339(),
       prompt: String::new(),
       log_path: log_file_path.to_string_lossy().into_owned(),
       stdin_path: Some(fifo_path.to_string_lossy().into_owned()),
-      keeper_pid,
+      keeper_pid: keeper.as_ref().map(|(pid, _)| *pid),
+      keeper_start: keeper.and_then(|(_, start)| start),
     };
     write_record(repo_path, &record).unwrap();
     #[allow(

@@ -6,6 +6,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
   sync::Arc,
@@ -27,6 +28,7 @@ use tauri_plugin_gpui::gpui::{
 
 use super::{
   github::parts,
+  integrations_cache::cache,
   linear,
   open_workspaces_data::{self as data, Checked, Line, OpenWorkspacesHost, Route, Target},
   workspace_data::WorkspaceHost,
@@ -62,6 +64,58 @@ pub(super) struct PrList {
   pub(super) mine: bool,
   /// Bumped per load, so an older answer is dropped.
   generation: u64,
+}
+
+impl PrList {
+  /// Starts a load, so any answer still in flight is dropped; the generation
+  /// to settle it with.
+  pub(super) fn start(&mut self) -> u64 {
+    self.generation += 1;
+    self.loading = true;
+    self.error = None;
+    self.generation
+  }
+
+  /// Takes a load's answer, unless a newer load started since.
+  pub(super) fn settle(
+    &mut self,
+    generation: u64,
+    result: Result<(Vec<GhPullRequest>, bool), String>,
+  ) -> bool {
+    if generation != self.generation {
+      return false;
+    }
+    self.loading = false;
+    match result {
+      Ok((items, mine)) => {
+        self.items = items;
+        self.mine = mine;
+      }
+      Err(err) => self.error = Some(err),
+    }
+    true
+  }
+}
+
+/// What the pull request list reads.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum PrQuery {
+  /// The user's own, or everyone's when they have none.
+  MineFirst,
+  /// Everyone's that match this GitHub search.
+  Search(String),
+}
+
+/// The read for a search box's `query`, narrowed to the pull requests
+/// assigned to the user when `assigned` is on.
+pub(super) fn pr_query(query: &str, assigned: bool) -> PrQuery {
+  let query = query.trim();
+  match (assigned, query.is_empty()) {
+    (false, true) => PrQuery::MineFirst,
+    (false, false) => PrQuery::Search(query.to_string()),
+    (true, true) => PrQuery::Search("assignee:@me".into()),
+    (true, false) => PrQuery::Search(format!("assignee:@me {query}")),
+  }
 }
 
 /// The Linear issues beside the lines.
@@ -132,6 +186,9 @@ pub struct OpenWorkspacesDialog {
   pub(super) github: Option<String>,
   pub(super) prs: PrList,
   pub(super) query: String,
+  /// The list holds only pull requests assigned to the user. Off each time
+  /// the dialog opens.
+  pub(super) assigned: bool,
   _search: Option<Task<()>>,
   /// The picked pull requests, in the order picked.
   pub(super) chosen: Vec<GhPullRequest>,
@@ -188,6 +245,7 @@ impl OpenWorkspacesDialog {
       github: None,
       prs: PrList::default(),
       query: String::new(),
+      assigned: false,
       _search: None,
       chosen: Vec::new(),
       issues: IssueList::default(),
@@ -201,6 +259,13 @@ impl OpenWorkspacesDialog {
       errors: Vec::new(),
       dismissed: false,
     };
+    // A repository seen before lists its pull requests at once, without
+    // waiting for the remote to be read again.
+    let repo = view.route.repo_path.clone();
+    if let Some(name) = cache(cx).remote_names.get(&repo).cloned() {
+      view.github = Some(name);
+      view.load_prs(cx);
+    }
     view.load(cx);
     view.load_issues(cx);
     view
@@ -213,12 +278,51 @@ impl OpenWorkspacesDialog {
     }
   }
 
-  /// Reads the remotes, then lists pull requests and fetches, so pasted
-  /// branches check against the remote's latest.
+  /// Reads the remotes and lists pull requests at once, and the branch
+  /// settings beside them; then fetches, so pasted branches check against
+  /// the remote's latest.
   fn load(&mut self, cx: &mut Context<Self>) {
     let (host, route) = (self.host.clone(), self.route.clone());
+    // The pull request list needs only the remote, a file read: it does not
+    // wait for the branches and settings behind jj.
+    cx.spawn({
+      let (host, route) = (host.clone(), route.clone());
+      async move |this, cx| {
+        let remotes = cx
+          .background_spawn(async move { data::remotes(&*host, &route.repos) })
+          .await;
+        this
+          .update(cx, |view, cx| {
+            let github = remotes
+              .iter()
+              .find(|(path, _)| *path == view.route.repo_path)
+              .map(|(_, name)| name.clone());
+            match &github {
+              Some(name) => cache(cx).remote_names.insert(
+                view.route.repo_path.clone(),
+                Instant::now(),
+                name.clone(),
+              ),
+              None => {
+                cache(cx).remote_names.take(&view.route.repo_path);
+              }
+            }
+            // Already listed from a remembered remote unless it changed.
+            let listed = view.prs.generation > 0 && view.github == github;
+            view.github = github;
+            view.remotes = Some(remotes);
+            if !listed {
+              view.load_prs(cx);
+            }
+            view.check_lines(cx);
+            cx.notify();
+          })
+          .ignore_closed();
+      }
+    })
+    .detach();
     cx.spawn(async move |this, cx| {
-      let (remotes, open, settings) = cx
+      let (open, settings) = cx
         .background_spawn({
           let (host, route) = (host.clone(), route.clone());
           async move {
@@ -240,40 +344,34 @@ impl OpenWorkspacesDialog {
               .map(|b| b.name)
               .collect();
             let default = WorkspaceDialogHost::default_branch(&*host, repo).ok();
-            (
-              data::remotes(&*host, &route.repos),
-              open,
-              (pattern, default, branches),
-            )
+            (open, (pattern, default, branches))
           }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        let (pattern, default, branches) = settings;
-        if let Some(pattern) = pattern {
-          view.pattern = pattern;
-        }
-        view.default_branch = default;
-        view.branches = branches;
-        view.github = remotes
-          .iter()
-          .find(|(path, _)| *path == view.route.repo_path)
-          .map(|(_, name)| name.clone());
-        view.remotes = Some(remotes);
-        view.open_branches = open;
-        view.load_prs(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          let (pattern, default, branches) = settings;
+          if let Some(pattern) = pattern {
+            view.pattern = pattern;
+          }
+          view.default_branch = default;
+          view.branches = branches;
+          view.open_branches = open;
+          cx.notify();
+        })
+        .ignore_closed();
       cx.background_spawn(async move {
         for repo in &route.repos {
           host.fetch(repo);
         }
       })
       .await;
-      let _ = this.update(cx, |view, cx| {
-        view.fetched = true;
-        view.check_lines(cx);
-      });
+      this
+        .update(cx, |view, cx| {
+          view.fetched = true;
+          view.check_lines(cx);
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -284,15 +382,25 @@ impl OpenWorkspacesDialog {
     let Some(repo) = self.github.clone() else {
       return;
     };
-    self.prs.generation += 1;
-    let generation = self.prs.generation;
-    self.prs.loading = true;
-    self.prs.error = None;
-    let (host, query) = (self.host.clone(), self.query.trim().to_string());
+    let generation = self.prs.start();
+    let (host, query) = (self.host.clone(), pr_query(&self.query, self.assigned));
+    // Keyed by what is read, so Assigned to me has its own entries.
+    let read = match &query {
+      PrQuery::MineFirst => String::new(),
+      PrQuery::Search(search) => search.clone(),
+    };
+    let key = (repo.clone(), read);
+    // What this search read last shows meanwhile, then the read replaces it.
+    if self.prs.items.is_empty() {
+      if let Some((items, mine)) = cache(cx).open_prs.get(&key).cloned() {
+        self.prs.items = items;
+        self.prs.mine = mine;
+      }
+    }
     cx.spawn(async move |this, cx| {
       let result = cx
         .background_spawn(async move {
-          if !query.is_empty() {
+          if let PrQuery::Search(query) = query {
             return host.open_prs(&repo, false, &query).map(|prs| (prs, false));
           }
           match host.open_prs(&repo, true, "")? {
@@ -301,20 +409,16 @@ impl OpenWorkspacesDialog {
           }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.prs.generation != generation {
-          return;
-        }
-        view.prs.loading = false;
-        match result {
-          Ok((items, mine)) => {
-            view.prs.items = items;
-            view.prs.mine = mine;
+      this
+        .update(cx, |view, cx| {
+          if let Ok(read) = &result {
+            cache(cx).open_prs.insert(key, Instant::now(), read.clone());
           }
-          Err(err) => view.prs.error = Some(err),
-        }
-        cx.notify();
-      });
+          if view.prs.settle(generation, result) {
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -328,25 +432,50 @@ impl OpenWorkspacesDialog {
     self.issues.loading = true;
     self.issues.error = None;
     let (host, repo) = (self.host.clone(), self.route.repo_path.clone());
+    if self.issues.items.is_empty() {
+      let cache = cache(cx);
+      if let Some(items) = cache.linear_issues.get(&(repo.clone(), None)).cloned() {
+        self.issues.items = items;
+        self.issues.viewer = cache.linear_viewer.get(&repo).map(|v| v.id.clone());
+      }
+    }
     cx.spawn(async move |this, cx| {
+      let key = repo.clone();
       let result = cx
         .background_spawn(async move {
-          let issues = host.linear_issues(&repo, None)?;
-          let viewer = host.linear_viewer(&repo).ok().map(|v| v.id);
-          Ok::<_, String>((issues, viewer))
+          // Two independent requests: run them side by side.
+          std::thread::scope(|scope| {
+            let viewer = scope.spawn(|| host.linear_viewer(&repo).ok());
+            let issues = host.linear_issues(&repo, None);
+            let viewer = super::joined(viewer);
+            issues.map(|issues| (issues, viewer))
+          })
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.issues.loading = false;
-        match result {
-          Ok((items, viewer)) => {
-            view.issues.items = items;
-            view.issues.viewer = viewer;
+      this
+        .update(cx, |view, cx| {
+          if let Ok((items, viewer)) = &result {
+            let cache = cache(cx);
+            cache
+              .linear_issues
+              .insert((key.clone(), None), Instant::now(), items.clone());
+            if let Some(viewer) = viewer {
+              cache
+                .linear_viewer
+                .insert(key, Instant::now(), viewer.clone());
+            }
           }
-          Err(err) => view.issues.error = Some(err),
-        }
-        cx.notify();
-      });
+          view.issues.loading = false;
+          match result {
+            Ok((items, viewer)) => {
+              view.issues.items = items;
+              view.issues.viewer = viewer.map(|v| v.id);
+            }
+            Err(err) => view.issues.error = Some(err),
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -377,9 +506,17 @@ impl OpenWorkspacesDialog {
       return;
     }
     self.query = query;
+    if self.github.is_some() {
+      // Searching from the first keystroke: the debounce counts as the wait,
+      // and an answer for the old query no longer lands.
+      self.prs.start();
+      cx.notify();
+    }
     self._search = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| view.load_prs(cx));
+      this
+        .update(cx, |view, cx| view.load_prs(cx))
+        .ignore_closed();
     }));
   }
 
@@ -389,7 +526,9 @@ impl OpenWorkspacesDialog {
     cx.notify();
     self._check = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| view.check_lines(cx));
+      this
+        .update(cx, |view, cx| view.check_lines(cx))
+        .ignore_closed();
     }));
   }
 
@@ -424,13 +563,15 @@ impl OpenWorkspacesDialog {
             .collect::<Vec<_>>()
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.checks.extend(checked);
-        view.checking = false;
-        // Lines typed while checking.
-        view.check_lines(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.checks.extend(checked);
+          view.checking = false;
+          // Lines typed while checking.
+          view.check_lines(cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -564,7 +705,9 @@ impl OpenWorkspacesDialog {
       let results = cx
         .background_spawn(async move { plan.run(&*host, targets) })
         .await;
-      let _ = this.update(cx, |view, cx| view.opened(results, cx));
+      this
+        .update(cx, |view, cx| view.opened(results, cx))
+        .ignore_closed();
     })
     .detach();
   }
@@ -628,6 +771,10 @@ impl OpenWorkspacesDialog {
     cx.notify();
   }
 
+  #[allow(
+    clippy::expect_used,
+    reason = "the fields are created before this read"
+  )]
   fn fields(&mut self, window: &mut Window, cx: &mut Context<Self>) -> &Fields {
     if self.fields.is_none() {
       let lines = cx.new(|cx| {
@@ -1173,14 +1320,15 @@ impl OpenWorkspacesDialog {
     } else {
       "Open issues"
     };
-    let list: gpui::AnyElement = if self.issues.loading {
-      div()
-        .py_12()
-        .child(crate::gpui_shell::ui::Loading::new(
-          "open-workspaces-issues-loading",
+    let list: gpui::AnyElement = if self.issues.loading && self.issues.items.is_empty() {
+      crate::gpui_shell::ui::delayed(
+        "open-workspaces-issues-loading",
+        div().py_12().child(crate::gpui_shell::ui::Loading::new(
+          "open-workspaces-issues-loading-spinner",
           p,
-        ))
-        .into_any_element()
+        )),
+      )
+      .into_any_element()
     } else if let Some(err) = &self.issues.error {
       parts::error_state(
         "open-workspaces-issues",
@@ -1204,6 +1352,7 @@ impl OpenWorkspacesDialog {
       heading,
       self.chosen_issues.len(),
       Input::new(search).aria_label("Search issues"),
+      None,
       list,
       p,
     )
@@ -1213,19 +1362,22 @@ impl OpenWorkspacesDialog {
   fn prs_pane(&self, search: &Entity<InputState>, p: &Palette, cx: &mut Context<Self>) -> Div {
     let heading = if !self.query.trim().is_empty() {
       "Matching pull requests"
+    } else if self.assigned {
+      "Assigned to you"
     } else if self.prs.mine {
       "Your pull requests"
     } else {
       "Open pull requests"
     };
     let list: gpui::AnyElement = if self.prs.loading && self.prs.items.is_empty() {
-      div()
-        .py_12()
-        .child(crate::gpui_shell::ui::Loading::new(
-          "open-workspaces-prs-loading",
+      crate::gpui_shell::ui::delayed(
+        "open-workspaces-prs-loading",
+        div().py_12().child(crate::gpui_shell::ui::Loading::new(
+          "open-workspaces-prs-loading-spinner",
           p,
-        ))
-        .into_any_element()
+        )),
+      )
+      .into_any_element()
     } else if let Some(err) = &self.prs.error {
       parts::error_state(
         "open-workspaces-prs",
@@ -1236,23 +1388,66 @@ impl OpenWorkspacesDialog {
       )
       .into_any_element()
     } else if self.prs.items.is_empty() {
-      crate::gpui_shell::ui::EmptyState::new(
-        "open-workspaces-no-open-pull-requests",
-        "No open pull requests.",
-        p,
-      )
-      .icon(theme::ICON_PR)
-      .into_any_element()
+      let query = self.query.trim();
+      let (id, message) = if query.is_empty() && self.assigned {
+        (
+          "open-workspaces-no-assigned-pull-requests",
+          "No open pull requests are assigned to you.".to_string(),
+        )
+      } else if query.is_empty() {
+        (
+          "open-workspaces-no-open-pull-requests",
+          "No open pull requests.".to_string(),
+        )
+      } else {
+        (
+          "open-workspaces-no-matching-pull-requests",
+          format!("No pull requests match \"{query}\"."),
+        )
+      };
+      crate::gpui_shell::ui::EmptyState::new(id, message, p)
+        .icon(theme::ICON_PR)
+        .into_any_element()
     } else {
+      // The last answer stays readable, dimmed, while a search replaces it.
       div()
+        .when(self.prs.loading, |d| d.opacity(0.5))
         .children(self.prs.items.iter().map(|pr| self.pr_row(pr, p, cx)))
         .into_any_element()
     };
+    // The centered spinner covers a search with nothing on screen yet.
+    let searching = (self.prs.loading && !self.prs.items.is_empty()).then(|| {
+      div()
+        .id("open-workspaces-prs-searching")
+        .role(gpui::Role::ProgressIndicator)
+        .aria_label("Searching pull requests")
+        .pr_1()
+        .child(ui::spinner(
+          "open-workspaces-prs-searching-spinner",
+          14.,
+          p.muted_foreground,
+        ))
+        .test_support()
+    });
+    let assigned = Button::new("open-workspaces-assigned", p)
+      .variant(Variant::Outline)
+      .size(ui::Size::Sm)
+      .h(zpx(28.))
+      .icon(theme::ICON_USER, 12.)
+      .label("Assigned to me")
+      .pressed(self.assigned)
+      .on_click(cx.listener(|view, _, _, cx| {
+        view.assigned = !view.assigned;
+        view.load_prs(cx);
+      }));
     pane(
       "open-workspaces-prs",
       heading,
       self.chosen.len(),
-      Input::new(search).aria_label("Search pull requests"),
+      Input::new(search)
+        .aria_label("Search pull requests")
+        .when_some(searching, |input, spinner| input.suffix(spinner)),
+      Some(assigned.into_any_element()),
       list,
       p,
     )
@@ -1305,12 +1500,13 @@ impl OpenWorkspacesDialog {
   }
 }
 
-/// A tab's heading, search and list.
+/// A tab's heading, search with an optional filter beside it, and list.
 fn pane(
   id: &'static str,
   heading: &'static str,
   picked: usize,
   search: Input,
+  filter: Option<gpui::AnyElement>,
   list: gpui::AnyElement,
   p: &Palette,
 ) -> Div {
@@ -1343,14 +1539,23 @@ fn pane(
     )
     .child(
       div()
-        .debug_selector(move || format!("{id}-search"))
-        .child(ui::text(
-          Styled::h(
-            search.prefix(ui::icon(theme::ICON_SEARCH, 14., p.muted_foreground)),
-            zpx(28.),
-          ),
-          TextSize::Sm,
-        )),
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+          div()
+            .flex_1()
+            .min_w_0()
+            .debug_selector(move || format!("{id}-search"))
+            .child(ui::text(
+              Styled::h(
+                search.prefix(ui::icon(theme::ICON_SEARCH, 14., p.muted_foreground)),
+                zpx(28.),
+              ),
+              TextSize::Sm,
+            )),
+        )
+        .children(filter),
     )
     .child(
       div()

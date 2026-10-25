@@ -11,6 +11,7 @@
 //! remote repository and the remote setup dialog go to the window.
 
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{collections::HashMap, rc::Rc, sync::Arc, time::Instant};
 
 use serde::Deserialize;
@@ -93,6 +94,13 @@ pub struct OnboardingView {
   confirm: Option<confirm::Pending<Self>>,
 }
 
+/// The listing the last onboarding screen read, which the next one draws
+/// until its own read returns: opening a window or coming back to the
+/// start screen shows the machines and recent repositories at once.
+struct LastListing(Listing);
+
+impl gpui::Global for LastListing {}
+
 /// What of the account the cloud row shows.
 fn cloud_seen(cx: &gpui::App) -> (bool, Option<String>) {
   let account = super::account_data::account(cx);
@@ -109,12 +117,17 @@ impl OnboardingView {
   ) -> Self {
     let view = cx.weak_entity();
     let sink: ActionSink = Rc::new(move |action, cx| {
-      let _ = view.update(cx, |view, cx| view.handle(action, cx));
+      view
+        .update(cx, |view, cx| view.handle(action, cx))
+        .ignore_closed();
     });
     let mut this = Self {
       react,
       sink,
-      listing: Listing::default(),
+      listing: cx
+        .try_global::<LastListing>()
+        .map(|last| last.0.clone())
+        .unwrap_or_default(),
       container: None,
       tools: HashMap::new(),
       popover: None,
@@ -161,16 +174,75 @@ impl OnboardingView {
   }
 
   /// Lists the machines and recent repositories again, off the main thread.
+  /// Docker answers last: the rows draw without it, and the dev containers
+  /// join them (the last ones stay until then).
   fn load(&mut self, cx: &mut Context<Self>) {
     let host = self.host.clone();
     cx.spawn(async move |this, cx| {
-      let listing = cx.background_spawn(async move { host.listing() }).await;
-      let _ = this.update(cx, |view, cx| {
-        view.listing = listing;
-        cx.notify();
-      });
+      let listed = host.clone();
+      let mut listing = cx.background_spawn(async move { listed.listing() }).await;
+      let containers = listing.containers;
+      this
+        .update(cx, |view, cx| {
+          if containers {
+            let (machines, recents) = view.dev_containers();
+            listing.machines.extend(machines);
+            listing.recents.extend(recents);
+          }
+          view.show(listing, cx);
+        })
+        .ignore_closed();
+      if !containers {
+        return;
+      }
+      let (machines, recents) = cx.background_spawn(async move { host.containers() }).await;
+      this
+        .update(cx, |view, cx| {
+          let mut listing = view.listing.clone();
+          listing
+            .machines
+            .retain(|m| !matches!(m.place, Place::DevContainer { .. }));
+          listing
+            .recents
+            .retain(|r| !r.machine_id.starts_with("devcontainer:"));
+          listing.machines.extend(machines);
+          listing.recents.extend(recents);
+          view.show(listing, cx);
+        })
+        .ignore_closed();
     })
     .detach();
+  }
+
+  /// The dev containers the last listing had.
+  fn dev_containers(&self) -> (Vec<Machine>, Vec<Recent>) {
+    (
+      self
+        .listing
+        .machines
+        .iter()
+        .filter(|m| matches!(m.place, Place::DevContainer { .. }))
+        .cloned()
+        .collect(),
+      self
+        .listing
+        .recents
+        .iter()
+        .filter(|r| r.machine_id.starts_with("devcontainer:"))
+        .cloned()
+        .collect(),
+    )
+  }
+
+  /// Draws `listing` and keeps it for the next screen, unless it is the
+  /// one drawn.
+  fn show(&mut self, listing: Listing, cx: &mut Context<Self>) {
+    crate::startup::mark("onboarding: machines listed");
+    cx.set_global(LastListing(listing.clone()));
+    if self.listing != listing {
+      self.listing = listing;
+      cx.notify();
+    }
   }
 
   /// Looks up the machine's tools again, off the main thread.
@@ -182,16 +254,18 @@ impl OnboardingView {
       let result = cx
         .background_spawn(async move { host.machine_tools(&place) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.tools.insert(
-          id,
-          Tools {
-            result: Some(result),
-            checking: false,
-          },
-        );
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.tools.insert(
+            id,
+            Tools {
+              result: Some(result),
+              checking: false,
+            },
+          );
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -272,18 +346,22 @@ impl OnboardingView {
       else {
         return;
       };
-      let _ = this.update(cx, |view, cx| {
-        view.container = Some(Ok(path.clone()));
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.container = Some(Ok(path.clone()));
+          cx.notify();
+        })
+        .ignore_closed();
       let result = cx
         .background_spawn(async move { host.start_dev_container(&path) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.container = result.err().map(Err);
-        view.load(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.container = result.err().map(Err);
+          view.load(cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -861,7 +939,9 @@ where
     );
     return;
   }
-  if let Err(err) = core::init(path) {
+  // The rebase pass runs behind the window, which opens at once; its
+  // `prepare_repo` must not set the repository up a second time.
+  if let Err(err) = core::init_deferring_rebase(path) {
     toast(
       ToastTone::Error,
       "Failed to open repository",
@@ -869,6 +949,7 @@ where
     );
     return;
   }
+  crate::gpui_shell::note_just_initialized(path);
   let last = [("last_opened_repo_path".to_string(), path.to_string())];
   if let Err(err) = host.set_settings(&last) {
     log::warn!("failed to remember the last opened repository: {err}");

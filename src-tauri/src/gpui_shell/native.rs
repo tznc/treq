@@ -7,7 +7,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
-use super::remote_repo::{self, Cutoff, Mutation, Remote, Transport};
+use super::remote_repo::{self, Cutoff, Mutation, Reads, Remote, Transport};
 use crate::{
   core::{
     feature_preview,
@@ -62,6 +62,16 @@ pub enum NativeEvent {
     pane_session_id: i64,
     select: bool,
   },
+  /// GPUI is removing (deleting or archiving) these workspaces of the
+  /// repository: the window hides their rows and leaves them at once, while
+  /// the removal runs. It ends in [`Self::WorkspacesRemoved`] or
+  /// [`Self::WorkspacesRestored`].
+  #[serde(rename_all = "camelCase")]
+  WorkspacesRemoving { repo_path: String, ids: Vec<i64> },
+  /// The removal started by [`Self::WorkspacesRemoving`] failed: the rows
+  /// show again.
+  #[serde(rename_all = "camelCase")]
+  WorkspacesRestored { repo_path: String, ids: Vec<i64> },
   /// GPUI removed (deleted or archived) these workspaces of the repository,
   /// so the window leaves them if they show.
   #[serde(rename_all = "camelCase")]
@@ -301,7 +311,9 @@ impl Transport for Backend {
   ) -> Result<serde_json::Value, String> {
     self.with_db(|db| feature_preview::require_remote_for_source(db, &endpoint.source))?;
     let pool = self.exec_pool();
-    crate::gpui_shell::block_on(remote_command::execute_remote_command::<serde_json::Value>(
+    // A relay drop or dead network leaves a pooled connection that fails the
+    // first read; `execute_remote_read` sends it once more on a fresh one.
+    crate::gpui_shell::block_on(remote_command::execute_remote_read::<serde_json::Value>(
       &pool,
       endpoint,
       request,
@@ -354,5 +366,10 @@ impl Transport for Backend {
       endpoint_id: endpoint_id.to_string(),
       reason: cutoff.id().to_string(),
     });
+  }
+
+  fn reads(&self) -> &Reads {
+    static READS: std::sync::OnceLock<Reads> = std::sync::OnceLock::new();
+    READS.get_or_init(Reads::default)
   }
 }

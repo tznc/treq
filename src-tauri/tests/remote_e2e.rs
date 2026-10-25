@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used, clippy::string_slice, reason = "test code")]
 //! Real-provider end-to-end tests for the managed-compute provider adapter
 //! (prds/remote-development.md, "Engineering and operational requirements":
 //! real-provider integration tests use isolated test resources and safe
@@ -31,6 +32,7 @@
 
 #![allow(
   clippy::unwrap_used,
+  clippy::let_underscore_must_use,
   clippy::print_stderr,
   reason = "test code reports progress on stderr"
 )]

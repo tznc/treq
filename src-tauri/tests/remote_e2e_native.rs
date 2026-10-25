@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used, clippy::string_slice, reason = "test code")]
 //! Live acceptance for the managed-instance flow against a dedicated test
 //! project whose Edge Functions provision real Fly Sprites.
 //!
@@ -15,6 +16,7 @@
 
 #![allow(
   clippy::unwrap_used,
+  clippy::let_underscore_must_use,
   clippy::print_stderr,
   reason = "test code reports progress on stderr"
 )]

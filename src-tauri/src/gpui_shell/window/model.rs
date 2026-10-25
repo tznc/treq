@@ -907,8 +907,8 @@ impl Model {
       format!("{}/{path}", self.repo().trim_end_matches('/'))
     };
     let dir = selected
-      .rfind('/')
-      .map(|i| selected[..i].to_string())
+      .rsplit_once('/')
+      .map(|(dir, _)| dir.to_string())
       .unwrap_or_default();
     self.view.file_browser = Some(FileBrowser {
       selected_file: Some(selected),

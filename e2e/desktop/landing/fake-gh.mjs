@@ -2,7 +2,9 @@
 // A stand-in `gh` for the landing capture: answers the calls the app makes
 // (PR status, checks, the GitHub panel's lists, review threads) with fixture
 // data for lorem-ipsum/event-bus. No network, no token.
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 if (process.env.TREQ_FAKE_GH_LOG) {
@@ -15,6 +17,8 @@ const field = (prefix) =>
 
 const REPO = "https://github.com/lorem-ipsum/event-bus";
 const author = (login) => ({ login, avatarUrl: null });
+/** Pull requests assigned to octocat, none of them octocat's own. */
+const ASSIGNED_TO_OCTOCAT = new Set([409, 421]);
 
 const prs = [
   {
@@ -39,6 +43,24 @@ const prs = [
     headRefName: "feat/event-ingest",
     baseRefName: "main",
     mergeStateStatus: "CLEAN",
+  },
+  {
+    number: 415,
+    title: "feat(spool): fail readiness when the spool queue is unreachable",
+    headRefName: "feat/spool-readiness",
+    baseRefName: "main",
+    mergeStateStatus: "CLEAN",
+    author: author("erin"),
+    createdAt: "2026-08-08T09:00:00Z",
+    body: [
+      "## Summary",
+      "",
+      "`/readyz` now returns **503** while the spool queue can't be reached, so the",
+      "load balancer stops routing ingest traffic to a pod that would drop it.",
+      "",
+      "- Probes the queue with a 500 ms timeout",
+      "- Keeps `/healthz` green, so the pod isn't restarted",
+    ].join("\n"),
   },
   {
     number: 409,
@@ -76,6 +98,24 @@ const prs = [
   comments: [],
   ...pr,
 }));
+
+// QA specs change a PR on "GitHub" by writing `$HOME/fake-gh-prs.json`:
+// fields to merge over a fixture PR, by head branch.
+const overrides = join(process.env.HOME ?? "", "fake-gh-prs.json");
+if (existsSync(overrides)) {
+  const changes = JSON.parse(readFileSync(overrides, "utf8"));
+  for (const pr of prs) Object.assign(pr, changes[pr.headRefName]);
+}
+// `gh pr edit` titles and bodies, kept beside the call log so later calls
+// see them, as GitHub would.
+const prEditsFile = process.env.TREQ_FAKE_GH_LOG
+  ? join(dirname(process.env.TREQ_FAKE_GH_LOG), "gh-pr-edits.json")
+  : null;
+const prEdits =
+  prEditsFile && existsSync(prEditsFile)
+    ? JSON.parse(readFileSync(prEditsFile, "utf8"))
+    : {};
+for (const pr of prs) Object.assign(pr, prEdits[pr.number]);
 
 const issues = [
   {
@@ -261,12 +301,32 @@ if (group === "pr" && command === "list") {
   if (has("--draft")) list = list.filter((pr) => pr.isDraft);
   // The signed-in user is octocat.
   if (after("--author") === "@me") list = list.filter((pr) => pr.author.login === "octocat");
-  const words = (has("--search") ? after("--search") : "")
+  if ((after("--search") ?? "").split(/\s+/).includes("assignee:@me"))
+    list = list.filter((pr) => ASSIGNED_TO_OCTOCAT.has(pr.number));
+  let words = (has("--search") ? after("--search") : "")
     .split(/\s+/)
     .filter((word) => word && !word.includes(":"))
     .map((word) => word.toLowerCase());
+  // QA hooks: "slow" holds the answer back so the search's loading state
+  // can be captured, "unreachable" fails as the network would.
+  if (words.includes("unreachable"))
+    fail("HTTP 502: Bad Gateway (https://api.github.com/graphql)");
+  if (words.includes("slow")) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 4000);
+    words = words.filter((word) => word !== "slow");
+  }
   list = list.filter((pr) => words.every((word) => pr.title.toLowerCase().includes(word)));
   out(list.map((pr) => pick(pr, after("--json"))));
+}
+if (group === "pr" && command === "edit") {
+  const number = args[2];
+  const edit = { ...prEdits[number] };
+  if (has("--title")) edit.title = after("--title");
+  if (has("--body-file")) edit.body = readFileSync(0, "utf8");
+  if (prEditsFile) {
+    writeFileSync(prEditsFile, JSON.stringify({ ...prEdits, [number]: edit }));
+  }
+  process.exit(0);
 }
 if (group === "pr" && command === "view") {
   const key = has("--") ? branch : args[2];
@@ -283,7 +343,14 @@ if (group === "pr" && command === "checks") {
   out(list);
 }
 if (group === "pr" && command === "diff") {
+  // A test can give a PR a diff, and change it mid-run, by writing
+  // pr-diff-<n>.diff next to this script; read on every call.
+  const file = join(dirname(fileURLToPath(import.meta.url)), `pr-diff-${args[2]}.diff`);
+  if (existsSync(file)) process.stdout.write(readFileSync(file, "utf8"));
   process.exit(0);
+}
+if (group === "api" && /^repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews$/.test(command ?? "")) {
+  out({ id: 1, state: "COMMENTED" });
 }
 if (group === "api" && command === "graphql") {
   const input =
@@ -339,7 +406,22 @@ if (group === "api" && command === "graphql") {
   }
   out({ data: {} });
 }
-if (group === "api" && command === "user") out({ login: "octocat" });
+if (group === "api" && command === "user") {
+  if (after("--jq") === ".login") {
+    process.stdout.write("octocat\n");
+    process.exit(0);
+  }
+  out({ login: "octocat" });
+}
+// The merge preview's GitHub merge: squash by default, rebase merges off.
+if (group === "repo" && command === "view") {
+  out({
+    viewerDefaultMergeMethod: "SQUASH",
+    mergeCommitAllowed: true,
+    squashMergeAllowed: true,
+    rebaseMergeAllowed: false,
+  });
+}
 if (group === "issue" && command === "view") {
   const issue = issues.find((i) => String(i.number) === args[2]);
   if (!issue) fail("issue not found");

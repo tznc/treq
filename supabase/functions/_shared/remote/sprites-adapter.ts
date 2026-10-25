@@ -151,8 +151,7 @@ function normalizeState(vendorState: string): ManagedInstanceState {
   }
 }
 
-// deno-lint-ignore no-explicit-any
-function normalizeInstance(sprite: any): ProviderInstance {
+function normalizeInstance(sprite: { name: string; status: string }): ProviderInstance {
   return {
     // Sprite names, rather than opaque UUIDs, address every lifecycle and
     // exec endpoint in the public API.

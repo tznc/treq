@@ -7,6 +7,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{rc::Rc, sync::Arc, time::Duration};
 
 use gpui_kit::base::TestSupportExt as _;
@@ -24,7 +25,8 @@ pub(super) mod account;
 )]
 pub use account::{
   AccountRoute, AccountTab, CloudCard, CloudEndpoint, CloudInstance, CloudRoute, CloudUsage,
-  GithubSection, IntegrationsTab, LinearSection, StatusTone, Subscription, UsageReport, User,
+  DeleteAccountDialog, GithubSection, IntegrationsTab, LinearSection, StatusTone, Subscription,
+  UsageReport, User,
 };
 
 use super::{
@@ -493,7 +495,9 @@ impl SettingsView {
     let sink: ActionSink = Rc::new(move |action, cx| {
       let view = view.clone();
       cx.defer(move |cx| {
-        let _ = view.update(cx, |view, cx| view.handle(action, cx));
+        view
+          .update(cx, |view, cx| view.handle(action, cx))
+          .ignore_closed();
       });
     });
     let mut this = Self {
@@ -560,10 +564,12 @@ impl SettingsView {
     let host = self.host.clone();
     cx.spawn(async move |this, cx| {
       let result = cx.background_spawn(async move { work(&*host) }).await;
-      let _ = this.update(cx, |view, cx| {
-        done(view, result, cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          done(view, result, cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -700,6 +706,21 @@ impl SettingsView {
 
   fn load_skills(&mut self, cx: &mut Context<Self>) {
     let repo = self.route.repo_path.clone();
+    // The registry as last read shows at once; the read below replaces it.
+    if self.skills.as_ref().is_some_and(|s| s.catalog.is_none()) {
+      let cached_repo = repo.clone();
+      self.spawn(
+        cx,
+        move |host| host.skill_catalog_cached(cached_repo.as_deref()),
+        |view, cached, _| {
+          if let Some((skills, cached)) = view.skills.as_mut().zip(cached) {
+            if skills.catalog.is_none() {
+              skills.catalog = Some(Ok(cached));
+            }
+          }
+        },
+      );
+    }
     self.spawn(
       cx,
       move |host| {
@@ -1723,6 +1744,12 @@ impl Render for SettingsView {
       {
         Some(self.cloud_delete_dialog(&p).into_any_element())
       }
+      Some(AccountTab::SignedIn(signed_in)) => signed_in.delete_account.as_ref().map(|dialog| {
+        let email = signed_in.email.clone().unwrap_or_default();
+        self
+          .delete_account_dialog(dialog, &email, &p, window, cx)
+          .into_any_element()
+      }),
       _ => None,
     };
 
@@ -2045,12 +2072,15 @@ impl SettingsView {
     });
 
     let body: AnyElement = if repo.loading {
-      div()
-        .py_8()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child("Loading settings...")
-        .into_any_element()
+      ui::delayed(
+        "settings-loading",
+        div()
+          .py_8()
+          .text_center()
+          .text_color(p.muted_foreground)
+          .child("Loading settings..."),
+      )
+      .into_any_element()
     } else {
       let pattern = self.controls.input(
         "repo.branchNamePattern",
@@ -2362,7 +2392,8 @@ impl SettingsView {
           .children(chips),
       )
       .when(tab.loading, |this| {
-        this.child(
+        this.child(ui::delayed(
+          "skills-loading",
           ui::text(div(), TextSize::Sm)
             .flex()
             .items_center()
@@ -2370,7 +2401,7 @@ impl SettingsView {
             .text_color(p.muted_foreground)
             .child(ui::spinner("skills-loading", 16., p.muted_foreground))
             .child("Loading skill registry…"),
-        )
+        ))
       })
       .when_some(tab.error.clone(), |this, err| {
         this.child(

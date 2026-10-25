@@ -7,6 +7,7 @@
 //! `tauri.conf.json` and maps its matches to `Matches`, the same shape the
 //! plugin produces. The types live here so the CLI builds without Tauri.
 
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 
 use clap::{Arg as ClapArg, ArgAction, ArgMatches, Command};
@@ -64,10 +65,28 @@ struct CommandConfig {
   subcommands: HashMap<String, CommandConfig>,
 }
 
-fn cli_config() -> CommandConfig {
-  let config: Value = serde_json::from_str(TAURI_CONFIG).expect("tauri.conf.json is valid JSON");
-  serde_json::from_value(config["plugins"]["cli"].clone())
-    .expect("tauri.conf.json plugins.cli uses only the keys the CLI parser supports")
+#[allow(
+  clippy::expect_used,
+  reason = "tauri.conf.json is embedded at build time and checked by tests"
+)]
+fn cli_config() -> &'static CommandConfig {
+  // Only `plugins.cli` is deserialised: serde skips the rest of the 28 KB
+  // file without building a `Value` tree for it.
+  #[derive(Deserialize)]
+  struct TauriConfig {
+    plugins: Plugins,
+  }
+  #[derive(Deserialize)]
+  struct Plugins {
+    cli: CommandConfig,
+  }
+  static CONFIG: std::sync::OnceLock<CommandConfig> = std::sync::OnceLock::new();
+  CONFIG.get_or_init(|| {
+    serde_json::from_str::<TauriConfig>(TAURI_CONFIG)
+      .expect("tauri.conf.json plugins.cli uses only the keys the CLI parser supports")
+      .plugins
+      .cli
+  })
 }
 
 fn build_command(name: &str, config: &CommandConfig) -> Command {
@@ -154,15 +173,15 @@ where
   S: Into<std::ffi::OsString> + Clone,
 {
   let config = cli_config();
-  let command = build_command("treq", &config).version(env!("CARGO_PKG_VERSION"));
+  let command = build_command("treq", config).version(env!("CARGO_PKG_VERSION"));
   let matches = command.try_get_matches_from(args)?;
-  Ok(to_matches(&config, &matches))
+  Ok(to_matches(config, &matches))
 }
 
 /// `treq <name> --help` text, for tests.
 #[cfg(test)]
 pub(super) fn subcommand_help(name: &str) -> String {
-  let mut command = build_command("treq", &cli_config());
+  let mut command = build_command("treq", cli_config());
   command.build();
   let sub = command.find_subcommand_mut(name).expect("known subcommand");
   sub.render_long_help().to_string()
@@ -178,7 +197,7 @@ where
     Ok(matches) => matches,
     Err(error) => {
       // Prints help/version to stdout and usage errors to stderr.
-      let _ = error.print();
+      error.print().best_effort();
       return if error.use_stderr() {
         USAGE_ERROR_EXIT_CODE
       } else {
@@ -187,10 +206,12 @@ where
     }
   };
   let Some(subcommand) = matches.subcommand else {
-    eprintln!("{}", build_command("treq", &cli_config()).render_usage());
+    eprintln!("{}", build_command("treq", cli_config()).render_usage());
     return USAGE_ERROR_EXIT_CODE;
   };
-  super::init_cli_binary_paths();
+  // No binary detection here: it spawns a login shell and a `which` per
+  // binary on every call, and a remote host runs one process per request.
+  // Push and fetch look their `git` up when they need it.
   super::handle_cli_command(&subcommand).unwrap_or_else(|| {
     eprintln!("Unknown command: {}", subcommand.name);
     USAGE_ERROR_EXIT_CODE
@@ -205,7 +226,7 @@ mod tests {
   fn every_configured_command_parses() {
     let config = cli_config();
     assert!(config.subcommands.contains_key("st"));
-    build_command("treq", &config).debug_assert();
+    build_command("treq", config).debug_assert();
   }
 
   #[test]
@@ -230,6 +251,20 @@ mod tests {
   fn usage_errors_exit_with_code_two() {
     assert_eq!(run(["treq", "bogus"]), USAGE_ERROR_EXIT_CODE);
     assert_eq!(run(["treq", "commit", "feat/x"]), USAGE_ERROR_EXIT_CODE);
+  }
+
+  #[test]
+  fn running_a_command_detects_no_binaries() {
+    // Detection spawns a login shell and a `which` per binary.
+    let missing = tempfile::tempdir().unwrap().path().join("none");
+    run([
+      "treq".as_ref(),
+      "workspace".as_ref(),
+      "--repo".as_ref(),
+      missing.as_os_str(),
+      "list".as_ref(),
+    ]);
+    assert_eq!(crate::binary_paths::get_binary_path("git"), None);
   }
 
   #[test]

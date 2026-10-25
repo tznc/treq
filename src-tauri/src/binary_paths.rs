@@ -1,8 +1,11 @@
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 static BINARY_PATHS_CACHE: OnceLock<HashMap<String, String>> = OnceLock::new();
 
@@ -30,6 +33,18 @@ fn select_supported_git(
 /// jj-lib fetch needs Git >= 2.41. GUI launches may find Apple's older Git
 /// before Homebrew, and the persisted binary cache may also point at that Git.
 pub fn resolve_remote_git() -> Result<String, String> {
+  // The lookup spawns `which -a git` plus `git --version` per candidate, and
+  // every fetch and push asks. A failure is not cached so installing Git
+  // takes effect without a restart.
+  static RESOLVED: OnceLock<String> = OnceLock::new();
+  if let Some(path) = RESOLVED.get() {
+    return Ok(path.clone());
+  }
+  let path = find_remote_git()?;
+  Ok(RESOLVED.get_or_init(|| path).clone())
+}
+
+fn find_remote_git() -> Result<String, String> {
   let mut paths = get_binary_path("git").into_iter().collect::<Vec<_>>();
   let finder = if cfg!(windows) { "where" } else { "which" };
   let mut command = Command::new(finder);
@@ -54,6 +69,27 @@ pub fn resolve_remote_git() -> Result<String, String> {
 
 /// Use the configured shell's PATH on Unix, plus the running executable directory.
 pub fn get_extended_path() -> String {
+  // Once the login shell's PATH is known the result no longer depends on the
+  // environment, so build it once.
+  #[cfg(unix)]
+  {
+    static EXTENDED: OnceLock<String> = OnceLock::new();
+    if let Some(path) = EXTENDED.get() {
+      return path.clone();
+    }
+    let (path, from_shell) = build_extended_path();
+    if from_shell {
+      return EXTENDED.get_or_init(|| path).clone();
+    }
+    path
+  }
+  #[cfg(not(unix))]
+  build_extended_path().0
+}
+
+/// The extended PATH, and whether it came from the login shell (stable) or
+/// fell back to the inherited environment.
+fn build_extended_path() -> (String, bool) {
   let current_path = env::var("PATH").unwrap_or_default();
 
   if cfg!(windows) {
@@ -71,21 +107,24 @@ pub fn get_extended_path() -> String {
         }
       }
     }
-    return all_paths.join(";");
+    return (all_paths.join(";"), false);
   }
 
   #[cfg(unix)]
-  let current_path = {
+  let (current_path, from_shell) = {
     static SHELL_PATH: OnceLock<Option<String>> = OnceLock::new();
-    SHELL_PATH
+    let shell_path = SHELL_PATH
       .get_or_init(|| {
         let shell = env::var_os("SHELL").filter(|shell| !shell.is_empty())?;
         let mut command = login_shell_command(&shell);
         shell_path_from_command(&mut command, std::time::Duration::from_secs(5))
       })
-      .clone()
-      .unwrap_or(current_path)
+      .clone();
+    let from_shell = shell_path.is_some();
+    (shell_path.unwrap_or(current_path), from_shell)
   };
+  #[cfg(not(unix))]
+  let from_shell = false;
 
   let mut all_paths: Vec<String> = current_path
     .split(':')
@@ -103,7 +142,7 @@ pub fn get_extended_path() -> String {
     }
   }
 
-  all_paths.join(":")
+  (all_paths.join(":"), from_shell)
 }
 
 #[cfg(unix)]
@@ -137,7 +176,7 @@ fn shell_path_from_command(command: &mut Command, timeout: std::time::Duration) 
       .take(1024 * 1024)
       .read_to_end(&mut bytes)
       .map(|_| bytes);
-    let _ = sender.send(result);
+    sender.send(result).ignore_closed();
   });
   let start = Instant::now();
   loop {
@@ -150,8 +189,8 @@ fn shell_path_from_command(command: &mut Command, timeout: std::time::Duration) 
       }
       Ok(None) if start.elapsed() < timeout => std::thread::sleep(Duration::from_millis(10)),
       _ => {
-        let _ = child.kill();
-        let _ = child.wait();
+        child.kill().best_effort();
+        child.wait().best_effort();
         return None;
       }
     }
@@ -177,37 +216,118 @@ pub fn get_exe_dir() -> Option<String> {
   }
 }
 
-/// Detect binary path using `which` (Unix) or `where` (Windows) with extended PATH
+/// Detect binary path on the extended PATH, as `which` (Unix) or `where`
+/// (Windows) would, without starting a process.
 pub fn detect_binary(name: &str) -> Option<String> {
-  if cfg!(windows) {
-    // `where` is the Windows equivalent of `which` and uses the inherited PATH.
-    return first_output_line(Command::new("where").arg(name));
-  }
-
   detect_binary_in(name, get_extended_path())
 }
 
 /// Finds `name` on `search_path` (a PATH-style list) and nowhere else, with
-/// the same `which` (Unix) or `where` (Windows) lookup as [`detect_binary`].
+/// the same lookup as [`detect_binary`].
 pub fn detect_binary_in(name: &str, search_path: impl AsRef<OsStr>) -> Option<String> {
-  let finder = if cfg!(windows) { "where" } else { "which" };
-  first_output_line(Command::new(finder).arg(name).env("PATH", search_path))
+  // The lookup `which` and `where` do, without a process: the first-run
+  // checklist asks for six tools at once, and a process each costs tens of
+  // milliseconds on Windows.
+  executable_in(name, search_path.as_ref())
 }
 
-/// The first line a successful lookup printed: the binary's path.
-fn first_output_line(command: &mut Command) -> Option<String> {
-  let output = command.output().ok()?;
-  if !output.status.success() {
+/// The first file called `name` in a directory of `search_path`, with one of
+/// the `pathext` extensions (`.EXE;.CMD`) added unless `name` has one already.
+/// Windows runs a file by its extension, so `git` finds `git.exe`.
+#[cfg_attr(unix, allow(dead_code, reason = "the Unix lookup checks permissions"))]
+fn executable_with_extensions(
+  name: &str,
+  search_path: &OsStr,
+  pathext: &str,
+  is_file: impl Fn(&Path) -> bool,
+) -> Option<String> {
+  if name.is_empty() {
     return None;
   }
-  let stdout = String::from_utf8(output.stdout).ok()?;
-  let path = stdout.lines().next()?.trim();
-  (!path.is_empty()).then(|| path.to_string())
+  let extensions: Vec<&str> = pathext.split(';').filter(|e| !e.is_empty()).collect();
+  let has_extension = extensions.iter().any(|ext| {
+    name.len() > ext.len()
+      && name.as_bytes()[name.len() - ext.len()..].eq_ignore_ascii_case(ext.as_bytes())
+  });
+  let candidates = |base: &Path| -> Vec<PathBuf> {
+    let name = base.as_os_str().to_string_lossy().into_owned();
+    let mut candidates = Vec::new();
+    if has_extension {
+      candidates.push(PathBuf::from(&name));
+    }
+    candidates.extend(
+      extensions
+        .iter()
+        .map(|ext| PathBuf::from(format!("{name}{ext}"))),
+    );
+    candidates
+  };
+  let found = if name.contains(['/', '\\']) {
+    candidates(Path::new(name)).into_iter().find(|c| is_file(c))
+  } else {
+    env::split_paths(search_path)
+      .filter(|dir| !dir.as_os_str().is_empty())
+      .find_map(|dir| {
+        candidates(&dir.join(name))
+          .into_iter()
+          .find(|candidate| is_file(candidate))
+      })
+  };
+  found.map(|path| path.to_string_lossy().into_owned())
+}
+
+#[cfg(not(unix))]
+fn executable_in(name: &str, search_path: &OsStr) -> Option<String> {
+  let pathext = env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+  executable_with_extensions(name, search_path, &pathext, Path::is_file)
+}
+
+/// The first executable file called `name` in a directory of `search_path`.
+#[cfg(unix)]
+fn executable_in(name: &str, search_path: &OsStr) -> Option<String> {
+  use std::os::unix::fs::PermissionsExt;
+  let is_executable = |path: &Path| {
+    path
+      .metadata()
+      .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+  };
+  if name.is_empty() {
+    return None;
+  }
+  if name.contains('/') {
+    return is_executable(Path::new(name)).then(|| name.to_string());
+  }
+  env::split_paths(search_path)
+    .filter(|dir| !dir.as_os_str().is_empty())
+    .map(|dir| dir.join(name))
+    .find(|candidate| is_executable(candidate))
+    .map(|path| path.to_string_lossy().into_owned())
+}
+
+/// [`detect_binary`] for binaries that are not in the startup cache, such as
+/// `gh`. A hit is kept for the process; a miss for a minute, so installing the
+/// tool takes effect soon without a `which` spawn on every poll.
+pub fn detect_binary_cached(name: &str) -> Option<String> {
+  const MISS_TTL: Duration = Duration::from_secs(60);
+  type Lookups = HashMap<String, (Option<String>, Instant)>;
+  static CACHE: OnceLock<Mutex<Lookups>> = OnceLock::new();
+  let cache = CACHE.get_or_init(Mutex::default);
+  if let Some((found, at)) = cache.lock().ok()?.get(name) {
+    if found.is_some() || at.elapsed() < MISS_TTL {
+      return found.clone();
+    }
+  }
+  let found = detect_binary(name);
+  cache
+    .lock()
+    .ok()?
+    .insert(name.to_string(), (found.clone(), Instant::now()));
+  found
 }
 
 /// Initialize binary paths cache with detected paths
 pub fn init_binary_paths_cache(paths: HashMap<String, String>) {
-  let _ = BINARY_PATHS_CACHE.set(paths);
+  BINARY_PATHS_CACHE.set(paths).best_effort();
 }
 
 /// Get cached binary path for a given binary name
@@ -217,26 +337,34 @@ pub fn get_binary_path(name: &str) -> Option<String> {
 
 /// Detect installed editor applications using mdfind
 pub fn detect_editor_app(app_name: &str) -> bool {
-  let search_pattern = "kMDItemKind == 'Application'";
+  let app_file = format!("/{}.app", app_name);
+  installed_applications().is_some_and(|apps| apps.lines().any(|line| line.ends_with(&app_file)))
+}
 
-  let output = Command::new("mdfind").arg(search_pattern).output().ok();
-
-  if let Some(output) = output {
-    if output.status.success() {
-      let stdout = String::from_utf8_lossy(&output.stdout);
-      let app_file = format!("/{}.app", app_name);
-      return stdout.lines().any(|line| line.ends_with(&app_file));
-    }
-  }
-
-  false
+/// Every application Spotlight knows, asked once for all the editors. Only
+/// macOS has `mdfind`; elsewhere there is no one to ask.
+fn installed_applications() -> Option<&'static str> {
+  static APPLICATIONS: OnceLock<Option<String>> = OnceLock::new();
+  APPLICATIONS
+    .get_or_init(|| {
+      if !cfg!(target_os = "macos") {
+        return None;
+      }
+      let output = Command::new("mdfind")
+        .arg("kMDItemKind == 'Application'")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+      Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    })
+    .as_deref()
 }
 
 static EDITOR_APPS_CACHE: OnceLock<HashMap<String, bool>> = OnceLock::new();
 
 /// Initialize editor apps cache
 pub fn init_editor_apps_cache(apps: HashMap<String, bool>) {
-  let _ = EDITOR_APPS_CACHE.set(apps);
+  EDITOR_APPS_CACHE.set(apps).best_effort();
 }
 
 /// Get a cached editor-apps snapshot if initialized.
@@ -246,7 +374,58 @@ pub fn get_editor_apps_cache() -> Option<HashMap<String, bool>> {
 
 #[cfg(test)]
 mod tests {
+  #[test]
+  fn finds_a_windows_tool_by_its_extension_without_a_process() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let (first, second) = (dir.path().join("a"), dir.path().join("b"));
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    std::fs::write(second.join("git.exe"), "").unwrap();
+    std::fs::write(second.join("npm.cmd"), "").unwrap();
+    std::fs::write(first.join("git.cmd"), "").unwrap();
+    let path = env::join_paths([&first, &second]).unwrap();
+    let find =
+      |name: &str| executable_with_extensions(name, &path, ".com;.exe;.cmd", Path::is_file);
+    // The earlier directory wins, and the extension is added in PATHEXT order.
+    assert_eq!(
+      find("git"),
+      Some(first.join("git.cmd").to_string_lossy().into_owned())
+    );
+    assert_eq!(
+      find("npm"),
+      Some(second.join("npm.cmd").to_string_lossy().into_owned())
+    );
+    assert_eq!(
+      find("git.exe"),
+      Some(second.join("git.exe").to_string_lossy().into_owned())
+    );
+    assert_eq!(find("node"), None);
+    assert_eq!(find(""), None);
+  }
+
   use super::*;
+
+  #[cfg(unix)]
+  #[test]
+  fn finds_the_first_executable_on_the_search_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let (first, second) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let tool = |dir: &tempfile::TempDir, mode| {
+      let path = dir.path().join("tool");
+      std::fs::write(&path, "#!/bin/sh\n").unwrap();
+      std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+      path
+    };
+    tool(&first, 0o644);
+    let wanted = tool(&second, 0o755);
+    let search = env::join_paths([first.path(), second.path()]).unwrap();
+    assert_eq!(
+      detect_binary_in("tool", &search),
+      Some(wanted.to_string_lossy().into_owned()),
+      "a file that is not executable does not shadow the one behind it"
+    );
+    assert_eq!(detect_binary_in("missing", &search), None);
+  }
 
   #[cfg(target_os = "macos")]
   #[test]

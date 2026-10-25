@@ -10,6 +10,7 @@
 //! hands an [`AutoReviewEvent`] to the frontend, which launches the same
 //! observable agent terminal the manual Start Review button launches.
 
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -89,7 +90,7 @@ fn last_fired() -> &'static Mutex<HashMap<String, String>> {
 /// Tauri setup; the CLI and tests leave it unset, which makes [`notify`] a
 /// no-op after its checks.
 pub fn set_emitter(emitter: Emitter) {
-  let _ = EMITTER.set(emitter);
+  EMITTER.set(emitter).best_effort();
 }
 
 /// Key a workspace's last fired operation is stored under.

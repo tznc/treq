@@ -394,8 +394,11 @@ fn github_lists_issues_and_hands_moves_to_react(cx: &mut TestAppContext) {
   assert!(h.drawn("github-issue-1"));
   assert!(h.drawn("github-issue-2"));
   assert!(!h.drawn("github-detail"));
+  // The two reads run side by side, in no set order.
+  let mut calls = host.calls();
+  calls.sort();
   assert_eq!(
-    host.calls(),
+    calls,
     ["read issues acme/treq open None", "read workspaces"]
   );
 
@@ -967,6 +970,7 @@ fn new_pr_fake() -> Fake {
     base_ref_name: String::new(),
     merge_state_status: None,
     is_draft: false,
+    body: String::new(),
   };
   Fake {
     workspaces: vec![
@@ -1026,4 +1030,28 @@ fn github_new_pr_from_a_branch(cx: &mut TestAppContext) {
   assert!(view(&mut h, |v| v.new_pr.as_ref().and_then(|n| n.error.clone())).is_some());
   h.click("github-new-pr-cancel");
   assert_eq!(h.sent(), [press("github.close")]);
+}
+
+#[gpui::test]
+fn github_reads_an_issue_ahead_while_the_pointer_rests_on_its_row(cx: &mut TestAppContext) {
+  use super::kept_tabs::{drawn_now, first_frame, reads};
+  use crate::gpui_shell::screen::prefetch::HOVER_INTENT;
+  let (mut h, host) = harness(cx, issues(), route("issues", None, false));
+  let at = h.cx.debug_bounds("github-issue-2").expect("row").center();
+  h.cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+  h.cx.executor().advance_clock(HOVER_INTENT);
+  h.cx.run_until_parked();
+  assert_eq!(reads(&host, "read issue 2"), 1);
+
+  // Opened, its detail is in the first frame, and is read again behind it.
+  h.update(|s| {
+    if let View::Github(route) = &mut s.view {
+      route.selected = Some(2);
+    }
+  });
+  first_frame(&mut h);
+  assert!(drawn_now(&mut h, "github-detail"));
+  assert!(!drawn_now(&mut h, "github-detail-loading-shown"));
+  h.cx.run_until_parked();
+  assert_eq!(reads(&host, "read issue 2"), 2);
 }

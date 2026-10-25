@@ -2,6 +2,7 @@
 //! made with the window, draws through the `Shell`, and receives what the
 //! window's views, the backend, the menu bar and app-wide events report.
 
+use crate::result_ext::ResultExt;
 use std::{
   collections::HashSet,
   rc::Rc,
@@ -41,6 +42,28 @@ fn drives(label: &str) -> bool {
 
 pub(in crate::gpui_shell) fn forget(label: &str) {
   driven().lock_or_recover().remove(label);
+  set_focused(label, false);
+}
+
+/// The windows in front, by label: none while the app is in the background.
+fn in_front() -> &'static Mutex<HashSet<String>> {
+  static IN_FRONT: std::sync::OnceLock<Mutex<HashSet<String>>> = std::sync::OnceLock::new();
+  IN_FRONT.get_or_init(Default::default)
+}
+
+/// Records whether window `label` has the focus, and tells the PR status
+/// poller whether any window does, so it slows down while none is.
+fn set_focused(label: &str, focused: bool) {
+  let none = {
+    let mut in_front = in_front().lock_or_recover();
+    if focused {
+      in_front.insert(label.to_string());
+    } else {
+      in_front.remove(label);
+    }
+    in_front.is_empty()
+  };
+  crate::pr_status::global().set_background(none);
 }
 
 /// Gives window `label` its model, on `repo`. Main thread, outside a GPUI
@@ -58,14 +81,14 @@ pub(in crate::gpui_shell) fn start(
       let weak = weak.clone();
       // The model can present from inside the shell's own update.
       cx.defer(move |cx| {
-        let _ = weak.update(cx, |shell, cx| shell.present(presentation, cx));
+        weak
+          .update(cx, |shell, cx| shell.present(presentation, cx))
+          .ignore_closed();
       });
     });
     let host = Arc::new(Backend::new(app.clone(), label.clone()));
-    let controller = cx.new(|cx| WindowController::new(host, repo, present, cx));
-    if let Some(dark) = shell.os_dark {
-      controller.update(cx, |c, cx| c.set_system_dark(dark, cx));
-    }
+    let dark = shell.os_dark;
+    let controller = cx.new(|cx| WindowController::new(host, repo, present, dark, cx));
     shell.window = Some(controller);
   })
 }
@@ -93,11 +116,12 @@ fn with_controller(
 ) {
   let label = label.to_string();
   defer_main(app, move |_| {
-    let _ = tauri_plugin_gpui::with_app(move |cx| {
+    tauri_plugin_gpui::with_app(move |cx| {
       if let Some(controller) = controller(&label, cx) {
         controller.update(cx, f);
       }
-    });
+    })
+    .ignore_closed();
   });
 }
 
@@ -139,6 +163,27 @@ pub(in crate::gpui_shell) fn sidebar_action(
   cx: &mut App,
 ) -> bool {
   controller(label, cx).is_some_and(|c| c.update(cx, |c, cx| c.sidebar_action(action, cx)))
+}
+
+/// Workspace `id` of `repo`, as window `label` last read it; `None` when
+/// the window has not read it (or the model does not drive the window).
+pub(in crate::gpui_shell) fn workspace(
+  label: &str,
+  repo: &str,
+  id: i64,
+  cx: &App,
+) -> Option<crate::local_db::Workspace> {
+  controller(label, cx)?.read(cx).workspace(repo, id).cloned()
+}
+
+/// The workspace view's route were window `label` to select workspace `id`
+/// of its repository.
+pub(in crate::gpui_shell) fn workspace_route(
+  label: &str,
+  id: i64,
+  cx: &App,
+) -> Option<screen::workspace_data::Route> {
+  controller(label, cx)?.read(cx).workspace_route(id)
 }
 
 /// A keyboard shortcut pressed in window `label`.
@@ -228,17 +273,35 @@ pub fn skill_install_link(app: &AppHandle, label: &str, skill_id: String) {
   }
 }
 
-/// Window `label` gained focus. Any thread.
-pub fn window_focused(app: &AppHandle, label: &str) {
-  with_controller(app, label, |c, cx| c.focused(cx));
+/// Window `label` gained (`focused`) or lost focus. Any thread.
+pub fn window_focused(app: &AppHandle, label: &str, focused: bool) {
+  set_focused(label, focused);
+  if focused {
+    with_controller(app, label, |c, cx| c.focused(cx));
+  } else {
+    with_controller(app, label, |c, _| c.blurred());
+  }
 }
 
 /// Follows the app-wide events the window's data depends on. Once.
 pub fn listen(app: &AppHandle) {
   let handle = app.clone();
-  app.listen_any("pr-statuses-updated", move |_| {
+  app.listen_any("pr-statuses-updated", move |event| {
+    let payload: serde_json::Value = serde_json::from_str(event.payload()).unwrap_or_default();
+    let Some(repo_path) = payload["repo_path"].as_str() else {
+      return;
+    };
+    let stacks_moved = payload["stacks_moved"].as_bool().unwrap_or(false);
+    // The PR's title or body was copied into workspaces: read them again.
+    let synced = crate::pr_status::synced_repo(event.payload()).is_some();
     for label in labels() {
-      with_controller(&handle, &label, |c, cx| c.prs_changed(cx));
+      let repo_path = repo_path.to_string();
+      with_controller(&handle, &label, move |c, cx| {
+        c.prs_changed(&repo_path, stacks_moved, cx);
+        if synced {
+          c.native_event(&NativeEvent::WorkspaceChanged { repo_path }, cx);
+        }
+      });
     }
   });
   // `remoteCutoffStore`: the transport tore an endpoint's connections down.

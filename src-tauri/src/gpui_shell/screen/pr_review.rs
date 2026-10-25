@@ -12,6 +12,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   cell::RefCell,
   ops::Range,
@@ -160,12 +161,14 @@ impl PrReviewView {
       let value = cx
         .background_spawn(async move { work(host.as_ref()) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.route == route {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.route == route {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -707,7 +710,10 @@ impl PrReviewView {
           })
           .child(dot.when(disabled, |this| this.opacity(0.5)))
           .child(
+            // flex_1 + min_w_0 so a long hint wraps inside the popover.
             div()
+              .flex_1()
+              .min_w_0()
               .child(div().font_weight(FontWeight::MEDIUM).child(event.label()))
               .child(
                 ui::text(div(), TextSize::Xs)

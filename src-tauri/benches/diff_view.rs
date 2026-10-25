@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::string_slice, reason = "bench code")]
+
 //! The Changes tab's per-row and per-frame helpers on a large diff: line
 //! numbers, comment and thread placement, intraline marks and syntax
 //! highlighting. `changes_perf` (an ignored lib test) measures whole frames.
@@ -100,9 +102,13 @@ fn bench_lines(c: &mut Criterion) {
   // What each drawn row asks: its gutter icon and the cards under it.
   group.bench_function("comments_visible_rows", |b| {
     b.iter(|| {
+      let outdated = |c: &diff::LineComment| diff::is_outdated(c, Some(&hunks));
       for l in 0..VISIBLE {
-        black_box(diff::line_has_comment(&comments, &file, &hunk, l, &hunks));
-        black_box(diff::comments_under(&comments, &file, &hunk, l, &hunks));
+        let at = diff::line_at(&hunk, l);
+        black_box(diff::line_has_comment(
+          &comments, &file, &hunk, at, &outdated,
+        ));
+        black_box(diff::comments_under(&comments, &file, &hunk, at, &outdated));
       }
     })
   });
