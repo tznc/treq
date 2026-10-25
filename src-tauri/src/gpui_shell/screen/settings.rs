@@ -2407,95 +2407,96 @@ impl SettingsView {
       .border_color(p.border)
       .rounded(radius::MD)
       .p_3()
-      .pr_12()
+      .pr_20()
       .debug_selector(move || selector)
-      .when(row.installed.is_some(), |this| {
+      // The uninstall and docs icons share one row in the top right corner;
+      // docs is last, so it stays in one column whether or not a skill is
+      // installed.
+      .when(row.has_url || row.installed.is_some(), |this| {
         this.child(
-          div().absolute().top_2().right_2().child(
-            Button::new(format!("skill-uninstall-{id}"), p)
-              .aria_label("Uninstall")
-              .variant(Variant::Outline)
-              .size(Size::IconXs)
-              .disabled(row.busy)
-              .border_color(p.destructive.opacity(0.3))
-              .text_color(p.destructive)
-              .hover_bg(p.destructive.opacity(0.1))
-              .icon(theme::ICON_TRASH, 14.)
-              .on_click(self.press(&format!("skills.uninstall:{id}"))),
-          ),
+          div()
+            .absolute()
+            .top_2()
+            .right_2()
+            .flex()
+            .items_center()
+            .gap_1()
+            .when(row.installed.is_some(), |this| {
+              this.child(
+                Button::new(format!("skill-uninstall-{id}"), p)
+                  .aria_label("Uninstall")
+                  .variant(Variant::Outline)
+                  .size(Size::IconXs)
+                  .disabled(row.busy)
+                  .border_color(p.destructive.opacity(0.3))
+                  .text_color(p.destructive)
+                  .hover_bg(p.destructive.opacity(0.1))
+                  .icon(theme::ICON_TRASH, 14.)
+                  .on_click(self.press(&format!("skills.uninstall:{id}"))),
+              )
+            })
+            .when(row.has_url, |this| {
+              this.child(
+                Button::new(format!("skill-source-{id}"), p)
+                  .aria_label("Open source")
+                  .variant(Variant::Ghost)
+                  .size(Size::IconXs)
+                  .text_color(p.muted_foreground)
+                  .icon(theme::ICON_BOOK_OPEN, 14.)
+                  .on_click(self.press(&format!("skills.source:{id}"))),
+              )
+            }),
         )
       })
       .child(
-        div()
-          // React's `space-y-2` counts the absolute uninstall button as the
-          // first child, so an installed skill's text starts 8px lower.
-          .when(row.installed.is_some(), |this| this.mt_2())
-          .flex()
-          .items_start()
-          .justify_between()
-          .gap_3()
-          .child(
-            div()
-              .min_w_0()
-              .child(
-                div()
-                  .flex()
-                  .items_center()
-                  .gap_2()
-                  .child(
-                    ui::text(div(), TextSize::Sm)
-                      .font_weight(FontWeight::MEDIUM)
-                      .truncate()
-                      .child(row.name.clone()),
-                  )
-                  .when(!row.source.is_empty(), |this| {
-                    this.child(
-                      ui::text(div(), TextSize::Xs)
-                        .text_color(p.muted_foreground)
-                        .child(row.source.clone()),
-                    )
-                  })
-                  .children(row.labels.iter().map(|label| {
-                    let tone = match label.as_str() {
-                      LABEL_APP_WIDE | LABEL_REPOSITORY => p.primary,
-                      LABEL_CUSTOM_REPO | LABEL_CUSTOM_GLOBAL => p.warning,
-                      _ => p.muted_foreground,
-                    };
-                    ui::text(div(), TextSize::Xs)
-                      .flex_none()
-                      .px_1p5()
-                      .rounded(radius::SM)
-                      .border_1()
-                      .border_color(tone.opacity(0.5))
-                      .bg(tone.opacity(0.1))
-                      .text_color(tone)
-                      .child(label.clone())
-                  })),
-              )
-              .when_some(row.description.clone(), |this, description| {
-                this.child(
-                  ui::text(div().mt_1(), TextSize::Sm)
-                    .text_color(p.muted_foreground)
-                    .line_clamp(2)
-                    .text_ellipsis()
-                    .child(description),
-                )
-              }),
-          )
-          .when(row.has_url, |this| {
-            let source = SharedString::from(format!("skill-source-{id}"));
-            let selector = source.to_string();
-            this.child(
+        div().flex().items_start().justify_between().gap_3().child(
+          div()
+            .min_w_0()
+            .child(
               div()
-                .id(source)
-                .debug_selector(move || selector)
-                .flex_none()
-                .mr_6()
-                .cursor_pointer()
-                .child(ui::icon(theme::ICON_BOOK_OPEN, 16., p.muted_foreground))
-                .on_click(self.press(&format!("skills.source:{id}"))),
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                  ui::text(div(), TextSize::Sm)
+                    .font_weight(FontWeight::MEDIUM)
+                    .truncate()
+                    .child(row.name.clone()),
+                )
+                .when(!row.source.is_empty(), |this| {
+                  this.child(
+                    ui::text(div(), TextSize::Xs)
+                      .text_color(p.muted_foreground)
+                      .child(row.source.clone()),
+                  )
+                })
+                .children(row.labels.iter().map(|label| {
+                  let tone = match label.as_str() {
+                    LABEL_APP_WIDE | LABEL_REPOSITORY => p.primary,
+                    LABEL_CUSTOM_REPO | LABEL_CUSTOM_GLOBAL => p.warning,
+                    _ => p.muted_foreground,
+                  };
+                  ui::text(div(), TextSize::Xs)
+                    .flex_none()
+                    .px_1p5()
+                    .rounded(radius::SM)
+                    .border_1()
+                    .border_color(tone.opacity(0.5))
+                    .bg(tone.opacity(0.1))
+                    .text_color(tone)
+                    .child(label.clone())
+                })),
             )
-          }),
+            .when_some(row.description.clone(), |this, description| {
+              this.child(
+                ui::text(div().mt_1(), TextSize::Sm)
+                  .text_color(p.muted_foreground)
+                  .line_clamp(2)
+                  .text_ellipsis()
+                  .child(description),
+              )
+            }),
+        ),
       )
       .map(|this| {
         if row.proprietary {
