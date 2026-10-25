@@ -97,6 +97,36 @@ pub fn merge_preview(repo_path: &str, workspace_id: i64, rollup: bool) -> Previe
   }
 }
 
+/// The branch's PR as the merge page shows it: `cached` from the app's PR
+/// cache when it is open or merged and the repository has a GitHub remote,
+/// with the repository's merge settings for an open one.
+pub fn github_pr(repo_path: &str, cached: Option<PrInfo>) -> Option<GithubPr> {
+  let pr = cached.filter(|pr| pr.state == "OPEN" || pr.state == "MERGED")?;
+  let remote = crate::github::get_git_remote_url_impl(repo_path)
+    .ok()
+    .flatten()?;
+  let settings = (pr.state == "OPEN")
+    .then(|| {
+      crate::binary_paths::get_binary_path("gh")
+        .or_else(|| crate::binary_paths::detect_binary("gh"))
+    })
+    .flatten()
+    .and_then(|gh| {
+      crate::github::gh_repo_merge_settings_impl(
+        &gh,
+        &remote.full_name,
+        &crate::binary_paths::get_extended_path(),
+      )
+      .map_err(|e| log::warn!("merge preview: repo merge settings: {e}"))
+      .ok()
+    });
+  Some(GithubPr {
+    repo_full_name: remote.full_name,
+    pr,
+    settings,
+  })
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -111,6 +141,36 @@ mod tests {
 
     assert_eq!(preview.error.as_deref(), Some("Workspace 7 not found"));
     assert!(preview.workspace.is_none() && preview.commits.is_none() && preview.diff.is_none());
+  }
+
+  fn pr(state: &str) -> PrInfo {
+    PrInfo {
+      number: 7,
+      title: "Feature".into(),
+      state: state.into(),
+      url: String::new(),
+      head_ref_name: "feature".into(),
+      base_ref_name: "main".into(),
+      merge_state_status: None,
+      is_draft: false,
+    }
+  }
+
+  #[test]
+  fn github_pr_needs_a_github_remote() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+
+    assert_eq!(github_pr(repo, Some(pr("OPEN"))), None);
+  }
+
+  #[test]
+  fn github_pr_skips_a_closed_or_missing_pr() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+
+    assert_eq!(github_pr(repo, Some(pr("CLOSED"))), None);
+    assert_eq!(github_pr(repo, None), None);
   }
 
   #[test]

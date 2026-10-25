@@ -190,30 +190,12 @@ impl MergeHost for Backend {
   }
 }
 
-/// The branch's PR from the PR cache when it is open or merged, with the
-/// repository's merge settings for an open one.
+/// The branch's PR from the PR cache, as the merge page shows it.
 fn github_pr(repo_path: &str, branch: &str) -> Option<GithubPr> {
-  let remote = crate::github::get_git_remote_url_impl(repo_path)
-    .ok()
-    .flatten()?;
-  let pr = crate::pr_status::global()
+  let cached = crate::pr_status::global()
     .get_cached(repo_path, branch)
-    .flatten()
-    .filter(|pr| pr.state == "OPEN" || pr.state == "MERGED")?;
-  let settings = (pr.state == "OPEN").then(gh_path).flatten().and_then(|gh| {
-    crate::github::gh_repo_merge_settings_impl(
-      &gh,
-      &remote.full_name,
-      &crate::binary_paths::get_extended_path(),
-    )
-    .map_err(|e| log::warn!("merge preview: repo merge settings: {e}"))
-    .ok()
-  });
-  Some(GithubPr {
-    repo_full_name: remote.full_name,
-    pr,
-    settings,
-  })
+    .flatten();
+  core::merge_preview::github_pr(repo_path, cached)
 }
 
 fn gh_path() -> Option<String> {
