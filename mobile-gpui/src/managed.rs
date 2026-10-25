@@ -8,6 +8,7 @@
 //! the endpoint off until the user reauthenticates.
 
 use std::{
+  collections::HashMap,
   sync::{Arc, Mutex},
   time::Duration,
 };
@@ -85,7 +86,7 @@ pub async fn connect(progress: impl Fn(&'static str) + Send + Sync) -> Result<Co
   }
 
   progress("Getting a certificate");
-  let (lease, endpoint) = issue(&instance.instance_id).await?;
+  let (lease, endpoint) = issue(&instance.instance_id, false).await?;
   activate(lease, endpoint.clone()).await;
   Ok(Connection {
     endpoint,
@@ -93,23 +94,73 @@ pub async fn connect(progress: impl Fn(&'static str) + Send + Sync) -> Result<Co
   })
 }
 
-/// Registers the device key and issues a certificate for it.
-async fn issue(instance_id: &str) -> Result<(Lease, SshEndpoint), String> {
+/// Key ids the control plane registered for this device's keys, by
+/// fingerprint. The id never changes for a key, so a connect skips the
+/// registration call (an Edge Function round trip) after the first.
+static REGISTERED_KEYS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+/// Issues with the cached registration of `fingerprint` when there is one,
+/// registering first otherwise. A failed issue with a cached id (the key
+/// was revoked, or another account signed in) registers again and issues
+/// once more. `fresh` ignores the cache, for reauthentication.
+async fn issue_with_registered_key<T, Reg, RegFut, Iss, IssFut>(
+  keys: &Mutex<Option<HashMap<String, String>>>,
+  fingerprint: &str,
+  fresh: bool,
+  mut register: Reg,
+  mut issue: Iss,
+) -> Result<T, String>
+where
+  Reg: FnMut() -> RegFut,
+  RegFut: std::future::Future<Output = Result<String, String>>,
+  Iss: FnMut(String) -> IssFut,
+  IssFut: std::future::Future<Output = Result<T, String>>,
+{
+  let cached = if fresh {
+    None
+  } else {
+    keys
+      .lock()
+      .unwrap()
+      .as_ref()
+      .and_then(|keys| keys.get(fingerprint).cloned())
+  };
+  if let Some(key_id) = cached {
+    if let Ok(issued) = issue(key_id).await {
+      return Ok(issued);
+    }
+  }
+  let key_id = register().await?;
+  keys
+    .lock()
+    .unwrap()
+    .get_or_insert_with(HashMap::new)
+    .insert(fingerprint.to_string(), key_id.clone());
+  issue(key_id).await
+}
+
+/// Registers the device key (once per key) and issues a certificate for it.
+async fn issue(instance_id: &str, fresh: bool) -> Result<(Lease, SshEndpoint), String> {
   let supabase = &backend::get().supabase;
   let (public_key, fingerprint) = device_public_key().await?;
-  let key = control_plane::register_client_key(
-    supabase,
-    &public_key,
-    DEVICE_KEY_COMMENT,
-    &format!("register:{fingerprint}"),
-  )
-  .await
-  .map_err(|e| e.to_string())?;
-  shared::issue(
-    supabase,
-    instance_id,
-    &key.id,
-    DEVICE_KEYSTORE_KEY_REFERENCE,
+  issue_with_registered_key(
+    &REGISTERED_KEYS,
+    &fingerprint,
+    fresh,
+    || async {
+      control_plane::register_client_key(
+        supabase,
+        &public_key,
+        DEVICE_KEY_COMMENT,
+        &format!("register:{fingerprint}"),
+      )
+      .await
+      .map(|key| key.id)
+      .map_err(|e| e.to_string())
+    },
+    |key_id| async move {
+      shared::issue(supabase, instance_id, &key_id, DEVICE_KEYSTORE_KEY_REFERENCE).await
+    },
   )
   .await
 }
@@ -186,7 +237,7 @@ pub async fn reauthenticate() -> Result<(), String> {
         .and_then(|c| c.endpoint.instance_id)
     })
     .ok_or("This host is not a managed instance.")?;
-  let (lease, endpoint) = issue(&instance_id).await?;
+  let (lease, endpoint) = issue(&instance_id, true).await?;
   let endpoint_id = endpoint.id.clone();
   activate(lease, endpoint).await;
   backend::get().pool.clear_cutoff(&endpoint_id).await;
@@ -229,4 +280,65 @@ pub fn stop() {
     task.abort();
   }
   tasks.lease = None;
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::sync::atomic::{AtomicUsize, Ordering};
+
+  async fn run(
+    keys: &Mutex<Option<HashMap<String, String>>>,
+    fresh: bool,
+    registrations: &AtomicUsize,
+    valid_key: &'static str,
+  ) -> Result<String, String> {
+    issue_with_registered_key(
+      keys,
+      "fp",
+      fresh,
+      || async {
+        registrations.fetch_add(1, Ordering::SeqCst);
+        Ok(valid_key.to_string())
+      },
+      |key_id| async move {
+        if key_id == valid_key {
+          Ok(format!("cert for {key_id}"))
+        } else {
+          Err("unknown key".to_string())
+        }
+      },
+    )
+    .await
+  }
+
+  #[tokio::test]
+  async fn registers_once_then_issues_with_the_cached_key() {
+    let keys = Mutex::new(None);
+    let registrations = AtomicUsize::new(0);
+    run(&keys, false, &registrations, "k1").await.unwrap();
+    run(&keys, false, &registrations, "k1").await.unwrap();
+    assert_eq!(registrations.load(Ordering::SeqCst), 1);
+  }
+
+  #[tokio::test]
+  async fn registers_again_when_the_cached_key_is_refused() {
+    let keys = Mutex::new(None);
+    let registrations = AtomicUsize::new(0);
+    run(&keys, false, &registrations, "k1").await.unwrap();
+    let issued = run(&keys, false, &registrations, "k2").await.unwrap();
+    assert_eq!(issued, "cert for k2");
+    assert_eq!(registrations.load(Ordering::SeqCst), 2);
+    run(&keys, false, &registrations, "k2").await.unwrap();
+    assert_eq!(registrations.load(Ordering::SeqCst), 2);
+  }
+
+  #[tokio::test]
+  async fn reauthentication_always_registers() {
+    let keys = Mutex::new(None);
+    let registrations = AtomicUsize::new(0);
+    run(&keys, false, &registrations, "k1").await.unwrap();
+    run(&keys, true, &registrations, "k1").await.unwrap();
+    assert_eq!(registrations.load(Ordering::SeqCst), 2);
+  }
 }
