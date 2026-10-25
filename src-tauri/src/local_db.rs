@@ -2462,9 +2462,19 @@ pub fn add_prompt_history(
 
 /// Get every prompt ever sent in this repository, most recent first.
 pub fn get_prompt_history(repo_path: &str) -> Result<Vec<PromptHistoryEntry>, String> {
+  get_prompt_history_page(repo_path, i64::MAX as usize, 0)
+}
+
+/// Up to `limit` prompts sent in this repository after the newest `offset`
+/// of them, most recent first.
+pub fn get_prompt_history_page(
+  repo_path: &str,
+  limit: usize,
+  offset: usize,
+) -> Result<Vec<PromptHistoryEntry>, String> {
   let conn = get_connection(repo_path)?;
   let sql = format!(
-    "{} ORDER BY ph.created_at DESC, ph.id DESC",
+    "{} ORDER BY ph.created_at DESC, ph.id DESC LIMIT ?1 OFFSET ?2",
     PROMPT_HISTORY_SELECT
   );
   let mut stmt = conn
@@ -2472,7 +2482,13 @@ pub fn get_prompt_history(repo_path: &str) -> Result<Vec<PromptHistoryEntry>, St
     .map_err(|e| format!("Failed to prepare prompt history query: {}", e))?;
 
   let entries = stmt
-    .query_map([], prompt_history_from_row)
+    .query_map(
+      params![
+        limit.min(i64::MAX as usize) as i64,
+        offset.min(i64::MAX as usize) as i64
+      ],
+      prompt_history_from_row,
+    )
     .map_err(|e| format!("Failed to query prompt history: {}", e))?;
 
   entries

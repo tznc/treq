@@ -590,6 +590,7 @@ pub fn run() {
       // every terminal.
       if let tauri::WindowEvent::Destroyed = event {
         let label = window.label().to_string();
+        core::agent_launch::forget_window(&label);
         #[cfg(feature = "gpui-shell")]
         #[cfg(desktop)]
         gpui_shell::forget_window(&label);
