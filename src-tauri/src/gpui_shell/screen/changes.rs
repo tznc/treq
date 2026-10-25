@@ -1118,16 +1118,19 @@ impl ChangesView {
     // with its own feedback, and runs even if the tab moved on meanwhile.
     cx.spawn(async move |this, cx| {
       let (work_host, work_parent) = (host.clone(), parent.clone());
-      let committed = cx
+      let (committed, auto_push) = cx
         .background_spawn(async move {
-          if split {
+          let committed = if split {
             work_host.split(&work_parent.working_directory(), &message, staged)
           } else {
             work_host.commit(&work_parent.repo_path, work_parent.workspace_id(), &message)
-          }
+          };
+          // A split never auto-pushed.
+          let auto_push = !split && work_host.auto_pushes(&work_parent.repo_path);
+          (committed, auto_push)
         })
         .await;
-      let pushing = committed.is_ok() && action == CommitAction::Push;
+      let pushing = committed.is_ok() && (action == CommitAction::Push || auto_push);
       this
         .update(cx, |view, cx| {
           if view.parent.key() != key {

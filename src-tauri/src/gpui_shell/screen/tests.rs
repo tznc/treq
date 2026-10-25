@@ -23,6 +23,8 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
+  /// The repository's auto-push setting, for the Changes tab's commit.
+  auto_push: bool,
   /// What the folder picker returns, and why starting a dev container fails.
   picked: Option<String>,
   container_error: Option<String>,
@@ -772,6 +774,10 @@ impl changes_data::ChangesHost for FakeHost {
   fn push_remote(&self, _: &str, workspace_id: Option<i64>) -> Result<String, String> {
     self.record(format!("push {workspace_id:?}"));
     Ok(String::new())
+  }
+
+  fn auto_pushes(&self, _: &str) -> bool {
+    self.auto_push
   }
 
   fn stash_all(
@@ -4687,6 +4693,24 @@ fn changes_tab_commits_the_working_copy(cx: &mut TestAppContext) {
     "{:?}",
     host.writes()
   );
+}
+
+#[gpui::test]
+fn changes_tab_pushes_after_the_commit_when_the_repo_auto_pushes(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.auto_push = true;
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.click("commit-message");
+  h.cx.simulate_input("Fix");
+  h.click("commit-button");
+  h.cx.run_until_parked();
+  let writes: Vec<_> = host
+    .writes()
+    .into_iter()
+    .filter(|w| w.starts_with("commit") || w.starts_with("push"))
+    .collect();
+  // The commit returns before the push, which runs once, as its own stage.
+  assert_eq!(writes, ["commit Some(7) \"Fix\"", "push Some(7)"]);
 }
 
 #[gpui::test]
