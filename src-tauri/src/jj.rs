@@ -213,7 +213,7 @@ use jj_lib::working_copy::{SnapshotOptions, WorkingCopyFreshness};
 use jj_lib::workspace::{
   default_working_copy_factories, default_working_copy_factory, LockedWorkspace, Workspace,
 };
-use jj_lib::workspace_store::{SimpleWorkspaceStore, WorkspaceStore as _};
+use jj_lib::workspace_store::SimpleWorkspaceStore;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
@@ -2783,8 +2783,38 @@ fn load_home_repo(
   Ok((workspace, repo, workspace_store))
 }
 
+/// Every workspace's recorded path, read from the store index in one pass.
+/// `SimpleWorkspaceStore::get_workspace_path` re-reads and decodes the whole
+/// index per call, which makes a loop over N workspaces O(N^2).
+struct WorkspacePaths(HashMap<String, PathBuf>);
+
+impl WorkspacePaths {
+  fn load(repo_path: &Path) -> Result<Self, JjError> {
+    use prost::Message as _;
+    let index = repo_path.join("workspace_store").join("index");
+    let bytes = fs::read(&index)
+      .map_err(|e| JjError::IoError(format!("Failed to read workspace store: {}", e)))?;
+    let decoded = jj_lib::protos::simple_workspace_store::Workspaces::decode(&*bytes)
+      .map_err(|e| JjError::IoError(format!("Failed to decode workspace store: {}", e)))?;
+    let mut paths = HashMap::with_capacity(decoded.workspaces.len());
+    for workspace in decoded.workspaces {
+      let path = jj_lib::file_util::path_from_bytes(&workspace.path)
+        .map_err(|e| JjError::IoError(format!("Failed to read workspace path: {}", e)))?
+        .to_path_buf();
+      paths.insert(workspace.name, path);
+    }
+    Ok(Self(paths))
+  }
+
+  fn get(&self, workspace_name: &jj_lib::ref_name::WorkspaceName) -> Option<PathBuf> {
+    self.0.get(workspace_name.as_str()).cloned()
+  }
+}
+
 fn list_registered_workspaces(repo_path: &str) -> Result<Vec<RegisteredWorkspace>, JjError> {
-  let (_home_workspace, repo, workspace_store) = load_home_repo(repo_path)?;
+  let (home_workspace, repo, _workspace_store) = load_home_repo(repo_path)?;
+  let workspace_paths = WorkspacePaths::load(home_workspace.repo_path())?;
+  let bookmark_index = BookmarkIndex::new(repo.view());
 
   let mut workspaces = Vec::new();
   for (workspace_name, wc_commit_id) in repo.view().wc_commit_ids() {
@@ -2796,15 +2826,12 @@ fn list_registered_workspaces(repo_path: &str) -> Result<Vec<RegisteredWorkspace
       continue;
     }
 
-    let stored_path = workspace_store
-      .get_workspace_path(workspace_name)
-      .map_err(|e| JjError::IoError(format!("Failed to read workspace path: {}", e)))?
-      .ok_or_else(|| {
-        JjError::IoError(format!(
-          "Workspace has no recorded path: {}",
-          workspace_name.as_str()
-        ))
-      })?;
+    let stored_path = workspace_paths.get(workspace_name).ok_or_else(|| {
+      JjError::IoError(format!(
+        "Workspace has no recorded path: {}",
+        workspace_name.as_str()
+      ))
+    })?;
     let stored_full_path = if stored_path.is_absolute() {
       stored_path
     } else {
@@ -2829,7 +2856,7 @@ fn list_registered_workspaces(repo_path: &str) -> Result<Vec<RegisteredWorkspace
       .get_commit(wc_commit_id)
       .map_err(|e| JjError::IoError(format!("Failed to load working-copy commit: {}", e)))?;
     let (branch_name, bookmark_has_conflicts) =
-      branch_name_for_workspace_commit(repo.as_ref(), workspace_name.as_str(), &wc_commit);
+      branch_name_for_workspace_commit(&bookmark_index, workspace_name.as_str(), &wc_commit);
     let last_activity_at = commit_author_timestamp_rfc3339(&wc_commit);
     let bookmark_conflicted = repo
       .view()
@@ -2884,56 +2911,90 @@ fn commit_author_timestamp_rfc3339(commit: &jj_lib::commit::Commit) -> Option<St
     .map(|ts| ts.to_rfc3339())
 }
 
+/// Bookmark lookups for one pass over the workspaces, built from a single scan
+/// of the view so each workspace costs O(1) instead of O(bookmarks).
+struct BookmarkIndex<'a> {
+  /// Commit id to the names of bookmarks that point at it with a normal target.
+  by_commit: HashMap<&'a jj_lib::backend::CommitId, Vec<&'a str>>,
+  /// Workspace name to the bookmarks that match it (exact or sanitized), in
+  /// view order, with whether the bookmark target is conflicted and the
+  /// commit ids it adds.
+  by_workspace: HashMap<String, Vec<(&'a str, &'a jj_lib::op_store::RefTarget)>>,
+}
+
+impl<'a> BookmarkIndex<'a> {
+  fn new(view: &'a jj_lib::view::View) -> Self {
+    let mut by_commit: HashMap<&jj_lib::backend::CommitId, Vec<&str>> = HashMap::new();
+    let mut by_workspace: HashMap<String, Vec<(&str, &jj_lib::op_store::RefTarget)>> =
+      HashMap::new();
+    for (name, target) in view.local_bookmarks() {
+      let name = name.as_str();
+      if let Some(id) = target.as_normal() {
+        by_commit.entry(id).or_default().push(name);
+      }
+      by_workspace
+        .entry(name.to_string())
+        .or_default()
+        .push((name, target));
+      let sanitized = sanitize_workspace_name(name);
+      if sanitized != name {
+        by_workspace
+          .entry(sanitized)
+          .or_default()
+          .push((name, target));
+      }
+    }
+    Self {
+      by_commit,
+      by_workspace,
+    }
+  }
+
+  fn matching(&self, workspace_name: &str) -> &[(&'a str, &'a jj_lib::op_store::RefTarget)] {
+    self
+      .by_workspace
+      .get(workspace_name)
+      .map(Vec::as_slice)
+      .unwrap_or(&[])
+  }
+
+  fn exact_for(&self, id: &jj_lib::backend::CommitId, workspace_name: &str) -> Option<&'a str> {
+    self.by_commit.get(id).and_then(|names| {
+      names
+        .iter()
+        .copied()
+        .find(|name| *name == workspace_name || sanitize_workspace_name(name) == workspace_name)
+    })
+  }
+}
+
 fn branch_name_for_workspace_commit(
-  repo: &dyn jj_lib::repo::Repo,
+  bookmarks: &BookmarkIndex<'_>,
   workspace_name: &str,
   wc_commit: &jj_lib::commit::Commit,
 ) -> (String, bool) {
-  let bookmark_matches_workspace = |bookmark_name: &str| {
-    bookmark_name == workspace_name || sanitize_workspace_name(bookmark_name) == workspace_name
-  };
-
-  let exact_bookmarks: Vec<String> = repo
-    .view()
-    .local_bookmarks_for_commit(wc_commit.id())
-    .filter(|&(_, target)| target.as_normal() == Some(wc_commit.id()))
-    .map(|(name, _)| name.as_str().to_string())
-    .collect();
-  if let Some(name) = exact_bookmarks
-    .iter()
-    .find(|name| bookmark_matches_workspace(name.as_str()))
-  {
-    return (name.clone(), false);
+  if let Some(name) = bookmarks.exact_for(wc_commit.id(), workspace_name) {
+    return (name.to_string(), false);
   }
 
   // A conflicted bookmark does not appear as an exact bookmark because it is
   // not a normal RefTarget. Still retain its canonical (possibly slash-
   // containing) name when the registered working-copy commit is one of the
   // conflict's targets, and surface the ambiguity to callers.
-  if let Some((name, _)) = repo.view().local_bookmarks().find(|(name, target)| {
-    bookmark_matches_workspace(name.as_str())
-      && target.has_conflict()
-      && target.added_ids().any(|id| id == wc_commit.id())
-  }) {
-    return (name.as_str().to_string(), true);
+  if let Some((name, _)) = bookmarks
+    .matching(workspace_name)
+    .iter()
+    .find(|(_, target)| target.has_conflict() && target.added_ids().any(|id| id == wc_commit.id()))
+  {
+    return (name.to_string(), true);
   }
 
-  let parent_bookmarks: Vec<String> = wc_commit
+  if let Some(name) = wc_commit
     .parent_ids()
     .iter()
-    .flat_map(|parent_id| {
-      repo
-        .view()
-        .local_bookmarks_for_commit(parent_id)
-        .filter(move |&(_, target)| target.as_normal() == Some(parent_id))
-        .map(|(name, _)| name.as_str().to_string())
-    })
-    .collect();
-  if let Some(name) = parent_bookmarks
-    .iter()
-    .find(|name| bookmark_matches_workspace(name.as_str()))
+    .find_map(|parent_id| bookmarks.exact_for(parent_id, workspace_name))
   {
-    return (name.clone(), false);
+    return (name.to_string(), false);
   }
 
   // After a commit the WC tip is an empty commit above the bookmark. A later
@@ -2941,12 +3002,8 @@ fn branch_name_for_workspace_commit(
   // lookups above miss. Prefer any matching bookmark (including conflicted)
   // over inventing a dashed workspace-name fallback that breaks PR / tip
   // revsets (`Revision 'feat-…' doesn't exist`).
-  if let Some((name, target)) = repo
-    .view()
-    .local_bookmarks()
-    .find(|(name, _)| bookmark_matches_workspace(name.as_str()))
-  {
-    return (name.as_str().to_string(), target.has_conflict());
+  if let Some((name, target)) = bookmarks.matching(workspace_name).first() {
+    return (name.to_string(), target.has_conflict());
   }
 
   (workspace_name.to_string(), false)
@@ -4168,7 +4225,10 @@ pub fn reconcile_all_workspaces_after_rewrite(
   skip_workspace_name: Option<&str>,
 ) -> Result<(), JjError> {
   // Load the home workspace to enumerate all registered workspaces and their paths.
-  let Ok((home_workspace, repo, workspace_store)) = load_home_repo(repo_path) else {
+  let Ok((home_workspace, repo, _workspace_store)) = load_home_repo(repo_path) else {
+    return Ok(());
+  };
+  let Ok(workspace_paths) = WorkspacePaths::load(home_workspace.repo_path()) else {
     return Ok(());
   };
 
@@ -4192,8 +4252,8 @@ pub fn reconcile_all_workspaces_after_rewrite(
     let ws_path: String = if ws_name_str == home_ws_name {
       home_ws_path.clone()
     } else {
-      match workspace_store.get_workspace_path(workspace_name) {
-        Ok(Some(stored_path)) => {
+      match workspace_paths.get(workspace_name) {
+        Some(stored_path) => {
           let full = if stored_path.is_absolute() {
             stored_path
           } else {
@@ -4213,7 +4273,7 @@ pub fn reconcile_all_workspaces_after_rewrite(
             full.to_string_lossy().into_owned()
           }
         }
-        _ => continue, // can't resolve path; skip gracefully
+        None => continue, // can't resolve path; skip gracefully
       }
     };
 
