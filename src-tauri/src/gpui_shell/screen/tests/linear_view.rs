@@ -110,6 +110,40 @@ impl linear_data::LinearHost for FakeHost {
     self.record(format!("apply linear suggestion {comment_id}"));
     Ok(())
   }
+  fn linear_create_issue(
+    &self,
+    _: &str,
+    team_id: &str,
+    title: &str,
+    description: &str,
+  ) -> Result<LinearIssue, String> {
+    self.record(format!(
+      "create linear issue {team_id} {title:?} {description:?}"
+    ));
+    let mut created = issue("9", ("Todo", "unstarted"), None);
+    created.title = title.into();
+    Ok(created)
+  }
+
+  fn linear_update_issue(
+    &self,
+    _: &str,
+    issue_id: &str,
+    title: &str,
+    description: &str,
+  ) -> Result<LinearIssue, String> {
+    self.record(format!(
+      "update linear issue {issue_id} {title:?} {description:?}"
+    ));
+    let mut updated = issue(issue_id, ("Todo", "unstarted"), None);
+    updated.title = title.into();
+    Ok(updated)
+  }
+
+  fn linear_delete_issue(&self, _: &str, issue_id: &str) -> Result<(), String> {
+    self.record(format!("delete linear issue {issue_id}"));
+    Ok(())
+  }
 }
 
 pub(super) fn user(id: &str, name: &str) -> LinearUser {
@@ -554,6 +588,95 @@ fn linear_shows_when_no_issues_match(cx: &mut TestAppContext) {
   assert!(h.drawn("linear-no-issues"));
 }
 
+#[gpui::test]
+fn linear_creates_an_issue_in_the_shown_team(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, linear_host());
+  h.click("linear-new-issue");
+  assert!(h.drawn("linear-new-issue-form"));
+  // No title, no create.
+  h.click("linear-new-issue-submit");
+  h.cx.run_until_parked();
+  assert!(!host.calls().iter().any(|c| c.starts_with("create")));
+  type_into(&mut h, "linear-new-issue-title", "New bug");
+  h.click("linear-new-issue-submit");
+  h.cx.run_until_parked();
+  let calls = host.calls();
+  let created = calls
+    .iter()
+    .position(|c| c == "create linear issue t1 \"New bug\" \"\"")
+    .unwrap_or_else(|| panic!("{calls:?}"));
+  // The list is read again and the new issue is the one inspected.
+  assert!(calls[created..].contains(&"read linear issues None".to_string()));
+  assert!(!h.drawn("linear-new-issue-form"));
+  assert_eq!(view(&mut h, |v| v.open_issue.clone()), Some("9".into()));
+}
+
+#[gpui::test]
+fn linear_new_issue_cancel_closes_the_form(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, linear_host());
+  h.click("linear-new-issue");
+  type_into(&mut h, "linear-new-issue-title", "Never mind");
+  h.click("linear-new-issue-cancel");
+  assert!(!h.drawn("linear-new-issue-form"));
+  assert!(!host.calls().iter().any(|c| c.starts_with("create")));
+}
+
+#[gpui::test]
+fn linear_edits_the_inspected_issue(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, linear_host());
+  h.click("linear-issue-1");
+  h.click("linear-issue-edit");
+  assert!(h.drawn("linear-issue-edit-form"));
+  type_into(&mut h, "linear-issue-edit-title", " v2");
+  h.click("linear-issue-edit-save");
+  h.cx.run_until_parked();
+  let calls = host.calls();
+  let updated = calls
+    .iter()
+    .position(|c| c == "update linear issue 1 \"Issue 1 v2\" \"Ship the API.\"")
+    .unwrap_or_else(|| panic!("{calls:?}"));
+  assert!(calls[updated..].contains(&"read linear issues None".to_string()));
+  assert!(!h.drawn("linear-issue-edit-form"));
+  assert!(h.drawn("linear-issue-page-1"));
+
+  // Cancel leaves Linear alone.
+  h.click("linear-issue-edit");
+  h.click("linear-issue-edit-cancel");
+  assert!(!h.drawn("linear-issue-edit-form"));
+  assert_eq!(
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("update"))
+      .count(),
+    1
+  );
+}
+
+#[gpui::test]
+fn linear_deletes_the_inspected_issue_after_confirming(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, linear_host());
+  h.click("linear-issue-1");
+  h.click("linear-issue-delete");
+  assert!(h.drawn("linear-delete-dialog"));
+  h.click("linear-delete-cancel");
+  assert!(!h.drawn("linear-delete-dialog"));
+  assert!(!host.calls().iter().any(|c| c.starts_with("delete")));
+
+  h.click("linear-issue-delete");
+  h.click("linear-delete-confirm");
+  h.cx.run_until_parked();
+  let calls = host.calls();
+  let deleted = calls
+    .iter()
+    .position(|c| c == "delete linear issue 1")
+    .unwrap_or_else(|| panic!("{calls:?}"));
+  assert!(calls[deleted..].contains(&"read linear issues None".to_string()));
+  assert!(!h.drawn("linear-delete-dialog"));
+  assert_eq!(view(&mut h, |v| v.open_issue.clone()), None);
+  assert!(h.drawn("linear-issue-1"));
+}
+
 #[test]
 fn linear_capitalizes_project_states() {
   assert_eq!(linear::capitalize("started"), "Started");
@@ -589,4 +712,124 @@ fn linear_document_comments_show_at_the_paragraph_they_quote(cx: &mut TestAppCon
   // The quoting comment sits in the text, above the comments under it.
   assert!(quoted.bottom() <= column.top(), "{quoted:?} {column:?}");
   assert!(column.contains(&unquoted.center()));
+}
+
+#[gpui::test]
+fn linear_long_comment_thread_folds_the_middle_and_expands_in_place(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.linear.comments = (0..8)
+    .map(|i| ("1".to_string(), comment(&format!("c{i}"), None)))
+    .collect();
+  let (mut h, _) = linear_harness(cx, host);
+  h.click("linear-issue-1");
+  h.cx.run_until_parked();
+  let shown = |h: &mut Harness| -> Vec<usize> {
+    (0..8)
+      .filter(|i| h.drawn(super::changes_large::leak(format!("linear-comment-c{i}"))))
+      .collect()
+  };
+  // The first comment and the newest three; four are behind the fold.
+  assert_eq!(shown(&mut h), [0, 5, 6, 7]);
+  assert!(h.drawn("linear-comments-show-earlier"));
+  h.click("linear-comments-show-earlier");
+  h.cx.run_until_parked();
+  assert_eq!(shown(&mut h), (0..8).collect::<Vec<_>>());
+  assert!(!h.drawn("linear-comments-show-earlier"));
+}
+
+/// Round 7 `integrations-scale` measurements. Run with `cargo test
+/// --features gpui-shell --lib lin_scale -- --ignored --nocapture
+/// --test-threads=1`.
+mod lin_scale {
+  use super::super::changes_large::{frame, report, timed};
+  use super::*;
+
+  fn n() -> usize {
+    std::env::var("PERF_N")
+      .ok()
+      .and_then(|v| v.parse().ok())
+      .unwrap_or(1000)
+  }
+
+  fn big_issue(i: usize) -> LinearIssue {
+    let mut it = issue(
+      &i.to_string(),
+      match i % 4 {
+        0 => ("Todo", "unstarted"),
+        1 => ("In Progress", "started"),
+        2 => ("Backlog", "backlog"),
+        _ => ("Done", "completed"),
+      },
+      Some(user(&format!("u{}", i % 9), &format!("User {}", i % 9))),
+    );
+    it.description = Some(format!(
+      "## Problem {i}\n\n{}\n\n- a\n- b\n",
+      "The sync engine drops updates when the queue is full and nobody notices. ".repeat(30)
+    ));
+    it.labels = vec!["bug".into(), format!("area-{}", i % 12)];
+    it
+  }
+
+  fn host(count: usize, comments: usize) -> FakeHost {
+    let mut host = linear_host();
+    host.linear.issues = (0..count).map(big_issue).collect();
+    host.linear.comments = (0..comments)
+      .map(|i| {
+        let mut c = comment(&format!("c{i}"), None);
+        c.body = format!(
+          "Comment {i}\n\n{}\n\n```rust\nfn x() {{}}\n```\n",
+          "Why the API? Because the old path is slow and brittle. ".repeat(10)
+        );
+        ("1".to_string(), c)
+      })
+      .collect();
+    host
+  }
+
+  fn notify(h: &mut Harness) {
+    h.screen.update(&mut h.cx, |screen, cx| {
+      let view = screen.linear.clone().expect("linear view");
+      view.update(cx, |_, cx| cx.notify());
+    });
+  }
+
+  #[gpui::test]
+  #[ignore = "benchmark; run with --ignored --nocapture"]
+  fn lin_scale_list(cx: &mut TestAppContext) {
+    let (mut h, _) = linear_harness(cx, host(n(), 0));
+    let mut f: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
+    report("linear list steady frame", &mut f);
+    let mut hov: Vec<_> = (0..10).map(|_| timed(&mut h, notify)).collect();
+    report("linear list notify", &mut hov);
+    h.click("linear-mode-kanban");
+    let mut k: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
+    report("linear kanban steady frame", &mut k);
+    h.click("linear-mode-list");
+    let mut v: Vec<_> = (0..6)
+      .map(|i| {
+        timed(&mut h, |h| {
+          h.click(
+            [
+              "linear-view-active",
+              "linear-view-backlog",
+              "linear-view-all",
+            ][i % 3],
+          )
+        })
+      })
+      .collect();
+    report("linear switch view tab", &mut v);
+  }
+
+  #[gpui::test]
+  #[ignore = "benchmark; run with --ignored --nocapture"]
+  fn lin_scale_comments(cx: &mut TestAppContext) {
+    for count in [10usize, 60, 300] {
+      let (mut h, _) = linear_harness(cx, host(50, count));
+      h.click("linear-issue-1");
+      h.cx.run_until_parked();
+      let mut f: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
+      report(&format!("linear issue open, {count} comments"), &mut f);
+    }
+  }
 }

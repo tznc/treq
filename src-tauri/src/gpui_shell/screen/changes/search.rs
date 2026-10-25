@@ -11,8 +11,12 @@ use gpui_kit::component::input::{Escape, InputState};
 
 use super::*;
 
-/// `useDebounce(searchQuery, 150)`.
+/// `useDebounce(searchQuery, 150)`, for a diff too long to index within a
+/// frame on every key.
 const DEBOUNCE: Duration = Duration::from_millis(150);
+/// Diffs under this many lines are searched on every key: indexing one costs
+/// well under a frame, so waiting for a pause only delays the highlights.
+const INSTANT_LINES: usize = 10_000;
 
 /// Where a match is: a diff line, or a line of a conflict region.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -177,6 +181,17 @@ impl ChangesView {
   fn set_query(&mut self, query: String, cx: &mut Context<Self>) {
     self.search.query = query.clone();
     self.search.current = 0;
+    let lines: usize = self
+      .hunks
+      .values()
+      .map(|data| data.hunks.iter().map(|h| h.lines.len()).sum::<usize>())
+      .sum();
+    if lines < INSTANT_LINES {
+      self.search.debounce = None;
+      self.search.applied = query;
+      cx.notify();
+      return;
+    }
     self.search.debounce = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
       this
@@ -570,5 +585,42 @@ mod tests {
   #[test]
   fn matches_keep_byte_offsets_past_wide_characters() {
     assert_eq!(match_ranges("é x É", "é"), vec![0..2, 5..7]);
+  }
+
+  /// Round 7 measurement of the find bar's index pass: `match_count` over
+  /// every diff line plus an entry per matching line, as `index_matches`
+  /// does it. `cargo test --lib find_index_cost -- --ignored --nocapture`.
+  #[test]
+  #[ignore = "perf measurement"]
+  fn find_index_cost() {
+    for lines in [3_000usize, 20_000, 100_000] {
+      let text: Vec<String> = (0..lines)
+        .map(|i| {
+          format!(
+            "    let value_{i} = compute_{}(\"item {i}\", {}).map(|v| v + {}); // note {i}",
+            i % 6,
+            i * 3,
+            i * 3
+          )
+        })
+        .collect();
+      for query in ["v", "value_1", "compute_3"] {
+        let started = std::time::Instant::now();
+        let mut index = std::collections::HashMap::new();
+        let mut total = 0;
+        for (l, line) in text.iter().enumerate() {
+          let n = match_count(line, query);
+          if n > 0 {
+            index.insert(("src/module.rs".to_string(), 0usize, l), (total, n));
+            total += n;
+          }
+        }
+        println!(
+          "{lines} lines, query {query:?}: {:?} ({} lines match)",
+          started.elapsed(),
+          index.len()
+        );
+      }
+    }
   }
 }

@@ -29,6 +29,7 @@ use super::{
   },
   integrations_cache::cache,
   prefetch::Intent,
+  rows::Rows,
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -72,6 +73,11 @@ pub(super) struct Pages<T> {
   pub(super) error: Option<String>,
   /// Bumped per load, so a stale one is dropped.
   generation: u64,
+  /// Bumped whenever `pages` is replaced, so what is derived from them
+  /// is recomputed only then.
+  version: u64,
+  /// The items of the pages, the first copy of each number, as of `version`.
+  unique: Option<(u64, Rc<Vec<T>>)>,
 }
 
 impl<T> Default for Pages<T> {
@@ -83,6 +89,8 @@ impl<T> Default for Pages<T> {
       fetching_next: false,
       error: None,
       generation: 0,
+      version: 0,
+      unique: None,
     }
   }
 }
@@ -91,14 +99,65 @@ impl<T> Pages<T> {
   fn has_next(&self) -> bool {
     self.pages.last().is_some_and(|p| p.has_more)
   }
+
+  /// Shows other pages.
+  fn set_pages(&mut self, pages: Vec<GhListPage<T>>) {
+    self.pages = pages;
+    self.version += 1;
+  }
 }
 
-/// Every item of the pages, the first copy of each number.
-fn items<T: Clone>(pages: &Pages<T>, number: impl Fn(&T) -> u64) -> Vec<T> {
-  data::unique_by_number(
-    pages.pages.iter().flat_map(|p| p.items.clone()).collect(),
-    number,
-  )
+impl<T: Clone> Pages<T> {
+  /// Every item of the pages, the first copy of each number. Copied once
+  /// per change of the pages, not per frame.
+  fn items(&mut self, number: impl Fn(&T) -> u64) -> Rc<Vec<T>> {
+    if let Some((version, items)) = &self.unique {
+      if *version == self.version {
+        return items.clone();
+      }
+    }
+    let items = Rc::new(data::unique_by_number(
+      self.pages.iter().flat_map(|p| p.items.clone()).collect(),
+      number,
+    ));
+    self.unique = Some((self.version, items.clone()));
+    items
+  }
+}
+
+/// What a list row stands for. Rows are built only while on screen.
+#[derive(Clone, PartialEq)]
+enum ListRow {
+  /// The loaded item at `ix`; `sig` says whether it still draws the same,
+  /// and `branches` whether its row has room for the branch names.
+  Item {
+    ix: usize,
+    number: u64,
+    sig: u64,
+    branches: bool,
+  },
+  /// "No loaded pull requests match the filters."
+  NoMatch,
+  LoadMore,
+}
+
+/// What the filtered pull request rows were derived from.
+#[derive(PartialEq)]
+struct PrRowsKey {
+  version: u64,
+  filters: PrFilters,
+  /// The minute the "opened within" filter was last evaluated at.
+  minute: Option<i64>,
+  branches: bool,
+  has_next: bool,
+}
+
+fn signature(fields: &[&str], flag: bool) -> u64 {
+  use std::hash::{Hash, Hasher};
+  let mut hasher = std::collections::hash_map::DefaultHasher::new();
+  fields.hash(&mut hasher);
+  flag.hash(&mut hasher);
+  hasher.finish()
 }
 
 /// What the open detail is about.
@@ -139,6 +198,8 @@ pub(super) struct Detail {
   pub(super) treq: Option<TreqChecks>,
   /// Workflow files whose run history is open, and what it read.
   pub(super) history_open: HashSet<String>,
+  /// The comment thread's fold is open: every comment shows.
+  pub(super) comments_expanded: bool,
   pub(super) history: HashMap<String, Vec<RunSummary>>,
   /// Runs whose job logs are open, and the logs read, by run and job.
   pub(super) runs_open: HashSet<i64>,
@@ -185,6 +246,10 @@ pub struct GithubView {
   remote_for: String,
   pub(super) issues: Pages<GhIssue>,
   pub(super) prs: Pages<GhPullRequest>,
+  issue_rows: Rows<ListRow>,
+  pr_rows: Rows<ListRow>,
+  /// The pull request rows the filters keep, for `pr_rows_key`.
+  pr_rows_cache: Option<(PrRowsKey, Vec<ListRow>)>,
   pub(super) filters: PrFilters,
   pub(super) detail: Detail,
   /// The comment being written, kept across items of the same kind.
@@ -246,6 +311,9 @@ impl GithubView {
       remote: None,
       issues: Pages::default(),
       prs: Pages::default(),
+      issue_rows: Rows::default(),
+      pr_rows: Rows::default(),
+      pr_rows_cache: None,
       filters: PrFilters::default(),
       detail: Detail::default(),
       comment: String::new(),
@@ -424,7 +492,7 @@ impl GithubView {
     if self.issues.pages.is_empty() {
       // The first page read last shows while the list is read again.
       if let Some(page) = cache(cx).issue_pages.get(&key).cloned() {
-        self.issues.pages = vec![page];
+        self.issues.set_pages(vec![page]);
         self.issues.loading = false;
       }
     }
@@ -458,7 +526,7 @@ impl GithubView {
     let key = (repo.clone(), filter);
     if self.prs.pages.is_empty() {
       if let Some(page) = cache(cx).pr_pages.get(&key).cloned() {
-        self.prs.pages = vec![page];
+        self.prs.set_pages(vec![page]);
         self.prs.loading = false;
       }
     }
@@ -483,21 +551,62 @@ impl GithubView {
     );
   }
 
-  /// The loaded pull requests the filters keep.
-  pub(super) fn visible_prs(&self) -> Vec<GhPullRequest> {
-    let prs = items(&self.prs, |pr| pr.number);
-    data::filter_prs(&prs, &self.filters, chrono::Utc::now())
+  pub(super) fn issue_items(&mut self) -> Rc<Vec<GhIssue>> {
+    self.issues.items(|issue| issue.number)
+  }
+
+  pub(super) fn pr_items(&mut self) -> Rc<Vec<GhPullRequest>> {
+    self.prs.items(|pr| pr.number)
+  }
+
+  /// The rows of the pull requests the filters keep, derived again only
+  /// when the pages, the filters or the layout change.
+  fn pr_list_rows(&mut self, branches: bool) -> Vec<ListRow> {
+    let now = chrono::Utc::now();
+    let key = PrRowsKey {
+      version: self.prs.version,
+      filters: self.filters.clone(),
+      minute: self
+        .filters
+        .opened_within_days
+        .map(|_| now.timestamp().div_euclid(60)),
+      branches,
+      has_next: self.prs.has_next(),
+    };
+    if let Some((cached, rows)) = &self.pr_rows_cache {
+      if *cached == key {
+        return rows.clone();
+      }
+    }
+    let prs = self.pr_items();
+    let mut rows: Vec<ListRow> = data::filter_pr_indices(&prs, &self.filters, now)
       .into_iter()
-      .cloned()
-      .collect()
-  }
-
-  pub(super) fn issue_items(&self) -> Vec<GhIssue> {
-    items(&self.issues, |issue| issue.number)
-  }
-
-  pub(super) fn pr_items(&self) -> Vec<GhPullRequest> {
-    items(&self.prs, |pr| pr.number)
+      .map(|ix| (ix, &prs[ix]))
+      .map(|(ix, pr)| ListRow::Item {
+        ix,
+        number: pr.number,
+        sig: signature(
+          &[
+            &pr.title,
+            &pr.state,
+            &pr.author.login,
+            &pr.head_ref_name,
+            &pr.base_ref_name,
+            &pr.created_at,
+          ],
+          pr.is_draft,
+        ),
+        branches,
+      })
+      .collect();
+    if rows.is_empty() {
+      rows.push(ListRow::NoMatch);
+    }
+    if key.has_next {
+      rows.push(ListRow::LoadMore);
+    }
+    self.pr_rows_cache = Some((key, rows.clone()));
+    rows
   }
 
   /// Reads the open detail again, keeping what shows meanwhile.
@@ -1007,6 +1116,7 @@ fn plan_load<T: Clone>(
     *pages = Pages {
       key: Some(key),
       generation: pages.generation,
+      version: pages.version + 1,
       ..Pages::default()
     };
   }
@@ -1048,7 +1158,7 @@ fn finish_load<T>(pages: &mut Pages<T>, result: Result<Vec<GhListPage<T>>, Strin
   pages.fetching_next = false;
   match result {
     Ok(read) => {
-      pages.pages = read;
+      pages.set_pages(read);
       pages.error = None;
     }
     Err(err) => pages.error = Some(err),
@@ -1139,7 +1249,7 @@ impl GithubView {
           .child(title),
       );
     let has_remote = matches!(remote, Some(Some(_)));
-    let body = self.list_body(show_detail, p, cx);
+    let body = self.list_body(show_detail, p, window, cx);
     named(div(), "github-list")
       .flex()
       .flex_col()
@@ -1162,14 +1272,7 @@ impl GithubView {
         has_remote && self.route.creating && self.route.tab == Tab::Issues,
         |d| d.child(self.new_issue_form(p, window, cx)),
       )
-      .child(
-        div()
-          .id("github-list-scroll")
-          .flex_1()
-          .min_h_0()
-          .overflow_y_scroll()
-          .child(body),
-      )
+      .child(div().flex_1().min_h_0().child(body))
   }
 
   fn view_tabs(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1507,6 +1610,7 @@ impl GithubView {
     &mut self,
     show_detail: bool,
     p: &Palette,
+    window: &Window,
     cx: &mut Context<Self>,
   ) -> gpui::AnyElement {
     match &self.remote {
@@ -1535,143 +1639,201 @@ impl GithubView {
       || -> parts::OnClick { Box::new(cx.listener(|view, _, _, cx| view.reload_list(false, cx))) };
     match self.route.tab {
       Tab::Issues => {
-        let pages = &self.issues;
-        if pages.loading {
-          return ui::delayed(
-            "github-list-loading",
-            div()
-              .py_12()
-              .child(ui::Loading::new("github-list-loading-spinner", p)),
-          )
-          .into_any_element();
+        if self.issues.loading {
+          return scrolled(
+            ui::delayed(
+              "github-list-loading",
+              div()
+                .py_12()
+                .child(ui::Loading::new("github-list-loading-spinner", p)),
+            )
+            .into_any_element(),
+          );
         }
         let issues = self.issue_items();
-        if let (Some(err), true) = (&pages.error, issues.is_empty()) {
-          return parts::error_state(
-            "github-list",
-            "Could not load issues",
-            err,
-            p,
-            Some(retry()),
-          )
-          .into_any_element();
+        if let (Some(err), true) = (&self.issues.error, issues.is_empty()) {
+          return scrolled(
+            parts::error_state(
+              "github-list",
+              "Could not load issues",
+              err,
+              p,
+              Some(retry()),
+            )
+            .into_any_element(),
+          );
         }
         if issues.is_empty() {
-          return ui::EmptyState::new("github-no-issues", "No issues found.", p)
-            .icon(theme::ICON_CIRCLE_DOT)
-            .into_any_element();
+          return scrolled(
+            ui::EmptyState::new("github-no-issues", "No issues found.", p)
+              .icon(theme::ICON_CIRCLE_DOT)
+              .into_any_element(),
+          );
         }
-        let (has_next, next) = (pages.has_next(), pages.fetching_next);
-        let selected = self.route.selected;
-        div()
-          .children(issues.iter().map(|issue| {
-            let n = issue.number;
-            self
-              .row(
-                format!("github-issue-{n}"),
-                selected == Some(n),
-                p,
-                cx,
-                move |view, cx| view.press(format!("github.select:{n}"), cx),
-              )
-              .on_hover(
-                cx.listener(move |view, hovered: &bool, _, cx| view.hover_item(n, *hovered, cx)),
-              )
-              .child(
-                div()
-                  .flex_1()
-                  .min_w_0()
-                  .child(parts::row_title(&issue.title, n, p))
-                  .child(
-                    parts::row_meta(p)
-                      .child(parts::state_chip(&issue.state, false, p))
-                      .child(
-                        div()
-                          .flex_none()
-                          .child(crate::gpui_shell::time::date(&issue.created_at)),
-                      ),
-                  ),
-              )
-              .child(chevron(p))
-          }))
-          .when(has_next, |d| {
-            d.child(parts::load_more(
-              "github-load-more",
-              next,
-              p,
-              Box::new(cx.listener(|view, _, _, cx| view.reload_list(true, cx))),
-            ))
+        let rows = issues
+          .iter()
+          .enumerate()
+          .map(|(ix, issue)| ListRow::Item {
+            ix,
+            number: issue.number,
+            sig: signature(&[&issue.title, &issue.state, &issue.created_at], false),
+            branches: false,
           })
-          .into_any_element()
+          .chain(self.issues.has_next().then_some(ListRow::LoadMore))
+          .collect();
+        self.issue_rows.sync(window, rows, |a, b| a == b);
+        gpui::list(
+          self.issue_rows.list.clone(),
+          cx.processor(|view, ix, _, cx| view.issue_list_row(ix, cx)),
+        )
+        .size_full()
+        .into_any_element()
       }
       Tab::Prs => {
-        let pages = &self.prs;
-        if pages.loading {
-          return ui::delayed(
-            "github-list-loading",
-            div()
-              .py_12()
-              .child(ui::Loading::new("github-list-loading-spinner", p)),
-          )
-          .into_any_element();
+        if self.prs.loading {
+          return scrolled(
+            ui::delayed(
+              "github-list-loading",
+              div()
+                .py_12()
+                .child(ui::Loading::new("github-list-loading-spinner", p)),
+            )
+            .into_any_element(),
+          );
         }
         let prs = self.pr_items();
-        if let (Some(err), true) = (&pages.error, prs.is_empty()) {
-          return parts::error_state(
-            "github-list",
-            "Could not load pull requests",
-            err,
-            p,
-            Some(retry()),
-          )
-          .into_any_element();
+        if let (Some(err), true) = (&self.prs.error, prs.is_empty()) {
+          return scrolled(
+            parts::error_state(
+              "github-list",
+              "Could not load pull requests",
+              err,
+              p,
+              Some(retry()),
+            )
+            .into_any_element(),
+          );
         }
         if prs.is_empty() {
-          return ui::EmptyState::new("github-no-prs", "No pull requests found.", p)
-            .icon(theme::ICON_PR)
-            .into_any_element();
+          return scrolled(
+            ui::EmptyState::new("github-no-prs", "No pull requests found.", p)
+              .icon(theme::ICON_PR)
+              .into_any_element(),
+          );
         }
-        let (has_next, next) = (pages.has_next(), pages.fetching_next);
-        let visible = self.visible_prs();
-        let selected = self.route.selected;
-        div()
-          .when(visible.is_empty(), |d| {
-            d.child(
-              ui::EmptyState::new(
-                "github-no-matching-prs",
-                "No loaded pull requests match the filters.",
-                p,
-              )
-              .icon(theme::ICON_PR),
-            )
-          })
-          .children(visible.iter().map(|pr| {
-            let n = pr.number;
-            self
-              .row(
-                format!("github-pr-{n}"),
-                selected == Some(n),
-                p,
-                cx,
-                move |view, cx| view.press(format!("github.select:{n}"), cx),
-              )
-              .on_hover(
-                cx.listener(move |view, hovered: &bool, _, cx| view.hover_item(n, *hovered, cx)),
-              )
-              .child(parts::pr_list_item(pr, !show_detail, p))
-              .child(chevron(p))
-          }))
-          .when(has_next, |d| {
-            d.child(parts::load_more(
-              "github-load-more",
-              next,
-              p,
-              Box::new(cx.listener(|view, _, _, cx| view.reload_list(true, cx))),
-            ))
-          })
-          .into_any_element()
+        let rows = self.pr_list_rows(!show_detail);
+        self.pr_rows.sync(window, rows, |a, b| a == b);
+        gpui::list(
+          self.pr_rows.list.clone(),
+          cx.processor(|view, ix, _, cx| view.pr_list_row(ix, cx)),
+        )
+        .size_full()
+        .into_any_element()
       }
     }
+  }
+
+  fn issue_list_row(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
+    let p = theme::palette(self.dark);
+    let Some(row) = self.issue_rows.get(ix).cloned() else {
+      return div().into_any_element();
+    };
+    match row {
+      ListRow::Item { ix, number: n, .. } => {
+        let issues = self.issue_items();
+        let Some(issue) = issues.get(ix).filter(|issue| issue.number == n) else {
+          return div().into_any_element();
+        };
+        let selected = self.route.selected;
+        self
+          .row(
+            format!("github-issue-{n}"),
+            selected == Some(n),
+            &p,
+            cx,
+            move |view, cx| view.press(format!("github.select:{n}"), cx),
+          )
+          .on_hover(
+            cx.listener(move |view, hovered: &bool, _, cx| view.hover_item(n, *hovered, cx)),
+          )
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .child(parts::row_title(&issue.title, n, &p))
+              .child(
+                parts::row_meta(&p)
+                  .child(parts::state_chip(&issue.state, false, &p))
+                  .child(
+                    div()
+                      .flex_none()
+                      .child(crate::gpui_shell::time::date(&issue.created_at)),
+                  ),
+              ),
+          )
+          .child(chevron(&p))
+          .into_any_element()
+      }
+      ListRow::NoMatch => div().into_any_element(),
+      ListRow::LoadMore => self.load_more_row(&p, cx),
+    }
+  }
+
+  fn pr_list_row(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
+    let p = theme::palette(self.dark);
+    let Some(row) = self.pr_rows.get(ix).cloned() else {
+      return div().into_any_element();
+    };
+    match row {
+      ListRow::Item {
+        ix,
+        number: n,
+        branches,
+        ..
+      } => {
+        let prs = self.pr_items();
+        let Some(pr) = prs.get(ix).filter(|pr| pr.number == n) else {
+          return div().into_any_element();
+        };
+        let selected = self.route.selected;
+        self
+          .row(
+            format!("github-pr-{n}"),
+            selected == Some(n),
+            &p,
+            cx,
+            move |view, cx| view.press(format!("github.select:{n}"), cx),
+          )
+          .on_hover(
+            cx.listener(move |view, hovered: &bool, _, cx| view.hover_item(n, *hovered, cx)),
+          )
+          .child(parts::pr_list_item(pr, branches, &p))
+          .child(chevron(&p))
+          .into_any_element()
+      }
+      ListRow::NoMatch => ui::EmptyState::new(
+        "github-no-matching-prs",
+        "No loaded pull requests match the filters.",
+        &p,
+      )
+      .icon(theme::ICON_PR)
+      .into_any_element(),
+      ListRow::LoadMore => self.load_more_row(&p, cx),
+    }
+  }
+
+  fn load_more_row(&self, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+    let next = match self.route.tab {
+      Tab::Issues => self.issues.fetching_next,
+      Tab::Prs => self.prs.fetching_next,
+    };
+    parts::load_more(
+      "github-load-more",
+      next,
+      p,
+      Box::new(cx.listener(|view, _, _, cx| view.reload_list(true, cx))),
+    )
+    .into_any_element()
   }
 
   /// An `IssueListItem` or `PrListItem` button.
@@ -1774,6 +1936,16 @@ impl GithubView {
           .child(err)
       }))
   }
+}
+
+/// A list's message, which scrolls like a list would.
+fn scrolled(content: gpui::AnyElement) -> gpui::AnyElement {
+  div()
+    .id("github-list-scroll")
+    .size_full()
+    .overflow_y_scroll()
+    .child(content)
+    .into_any_element()
 }
 
 fn chevron(p: &Palette) -> impl IntoElement {

@@ -2,7 +2,7 @@
 //! the prompts it sends an agent, the line selection, the chart's
 //! timeline.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use super::changes_data::ChangesHost;
 use crate::{
@@ -406,52 +406,51 @@ ORDER BY errors DESC, records DESC",
 /// The chart's severities, lowest first so ERROR stacks on top.
 pub const SERIES: [(&str, &str); 3] = [("INFO", "Info"), ("WARN", "Warn"), ("ERROR", "Error")];
 
-/// `MAX_BUCKETS`: a wide range keeps only its populated buckets.
-const MAX_BUCKETS: i64 = 300;
+/// The most columns the chart draws. A longer range merges seconds into
+/// columns, so the bars stay wider than a pixel and a repaint stays cheap.
+const MAX_COLUMNS: i64 = 200;
 
 /// `LogsTimeseriesChart`'s bars: each slot's label and its count per
 /// [`SERIES`], quiet seconds filled in so bursts don't look adjacent.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct Chart {
   pub labels: Vec<String>,
   pub counts: Vec<[i64; 3]>,
 }
 
+/// The chart of `buckets`: one column per second up to [`MAX_COLUMNS`]; a
+/// longer range has its seconds merged into that many columns, each
+/// labelled by its first second.
 pub fn chart(buckets: &[LogBucket]) -> Chart {
   let parse = |b: &LogBucket| {
     chrono::DateTime::parse_from_rfc3339(&b.bucket)
       .ok()
       .map(|d| d.timestamp_millis())
   };
-  let mut times: Vec<i64> = buckets.iter().filter_map(parse).collect();
-  times.sort_unstable();
-  times.dedup();
-  let (Some(&first), Some(&last)) = (times.first(), times.last()) else {
-    return Chart {
-      labels: Vec::new(),
-      counts: Vec::new(),
-    };
-  };
-  let slots = (last - first) / 1000 + 1;
-  let timeline: Vec<i64> = if slots > MAX_BUCKETS {
-    times
-  } else {
-    (0..slots).map(|i| first + i * 1000).collect()
-  };
-  let index: HashMap<i64, usize> = timeline.iter().enumerate().map(|(i, t)| (*t, i)).collect();
-  let mut counts = vec![[0; 3]; timeline.len()];
-  for bucket in buckets {
-    let Some(series) = SERIES.iter().position(|(s, _)| *s == bucket.severity_text) else {
-      continue;
-    };
-    if let Some(&at) = parse(bucket).and_then(|t| index.get(&t)) {
-      counts[at][series] = bucket.count;
-    }
-  }
-  let labels = timeline
+  let points: Vec<(i64, usize, i64)> = buckets
     .iter()
-    .map(|t| {
-      chrono::DateTime::from_timestamp_millis(*t)
+    .filter_map(|b| {
+      let series = SERIES.iter().position(|(s, _)| *s == b.severity_text)?;
+      Some((parse(b)?, series, b.count))
+    })
+    .collect();
+  let (Some(first), Some(last)) = (
+    points.iter().map(|p| p.0).min(),
+    points.iter().map(|p| p.0).max(),
+  ) else {
+    return Chart::default();
+  };
+  let seconds = (last - first) / 1000 + 1;
+  // Seconds per column, whole seconds.
+  let width = (seconds + MAX_COLUMNS - 1) / MAX_COLUMNS;
+  let columns = ((seconds + width - 1) / width) as usize;
+  let mut counts = vec![[0; 3]; columns];
+  for (at, series, count) in points {
+    counts[((at - first) / 1000 / width) as usize][series] += count;
+  }
+  let labels = (0..columns as i64)
+    .map(|i| {
+      chrono::DateTime::from_timestamp_millis(first + i * width * 1000)
         .map(|d| d.format("%H:%M:%S").to_string())
         .unwrap_or_default()
     })
@@ -598,5 +597,21 @@ mod tests {
     ]);
     assert_eq!(chart.labels, vec!["10:00:01", "10:00:02", "10:00:03"]);
     assert_eq!(chart.counts, vec![[5, 1, 0], [0, 0, 0], [0, 0, 2]]);
+  }
+
+  #[test]
+  fn charts_a_long_range_in_merged_columns() {
+    // 20 000 populated seconds, 7 s apart: about 39 hours.
+    let buckets: Vec<_> = (0..20_000)
+      .map(|i| {
+        let at = chrono::DateTime::from_timestamp(1_785_000_000 + i * 7, 0).unwrap();
+        bucket(&at.format("%Y-%m-%dT%H:%M:%SZ").to_string(), "INFO", 2)
+      })
+      .collect();
+    let chart = chart(&buckets);
+    assert!(chart.labels.len() <= 200 && chart.labels.len() > 100);
+    assert_eq!(chart.labels.len(), chart.counts.len());
+    // Merging loses no records.
+    assert_eq!(chart.counts.iter().map(|c| c[0]).sum::<i64>(), 40_000);
   }
 }
