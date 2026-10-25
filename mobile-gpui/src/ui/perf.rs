@@ -108,9 +108,24 @@ fn mount<V: Render>(
   })
 }
 
+/// A forced full frame (`refresh` invalidates cached views too).
 fn draw(cx: &mut TestAppContext, window: AnyWindowHandle) {
   cx.update_window(window, |_, window, cx| window.render_frame(cx))
     .unwrap();
+}
+
+/// A frame as the platform draws it after a `notify`: views not notified
+/// and behind a cached boundary are reused.
+fn redraw(cx: &mut TestAppContext, window: AnyWindowHandle) {
+  cx.update_window(window, |_, window, cx| window.draw(cx).clear(cx))
+    .unwrap();
+}
+
+fn rows_env(default: &[usize]) -> Vec<usize> {
+  std::env::var("ROWS")
+    .ok()
+    .map(|v| v.split(',').filter_map(|n| n.parse().ok()).collect())
+    .unwrap_or_else(|| default.to_vec())
 }
 
 fn summaries(n: usize) -> Vec<WorkspaceSummary> {
@@ -155,17 +170,163 @@ impl Render for Host {
         .child
         .clone()
         .cached(StyleRefinement::default().size_full())
+        .into_any_element()
     } else {
-      self.child.clone()
+      self.child.clone().into_any_element()
     };
     div().size_full().child(child)
+  }
+}
+
+/// Which part of a list row costs the layout time: rows rebuilt from
+/// parts, `n` of them in a scrolling column like the screens use.
+struct Variant {
+  n: usize,
+  kind: &'static str,
+}
+
+impl Render for Variant {
+  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    use gpui_kit::component::{h_flex, v_flex};
+    use gpui_kit::prelude::*;
+    use gpui_kit::{ParentElement as _, StatefulInteractiveElement as _};
+    let kind = self.kind;
+    let rows = (0..self.n).map(|i| -> gpui_kit::AnyElement {
+      match kind {
+        "production-row" => super::widgets::row_full(
+          gpui_kit::SharedString::from(format!("r{i}")),
+          None,
+          format!("Workspace number {i}"),
+          Some(format!("feature/branch-{i}").into()),
+          Some(h_flex().gap_2().child("3").into_any_element()),
+          cx,
+        )
+        .into_any_element(),
+        "hold-wrapped" => super::hold::hold(
+          ("h", i as u64),
+          super::widgets::row_full(
+            gpui_kit::SharedString::from(format!("r{i}")),
+            None,
+            format!("Workspace number {i}"),
+            Some(format!("feature/branch-{i}").into()),
+            Some(h_flex().gap_2().child("3").into_any_element()),
+            cx,
+          ),
+          |_, _| {},
+        )
+        .into_any_element(),
+        "two-text-in-hflex" => h_flex()
+          .id(("t", i))
+          .px_4()
+          .py_2()
+          .gap_3()
+          .child(v_flex().flex_1().min_w_0().child(div().truncate().child("Workspace number"))
+            .child(div().truncate().child("feature/branch")))
+          .into_any_element(),
+        "two-text-no-truncate" => h_flex()
+          .id(("n", i))
+          .px_4()
+          .py_2()
+          .gap_3()
+          .child(v_flex().flex_1().min_w_0().child(div().child("Workspace number"))
+            .child(div().child("feature/branch")))
+          .into_any_element(),
+        "two-text-nowrap" => h_flex()
+          .id(("w", i))
+          .px_4()
+          .py_2()
+          .gap_3()
+          .child(v_flex().flex_1().min_w_0().child(div().whitespace_nowrap().overflow_hidden().child("Workspace number"))
+            .child(div().whitespace_nowrap().overflow_hidden().child("feature/branch")))
+          .into_any_element(),
+        "one-truncate" => div().id(("o", i)).h(px(56.)).child(div().truncate().child("Workspace number")).into_any_element(),
+        "two-truncate-vflex-only" => v_flex().id(("v", i)).child(div().truncate().child("Workspace number"))
+            .child(div().truncate().child("feature/branch")).into_any_element(),
+        // Block (not flex) column for the two texts.
+        "block-column-in-hflex" => h_flex()
+          .id(("a", i))
+          .px_4()
+          .py_2()
+          .gap_3()
+          .child(div().flex_1().min_w_0().child(div().truncate().child("Workspace number"))
+            .child(div().truncate().child("feature/branch")))
+          .into_any_element(),
+        // Whole row a block container; texts truncate; chevron absolute-free.
+        "block-row" => div()
+          .id(("b", i))
+          .px_4()
+          .py_2()
+          .child(div().truncate().child("Workspace number"))
+          .child(div().truncate().child("feature/branch"))
+          .into_any_element(),
+        // Fixed width texts (what a measured layout would settle on).
+        "fixed-width-texts-in-hflex" => h_flex()
+          .id(("c", i))
+          .px_4()
+          .py_2()
+          .gap_3()
+          .child(v_flex().flex_1().min_w_0().child(div().w(px(300.)).h(px(20.)).truncate().child("Workspace number"))
+            .child(div().w(px(300.)).h(px(20.)).truncate().child("feature/branch")))
+          .into_any_element(),
+        // Single text node with a newline-free combined label.
+        "one-text-in-hflex" => h_flex()
+          .id(("d", i))
+          .px_4()
+          .py_2()
+          .gap_3()
+          .child(div().flex_1().min_w_0().truncate().child("Workspace number"))
+          .into_any_element(),
+        // Block text column; the chevron is out of flow.
+        "absolute-chevron-row" => div()
+          .id(("e", i))
+          .relative()
+          .px_4()
+          .py_2()
+          .pr(px(40.))
+          .child(div().truncate().child("Workspace number"))
+          .child(div().truncate().child("feature/branch"))
+          .child(div().absolute().right_4().top_4().child("›"))
+          .into_any_element(),
+        "one-text" => div().id(("o", i)).h(px(56.)).child("Workspace number").into_any_element(),
+        "fixed-height-row" => h_flex()
+          .id(("f", i))
+          .h(px(56.))
+          .px_4()
+          .gap_3()
+          .child(v_flex().flex_1().min_w_0().child(div().truncate().child("Workspace number"))
+            .child(div().truncate().child("feature/branch")))
+          .into_any_element(),
+        _ => unreachable!(),
+      }
+    });
+    div().size_full().child(
+      v_flex()
+        .id("scroller")
+        .size_full()
+        .overflow_y_scroll()
+        .child(v_flex().children(rows)),
+    )
+  }
+}
+
+#[gpui_kit::test]
+#[ignore]
+fn mobile_render_row_variants(cx: &mut TestAppContext) {
+  let only = std::env::var("KIND").ok();
+  for kind in ["absolute-chevron-row", "block-column-in-hflex", "block-row", "fixed-width-texts-in-hflex", "one-text-in-hflex", "one-text", "one-truncate", "two-truncate-vflex-only", "two-text-no-truncate", "two-text-nowrap", "two-text-in-hflex", "fixed-height-row", "production-row", "hold-wrapped"] {
+    if only.as_deref().is_some_and(|k| k != kind) {
+      continue;
+    }
+    let (window, _) = mount(cx, |_, cx| cx.new(|_| Variant { n: rows_env(&[100])[0], kind }));
+    draw(cx, window);
+    measure(&format!("100 x {kind}"), frames(), || draw(cx, window));
   }
 }
 
 #[gpui_kit::test]
 #[ignore]
 fn mobile_render_workspaces_list(cx: &mut TestAppContext) {
-  for n in [20usize, 100, 400] {
+  for n in rows_env(&[20, 100, 400]) {
     let list = summaries(n);
     let (window, screen) = mount(cx, |window, cx| {
       cx.new(|cx| WorkspacesScreen::for_test(list, window, cx))
@@ -210,7 +371,7 @@ fn mobile_render_cached_boundary(cx: &mut TestAppContext) {
           })
         })
         .unwrap();
-        draw(cx, window);
+        redraw(cx, window);
       },
     );
   }
