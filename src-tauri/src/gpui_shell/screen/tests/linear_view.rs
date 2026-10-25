@@ -589,4 +589,94 @@ fn linear_document_comments_show_at_the_paragraph_they_quote(cx: &mut TestAppCon
   // The quoting comment sits in the text, above the comments under it.
   assert!(quoted.bottom() <= column.top(), "{quoted:?} {column:?}");
   assert!(column.contains(&unquoted.center()));
+
+/// Round 7 `integrations-scale` measurements. Run with `cargo test
+/// --features gpui-shell --lib lin_scale -- --ignored --nocapture
+/// --test-threads=1`.
+mod lin_scale {
+  use super::*;
+  use super::super::changes_large::{frame, report, timed};
+
+  fn n() -> usize {
+    std::env::var("PERF_N")
+      .ok()
+      .and_then(|v| v.parse().ok())
+      .unwrap_or(1000)
+  }
+
+  fn big_issue(i: usize) -> LinearIssue {
+    let mut it = issue(
+      &i.to_string(),
+      match i % 4 {
+        0 => ("Todo", "unstarted"),
+        1 => ("In Progress", "started"),
+        2 => ("Backlog", "backlog"),
+        _ => ("Done", "completed"),
+      },
+      Some(user(&format!("u{}", i % 9), &format!("User {}", i % 9))),
+    );
+    it.description = Some(format!(
+      "## Problem {i}\n\n{}\n\n- a\n- b\n",
+      "The sync engine drops updates when the queue is full and nobody notices. ".repeat(30)
+    ));
+    it.labels = vec!["bug".into(), format!("area-{}", i % 12)];
+    it
+  }
+
+  fn host(count: usize, comments: usize) -> FakeHost {
+    let mut host = linear_host();
+    host.linear.issues = (0..count).map(big_issue).collect();
+    host.linear.comments = (0..comments)
+      .map(|i| {
+        let mut c = comment(&format!("c{i}"), None);
+        c.body = format!(
+          "Comment {i}\n\n{}\n\n```rust\nfn x() {{}}\n```\n",
+          "Why the API? Because the old path is slow and brittle. ".repeat(10)
+        );
+        ("1".to_string(), c)
+      })
+      .collect();
+    host
+  }
+
+  fn notify(h: &mut Harness) {
+    h.screen.update(&mut h.cx, |screen, cx| {
+      let view = screen.linear.clone().expect("linear view");
+      view.update(cx, |_, cx| cx.notify());
+    });
+  }
+
+  #[gpui::test]
+  #[ignore = "benchmark; run with --ignored --nocapture"]
+  fn lin_scale_list(cx: &mut TestAppContext) {
+    let (mut h, _) = linear_harness(cx, host(n(), 0));
+    let mut f: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
+    report("linear list steady frame", &mut f);
+    let mut hov: Vec<_> = (0..10).map(|_| timed(&mut h, notify)).collect();
+    report("linear list notify", &mut hov);
+    h.click("linear-mode-kanban");
+    let mut k: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
+    report("linear kanban steady frame", &mut k);
+    h.click("linear-mode-list");
+    let mut v: Vec<_> = (0..6)
+      .map(|i| {
+        timed(&mut h, |h| {
+          h.click(["linear-view-active", "linear-view-backlog", "linear-view-all"][i % 3])
+        })
+      })
+      .collect();
+    report("linear switch view tab", &mut v);
+  }
+
+  #[gpui::test]
+  #[ignore = "benchmark; run with --ignored --nocapture"]
+  fn lin_scale_comments(cx: &mut TestAppContext) {
+    for count in [10usize, 60, 300] {
+      let (mut h, _) = linear_harness(cx, host(50, count));
+      h.click("linear-issue-1");
+      h.cx.run_until_parked();
+      let mut f: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
+      report(&format!("linear issue open, {count} comments"), &mut f);
+    }
+  }
 }
