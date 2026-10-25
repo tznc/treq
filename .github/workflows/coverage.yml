@@ -148,3 +148,9 @@ jobs:
           name: rust-coverage
           path: coverage
           retention-days: 30
+
+      # Floor just under main's line coverage (82.5% when set). Raise it as
+      # coverage grows; never lower it to land a change.
+      - name: Check coverage floor
+        working-directory: src-tauri
+        run: cargo llvm-cov report --summary-only --fail-under-lines 82
