@@ -1,12 +1,13 @@
 // Remote SSH against a real server: a second app with a fresh home whose
 // ~/.ssh holds the key the server trusts, driven through the Overview
 // screen's machines, the SSH Hosts +, the repository form, New
-// Workspaces, a remote shell, installing Claude Code with its official
-// installer and running it as an agent, and a dropped connection. Opt-in: set QA_SSH_HOST, QA_SSH_PORT, QA_SSH_USER,
+// Workspaces, a remote shell, installing Claude Code, Codex, Cursor and Copilot
+// with their installers and starting each as an agent, and a dropped connection. Opt-in: set QA_SSH_HOST, QA_SSH_PORT, QA_SSH_USER,
 // QA_SSH_KEY (a private key with its `.pub` beside it) and QA_SSH_REPO (a
 // path on the server the run replaces with a fresh Git repository). The
 // server needs `treq`, jj, git, tmux and curl, and must reach
-// claude.ai; `ssh-server/up.sh` starts one in Docker and prints the
+// claude.ai, cursor.com, nodejs.org and registry.npmjs.org;
+// `ssh-server/up.sh` starts one in Docker and prints the
 // variables.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { copyFileSync, mkdirSync } from "node:fs";
@@ -248,8 +249,26 @@ async function setDefaultAgent(row: number): Promise<void> {
   await page.getByRole("button", { name: "Close", exact: true }).click();
 }
 
-// Each desktop agent CLI starts on the host and takes typed input. The
-// image's stand-in agents echo what they read (ssh-server/fake-agent.sh).
+// The four agent CLIs Treq starts, each with its provider's installer.
+test("ssh remote: install the agent CLIs", async () => {
+  test.setTimeout(900_000);
+  onServer(
+    `set -e; cd ~; mkdir -p ~/.local/bin
+     curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1
+     curl -fsS https://cursor.com/install | bash >/dev/null 2>&1
+     v=$(curl -fsS https://nodejs.org/dist/index.json | grep -o '"v22[.0-9]*"' | head -1 | tr -d '"')
+     curl -fsSL https://nodejs.org/dist/$v/node-$v-linux-x64.tar.gz | tar xz -C ~
+     for b in node npm npx; do ln -sf ~/node-$v-linux-x64/bin/$b ~/.local/bin/$b; done
+     export PATH=~/.local/bin:$PATH; npm config set prefix ~/.local
+     npm i -g @openai/codex @github/copilot >/dev/null 2>&1`,
+  );
+  for (const bin of ["claude", "codex", "cursor-agent", "copilot"]) {
+    expect(onServer(`~/.local/bin/${bin} --version`)).not.toBe("");
+  }
+});
+
+// Each agent starts from the workspace's Start agent button, with no
+// credentials on the host, and stops at its provider's first-run screen.
 for (const [label, row, bin] of [
   ["Claude", 1, "claude"],
   ["Codex", 2, "codex"],
@@ -257,19 +276,23 @@ for (const [label, row, bin] of [
   ["Copilot", 4, "copilot"],
 ] as const) {
   test(`ssh remote: start ${label} and send it input`, async () => {
+    // One agent at a time, so its pane has the full width.
+    for (const stop of await page.getByRole("button", { name: "Stop", exact: true }).all()) await stop.click();
     await setDefaultAgent(row);
     const workspace = page.getByRole("button", { name: WORKSPACE, exact: true });
     await workspace.click();
     await workspace.hover();
     await workspace.getByRole("button", { name: "Start agent" }).click();
-    await page.waitForTimeout(5000);
-    // The new agent's pane opens rightmost.
-    await page.mouse.click(1300, 780);
-    await page.keyboard.type(`hello ${bin}\n`);
-    await page.waitForTimeout(2000);
-    await shot(`agent-${bin}`, `${label} started as a remote agent`, [
-      `The agent pane shows '${bin} agent ready in' the workspace path under .treq/workspaces`,
-      `It then shows '${bin} got: hello ${bin}': typed input reached the agent`,
+    await page.waitForTimeout(12_000);
+    await shot(`agent-${bin}`, `${label}: the real CLI's first-run screen`, [
+      `The agent pane, titled '${bin.replace("-", "_")}-…', shows ${label}'s own welcome or sign-in screen`,
+    ]);
+    await page.mouse.click(700, 780);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.type("hello");
+    await page.waitForTimeout(3000);
+    await shot(`agent-${bin}-input`, `${label} after typed input`, [
+      "The screen reacts to the keys: a moved selection, typed text, or the next first-run step",
     ]);
   });
 }
