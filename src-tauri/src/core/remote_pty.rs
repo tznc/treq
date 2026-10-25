@@ -99,16 +99,18 @@ pub enum RemoteAgentId {
   Claude,
   Codex,
   CursorAgent,
+  Copilot,
 }
 
 impl RemoteAgentId {
-  pub const ALL: [Self; 3] = [Self::Claude, Self::Codex, Self::CursorAgent];
+  pub const ALL: [Self; 4] = [Self::Claude, Self::Codex, Self::CursorAgent, Self::Copilot];
 
   pub fn binary_name(self) -> &'static str {
     match self {
       Self::Claude => "claude",
       Self::Codex => "codex",
       Self::CursorAgent => "cursor-agent",
+      Self::Copilot => "copilot",
     }
   }
 }
@@ -515,6 +517,15 @@ impl RemotePtyManager {
 
 #[cfg(test)]
 mod tests {
+  #[test]
+  fn allow_lists_every_desktop_agent_binary() {
+    let bins: Vec<_> = super::RemoteAgentId::ALL
+      .iter()
+      .map(|a| a.binary_name())
+      .collect();
+    assert_eq!(bins, ["claude", "codex", "cursor-agent", "copilot"]);
+  }
+
   use super::*;
   use crate::core::remote_control_plane::{SshAuthentication, SshEndpointSource, TrustedHostKey};
   use russh::keys::PrivateKey;

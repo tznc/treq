@@ -222,6 +222,7 @@ pub fn remote_agent(agent: &str) -> Option<RemoteAgentId> {
     "claude" => Some(RemoteAgentId::Claude),
     "codex" => Some(RemoteAgentId::Codex),
     "cursor" => Some(RemoteAgentId::CursorAgent),
+    "copilot" => Some(RemoteAgentId::Copilot),
     _ => None,
   }
 }
@@ -258,6 +259,7 @@ pub fn session_label(agent: Option<RemoteAgentId>, now_ms: u64) -> String {
     Some(RemoteAgentId::Claude) => "claude",
     Some(RemoteAgentId::Codex) => "codex",
     Some(RemoteAgentId::CursorAgent) => "cursor_agent",
+    Some(RemoteAgentId::Copilot) => "copilot",
     None => "shell",
   };
   format!("{kind}-{}", base36(now_ms))
@@ -764,7 +766,8 @@ mod tests {
     assert_eq!(remote_agent("claude"), Some(RemoteAgentId::Claude));
     assert_eq!(remote_agent("codex"), Some(RemoteAgentId::Codex));
     assert_eq!(remote_agent("cursor"), Some(RemoteAgentId::CursorAgent));
-    assert_eq!(remote_agent("copilot"), None);
+    assert_eq!(remote_agent("copilot"), Some(RemoteAgentId::Copilot));
+    assert_eq!(remote_agent("aider"), None);
   }
 
   #[test]
@@ -786,6 +789,7 @@ mod tests {
     assert!(a.starts_with("shell-"));
     assert_ne!(a, b);
     assert!(session_label(Some(RemoteAgentId::CursorAgent), 1).starts_with("cursor_agent-"));
+    assert!(session_label(Some(RemoteAgentId::Copilot), 1).starts_with("copilot-"));
     assert_eq!(base36(35), "z");
     assert_eq!(base36(36), "10");
   }

@@ -225,19 +225,12 @@ impl Model {
   pub fn start_remote_agent(&mut self, workspace_id: Option<i64>, data: &Data) -> Vec<Effect> {
     let workspace = workspace_id.and_then(|id| self.workspace_in(self.repo(), id, data));
     // Any other agent the setting names starts Claude.
-    let chosen = self
+    let agent = self
       .prefs
       .default_agent
       .as_deref()
-      .filter(|agent| matches!(*agent, "codex" | "cursor" | "copilot"))
-      .unwrap_or("claude");
-    let Some(agent) = remote::remote_agent(chosen) else {
-      return vec![toast(
-        ToastTone::Warning,
-        "Agent unavailable on remote hosts",
-        "Copilot cannot be started in a remote workspace yet. Choose Claude, Codex or Cursor.",
-      )];
-    };
+      .and_then(remote::remote_agent)
+      .unwrap_or(RemoteAgentId::Claude);
     self.set_selected(workspace.as_ref().map(|w| w.id));
     let label = remote::session_label(Some(agent), remote::now_ms());
     self.open_remote_target(workspace.as_ref(), label, Some(agent), false)
@@ -301,15 +294,16 @@ mod tests {
   }
 
   #[test]
-  fn refuses_an_agent_the_host_cannot_start() {
+  fn starts_copilot_on_the_host() {
     let mut model = remote_model();
     model.prefs.default_agent = Some("copilot".into());
-    let effects = model.start_remote_agent(None, &Data::default());
-    assert!(matches!(
-      effects.as_slice(),
-      [Effect::Toast { title, .. }] if title == "Agent unavailable on remote hosts"
-    ));
-    assert!(model.commands.is_empty());
+    model.start_remote_agent(None, &Data::default());
+    let command = &model.commands[0];
+    assert_eq!(command["remote"]["launch"]["agent"], "copilot");
+    assert!(command["remote"]["label"]
+      .as_str()
+      .unwrap()
+      .starts_with("copilot-"));
   }
 
   #[test]
