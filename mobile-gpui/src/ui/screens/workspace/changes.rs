@@ -143,18 +143,18 @@ impl WorkspaceScreen {
   ) -> AnyElement {
     let theme = cx.theme();
     let path = change.path.clone();
-    let committed_hunks = committed.then(|| {
+    // Borrowed from the diff, not cloned for every file on every render.
+    let committed_hunks: Option<&[JjDiffHunk]> = committed.then(|| {
       diff_data
         .hunks_by_file
         .iter()
         .find(|f| f.path == change.path)
-        .map(|f| f.hunks.clone())
-        .unwrap_or_default()
+        .map_or(&[][..], |f| f.hunks.as_slice())
     });
     let uncommitted = (!committed).then(|| self.hunks.files.get(&path)).flatten();
     let hunks: Option<&[JjDiffHunk]> = match (&committed_hunks, uncommitted) {
       (Some(h), _) => Some(h),
-      (None, Some(Load::Ready(h))) => Some(h),
+      (None, Some(Load::Ready(h))) => Some(h.as_slice()),
       _ => None,
     };
     let count = self.review.read(cx).count_for(&path);
@@ -211,7 +211,7 @@ impl WorkspaceScreen {
       }
       (Some(h), _) => {
         let this = cx.weak_entity();
-        let (tap_place, tap_hunks) = (place.clone(), h.to_vec());
+        let tap_place = place.clone();
         div()
           .id(SharedString::from(format!("hunks-{section}-{path}")))
           .overflow_x_scroll()
@@ -221,9 +221,13 @@ impl WorkspaceScreen {
             &picked,
             &self.review,
             Rc::new(move |at, _, cx| {
+              // The hunks are read when a line is tapped, not copied into
+              // every file's handler on every render.
               this
                 .update(cx, |this, cx| {
-                  this.tap_line(tap_place.clone(), &tap_hunks, at, cx)
+                  if let Some(hunks) = this.picked_hunks(&tap_place.0, tap_place.1) {
+                    this.tap_line(tap_place.clone(), &hunks, at, cx);
+                  }
                 })
                 .ok();
             }),

@@ -125,6 +125,8 @@ chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.11"
 ignore = "0.4"
 jj-lib = "0.40.0"
+# Same version jj-lib uses; decodes the workspace store index once per pass.
+prost = "0.14"
 futures = "0.3"
 # Watches the selected workspace so the Changes tab follows edits on disk.
 notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }

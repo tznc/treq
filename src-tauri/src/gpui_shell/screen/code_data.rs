@@ -157,6 +157,16 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     description: &str,
   ) -> Result<(), String>;
   fn set_title(&self, repo_path: &str, workspace_id: i64, title: &str) -> Result<(), String>;
+  /// The pull request text last copied into the workspace, or `None` when
+  /// it wasn't opened from one (`core::pr_sync`).
+  fn pr_sync(&self, repo_path: &str, workspace_id: i64) -> Option<crate::local_db::PrSyncRecord>;
+  /// Copies the pull request's title and body over local edits.
+  fn resync_from_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
+  /// Sends the workspace's local title and description edits to its pull
+  /// request.
+  fn push_to_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
+  /// The pull request's title and body as GitHub has them.
+  fn pr_text(&self, repo_path: &str, workspace: &Workspace) -> Option<(String, String)>;
   /// Builds the file index the first time, then searches it.
   fn search_files(
     &self,
@@ -272,6 +282,34 @@ impl CodeHost for Backend {
       MaybeEmptyParam::Omitted,
     )
     .map(|_| ())
+  }
+
+  fn pr_sync(&self, repo_path: &str, workspace_id: i64) -> Option<crate::local_db::PrSyncRecord> {
+    if self.remote_containing(repo_path).is_some() {
+      return None;
+    }
+    core::pr_sync::record(repo_path, workspace_id)
+  }
+
+  fn resync_from_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Syncing from the pull request"));
+    }
+    core::pr_sync::resync_workspace(repo_path, workspace_id)
+  }
+
+  fn push_to_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Updating the pull request"));
+    }
+    core::pr_sync::push_edits_to_github(repo_path, workspace_id)
+  }
+
+  fn pr_text(&self, repo_path: &str, workspace: &Workspace) -> Option<(String, String)> {
+    if self.remote_containing(repo_path).is_some() {
+      return None;
+    }
+    core::pr_sync::github_text(repo_path, workspace)
   }
 
   fn search_files(

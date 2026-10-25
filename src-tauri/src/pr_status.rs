@@ -742,6 +742,24 @@ fn statuses_sorted<V>(map: &HashMap<String, V>) -> std::collections::BTreeMap<&S
   map.iter().collect()
 }
 
+/// The `pr-statuses-updated` payload. `stacks_moved` says a PR's base moved
+/// (`core::pr_stacks`); `synced` lists the workspaces whose title or
+/// description the PR just changed (`core::pr_sync`).
+fn update_payload(repo_path: &str, stacks_moved: bool, synced: &[i64]) -> serde_json::Value {
+  serde_json::json!({ "repo_path": repo_path, "stacks_moved": stacks_moved, "synced": synced })
+}
+
+/// The repository of a `pr-statuses-updated` payload whose workspaces the
+/// PR changed, so windows read them again.
+pub fn synced_repo(payload: &str) -> Option<String> {
+  let payload: serde_json::Value = serde_json::from_str(payload).ok()?;
+  let synced = payload["synced"].as_array()?;
+  if synced.is_empty() {
+    return None;
+  }
+  payload["repo_path"].as_str().map(str::to_string)
+}
+
 /// Attach a Tauri event emitter so cache refreshes notify the frontend.
 pub fn set_app_handle(app: tauri::AppHandle) {
   use tauri::Emitter;
@@ -751,24 +769,28 @@ pub fn set_app_handle(app: tauri::AppHandle) {
   global().set_on_update(Arc::new(move |repo_path, statuses, ci_statuses| {
     // Follow GitHub retargets and merged bases before the UI rereads stacks.
     let stacks_moved = crate::core::pr_stacks::sync_pr_bases(repo_path, statuses);
+    // Before the event, so windows re-reading on it see the PR's text.
+    let synced = crate::core::pr_sync::sync_repo(repo_path, statuses).unwrap_or_else(|err| {
+      log::warn!("pr-status: syncing PR text into {repo_path}: {err}");
+      Vec::new()
+    });
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     serde_json::to_string(&(statuses_sorted(statuses), statuses_sorted(ci_statuses)))
       .unwrap_or_default()
       .hash(&mut hasher);
     let digest = hasher.finish();
-    if last_emitted
+    let unchanged = last_emitted
       .lock_or_recover()
       .insert(repo_path.to_string(), digest)
-      == Some(digest)
-      && !stacks_moved
-    {
+      == Some(digest);
+    if unchanged && !stacks_moved && synced.is_empty() {
       return;
     }
     app
       .emit(
         "pr-statuses-updated",
-        serde_json::json!({ "repo_path": repo_path, "stacks_moved": stacks_moved }),
+        update_payload(repo_path, stacks_moved, &synced),
       )
       .ignore_closed();
   }));
@@ -790,6 +812,7 @@ mod tests {
       base_ref_name: "main".into(),
       merge_state_status: Some("CLEAN".into()),
       is_draft: false,
+      body: String::new(),
     }
   }
 
@@ -1308,6 +1331,18 @@ mod tests {
       thread::sleep(Duration::from_millis(5));
     }
     mgr.shutdown();
+  }
+
+  #[test]
+  fn synced_repo_names_repo_when_workspaces_changed() {
+    let payload = update_payload("/r", false, &[3]);
+    assert_eq!(synced_repo(&payload.to_string()).as_deref(), Some("/r"));
+  }
+
+  #[test]
+  fn synced_repo_is_none_when_nothing_synced() {
+    let payload = update_payload("/r", false, &[]);
+    assert_eq!(synced_repo(&payload.to_string()), None);
   }
 
   #[test]
