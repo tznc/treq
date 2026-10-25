@@ -38,14 +38,14 @@ test("terminal rename: agent and shell titles", async ({ page }) => {
   await page.keyboard.type("Fix cache eviction");
   await page.keyboard.press("Enter");
   await settle(page, 800);
-  await expect(page.getByTestId(/^terminal-title-session-/).first()).toHaveText("Fix cache eviction");
+  await expect(page.getByTestId(/^terminal-title-session-/).first()).toHaveAccessibleName("Fix cache eviction");
 
   await shell.dblclick();
   await settle(page, 600);
   await page.keyboard.type("dev server");
   await page.keyboard.press("Enter");
   await settle(page, 800);
-  await expect(page.getByTestId(/^terminal-title-shell-/).first()).toHaveText("dev server");
+  await expect(page.getByTestId(/^terminal-title-shell-/).first()).toHaveAccessibleName("dev server");
   await capture(page, {
     name: "24-terminal-rename-renamed",
     title: "Agent and shell renamed",
@@ -62,5 +62,5 @@ test("terminal rename: agent and shell titles", async ({ page }) => {
   await page.keyboard.type("typo");
   await page.keyboard.press("Escape");
   await settle(page, 600);
-  await expect(page.getByTestId(/^terminal-title-shell-/).first()).toHaveText("dev server");
+  await expect(page.getByTestId(/^terminal-title-shell-/).first()).toHaveAccessibleName("dev server");
 });

@@ -8786,7 +8786,10 @@ fn user_managed_form_is_locked_while_react_registers(cx: &mut TestAppContext) {
 fn terminal_dialog_lists_sessions_to_reattach(cx: &mut TestAppContext) {
   let host = FakeHost {
     remote_sessions: Some(Ok(vec![
-      remote_session("claude-1", true),
+      crate::core::pty_remote_supervisor::PtySessionInfo {
+        title: Some("Fix the login".into()),
+        ..remote_session("claude-1", true)
+      },
       remote_session("shell-2", false),
     ])),
     ..FakeHost::default()
@@ -8803,8 +8806,8 @@ fn terminal_dialog_lists_sessions_to_reattach(cx: &mut TestAppContext) {
   assert_eq!(
     fields(&h, "remote.terminal.open"),
     vec![
-      serde_json::json!({ "label": "claude-1", "reattach": true }),
-      serde_json::json!({ "label": null, "reattach": false }),
+      serde_json::json!({ "label": "claude-1", "title": "Fix the login", "reattach": true }),
+      serde_json::json!({ "label": null, "title": null, "reattach": false }),
     ]
   );
 }
@@ -8821,7 +8824,7 @@ fn terminal_dialog_starts_a_session_when_listing_fails(cx: &mut TestAppContext) 
   h.click("remote-start-new");
   assert_eq!(
     fields(&h, "remote.terminal.open"),
-    vec![serde_json::json!({ "label": null, "reattach": false })]
+    vec![serde_json::json!({ "label": null, "title": null, "reattach": false })]
   );
 }
 

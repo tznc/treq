@@ -2205,6 +2205,8 @@ impl TerminalPane {
     let tip = format!("terminal-title-tip-{id}");
     let title = div()
       .id(SharedString::from(format!("terminal-title-{id}")))
+      .role(gpui::Role::Label)
+      .aria_label(SharedString::from(text.clone()))
       .test_support()
       .debug_selector(|| "terminal-title".into())
       .min_w_0()
