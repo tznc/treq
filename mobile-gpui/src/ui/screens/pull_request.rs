@@ -205,6 +205,7 @@ mod tests {
       base_ref_name: "main".into(),
       merge_state_status: None,
       is_draft: draft,
+      body: String::new(),
     }
   }
 
