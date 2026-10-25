@@ -1375,8 +1375,6 @@ impl LogsView {
       .borrow()
       .get("logs-chart")
       .map_or(600., |b| f32::from(b.size.width) - 60.);
-    let slot = width / data.labels.len() as f32;
-    let every = (56. / slot).ceil().max(1.) as usize;
     let legend = div()
       .absolute()
       .top(zpx(2.))
@@ -1457,20 +1455,34 @@ impl LogsView {
           .text_color(p.muted_foreground)
           .child(t.to_string())
       }));
+    // A handful of evenly spaced times, each wide enough to read in full,
+    // however many columns the bars are.
+    let columns = data.labels.len();
+    let label_width = 64.;
+    let labelled = ((width / (label_width + 24.)).floor() as usize)
+      .clamp(1, 8)
+      .min(columns);
     let x_labels = div()
       .absolute()
       .bottom(zpx(4.))
       .left(zpx(44.))
       .right(zpx(16.))
-      .flex()
-      .children(data.labels.iter().enumerate().map(|(i, label)| {
+      .h(zpx(16.))
+      .children((0..labelled).map(|k| {
+        let column = (((k as f32 + 0.5) * columns as f32 / labelled as f32 - 0.5).round() as usize)
+          .min(columns - 1);
+        let centre = (column as f32 + 0.5) / columns as f32;
         ui::text(div(), TextSize::Xs)
-          .flex_1()
+          .absolute()
+          .top_0()
+          .left(gpui::relative(centre))
+          .ml(zpx(-label_width / 2.))
+          .w(zpx(label_width))
           .flex()
           .justify_center()
-          .overflow_hidden()
+          .whitespace_nowrap()
           .text_color(p.muted_foreground)
-          .when(i % every == 0, |this| this.child(label.clone()))
+          .child(data.labels[column].clone())
       }));
     Some(
       div()

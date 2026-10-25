@@ -2372,20 +2372,15 @@ impl LinearView {
                     .into_any_element(),
                   None => {
                     let of = of.clone();
-                    super::workspace_dialog::disclosure(
+                    super::github::parts::fold_row(
                       "linear-comments-show-earlier",
-                      format!(
-                        "Show {} earlier comments",
-                        super::rows::hidden(unanchored.len())
-                      ),
-                      false,
+                      super::rows::hidden(unanchored.len()),
                       p,
                       cx.listener(move |view, _, _, cx| {
                         view.comments_expanded.insert(of.clone());
                         cx.notify();
                       }),
                     )
-                    .into_any_element()
                   }
                 }),
             )

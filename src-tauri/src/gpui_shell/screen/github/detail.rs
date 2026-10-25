@@ -400,20 +400,15 @@ impl GithubView {
             ))
             .into_any_element()
           }
-          None => {
-            let hidden = crate::gpui_shell::screen::rows::hidden(comments.len());
-            super::super::workspace_dialog::disclosure(
-              "github-comments-show-earlier",
-              format!("Show {hidden} earlier comments"),
-              false,
-              p,
-              cx.listener(|view, _, _, cx| {
-                view.detail.comments_expanded = true;
-                cx.notify();
-              }),
-            )
-            .into_any_element()
-          }
+          None => parts::fold_row(
+            "github-comments-show-earlier",
+            crate::gpui_shell::screen::rows::hidden(comments.len()),
+            p,
+            cx.listener(|view, _, _, cx| {
+              view.detail.comments_expanded = true;
+              cx.notify();
+            }),
+          ),
         })),
     )
   }

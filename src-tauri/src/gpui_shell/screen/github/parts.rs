@@ -359,3 +359,22 @@ pub fn pr_list_item(pr: &GhPullRequest, branches: bool, p: &Palette) -> Div {
         ),
     )
 }
+
+/// A comment thread's fold: a full-width outline button under the same
+/// gap as the cards, which shows the comments it hides.
+pub fn fold_row(
+  id: &'static str,
+  hidden: usize,
+  p: &Palette,
+  on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+) -> gpui::AnyElement {
+  Button::new(id, p)
+    .variant(Variant::Outline)
+    .size(Size::Sm)
+    .w_full()
+    .gap_1()
+    .icon(theme::ICON_CHEVRON_DOWN, 14.)
+    .label(format!("Show {hidden} earlier comments"))
+    .on_click(on_click)
+    .into_any_element()
+}
