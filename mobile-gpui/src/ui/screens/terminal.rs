@@ -4,7 +4,7 @@
 //! session, attached, full screen. Leaving it detaches; the session keeps
 //! running on the host.
 
-use std::{rc::Rc, time::Duration};
+use std::{collections::HashMap, rc::Rc, time::Duration};
 
 use futures::channel::mpsc;
 use gpui_kit::component::Disableable as _;
@@ -219,6 +219,9 @@ pub struct Sessions {
   workspace: Option<Workspace>,
   sessions: Load<Vec<PtySessionInfo>>,
   notice: Option<String>,
+  /// Unsent messages by session label, kept while the session's page is
+  /// closed (to read a diff, say) so the message is there on return.
+  drafts: HashMap<String, String>,
 }
 
 fn list_request(repo: &str, workspace: &Workspace) -> TreqCommandRequest {
@@ -240,6 +243,7 @@ impl Sessions {
       workspace,
       sessions,
       notice: None,
+      drafts: HashMap::new(),
     };
     this.fetch(true, cx);
     this
@@ -593,8 +597,15 @@ impl TerminalScreen {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Self {
-    let message =
-      cx.new(|cx| InputState::new(window, cx).placeholder(format!("Message {}", program.name())));
+    let draft = sessions
+      .upgrade()
+      .and_then(|list| list.update(cx, |list, _| list.drafts.remove(&label)))
+      .unwrap_or_default();
+    let message = cx.new(|cx| {
+      InputState::new(window, cx)
+        .placeholder(format!("Message {}", program.name()))
+        .default_value(draft)
+    });
     cx.subscribe_in(
       &message,
       window,
@@ -605,12 +616,22 @@ impl TerminalScreen {
       },
     )
     .detach();
-    // Leaving the page detaches; the list then shows what's still running.
+    // Leaving the page detaches; the list then shows what's still running
+    // and keeps the unsent message for the next visit.
     let list = sessions.clone();
-    cx.on_release(move |_, cx| {
+    cx.on_release(move |this: &mut Self, cx| {
+      let draft = this.message.read(cx).value().to_string();
+      let label = this.label.clone();
       let list = list.clone();
       cx.defer(move |cx| {
-        list.update(cx, |list, cx| list.reload(cx)).ok();
+        list
+          .update(cx, |list, cx| {
+            if !draft.trim().is_empty() {
+              list.drafts.insert(label, draft);
+            }
+            list.reload(cx)
+          })
+          .ok();
       });
     })
     .detach();
