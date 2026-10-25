@@ -9200,12 +9200,15 @@ pub fn rebase_snapshot(repo_path: &str, pairs: &[(&str, &str)]) -> Result<Rebase
   })
 }
 
-/// Imports git refs and HEAD into jj once (what `classify_workspace_bookmark`
-/// does per call), so a following [`rebase_snapshot`] sees refs moved by git
-/// outside jj. Writes an operation only when something changed.
+/// Imports git branch refs into jj once, so a following [`rebase_snapshot`]
+/// sees branches moved by git outside jj. Writes an operation only when
+/// something changed. Git HEAD is deliberately not imported: recording it in
+/// the view without moving the home working copy (as
+/// `reconcile_colocated_home_repo` does) would hide a git-only commit from the
+/// next home read.
 pub fn import_git_refs(repo_path: &str) -> Result<(), JjError> {
   let mut loaded = load_workspace_repo(repo_path)?;
-  import_colocated_git_state(&mut loaded, repo_path)
+  import_remaining_git_refs(&mut loaded)
 }
 
 /// The id of the repo's current operation (op head).

@@ -265,6 +265,14 @@ fn record_rebase_pass(repo_path: &str, operation_id: String) {
 /// One repo load classifies every workspace; only those not provably in sync
 /// go through [`ensure_workspace_rebased`], which loads per workspace.
 fn rebase_workspaces(repo_path: &str, conflict_style: &str) {
+  let Ok(all_workspaces) = local_db::get_workspaces(repo_path) else {
+    return;
+  };
+  // Nothing to rebase, and importing git state into a repo without workspaces
+  // would pre-empt the home repo's own reconcile of a git-only commit.
+  if all_workspaces.is_empty() {
+    return;
+  }
   // Refs moved by git outside jj must be visible to the checks below, and to
   // the op head the skip compares against.
   jj::import_git_refs(repo_path).warn_on_err("import git refs before the rebase pass");
@@ -278,9 +286,6 @@ fn rebase_workspaces(repo_path: &str, conflict_style: &str) {
       return;
     }
   }
-  let Ok(all_workspaces) = local_db::get_workspaces(repo_path) else {
-    return;
-  };
   let pairs: Vec<(&str, &str)> = all_workspaces
     .iter()
     .map(|workspace| {
