@@ -527,9 +527,10 @@ fn linear_without_a_key_says_how_to_connect(cx: &mut TestAppContext) {
       id: "linear.openSettings".into()
     }]
   );
-  h.click("linear-section-projects");
-  let page = screen(&mut h);
-  expect(page.get_by_text(crate::linear::NOT_CONNECTED)).to_be_visible();
+  // The whole view says it: no tabs to switch to, no team to pick.
+  assert!(h.drawn("linear-connection-state"));
+  assert!(!h.drawn("linear-section-projects"));
+  assert!(!h.drawn("linear-team-selector"));
 }
 
 #[gpui::test]

@@ -1081,10 +1081,61 @@ impl LinearView {
   }
 }
 
+impl LinearView {
+  /// A read's error that only Settings can fix: Linear is not connected, or
+  /// refuses the key.
+  fn connection_error(&self) -> Option<String> {
+    let issues = self.issues.get(&self.team).and_then(|f| f.error.as_ref());
+    [issues, self.projects.error.as_ref()]
+      .into_iter()
+      .flatten()
+      .find(|error| crate::linear::needs_connection(error))
+      .cloned()
+  }
+
+  /// The empty state in place of the tabs while Linear can't be read.
+  fn connection_state(
+    &self,
+    error: String,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let title = if error == crate::linear::NOT_CONNECTED {
+      "Connect Linear"
+    } else {
+      "Linear rejected the API key"
+    };
+    div()
+      .id("linear-connection")
+      .role(Role::Label)
+      .aria_label(SharedString::from(error.clone()))
+      .test_support()
+      .flex_1()
+      .min_h_0()
+      .flex()
+      .items_center()
+      .justify_center()
+      .child(
+        ui::EmptyState::new("linear-connection-state", title, p)
+          .icon(theme::ICON_LINEAR)
+          .error(error != crate::linear::NOT_CONNECTED)
+          .message(error)
+          .action(
+            Button::new("linear-open-settings", p)
+              .variant(Variant::Outline)
+              .size(Size::Sm)
+              .label("Open Settings")
+              .on_click(cx.listener(|view, _, _, cx| view.open_settings(cx))),
+          ),
+      )
+  }
+}
+
 impl Render for LinearView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.sync_project(cx);
     let p = theme::palette(self.dark);
+    let connection = self.connection_error();
     let header = div()
       .flex()
       .items_center()
@@ -1105,7 +1156,21 @@ impl Render for LinearView {
               .child("Linear"),
           ),
       )
-      .child(self.team_selector(&p, cx));
+      .children(connection.is_none().then(|| self.team_selector(&p, cx)));
+    // Without a working key no tab can show anything: the whole view says
+    // what to fix.
+    if let Some(error) = connection {
+      return div()
+        .debug_selector(|| "linear-panel".into())
+        .size_full()
+        .flex()
+        .flex_col()
+        .bg(p.background)
+        .text_color(p.foreground)
+        .child(header)
+        .child(self.connection_state(error, &p, cx))
+        .into_any_element();
+    }
     let sections = div()
       .px_4()
       .pb_2()
@@ -1136,6 +1201,7 @@ impl Render for LinearView {
       .child(sections)
       .child(body)
       .children(dialog)
+      .into_any_element()
   }
 }
 
@@ -1264,11 +1330,11 @@ impl LinearView {
       .when_some(fetch.error.clone(), |this, error| {
         this.child(
           message("linear-issues-error", error.into(), p.destructive).child(
-            Button::new("linear-open-settings", p)
+            Button::new("linear-issues-retry", p)
               .variant(Variant::Outline)
               .size(Size::Sm)
-              .label("Open Settings")
-              .on_click(cx.listener(|view, _, _, cx| view.open_settings(cx))),
+              .label("Try again")
+              .on_click(cx.listener(|view, _, _, cx| view.load_issues(cx))),
           ),
         )
       });
@@ -1753,11 +1819,11 @@ impl LinearView {
             .text_color(p.destructive)
             .child(error)
             .child(
-              Button::new("linear-projects-open-settings", p)
+              Button::new("linear-projects-retry", p)
                 .variant(Variant::Outline)
                 .size(Size::Sm)
-                .label("Open Settings")
-                .on_click(cx.listener(|view, _, _, cx| view.open_settings(cx))),
+                .label("Try again")
+                .on_click(cx.listener(|view, _, _, cx| view.load_projects(cx))),
             ),
         )
       })
