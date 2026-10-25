@@ -3,6 +3,12 @@
 //! `cargo test --test chat_record_cost -- --ignored --nocapture`
 //! (`CHAT_TICKS=3600` for an hour). Linux only: bytes written come from
 //! `/proc/self/io`.
+#![allow(
+  clippy::unwrap_used,
+  clippy::let_underscore_must_use,
+  clippy::undocumented_unsafe_blocks,
+  reason = "measurement test"
+)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
