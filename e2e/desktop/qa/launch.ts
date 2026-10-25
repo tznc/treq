@@ -5,9 +5,10 @@
 // sidebar, a commit large enough to defer its diff ("Load diff"), and
 // uncommitted edits for the Changes tab, and a fake Linear (./fake-linear.ts)
 // that a repository reaches once it has a Linear API key. `QA_THEME` (dark|light) picks the
-// theme the app starts in.
+// theme the app starts in. `QA_ACCOUNT=signed-in` starts signed in, against a
+// fake Supabase (./fake-supabase.ts).
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -15,6 +16,7 @@ import { appBinary } from "../env.ts";
 import { gitIn, makeFixture, startApp, writeBin } from "../harness.ts";
 import { ALERTING, seedLandingRepo, STACK_PARENT, workspaceDir } from "../landing/seed.ts";
 import { startFakeLinear } from "./fake-linear.ts";
+import { startFakeSupabase } from "./fake-supabase.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = makeFixture("treq-qa-", "event-bus");
@@ -135,12 +137,24 @@ const appDb = new DatabaseSync(join(home, ".local/share/com.treq/treq.db"));
 appDb
   .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('theme', ?)")
   .run(theme);
+const signedIn = process.env.QA_ACCOUNT === "signed-in";
+if (signedIn) {
+  // The session the app restores; the fake Supabase refreshes it.
+  appDb
+    .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('supabase_session', ?)")
+    .run(JSON.stringify({ accessToken: "qa-access", refreshToken: "qa-refresh" }));
+}
 appDb.close();
 
 writeFileSync(join(fixture.root, "qa-extra.json"), JSON.stringify({ docs, theme, repo }));
 
 const linearPort = Number(process.env.TREQ_E2E_PORT ?? 9333) + 2;
 startFakeLinear(linearPort);
+if (signedIn) {
+  // The debug build reaches the project in package.json's `env.dev`.
+  const pkg = JSON.parse(readFileSync(join(here, "../../../package.json"), "utf8"));
+  startFakeSupabase(Number(new URL(pkg.env.dev.supabase.url).port));
+}
 
 startApp(fixture, {
   GDK_SCALE: process.env.GDK_SCALE ?? "2",
