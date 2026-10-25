@@ -1735,7 +1735,29 @@ impl SettingsView {
               .child(
                 ui::text(div(), TextSize::Sm)
                   .text_color(p.muted_foreground)
-                  .child("This cannot be undone. Your subscription is canceled immediately without a refund for the remaining period. Your cloud workspace and everything on it is deleted. Treq disconnects Linear and forgets your GitHub App installations. If you are the last owner of an organization, make another member an owner or delete the organization first. Billing records are kept for tax and accounting."),
+                  .child("This cannot be undone. Deleting your account:"),
+              )
+              .child(
+                div().flex().flex_col().gap_1().children(
+                  [
+                    "Cancels your subscription immediately, without a refund for the rest of the period.",
+                    "Deletes your cloud workspace and everything on it.",
+                    "Disconnects Linear and forgets your GitHub App installations.",
+                    "Keeps billing records for tax and accounting.",
+                  ]
+                  .map(|item| {
+                    div()
+                      .flex()
+                      .gap_2()
+                      .child(ui::text(div().flex_none(), TextSize::Sm).text_color(p.muted_foreground).child("•"))
+                      .child(ui::text(div().min_w_0(), TextSize::Sm).text_color(p.muted_foreground).child(item))
+                  }),
+                ),
+              )
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .text_color(p.muted_foreground)
+                  .child("If you are the last owner of an organization, make another member an owner or delete the organization first."),
               ),
           )
           .child(

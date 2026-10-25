@@ -154,7 +154,7 @@ test("account: delete refused while last owner, then deleted and signed out", as
       name: "21-delete-account-02-confirm-empty",
       title: "Delete account dialog before the email is typed",
       expectations: [
-        "A dialog titled 'Delete your Treq account?' lists the consequences",
+        "A dialog titled 'Delete your Treq account?' lists the consequences as bullet points",
         "An empty field asks to type the account email to confirm",
         "The red 'Delete Account' button is disabled",
       ],
