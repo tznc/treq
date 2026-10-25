@@ -77,7 +77,8 @@ pub fn open(repo: String, cx: &mut App) {
   );
 }
 
-fn repo_name(path: &str) -> &str {
+/// A repository's folder name, from its path on the host.
+pub fn repo_name(path: &str) -> &str {
   path
     .trim_end_matches('/')
     .rsplit('/')

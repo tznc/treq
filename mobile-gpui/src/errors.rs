@@ -84,6 +84,15 @@ pub fn describe(raw: &str) -> Problem {
       None,
     );
   }
+  // A treq from before `file list`: clap wants `--path`, or names the action.
+  if has("unknown file action 'list'")
+    || (has("required arguments were not provided") && has("--path"))
+  {
+    return Problem::new(
+      "Browsing files needs a newer treq on this host. Update treq there, then try again.",
+      None,
+    );
+  }
   if has("no git remote named") {
     return Problem::new(
       "This repository has no Git remote to push to. Add one on the host (git remote add origin …), then push again.",

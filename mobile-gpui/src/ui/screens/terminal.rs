@@ -303,10 +303,15 @@ impl Sessions {
   }
 
   fn new_agent(&mut self, cx: &mut Context<Self>) {
+    self.new_agent_with(String::new(), cx)
+  }
+
+  /// The New agent sheet with `message` already typed as its first message.
+  pub fn new_agent_with(&mut self, message: String, cx: &mut Context<Self>) {
     let agents = agents_on(host_check(cx).as_ref());
     let sessions = cx.weak_entity();
     sheet::open(Some("New agent".into()), cx, move |window, cx| {
-      cx.new(|cx| AgentSheet::new(agents, sessions, window, cx))
+      cx.new(|cx| AgentSheet::new(agents, sessions, message, window, cx))
     });
   }
 
@@ -434,10 +439,15 @@ impl AgentSheet {
   fn new(
     agents: Vec<RemoteAgentId>,
     sessions: WeakEntity<Sessions>,
+    message: String,
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Self {
-    let message = cx.new(|cx| InputState::new(window, cx).placeholder("First message (optional)"));
+    let message = cx.new(|cx| {
+      InputState::new(window, cx)
+        .placeholder("First message (optional)")
+        .default_value(message)
+    });
     Self {
       agents,
       selected: 0,

@@ -503,6 +503,11 @@ pub(crate) fn parse_remote_command_request(
       query: value.unwrap_or_default(),
       limit: optional_usize(matches, "limit")?,
     }),
+    ("file", "list") => Ok(TreqCommandRequest::ListFiles {
+      repo,
+      workspace,
+      path: path.unwrap_or_default(),
+    }),
     ("changes", "diff") => Ok(TreqCommandRequest::DiffFile {
       repo,
       workspace,

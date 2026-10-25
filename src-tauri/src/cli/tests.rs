@@ -898,6 +898,11 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       query: "main".into(),
       limit: Some(4),
     },
+    R::ListFiles {
+      repo: repo(),
+      workspace: Some("1".into()),
+      path: "src".into(),
+    },
     R::WorkspaceChangeMarker {
       repo: repo(),
       workspace: Some("1".into()),

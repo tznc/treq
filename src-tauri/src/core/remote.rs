@@ -213,6 +213,15 @@ pub enum TreqCommandRequest {
     revision: String,
     path: String,
   },
+  /// One directory of the workspace's files (Git-ignored entries left out),
+  /// directories first; `path` is relative to the workspace, empty for its
+  /// root. See [`RemoteFileEntry`].
+  ListFiles {
+    repo: String,
+    workspace: Option<String>,
+    #[serde(default)]
+    path: String,
+  },
   /// Fuzzy file-name search over the workspace file index.
   SearchFiles {
     repo: String,
@@ -580,6 +589,7 @@ impl TreqCommandRequest {
       | Self::CommitDiff { .. }
       | Self::CommitFileDiff { .. }
       | Self::SearchFiles { .. }
+      | Self::ListFiles { .. }
       | Self::ProbeRepo { .. }
       | Self::GitRemoteInfo { .. }
       | Self::AgentStatus { .. }
@@ -672,6 +682,7 @@ impl TreqCommandRequest {
       | Self::CommitDiff { .. }
       | Self::CommitFileDiff { .. }
       | Self::SearchFiles { .. }
+      | Self::ListFiles { .. }
       | Self::WorkspaceChangeMarker { .. }
       | Self::MachineUsage { .. }
       | Self::MachineTools { .. }
@@ -721,6 +732,7 @@ impl TreqCommandRequest {
       Self::CommitDiff { .. } => "CommitDiff",
       Self::CommitFileDiff { .. } => "CommitFileDiff",
       Self::SearchFiles { .. } => "SearchFiles",
+      Self::ListFiles { .. } => "ListFiles",
       Self::WorkspaceChangeMarker { .. } => "WorkspaceChangeMarker",
       Self::MachineUsage { .. } => "MachineUsage",
       Self::MachineTools { .. } => "MachineTools",
@@ -836,6 +848,7 @@ impl TreqCommandRequest {
     "CommitDiff",
     "CommitFileDiff",
     "SearchFiles",
+    "ListFiles",
   ];
 }
 
@@ -1655,6 +1668,18 @@ impl TreqCommandRequest {
         }
         ("file", "search", repo)
       }
+      Self::ListFiles {
+        repo,
+        workspace,
+        path,
+      } => {
+        fields.workspace = workspace.as_deref();
+        // The workspace root is an empty path, which `--path` refuses.
+        if !path.is_empty() {
+          fields.path = Some(path);
+        }
+        ("file", "list", repo)
+      }
       Self::DiffFile {
         repo,
         workspace,
@@ -2366,6 +2391,15 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       &query,
       limit.unwrap_or(50),
     )),
+    TreqCommandRequest::ListFiles {
+      repo,
+      workspace,
+      path,
+    } => json(list_workspace_files(
+      &repo,
+      workspace_id(workspace.as_ref())?,
+      &path,
+    )),
     TreqCommandRequest::ProbeRepo { repo } => json(probe_repo_path(&repo)),
     TreqCommandRequest::InitRepo {
       repo,
@@ -3048,6 +3082,63 @@ fn search_files_local(
   )
 }
 
+/// An entry of [`TreqCommandRequest::ListFiles`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteFileEntry {
+  pub name: String,
+  /// Relative to the workspace, with `/` separators.
+  pub path: String,
+  pub is_directory: bool,
+  /// "conflict", "workingCopy" or "committed" (for a directory, the most
+  /// severe among its files); absent when untouched.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub status: Option<String>,
+}
+
+/// [`TreqCommandRequest::ListFiles`]: one directory of the workspace, with
+/// hidden directories (`.git`, `.jj`) left out as the desktop tree does.
+fn list_workspace_files(
+  repo: &str,
+  workspace: Option<i64>,
+  path: &str,
+) -> Result<Vec<RemoteFileEntry>, String> {
+  let path = path.trim().trim_matches('/');
+  if Path::new(path)
+    .components()
+    .any(|c| !matches!(c, std::path::Component::Normal(_)))
+  {
+    return Err(format!(
+      "invalid_arguments: {path} is not a path inside the workspace"
+    ));
+  }
+  let root = resolve_workspace_path(repo, workspace)?;
+  let dir = Path::new(&root).join(path);
+  let mut entries: Vec<_> = crate::core::list_directory(&dir.to_string_lossy())?
+    .into_iter()
+    .filter(|e| !(e.is_directory && e.name.starts_with('.')))
+    .collect();
+  let target = crate::local_db::get_workspace_by_id(repo, workspace.unwrap_or(0))
+    .ok()
+    .flatten()
+    .and_then(|w| w.target_branch);
+  crate::core::files::annotate_entry_statuses(&root, &mut entries, target.as_deref());
+  Ok(
+    entries
+      .into_iter()
+      .map(|e| RemoteFileEntry {
+        path: if path.is_empty() {
+          e.name.clone()
+        } else {
+          format!("{path}/{}", e.name)
+        },
+        name: e.name,
+        is_directory: e.is_directory,
+        status: e.status,
+      })
+      .collect(),
+  )
+}
+
 fn is_repo_dir(path: &Path) -> bool {
   path.join(".jj").is_dir() || path.join(".git").exists()
 }
@@ -3724,6 +3815,64 @@ fn validate_remote_path(path: &str) -> Result<(), String> {
 mod tests {
   use super::*;
   use std::process::Command;
+
+  #[test]
+  fn list_files_lists_one_directory_without_ignored_or_hidden_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::process::Command::new("git")
+      .args(["init", "-q"])
+      .current_dir(root)
+      .status()
+      .unwrap();
+    for sub in ["src/ui", "target", ".github"] {
+      fs::create_dir_all(root.join(sub)).unwrap();
+    }
+    fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    fs::write(root.join("README.md"), "").unwrap();
+    fs::write(root.join("src/main.rs"), "").unwrap();
+    let repo = root.to_str().unwrap().to_string();
+
+    let names = |path: &str| -> Vec<(String, String, bool)> {
+      let value = execute_local_request(TreqCommandRequest::ListFiles {
+        repo: repo.clone(),
+        workspace: None,
+        path: path.into(),
+      })
+      .unwrap();
+      serde_json::from_value::<Vec<RemoteFileEntry>>(value)
+        .unwrap()
+        .into_iter()
+        .map(|e| (e.name, e.path, e.is_directory))
+        .collect()
+    };
+    assert_eq!(
+      names(""),
+      vec![
+        ("src".into(), "src".into(), true),
+        (".gitignore".into(), ".gitignore".into(), false),
+        ("README.md".into(), "README.md".into(), false),
+      ]
+    );
+    assert_eq!(
+      names("src/"),
+      vec![
+        ("ui".into(), "src/ui".into(), true),
+        ("main.rs".into(), "src/main.rs".into(), false),
+      ]
+    );
+    for outside in ["..", "../etc", "/etc", "src/../.."] {
+      assert!(
+        execute_local_request(TreqCommandRequest::ListFiles {
+          repo: repo.clone(),
+          workspace: None,
+          path: outside.into(),
+        })
+        .is_err(),
+        "{outside}"
+      );
+    }
+  }
 
   #[cfg(unix)]
   #[test]
@@ -5068,7 +5217,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 63);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 64);
   }
 
   #[test]

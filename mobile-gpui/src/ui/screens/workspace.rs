@@ -1,5 +1,5 @@
-//! One workspace: its branch and status over three tabs (Terminals,
-//! Changes, Commits), with the workspace's actions in the ⋯ menu and a
+//! One workspace: its branch and status over four tabs (Terminals,
+//! Changes, Commits, Files), with the workspace's actions in the ⋯ menu and a
 //! switcher to its siblings on the title.
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
@@ -33,7 +33,9 @@ use treq_ui::{
 
 use super::{
   commits::{self, CommitsScreen},
-  conflicts, diff, mutation_message, on_epoch,
+  conflicts, diff,
+  files::FilesView,
+  mutation_message, on_epoch,
   terminal::Sessions,
   workspaces,
 };
@@ -112,9 +114,10 @@ enum View {
   Terminals,
   Changes,
   Commits,
+  Files,
 }
 
-const VIEWS: [View; 3] = [View::Terminals, View::Changes, View::Commits];
+const VIEWS: [View; 4] = [View::Terminals, View::Changes, View::Commits, View::Files];
 
 #[derive(Deserialize)]
 struct ChangeMarker {
@@ -192,6 +195,8 @@ pub struct WorkspaceScreen {
   sessions: Entity<Sessions>,
   /// Made when the Commits tab is first shown.
   commits: Option<Entity<CommitsScreen>>,
+  /// Made when the Files tab is first shown.
+  files: Option<Entity<FilesView>>,
   commit_message: Entity<InputState>,
   /// The action running from this screen, by name.
   busy: Option<&'static str>,
@@ -257,6 +262,7 @@ impl WorkspaceScreen {
       marker: None,
       sessions,
       commits: None,
+      files: None,
       commit_message: cx.new(|cx| InputState::new(window, cx).placeholder("Commit message")),
       busy: None,
       message: None,
@@ -312,6 +318,9 @@ impl WorkspaceScreen {
       if let Some(commits) = &self.commits {
         commits.update(cx, |commits, cx| commits.reload(cx));
       }
+      if let Some(files) = &self.files {
+        files.update(cx, |files, cx| files.reload(cx));
+      }
     }
   }
 
@@ -340,11 +349,15 @@ impl WorkspaceScreen {
     );
   }
 
-  fn select(&mut self, view: View, cx: &mut Context<Self>) {
+  fn select(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
     self.view = view;
     if view == View::Commits && self.commits.is_none() {
       let target = self.target.clone();
       self.commits = Some(cx.new(|cx| CommitsScreen::new(target, cx)));
+    }
+    if view == View::Files && self.files.is_none() {
+      let (target, sessions) = (self.target.clone(), self.sessions.downgrade());
+      self.files = Some(cx.new(|cx| FilesView::new(target, sessions, window, cx)));
     }
     cx.notify();
   }
@@ -750,10 +763,11 @@ impl WorkspaceScreen {
           }
         })
         .tab(counted(Tab::new("tab-commits", "Commits"), ahead))
+        .tab(Tab::new("tab-files", "Files"))
         .selected(VIEWS.iter().position(|v| *v == view).unwrap_or(0))
-        .on_select(move |ix, _, cx| {
+        .on_select(move |ix, window, cx| {
           this
-            .update(cx, |screen, cx| screen.select(VIEWS[ix], cx))
+            .update(cx, |screen, cx| screen.select(VIEWS[ix], window, cx))
             .ok();
         }),
     )
@@ -875,6 +889,10 @@ impl Render for WorkspaceScreen {
         .into_any_element(),
       View::Commits => match &self.commits {
         Some(commits) => commits.clone().into_any_element(),
+        None => div().into_any_element(),
+      },
+      View::Files => match &self.files {
+        Some(files) => files.clone().into_any_element(),
         None => div().into_any_element(),
       },
     };
@@ -1068,7 +1086,7 @@ mod tests {
       previous_path: previous.map(str::to_string),
       changed_line_count: lines,
       diff_deferred: false,
-    content_id: None,
+      content_id: None,
     }
   }
 

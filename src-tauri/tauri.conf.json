@@ -437,7 +437,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: search, read, restore, patch"
+              "description": "Action: list, search, read, restore, patch"
             },
             {
               "name": "repo",
@@ -453,8 +453,7 @@
             {
               "name": "path",
               "takesValue": true,
-              "required": true,
-              "description": "Repository-relative file path"
+              "description": "Repository-relative file path (read, restore, patch), or directory for list (default: the root)"
             },
             {
               "name": "revision",
