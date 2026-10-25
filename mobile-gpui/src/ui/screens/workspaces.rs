@@ -390,6 +390,10 @@ impl WorkspacesScreen {
           let repo = self.repo.clone();
           move |_, cx| super::issues::open(repo.clone(), cx)
         }),
+        sheet::MenuEntry::new("menu-prs", "Pull requests", {
+          let repo = self.repo.clone();
+          move |_, cx| super::pull_requests::open(repo.clone(), cx)
+        }),
         sheet::MenuEntry::new("menu-refresh", "Refresh", move |_, cx| {
           this.update(cx, |screen, cx| screen.reload(cx)).ok();
         }),
