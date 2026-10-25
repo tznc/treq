@@ -340,7 +340,7 @@ impl machines::MachinesHost for FakeHost {
     &self,
     place: &machines::Place,
   ) -> Result<crate::core::pty_remote_supervisor::TerminalStatus, String> {
-    self.record(format!("terminal status {place:?}"));
+    self.record(format!("read terminal status {place:?}"));
     self
       .terminal_status
       .clone()
@@ -2270,7 +2270,7 @@ fn onboarding_shows_the_daemon_the_host_reports(cx: &mut TestAppContext) {
   assert!(host
     .calls()
     .iter()
-    .any(|c| c.starts_with("terminal status Ssh")));
+    .any(|c| c.starts_with("read terminal status Ssh")));
 }
 
 #[gpui::test]

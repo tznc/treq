@@ -405,3 +405,39 @@ test("ssh remote: the machine shows the daemon holding its terminals after a res
     "The app was restarted; the terminals kept running on the host meanwhile",
   ]);
 });
+
+test("ssh remote: switching the machine to tmux keeps its terminals in tmux", async () => {
+  // The popover from the previous step is open on the Overview.
+  await page.getByRole("button", { name: "Use tmux…" }).click();
+  await page.getByRole("button", { name: "Use tmux", exact: true }).click();
+  // Confirming closes the popover; open it again to read the result.
+  await page.waitForTimeout(3000);
+  await page.getByRole("button", { name: /on QA container$/ }).click();
+  // Switching closed the daemon's terminals and stopped it.
+  await expect(page.getByRole("status", { name: /^tmux: 0 terminals/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Use Treq daemon…" })).toBeVisible();
+  expect(terminalStatus().daemon).toBeNull();
+  await shot("host-terminals-tmux", "The machine switched to tmux", [
+    "The Terminals section reads 'Terminals are held by tmux.' and 'tmux: 0 terminals.'",
+    "The switch button now reads Use Treq daemon…",
+  ]);
+  await page.keyboard.press("Escape");
+  await page.getByRole("listitem", { name: env.repo }).first().click();
+  const row = page.getByRole("button", { name: ROW, exact: true });
+  await expect(row).toBeVisible({ timeout: 60_000 });
+  await row.click();
+  await row.hover();
+  await row.getByRole("button", { name: "Open shell" }).click();
+  await page.waitForTimeout(4000);
+  await page.mouse.click(700, 780);
+  await page.keyboard.type("echo in-tmux-$((6*7))\n");
+  await page.waitForTimeout(2000);
+  const status = terminalStatus();
+  expect(status.daemon).toBeNull();
+  expect(status.tmux_sessions).toBeGreaterThanOrEqual(1);
+  expect(onServer("treq pty-remote status --repo /")).toMatch(/tmux: installed, [1-9]\d* Treq sessions?/);
+  await shot("shell-tmux", "A remote shell on a machine set to tmux", [
+    "The shell shows 'in-tmux-42' from the server",
+    "No tmux status line at the bottom of the pane",
+  ]);
+});
