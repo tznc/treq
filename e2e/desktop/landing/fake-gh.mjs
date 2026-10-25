@@ -89,6 +89,10 @@ if (existsSync(overrides)) {
   for (const pr of prs) Object.assign(pr, changes[pr.headRefName]);
 }
 
+// QA: `$HOME/fake-gh-extra-prs.json` adds fixture PRs (a long list).
+const extra = join(process.env.HOME ?? "", "fake-gh-extra-prs.json");
+if (existsSync(extra)) prs.push(...JSON.parse(readFileSync(extra, "utf8")));
+
 const issues = [
   {
     number: 77,

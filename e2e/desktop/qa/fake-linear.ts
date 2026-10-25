@@ -114,7 +114,19 @@ const comments = [
 ];
 
 /** Comments by what they are on. */
+const longThread = Array.from({ length: 30 }, (_, i) => ({
+  id: `long-${i + 1}`,
+  body:
+    i % 4 === 3
+      ? `Comment ${i + 1}: a longer note.\n\n- first point about the cache\n- second point with \`inline code\`\n\nAnd a closing line.`
+      : `Comment ${i + 1}: ${i % 2 ? "Tried it on staging, still flaky." : "Looks right to me, shipping after the next run."}`,
+  user: i % 3 ? teammate : viewer,
+  createdAt: new Date(Date.UTC(2026, 9, 1 + (i % 25), 8 + (i % 9), i)).toISOString(),
+  quotedText: null,
+}));
+
 const commentsOn: Record<string, object[]> = {
+  "issue-139": longThread,
   "issue-142": comments,
   "d-retries": [
     {
