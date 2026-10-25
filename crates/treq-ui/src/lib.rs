@@ -225,6 +225,8 @@ pub enum Variant {
 pub enum Size {
   Default,
   Icon,
+  /// 32px square: an icon button beside small (`Sm`) controls.
+  IconSm,
   IconXs,
   Lg,
   Sm,
@@ -515,6 +517,7 @@ impl RenderOnce for Button {
       .map(|b| match self.size {
         Size::Default => text(b.h(zpx(40.)).px_4(), TextSize::Sm),
         Size::Icon => b.size(zpx(40.)),
+        Size::IconSm => b.size(zpx(32.)),
         Size::IconXs => b.size(zpx(24.)),
         Size::Lg => text(b.h(zpx(44.)).px_6(), TextSize::Lg),
         Size::Sm => text(b.h(zpx(32.)).px_3(), TextSize::Sm),

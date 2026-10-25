@@ -76,7 +76,7 @@ The window keeps two repository paths:
 
 Pages that show a home repository or workspace operate on the active repository. The new-workspace dialog targets the active repository.
 
-Status and polling (workspace status, PR status, merge queue) run for every repository in the window, not only the active one.
+Status and polling (workspace status, PR status) run for every repository in the window, not only the active one.
 
 ### Agents
 

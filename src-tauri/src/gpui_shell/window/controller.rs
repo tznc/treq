@@ -256,6 +256,12 @@ impl WindowController {
     self.run(effects, cx);
   }
 
+  /// A `treq://skill/install` link: Settings shows its confirmation.
+  pub fn open_skill_install(&mut self, skill_id: String, cx: &mut Context<Self>) {
+    self.model.open_skill_install(skill_id);
+    self.run(Vec::new(), cx);
+  }
+
   /// A folder the menu bar's "Open…" picked: opens it in this window.
   pub fn open_folder(&mut self, path: String, cx: &mut Context<Self>) {
     self.run(vec![Effect::OpenRepoAt(path)], cx);

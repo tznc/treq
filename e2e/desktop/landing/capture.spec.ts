@@ -96,15 +96,24 @@ async function openTab(page: Page, name: string): Promise<void> {
   await page.waitForTimeout(1500);
 }
 
-/** Comments on the diff line at `y` through its gutter's add button. */
+/** Comments on a diff line through its gutter's add button. */
 async function commentOnLine(
   page: Page,
-  y: number,
+  path: string,
+  line: number,
   text: string,
 ): Promise<void> {
-  await page.mouse.move(800, y);
-  await page.mouse.move(645, y, { steps: 4 });
-  await page.mouse.click(645, y);
+  const add = page.getByRole("button", {
+    name: `Add comment on ${path} line ${line}`,
+  });
+  // The button only shows while the line is hovered, so the pointer goes there
+  // first.
+  const box = await add.boundingBox();
+  if (!box) throw new Error(`no add comment button for ${path} line ${line}`);
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x + 150, y);
+  await page.mouse.move(x, y, { steps: 4 });
+  await page.mouse.click(x, y);
   const input = page.getByRole("textbox", { name: "Add a comment..." });
   await expect(input).toBeVisible();
   await input.fill(text);
@@ -192,7 +201,7 @@ test("captures the landing screenshots", async ({ page }) => {
   // A resolved GitHub thread and a local comment on client.ts.
   await page.mouse.click(326, 383); // client.ts under Committed
   await page.waitForTimeout(1500);
-  await commentOnLine(page, 348, "remove this"); // line 6
+  await commentOnLine(page, "packages/web/src/lib/client.ts", 6, "remove this");
   await page.mouse.click(571, 474); // unfold the resolved thread
   await page.waitForTimeout(800);
   await shot(page, "review.png", CHANGES);
@@ -231,8 +240,8 @@ test("captures the landing screenshots", async ({ page }) => {
   // Review comments on an uncommitted and a committed file.
   await openWorkspace(page, CACHE);
   await openTab(page, "Changes");
-  await commentOnLine(page, 524, "cover the miss path"); // cache.test.ts line 4
-  await commentOnLine(page, 229, "keep the map private"); // cache.ts line 1
+  await commentOnLine(page, "packages/api/src/cache.test.ts", 4, "cover the miss path");
+  await commentOnLine(page, "packages/api/src/cache.ts", 1, "keep the map private");
   await shot(page, "code-reviews.png", CHANGES);
 
   // Three agent workspaces stacked on the cache workspace.

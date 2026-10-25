@@ -9,7 +9,7 @@
 // GET /user/installations lists the installations of this App that the user
 // can access. The token is only passed to that call; nothing keeps it.
 
-import { getInstallation } from "../_shared/merge-queue/github-adapter.ts";
+import { getInstallation } from "../_shared/github/app.ts";
 import type { GitHubInstallationAccess } from "./lib.ts";
 
 export type GitHubAppOAuthCredentials = {

@@ -38,7 +38,6 @@ export async function refuseGatedAction(
 export const PRO_REQUIRED_MESSAGES = {
   githubApp:
     "The Treq GitHub App needs Pro. Start a trial or upgrade on your treq.dev dashboard.",
-  mergeQueue: "The merge queue needs Pro.",
   linearOAuth:
     "Linear OAuth needs Pro. Add a personal Linear API key in the repository's Linear settings to keep using Linear on the Free plan.",
   cloudWorkspace:

@@ -89,7 +89,7 @@ impl std::fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
-/// The PostgREST code `set_merge_queue_enabled` raises without Pro.
+/// The PostgREST code an RPC raises without Pro.
 const POSTGREST_PRO_REQUIRED: &str = "PT402";
 
 impl ApiError {
@@ -399,7 +399,7 @@ mod tests {
   async fn calls_rpcs_and_functions_and_reads_their_errors() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-      .and(path("/rest/v1/rpc/get_merge_queue_enabled"))
+      .and(path("/rest/v1/rpc/get_flag"))
       .and(body_json(json!({"p_repo_full_name": "o/r"})))
       .respond_with(ResponseTemplate::new(200).set_body_json(json!(true)))
       .mount(&server)
@@ -420,10 +420,7 @@ mod tests {
       .await;
     let (supabase, _) = client(&server.uri());
     let enabled: bool = supabase
-      .rpc(
-        "get_merge_queue_enabled",
-        &json!({"p_repo_full_name": "o/r"}),
-      )
+      .rpc("get_flag", &json!({"p_repo_full_name": "o/r"}))
       .await
       .unwrap();
     assert!(enabled);

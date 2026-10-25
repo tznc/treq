@@ -1,8 +1,7 @@
 //! The workspace header's actions GPUI runs itself, which React's
 //! `useWorkspaceChecks`, `CreatePrButtonGroup`, `ViewPrButton`,
-//! `MergeQueueButton`, `handleTargetBranchSelect` and Dashboard's
-//! `handleDelete` ran: workflow checks, pull requests, the merge queue,
-//! retargeting and the More menu's Reset to remote and Delete Workspace.
+//! `handleTargetBranchSelect` and Dashboard's `handleDelete` ran: workflow
+//! checks, pull requests, retargeting and the More menu's Reset to remote and Delete Workspace.
 
 use crate::result_ext::ResultExt;
 use tauri_plugin_gpui::gpui::{prelude::*, App, Context};
@@ -18,7 +17,6 @@ use super::{
 };
 use crate::{
   core::{
-    account::QueueAction,
     context_menu::{self, MenuAction},
     running_checks::{CheckRun, ChecksTarget},
     RemoteSyncStatus,
@@ -37,7 +35,6 @@ use crate::{
 pub(super) struct Busy {
   pub creating_pr: bool,
   pub retargeting: bool,
-  pub queueing: bool,
 }
 
 impl WorkspaceView {
@@ -55,7 +52,6 @@ impl WorkspaceView {
         "workspace.createPr" => self.start_pr(false, cx),
         "workspace.createPrMenu" => self.create_pr_menu(cx),
         "workspace.viewPr" => self.open_pr_view(),
-        "workspace.mergeQueue" => self.toggle_queue(cx),
         "workspace.more" => self.more_menu(cx),
         _ => return false,
       },
@@ -495,90 +491,11 @@ impl WorkspaceView {
     .detach();
   }
 
-  /// `MergeQueueButton`'s click: adds the branch to the queue, or takes it
-  /// off while it is queued.
-  fn toggle_queue(&mut self, cx: &mut Context<Self>) {
-    let Some(button) = self.route.merge_queue.clone() else {
-      return;
-    };
-    let Some(request) = self.pr_request() else {
-      return;
-    };
-    if self.busy.queueing || button.disabled {
-      return;
-    }
-    let action = if button.label == "Queued" {
-      QueueAction::Dequeue
-    } else {
-      QueueAction::Enqueue
-    };
-    self.busy.queueing = true;
-    self.rebuild(cx);
-    let host = self.actions.clone();
-    cx.spawn(async move |this, cx| {
-      let done = {
-        let (host, request) = (host.clone(), request.clone());
-        cx.background_spawn(async move { host.queue(&request.full_name, &request.branch, action) })
-          .await
-      };
-      this
-        .update(cx, |view, cx| {
-          view.busy.queueing = false;
-          let (title, description, tone, button) = match done {
-            Ok(()) => (
-              match action {
-                QueueAction::Enqueue => "Added to merge queue",
-                QueueAction::Dequeue => "Removed from merge queue",
-              }
-              .to_string(),
-              String::new(),
-              ToastTone::Success,
-              None,
-            ),
-            Err(err) if err.is_pro_required() => {
-              let url = format!("{}/dashboard", native::web_url());
-              let opener = host.clone();
-              (
-                "The merge queue needs Pro".to_string(),
-                String::new(),
-                ToastTone::Info,
-                Some(ToastAction {
-                  label: "Upgrade to Pro".into(),
-                  id: native::register_toast_action(move || opener.open_url(&url)),
-                }),
-              )
-            }
-            Err(err) => (
-              "Queue error".to_string(),
-              err.message,
-              ToastTone::Error,
-              None,
-            ),
-          };
-          view.host.notify(NativeEvent::Toast {
-            title,
-            description,
-            tone,
-            action: button,
-          });
-          view.host.notify(NativeEvent::WorkspaceChanged {
-            repo_path: request.repo_path.clone(),
-          });
-          view.rebuild(cx);
-        })
-        .ignore_closed();
-    })
-    .detach();
-  }
-
   /// The route as drawn: React's, with what GPUI runs itself on top.
   pub(crate) fn drawn_route(&self, cx: &App) -> super::Route {
     let mut route = self.route.clone();
     route.creating_pr |= self.busy.creating_pr;
     route.retargeting |= self.busy.retargeting;
-    if let Some(button) = route.merge_queue.as_mut() {
-      button.disabled |= self.busy.queueing;
-    }
     if let Some(id) = route.workspace_id {
       let running = checks_run::of(cx, &self.checks_repo(), id);
       merge(&mut route.running_checks, running.files);

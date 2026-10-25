@@ -38,7 +38,6 @@ fn kind_of(tone: ToastTone) -> toast_queue::ToastKind {
     ToastTone::Success => toast_queue::ToastKind::Success,
     ToastTone::Warning => toast_queue::ToastKind::Warning,
     ToastTone::Error => toast_queue::ToastKind::Error,
-    ToastTone::Info => toast_queue::ToastKind::Info,
   }
 }
 

@@ -236,6 +236,8 @@ enum DeepLinkKind {
   Agent,
   /// `treq://auth/callback?token=...`: finish browser sign-in.
   AuthCallback,
+  /// `treq://skill/install?id=...`: offer to install a catalog skill.
+  SkillInstall,
   Unknown,
 }
 
@@ -254,6 +256,13 @@ fn classify_deep_link(url: &str) -> DeepLinkKind {
     {
       DeepLinkKind::AuthCallback
     }
+    Ok(parsed)
+      if parsed.scheme() == "treq"
+        && parsed.host_str() == Some("skill")
+        && parsed.path() == "/install" =>
+    {
+      DeepLinkKind::SkillInstall
+    }
     _ => DeepLinkKind::Unknown,
   }
 }
@@ -268,6 +277,28 @@ fn focus_target_window(app: &AppHandle) {
   window.unminimize().ignore_closed();
   window.show().ignore_closed();
   window.set_focus().ignore_closed();
+}
+
+/// `treq://skill/install?id=...`: the focused window shows the install
+/// confirmation for that catalog skill.
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+fn skill_install_deep_link(app: &AppHandle, url: &str) {
+  let Some(skill_id) = crate::core::skills::parse_skill_install_link(url) else {
+    log::info!("skill deep link ignored (malformed id)");
+    return;
+  };
+  // A link that launched Treq comes before any window: the first window
+  // to start shows it.
+  let Some(label) = resolve_menu_target_label(app) else {
+    crate::core::skills::queue_pending_skill_install(skill_id);
+    return;
+  };
+  focus_target_window(app);
+  #[cfg(feature = "gpui-shell")]
+  gpui_shell::skill_install_link(app, &label, skill_id);
+  #[cfg(not(feature = "gpui-shell"))]
+  let _ = (label, skill_id);
 }
 
 /// Handles the regular "Open..." menu action (CmdOrCtrl+O).
@@ -759,6 +790,14 @@ pub fn run() {
           });
         }
         let handle = app.handle().clone();
+        // The link that launched Treq, if any; later links reach on_open_url.
+        if let Ok(Some(urls)) = app.deep_link().get_current() {
+          for url in urls {
+            if classify_deep_link(url.as_str()) == DeepLinkKind::SkillInstall {
+              skill_install_deep_link(app.handle(), url.as_str());
+            }
+          }
+        }
         app.deep_link().on_open_url(move |event| {
           let urls: Vec<String> = event.urls().into_iter().map(|u| u.to_string()).collect();
           for url in urls {
@@ -781,6 +820,8 @@ pub fn run() {
                   log::info!("agent deep link ignored (no matching window/repo)");
                 }
               }
+              // One window asks: installing is app-wide, not per repository.
+              DeepLinkKind::SkillInstall => skill_install_deep_link(&handle, &url),
               DeepLinkKind::Unknown => log::info!("deep link ignored (unrecognized url)"),
             }
           }
@@ -1194,12 +1235,22 @@ mod tests {
   }
 
   #[test]
+  fn classifies_skill_install_link_as_skill_install() {
+    let url = "treq://skill/install?id=anthropic%2Fpdf";
+    assert_eq!(
+      super::classify_deep_link(url),
+      super::DeepLinkKind::SkillInstall
+    );
+  }
+
+  #[test]
   fn classifies_other_links_as_unknown() {
     for url in [
       "treq://auth/other?token=abc",
       "treq://auth/callback/extra?token=abc",
       "https://treq.dev/auth/callback?token=abc",
       "treq://settings",
+      "treq://skill/uninstall?id=anthropic%2Fpdf",
       "not a url",
     ] {
       assert_eq!(

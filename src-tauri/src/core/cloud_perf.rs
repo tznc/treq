@@ -1,5 +1,5 @@
 //! Round 7 measurements of the Supabase client: request and connection
-//! counts, refresh serialization and the merge queue payload. All
+//! counts, and refresh serialization. All
 //! `#[ignore]`d; run with
 //! `cargo test --lib core::cloud_perf -- --ignored --nocapture --test-threads=1`.
 
@@ -231,79 +231,5 @@ async fn r7_hung_refresh_blocks_callers() {
   println!(
     "requests that reached the server: {:?}",
     summarize(&server).await
-  );
-}
-
-/// The merge queue RPC returns every merged entry ever.
-#[tokio::test]
-#[ignore]
-async fn r7_queue_entries_parse_cost() {
-  for rows in [50usize, 500, 5000] {
-    let server = MockServer::start().await;
-    let body: Vec<Value> = (0..rows)
-      .map(|i| {
-        json!({"branch_name": format!("branch-{i}"), "pr_number": i, "pr_title": format!("title {i}"),
-               "status": "merged", "position": i, "target_branch": "main"})
-      })
-      .collect();
-    let bytes = serde_json::to_vec(&body).unwrap().len();
-    Mock::given(method("POST"))
-      .and(path("/rest/v1/rpc/get_repo_branch_queue_statuses"))
-      .respond_with(ResponseTemplate::new(200).set_body_json(&body))
-      .mount(&server)
-      .await;
-    let (supabase, _) = client(&server.uri());
-    let _ = account::queue_entries(&supabase, "o/r", None)
-      .await
-      .unwrap();
-    let t = Instant::now();
-    for _ in 0..20 {
-      let _ = account::queue_entries(&supabase, "o/r", None)
-        .await
-        .unwrap();
-    }
-    println!(
-      "{rows} merged rows, {} KB: {:?} per poll (loopback, incl. http + parse + sort, debug build)",
-      bytes / 1024,
-      t.elapsed() / 20
-    );
-  }
-}
-
-/// Wire bytes of the queue payload with and without gzip (the server's
-/// `Content-Encoding` is what the client now asks for).
-#[tokio::test]
-#[ignore]
-async fn r7_queue_entries_gzip_wire_bytes() {
-  use std::io::Write;
-  let body: Vec<Value> = (0..5000)
-    .map(|i| {
-      json!({"branch_name": format!("branch-{i}"), "pr_number": i, "pr_title": format!("title {i}"),
-             "status": "merged", "position": i, "target_branch": "main"})
-    })
-    .collect();
-  let raw = serde_json::to_vec(&body).unwrap();
-  let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-  gz.write_all(&raw).unwrap();
-  let gz = gz.finish().unwrap();
-  let server = MockServer::start().await;
-  Mock::given(method("POST"))
-    .and(path("/rest/v1/rpc/get_repo_branch_queue_statuses"))
-    .respond_with(
-      ResponseTemplate::new(200)
-        .insert_header("content-encoding", "gzip")
-        .set_body_raw(gz.clone(), "application/json"),
-    )
-    .mount(&server)
-    .await;
-  let (supabase, _) = client(&server.uri());
-  let rows = account::queue_entries(&supabase, "o/r", None)
-    .await
-    .unwrap();
-  println!(
-    "5000 rows: {} KB on the wire with gzip (was {} KB), {} rows decoded",
-    gz.len() / 1024,
-    raw.len() / 1024,
-    rows.len()
   );
 }

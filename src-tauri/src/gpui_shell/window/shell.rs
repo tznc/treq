@@ -89,6 +89,10 @@ pub(in crate::gpui_shell) fn start(
     let host = Arc::new(Backend::new(app.clone(), label.clone()));
     let dark = shell.os_dark;
     let controller = cx.new(|cx| WindowController::new(host, repo, present, dark, cx));
+    // A skill link that launched Treq arrived before this window could take it.
+    if let Some(skill_id) = crate::core::skills::take_pending_skill_install() {
+      controller.update(cx, |c, cx| c.open_skill_install(skill_id, cx));
+    }
     shell.window = Some(controller);
   })
 }
@@ -264,6 +268,13 @@ pub fn menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<Str
   };
   with_controller(app, label, move |c, cx| c.menu(item, cx));
   true
+}
+
+/// A `treq://skill/install` link for window `label`. Any thread.
+pub fn skill_install_link(app: &AppHandle, label: &str, skill_id: String) {
+  if drives(label) {
+    with_controller(app, label, move |c, cx| c.open_skill_install(skill_id, cx));
+  }
 }
 
 /// Window `label` gained (`focused`) or lost focus. Any thread.
