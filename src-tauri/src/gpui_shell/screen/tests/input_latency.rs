@@ -212,6 +212,15 @@ fn input_latency_window_changes(cx: &mut TestAppContext) {
     })
     .collect();
   report("zoom 100 <-> 110", zoom);
+  let install: Vec<_> = (0..10)
+    .map(|i| {
+      sample(&mut h, |h| {
+        h.cx
+          .update(|_, cx| crate::gpui_shell::theme::set_dark(i % 2 == 1, cx));
+      })
+    })
+    .collect();
+  report("theme install only (set_dark + frame)", install);
   let theme: Vec<_> = (0..10)
     .map(|i| {
       sample(&mut h, |h| {
