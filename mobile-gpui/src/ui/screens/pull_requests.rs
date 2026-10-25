@@ -17,10 +17,10 @@ use treq_lib::{
   github::{GhListPage, GhPullRequest},
 };
 
-use super::{on_epoch, pr_detail, workspaces::repo_name};
+use super::{on_epoch, pr_detail};
 use crate::{
   errors, remote,
-  ui::{load, nav, widgets, Load, Location},
+  ui::{load, widgets, Load},
 };
 
 /// How many results a search asks for.
@@ -128,20 +128,6 @@ pub fn detail_line(pr: &GhPullRequest) -> String {
   )
 }
 
-/// Opens the pull request list of the repository at `repo` on the host.
-pub fn open(repo: String, cx: &mut App) {
-  let location = Location {
-    repo: Some(repo.clone()),
-    workspace: None,
-  };
-  nav::push(
-    format!("Pull requests · {}", repo_name(&repo)),
-    location,
-    cx,
-    move |window, cx| cx.new(|cx| PullRequestsScreen::new(repo, window, cx)),
-  );
-}
-
 pub struct PullRequestsScreen {
   repo: String,
   filter: Filter,
@@ -160,7 +146,7 @@ pub struct PullRequestsScreen {
 }
 
 impl PullRequestsScreen {
-  fn new(repo: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+  pub(super) fn new(repo: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
     on_epoch(cx, |this, cx| this.reload(cx));
     let query = cx.new(|cx| InputState::new(window, cx).placeholder("Search open pull requests"));
     cx.subscribe(&query, |this, _, event: &InputEvent, cx| match event {
