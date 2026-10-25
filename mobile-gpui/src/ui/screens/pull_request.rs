@@ -295,6 +295,7 @@ mod tests {
     PrInfo {
       number: 7,
       title: "Fix".into(),
+      body: String::new(),
       state: state.into(),
       url: "https://github.com/o/r/pull/7".into(),
       head_ref_name: "fix".into(),

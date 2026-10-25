@@ -156,10 +156,11 @@ pub struct GhIssueComment {
   pub id: String,
   pub body: String,
   pub author: GhAuthor,
+  #[serde(alias = "created_at")]
   pub created_at: String,
   /// `gh` gives the counts; `gh_comment_reactions_impl` adds whether the
   /// viewer reacted.
-  #[serde(default, rename(deserialize = "reactionGroups"))]
+  #[serde(default, rename(deserialize = "reactionGroups"), alias = "reactions")]
   pub reactions: Vec<GhReactionGroup>,
 }
 
@@ -174,16 +175,18 @@ pub struct GhReactionGroup {
 }
 
 /// A `ReactionGroup` as `gh --json` (`users`) or GraphQL (`reactors`)
-/// spells it.
+/// spells it, or as [`GhReactionGroup`] serializes it (`count`).
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawReactionGroup {
   content: String,
   #[serde(default)]
+  count: Option<u32>,
+  #[serde(default)]
   users: Option<TotalCount>,
   #[serde(default)]
   reactors: Option<TotalCount>,
-  #[serde(default)]
+  #[serde(default, alias = "viewer_has_reacted")]
   viewer_has_reacted: bool,
 }
 
@@ -197,7 +200,10 @@ impl From<RawReactionGroup> for GhReactionGroup {
   fn from(raw: RawReactionGroup) -> Self {
     GhReactionGroup {
       content: raw.content,
-      count: raw.reactors.or(raw.users).map_or(0, |c| c.total_count),
+      count: raw
+        .count
+        .or_else(|| raw.reactors.or(raw.users).map(|c| c.total_count))
+        .unwrap_or(0),
       viewer_has_reacted: raw.viewer_has_reacted,
     }
   }
@@ -213,7 +219,9 @@ pub struct GhIssue {
   pub body: Option<String>,
   pub author: GhAuthor,
   pub labels: Vec<GhLabel>,
+  #[serde(alias = "created_at")]
   pub created_at: String,
+  #[serde(alias = "updated_at")]
   pub updated_at: String,
   pub comments: Option<Vec<GhIssueComment>>,
 }
@@ -228,13 +236,18 @@ pub struct GhPullRequest {
   pub body: Option<String>,
   pub author: GhAuthor,
   pub labels: Vec<GhLabel>,
+  #[serde(alias = "head_ref_name")]
   pub head_ref_name: String,
+  #[serde(alias = "base_ref_name")]
   pub base_ref_name: String,
+  #[serde(alias = "merge_state_status")]
   pub merge_state_status: Option<String>,
+  #[serde(alias = "created_at")]
   pub created_at: String,
+  #[serde(alias = "updated_at")]
   pub updated_at: String,
   pub comments: Option<Vec<GhIssueComment>>,
-  #[serde(default)]
+  #[serde(default, alias = "is_draft")]
   pub is_draft: bool,
 }
 
@@ -1026,7 +1039,7 @@ pub fn gh_set_reaction_impl(
 
 /// One inline comment of a submitted review. `side` is `LEFT` or `RIGHT`;
 /// `start_line` makes it a multi-line comment on the same side.
-#[derive(serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct GhDraftReviewComment {
   pub path: String,
   pub line: u64,
@@ -1791,7 +1804,7 @@ pub fn list_prs_with_checks_via_gh_impl(
 
 // ── GitHub PR review comment threads (read-only) ────────────────────────────
 
-#[derive(serde::Serialize, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
 pub struct GhReviewComment {
   pub id: String,
   pub body: String,
@@ -1802,7 +1815,7 @@ pub struct GhReviewComment {
   pub reactions: Vec<GhReactionGroup>,
 }
 
-#[derive(serde::Serialize, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
 pub struct GhReviewThread {
   pub id: String,
   pub is_resolved: bool,
@@ -2128,6 +2141,87 @@ mod tests {
   }
 
   use super::*;
+
+  /// The host sends what it read from `gh` to the phone as JSON; reading
+  /// that JSON back must give the same values.
+  #[test]
+  fn github_types_survive_a_serialize_deserialize_round_trip() {
+    fn round_trip<T: serde::Serialize + serde::de::DeserializeOwned>(
+      value: &T,
+    ) -> serde_json::Value {
+      let json = serde_json::to_value(value).unwrap();
+      let back: T = serde_json::from_value(json.clone()).unwrap();
+      assert_eq!(serde_json::to_value(&back).unwrap(), json);
+      json
+    }
+    let author = GhAuthor {
+      login: "octo".into(),
+      avatar_url: Some("https://a".into()),
+    };
+    let comment = GhIssueComment {
+      id: "c1".into(),
+      body: "hi".into(),
+      author: author.clone(),
+      created_at: "2026-01-01T00:00:00Z".into(),
+      reactions: vec![GhReactionGroup {
+        content: "HEART".into(),
+        count: 3,
+        viewer_has_reacted: true,
+      }],
+    };
+    round_trip(&GhIssue {
+      number: 1,
+      title: "t".into(),
+      state: "OPEN".into(),
+      url: "u".into(),
+      body: Some("b".into()),
+      author: author.clone(),
+      labels: vec![GhLabel {
+        name: "bug".into(),
+        color: "f00".into(),
+      }],
+      created_at: "c".into(),
+      updated_at: "u".into(),
+      comments: Some(vec![comment.clone()]),
+    });
+    round_trip(&GhListPage {
+      items: vec![GhPullRequest {
+        number: 2,
+        title: "t".into(),
+        state: "OPEN".into(),
+        url: "u".into(),
+        body: None,
+        author: author.clone(),
+        labels: vec![],
+        head_ref_name: "feat".into(),
+        base_ref_name: "main".into(),
+        merge_state_status: Some("CLEAN".into()),
+        created_at: "c".into(),
+        updated_at: "u".into(),
+        comments: Some(vec![comment]),
+        is_draft: true,
+      }],
+      has_more: true,
+      end_cursor: Some("x".into()),
+    });
+    round_trip(&vec![GhReviewThread {
+      id: "t1".into(),
+      is_resolved: true,
+      is_outdated: false,
+      path: "a.rs".into(),
+      line: Some(4),
+      diff_side: "RIGHT".into(),
+      comments: vec![GhReviewComment {
+        id: "r1".into(),
+        body: "b".into(),
+        author,
+        created_at: "c".into(),
+        diff_hunk: "@@".into(),
+        url: "u".into(),
+        reactions: vec![],
+      }],
+    }]);
+  }
   use std::fs;
   use std::io::Write;
   use tempfile::TempDir;
