@@ -7,6 +7,7 @@ import type { StripeEmbeddedCheckout } from "@stripe/stripe-js";
 import { loadStripe } from "@stripe/stripe-js/pure";
 import { supabase } from "../lib/supabase";
 import { proRequiredMessage } from "../lib/pro-required";
+import { confirmsAccountDeletion, deleteAccount } from "../lib/account";
 import {
   GITHUB_APP_INSTALL_URL,
   STRIPE_PUBLISHABLE_KEY,
@@ -1598,6 +1599,116 @@ function TeamTab({
   );
 }
 
+// ── Delete account ───────────────────────────────────────────────────────────
+//
+// The delete-account Edge Function cancels the subscription, destroys the
+// Treq Cloud machines and deletes the account. The user types their email
+// first. A refusal (the user is the last owner of an organization) shows the
+// server's sentence.
+
+function DeleteAccountSection({ email }: { email: string }) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const confirmable = !pending && confirmsAccountDeletion(typed, email);
+
+  const close = () => {
+    setOpen(false);
+    setTyped("");
+    setError(null);
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!confirmable) return;
+    setPending(true);
+    setError(null);
+    try {
+      await deleteAccount();
+      await supabase.auth.signOut({ scope: "local" });
+      window.location.href = "/";
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Your account could not be deleted.",
+      );
+      setPending(false);
+    }
+  };
+
+  return (
+    <section aria-labelledby="delete-account-heading" style={styles.dangerSection}>
+      <h2 id="delete-account-heading" style={styles.sectionTitle}>
+        Delete account
+      </h2>
+      <div style={{ ...styles.card, ...styles.dangerCard }}>
+        <p style={styles.billingNote}>
+          Your Pro subscription is cancelled at once, without a refund, and
+          your Treq Cloud machines and their disks are deleted. Billing records
+          are kept. Repositories and workspaces on your computer are not
+          touched. If you are the last owner of an organization, make another
+          member an owner or delete the organization first.
+        </p>
+        {!open ? (
+          <div style={styles.billingActions}>
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              style={styles.dangerButton}
+            >
+              Delete account…
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={submit}>
+            <label htmlFor="delete-account-email" style={styles.dangerLabel}>
+              Type {email} to confirm
+            </label>
+            <input
+              id="delete-account-email"
+              type="email"
+              autoComplete="off"
+              value={typed}
+              disabled={pending}
+              placeholder={email}
+              onChange={(event) => {
+                setTyped(event.target.value);
+                setError(null);
+              }}
+              style={styles.input}
+            />
+            <div style={styles.billingActions}>
+              <button
+                type="button"
+                onClick={close}
+                disabled={pending}
+                style={styles.secondaryButton}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!confirmable}
+                style={{
+                  ...styles.dangerButton,
+                  ...(!confirmable ? styles.primaryButtonDisabled : {}),
+                }}
+              >
+                {pending ? "Deleting…" : "Delete account"}
+              </button>
+            </div>
+          </form>
+        )}
+        {error && (
+          <div role="alert" style={styles.errorText}>
+            {error}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 // ── Dashboard shell ──────────────────────────────────────────────────────────
 
 function DashboardContent() {
@@ -1732,11 +1843,14 @@ function DashboardContent() {
 
       <div style={styles.content}>
         {activeTab === "subscription" && (
-          <SubscriptionTab
-            subscription={subscription}
-            reloadSubscription={loadSubscription}
-            stripePaymentsEnabled={stripePaymentsEnabled}
-          />
+          <>
+            <SubscriptionTab
+              subscription={subscription}
+              reloadSubscription={loadSubscription}
+              stripePaymentsEnabled={stripePaymentsEnabled}
+            />
+            <DeleteAccountSection email={user.email ?? ""} />
+          </>
         )}
 
         {activeTab === "integrations" && (
@@ -1929,6 +2043,9 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "0.85rem",
   },
   errorText: { color: "#ef4444", fontSize: "0.85rem", marginTop: "0.75rem" },
+  dangerSection: { marginTop: "2.5rem" },
+  dangerCard: { borderColor: "rgba(239,68,68,0.4)" },
+  dangerLabel: { display: "block", fontSize: "0.85rem", marginBottom: "0.4rem" },
   comingSoonSubtext: {
     marginTop: "0.5rem",
     fontSize: "0.8rem",
