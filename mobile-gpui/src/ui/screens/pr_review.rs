@@ -640,7 +640,11 @@ impl PrReviewScreen {
                   .child(c.created_at.get(..10).unwrap_or("").to_string()),
               ),
           )
-          .child(div().text_sm().child(c.body.clone()))
+          .child(div().text_sm().child(widgets::markdown(
+            SharedString::from(format!("thread-comment-{}", c.id)),
+            &c.body,
+            cx,
+          )))
           .child(self.reactions(c, cx))
       })
       .collect();
