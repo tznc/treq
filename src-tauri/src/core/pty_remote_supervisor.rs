@@ -112,6 +112,11 @@ pub struct PtySessionInfo {
 /// The tmux user option holding a session's title.
 const TITLE_OPTION: &str = "@treq-title";
 
+/// How long [`rename_session`] waits for a session that is still starting:
+/// `RENAME_WAIT_TRIES` checks, `RENAME_WAIT_STEP` apart.
+const RENAME_WAIT_TRIES: u32 = 30;
+const RENAME_WAIT_STEP: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// Longest title kept, in characters.
 const TITLE_MAX_CHARS: usize = 80;
 
@@ -499,6 +504,14 @@ pub fn rename_session(
     None => return Err(no_backend_error()),
   }
   let name = session_name(repo, workspace, label);
+  // A client names a new session right after attaching, which can be
+  // before the attach has created it: give it a moment to appear.
+  for _ in 0..RENAME_WAIT_TRIES {
+    if session_exists(PtyBackend::Tmux, &name) {
+      break;
+    }
+    std::thread::sleep(RENAME_WAIT_STEP);
+  }
   // `=` for an exact match; the trailing `:` makes it a session target,
   // which set-option needs (a bare `=name` reads as a pane and fails).
   let target = format!("={name}:");
