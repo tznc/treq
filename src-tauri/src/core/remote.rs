@@ -535,6 +535,66 @@ pub enum TreqCommandRequest {
     cols: u16,
     rows: u16,
   },
+  /// Pastes `text` into a running persistent session as one bracketed
+  /// paste, then presses Enter when `submit`: how a review reaches an
+  /// agent's terminal.
+  PtyPaste {
+    repo: String,
+    workspace: String,
+    label: String,
+    text: String,
+    submit: bool,
+    idempotency_key: String,
+  },
+  /// The review a workspace's page left unsent on the host (empty if none).
+  ReviewLoad {
+    repo: String,
+    workspace: String,
+    scope: ReviewScope,
+  },
+  /// Keeps a workspace's unsent review on the host. Overwrites.
+  ReviewSave {
+    repo: String,
+    workspace: String,
+    scope: ReviewScope,
+    review: crate::core::review::Stored,
+  },
+  /// Drops a workspace's unsent review, once it is sent or discarded.
+  ReviewClear {
+    repo: String,
+    workspace: String,
+    scope: ReviewScope,
+  },
+}
+
+/// Which page a pending review belongs to: each keeps its own, as on
+/// desktop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewScope {
+  /// The Changes tab's diff.
+  Changes,
+  /// The file browser.
+  Files,
+}
+
+impl ReviewScope {
+  pub fn as_str(self) -> &'static str {
+    match self {
+      Self::Changes => "changes",
+      Self::Files => "files",
+    }
+  }
+
+  pub fn parse(value: &str) -> Result<Self, String> {
+    match value {
+      "changes" => Ok(Self::Changes),
+      "files" => Ok(Self::Files),
+      other => Err(format!(
+        "invalid_arguments: review scope must be changes or files, not '{other}'"
+      )),
+    }
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -589,7 +649,8 @@ impl TreqCommandRequest {
       | Self::WorkspaceChangeMarker { .. }
       | Self::MachineUsage { .. }
       | Self::MachineTools { .. }
-      | Self::ListDirectories { .. } => false,
+      | Self::ListDirectories { .. }
+      | Self::ReviewLoad { .. } => false,
       Self::HostCheck { .. } => false,
       // -- Mutations -----------------------------------------------------------
       Self::CloneRepo { .. }
@@ -626,7 +687,10 @@ impl TreqCommandRequest {
       | Self::AgentInput { .. }
       | Self::AgentStop { .. }
       | Self::PtyStart { .. }
-      | Self::PtyStop { .. } => true,
+      | Self::PtyStop { .. }
+      | Self::PtyPaste { .. }
+      | Self::ReviewSave { .. }
+      | Self::ReviewClear { .. } => true,
     }
   }
 
@@ -654,7 +718,8 @@ impl TreqCommandRequest {
       | Self::GitPush { .. }
       | Self::AgentStart { .. }
       | Self::AgentInput { .. }
-      | Self::PtyStart { .. } => true,
+      | Self::PtyStart { .. }
+      | Self::PtyPaste { .. } => true,
       Self::InspectRepository { .. }
       | Self::RepositoryStatus { .. }
       | Self::ListBranches { .. }
@@ -698,7 +763,10 @@ impl TreqCommandRequest {
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
       | Self::PtyStop { .. }
-      | Self::PtyAttachCommand { .. } => false,
+      | Self::PtyAttachCommand { .. }
+      | Self::ReviewLoad { .. }
+      | Self::ReviewSave { .. }
+      | Self::ReviewClear { .. } => false,
     }
   }
 
@@ -767,6 +835,10 @@ impl TreqCommandRequest {
       Self::PtyList { .. } => "PtyList",
       Self::PtyStop { .. } => "PtyStop",
       Self::PtyAttachCommand { .. } => "PtyAttachCommand",
+      Self::PtyPaste { .. } => "PtyPaste",
+      Self::ReviewLoad { .. } => "ReviewLoad",
+      Self::ReviewSave { .. } => "ReviewSave",
+      Self::ReviewClear { .. } => "ReviewClear",
     }
   }
 
@@ -832,6 +904,10 @@ impl TreqCommandRequest {
     "PtyList",
     "PtyStop",
     "PtyAttachCommand",
+    "PtyPaste",
+    "ReviewLoad",
+    "ReviewSave",
+    "ReviewClear",
     "WorkspaceDiff",
     "CommitDiff",
     "CommitFileDiff",
@@ -1966,6 +2042,53 @@ impl TreqCommandRequest {
         fields.value = Some(pty_launch_payload(remote_dir, launch, *cols, *rows));
         ("pty-remote", "attach-command", repo)
       }
+      Self::PtyPaste {
+        repo,
+        workspace,
+        label,
+        text,
+        submit,
+        idempotency_key,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(label);
+        fields.value = Some(text.clone());
+        fields.idempotency_key = Some(idempotency_key);
+        if *submit {
+          fields.extra.push(("submit", "true".into()));
+        }
+        ("pty-remote", "paste", repo)
+      }
+      Self::ReviewLoad {
+        repo,
+        workspace,
+        scope,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(scope.as_str());
+        ("changes", "review", repo)
+      }
+      Self::ReviewSave {
+        repo,
+        workspace,
+        scope,
+        review,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(scope.as_str());
+        fields.value =
+          Some(serde_json::to_string(review).map_err(|e| format!("Failed to encode review: {e}"))?);
+        ("changes", "review-save", repo)
+      }
+      Self::ReviewClear {
+        repo,
+        workspace,
+        scope,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(scope.as_str());
+        ("changes", "review-clear", repo)
+      }
     };
     validate_remote_path(repo)?;
     let path = fields.path.or(fields.owned_path.as_deref());
@@ -2960,6 +3083,102 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       cols,
       rows,
     )),
+    TreqCommandRequest::PtyPaste {
+      repo,
+      workspace,
+      label,
+      text,
+      submit,
+      idempotency_key,
+    } => with_idempotency_key(
+      &repo,
+      "pty.paste",
+      Some(idempotency_key.as_str()),
+      request_snapshot.as_ref().expect("PtyPaste is a mutation"),
+      || {
+        json(crate::core::pty_remote_supervisor::paste_text(
+          &repo, &workspace, &label, &text, submit,
+        ))
+      },
+    ),
+    TreqCommandRequest::ReviewLoad {
+      repo,
+      workspace,
+      scope,
+    } => {
+      let id = review_workspace_id(&workspace)?;
+      json(load_review(&repo, id, scope))
+    }
+    TreqCommandRequest::ReviewSave {
+      repo,
+      workspace,
+      scope,
+      review,
+    } => {
+      let id = review_workspace_id(&workspace)?;
+      json(save_review(&repo, id, scope, &review))
+    }
+    TreqCommandRequest::ReviewClear {
+      repo,
+      workspace,
+      scope,
+    } => {
+      let id = review_workspace_id(&workspace)?;
+      json(match scope {
+        ReviewScope::Changes => crate::core::review_drafts::clear_pending_review(&repo, id),
+        ReviewScope::Files => crate::core::review_drafts::clear_file_browser_review(&repo, id),
+      })
+    }
+  }
+}
+
+fn review_workspace_id(workspace: &String) -> Result<i64, String> {
+  workspace_id(Some(workspace))?.ok_or_else(|| "invalid_arguments: workspace is required".into())
+}
+
+/// `ReviewLoad`: the host's kept review, empty when there is none.
+fn load_review(
+  repo: &str,
+  workspace_id: i64,
+  scope: ReviewScope,
+) -> Result<crate::core::review::Stored, String> {
+  use crate::core::{review::Stored, review_drafts};
+  Ok(match scope {
+    ReviewScope::Changes => review_drafts::pending_review(repo, workspace_id)?
+      .map(|review| Stored::parse(&review))
+      .unwrap_or_default(),
+    ReviewScope::Files => review_drafts::file_browser_review(repo, workspace_id)?
+      .map(|review| Stored {
+        comments: serde_json::from_str(&review.comments).unwrap_or_default(),
+        summary: review.summary_text.unwrap_or_default(),
+        notes: vec![],
+      })
+      .unwrap_or_default(),
+  })
+}
+
+/// `ReviewSave`: an empty review clears what the host kept.
+fn save_review(
+  repo: &str,
+  workspace_id: i64,
+  scope: ReviewScope,
+  review: &crate::core::review::Stored,
+) -> Result<(), String> {
+  use crate::core::review_drafts;
+  let (comments, summary, notes) = review.to_save();
+  match (scope, review.is_empty()) {
+    (ReviewScope::Changes, true) => review_drafts::clear_pending_review(repo, workspace_id),
+    (ReviewScope::Files, true) => review_drafts::clear_file_browser_review(repo, workspace_id),
+    (ReviewScope::Changes, false) => review_drafts::save_pending_review(
+      repo,
+      workspace_id,
+      &comments,
+      summary.as_deref(),
+      notes.as_deref(),
+    ),
+    (ReviewScope::Files, false) => {
+      review_drafts::save_file_browser_review(repo, workspace_id, &comments, summary.as_deref())
+    }
   }
 }
 
@@ -3758,6 +3977,50 @@ fn validate_remote_path(path: &str) -> Result<(), String> {
 mod tests {
   use super::*;
   use std::process::Command;
+
+  #[test]
+  fn reviews_round_trip_per_page_and_an_empty_save_clears() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let id = crate::local_db::add_workspace(
+      repo,
+      "ws".into(),
+      format!("{repo}/.treq/workspaces/ws"),
+      "ws".into(),
+      None,
+      None,
+      None,
+    )
+    .unwrap();
+    let review = |summary: &str| crate::core::review::Stored {
+      comments: vec![crate::core::review::Pending::file("a.rs").comment(
+        "tidy",
+        "c1".into(),
+        "now".into(),
+      )],
+      summary: summary.into(),
+      notes: vec![],
+    };
+
+    save_review(repo, id, ReviewScope::Changes, &review("changes")).unwrap();
+    save_review(repo, id, ReviewScope::Files, &review("files")).unwrap();
+    assert_eq!(
+      load_review(repo, id, ReviewScope::Changes).unwrap(),
+      review("changes")
+    );
+    assert_eq!(
+      load_review(repo, id, ReviewScope::Files).unwrap(),
+      review("files")
+    );
+
+    save_review(repo, id, ReviewScope::Files, &Default::default()).unwrap();
+    assert!(load_review(repo, id, ReviewScope::Files)
+      .unwrap()
+      .is_empty());
+    assert!(!load_review(repo, id, ReviewScope::Changes)
+      .unwrap()
+      .is_empty());
+  }
 
   #[cfg(unix)]
   #[test]
@@ -5102,7 +5365,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 63);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 67);
   }
 
   #[test]
