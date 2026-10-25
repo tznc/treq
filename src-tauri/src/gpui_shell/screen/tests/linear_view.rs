@@ -569,7 +569,10 @@ fn linear_document_comments_show_at_the_paragraph_they_quote(cx: &mut TestAppCon
     .linear
     .comments
     .push(("d1".into(), comment("c2", Some("Second part"))));
-  host.linear.comments.push(("d1".into(), comment("c3", None)));
+  host
+    .linear
+    .comments
+    .push(("d1".into(), comment("c3", None)));
   let (mut h, _) = linear_harness(cx, host);
   h.click("linear-section-projects");
   // A project without comments shows only its text.
