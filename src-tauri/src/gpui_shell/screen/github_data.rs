@@ -517,6 +517,7 @@ fn matches_conflict(pr: &GhPullRequest, conflict: Option<&str>) -> bool {
 }
 
 /// `filterPrs`, as of `now`.
+#[cfg(test)]
 pub fn filter_prs<'a>(
   prs: &'a [GhPullRequest],
   filters: &PrFilters,
