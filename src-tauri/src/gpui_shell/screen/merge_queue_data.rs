@@ -12,26 +12,36 @@ pub use crate::core::account::QueueEntry;
 
 /// `MERGE_QUEUE_HISTORY_PAGE_SIZE`: merged entries each "Load more" adds.
 pub const HISTORY_PAGE: usize = 5;
+/// Merged entries read beyond the ones shown: the next "Load more" paints at
+/// once, a stack cut at the edge of the read stays off screen, and the tip
+/// marker still finds the newest landed stack's first entry.
+pub const HISTORY_SLACK: usize = 20;
 /// `DIFF_BAR_HALF_WIDTH_PX`.
 pub const BAR_HALF: f32 = 14.;
 
 /// What the tab reads from the backend; faked in tests. Blocks.
 pub trait MergeQueueHost: CodeHost + WorkspaceDialogHost {
   /// Whether `full_name` opted in to the merge queue, and its entries in
-  /// position order (none while it has not).
-  fn merge_queue(&self, full_name: &str) -> Result<(bool, Vec<QueueEntry>), String>;
+  /// position order (none while it has not): the queued ones and the newest
+  /// `history` merged ones.
+  fn merge_queue(&self, full_name: &str, history: usize)
+    -> Result<(bool, Vec<QueueEntry>), String>;
   /// Removes `branches` (a stack, bottom first) from the queue.
   fn dequeue(&self, full_name: &str, branches: &[String]) -> Result<(), String>;
 }
 
 impl MergeQueueHost for crate::gpui_shell::native::Backend {
-  fn merge_queue(&self, full_name: &str) -> Result<(bool, Vec<QueueEntry>), String> {
+  fn merge_queue(
+    &self,
+    full_name: &str,
+    history: usize,
+  ) -> Result<(bool, Vec<QueueEntry>), String> {
     let cloud = crate::commands::cloud::owned_cloud(self.app())
       .ok_or("The account is not available in this window.")?;
     crate::gpui_shell::block_on(async {
       let enabled = account::queue_enabled(&cloud.supabase, full_name).await?;
       let entries = if enabled {
-        account::queue_entries(&cloud.supabase, full_name).await?
+        account::queue_entries(&cloud.supabase, full_name, Some(history)).await?
       } else {
         Vec::new()
       };
@@ -316,5 +326,28 @@ mod tests {
     e.pr_title = Some(" Fix ".into());
     assert_eq!(tip_title(Some(&e)), Some("Fix".into()));
     assert_eq!(tip_title(None), None);
+  }
+
+  /// Round 7: what one render used to rebuild (`with_local_stats` and
+  /// `partition` over every entry) at the size of a long history, against the
+  /// entries now read. `cargo test --lib queue_perf_derive -- --ignored --nocapture`.
+  #[test]
+  #[ignore]
+  fn queue_perf_derive() {
+    for (label, merged) in [
+      ("10000 merged (before)", 10_000),
+      ("25 merged + slack (after, once per change)", 45),
+    ] {
+      let entries: Vec<_> = (0..merged)
+        .map(|i| entry(&format!("b{i}"), "main", i, "merged"))
+        .collect();
+      let stats = HashMap::new();
+      let start = std::time::Instant::now();
+      for _ in 0..20 {
+        let all = with_local_stats(&entries, &stats);
+        std::hint::black_box(partition(&all));
+      }
+      println!("{label}: {:?} per derive", start.elapsed() / 20);
+    }
   }
 }

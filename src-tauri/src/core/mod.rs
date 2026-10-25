@@ -13,6 +13,8 @@ pub mod changes;
 pub mod checks;
 pub mod checks_logs;
 pub mod cloud;
+#[cfg(test)]
+mod cloud_perf;
 pub mod commits;
 pub mod context_menu;
 pub mod control_plane;

@@ -25,6 +25,12 @@ use crate::lock_ext::LockExt;
 pub const SESSION_SETTING: &str = "supabase_session";
 /// Refresh this long before the access token expires (supabase-js uses 90 s).
 const REFRESH_MARGIN_SECS: i64 = 90;
+/// A refresh answers in well under a second; the client-wide timeout is sized
+/// for Edge Functions, so a stalled auth server would hold every caller.
+const REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+/// After a refresh fails without a verdict (offline, timeout, 5xx), callers use
+/// the cached token for this long instead of retrying on every focus and tick.
+const REFRESH_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Where the session's tokens persist.
 pub trait SessionStore: Send + Sync {
@@ -177,6 +183,10 @@ pub struct Auth {
   status: Mutex<AuthStatus>,
   /// Held across a refresh, so two callers never spend one refresh token.
   refreshing: tokio::sync::Mutex<()>,
+  /// When the last refresh failed without a verdict from the server.
+  refresh_failed_at: Mutex<Option<std::time::Instant>>,
+  refresh_timeout: std::time::Duration,
+  refresh_backoff: std::time::Duration,
   listeners: Mutex<Vec<Listener>>,
 }
 
@@ -189,6 +199,9 @@ impl Auth {
       store,
       status: Mutex::new(AuthStatus::default()),
       refreshing: tokio::sync::Mutex::new(()),
+      refresh_failed_at: Mutex::new(None),
+      refresh_timeout: REFRESH_TIMEOUT,
+      refresh_backoff: REFRESH_BACKOFF,
       listeners: Mutex::new(Vec::new()),
     }
   }
@@ -234,16 +247,22 @@ impl Auth {
     self.update(|status| status.session = session);
   }
 
-  async fn token_request(&self, url: String, body: Value) -> Result<Session, ApiError> {
-    let response = self
+  async fn token_request(
+    &self,
+    url: String,
+    body: Value,
+    timeout: Option<std::time::Duration>,
+  ) -> Result<Session, ApiError> {
+    let mut request = self
       .http
       .post(url)
       .bearer_auth(&self.anon_key)
       .header("apikey", &self.anon_key)
-      .json(&body)
-      .send()
-      .await
-      .map_err(ApiError::transport)?;
+      .json(&body);
+    if let Some(timeout) = timeout {
+      request = request.timeout(timeout);
+    }
+    let response = request.send().await.map_err(ApiError::transport)?;
     let tokens: TokenResponse = supabase::read(response).await?;
     Ok(tokens.into_session(now()))
   }
@@ -253,6 +272,7 @@ impl Auth {
       .token_request(
         format!("{}/auth/v1/token?grant_type=refresh_token", self.url),
         json!({ "refresh_token": refresh_token }),
+        Some(self.refresh_timeout),
       )
       .await
   }
@@ -267,6 +287,7 @@ impl Auth {
       .token_request(
         format!("{}/functions/v1/exchange-desktop-token", self.url),
         json!({ "token": token }),
+        None,
       )
       .await;
     match result {
@@ -318,20 +339,45 @@ impl Auth {
     result
   }
 
-  /// A valid access token, refreshed first when it is about to expire.
+  /// The access token while it is unexpired.
+  fn cached_token(&self) -> Option<String> {
+    self
+      .session()
+      .filter(|s| s.expires_at > now())
+      .map(|s| s.access_token)
+  }
+
+  /// `true` while a refresh that failed without a verdict is remembered.
+  fn backing_off(&self) -> bool {
+    self
+      .refresh_failed_at
+      .lock_or_recover()
+      .is_some_and(|at| at.elapsed() < self.refresh_backoff)
+  }
+
+  /// A valid access token, refreshed first when it is about to expire. A
+  /// refresh that fails (offline, timeout, server error) is not retried for
+  /// [`REFRESH_BACKOFF`]; callers get the cached token while it is unexpired.
   pub async fn access_token(&self) -> Option<String> {
     let session = self.session()?;
     if !needs_refresh(session.expires_at, now()) {
       return Some(session.access_token);
     }
+    if self.backing_off() {
+      return self.cached_token();
+    }
     let _guard = self.refreshing.lock().await;
-    // Another caller may have refreshed while this one waited.
+    // Another caller may have refreshed (or failed) while this one waited.
     let session = self.session()?;
     if !needs_refresh(session.expires_at, now()) {
       return Some(session.access_token);
     }
+    if self.backing_off() {
+      return self.cached_token();
+    }
     match self.refresh(&session.refresh_token).await {
       Ok(fresh) => {
+        *self.refresh_failed_at.lock_or_recover() = None;
         let token = fresh.access_token.clone();
         self.set_session(Some(fresh));
         Some(token)
@@ -344,10 +390,8 @@ impl Auth {
           self.set_session(None);
           return None;
         }
-        self
-          .session()
-          .filter(|s| s.expires_at > now())
-          .map(|s| s.access_token)
+        *self.refresh_failed_at.lock_or_recover() = Some(std::time::Instant::now());
+        self.cached_token()
       }
     }
   }
@@ -618,5 +662,90 @@ mod tests {
     supabase.auth.sign_out().await;
     assert_eq!(supabase.auth.session(), None);
     assert_eq!(store.load(), None);
+  }
+}
+
+#[cfg(test)]
+mod refresh_resilience_tests {
+  use std::time::{Duration, Instant};
+
+  use serde_json::json;
+  use wiremock::{
+    matchers::{method, path},
+    Mock, MockServer, ResponseTemplate,
+  };
+
+  use crate::core::supabase::test_support::client;
+
+  fn near_expiry() -> serde_json::Value {
+    json!({
+      "access_token": "a1", "refresh_token": "r1", "expires_in": 30,
+      "user": {"id": "u1"}
+    })
+  }
+
+  async fn signed_in(server: &MockServer) -> crate::core::supabase::Supabase {
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/exchange-desktop-token"))
+      .respond_with(ResponseTemplate::new(200).set_body_json(near_expiry()))
+      .mount(server)
+      .await;
+    let (supabase, _) = client(&server.uri());
+    supabase.auth.exchange_token("t").await.unwrap();
+    supabase
+  }
+
+  fn refresh_requests(requests: &[wiremock::Request]) -> usize {
+    requests
+      .iter()
+      .filter(|r| r.url.path() == "/auth/v1/token")
+      .count()
+  }
+
+  #[tokio::test]
+  async fn a_hung_refresh_times_out_and_returns_the_cached_token() {
+    let server = MockServer::start().await;
+    let mut supabase = signed_in(&server).await;
+    // A session inside the refresh margin but not yet expired.
+    Mock::given(method("POST"))
+      .and(path("/auth/v1/token"))
+      .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(30)))
+      .mount(&server)
+      .await;
+    let auth = std::sync::Arc::get_mut(&mut supabase.auth).unwrap();
+    auth.refresh_timeout = Duration::from_millis(200);
+
+    let started = Instant::now();
+    let (first, second) = tokio::join!(supabase.auth.access_token(), supabase.auth.access_token());
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert_eq!(first.as_deref(), Some("a1"));
+    assert_eq!(second.as_deref(), Some("a1"));
+    // The second caller waited on the lock and then saw the failure.
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(refresh_requests(&requests), 1);
+  }
+
+  #[tokio::test]
+  async fn a_failed_refresh_is_remembered_then_retried_after_the_backoff() {
+    let server = MockServer::start().await;
+    let mut supabase = signed_in(&server).await;
+    Mock::given(method("POST"))
+      .and(path("/auth/v1/token"))
+      .respond_with(ResponseTemplate::new(503))
+      .mount(&server)
+      .await;
+    let auth = std::sync::Arc::get_mut(&mut supabase.auth).unwrap();
+    auth.refresh_backoff = Duration::from_millis(300);
+
+    for _ in 0..3 {
+      assert_eq!(supabase.auth.access_token().await.as_deref(), Some("a1"));
+    }
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(refresh_requests(&requests), 1);
+
+    tokio::time::sleep(Duration::from_millis(350)).await;
+    assert_eq!(supabase.auth.access_token().await.as_deref(), Some("a1"));
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(refresh_requests(&requests), 2);
   }
 }

@@ -60,6 +60,20 @@ pub fn describe(raw: &str) -> Problem {
       Some(Fix::ReviewHostKey),
     );
   }
+  // Before the SSH key check: a Git remote that refuses the host's
+  // credentials says "Authentication failed" or "Permission denied" too.
+  if has("push failed")
+    && (has("could not read username")
+      || has("authentication failed for")
+      || has("permission denied")
+      || has("repository not found")
+      || has("403"))
+  {
+    return Problem::new(
+      "The host couldn't sign in to the Git remote. Sign in there from a shell in this workspace (for GitHub: gh auth login, then gh auth setup-git), then push again.",
+      None,
+    );
+  }
   if has("authentication failed") || has("permission denied (publickey") {
     return Problem::new(
       "The host refused this device's key. Add the device's public key to ~/.ssh/authorized_keys on the host.",
@@ -250,6 +264,22 @@ mod tests {
     assert!(describe("unknown git action 'pr-create'")
       .message
       .starts_with("Pull requests need a newer treq"));
+  }
+
+  #[test]
+  fn a_push_the_remote_refuses_says_to_sign_in_on_the_host() {
+    for raw in [
+      "git_command_failed: Push failed: IO error: Failed to push bookmark: Git process failed: External git program failed:\nfatal: could not read Username for 'https://github.com': No such device or address",
+      "git_command_failed: Push failed: remote: Permission to tznc/x.git denied.\nfatal: unable to access: The requested URL returned error: 403",
+      "git_command_failed: Push failed: git@github.com: Permission denied (publickey).",
+    ] {
+      let problem = describe(raw);
+      assert!(
+        problem.message.starts_with("The host couldn't sign in to the Git remote"),
+        "{raw}"
+      );
+      assert_eq!(problem.fix, None);
+    }
   }
 
   #[test]

@@ -105,7 +105,10 @@ impl ReposScreen {
             }
             workspaces::open(path, cx);
           }
-          Ok(_) => this.error = Some(format!("No repository found at {path} on this machine.")),
+          Ok(probe) if probe.exists => {
+            this.error = Some(format!("{path} isn't a Git or jj repository."))
+          }
+          Ok(_) => this.error = Some(format!("No folder at {path} on this machine.")),
           Err(error) => this.error = Some(crate::errors::describe(&error).message),
         }
       },
@@ -124,7 +127,8 @@ impl Render for ReposScreen {
     } else {
       widgets::card(cx).children(saved.into_iter().enumerate().map(|(i, repo)| {
         let path = repo.canonical_remote_path.clone();
-        widgets::row(("repo", i), repo.display_name.clone(), None, cx)
+        let name = workspaces::repo_name(&path).to_string();
+        widgets::row(("repo", i), name, Some(path.clone().into()), cx)
           .on_click(cx.listener(move |this, _, _, cx| this.open_repository(path.clone(), cx)))
       }))
     };
