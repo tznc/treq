@@ -46,6 +46,77 @@ e2e = ["gpui-shell", "dep:gpui-playwright"]
 # Clippy's default set runs in CI with -D warnings; these add checks it
 # leaves out. clippy.toml lets tests unwrap and expect.
 [lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Pedantic lints this repo does not enforce.
+cast_lossless = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+doc_markdown = "allow"
+fn_params_excessive_bools = "allow"
+if_not_else = "allow"
+implicit_hasher = "allow"
+items_after_statements = "allow"
+many_single_char_names = "allow"
+match_bool = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
+similar_names = "allow"
+single_match_else = "allow"
+struct_excessive_bools = "allow"
+struct_field_names = "allow"
+too_many_lines = "allow"
+unreadable_literal = "allow"
+# Pedantic lints with existing hits (count when enabled). Fix one lint per
+# PR and delete its line; new code cannot add a lint that is not listed.
+uninlined_format_args = "allow" # 1442
+redundant_closure_for_method_calls = "allow" # 233
+semicolon_if_nothing_returned = "allow" # 160
+used_underscore_binding = "allow" # 97
+map_unwrap_or = "allow" # 88
+needless_pass_by_value = "allow" # 78
+duration_suboptimal_units = "allow" # 47
+ignored_unit_patterns = "allow" # 44
+format_push_string = "allow" # 40
+unused_self = "allow" # 38
+assigning_clones = "allow" # 28
+default_trait_access = "allow" # 28
+match_same_arms = "allow" # 23
+format_collect = "allow" # 18
+unnecessary_wraps = "allow" # 16
+option_option = "allow" # 13
+unnecessary_debug_formatting = "allow" # 11
+ignore_without_reason = "allow" # 10
+case_sensitive_file_extension_comparisons = "allow" # 10
+needless_raw_string_hashes = "allow" # 7
+unnested_or_patterns = "allow" # 6
+bool_to_int_with_if = "allow" # 5
+needless_continue = "allow" # 5
+manual_string_new = "allow" # 5
+stable_sort_primitive = "allow" # 5
+manual_assert = "allow" # 4
+float_cmp = "allow" # 3
+ref_option = "allow" # 3
+unchecked_time_subtraction = "allow" # 3
+match_wildcard_for_single_variants = "allow" # 3
+naive_bytecount = "allow" # 2
+large_types_passed_by_value = "allow" # 2
+single_char_pattern = "allow" # 1
+borrow_as_ptr = "allow" # 1
+manual_is_variant_and = "allow" # 1
+trivially_copy_pass_by_ref = "allow" # 1
+unnecessary_semicolon = "allow" # 1
+iter_filter_is_some = "allow" # 1
+inconsistent_struct_constructor = "allow" # 1
+nonminimal_bool = "allow" # 1
+unused_async = "allow" # 1
+manual_assert_eq = "allow" # 1
+assert_is_empty = "allow" # 89
+unused_async_trait_impl = "allow" # 2
+
 dbg_macro = "warn"
 todo = "warn"
 unimplemented = "warn"
