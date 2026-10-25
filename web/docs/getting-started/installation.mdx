@@ -15,7 +15,7 @@ Download the latest version for your platform from the GitHub Releases page.
 | Windows | `x86_64-pc-windows-msvc` |
 | Linux | `x86_64-unknown-linux-gnu` |
 
-[View Releases](https://github.com/Ziinc/treq/releases)
+[View Releases](https://github.com/tznc/treq/releases/latest)
 
 ### Nightly builds
 
@@ -33,26 +33,25 @@ Installing [Jujutsu (`jj`)](https://docs.jj-vcs.dev/latest/install-and-setup/) a
 
 ## Initial Setup
 
-Click **Select Repository** or the folder icon, and navigate to a Git repository, selecting the folder containing `.git`. [Using Treq with a Git repository](/docs/tutorials/using-treq-with-git-repo) covers what Treq writes to that folder.
+Click **Open repository…** on the start screen and select the folder that contains `.git`. [Using Treq with a Git repository](/docs/tutorials/using-treq-with-git-repo) covers what Treq writes to that folder.
 
 ## Creating Your First Workspace
 
 A [workspace](/docs/concepts/workspaces) is where each piece of parallel work lives.
 
-1. Click **New Workspace**. You can also press `Cmd+N` on macOS or `Ctrl+N` on Windows and Linux.
-2. Fill in a plan title describing what you're working on.
-3. Adjust the branch name if needed.
-4. Click **Create Workspace** to save.
+1. Click **New** in the sidebar, or press `Cmd+N` on macOS or `Ctrl+N` on Windows and Linux. The **New Workspaces** dialog opens.
+2. Type one line per workspace. A line can be a title for new work, an existing branch name, or a GitHub pull request link.
+3. Click **Create 1 Workspace**. The button counts the lines, so it reads **Create 3 Workspaces** for three lines.
 
 ## Starting an Agent
 
-1. In the **Code** tab, write your prompt into the prompt input.
-2. Submit the prompt.
+1. In the **Code** tab, describe the task in the prompt input.
+2. Click **Run** to start the agent. For Claude the button reads **Edit**.
 3. Watch the agent terminal open and start running.
-4. Open the **Review** tab to view the agent's changes.
+4. Open the **Changes** tab to view the agent's changes.
 
 ## Commit, Push, Merge
 
-1. Commit changes in the **Review** tab.
-2. Push changes to remote.
-3. Optionally merge locally by clicking the **Merge** button.
+1. Commit changes in the **Changes** tab.
+2. Click **Push** in the workspace header to push the branch to the remote.
+3. Click **Merge...** to merge the workspace into its target branch. When the workspace has an open pull request, choose **Locally** or **On GitHub** in the merge dialog.
