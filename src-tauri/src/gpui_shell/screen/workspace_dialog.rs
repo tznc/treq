@@ -969,17 +969,18 @@ fn text_button(id: &'static str, label: &'static str, p: &Palette) -> Stateful<D
 /// by the label.
 pub(super) fn disclosure(
   id: &'static str,
-  label: &'static str,
+  label: impl Into<SharedString>,
   open: bool,
   p: &Palette,
   on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
   let fg = p.foreground;
+  let label: SharedString = label.into();
   ui::text(div(), TextSize::Xs)
     .id(id)
     .debug_selector(move || id.into())
     .role(gpui::Role::Button)
-    .aria_label(label)
+    .aria_label(label.clone())
     .on_click(on_click)
     .flex()
     .items_center()

@@ -198,6 +198,8 @@ pub(super) struct Detail {
   pub(super) treq: Option<TreqChecks>,
   /// Workflow files whose run history is open, and what it read.
   pub(super) history_open: HashSet<String>,
+  /// The comment thread's fold is open: every comment shows.
+  pub(super) comments_expanded: bool,
   pub(super) history: HashMap<String, Vec<RunSummary>>,
   /// Runs whose job logs are open, and the logs read, by run and job.
   pub(super) runs_open: HashSet<i64>,

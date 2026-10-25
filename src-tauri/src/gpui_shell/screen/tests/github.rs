@@ -1062,6 +1062,54 @@ fn github_reads_an_issue_ahead_while_the_pointer_rests_on_its_row(cx: &mut TestA
   assert_eq!(reads(&host, "read issue 2"), 2);
 }
 
+fn thread_fake(count: usize) -> Fake {
+  let mut p = pr(1, "feat/b0", "main");
+  p.comments = Some(
+    (0..count)
+      .map(|i| GhIssueComment {
+        id: format!("c{i}"),
+        body: format!("comment {i}"),
+        author: author("bob"),
+        created_at: "2026-10-02T10:00:00Z".into(),
+        reactions: Vec::new(),
+      })
+      .collect(),
+  );
+  Fake {
+    remote: acme(),
+    pr_pages: vec![page(vec![pr(1, "feat/b0", "main")], false, None)],
+    pr: Some(p),
+    ..Fake::default()
+  }
+}
+
+#[gpui::test]
+fn github_long_comment_thread_folds_the_middle_and_expands_in_place(cx: &mut TestAppContext) {
+  let (mut h, _) = harness(cx, thread_fake(8), route("prs", Some(1), false));
+  h.cx.run_until_parked();
+  let shown = |h: &mut Harness| -> Vec<usize> {
+    (0..8)
+      .filter(|i| h.drawn(super::changes_large::leak(format!("reaction-add-c{i}"))))
+      .collect()
+  };
+  // The first comment and the newest three; four are behind the fold.
+  assert_eq!(shown(&mut h), [0, 5, 6, 7]);
+  assert!(h.drawn("github-comments-show-earlier"));
+  h.click("github-comments-show-earlier");
+  h.cx.run_until_parked();
+  assert_eq!(shown(&mut h), (0..8).collect::<Vec<_>>());
+  assert!(!h.drawn("github-comments-show-earlier"));
+}
+
+#[gpui::test]
+fn github_short_comment_thread_is_not_folded(cx: &mut TestAppContext) {
+  // Folding one comment would only trade it for a row.
+  let (mut h, _) = harness(cx, thread_fake(5), route("prs", Some(1), false));
+  h.cx.run_until_parked();
+  assert!(h.drawn("reaction-add-c2"));
+  assert!(!h.drawn("github-comments-show-earlier"));
+}
+
 /// Round 7 `integrations-scale` measurements: the lists and details with
 /// hundreds of rows. Run with `cargo test --features gpui-shell --lib
 /// gh_scale -- --ignored --nocapture --test-threads=1`.
