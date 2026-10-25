@@ -110,12 +110,7 @@ pub fn rebase_workspaces_for_target(
   // Filter workspaces that need rebasing (where last_rebased_commit != current_commit)
   let workspaces_needing_rebase: Vec<&Workspace> = workspaces
     .iter()
-    .filter(|w| {
-      let last_rebased = local_db::get_workspace_last_rebased_commit(repo_path, w.id)
-        .ok()
-        .flatten();
-      last_rebased.as_ref() != Some(&current_target_commit)
-    })
+    .filter(|w| local_db::last_rebased_commit_of(w).as_ref() != Some(&current_target_commit))
     .collect();
 
   if workspaces_needing_rebase.is_empty() {
@@ -127,6 +122,8 @@ pub fn rebase_workspaces_for_target(
   let mut all_success = true;
   let mut combined_messages = Vec::new();
   let mut bookmark_conflicts = Vec::new();
+  // Bookkeeping is written once after the loop, not once per workspace.
+  let mut rebased_ids = Vec::new();
 
   for workspace in &workspaces_needing_rebase {
     let full_path = get_full_workspace_path(workspace);
@@ -166,11 +163,7 @@ pub fn rebase_workspaces_for_target(
         }
       }
 
-      local_db::update_workspace_last_rebased_commit(
-        repo_path,
-        workspace.id,
-        &current_target_commit,
-      )?;
+      rebased_ids.push(workspace.id);
       workspace_branches.push(workspace.branch_name.clone());
       combined_messages.push(format!(
         "Workspace '{}': synced with '{}'",
@@ -220,11 +213,7 @@ pub fn rebase_workspaces_for_target(
 
         // WC placement is handled inside jj_rebase_with_revset; a separate jj_sync_working_copy_if_safe would clobber the fresh WC commit.
 
-        local_db::update_workspace_last_rebased_commit(
-          repo_path,
-          workspace.id,
-          &current_target_commit,
-        )?;
+        rebased_ids.push(workspace.id);
       }
       Err(e) => {
         tracing::warn!(
@@ -240,6 +229,8 @@ pub fn rebase_workspaces_for_target(
       }
     }
   }
+
+  local_db::update_workspaces_last_rebased_commit(repo_path, &rebased_ids, &current_target_commit)?;
 
   Ok(Some(AutoRebaseResult {
     target_branch: target_branch.to_string(),

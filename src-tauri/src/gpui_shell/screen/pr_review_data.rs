@@ -3,7 +3,10 @@
 //! unified diff as files and hunks, review drafts kept in the local
 //! database as line comments, and drafts back to a GitHub review.
 
-use std::{collections::HashMap, sync::LazyLock};
+use std::{
+  collections::HashMap,
+  sync::{Arc, LazyLock},
+};
 
 use super::{
   changes_data::{ChangedFile, ChangesHost},
@@ -247,87 +250,8 @@ pub fn hash_diff_lines(lines: &[String]) -> String {
   format!("{hash:08x}")
 }
 
-/// The hunk and lines `start..=end` on the draft's side cover, if all are
-/// in the diff (`findCommentedLines`).
-fn commented_lines(
-  hunks: &HashMap<String, Vec<JjDiffHunk>>,
-  draft: &AgentReviewComment,
-) -> Option<(String, Vec<String>)> {
-  let side = if draft.side.as_deref() == Some("old") {
-    Side::Old
-  } else {
-    Side::New
-  };
-  for hunk in hunks.get(&draft.file_path)? {
-    let numbers = line_numbers(hunk);
-    let lines: Vec<String> = hunk
-      .lines
-      .iter()
-      .zip(&numbers)
-      .filter(|(_, (old, new))| {
-        let line_side = if old.is_some() && new.is_none() {
-          Side::Old
-        } else {
-          Side::New
-        };
-        let n = match side {
-          Side::Old => *old,
-          Side::New => *new,
-        };
-        line_side == side
-          && n.is_some_and(|n| i64::from(n) >= draft.start_line && i64::from(n) <= draft.end_line)
-      })
-      .map(|(l, _)| l.clone())
-      .collect();
-    if lines.len() as i64 == draft.end_line - draft.start_line + 1 {
-      return Some((hunk.id.clone(), lines));
-    }
-  }
-  None
-}
-
-/// Where a draft's lines moved to (`findMovedLines`): the run of diff lines
-/// on its side that hashes to `line_hash`, nearest its old start. Only lines
-/// in the diff can be found.
-fn moved_lines(
-  hunks: &HashMap<String, Vec<JjDiffHunk>>,
-  draft: &AgentReviewComment,
-  line_hash: &str,
-) -> Option<(String, Vec<String>, i64)> {
-  let old_side = draft.side.as_deref() == Some("old");
-  let size = usize::try_from(draft.end_line - draft.start_line + 1).ok()?;
-  let mut best: Option<(String, Vec<String>, i64)> = None;
-  for hunk in hunks.get(&draft.file_path)? {
-    // Consecutive lines on one side of a hunk have consecutive numbers.
-    let side_lines: Vec<(&String, i64)> = hunk
-      .lines
-      .iter()
-      .zip(line_numbers(hunk))
-      .filter_map(|(text, (old, new))| match (old_side, old, new) {
-        (true, Some(o), None) => Some((text, i64::from(o))),
-        (false, _, Some(n)) => Some((text, i64::from(n))),
-        _ => None,
-      })
-      .collect();
-    for window in side_lines.windows(size) {
-      let lines: Vec<String> = window.iter().map(|(t, _)| (*t).clone()).collect();
-      if hash_diff_lines(&lines) != line_hash {
-        continue;
-      }
-      let start = window[0].1;
-      let nearer = best
-        .as_ref()
-        .is_none_or(|(_, _, b)| (start - draft.start_line).abs() < (b - draft.start_line).abs());
-      if nearer {
-        best = Some((hunk.id.clone(), lines, start));
-      }
-    }
-  }
-  best
-}
-
 /// A kept draft as the diff shows it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Draft {
   pub row: AgentReviewComment,
   pub comment: LineComment,
@@ -338,85 +262,325 @@ pub struct Draft {
   pub outdated: bool,
 }
 
-/// `draftToLineComment`: follows its lines if a PR update moved them
-/// unchanged; outdated when they left the diff or no longer hash as when it
-/// was written, and then shows the lines it was written on.
-pub fn draft_to_comment(
-  row: &AgentReviewComment,
-  hunks: &HashMap<String, Vec<JjDiffHunk>>,
-) -> Draft {
-  let mut found = commented_lines(hunks, row);
-  let mut start_line = row.start_line;
-  if let Some(stored) = row.line_hash.as_deref() {
-    let unchanged = found
-      .as_ref()
-      .is_some_and(|(_, lines)| hash_diff_lines(lines) == stored);
-    if !unchanged {
-      if let Some((id, lines, start)) = moved_lines(hunks, row, stored) {
-        found = Some((id, lines));
-        start_line = start;
-      }
-    }
-  }
-  let end_line = start_line + (row.end_line - row.start_line);
-  let line_hash = found.as_ref().map(|(_, lines)| hash_diff_lines(lines));
-  let outdated = found.is_none()
-    || row
-      .line_hash
-      .as_ref()
-      .is_some_and(|h| Some(h) != line_hash.as_ref());
-  let text = match &row.suggested_replacement {
-    Some(s) if !row.comment_text.contains("```suggestion") => {
-      format!("{}\n\n```suggestion\n{s}\n```", row.comment_text)
-    }
-    _ => row.comment_text.clone(),
-  };
-  let (hunk_id, line_content) = match (&found, outdated) {
-    (Some((id, lines)), false) => (id.clone(), lines.clone()),
-    _ => (
-      OUTDATED_HUNK.to_string(),
-      row
-        .quoted_text
-        .as_deref()
-        .map(|q| q.split('\n').map(str::to_string).collect())
-        .unwrap_or_default(),
-    ),
-  };
-  let quoted_text = found.as_ref().map(|(_, lines)| lines.join("\n"));
-  let n = |v: i64| u32::try_from(v).unwrap_or(0);
-  Draft {
-    comment: LineComment {
-      id: row.id.clone(),
-      file_path: row.file_path.clone(),
-      hunk_id,
-      start_line: n(start_line),
-      end_line: n(end_line),
-      line_content,
-      text,
-      created_at: row.created_at.clone(),
-      line_side: Some(if row.side.as_deref() == Some("old") {
-        Side::Old
-      } else {
-        Side::New
-      }),
-      source: None,
-      github_author: None,
-      github_avatar_url: None,
-      github_comment_url: None,
-    },
-    row: row.clone(),
-    line_hash,
-    quoted_text,
-    outdated,
+/// A file's hunks, shared (`Arc`) or owned.
+pub trait HunkList {
+  fn hunks(&self) -> &[JjDiffHunk];
+}
+
+impl HunkList for Vec<JjDiffHunk> {
+  fn hunks(&self) -> &[JjDiffHunk] {
+    self
   }
 }
 
+impl HunkList for Arc<Vec<JjDiffHunk>> {
+  fn hunks(&self) -> &[JjDiffHunk] {
+    self
+  }
+}
+
+type LineNumbers = Vec<(Option<u32>, Option<u32>)>;
+
+/// The diff lines of one side of a hunk, as `(line index, line number)`.
+/// Consecutive lines on one side of a hunk have consecutive numbers.
+type SideLines = Vec<(usize, i64)>;
+
+/// djb2 as `hashDiffLines` computes it, over UTF-16 units, mod 2^32.
+const DJB2_SEED: u32 = 5381;
+
+fn pow33(mut exp: usize) -> u32 {
+  let (mut base, mut out) = (33u32, 1u32);
+  while exp > 0 {
+    if exp & 1 == 1 {
+      out = out.wrapping_mul(base);
+    }
+    base = base.wrapping_mul(base);
+    exp >>= 1;
+  }
+  out
+}
+
+/// `33 * inverse == 1 (mod 2^32)`: 33 is odd, so it has one.
+fn inverse33() -> u32 {
+  let mut x = 1u32;
+  for _ in 0..5 {
+    x = x.wrapping_mul(2u32.wrapping_sub(33u32.wrapping_mul(x)));
+  }
+  x
+}
+
+/// The hash of every `size` consecutive lines of `lines`, as
+/// [`hash_diff_lines`] gives them as a number, from one pass over the lines
+/// instead of joining each window.
+fn window_hashes<'a>(lines: impl Iterator<Item = &'a str>, size: usize) -> Vec<u32> {
+  // `prefix[k]` is the polynomial of the first `k` lines each followed by a
+  // newline, `end[k]` how many UTF-16 units that is.
+  let mut prefix = vec![0u32];
+  let mut end = vec![0usize];
+  for line in lines {
+    let (mut poly, mut units) = (0u32, 0usize);
+    for unit in line.encode_utf16() {
+      poly = poly.wrapping_mul(33).wrapping_add(u32::from(unit));
+      units += 1;
+    }
+    let (last, at) = (prefix[prefix.len() - 1], end[end.len() - 1]);
+    // The line and its newline, after what came before.
+    let with_newline = poly.wrapping_mul(33).wrapping_add(10);
+    prefix.push(
+      last
+        .wrapping_mul(pow33(units + 1))
+        .wrapping_add(with_newline),
+    );
+    end.push(at + units + 1);
+  }
+  let inverse = inverse33();
+  (0..prefix.len().saturating_sub(size))
+    .map(|a| {
+      let b = a + size;
+      let span = end[b] - end[a];
+      let blocks = prefix[b].wrapping_sub(prefix[a].wrapping_mul(pow33(span)));
+      // The window ends at its last line, not at a newline.
+      let poly = blocks.wrapping_sub(10).wrapping_mul(inverse);
+      DJB2_SEED.wrapping_mul(pow33(span - 1)).wrapping_add(poly)
+    })
+    .collect()
+}
+
+/// Places drafts on a diff. What one pass learns about a file (its line
+/// numbers, the lines of each side, the hash of every window of a size) is
+/// kept for the drafts after it.
+/// Window hash to the windows with it.
+type WindowIndex = HashMap<u32, Vec<(usize, usize)>>;
+
+struct Placer<'a, H> {
+  hunks: &'a HashMap<String, H>,
+  numbers: HashMap<String, Vec<LineNumbers>>,
+  sides: HashMap<(String, bool), Vec<SideLines>>,
+  /// Window hash to the windows with it, as `(hunk, first index in the
+  /// side's lines)`, in diff order.
+  windows: HashMap<(String, bool, usize), WindowIndex>,
+}
+
+impl<'a, H: HunkList> Placer<'a, H> {
+  fn new(hunks: &'a HashMap<String, H>) -> Self {
+    Self {
+      hunks,
+      numbers: HashMap::new(),
+      sides: HashMap::new(),
+      windows: HashMap::new(),
+    }
+  }
+
+  fn numbers(&mut self, file: &str) -> &[LineNumbers] {
+    let hunks = self.hunks;
+    self.numbers.entry(file.to_string()).or_insert_with(|| {
+      hunks
+        .get(file)
+        .map_or(&[][..], HunkList::hunks)
+        .iter()
+        .map(line_numbers)
+        .collect()
+    })
+  }
+
+  /// The hunk and lines `start..=end` on the draft's side cover, if all are
+  /// in the diff (`findCommentedLines`).
+  fn commented_lines(&mut self, draft: &AgentReviewComment) -> Option<(String, Vec<String>)> {
+    let side = if draft.side.as_deref() == Some("old") {
+      Side::Old
+    } else {
+      Side::New
+    };
+    let all = self.hunks;
+    let hunks = all.get(&draft.file_path)?.hunks();
+    self.numbers(&draft.file_path);
+    let numbers = &self.numbers[&draft.file_path];
+    for (hunk, numbers) in hunks.iter().zip(numbers) {
+      let lines: Vec<String> = hunk
+        .lines
+        .iter()
+        .zip(numbers)
+        .filter(|(_, (old, new))| {
+          let line_side = if old.is_some() && new.is_none() {
+            Side::Old
+          } else {
+            Side::New
+          };
+          let n = match side {
+            Side::Old => *old,
+            Side::New => *new,
+          };
+          line_side == side
+            && n.is_some_and(|n| i64::from(n) >= draft.start_line && i64::from(n) <= draft.end_line)
+        })
+        .map(|(l, _)| l.clone())
+        .collect();
+      if lines.len() as i64 == draft.end_line - draft.start_line + 1 {
+        return Some((hunk.id.clone(), lines));
+      }
+    }
+    None
+  }
+
+  /// Where a draft's lines moved to (`findMovedLines`): the run of diff
+  /// lines on its side that hashes to `line_hash`, nearest its old start.
+  /// Only lines in the diff can be found.
+  fn moved_lines(
+    &mut self,
+    draft: &AgentReviewComment,
+    line_hash: &str,
+  ) -> Option<(String, Vec<String>, i64)> {
+    let old_side = draft.side.as_deref() == Some("old");
+    let size = usize::try_from(draft.end_line - draft.start_line + 1)
+      .ok()
+      .filter(|&size| size > 0)?;
+    // `hash_diff_lines` writes eight lowercase digits; nothing else equals it.
+    let target = u32::from_str_radix(line_hash, 16)
+      .ok()
+      .filter(|h| format!("{h:08x}") == line_hash)?;
+    let file = draft.file_path.as_str();
+    let all = self.hunks;
+    let hunks = all.get(file)?.hunks();
+    self.numbers(file);
+    let side_key = (file.to_string(), old_side);
+    if !self.sides.contains_key(&side_key) {
+      let sides = hunks
+        .iter()
+        .zip(&self.numbers[file])
+        .map(|(hunk, numbers)| {
+          (0..hunk.lines.len())
+            .filter_map(|i| match (old_side, numbers[i]) {
+              (true, (Some(o), None)) => Some((i, i64::from(o))),
+              (false, (_, Some(n))) => Some((i, i64::from(n))),
+              _ => None,
+            })
+            .collect()
+        })
+        .collect();
+      self.sides.insert(side_key.clone(), sides);
+    }
+    let sides = &self.sides[&side_key];
+    let windows = self
+      .windows
+      .entry((file.to_string(), old_side, size))
+      .or_insert_with(|| {
+        let mut index: HashMap<u32, Vec<(usize, usize)>> = HashMap::new();
+        for (h, (hunk, side)) in hunks.iter().zip(sides).enumerate() {
+          let lines = side.iter().map(|&(i, _)| hunk.lines[i].as_str());
+          for (at, hash) in window_hashes(lines, size).into_iter().enumerate() {
+            index.entry(hash).or_default().push((h, at));
+          }
+        }
+        index
+      });
+    let mut best: Option<(String, Vec<String>, i64)> = None;
+    for &(h, at) in windows.get(&target).map_or(&[][..], Vec::as_slice) {
+      let (hunk, side) = (&hunks[h], &sides[h]);
+      let lines: Vec<String> = side[at..at + size]
+        .iter()
+        .map(|&(i, _)| hunk.lines[i].clone())
+        .collect();
+      // The index keys on a 32-bit hash: confirm it.
+      if hash_diff_lines(&lines) != line_hash {
+        continue;
+      }
+      let start = side[at].1;
+      let nearer = best
+        .as_ref()
+        .is_none_or(|(_, _, b)| (start - draft.start_line).abs() < (b - draft.start_line).abs());
+      if nearer {
+        best = Some((hunk.id.clone(), lines, start));
+      }
+    }
+    best
+  }
+
+  /// `draftToLineComment`: follows its lines if a PR update moved them
+  /// unchanged; outdated when they left the diff or no longer hash as when
+  /// it was written.
+  fn place(&mut self, row: &AgentReviewComment) -> Draft {
+    let mut found = self.commented_lines(row);
+    let mut start_line = row.start_line;
+    if let Some(stored) = row.line_hash.as_deref() {
+      let unchanged = found
+        .as_ref()
+        .is_some_and(|(_, lines)| hash_diff_lines(lines) == stored);
+      if !unchanged {
+        if let Some((id, lines, start)) = self.moved_lines(row, stored) {
+          found = Some((id, lines));
+          start_line = start;
+        }
+      }
+    }
+    let end_line = start_line + (row.end_line - row.start_line);
+    let line_hash = found.as_ref().map(|(_, lines)| hash_diff_lines(lines));
+    let outdated = found.is_none()
+      || row
+        .line_hash
+        .as_ref()
+        .is_some_and(|h| Some(h) != line_hash.as_ref());
+    let text = match &row.suggested_replacement {
+      Some(s) if !row.comment_text.contains("```suggestion") => {
+        format!("{}\n\n```suggestion\n{s}\n```", row.comment_text)
+      }
+      _ => row.comment_text.clone(),
+    };
+    let (hunk_id, line_content) = match (&found, outdated) {
+      (Some((id, lines)), false) => (id.clone(), lines.clone()),
+      _ => (
+        OUTDATED_HUNK.to_string(),
+        row
+          .quoted_text
+          .as_deref()
+          .map(|q| q.split('\n').map(str::to_string).collect())
+          .unwrap_or_default(),
+      ),
+    };
+    let quoted_text = found.as_ref().map(|(_, lines)| lines.join("\n"));
+    let n = |v: i64| u32::try_from(v).unwrap_or(0);
+    Draft {
+      comment: LineComment {
+        id: row.id.clone(),
+        file_path: row.file_path.clone(),
+        hunk_id,
+        start_line: n(start_line),
+        end_line: n(end_line),
+        line_content,
+        text,
+        created_at: row.created_at.clone(),
+        line_side: Some(if row.side.as_deref() == Some("old") {
+          Side::Old
+        } else {
+          Side::New
+        }),
+        source: None,
+        github_author: None,
+        github_avatar_url: None,
+        github_comment_url: None,
+      },
+      row: row.clone(),
+      line_hash,
+      quoted_text,
+      outdated,
+    }
+  }
+}
+
+/// `draftToLineComment` for one draft.
+pub fn draft_to_comment<H: HunkList>(
+  row: &AgentReviewComment,
+  hunks: &HashMap<String, H>,
+) -> Draft {
+  Placer::new(hunks).place(row)
+}
+
 /// The drafts shown: every one not resolved, once the diff was read.
-pub fn drafts(rows: &[AgentReviewComment], hunks: &HashMap<String, Vec<JjDiffHunk>>) -> Vec<Draft> {
+pub fn drafts<H: HunkList>(rows: &[AgentReviewComment], hunks: &HashMap<String, H>) -> Vec<Draft> {
+  let mut placer = Placer::new(hunks);
   rows
     .iter()
     .filter(|r| r.status != "resolved")
-    .map(|r| draft_to_comment(r, hunks))
+    .map(|r| placer.place(r))
     .collect()
 }
 
@@ -680,6 +844,56 @@ rename to moved.rs
     let hash = hash_diff_lines(&["+x".into()]);
     let moved = draft_to_comment(&row(7, 7, "new", Some(&hash)), &hunks);
     assert_eq!(moved.comment.start_line, 8);
+  }
+
+  #[test]
+  fn window_hashes_equal_the_hash_of_the_joined_lines() {
+    let lines: Vec<String> = [
+      "",
+      "a",
+      "+x\u{e9}",
+      "\u{1f600} smile",
+      " ",
+      "same",
+      "same",
+      "z",
+    ]
+    .iter()
+    .map(ToString::to_string)
+    .collect();
+    for size in 1..=lines.len() {
+      let hashes = window_hashes(lines.iter().map(String::as_str), size);
+      assert_eq!(hashes.len(), lines.len() - size + 1);
+      for (at, hash) in hashes.iter().enumerate() {
+        assert_eq!(
+          format!("{hash:08x}"),
+          hash_diff_lines(&lines[at..at + size]),
+          "size {size} at {at}"
+        );
+      }
+    }
+  }
+
+  #[test]
+  fn many_moved_drafts_each_follow_their_own_lines() {
+    let body: String = (0..200).map(|i| format!("+line {i}\n")).collect();
+    let hunks = parse_unified_diff(&format!(
+      "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -0,0 +1,200 @@\n{body}"
+    ))
+    .hunks;
+    let rows: Vec<_> = (0..20)
+      .map(|i| {
+        let hash = hash_diff_lines(&[format!("+line {}", i * 10), format!("+line {}", i * 10 + 1)]);
+        let mut r = row(500, 501, "new", Some(&hash));
+        r.file_path = "f".into();
+        r.id = format!("d{i}");
+        r
+      })
+      .collect();
+    for (i, draft) in drafts(&rows, &hunks).iter().enumerate() {
+      assert!(!draft.outdated, "draft {i}");
+      assert_eq!(draft.comment.start_line as usize, i * 10 + 1);
+    }
   }
 
   #[test]

@@ -211,15 +211,19 @@ impl Lightbox {
         continue;
       }
       let host = self.host.clone();
-      let read = cx
-        .background_executor()
-        .spawn(async move { host.read_send_asset(&path).unwrap_or_default() });
+      // The file is read and split into lines off the main thread.
+      let read = cx.background_executor().spawn(async move {
+        let text = host.read_send_asset(&path).unwrap_or_default();
+        text_lines(&text)
+          .into_iter()
+          .map(str::to_string)
+          .collect::<Vec<_>>()
+      });
       let path = asset.path.clone();
       cx.spawn(async move |this, cx| {
-        let text = read.await;
+        let lines = read.await;
         this
           .update(cx, |view, cx| {
-            let lines = text_lines(&text).into_iter().map(str::to_string).collect();
             view.texts.insert(path, Rc::new(lines));
             cx.notify();
           })

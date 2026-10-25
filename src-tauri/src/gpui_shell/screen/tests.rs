@@ -23,8 +23,6 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
-  /// The repository's auto-push setting, for the Changes tab's commit.
-  auto_push: bool,
   /// What the folder picker returns, and why starting a dev container fails.
   picked: Option<String>,
   container_error: Option<String>,
@@ -716,7 +714,12 @@ impl changes_data::ChangesHost for FakeHost {
     if let Some(token) = token {
       self.record(format!("hunks at {token}"));
     }
-    let working = self.working().ok_or("no changes")?;
+    // Borrowed, not cloned: a batch of a large changeset would copy it all.
+    let edited = self.edited.lock().unwrap();
+    let working = edited
+      .as_ref()
+      .or(self.working.as_ref())
+      .ok_or("no changes")?;
     // As the backend: the diff `token` names, unless a test moved the disk.
     let read_at = self.hunks_token.lock().unwrap().clone();
     Ok(crate::core::WorkspaceFileHunksBatch {
@@ -774,10 +777,6 @@ impl changes_data::ChangesHost for FakeHost {
   fn push_remote(&self, _: &str, workspace_id: Option<i64>) -> Result<String, String> {
     self.record(format!("push {workspace_id:?}"));
     Ok(String::new())
-  }
-
-  fn auto_pushes(&self, _: &str) -> bool {
-    self.auto_push
   }
 
   fn stash_all(
@@ -1036,6 +1035,7 @@ impl terminal_data::TerminalHost for FakeHost {
     Ok(terminal_data::Prepared {
       command: format!("{} --start", start.agent),
       skill_write_warning: None,
+      file_paths: vec![format!("/tmp/treq-agent-prompt-{}.txt", start.agent)],
     })
   }
 
@@ -1066,6 +1066,10 @@ impl terminal_data::TerminalHost for FakeHost {
   ) -> Result<(), String> {
     self.record(format!("chat message {session_id} {text:?}"));
     Ok(())
+  }
+
+  fn remove_session_files(&self, paths: &[String]) {
+    self.record(format!("remove files {paths:?}"));
   }
 
   fn read_send_asset(&self, path: &str) -> Result<String, String> {
@@ -4696,24 +4700,6 @@ fn changes_tab_commits_the_working_copy(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn changes_tab_pushes_after_the_commit_when_the_repo_auto_pushes(cx: &mut TestAppContext) {
-  let mut host = changes_host();
-  host.auto_push = true;
-  let (mut h, host) = workspace_harness(cx, host, changes_route());
-  h.click("commit-message");
-  h.cx.simulate_input("Fix");
-  h.click("commit-button");
-  h.cx.run_until_parked();
-  let writes: Vec<_> = host
-    .writes()
-    .into_iter()
-    .filter(|w| w.starts_with("commit") || w.starts_with("push"))
-    .collect();
-  // The commit returns before the push, which runs once, as its own stage.
-  assert_eq!(writes, ["commit Some(7) \"Fix\"", "push Some(7)"]);
-}
-
-#[gpui::test]
 fn changes_tab_commits_only_staged_files(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   h.click("file-row-a.rs");
@@ -6174,6 +6160,12 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
   assert!(!h.drawn("terminal-column-agent"));
   assert!(host.calls().contains(&format!("close {}", agent_pty())));
   assert!(h.sent().contains(&field("terminal.closeSession", 3.into())));
+  // The session's prompt and skill files go with it.
+  let removed = host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("remove files") && c.contains("treq-agent-prompt-"));
+  assert!(removed, "{:?}", host.calls());
   // Closing the last terminal hides the pane, chip included.
   assert!(!h.drawn("terminal-pane-controls"));
 }
@@ -8267,6 +8259,7 @@ mod code_files_large;
 mod commit_diffs;
 mod commits_large;
 mod conflicts;
+mod diff_extremes;
 mod file_browser;
 mod fuzz;
 mod github;

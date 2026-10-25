@@ -3346,11 +3346,12 @@ fn clone_repo_local(repo_url: &str, destination: &str) -> Result<RepositoryInspe
   inspect_repository_path(destination)
 }
 
-/// Applies a base64-encoded unified diff to `path` inside the given
-/// workspace (or the repo root) using `git apply`. Base64 keeps the exec
-/// argument vector a plain string even though the payload contains newlines.
+/// Fails with the same errors as `inspect_repository_path` for a missing or
+/// non-repository path, but only stats the path: no jj load, ref import or
+/// working-copy snapshot (which writes an op), so read commands stay read-only.
 fn require_existing_repo(repo: &str) -> Result<(), String> {
-  inspect_repository_path(repo).map(|_| ())
+  let root = validate_repository_path(repo)?;
+  detect_repository_type(&root).map(|_| ())
 }
 
 /// Applies a base64-encoded unified diff to `path` inside the given

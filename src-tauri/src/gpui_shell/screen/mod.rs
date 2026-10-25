@@ -62,7 +62,7 @@ mod onboarding;
 mod open_workspaces;
 mod open_workspaces_data;
 mod reactions;
-mod rows;
+pub(in crate::gpui_shell) mod rows;
 pub(super) use onboarding::open_repo_at;
 mod onboarding_remote;
 mod pr_review;

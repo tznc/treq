@@ -386,6 +386,29 @@ pub struct TerminalView {
   pub remote: RemoteState,
   _exit: Option<Listening>,
   _tasks: Vec<Task<()>>,
+  /// Temporary files of this session (an agent's prompt, settings and
+  /// skills, and images pasted in), deleted when the terminal closes.
+  session_files: Vec<String>,
+}
+
+/// Deletes a session's temporary files off the main thread.
+fn remove_files(host: Host, files: Vec<String>) {
+  #[cfg(test)]
+  host.remove_session_files(&files);
+  #[cfg(not(test))]
+  std::thread::spawn(move || host.remove_session_files(&files));
+}
+
+impl Drop for TerminalView {
+  fn drop(&mut self) {
+    if let Start::Agent { start, .. } = &self.start {
+      self.host.end_chat(&start.repo_path, start.session_id);
+    }
+    if self.session_files.is_empty() {
+      return;
+    }
+    remove_files(self.host.clone(), std::mem::take(&mut self.session_files));
+  }
 }
 
 fn now_millis() -> u128 {
@@ -439,6 +462,7 @@ impl TerminalView {
       remote: RemoteState::default(),
       _exit: None,
       _tasks: Vec::new(),
+      session_files: Vec::new(),
     }
   }
 
@@ -765,14 +789,14 @@ impl TerminalView {
         host
           .resize_pty(&pty, rows as u16, cols as u16)
           .ignore_closed();
-        return Ok(None);
+        return Ok((None, Vec::new()));
       }
-      let (spawn, warning) = match &start {
+      let (spawn, warning, files) = match &start {
         Start::Remote { target } => {
           host
             .remote_attach(&pty, target, cols as u16, rows as u16)
             .map_err(|e| (false, e))?;
-          return Ok(None);
+          return Ok((None, Vec::new()));
         }
         Start::Shell { dir } => (
           Spawn {
@@ -782,6 +806,7 @@ impl TerminalView {
             ..Spawn::default()
           },
           None,
+          Vec::new(),
         ),
         Start::Agent {
           start,
@@ -802,6 +827,7 @@ impl TerminalView {
               auto_command: Some(prepared.command),
             },
             prepared.skill_write_warning,
+            prepared.file_paths,
           )
         }
       };
@@ -809,10 +835,10 @@ impl TerminalView {
       host
         .resize_pty(&pty, rows as u16, cols as u16)
         .ignore_closed();
-      Ok(warning)
+      Ok((warning, files))
     });
     self._tasks.push(cx.spawn(async move |this, cx| {
-      let result: Result<Option<String>, (bool, String)> = task.await;
+      let result: Result<(Option<String>, Vec<String>), (bool, String)> = task.await;
       this
         .update(cx, |view, cx| {
           view.pty_size = Some((cols, rows));
@@ -821,7 +847,8 @@ impl TerminalView {
             return;
           }
           view.status = match result {
-            Ok(warning) => {
+            Ok((warning, files)) => {
+              view.session_files.extend(files);
               if let Some(description) = warning {
                 (view.on_event)(
                   TermEvent::Toast {
@@ -849,6 +876,7 @@ impl TerminalView {
   fn retry(&mut self, cx: &mut Context<Self>) {
     self.host.close_pty(&self.pty).ignore_closed();
     terminal_data::detach(&self.pty);
+    remove_files(self.host.clone(), std::mem::take(&mut self.session_files));
     self.live = None;
     self._tasks.clear();
     self.status = Status::Preparing;
@@ -944,6 +972,7 @@ impl TerminalView {
     let paste = (m.platform && k.key == "v") || (m.control && m.shift && k.key == "v");
     if paste {
       let item = cx.read_from_clipboard();
+      let mut pasted = Vec::new();
       // A copied image goes in as the path of a file holding it: Claude Code
       // and Codex attach a pasted image path, and nothing else reaches them
       // through a PTY. A remote host can't read a local file.
@@ -958,10 +987,12 @@ impl TerminalView {
         self
           .host
           .write_pasted_image(&image.bytes)
+          .inspect(|path| pasted.push(path.clone()))
           .map(|path| shell_quote(&path))
           .inspect_err(|e| tracing::warn!("failed to save pasted image: {e}"))
           .ok()
       });
+      self.session_files.extend(pasted);
       if let Some(text) = text {
         let bracketed = self.with_emulator(|e| e.bracketed_paste()).unwrap_or(false);
         let bytes = paste_bytes(&text, bracketed);
@@ -1930,9 +1961,13 @@ impl TerminalPane {
     }
     self.environment_repo = Some(repo.clone());
     let host = self.host.clone();
-    let task = cx
-      .background_executor()
-      .spawn(async move { code_data::task_settings(&*host, &repo).environment });
+    let task = cx.background_executor().spawn(async move {
+      let mut environment = code_data::task_settings(&*host, &repo).environment;
+      if let Some(environment) = environment.as_mut() {
+        environment.status = Some(host.devcontainer_status(&repo));
+      }
+      environment
+    });
     self._environment_task = Some(cx.spawn(async move |this, cx| {
       let environment = task.await;
       this

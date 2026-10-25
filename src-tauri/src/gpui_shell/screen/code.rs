@@ -487,20 +487,50 @@ impl CodeView {
     };
     // A read again that found what shows already (a revalidation) draws
     // nothing new.
+    let mut settings = read.settings;
+    // The container's status is read next; what was read last shows meanwhile.
+    if let (Some(new), Some(old)) = (
+      settings.environment.as_mut(),
+      self.settings.as_ref().and_then(|s| s.environment.as_ref()),
+    ) {
+      new.status = old.status.clone();
+    }
     let unchanged = !moved
       && !(self.history_loading && self.history_limit > HISTORY_PAGE)
       && self.overview.as_ref() == Some(&read.overview)
       && self.history.as_deref() == read.history.as_ref().ok()
       && self.history_error.is_none()
       && self.stack == read.stack
-      && self.settings.as_ref() == Some(&read.settings);
+      && self.settings.as_ref() == Some(&settings);
     self.overview = Some(read.overview);
     self.set_history(read.history);
     self.stack = read.stack;
-    self.settings = Some(read.settings);
+    let environment = settings.environment.is_some();
+    self.settings = Some(settings);
     if !unchanged {
       cx.notify();
     }
+    if environment {
+      self.read_environment_status(cx);
+    }
+  }
+
+  /// Reads whether the repository's devcontainer runs (a `docker ps`), apart
+  /// from the settings so those show without waiting for it.
+  fn read_environment_status(&mut self, cx: &mut Context<Self>) {
+    self.read(
+      |host, parent| host.devcontainer_status(&parent.repo_path),
+      |view, status, cx| {
+        let Some(env) = view.settings.as_mut().and_then(|s| s.environment.as_mut()) else {
+          return;
+        };
+        if env.status.as_ref() != Some(&status) {
+          env.status = Some(status);
+          cx.notify();
+        }
+      },
+      cx,
+    );
   }
 
   /// Runs `read` off the main thread, then `apply`s it unless the tab moved
