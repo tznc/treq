@@ -75,7 +75,8 @@ impl Target {
       head_branch: self.branch.clone(),
       base_branch: self.base.clone().unwrap_or_else(|| stack_on.to_string()),
       title: self.title.clone(),
-      description: self.pr.map(|n| format!("From GitHub PR #{n}")),
+      description: None,
+      pr_number: self.pr,
     }
   }
 
@@ -157,10 +158,16 @@ impl OpenWorkspacesHost for Backend {
     }
     core::open_or_create_workspaces(repo_path, requests)
       .into_iter()
-      .map(|result| {
+      .zip(requests)
+      .map(|(result, request)| {
         let (workspace, created) = result?;
         if created {
           crate::commands::workspace::spawn_setup_script_if_configured(&workspace);
+          // The dialog's PRs carry no body; the poll fills it in.
+          if request.pr_number.is_some() {
+            crate::pr_status::global()
+              .queue_branch_refresh(repo_path.to_string(), workspace.branch_name.clone());
+          }
         }
         Ok((workspace.id, created))
       })

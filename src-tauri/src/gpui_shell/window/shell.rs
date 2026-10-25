@@ -285,10 +285,15 @@ pub fn listen(app: &AppHandle) {
       return;
     };
     let stacks_moved = payload["stacks_moved"].as_bool().unwrap_or(false);
+    // The PR's title or body was copied into workspaces: read them again.
+    let synced = crate::pr_status::synced_repo(event.payload()).is_some();
     for label in labels() {
       let repo_path = repo_path.to_string();
       with_controller(&handle, &label, move |c, cx| {
-        c.prs_changed(&repo_path, stacks_moved, cx)
+        c.prs_changed(&repo_path, stacks_moved, cx);
+        if synced {
+          c.native_event(&NativeEvent::WorkspaceChanged { repo_path }, cx);
+        }
       });
     }
   });

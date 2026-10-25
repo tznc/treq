@@ -304,16 +304,20 @@ impl GithubHost for Backend {
   }
 
   fn open_pr_workspace(&self, repo_path: &str, pr: &GhPullRequest) -> Result<(i64, bool), String> {
-    let description = format!("From GitHub PR #{}", pr.number);
+    let body = pr.body.as_deref().map(str::trim).filter(|b| !b.is_empty());
     let (workspace, created) = core::open_or_create_workspace_from_pr(
       repo_path,
       &pr.head_ref_name,
       &pr.base_ref_name,
       Some(&pr.title),
-      Some(&description),
+      body,
+      Some(pr.number),
     )?;
     if created {
       crate::commands::workspace::spawn_setup_script_if_configured(&workspace);
+      // The list's PRs carry no body; the poll fills it in.
+      crate::pr_status::global()
+        .queue_branch_refresh(repo_path.to_string(), pr.head_ref_name.clone());
     }
     Ok((workspace.id, created))
   }
@@ -482,20 +486,28 @@ pub fn stack_levels(prs: &[GhPullRequest]) -> HashMap<u64, u32> {
     .collect()
 }
 
-fn matches_query(pr: &GhPullRequest, query: &str) -> bool {
-  let q = query.trim().to_lowercase();
+/// Whether the PR matches `q`, the trimmed, lowercased search text.
+fn matches_query(pr: &GhPullRequest, q: &str) -> bool {
   if q.is_empty() {
     return true;
   }
-  [
-    pr.title.as_str(),
-    &format!("#{}", pr.number),
-    &pr.head_ref_name,
-    &pr.base_ref_name,
-    &pr.author.login,
-  ]
-  .iter()
-  .any(|field| field.to_lowercase().contains(&q))
+  let has = |field: &str| {
+    // ASCII text, the common case, is compared without allocating.
+    if field.is_ascii() {
+      field.len() >= q.len()
+        && field
+          .as_bytes()
+          .windows(q.len())
+          .any(|w| w.eq_ignore_ascii_case(q.as_bytes()))
+    } else {
+      field.to_lowercase().contains(q)
+    }
+  };
+  has(&pr.title)
+    || has(&pr.head_ref_name)
+    || has(&pr.base_ref_name)
+    || has(&pr.author.login)
+    || format!("#{}", pr.number).contains(q)
 }
 
 fn matches_conflict(pr: &GhPullRequest, conflict: Option<&str>) -> bool {
@@ -509,11 +521,25 @@ fn matches_conflict(pr: &GhPullRequest, conflict: Option<&str>) -> bool {
 }
 
 /// `filterPrs`, as of `now`.
+#[cfg(test)]
 pub fn filter_prs<'a>(
   prs: &'a [GhPullRequest],
   filters: &PrFilters,
   now: chrono::DateTime<chrono::Utc>,
 ) -> Vec<&'a GhPullRequest> {
+  filter_pr_indices(prs, filters, now)
+    .into_iter()
+    .map(|ix| &prs[ix])
+    .collect()
+}
+
+/// `filterPrs`, as the indices of the PRs it keeps.
+pub fn filter_pr_indices(
+  prs: &[GhPullRequest],
+  filters: &PrFilters,
+  now: chrono::DateTime<chrono::Utc>,
+) -> Vec<usize> {
+  let query = filters.query.trim().to_lowercase();
   let levels = filters
     .stack_level
     .map(|_| stack_levels(prs))
@@ -526,8 +552,9 @@ pub fn filter_prs<'a>(
   let is = |value: &Option<String>, actual: &str| value.as_deref().is_none_or(|v| v == actual);
   prs
     .iter()
-    .filter(|pr| {
-      matches_query(pr, &filters.query)
+    .enumerate()
+    .filter(|(_, pr)| {
+      matches_query(pr, &query)
         && is(&filters.author, &pr.author.login)
         && is(&filters.head, &pr.head_ref_name)
         && is(&filters.base, &pr.base_ref_name)
@@ -541,6 +568,7 @@ pub fn filter_prs<'a>(
           .as_deref()
           .is_none_or(|label| pr.labels.iter().any(|l| l.name == label))
     })
+    .map(|(ix, _)| ix)
     .collect()
 }
 
@@ -957,6 +985,7 @@ mod tests {
       base_ref_name: String::new(),
       merge_state_status: None,
       is_draft: false,
+      body: String::new(),
     };
     let statuses = HashMap::from([
       ("open".to_string(), Some(info("OPEN"))),

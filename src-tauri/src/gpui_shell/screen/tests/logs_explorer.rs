@@ -129,3 +129,88 @@ fn system_logs_search_and_offer_no_explorer(cx: &mut TestAppContext) {
     host.calls()
   );
 }
+
+// Round 7 measurements: `cargo test --lib logs_perf -- --ignored --nocapture --test-threads=1`.
+
+fn perf_host(records: usize, buckets: usize, long: usize) -> FakeHost {
+  let mut host = logs_host();
+  host.logs = (0..records)
+    .map(|i| {
+      let body = if long > 0 {
+        format!("line {i} {}", "word ".repeat(long / 5))
+      } else {
+        format!(
+          "line {i} compiling crate number {i} with a moderately long message body xxxxxxxxxxxx"
+        )
+      };
+      log_record(&body, if i % 50 == 0 { "ERROR" } else { "INFO" })
+    })
+    .collect();
+  host.buckets = (0..buckets)
+    .flat_map(|i| {
+      let t = 1_785_000_000 + (i as i64) * 7;
+      ["INFO", "ERROR"].map(|s| crate::core::checks_logs::LogBucket {
+        bucket: chrono::DateTime::from_timestamp(t, 0)
+          .unwrap()
+          .format("%Y-%m-%dT%H:%M:%SZ")
+          .to_string(),
+        severity_text: s.into(),
+        count: 1 + (i as i64 % 40),
+      })
+    })
+    .collect();
+  host
+}
+
+fn logs_perf_case(
+  cx: &mut TestAppContext,
+  label: &str,
+  records: usize,
+  buckets: usize,
+  long: usize,
+) {
+  use super::changes_large::{frame, report, timed};
+  let (mut h, _) = workspace_harness(cx, perf_host(records, buckets, long), logs_route(None));
+  assert!(h.drawn("repo-log-line"));
+  println!("-- {label}: records={records} buckets={buckets}x2 long={long}B");
+  let mut full: Vec<_> = (0..8).map(|_| frame(&mut h)).collect();
+  report("full frame", &mut full);
+  let mut click: Vec<_> = (0..6)
+    .map(|_| timed(&mut h, |h| h.click("repo-log-line")))
+    .collect();
+  report("click a line (notify)", &mut click);
+  let mut menu: Vec<_> = (0..6)
+    .map(|_| timed(&mut h, |h| h.click("log-level-filter")))
+    .collect();
+  report("toggle level menu (notify)", &mut menu);
+}
+
+#[gpui::test]
+#[ignore = "benchmark"]
+fn logs_perf_baseline(cx: &mut TestAppContext) {
+  logs_perf_case(cx, "default cap", 2000, 0, 0);
+}
+
+#[gpui::test]
+#[ignore = "benchmark"]
+fn logs_perf_long_lines(cx: &mut TestAppContext) {
+  logs_perf_case(cx, "long lines", 2000, 0, 4000);
+}
+
+#[gpui::test]
+#[ignore = "benchmark"]
+fn logs_perf_chart_300(cx: &mut TestAppContext) {
+  logs_perf_case(cx, "chart 300 slots", 2000, 150, 0);
+}
+
+#[gpui::test]
+#[ignore = "benchmark"]
+fn logs_perf_chart_20k(cx: &mut TestAppContext) {
+  logs_perf_case(cx, "chart sparse 20k", 2000, 20_000, 0);
+}
+
+#[gpui::test]
+#[ignore = "benchmark"]
+fn logs_perf_very_long_lines(cx: &mut TestAppContext) {
+  logs_perf_case(cx, "100 KB lines", 300, 0, 100_000);
+}

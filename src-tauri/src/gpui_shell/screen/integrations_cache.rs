@@ -5,6 +5,8 @@
 //! by the next read. Keys carry the repository, so one repository's rows
 //! never stand in for another's.
 
+use std::rc::Rc;
+
 use tauri_plugin_gpui::gpui::{App, Global};
 
 use super::{github_data::StateFilter, prefetch::Lru};
@@ -25,7 +27,7 @@ pub(super) struct Integrations {
   pub open_prs: Lru<(String, String), (Vec<GhPullRequest>, bool)>,
   /// Linear issues by repository path and team, and the viewer by
   /// repository path; the dialog and the Linear view share them.
-  pub linear_issues: Lru<(String, Option<String>), Vec<LinearIssue>>,
+  pub linear_issues: Lru<(String, Option<String>), Rc<Vec<LinearIssue>>>,
   pub linear_viewer: Lru<String, LinearUser>,
   pub issue_pages: Lru<ListKey, GhListPage<GhIssue>>,
   pub pr_pages: Lru<ListKey, GhListPage<GhPullRequest>>,

@@ -118,7 +118,7 @@ pub(super) fn expanded(cx: &mut TestAppContext) -> Harness {
   expanded_with(cx, large_host())
 }
 
-fn expanded_with(cx: &mut TestAppContext, host: FakeHost) -> Harness {
+pub(super) fn expanded_with(cx: &mut TestAppContext, host: FakeHost) -> Harness {
   let (mut h, _) = workspace_harness(cx, host, changes_route());
   if h.drawn("view-large-changeset") {
     h.click("view-large-changeset");
@@ -207,7 +207,7 @@ fn a_large_diff_finds_text_on_rows_not_drawn(cx: &mut TestAppContext) {
 
 /// `large_host` under review: a kept review of `COMMENTS` line comments and
 /// `THREADS` GitHub review threads on every file.
-fn reviewed_host() -> FakeHost {
+pub(super) fn reviewed_host() -> FakeHost {
   const COMMENTS: usize = 20;
   const THREADS: usize = 5;
   let mut host = large_host();

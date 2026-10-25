@@ -1,6 +1,6 @@
 // A fake Linear GraphQL endpoint for the QA app (`TREQ_E2E_LINEAR_URL`):
-// the viewer, teams, a short issue list, projects with documents, and
-// comments. Only a repository with a Linear API key reaches it, so views
+// the viewer, teams, a short issue list that issues can be created in,
+// edited and deleted from, projects with documents, and comments. Only a repository with a Linear API key reaches it, so views
 // without one still show "not connected"; the key `lin_api_bad` is rejected
 // the way Linear rejects a revoked key.
 import { createServer, type Server } from "node:http";
@@ -127,8 +127,33 @@ const commentsOn: Record<string, object[]> = {
   ],
 };
 
+let next = Math.max(...issues.map((i) => Number(i.identifier.split("-")[1]))) + 1;
+
+type IssueInput = { teamId?: string; title?: string; description?: string };
+
 function answer(query: string, variables: Record<string, unknown>): object | null {
   const id = variables.id as string | undefined;
+  const input = (variables.input ?? {}) as IssueInput;
+  // Mutations first: their selections name the same fields as the reads.
+  if (query.includes("issueCreate(")) {
+    const created = issue(next++, input.title ?? "", ["Todo", "unstarted"], null, [0, "No priority"], null);
+    created.description = input.description ?? "";
+    issues.unshift(created);
+    return { issueCreate: { success: true, issue: created } };
+  }
+  if (query.includes("issueUpdate(")) {
+    const found = issues.find((i) => i.id === id);
+    if (found && input.title !== undefined) {
+      found.title = input.title;
+      found.description = input.description ?? found.description;
+    }
+    return { issueUpdate: { success: !!found, issue: found ?? null } };
+  }
+  if (query.includes("issueDelete(")) {
+    const at = issues.findIndex((i) => i.id === id);
+    if (at >= 0) issues.splice(at, 1);
+    return { issueDelete: { success: at >= 0 } };
+  }
   // Most specific first: `issue(id:` with comments before `issue(`, and
   // `issues(` / `projects(` before their singular forms.
   if (query.includes("comments(")) {
