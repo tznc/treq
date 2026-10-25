@@ -237,18 +237,76 @@ fn init_repo_state(repo_path: &str) -> Result<Option<String>, InitError> {
   }
 }
 
+/// Operation id of each repo at the end of its last clean rebase pass. While
+/// the op head is unchanged no bookmark or workspace moved (both live in the
+/// view), so the next pass has nothing to find and is skipped. Per process:
+/// a fresh launch always runs one pass.
+static LAST_REBASE_PASS: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> =
+  std::sync::Mutex::new(None);
+
+fn last_rebase_pass(repo_path: &str) -> Option<String> {
+  let guard = LAST_REBASE_PASS.lock().ok()?;
+  guard.as_ref()?.get(repo_path).cloned()
+}
+
+fn record_rebase_pass(repo_path: &str, operation_id: String) {
+  if let Ok(mut guard) = LAST_REBASE_PASS.lock() {
+    guard
+      .get_or_insert_with(Default::default)
+      .insert(repo_path.to_string(), operation_id);
+  }
+}
+
 /// Rebases each workspace that is behind its target branch.
+///
+/// One repo load classifies every workspace; only those not provably in sync
+/// go through [`ensure_workspace_rebased`], which loads per workspace.
 fn rebase_workspaces(repo_path: &str, conflict_style: &str) {
-  if let Ok(all_workspaces) = local_db::get_workspaces(repo_path) {
-    for workspace in all_workspaces {
-      if let Err(err) = ensure_workspace_rebased(repo_path, workspace.id, conflict_style) {
-        tracing::warn!(
-          "Init rebase warning: workspace '{}' ({}) failed: {}",
-          workspace.workspace_name,
-          workspace.id,
-          err
-        );
-      }
+  // Refs moved by git outside jj must be visible to the checks below, and to
+  // the op head the skip compares against.
+  jj::import_git_refs(repo_path).warn_on_err("import git refs before the rebase pass");
+  // Cheap check first: while the op head is unchanged since the last clean
+  // pass nothing can be behind.
+  if let (Some(last), Ok(current)) = (
+    last_rebase_pass(repo_path),
+    jj::current_operation_id(repo_path),
+  ) {
+    if last == current {
+      return;
+    }
+  }
+  let Ok(all_workspaces) = local_db::get_workspaces(repo_path) else {
+    return;
+  };
+  let pairs: Vec<(&str, &str)> = all_workspaces
+    .iter()
+    .map(|workspace| {
+      (
+        workspace.branch_name.as_str(),
+        workspace.target_branch.as_deref().unwrap_or("main"),
+      )
+    })
+    .collect();
+  let snapshot = jj::rebase_snapshot(repo_path, &pairs).ok();
+
+  let mut clean = true;
+  for (index, workspace) in all_workspaces.iter().enumerate() {
+    if snapshot.as_ref().is_some_and(|s| s.is_in_sync(index)) {
+      continue;
+    }
+    if let Err(err) = ensure_workspace_rebased(repo_path, workspace.id, conflict_style) {
+      clean = false;
+      tracing::warn!(
+        "Init rebase warning: workspace '{}' ({}) failed: {}",
+        workspace.workspace_name,
+        workspace.id,
+        err
+      );
+    }
+  }
+  if clean {
+    if let Ok(operation_id) = jj::current_operation_id(repo_path) {
+      record_rebase_pass(repo_path, operation_id);
     }
   }
 }

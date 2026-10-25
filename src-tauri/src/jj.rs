@@ -9136,6 +9136,77 @@ pub fn jj_workspace_parent_descends_from_target(
     .map_err(|e| JjError::IoError(format!("Failed ancestry check: {}", e)))
 }
 
+/// Result of [`rebase_snapshot`].
+pub struct RebaseSnapshot {
+  operation_id: String,
+  in_sync: Vec<bool>,
+}
+
+impl RebaseSnapshot {
+  /// The operation the snapshot was taken at.
+  pub fn operation_id(&self) -> &str {
+    &self.operation_id
+  }
+
+  /// Whether the pair at `index` is certainly not behind its target.
+  pub fn is_in_sync(&self, index: usize) -> bool {
+    self.in_sync.get(index).copied().unwrap_or(false)
+  }
+}
+
+/// Checks many `(workspace branch, target branch)` pairs against one repo
+/// load. A pair is in sync only when both are local bookmarks with a single
+/// target and the target tip is an ancestor of the workspace bookmark; any
+/// other outcome (missing, conflicted, behind, error) is reported as not in
+/// sync so the caller falls back to the per-workspace path that handles it.
+pub fn rebase_snapshot(repo_path: &str, pairs: &[(&str, &str)]) -> Result<RebaseSnapshot, JjError> {
+  let loaded = load_workspace_repo(repo_path)?;
+  let operation_id = loaded.repo.operation().id().hex();
+  let in_sync = pairs
+    .iter()
+    .map(|(workspace_branch, target_branch)| {
+      if validate_branch_name(workspace_branch, "workspace").is_err()
+        || validate_branch_name(target_branch, "target").is_err()
+      {
+        return false;
+      }
+      let view = loaded.repo.view();
+      let (Some(workspace_tip), Some(target_tip)) = (
+        view
+          .get_local_bookmark(RefName::new(workspace_branch))
+          .as_normal(),
+        view
+          .get_local_bookmark(RefName::new(target_branch))
+          .as_normal(),
+      ) else {
+        return false;
+      };
+      loaded
+        .repo
+        .index()
+        .is_ancestor(target_tip, workspace_tip)
+        .unwrap_or(false)
+    })
+    .collect();
+  Ok(RebaseSnapshot {
+    operation_id,
+    in_sync,
+  })
+}
+
+/// Imports git refs and HEAD into jj once (what `classify_workspace_bookmark`
+/// does per call), so a following [`rebase_snapshot`] sees refs moved by git
+/// outside jj. Writes an operation only when something changed.
+pub fn import_git_refs(repo_path: &str) -> Result<(), JjError> {
+  let mut loaded = load_workspace_repo(repo_path)?;
+  import_colocated_git_state(&mut loaded, repo_path)
+}
+
+/// The id of the repo's current operation (op head).
+pub fn current_operation_id(repo_path: &str) -> Result<String, JjError> {
+  Ok(load_workspace_repo(repo_path)?.repo.operation().id().hex())
+}
+
 fn resolve_merge_target_parent(
   loaded: &LoadedWorkspaceRepo,
   workspace_path: &str,
@@ -10682,6 +10753,35 @@ mod tests {
       .get_commit(wc_id)
       .expect("load wc commit");
     wc.parent_ids().first().expect("wc parent").hex()
+  }
+
+  #[test]
+  fn rebase_snapshot_marks_only_workspaces_that_are_certainly_in_sync() {
+    let temp = init_colocated_repo_with_two_branches();
+    let repo_path = temp.path().to_str().expect("utf8 path");
+
+    let snapshot = rebase_snapshot(
+      repo_path,
+      &[
+        ("branch-b", "branch-a"),
+        ("branch-a", "branch-a"),
+        ("branch-a", "branch-b"),
+        ("missing", "branch-a"),
+        ("branch-b", "missing"),
+      ],
+    )
+    .expect("snapshot");
+
+    assert!(snapshot.is_in_sync(0), "descendant of its target");
+    assert!(snapshot.is_in_sync(1), "branch is its own target");
+    assert!(!snapshot.is_in_sync(2), "behind its target");
+    assert!(!snapshot.is_in_sync(3), "missing workspace bookmark");
+    assert!(!snapshot.is_in_sync(4), "missing target bookmark");
+    assert!(!snapshot.is_in_sync(9), "out of range is not in sync");
+    assert_eq!(
+      snapshot.operation_id(),
+      current_operation_id(repo_path).expect("op id")
+    );
   }
 
   #[test]
