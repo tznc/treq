@@ -104,8 +104,12 @@ fn allocs_changes_small(cx: &mut TestAppContext) {
   print_frame("changes, small", &mut h);
 }
 
-fn live() -> isize {
+pub(super) fn live() -> isize {
   LIVE.load(Relaxed)
+}
+
+pub(super) fn allocs_now() -> usize {
+  ALLOCS.load(Relaxed)
 }
 
 /// Memory held after showing the large working copy in one workspace after
