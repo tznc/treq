@@ -227,6 +227,49 @@ test("ssh remote: shell, Changes, Commits and agent", async () => {
   await shot("ws-commits", "Remote workspace: committed", ["'Add sub' is the workspace's commit"]);
 });
 
+/** Picks `label` in Settings' Default Agent select and saves. */
+async function setDefaultAgent(label: string, row: number): Promise<void> {
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const select = page.getByRole("combobox", { name: "Default Agent" });
+  await select.scrollIntoViewIfNeeded();
+  const box = await select.boundingBox();
+  if (!box) throw new Error("no Default Agent select");
+  await select.click();
+  await page.waitForTimeout(800);
+  // Options: Default, Claude, Codex, Cursor, Copilot.
+  await page.mouse.click(box.x + 40, box.y + box.height + 26 + row * 30);
+  await page.waitForTimeout(500);
+  await expect(select).toContainText(label);
+  await page.getByRole("button", { name: "Save Settings" }).click();
+  await page.waitForTimeout(1000);
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+}
+
+// Each desktop agent CLI starts on the host and takes typed input. The
+// image's stand-in agents echo what they read (ssh-server/fake-agent.sh).
+for (const [label, row, bin] of [
+  ["Claude", 1, "claude"],
+  ["Codex", 2, "codex"],
+  ["Cursor", 3, "cursor-agent"],
+  ["Copilot", 4, "copilot"],
+] as const) {
+  test(`ssh remote: start ${label} and send it input`, async () => {
+    await setDefaultAgent(label, row);
+    const workspace = page.getByRole("button", { name: BRANCH, exact: true });
+    await workspace.click();
+    await workspace.hover();
+    await workspace.getByRole("button", { name: "Start agent" }).click();
+    await page.waitForTimeout(5000);
+    await page.mouse.click(700, 780);
+    await page.keyboard.type(`hello ${bin}\n`);
+    await page.waitForTimeout(2000);
+    await shot(`agent-${bin}`, `${label} started as a remote agent`, [
+      `The agent pane shows '${bin} agent ready in' the workspace path under .treq/workspaces`,
+      `It then shows '${bin} got: hello ${bin}': typed input reached the agent`,
+    ]);
+  });
+}
+
 test("ssh remote: install Claude Code and run it as an agent", async () => {
   test.setTimeout(600_000);
   const row = page.getByRole("button", { name: BRANCH, exact: true });

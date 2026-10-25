@@ -59,11 +59,11 @@ fn missing_tools(state: &MachineState) -> Option<String> {
   match (check.terminal.is_none(), check.agents.is_empty()) {
     (false, false) => None,
     (true, true) => Some(
-      "No tmux or screen, and no agent CLI (claude, codex, cursor-agent): terminals and agents won't start."
+      "No tmux or screen, and no agent CLI (claude, codex, cursor-agent, copilot): terminals and agents won't start."
         .into(),
     ),
     (true, false) => Some("No tmux or screen: terminals and agents won't start.".into()),
-    (false, true) => Some("No agent CLI found (claude, codex, cursor-agent).".into()),
+    (false, true) => Some("No agent CLI found (claude, codex, cursor-agent, copilot).".into()),
   }
 }
 

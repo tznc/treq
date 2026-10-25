@@ -154,6 +154,7 @@ pub fn agent_name(agent: RemoteAgentId) -> &'static str {
     RemoteAgentId::Claude => "Claude Code",
     RemoteAgentId::Codex => "Codex",
     RemoteAgentId::CursorAgent => "Cursor Agent",
+    RemoteAgentId::Copilot => "Copilot",
   }
 }
 
@@ -163,6 +164,7 @@ fn label_prefix(agent: RemoteAgentId) -> &'static str {
     RemoteAgentId::Claude => "claude",
     RemoteAgentId::Codex => "codex",
     RemoteAgentId::CursorAgent => "cursor",
+    RemoteAgentId::Copilot => "copilot",
   }
 }
 

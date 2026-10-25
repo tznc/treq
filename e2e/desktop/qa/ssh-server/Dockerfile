@@ -11,5 +11,9 @@ RUN useradd -m -s /bin/bash dev \
   && chown dev:dev /home/dev/.ssh && chmod 700 /home/dev/.ssh \
   && sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config \
   && echo 'export PATH="$HOME/.local/bin:$PATH"' >> /home/dev/.profile
+# Stand-ins for the four agent CLIs, for 18-ssh-remote's agent check. The
+# Claude Code the spec installs to ~/.local/bin comes first on PATH.
+COPY fake-agent.sh /opt/fake-agents/fake-agent
+RUN for a in claude codex cursor-agent copilot; do ln -s /opt/fake-agents/fake-agent /usr/local/bin/$a; done
 EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D", "-e"]
