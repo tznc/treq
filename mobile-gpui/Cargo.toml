@@ -80,3 +80,8 @@ debug-assertions = false
 opt-level = "s"
 lto = "thin"
 strip = true
+
+[package.metadata.cargo-machete]
+# rust-embed only turns on `debug-embed` for gpui-kit's icons. treq is not
+# imported yet; remove it here once the mobile client uses it or drops it.
+ignored = ["rust-embed", "treq"]

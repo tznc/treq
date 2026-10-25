@@ -58,6 +58,8 @@ use crate::{
 
 /// How often the review agent's comments are read again (`refreshMs`).
 const REVIEW_POLL: Duration = Duration::from_secs(10);
+/// How long the issues a visit read stand in for reading them again.
+const ISSUES_FRESH: Duration = Duration::from_secs(30);
 
 /// `Issues` or `Projects`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -170,7 +172,7 @@ pub struct LinearView {
   teams: Fetch<Vec<LinearTeam>>,
   viewer: Option<LinearUser>,
   /// The issues, by team.
-  pub(super) issues: HashMap<Option<String>, Fetch<Vec<LinearIssue>>>,
+  pub(super) issues: HashMap<Option<String>, Fetch<Rc<Vec<LinearIssue>>>>,
   pub(super) mode: IssueMode,
   pub(super) issue_view: IssueView,
   pub(super) issue_filters: IssueFilters,
@@ -192,6 +194,8 @@ pub struct LinearView {
   issue_rows: Rows<IssueRow>,
   column_rows: HashMap<String, Rows<IssueRow>>,
   comments: HashMap<Commented, Fetch<Vec<LinearComment>>>,
+  /// Comment threads whose fold is open: every comment shows.
+  comments_expanded: HashSet<Commented>,
   pub(super) projects: Fetch<Vec<LinearProject>>,
   pub(super) project_view: ProjectView,
   pub(super) project_filters: ProjectFilters,
@@ -310,6 +314,7 @@ impl LinearView {
       issue_rows: Rows::default(),
       column_rows: HashMap::new(),
       comments: HashMap::new(),
+      comments_expanded: HashSet::new(),
       projects: Fetch::default(),
       project_view: ProjectView::All,
       project_filters: ProjectFilters::default(),
@@ -373,7 +378,7 @@ impl LinearView {
       },
       cx,
     );
-    self.load_issues(cx);
+    self.load_issues_unless_fresh(cx);
   }
 
   /// Runs `work` off the main thread, then `apply` on the view, unless the
@@ -402,6 +407,26 @@ impl LinearView {
     .detach();
   }
 
+  /// Reads the issues again, unless a read the cache holds is under
+  /// [`ISSUES_FRESH`] old: opening the panel, switching the section or the
+  /// team would otherwise repeat every page of a long list each time.
+  fn load_issues_unless_fresh(&mut self, cx: &mut Context<Self>) {
+    let key = (self.route.repo_path.clone(), self.team.clone());
+    let fresh = cache(cx)
+      .linear_issues
+      .age(&key, Instant::now())
+      .is_some_and(|age| age < ISSUES_FRESH);
+    if fresh
+      && self
+        .issues
+        .get(&self.team)
+        .is_some_and(|f| f.data.is_some())
+    {
+      return;
+    }
+    self.load_issues(cx);
+  }
+
   fn load_issues(&mut self, cx: &mut Context<Self>) {
     let team = self.team.clone();
     let seed = cache(cx)
@@ -417,6 +442,7 @@ impl LinearView {
     self.run(
       move |host, repo| host.linear_issues(repo, team.as_deref()),
       move |view, result, cx| {
+        let result = result.map(Rc::new);
         if let Ok(issues) = &result {
           cache(cx).linear_issues.insert(
             (view.route.repo_path.clone(), key.clone()),
@@ -576,7 +602,7 @@ impl LinearView {
         self.issue_filters = IssueFilters::default();
         self.close_issue_forms();
         self.open_issue = None;
-        self.load_issues(cx);
+        self.load_issues_unless_fresh(cx);
       }
       Section::Projects => {
         self.project_view = ProjectView::All;
@@ -597,7 +623,7 @@ impl LinearView {
     self.team = team;
     self.close_issue_forms();
     self.open_issue = None;
-    self.load_issues(cx);
+    self.load_issues_unless_fresh(cx);
     cx.notify();
   }
 
@@ -973,7 +999,7 @@ impl LinearView {
   // ---- What the view shows. ----
 
   pub(super) fn current_issues(&self) -> Option<&Vec<LinearIssue>> {
-    self.issues.get(&self.team).and_then(|f| f.data.as_ref())
+    self.issues.get(&self.team).and_then(|f| f.data.as_deref())
   }
 
   fn viewer_id(&self) -> Option<&str> {
@@ -2953,9 +2979,26 @@ impl LinearView {
               )
             })
             .children(
-              unanchored
-                .iter()
-                .map(|c| self.comment_card(&of, &open, c, true, p, cx)),
+              // A long thread shows its first comment and the newest few.
+              super::rows::thread(unanchored.len(), self.comments_expanded.contains(&of))
+                .into_iter()
+                .map(|ix| match ix {
+                  Some(ix) => self
+                    .comment_card(&of, &open, unanchored[ix], true, p, cx)
+                    .into_any_element(),
+                  None => {
+                    let of = of.clone();
+                    super::github::parts::fold_row(
+                      "linear-comments-show-earlier",
+                      super::rows::hidden(unanchored.len()),
+                      p,
+                      cx.listener(move |view, _, _, cx| {
+                        view.comments_expanded.insert(of.clone());
+                        cx.notify();
+                      }),
+                    )
+                  }
+                }),
             )
         })
     });
