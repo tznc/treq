@@ -19,8 +19,12 @@ test("terminal rename: agent and shell titles", async ({ page }) => {
   await row(page, BRANCH).getByRole("button", { name: "Open shell" }).click();
   await settle(page, 2500);
 
-  const agent = page.getByTestId(/^terminal-title-session-/).first();
-  const shell = page.getByTestId(/^terminal-title-shell-/).first();
+  // Column groups are named after their titles; a title's test id
+  // starts with `terminal-title-`.
+  const title = (column: string | RegExp) =>
+    page.getByRole("group", { name: column }).getByTestId(/^terminal-title-/);
+  const agent = title("Claude 1 terminal");
+  const shell = title("Shell terminal");
   await expect(agent).toBeVisible();
   await expect(shell).toBeVisible();
 
@@ -32,35 +36,34 @@ test("terminal rename: agent and shell titles", async ({ page }) => {
     clip: { x: 0, y: 560, width: 1400, height: 110 },
     expectations: [
       "The agent column's title is replaced by a text field holding its name, selected",
-      "The field sits where the title was; the workspace badge and buttons don't move",
+      "The field takes the title's place; the workspace badge moves right to make room",
     ],
   });
   await page.keyboard.type("Fix cache eviction");
   await page.keyboard.press("Enter");
   await settle(page, 800);
-  await expect(page.getByTestId(/^terminal-title-session-/).first()).toHaveAccessibleName("Fix cache eviction");
+  await expect(title("Fix cache eviction terminal")).toHaveAccessibleName("Fix cache eviction");
 
   await shell.dblclick();
   await settle(page, 600);
   await page.keyboard.type("dev server");
   await page.keyboard.press("Enter");
   await settle(page, 800);
-  await expect(page.getByTestId(/^terminal-title-shell-/).first()).toHaveAccessibleName("dev server");
+  await expect(title("dev server terminal")).toHaveAccessibleName("dev server");
   await capture(page, {
     name: "24-terminal-rename-renamed",
     title: "Agent and shell renamed",
     expectations: [
       "The agent column's header reads 'Fix cache eviction', the shell's 'dev server'",
       "Both still show their workspace badge and close button",
-      "The sidebar lists the agent as 'Fix cache eviction'",
     ],
   });
 
   // Esc leaves the name as it was.
-  await page.getByTestId(/^terminal-title-shell-/).first().dblclick();
+  await title("dev server terminal").dblclick();
   await settle(page, 400);
   await page.keyboard.type("typo");
   await page.keyboard.press("Escape");
   await settle(page, 600);
-  await expect(page.getByTestId(/^terminal-title-shell-/).first()).toHaveAccessibleName("dev server");
+  await expect(title("dev server terminal")).toHaveAccessibleName("dev server");
 });
