@@ -54,7 +54,7 @@ The card also shows disk use against your quota and the number of workspaces and
 
 When the card shows **Degraded** or **Failed**, a **Repair** button appears. It reruns Treq setup on the machine and keeps your files and repositories.
 
-The trash icon (**Delete cloud workspace**) removes the machine. The confirmation dialog warns that cloned repositories, uncommitted changes, and agent sessions are lost, and that you cannot undo it.
+The trash icon (**Delete cloud workspace**) removes the machine. The confirmation dialog warns that cloned repositories, uncommitted changes, and agent sessions are lost, and that you cannot undo it. Deleting your Treq account deletes the cloud workspace and its disk too.
 
 ## If your subscription lapses
 
