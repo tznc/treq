@@ -6,6 +6,8 @@
 mod hold;
 mod home;
 mod load;
+#[cfg(test)]
+mod perf;
 mod review;
 mod screens;
 pub mod sheet;
@@ -340,6 +342,11 @@ impl Root {
     self.sheet = None;
     tauri_plugin_gpui::set_back_enabled(self.stack.len() > 1);
     self.save_snapshot(cx);
+    // A page revealed by a pop was cached while it was covered; redraw it
+    // once so state it reads outside the entity (the store) is current.
+    if let Some(page) = self.stack.last() {
+      App::notify(cx, page.view.entity_id());
+    }
     cx.notify();
   }
 
@@ -479,7 +486,20 @@ impl Render for Root {
             }),
         )
       })
-      .child(div().flex_1().min_h_0().child(page.view.clone()))
+      .child(
+        div()
+          .flex_1()
+          .min_h_0()
+          // Cached: a sheet, spinner or caret blink elsewhere in the window
+          // must not re-render the page. It re-renders when it notifies
+          // itself or an entity it observes, or when its bounds change.
+          .child(
+            page
+              .view
+              .clone()
+              .cached(StyleRefinement::default().size_full()),
+          ),
+      )
       .when_some(blocked, |root, reason| {
         root.child(cutoff_overlay(reason, managed, cx))
       })

@@ -29,6 +29,8 @@ pub struct TerminalView {
   focus: FocusHandle,
   size: (u16, u16),
   cell: Option<Size<Pixels>>,
+  /// The part of a line the finger has moved but the view has not scrolled.
+  scroll_remainder: f32,
   /// Set once the remote channel ended.
   pub exit: Option<Option<u32>>,
   on_exit: Option<Box<dyn FnOnce(Option<u32>, &mut Window, &mut App)>>,
@@ -85,10 +87,17 @@ impl TerminalView {
       focus,
       size: (cols, rows),
       cell: None,
+      scroll_remainder: 0.,
       exit: None,
       on_exit: Some(Box::new(on_exit)),
       _reader: reader,
     }
+  }
+
+  /// How many lines the view is scrolled back (measurement tests).
+  #[cfg(test)]
+  pub(crate) fn scrollback_offset(&self) -> usize {
+    self.parser.screen().scrollback()
   }
 
   /// Whether the program asked for application cursor keys (DECCKM),
@@ -108,6 +117,7 @@ impl TerminalView {
     }
     if self.parser.screen().scrollback() > 0 {
       self.parser.screen_mut().set_scrollback(0);
+      self.scroll_remainder = 0.;
       cx.notify();
     }
     let id = self.session_id.clone();
@@ -156,11 +166,27 @@ impl TerminalView {
       ScrollDelta::Lines(delta) => delta.y,
       ScrollDelta::Pixels(delta) => f32::from(delta.y) / LINE_HEIGHT,
     };
-    let current = self.parser.screen().scrollback() as f32;
-    let target = (current + lines).max(0.).round() as usize;
+    let current = self.parser.screen().scrollback();
+    let target = scrolled_to(current, lines, &mut self.scroll_remainder);
     self.parser.screen_mut().set_scrollback(target);
     cx.notify();
   }
+}
+
+/// The scrollback after moving `lines` (positive scrolls back) from
+/// `current`. Touch drags arrive as many small pixel deltas, so the
+/// fraction of a line left over is carried in `remainder` to the next event.
+fn scrolled_to(current: usize, lines: f32, remainder: &mut f32) -> usize {
+  let moved = *remainder + lines;
+  let whole = moved.trunc();
+  *remainder = moved - whole;
+  let target = current as f32 + whole;
+  if moved < 0. && target <= 0. {
+    // At the live screen: nothing to carry back the other way.
+    *remainder = 0.;
+    return 0;
+  }
+  target as usize
 }
 
 impl Drop for TerminalView {
@@ -359,5 +385,36 @@ impl EntityInputHandler for TerminalView {
     _: &mut Context<Self>,
   ) -> Option<usize> {
     None
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn drag(px_per_event: f32, events: usize) -> usize {
+    let (mut scrollback, mut remainder) = (0, 0.);
+    for _ in 0..events {
+      scrollback = scrolled_to(scrollback, px_per_event / LINE_HEIGHT, &mut remainder);
+    }
+    scrollback
+  }
+
+  #[core::prelude::v1::test]
+  fn slow_drags_scroll_and_fast_ones_do_not_overshoot() {
+    // 20 events: 340 px is 20 lines at 17 px per line.
+    assert_eq!(drag(3., 20), 3);
+    assert_eq!(drag(8., 20), 9);
+    assert_eq!(drag(9., 20), 10);
+    assert_eq!(drag(17., 20), 20);
+  }
+
+  #[core::prelude::v1::test]
+  fn dragging_back_to_the_live_screen_stops_there() {
+    let mut remainder = 0.;
+    assert_eq!(scrolled_to(2, -0.4, &mut remainder), 2);
+    assert_eq!(scrolled_to(2, -3., &mut remainder), 0);
+    assert_eq!(remainder, 0.);
+    assert_eq!(scrolled_to(0, 0.5, &mut remainder), 0);
   }
 }

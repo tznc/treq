@@ -238,6 +238,8 @@ impl Sessions {
       .as_ref()
       .and_then(|w| remote::last(&list_request(&target.repo, w)))
       .map_or(Load::Idle, Load::Ready);
+    // `render` reads the host check from the model.
+    cx.observe(&ui::model(cx), |_, _, cx| cx.notify()).detach();
     let mut this = Self {
       target,
       workspace,
