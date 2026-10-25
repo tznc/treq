@@ -6,7 +6,9 @@
 # It must run on the host's libc (or build the musl target instead).
 # Env: QA_SSH_PORT (2222), QA_SSH_CLI (target/cli/debug/treq), JJ_VERSION.
 # QA_SSH_CA: a CA bundle the host must trust, for a TLS-intercepting proxy
-# in front of the spec's Claude Code install.
+# in front of the spec's agent CLI installs.
+# QA_SSH_PROXY: an HTTPS proxy on this machine's loopback the host must use
+# (the container then shares this machine's network, sshd on QA_SSH_PORT).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../../.." && pwd)"
@@ -26,7 +28,12 @@ fi
 
 docker build -q -t "$name" "$here" >/dev/null
 docker rm -f "$name" >/dev/null 2>&1 || true
-docker run -d --name "$name" -p "127.0.0.1:$port:22" "$name" >/dev/null
+if [ -n "${QA_SSH_PROXY:-}" ]; then
+  docker run -d --name "$name" --network host "$name" /usr/sbin/sshd -D -e -p "$port" >/dev/null
+  docker exec "$name" sh -c "printf 'HTTPS_PROXY=%s\\nhttps_proxy=%s\\n' '$QA_SSH_PROXY' '$QA_SSH_PROXY' >> /etc/environment"
+else
+  docker run -d --name "$name" -p "127.0.0.1:$port:22" "$name" >/dev/null
+fi
 docker cp "$work/id_ed25519.pub" "$name:/home/dev/.ssh/authorized_keys"
 docker cp "$cli" "$name:/usr/local/bin/treq"
 docker cp "$work/jj" "$name:/usr/local/bin/jj"

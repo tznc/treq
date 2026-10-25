@@ -1,12 +1,13 @@
 // Remote SSH against a real server: a second app with a fresh home whose
 // ~/.ssh holds the key the server trusts, driven through the Overview
 // screen's machines, the SSH Hosts +, the repository form, New
-// Workspaces, a remote shell, installing Claude Code with its official
-// installer and running it as an agent, and a dropped connection. Opt-in: set QA_SSH_HOST, QA_SSH_PORT, QA_SSH_USER,
+// Workspaces, a remote shell, installing Claude Code, Codex, Cursor and Copilot
+// with their installers and starting each as an agent, and a dropped connection. Opt-in: set QA_SSH_HOST, QA_SSH_PORT, QA_SSH_USER,
 // QA_SSH_KEY (a private key with its `.pub` beside it) and QA_SSH_REPO (a
 // path on the server the run replaces with a fresh Git repository). The
 // server needs `treq`, jj, git, tmux and curl, and must reach
-// claude.ai; `ssh-server/up.sh` starts one in Docker and prints the
+// claude.ai, cursor.com, nodejs.org and registry.npmjs.org;
+// `ssh-server/up.sh` starts one in Docker and prints the
 // variables.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { copyFileSync, mkdirSync } from "node:fs";
@@ -23,7 +24,8 @@ const env = {
   key: process.env.QA_SSH_KEY ?? "",
   repo: process.env.QA_SSH_REPO ?? "",
 };
-const BRANCH = "treq/remote-feature";
+// The sidebar names a workspace by its title, not its branch.
+const WORKSPACE = "Remote feature";
 const sshPort = port + 4;
 let app: ChildProcess;
 let browser: Browser;
@@ -175,17 +177,17 @@ test("ssh remote: New Workspaces creates on the server", async () => {
   await page.getByLabel("Workspaces", { exact: true }).fill("Remote feature");
   await expect(page.getByRole("button", { name: "Create 1 Workspace" })).toBeEnabled({ timeout: 20_000 });
   await page.getByRole("button", { name: "Create 1 Workspace" }).click();
-  const row = page.getByRole("button", { name: BRANCH, exact: true });
+  const row = page.getByRole("button", { name: WORKSPACE, exact: true });
   await expect(row).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole("heading", { name: "New Workspaces" })).toHaveCount(0);
   await shot("workspace-created", "Remote workspace created", [
-    `${BRANCH} shows under WORKSPACES; the dialog closed with no error`,
+    `${WORKSPACE} shows under WORKSPACES; the dialog closed with no error`,
   ]);
   expect(onServer(`ls '${env.repo}/.treq/workspaces'`)).toContain("remote-feature");
 });
 
 test("ssh remote: shell, Changes, Commits and agent", async () => {
-  const row = page.getByRole("button", { name: BRANCH, exact: true });
+  const row = page.getByRole("button", { name: WORKSPACE, exact: true });
   await row.click();
   await row.hover();
   await row.getByRole("button", { name: "Open shell" }).click();
@@ -227,9 +229,78 @@ test("ssh remote: shell, Changes, Commits and agent", async () => {
   await shot("ws-commits", "Remote workspace: committed", ["'Add sub' is the workspace's commit"]);
 });
 
+/** Picks the agent at `row` in Settings' Default Agent select and saves. */
+async function setDefaultAgent(row: number): Promise<void> {
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  // The application's agent: a remote repository's setting is not read.
+  await page.getByRole("tab", { name: "Application" }).click();
+  await page.waitForTimeout(800);
+  const select = page.getByRole("combobox", { name: "Default Agent" });
+  await select.scrollIntoViewIfNeeded();
+  const box = await select.boundingBox();
+  if (!box) throw new Error("no Default Agent select");
+  await select.click();
+  await page.waitForTimeout(800);
+  // Options: Default, Claude, Codex, Cursor, Copilot.
+  await page.mouse.click(box.x + 40, box.y + box.height + 26 + row * 30);
+  await page.waitForTimeout(500);
+  await page.getByRole("button", { name: "Save Settings" }).click();
+  await page.waitForTimeout(1000);
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+}
+
+// The four agent CLIs Treq starts, each with its provider's installer.
+test("ssh remote: install the agent CLIs", async () => {
+  test.setTimeout(900_000);
+  onServer(
+    `set -e; cd ~; mkdir -p ~/.local/bin
+     curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1
+     curl -fsS https://cursor.com/install | bash >/dev/null 2>&1
+     v=$(curl -fsS https://nodejs.org/dist/index.json | grep -o '"v22[.0-9]*"' | head -1 | tr -d '"')
+     curl -fsSL https://nodejs.org/dist/$v/node-$v-linux-x64.tar.gz | tar xz -C ~
+     for b in node npm npx; do ln -sf ~/node-$v-linux-x64/bin/$b ~/.local/bin/$b; done
+     export PATH=~/.local/bin:$PATH; npm config set prefix ~/.local
+     npm i -g @openai/codex @github/copilot >/dev/null 2>&1`,
+  );
+  for (const bin of ["claude", "codex", "cursor-agent", "copilot"]) {
+    // A login shell, as Treq starts agents: npm's CLIs need node on PATH.
+    expect(onServer(`bash -lc '${bin} --version'`)).not.toBe("");
+  }
+});
+
+// Each agent starts from the workspace's Start agent button, with no
+// credentials on the host, and stops at its provider's first-run screen.
+for (const [label, row, bin] of [
+  ["Claude", 1, "claude"],
+  ["Codex", 2, "codex"],
+  ["Cursor", 3, "cursor-agent"],
+  ["Copilot", 4, "copilot"],
+] as const) {
+  test(`ssh remote: start ${label} and send it input`, async () => {
+    // One agent at a time, so its pane has the full width.
+    for (const stop of await page.getByRole("button", { name: "Stop", exact: true }).all()) await stop.click();
+    await setDefaultAgent(row);
+    const workspace = page.getByRole("button", { name: WORKSPACE, exact: true });
+    await workspace.click();
+    await workspace.hover();
+    await workspace.getByRole("button", { name: "Start agent" }).click();
+    await page.waitForTimeout(12_000);
+    await shot(`agent-${bin}`, `${label}: the real CLI's first-run screen`, [
+      `The agent pane, titled '${bin.replace("-", "_")}-…', shows ${label}'s own welcome or sign-in screen`,
+    ]);
+    await page.mouse.click(700, 780);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.type("hello");
+    await page.waitForTimeout(3000);
+    await shot(`agent-${bin}-input`, `${label} after typed input`, [
+      "The screen reacts to the keys: a moved selection, typed text, or the next first-run step",
+    ]);
+  });
+}
+
 test("ssh remote: install Claude Code and run it as an agent", async () => {
   test.setTimeout(600_000);
-  const row = page.getByRole("button", { name: BRANCH, exact: true });
+  const row = page.getByRole("button", { name: WORKSPACE, exact: true });
   // The official installer, typed into the remote shell as a user would.
   await page.mouse.click(700, 780);
   await page.keyboard.type("clear; curl -fsSL https://claude.ai/install.sh | bash\n");

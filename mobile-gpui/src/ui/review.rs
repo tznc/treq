@@ -925,7 +925,7 @@ impl Render for SendSheet {
           )
           .when(chosen.is_none(), |c| {
             c.child(widgets::muted(
-              "No agents on this host. Install Claude Code, Codex or Cursor Agent there, then reconnect.",
+              "No agents on this host. Install Claude Code, Codex, Cursor Agent or Copilot there, then reconnect.",
               cx,
             ))
           }),
