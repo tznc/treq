@@ -7420,6 +7420,12 @@ pub fn jj_push(workspace_path: &str) -> Result<String, JjError> {
       "Cannot push: not on a branch (HEAD is detached). Check out a branch first.".to_string(),
     ));
   }
+  jj_push_bookmark(workspace_path, &branch_name)
+}
+
+/// Push one bookmark to origin, whichever branch the workspace is on.
+pub fn jj_push_bookmark(workspace_path: &str, branch_name: &str) -> Result<String, JjError> {
+  let branch_name = branch_name.to_string();
 
   // Ensure bookmark is tracked before push to avoid non-tracking bookmark warnings.
   let mut tracking_message = String::new();

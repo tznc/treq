@@ -47,6 +47,8 @@ struct FakeHost {
   /// What the merge preview reads, and whether merging fails.
   merge: merge::Preview,
   merge_error: Option<String>,
+  /// Notes a merge reports, such as stacked PRs moved onto a new base.
+  merge_notes: Vec<String>,
   /// What the Code tab reads.
   overview: code_data::Overview,
   history: Option<crate::jj::JjLogResult>,
@@ -560,9 +562,28 @@ impl crate::gpui_shell::popover::PopoverHost for FakeHost {
   }
 }
 
+impl FakeHost {
+  fn merge_result(&self) -> Result<crate::core::MergeResult, String> {
+    match &self.merge_error {
+      Some(err) => Err(err.clone()),
+      None => Ok(crate::core::MergeResult {
+        plan: self
+          .merge
+          .plan
+          .clone()
+          .unwrap_or_else(|| merge_plan(&[], false)),
+        notes: self.merge_notes.clone(),
+      }),
+    }
+  }
+}
+
 impl merge::MergeHost for FakeHost {
-  fn merge_preview(&self, _: &str, workspace_id: i64) -> merge::Preview {
-    self.record(format!("read merge {workspace_id}"));
+  fn merge_preview(&self, _: &str, workspace_id: i64, rollup: bool) -> merge::Preview {
+    self.record(format!(
+      "read merge {workspace_id}{}",
+      if rollup { " rollup" } else { "" }
+    ));
     self.merge.clone()
   }
 
@@ -572,9 +593,35 @@ impl merge::MergeHost for FakeHost {
     workspace_id: i64,
     message: &str,
     strategy: merge::Strategy,
-  ) -> Result<(), String> {
-    self.record(format!("merge {workspace_id} {strategy:?} {message:?}"));
-    self.merge_error.clone().map_or(Ok(()), Err)
+    options: crate::core::LocalMergeOptions,
+  ) -> Result<crate::core::MergeResult, String> {
+    let mut line = format!("merge {workspace_id} {strategy:?} {message:?}");
+    if options.rollup {
+      line.push_str(" rollup");
+    }
+    if options.push {
+      line.push_str(" push");
+    }
+    self.record(line);
+    self.merge_result()
+  }
+
+  fn merge_on_github(
+    &self,
+    _: &str,
+    workspace_id: i64,
+    request: &merge::GithubMerge,
+  ) -> Result<crate::core::MergeResult, String> {
+    self.record(format!(
+      "merge on github {workspace_id} {}#{} {:?} {:?}",
+      request.repo_full_name, request.pr_number, request.method, request.subject
+    ));
+    self.merge_result()
+  }
+
+  fn sync_merged(&self, _: &str, workspace_id: i64) -> Result<crate::core::MergeResult, String> {
+    self.record(format!("sync merged {workspace_id}"));
+    self.merge_result()
   }
 }
 
@@ -3666,7 +3713,57 @@ fn merge_preview(commits: usize) -> merge::Preview {
       }))
       .expect("diff"),
     ),
-    error: None,
+    plan: Some(merge_plan(&[], false)),
+    ..merge::Preview::default()
+  }
+}
+
+/// The landing plan of the `feature` workspace into `develop`, moving
+/// `retargeted` children onto it.
+fn merge_plan(retargeted: &[&str], can_rollup: bool) -> crate::core::MergeLandingPlan {
+  crate::core::MergeLandingPlan {
+    target_branch: "develop".into(),
+    landed_branches: vec!["feature".into()],
+    retargeted: retargeted
+      .iter()
+      .enumerate()
+      .map(|(i, branch)| crate::core::WorkspaceRetarget {
+        workspace_id: 20 + i as i64,
+        branch_name: branch.to_string(),
+        from_branch: "feature".into(),
+        to_branch: "develop".into(),
+      })
+      .collect(),
+    can_rollup,
+  }
+}
+
+/// The preview with PR #7 for `feature` on GitHub (`o/r`), whose default
+/// merge method is squash and which forbids rebase merges.
+fn github_preview(state: &str, merge_state: &str, base: &str) -> merge::Preview {
+  merge::Preview {
+    github: Some(merge::GithubPr {
+      repo_full_name: "o/r".into(),
+      pr: crate::github::PrInfo {
+        number: 7,
+        title: "Feature".into(),
+        state: state.into(),
+        url: "https://github.com/o/r/pull/7".into(),
+        head_ref_name: "feature".into(),
+        base_ref_name: base.into(),
+        merge_state_status: Some(merge_state.into()),
+        is_draft: false,
+      },
+      settings: Some(crate::github::GhRepoMergeSettings {
+        default_method: crate::github::GhMergeMethod::Squash,
+        allowed_methods: vec![
+          crate::github::GhMergeMethod::Merge,
+          crate::github::GhMergeMethod::Squash,
+        ],
+      }),
+    }),
+    can_push: true,
+    ..merge_preview(2)
   }
 }
 
@@ -3792,6 +3889,218 @@ fn merge_preview_collapses_files_and_goes_back(cx: &mut TestAppContext) {
     h.sent(),
     vec![ScreenAction::Press {
       id: "mergePreview.cancel".into()
+    }]
+  );
+}
+
+#[gpui::test]
+fn merge_preview_without_a_pr_merges_locally_only(cx: &mut TestAppContext) {
+  let (mut h, _) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge_preview(1),
+      ..FakeHost::default()
+    },
+  );
+  assert!(h.drawn("merge-landing"));
+  assert!(!h.drawn("merge-location-github"));
+  assert!(!h.drawn("merge-push"));
+}
+
+#[gpui::test]
+fn merge_preview_lists_children_it_retargets(cx: &mut TestAppContext) {
+  let (mut h, _) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge::Preview {
+        plan: Some(merge_plan(&["child"], false)),
+        ..merge_preview(1)
+      },
+      ..FakeHost::default()
+    },
+  );
+  assert_eq!(
+    merge_view(&mut h, |v| v.landing_lines()),
+    [
+      "feature lands in develop.",
+      "child is retargeted onto develop (was feature)",
+    ]
+  );
+}
+
+#[gpui::test]
+fn merge_preview_pushes_the_target_by_default(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge::Preview {
+        can_push: true,
+        ..merge_preview(1)
+      },
+      ..FakeHost::default()
+    },
+  );
+  assert!(h.drawn("merge-push"));
+  h.click("merge-confirm");
+  h.cx.run_until_parked();
+  assert!(host.writes()[0].ends_with(" push"), "{:?}", host.writes());
+}
+
+#[gpui::test]
+fn merge_preview_skips_the_push_when_unticked(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge::Preview {
+        can_push: true,
+        ..merge_preview(1)
+      },
+      ..FakeHost::default()
+    },
+  );
+  h.click("merge-push");
+  h.click("merge-confirm");
+  h.cx.run_until_parked();
+  assert!(!host.writes()[0].ends_with(" push"), "{:?}", host.writes());
+}
+
+#[gpui::test]
+fn merge_preview_rolls_up_a_stack(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge::Preview {
+        plan: Some(merge_plan(&[], true)),
+        rollup_root: Some("main".into()),
+        ..merge_preview(1)
+      },
+      ..FakeHost::default()
+    },
+  );
+  h.click("merge-rollup");
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"read merge 7 rollup".to_string()));
+  h.click("merge-confirm");
+  h.cx.run_until_parked();
+  assert!(host.writes()[0].ends_with(" rollup"), "{:?}", host.writes());
+}
+
+#[gpui::test]
+fn merge_preview_merges_the_pr_on_github_with_the_repo_default(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: github_preview("OPEN", "CLEAN", "develop"),
+      merge_notes: vec!["Moved PR #8 (child) onto develop".into()],
+      ..FakeHost::default()
+    },
+  );
+  h.click("merge-location-github");
+  assert_eq!(merge_view(&mut h, |v| v.strategy), merge::Strategy::Squash);
+  assert!(!h.drawn("merge-push"));
+  h.click("merge-strategy");
+  assert!(h.drawn("merge-strategy-squash"));
+  assert!(!h.drawn("merge-strategy-rebase"));
+  h.click("merge-strategy-squash");
+  h.click("merge-confirm");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "merge on github 7 o/r#7 Squash None",
+      "notify toast Pull request merged",
+      "notify toast Stacked pull requests updated",
+    ]
+  );
+  assert_eq!(
+    h.sent(),
+    vec![ScreenAction::Press {
+      id: "mergePreview.merged".into()
+    }]
+  );
+}
+
+#[gpui::test]
+fn merge_preview_hints_the_github_message_is_optional(cx: &mut TestAppContext) {
+  let (mut h, _) = merge_harness(
+    cx,
+    FakeHost {
+      merge: github_preview("OPEN", "CLEAN", "develop"),
+      ..FakeHost::default()
+    },
+  );
+  let placeholder = |h: &mut Harness| {
+    h.screen.read_with(&h.cx, |screen, cx| {
+      screen
+        .merge
+        .as_ref()
+        .expect("merge view")
+        .read(cx)
+        .message_placeholder()
+    })
+  };
+  assert_eq!(placeholder(&mut h), "Enter merge commit message...");
+  h.click("merge-location-github");
+  assert!(h.drawn("merge-message"));
+  assert_eq!(
+    placeholder(&mut h),
+    "Leave empty to use GitHub's default message"
+  );
+}
+
+#[gpui::test]
+fn merge_preview_warns_what_github_reports(cx: &mut TestAppContext) {
+  let (mut h, _) = merge_harness(
+    cx,
+    FakeHost {
+      merge: github_preview("OPEN", "DIRTY", "develop"),
+      ..FakeHost::default()
+    },
+  );
+  assert!(!h.drawn("merge-warning-0"));
+  h.click("merge-location-github");
+  assert!(h.drawn("merge-warning-0"));
+  assert_eq!(
+    merge_view(&mut h, |v| v.warnings()),
+    ["This pull request has merge conflicts on GitHub. Resolve them before merging."]
+  );
+}
+
+#[gpui::test]
+fn merge_preview_blocks_a_pr_with_another_base(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: github_preview("OPEN", "CLEAN", "main"),
+      ..FakeHost::default()
+    },
+  );
+  h.click("merge-location-github");
+  h.click("merge-confirm");
+  h.cx.run_until_parked();
+  assert!(host.writes().is_empty());
+}
+
+#[gpui::test]
+fn merge_preview_syncs_a_pr_already_merged(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: github_preview("MERGED", "CLEAN", "develop"),
+      ..FakeHost::default()
+    },
+  );
+  assert!(!h.drawn("merge-location-github"));
+  h.click("merge-sync");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    ["sync merged 7", "notify toast Workspace synced"]
+  );
+  assert_eq!(
+    h.sent(),
+    vec![ScreenAction::Press {
+      id: "mergePreview.merged".into()
     }]
   );
 }
