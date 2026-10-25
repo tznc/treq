@@ -1,4 +1,27 @@
 {
+  "model": "opus",
+  "effortLevel": "low",
+  "env": {
+    "BASH_MAX_OUTPUT_LENGTH": "20000",
+    "MAX_MCP_OUTPUT_TOKENS": "10000",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"
+  },
+  "permissions": {
+    "deny": [
+      "Read(./target/**)",
+      "Read(./src-tauri/target/**)",
+      "Read(./src-tauri/gen/**)",
+      "Read(./mobile-gpui/target/**)",
+      "Read(./mobile-gpui/dist/**)",
+      "Read(./**/node_modules/**)",
+      "Read(./web/build/**)",
+      "Read(./web/.docusaurus/**)",
+      "Read(./web/package-lock.json)",
+      "Read(./supabase/.temp/**)",
+      "Read(./supabase/.branches/**)",
+      "Read(./coverage/**)"
+    ]
+  },
   "attribution": {
     "commit": "",
     "pr": "",
@@ -39,5 +62,23 @@
         ]
       }
     ]
-  }
+  },
+  "disableBundledSkills": true,
+  "maxEffortLevel": "medium",
+  "precomputeCompactionEnabled": false,
+  "skillOverrides": {
+    "anthropic-skills:pptx": "off",
+    "anthropic-skills:xlsx": "off",
+    "anthropic-skills:docx": "off",
+    "anthropic-skills:pdf": "off",
+    "anthropic-skills:morning": "off",
+    "anthropic-skills:import-memory": "off",
+    "anthropic-skills:google-workspace": "off",
+    "anthropic-skills:computer-use": "off",
+    "anthropic-skills:chrome-browser": "off",
+    "anthropic-skills:built-in-browser": "off",
+    "anthropic-skills:deep-research": "off"
+  },
+  "skillListingMaxDescChars": 400,
+  "bashOutputMaxChars": 20000
 }

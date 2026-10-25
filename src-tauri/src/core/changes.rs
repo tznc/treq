@@ -1,6 +1,6 @@
 use crate::result_ext::ResultExt;
 use crate::{jj, local_db};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -56,30 +56,37 @@ pub(crate) fn deduplicate_file_paths(file_paths: Vec<String>) -> Vec<String> {
     .collect()
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceFileHunksBatchFile {
   pub path: String,
+  #[serde(default)]
   pub hunks: Vec<jj::JjDiffHunk>,
-  #[serde(skip_serializing_if = "Option::is_none")]
+  #[serde(default, skip_serializing_if = "Option::is_none")]
   pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+/// Also what a remote host's `DiffFiles` answers.
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceFileHunksBatch {
   /// Names the working-copy diff the files were read from, and the marker
   /// style; empty when unknown. Equal tokens mean equal hunks.
+  #[serde(default)]
   pub snapshot_token: String,
   pub files: Vec<WorkspaceFileHunksBatchFile>,
 }
 
-/// [`list_file_hunks`] for several files, read from one snapshot.
+/// [`list_file_hunks`] for several files, read from one snapshot. With the
+/// `token` of the diff the files were listed from (`working_copy_token`),
+/// they are read from that diff's trees instead, with no snapshot; a token
+/// naming no trees (or another marker style) falls back to the snapshot.
 pub fn list_file_hunks_batch(
   repo_path: &str,
   workspace_id: Option<i64>,
   file_paths: Vec<String>,
   conflict_marker_style: &str,
+  token: Option<&str>,
 ) -> Result<WorkspaceFileHunksBatch, String> {
   if repo_path.trim().is_empty() {
     return Err("Repository path cannot be empty".to_string());
@@ -87,20 +94,35 @@ pub fn list_file_hunks_batch(
   let path = resolve_workspace_dir(repo_path, workspace_id)?;
   let paths = deduplicate_file_paths(file_paths);
   let error = |e: jj::JjError| format!("Failed to get file hunks: {}", e);
-  let (snapshot_token, hunks): (String, Vec<Result<_, String>>) =
-    match jj::jj_get_file_hunks_batch(&path, &paths, conflict_marker_style) {
-      Ok((token, hunks)) => (
-        format!("{token}:{conflict_marker_style}"),
-        hunks.into_iter().map(|h| h.map_err(error)).collect(),
-      ),
-      Err(e) => {
-        let message = error(e);
-        (
-          String::new(),
-          paths.iter().map(|_| Err(message.clone())).collect(),
-        )
+  let suffix = format!(":{conflict_marker_style}");
+  let at_token = token
+    .and_then(|token| token.strip_suffix(&suffix))
+    .and_then(|trees| {
+      match jj::jj_get_file_hunks_at(&path, trees, &paths, conflict_marker_style) {
+        Ok(read) => read,
+        Err(e) => {
+          log::warn!("Failed to read file hunks at {trees}: {e}");
+          None
+        }
       }
-    };
+    });
+  let read = match at_token {
+    Some(read) => Ok(read),
+    None => jj::jj_get_file_hunks_batch(&path, &paths, conflict_marker_style),
+  };
+  let (snapshot_token, hunks): (String, Vec<Result<_, String>>) = match read {
+    Ok((token, hunks)) => (
+      format!("{token}{suffix}"),
+      hunks.into_iter().map(|h| h.map_err(error)).collect(),
+    ),
+    Err(e) => {
+      let message = error(e);
+      (
+        String::new(),
+        paths.iter().map(|_| Err(message.clone())).collect(),
+      )
+    }
+  };
   let files = paths
     .into_iter()
     .zip(hunks)

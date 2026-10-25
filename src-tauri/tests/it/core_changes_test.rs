@@ -834,7 +834,7 @@ fn list_file_hunks_batch_matches_single_file_reads() {
     .to_vec();
 
   let batch =
-    treq_lib::core::list_file_hunks_batch(&repo.repo_path, Some(workspace.id), paths, "git")
+    treq_lib::core::list_file_hunks_batch(&repo.repo_path, Some(workspace.id), paths, "git", None)
       .expect("batch read should succeed");
 
   let read: Vec<&str> = batch.files.iter().map(|f| f.path.as_str()).collect();
@@ -880,6 +880,7 @@ fn list_file_hunks_batch_token_follows_working_copy_edits() {
       Some(workspace.id),
       vec!["a.txt".into()],
       "git",
+      None,
     )
     .expect("batch read should succeed")
     .snapshot_token
@@ -890,4 +891,169 @@ fn list_file_hunks_batch_token_follows_working_copy_edits() {
   assert_eq!(token(), first, "an unchanged working copy keeps its token");
   TestRepo::write_workspace_file(&workspace_path, "a.txt", "one\ntwo\n").unwrap();
   assert_ne!(token(), first, "an edit changes it");
+}
+
+#[test]
+fn list_file_hunks_batch_reads_the_diffs_trees() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let workspace = repo
+    .create_workspace_simple("feat/hunk-trees")
+    .expect("Failed to create workspace");
+  let workspace_path = repo.workspace_full_path(&workspace);
+  TestRepo::write_workspace_file(&workspace_path, "a.txt", "one\n").unwrap();
+  let diff =
+    treq_lib::core::workspaces::workspace_cli_diff(&repo.repo_path, workspace.id).expect("diff");
+  let token = diff.working_copy_token.expect("a token");
+  let before =
+    treq_lib::core::list_file_hunks(&repo.repo_path, Some(workspace.id), "a.txt", "git").unwrap();
+  // Edited after the list was read: the batch still shows the list's state.
+  TestRepo::write_workspace_file(&workspace_path, "a.txt", "one\ntwo\n").unwrap();
+
+  let batch = treq_lib::core::list_file_hunks_batch(
+    &repo.repo_path,
+    Some(workspace.id),
+    vec!["a.txt".into()],
+    "git",
+    Some(&token),
+  )
+  .expect("batch read should succeed");
+
+  assert_eq!(batch.snapshot_token, token);
+  assert_eq!(
+    serde_json::to_value(&batch.files[0].hunks).unwrap(),
+    serde_json::to_value(&before).unwrap()
+  );
+  let fresh =
+    treq_lib::core::list_file_hunks(&repo.repo_path, Some(workspace.id), "a.txt", "git").unwrap();
+  assert_ne!(
+    serde_json::to_value(&fresh).unwrap(),
+    serde_json::to_value(&before).unwrap(),
+    "a read without the token sees the edit"
+  );
+}
+
+#[test]
+fn list_file_hunks_batch_from_trees_matches_snapshot_reads() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let workspace = repo
+    .create_workspace_with_commit(
+      "feat/hunk-tree-match",
+      "shared.txt",
+      "workspace side\n",
+      None,
+    )
+    .expect("create workspace with commit");
+  let ws_dir = repo.workspace_full_path(&workspace);
+  let ws_change_id = get_change_id(&ws_dir, "@-").expect("workspace change id");
+  repo
+    .create_file("shared.txt", "main side\n")
+    .expect("write main shared.txt");
+  treq_lib::jj::jj_commit(&repo.repo_path, "main commit").expect("commit main");
+  let main_change_id = get_change_id(&repo.repo_path, "@-").expect("main change id");
+  // The working copy's parent is a conflicted merge: its tree has several ids.
+  TestRepo::jj_new(&ws_dir, &[&ws_change_id, &main_change_id]).expect("conflicted merge");
+  TestRepo::jj_new(&ws_dir, &["@"]).expect("child of conflicted merge");
+  TestRepo::write_workspace_file(&ws_dir, "shared.txt", "resolved\n").unwrap();
+  TestRepo::write_workspace_file(&ws_dir, "added.txt", "new\n").unwrap();
+  TestRepo::write_workspace_file(&ws_dir, "bin.dat", "a\0b\0c").unwrap();
+  let diff =
+    treq_lib::core::workspaces::workspace_cli_diff(&repo.repo_path, workspace.id).expect("diff");
+  let token = diff.working_copy_token.expect("a token");
+  assert!(token.contains(','), "a conflicted parent tree: {token}");
+  let paths: Vec<String> = diff
+    .uncommitted_files
+    .iter()
+    .map(|f| f.path.clone())
+    .collect();
+  assert_eq!(paths.len(), 3, "{paths:?}");
+  let read = |token: Option<&str>| {
+    treq_lib::core::list_file_hunks_batch(
+      &repo.repo_path,
+      Some(workspace.id),
+      paths.clone(),
+      "git",
+      token,
+    )
+    .expect("batch read should succeed")
+  };
+
+  let from_trees = read(Some(&token));
+  let from_snapshot = read(None);
+
+  assert_eq!(from_trees.snapshot_token, from_snapshot.snapshot_token);
+  for (a, b) in from_trees.files.iter().zip(&from_snapshot.files) {
+    assert_eq!(a.path, b.path);
+    assert_eq!(a.error, b.error);
+    assert_eq!(
+      serde_json::to_value(&a.hunks).unwrap(),
+      serde_json::to_value(&b.hunks).unwrap(),
+      "{}",
+      a.path
+    );
+  }
+}
+
+#[test]
+fn list_file_hunks_batch_snapshots_for_a_token_naming_no_trees() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let workspace = repo
+    .create_workspace_simple("feat/hunk-bad-token")
+    .expect("Failed to create workspace");
+  let workspace_path = repo.workspace_full_path(&workspace);
+  TestRepo::write_workspace_file(&workspace_path, "a.txt", "one\n").unwrap();
+  let read = |token: &str| {
+    treq_lib::core::list_file_hunks_batch(
+      &repo.repo_path,
+      Some(workspace.id),
+      vec!["a.txt".into()],
+      "git",
+      Some(token),
+    )
+    .expect("batch read should succeed")
+  };
+  let fresh = read("").snapshot_token;
+
+  for token in [
+    "garbage:git",
+    "00..00:git",
+    "0123456789abcdef0123456789abcdef01234567..0123456789abcdef0123456789abcdef01234567:git",
+    // Another marker style than the read's.
+    &fresh.replace(":git", ":diff"),
+  ] {
+    let batch = read(token);
+    assert_eq!(batch.snapshot_token, fresh, "{token}");
+    assert!(batch.files[0].error.is_none(), "{token}");
+    assert!(!batch.files[0].hunks.is_empty(), "{token}");
+  }
+}
+
+#[test]
+fn workspace_diff_names_each_files_content() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let workspace = repo
+    .create_workspace_simple("feat/content-ids")
+    .expect("Failed to create workspace");
+  let workspace_path = repo.workspace_full_path(&workspace);
+  TestRepo::write_workspace_file(&workspace_path, "a.txt", "one\n").unwrap();
+  TestRepo::write_workspace_file(&workspace_path, "b.txt", "two\n").unwrap();
+  let ids = || {
+    let diff =
+      treq_lib::core::workspaces::workspace_cli_diff(&repo.repo_path, workspace.id).expect("diff");
+    diff
+      .uncommitted_files
+      .into_iter()
+      .map(|f| (f.path, f.content_id.expect("a content id")))
+      .collect::<std::collections::HashMap<_, _>>()
+  };
+
+  let first = ids();
+  assert_eq!(ids(), first, "an unchanged working copy keeps its ids");
+  TestRepo::write_workspace_file(&workspace_path, "a.txt", "one\nmore\n").unwrap();
+  let second = ids();
+
+  assert_ne!(
+    second["a.txt"], first["a.txt"],
+    "the edited file's id changes"
+  );
+  assert_eq!(second["b.txt"], first["b.txt"], "the other file's id stays");
 }
