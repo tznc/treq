@@ -303,12 +303,20 @@ fn linear_lists_issues_and_kicks_one_off(cx: &mut TestAppContext) {
       })
     )]
   );
-  // The identifier opens the issue in Linear without expanding the row.
-  h.click("linear-issue-link-1");
+  // The agent button doesn't open the issue's page.
+  assert!(view(&mut h, |v| v.open_issue.is_none()));
+
+  // The row opens the page, which opens the issue in Linear and goes back.
+  h.click("linear-issue-1");
+  assert!(h.drawn("linear-issue-page-1"));
+  assert!(!h.drawn("linear-issue-2"));
+  h.click("linear-issue-open");
   assert!(host
     .calls()
     .contains(&"open https://linear.app/x/ENG-1".to_string()));
-  assert!(view(&mut h, |v| v.expanded.is_empty()));
+  h.click("linear-issue-back");
+  assert!(!h.drawn("linear-issue-page-1"));
+  assert!(h.drawn("linear-issue-2"));
 }
 
 #[gpui::test]
@@ -397,6 +405,11 @@ fn linear_kanban_groups_issues_by_state(cx: &mut TestAppContext) {
     &h.sent()[..],
     [ScreenAction::Field { field, value }] if field == "linear.kickoff" && value["id"] == "2"
   ));
+  assert!(view(&mut h, |v| v.open_issue.is_none()));
+  // A card opens the issue's page.
+  h.click("linear-kanban-card-2");
+  assert!(h.drawn("linear-issue-page-2"));
+  assert!(!h.drawn("linear-kanban-column-Todo"));
 }
 
 #[gpui::test]
@@ -409,7 +422,7 @@ fn linear_issue_shows_its_comments_and_starts_a_review(cx: &mut TestAppContext) 
   );
   let (mut h, host) = linear_harness(cx, host);
   h.click("linear-issue-1");
-  assert!(h.drawn("linear-issue-expanded-1"));
+  assert!(h.drawn("linear-issue-page-1"));
   assert!(host.calls().contains(&"read linear comments 1".to_string()));
   assert!(h.drawn("linear-comment-c1"));
   h.click("linear-start-review-linear_issue-1");
@@ -437,9 +450,9 @@ fn linear_issue_shows_its_comments_and_starts_a_review(cx: &mut TestAppContext) 
   assert!(!view(&mut h, |v| v
     .starting
     .contains(&linear_data::Commented::Issue("1".into()))));
-  // Folding it closes the comments.
-  h.click("linear-issue-1");
-  assert!(!h.drawn("linear-issue-expanded-1"));
+  // Back to the list closes the comments.
+  h.click("linear-issue-back");
+  assert!(!h.drawn("linear-comment-c1"));
 }
 
 #[gpui::test]
