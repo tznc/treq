@@ -1525,6 +1525,16 @@ pub(super) fn scrolling_markdown(
   markdown_view(id, text, size, dark, true).size_full()
 }
 
+fn markdown_text_size(size: f32) -> TextSize {
+  match size {
+    s if s <= 11. => TextSize::Xs,
+    s if s <= 12. => TextSize::Code,
+    s if s <= 14. => TextSize::Sm,
+    s if s <= 17. => TextSize::Lg,
+    _ => TextSize::Xl,
+  }
+}
+
 fn markdown_view(
   id: impl Into<SharedString>,
   text: &str,
@@ -1533,12 +1543,7 @@ fn markdown_view(
   scrollable: bool,
 ) -> Div {
   let id: SharedString = id.into();
-  let text_size = match size {
-    s if s <= 12. => TextSize::Xs,
-    s if s <= 14. => TextSize::Sm,
-    s if s <= 17. => TextSize::Lg,
-    _ => TextSize::Xl,
-  };
+  let text_size = markdown_text_size(size);
   let size = text_size.metrics().0;
   let style = TextViewStyle {
     is_dark: dark,

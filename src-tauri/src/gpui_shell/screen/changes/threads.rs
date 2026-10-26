@@ -519,7 +519,7 @@ impl ChangesView {
         super::super::code::markdown(
           format!("github-comment-{}", comment.id),
           &comment.body,
-          13.,
+          TextSize::Code.metrics().0,
           self.dark,
         ),
       ))

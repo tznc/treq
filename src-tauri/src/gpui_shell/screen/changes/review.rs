@@ -417,7 +417,7 @@ impl ChangesView {
     cx.notify();
   }
 
-  fn start_edit(&mut self, id: &str, text: &str, cx: &mut Context<Self>) {
+  pub(super) fn start_edit(&mut self, id: &str, text: &str, cx: &mut Context<Self>) {
     self.review.editing = Some(id.into());
     self.review.edit_text = text.into();
     self.review.edit_input = None;
@@ -897,7 +897,7 @@ impl ChangesView {
   /// [`is_outdated`] for `comment` against `hunks`, worked out once per
   /// layout: it reads the hunk's lines, and every row it could sit under
   /// asks.
-  fn is_outdated_in(&self, comment: &LineComment, hunks: &[JjDiffHunk]) -> bool {
+  pub(super) fn is_outdated_in(&self, comment: &LineComment, hunks: &[JjDiffHunk]) -> bool {
     let known = (self.layout_gen, comment.start_line, comment.end_line);
     let cached = self.review.outdated.borrow().get(&comment.id).copied();
     if let Some((generation, start, end, outdated)) = cached {
@@ -1188,8 +1188,9 @@ impl ChangesView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> gpui::AnyElement {
+    // Comment text reads at the diff's code size, so it follows zoom with it.
     let box_ = || {
-      div()
+      ui::text(div(), TextSize::Code)
         .bg(p.background)
         .rounded(radius::MD)
         .p_3()
@@ -1218,7 +1219,9 @@ impl ChangesView {
     let card = box_()
       .id(SharedString::from(format!("comment-{id}")))
       .debug_selector(move || selector.into())
-      .group("comment-card")
+      .role(gpui::Role::Button)
+      .aria_label("Edit comment")
+      .test_support()
       .cursor_pointer()
       .hover(|s| s.shadow_md())
       .on_click(cx.listener(move |view, _, _, cx| view.start_edit(&edit, &body, cx)))
@@ -1227,14 +1230,6 @@ impl ChangesView {
           .flex()
           .items_start()
           .gap_2()
-          .child(
-            div()
-              .mt_0p5()
-              .flex_none()
-              .opacity(0.)
-              .group_hover("comment-card", |s| s.opacity(1.))
-              .child(ui::icon(theme::ICON_PENCIL, 12., muted)),
-          )
           .child(self.comment_body(id, text, p, cx))
           .child(
             self.tip(
@@ -1345,7 +1340,7 @@ impl ChangesView {
           .review
           .edit_input
           .as_ref()
-          .map(|i| Textarea::new(&i.state)),
+          .map(|i| ui::text(Textarea::new(&i.state), TextSize::Code)),
       )
       .child(
         div()
@@ -1391,7 +1386,7 @@ impl ChangesView {
       .draft
       .as_ref()
       .is_some_and(|d| suggestion_block(d).is_some());
-    div()
+    ui::text(div(), TextSize::Code)
       .debug_selector(|| "comment-input".into())
       .bg(p.muted)
       .border_1()
@@ -1437,13 +1432,11 @@ impl ChangesView {
             .child(d.line_content.join(" ")),
         )
       }))
-      .children(
-        self
-          .review
-          .draft_input
-          .as_ref()
-          .map(|i| div().mb_2().child(Textarea::new(&i.state))),
-      )
+      .children(self.review.draft_input.as_ref().map(|i| {
+        div()
+          .mb_2()
+          .child(ui::text(Textarea::new(&i.state), TextSize::Code))
+      }))
       .child(
         div()
           .flex()
@@ -1687,13 +1680,11 @@ impl ChangesView {
           .py_3()
           .font_family(theme::SANS_FONT)
           .child(div().mb_2().text_color(p.muted_foreground).child(label))
-          .children(
-            self
-              .review
-              .note_input
-              .as_ref()
-              .map(|i| div().mb_2().child(Textarea::new(&i.state))),
-          )
+          .children(self.review.note_input.as_ref().map(|i| {
+            div()
+              .mb_2()
+              .child(ui::text(Textarea::new(&i.state), TextSize::Code))
+          }))
           .child(
             div()
               .flex()

@@ -651,7 +651,7 @@ impl ChangesView {
           reply
             .input
             .as_ref()
-            .map(|(state, _)| ui::text(Textarea::new(state), TextSize::Xs).min_h(zpx(60.))),
+            .map(|(state, _)| ui::text(Textarea::new(state), TextSize::Code).min_h(zpx(60.))),
         )
         .children(reply.error.clone().map(|err| {
           ui::text(div(), TextSize::Xs)
