@@ -230,6 +230,9 @@ pub enum Size {
   IconSm,
   IconXs,
   Lg,
+  /// [`theme::CONTROL_MD`] tall: the toolbar and header size, which
+  /// [`SplitButton`] and status pills share.
+  Md,
   Sm,
   Xs,
 }
@@ -511,7 +514,7 @@ impl RenderOnce for Button {
       .debug_selector(move || selector)
       .whitespace_nowrap()
       .font_weight(gpui::FontWeight::MEDIUM)
-      .rounded(zpx(8.))
+      .rounded(zpx(theme::RADIUS_MD))
       .p_0()
       .min_h_0()
       .when(self.variant != Variant::Outline, |b| b.border_0())
@@ -521,6 +524,7 @@ impl RenderOnce for Button {
         Size::IconSm => b.size(zpx(32.)),
         Size::IconXs => b.size(zpx(24.)),
         Size::Lg => text(b.h(zpx(44.)).px_6(), TextSize::Lg),
+        Size::Md => text(b.h(zpx(theme::CONTROL_MD)).px_2p5(), TextSize::Sm),
         Size::Sm => text(b.h(zpx(32.)).px_3(), TextSize::Sm),
         Size::Xs => text(b.h(zpx(24.)).px_2(), TextSize::Sm),
       })

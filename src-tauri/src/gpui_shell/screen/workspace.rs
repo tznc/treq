@@ -164,6 +164,15 @@ pub struct ViewPr {
 }
 
 /// React's `View PR (#12, open)`: the number and state the icon and color show.
+/// What the sync pip signals, as its tooltip and accessible name say it.
+fn sync_state(sync: &Sync) -> String {
+  match (sync.ahead, sync.behind) {
+    (a, 0) => format!("{a} to push"),
+    (0, b) => format!("{b} to pull"),
+    (a, b) => format!("{a} to push, {b} to pull"),
+  }
+}
+
 fn view_pr_name(pr: &ViewPr) -> String {
   let state = if pr.draft {
     "draft"
@@ -1316,7 +1325,7 @@ impl WorkspaceView {
       .ml_auto();
     if let Some(push) = &h.push {
       let button = Button::new("workspace-push", p)
-        .size(Size::Sm)
+        .size(Size::Md)
         .disabled(push.disabled)
         .icon(theme::ICON_UPLOAD, 16.)
         .label("Push")
@@ -1373,7 +1382,7 @@ impl WorkspaceView {
           div()
             .id("workspace-status-skeleton")
             .debug_selector(|| "workspace-status-skeleton".into())
-            .h(zpx(24.))
+            .h(zpx(theme::CONTROL_MD))
             .w(zpx(56.))
             .rounded(radius::SM)
             .bg(p.muted.opacity(0.6))
@@ -1396,7 +1405,7 @@ impl WorkspaceView {
         } else {
           Variant::Outline
         })
-        .size(Size::Sm)
+        .size(Size::Md)
         .gap_1()
         .disabled(merge.disabled)
         .when(merge.passing, |b| {
@@ -1425,7 +1434,7 @@ impl WorkspaceView {
           .child(
             Button::new("workspace-more", p)
               .variant(Variant::Ghost)
-              .size(Size::Sm)
+              .size(Size::Md)
               .px_1()
               .disabled(more.disabled)
               .icon(theme::ICON_MORE, 16.)
@@ -1550,16 +1559,17 @@ impl WorkspaceView {
   }
 
   fn sync(&self, sync: &Sync, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
-    let dot = ui::Tone::Warning.color(p);
+    // The header only draws sync while the branch and its remote differ;
+    // the pip says so at a glance, and the tooltip says by how much.
+    let state = sync_state(sync);
     let button = Button::new("workspace-sync", p)
-      .aria_label("Sync with remote")
+      .aria_label(format!("Sync with remote: {state}"))
       .variant(if sync.ahead > 0 {
         Variant::Outline
       } else {
         Variant::Ghost
       })
-      .size(Size::Sm)
-      .h(zpx(24.))
+      .size(Size::Md)
       .gap_1()
       .px_2()
       .text_color(p.muted_foreground)
@@ -1579,31 +1589,33 @@ impl WorkspaceView {
       .with_tooltip(
         "workspace-sync",
         Some(TooltipContent::Text(
-          "Sync with remote (fetch and push)".into(),
+          format!("{state}. Sync with remote (fetch and push)").into(),
         )),
         button,
         cx,
       )
       .child(
+        // Solid status colour, ringed in the background so it reads against
+        // the button's border in both themes; inset so nothing clips it.
         div()
+          .debug_selector(|| "workspace-sync-pip".into())
           .absolute()
-          .top(zpx(-2.))
-          .right(zpx(-2.))
+          .top(zpx(-3.))
+          .right(zpx(-3.))
           .size(zpx(8.))
           .rounded_full()
-          .bg(dot)
-          .with_animation("workspace-sync-pulse", pulse(), |el, delta| {
-            el.opacity(0.5 * pulse_opacity(delta))
-          }),
+          .border_2()
+          .border_color(p.background)
+          .bg(ui::Tone::Warning.color(p)),
       )
   }
 
   fn checks(&self, checks: &Checks, p: &Palette) -> Button {
     let icon = match checks.status.as_deref() {
-      Some("passed") => ui::icon(theme::ICON_CIRCLE_CHECK, 14., ui::Tone::Success.color(p)),
-      Some("failed") => ui::icon(theme::ICON_CIRCLE_X, 14., ui::Tone::Danger.color(p)),
-      Some(_) => ui::icon(theme::ICON_SPINNER, 14., p.muted_foreground),
-      None => ui::icon(theme::ICON_CIRCLE_DOT, 14., p.muted_foreground),
+      Some("passed") => ui::icon(theme::ICON_CIRCLE_CHECK, 16., ui::Tone::Success.color(p)),
+      Some("failed") => ui::icon(theme::ICON_CIRCLE_X, 16., ui::Tone::Danger.color(p)),
+      Some(_) => ui::icon(theme::ICON_SPINNER, 16., p.muted_foreground),
+      None => ui::icon(theme::ICON_CIRCLE_DOT, 16., p.muted_foreground),
     };
     let running = checks
       .status
@@ -1611,7 +1623,7 @@ impl WorkspaceView {
       .is_some_and(|s| s != "passed" && s != "failed");
     Button::new("workspace-checks", p)
       .variant(Variant::Outline)
-      .size(Size::Sm)
+      .size(Size::Md)
       .gap_1p5()
       .px_2()
       .map(|b| {

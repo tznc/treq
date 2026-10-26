@@ -9917,3 +9917,22 @@ fn changes_tab_shift_click_extends_the_line_selection(cx: &mut TestAppContext) {
     Some((1..=6).map(|l| (0, l)).collect())
   );
 }
+
+#[gpui::test]
+fn workspace_header_controls_share_one_height(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
+  let mut height = |s: &'static str| h.cx.debug_bounds(s).expect(s).size.height;
+  let toolbar = height("workspace-view-pr");
+  for selector in [
+    "workspace-view-pr-menu",
+    "workspace-checks",
+    "workspace-sync",
+    "workspace-merge",
+    "workspace-more",
+  ] {
+    assert_eq!(height(selector), toolbar, "{selector}");
+  }
+  assert_eq!(toolbar, gpui::px(crate::gpui_shell::ui::theme::CONTROL_MD));
+  // The pip names what it signals.
+  assert!(h.drawn("workspace-sync-pip"));
+}

@@ -330,7 +330,7 @@ fn the_workspace_header_names_its_icon_buttons(cx: &mut TestAppContext) {
     "Workspace target",
     "View PR (#42, open)",
     "Open PR on web",
-    "Sync with remote",
+    "Sync with remote: 2 to push",
     "More workspace actions",
   ] {
     expect(screen.get_by_role(button(name))).to_be_visible();

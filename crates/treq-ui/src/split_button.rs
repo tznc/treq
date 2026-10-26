@@ -184,7 +184,7 @@ impl RenderOnce for SplitButton {
     .when_some(self.icon, |b, icon| b.icon(icon, 16.))
     .label(self.label)
     .when_some(self.aria_label, |b, name| b.aria_label(name))
-    .h(zpx(28.))
+    .h(zpx(theme::CONTROL_MD))
     .px_3()
     .gap_1p5()
     .rounded_r_none()
@@ -210,7 +210,7 @@ impl RenderOnce for SplitButton {
     .aria_label(self.menu_label)
     .icon(self.menu_icon, 14.)
     .w(zpx(if pill { MENU_WIDTH + 4. } else { MENU_WIDTH }))
-    .h(zpx(28.))
+    .h(zpx(theme::CONTROL_MD))
     .rounded_l_none()
     .when(pill, |b| b.rounded_r_full().pr_0p5())
     .border_l_0()
@@ -226,7 +226,7 @@ impl RenderOnce for SplitButton {
       .flex_none()
       .items_center()
       .child(main)
-      .child(div().w_px().h(zpx(28.)).bg(divider))
+      .child(div().w_px().h(zpx(theme::CONTROL_MD)).bg(divider))
       .child(menu)
   }
 }
