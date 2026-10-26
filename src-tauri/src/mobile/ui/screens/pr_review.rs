@@ -35,8 +35,8 @@ use super::{
   pr_detail::{self, emoji, toggle_reaction, REACTIONS},
   pr_review_logic::{
     allowed, can_submit, collapsed, detached_threads, extends, parse_diff, pending_for,
-    returns_to_pr, submit_action, suggestion, thread_count, threads_at, Event, PendingComment, PrFile,
-    OWN_PR_HINT,
+    returns_to_pr, submit_action, suggestion, thread_count, threads_at, Event, PendingComment,
+    PrFile, OWN_PR_HINT,
   },
 };
 use crate::mobile::{

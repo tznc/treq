@@ -325,7 +325,10 @@ fn pr_review_stays_open_after_a_comment(cx: &mut TestAppContext) {
   h.cx.simulate_input("looks fine");
   h.click("pr-review-submit");
   h.cx.run_until_parked();
-  assert!(host.writes().iter().any(|w| w.starts_with("submit review o/r 5 COMMENT")));
+  assert!(host
+    .writes()
+    .iter()
+    .any(|w| w.starts_with("submit review o/r 5 COMMENT")));
   assert!(!h.sent().contains(&press("prReview.submitted")));
 }
 
