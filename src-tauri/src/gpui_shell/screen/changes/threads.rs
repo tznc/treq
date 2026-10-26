@@ -169,7 +169,11 @@ impl ChangesView {
         .map(|(p, d)| (p.clone(), &d.hunks[..]))
         .collect()
     }
-    let working = on(&self.hunks, &paths);
+    let mut working = on(&self.hunks, &paths);
+    // Files shown as their branch diff anchor on it alone.
+    if let Some(s) = &self.snapshot {
+      working.retain(|p, _| !s.shows_branch_diff(p));
+    }
     let committed = self
       .snapshot
       .as_ref()
