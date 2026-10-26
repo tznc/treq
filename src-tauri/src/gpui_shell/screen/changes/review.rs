@@ -222,6 +222,16 @@ impl ChangesView {
     cx.notify();
   }
 
+  /// Shift-click: moves the selection's head to `at`, keeping its anchor, and
+  /// keeps dragging from there. Without a selection in `path`, a plain press.
+  pub(super) fn extend_line(&mut self, path: &str, at: LineRef, cx: &mut Context<Self>) {
+    match self.review.selection.as_mut().filter(|s| s.path == path) {
+      Some(s) => s.dragging = true,
+      None => return self.press_line(path, at, cx),
+    }
+    self.drag_line(path, at, cx);
+  }
+
   pub(super) fn drag_line(&mut self, path: &str, at: LineRef, cx: &mut Context<Self>) {
     let Some(s) = self.review.selection.as_ref() else {
       return;
@@ -1016,10 +1026,14 @@ impl ChangesView {
           .when(!conflicted, |this| {
             this.on_mouse_down(
               MouseButton::Left,
-              cx.listener(move |view, _: &MouseDownEvent, window, cx| {
+              cx.listener(move |view, e: &MouseDownEvent, window, cx| {
                 cx.stop_propagation();
                 window.focus(&view.focus, cx);
-                view.press_line(&press, at, cx);
+                if e.modifiers.shift {
+                  view.extend_line(&press, at, cx);
+                } else {
+                  view.press_line(&press, at, cx);
+                }
               }),
             )
           })
