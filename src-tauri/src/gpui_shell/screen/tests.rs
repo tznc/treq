@@ -9936,6 +9936,7 @@ fn changes_tab_shift_click_extends_the_line_selection(cx: &mut TestAppContext) {
     selected_lines(&mut h).map(|(_, l)| l),
     Some((1..=6).map(|l| (0, l)).collect())
   );
+}
 
 #[test]
 fn terminal_label_shows_the_workspace_title_else_the_branch() {
