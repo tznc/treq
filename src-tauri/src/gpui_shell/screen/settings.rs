@@ -1064,7 +1064,7 @@ impl SettingsView {
     let Some(repo) = self.repo.as_ref() else {
       return;
     };
-    let (path, current) = (repo.path.clone(), repo.fields().review_prompt.clone());
+    let (path, current) = (repo.path.clone(), repo.fields().review_prompt);
     self.spawn(
       cx,
       move |host| host.export_review_history(&path),
