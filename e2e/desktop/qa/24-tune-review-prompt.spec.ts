@@ -110,7 +110,7 @@ test("tune review prompt: start, review edits, apply", async ({ page }) => {
     name: "24-tune-03-edits",
     title: "Settings: the agent's proposed edits on the review cards",
     expectations: [
-      "Proposed edits (2) under the prompt, each a condensed Local card with its line in the header",
+      "Proposed edits (2) with a ghost Dismiss all pulled right in the same row; condensed Local cards with their line",
       "Each card shows the reason and the suggestion as a red/green diff",
       "Ghost Dismiss (X) then Apply (check, primary) pulled to the card's right edge",
     ],
@@ -129,6 +129,6 @@ test("tune review prompt: start, review edits, apply", async ({ page }) => {
       "The prompt field now contains the applied text",
     ],
   });
-  await page.getByRole("button", { name: "Dismiss" }).first().click();
+  await page.getByRole("button", { name: "Dismiss all" }).click();
   await expect(apply).toHaveCount(0);
 });

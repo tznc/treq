@@ -740,6 +740,38 @@ impl SettingsView {
     );
   }
 
+  /// Dismiss all: removes every proposed edit without applying any.
+  fn dismiss_all_prompt_edits(&mut self, cx: &mut Context<Self>) {
+    let Some(repo) = self.repo.as_mut().filter(|repo| repo.edits_busy.is_empty()) else {
+      return;
+    };
+    let ids: Vec<String> = repo.edits.iter().map(|edit| edit.id.clone()).collect();
+    repo.edits_busy.extend(ids.iter().cloned());
+    let path = repo.path.clone();
+    self.spawn(
+      cx,
+      move |host| {
+        ids
+          .iter()
+          .try_for_each(|id| host.delete_prompt_edit(&path, id))
+      },
+      |view, result, cx| {
+        if let Some(repo) = view.repo.as_mut() {
+          repo.edits_busy.clear();
+          if result.is_ok() {
+            repo.edits.clear();
+          }
+        }
+        if let Err(err) = result {
+          view
+            .host
+            .notify(toast(ToastTone::Error, "Review prompt", err));
+        }
+        view.load_prompt_edits(cx);
+      },
+    );
+  }
+
   /// Apply or Dismiss on a proposed review prompt edit. Apply
   /// writes into the prompt as edited here and saves it.
   fn prompt_edit_action(&mut self, action: CardAction, id: String, cx: &mut Context<Self>) {
@@ -1199,7 +1231,29 @@ impl SettingsView {
       .flex()
       .flex_col()
       .gap_3()
-      .child(label(format!("Proposed edits ({})", edits.len())))
+      .child(
+        div()
+          .debug_selector(|| "prompt-edits-header".into())
+          .flex()
+          .items_center()
+          .justify_between()
+          .gap_2()
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .font_weight(FontWeight::MEDIUM)
+              .child(format!("Proposed edits ({})", edits.len())),
+          )
+          .child(
+            Button::new("prompt-edits-dismiss-all", p)
+              .variant(Variant::Ghost)
+              .size(Size::Xs)
+              .gap_1()
+              .disabled(!busy.is_empty())
+              .icon(theme::ICON_X, 12.)
+              .label("Dismiss all")
+              .on_click(self.press("repo.promptEdits.dismissAll")),
+          ),
+      )
       .children(edits.iter().map(|edit| {
         let location = if edit.end_line == edit.start_line {
           format!("Line {}", edit.start_line)
@@ -1309,6 +1363,7 @@ impl SettingsView {
           },
           "app.setupScript.run" => self.run_setup(cx),
           "repo.reviewPrompt.tune" => self.tune_review_prompt(cx),
+          "repo.promptEdits.dismissAll" => self.dismiss_all_prompt_edits(cx),
           "repo.yaml.reload" => self.load_repo(cx),
           "skills.confirm.install" => self.answer_skill_link(true, cx),
           "skills.confirm.cancel" => self.answer_skill_link(false, cx),

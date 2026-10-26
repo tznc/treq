@@ -2898,6 +2898,44 @@ fn settings_reviews_proposed_prompt_edits_with_the_review_cards(cx: &mut TestApp
 }
 
 #[gpui::test]
+fn settings_dismisses_every_proposed_prompt_edit_at_once(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    prompt_edits: std::sync::Mutex::new(vec![prompt_edit("e1"), prompt_edit("e2")]),
+    ..FakeHost::default()
+  });
+  let mut h = code_review_settings(cx, host.clone());
+  // In the "Proposed edits" row, pulled to the right edge of the cards.
+  let all = h
+    .cx
+    .debug_bounds("prompt-edits-dismiss-all")
+    .expect("dismiss all drawn");
+  let header = h
+    .cx
+    .debug_bounds("prompt-edits-header")
+    .expect("header drawn");
+  let card = h.cx.debug_bounds("prompt-edit-card").expect("card drawn");
+  assert!(header.contains(&all.center()), "{all:?} in {header:?}");
+  assert!(
+    (card.right() - all.right()).abs() < gpui::px(1.),
+    "{all:?} vs {card:?}"
+  );
+
+  h.click("prompt-edits-dismiss-all");
+  h.cx.run_until_parked();
+  let calls = host.calls();
+  assert!(
+    calls.contains(&"delete prompt edit e1".to_string()),
+    "{calls:?}"
+  );
+  assert!(
+    calls.contains(&"delete prompt edit e2".to_string()),
+    "{calls:?}"
+  );
+  assert!(!h.drawn("prompt-edit-card"));
+  assert!(!h.drawn("prompt-edits-dismiss-all"));
+}
+
+#[gpui::test]
 fn settings_scrolls_its_content(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, settings());
   h.cx
