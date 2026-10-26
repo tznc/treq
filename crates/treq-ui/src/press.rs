@@ -14,7 +14,7 @@ use std::{
 };
 
 use gpui::{
-  fill, px, size, AnyElement, App, Bounds, Element, ElementId, Empty, GlobalElementId, Hitbox,
+  fill, px, AnyElement, App, Bounds, Element, ElementId, Empty, GlobalElementId, Hitbox,
   HitboxBehavior, InspectorElementId, IntoElement, LayoutId, LongPressEvent, MouseButton,
   MouseDownEvent, MouseUpEvent, Pixels, ScrollWheelEvent, Style, Task, TouchDragEvent, TouchPhase,
   Window,
@@ -275,12 +275,6 @@ fn release(state: &Shared, window: &mut Window, cx: &mut App) {
   state.borrow_mut().1 = Some(task);
 }
 
-/// The size `bounds` would need to be a comfortable touch target.
-pub fn meets_touch_target(bounds: Bounds<Pixels>) -> bool {
-  let min = size(px(MIN_TOUCH_TARGET), px(MIN_TOUCH_TARGET));
-  bounds.size.width >= min.width && bounds.size.height >= min.height
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -399,13 +393,5 @@ mod tests {
       touch(&mut cx, TouchPhase::Ended, 50., 200.);
       assert!(changes.borrow().is_empty());
     }
-  }
-
-  #[test]
-  fn touch_target_minimum_is_44() {
-    let b = |w, h| Bounds::new(Default::default(), size(px(w), px(h)));
-    assert!(meets_touch_target(b(44., 44.)));
-    assert!(!meets_touch_target(b(32., 44.)));
-    assert!(!meets_touch_target(b(120., 24.)));
   }
 }
