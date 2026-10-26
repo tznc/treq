@@ -62,6 +62,7 @@ pub fn pressable(id: impl Into<ElementId>, child: impl IntoElement) -> Press {
     child: Some(child.into_any_element()),
     overlay: false,
     radius: px(0.),
+    on_change: None,
   }
 }
 
@@ -74,6 +75,7 @@ pub fn press_overlay() -> Press {
     child: None,
     overlay: true,
     radius: px(0.),
+    on_change: None,
   }
 }
 
@@ -82,6 +84,7 @@ pub struct Press {
   child: Option<AnyElement>,
   overlay: bool,
   radius: Pixels,
+  on_change: Option<OnChange>,
 }
 
 impl Press {
@@ -90,9 +93,18 @@ impl Press {
     self.radius = radius;
     self
   }
+
+  /// Runs `f` with `true` when the press shows and `false` when it goes.
+  pub fn on_change(mut self, f: impl Fn(bool) + 'static) -> Self {
+    self.on_change = Some(Rc::new(f));
+    self
+  }
 }
 
-type Shared = Rc<RefCell<(PressState, Option<Task<()>>)>>;
+type OnChange = Rc<dyn Fn(bool)>;
+
+/// The press, its pending release and who hears about changes.
+type Shared = Rc<RefCell<(PressState, Option<Task<()>>, Option<OnChange>)>>;
 
 impl IntoElement for Press {
   type Element = Self;
@@ -165,6 +177,7 @@ impl Element for Press {
       let state: Shared = state.unwrap_or_default();
       (state.clone(), state)
     });
+    state.borrow_mut().2 = self.on_change.clone();
 
     if let Some(child) = child {
       child.paint(window, cx);
@@ -219,9 +232,19 @@ impl Element for Press {
 
 fn press(state: &Shared, window: &mut Window) {
   let mut state = state.borrow_mut();
+  let was = state.0.is_pressed();
   state.0.press(Instant::now());
   state.1 = None;
   window.refresh();
+  if !was {
+    notify(&state.2, true);
+  }
+}
+
+fn notify(on_change: &Option<OnChange>, pressed: bool) {
+  if let Some(f) = on_change {
+    f(pressed);
+  }
 }
 
 fn cancel(state: &Shared, window: &mut Window) {
@@ -230,6 +253,7 @@ fn cancel(state: &Shared, window: &mut Window) {
     state.0.cancel();
     state.1 = None;
     window.refresh();
+    notify(&state.2, false);
   }
 }
 
@@ -240,7 +264,12 @@ fn release(state: &Shared, window: &mut Window, cx: &mut App) {
   let shared = state.clone();
   let task = window.spawn(cx, async move |cx| {
     cx.background_executor().timer(delay).await;
-    shared.borrow_mut().0.cancel();
+    let on_change = {
+      let mut shared = shared.borrow_mut();
+      shared.0.cancel();
+      shared.2.clone()
+    };
+    notify(&on_change, false);
     cx.update(|window, _| window.refresh()).ok();
   });
   state.borrow_mut().1 = Some(task);
@@ -286,6 +315,90 @@ mod tests {
     state.cancel();
     assert!(!state.is_pressed());
     assert_eq!(state.release_delay(Instant::now()), None);
+  }
+
+  mod touch {
+    use std::{cell::RefCell, rc::Rc, time::Duration};
+
+    use gpui::{
+      div, point, px, Context, IntoElement, ParentElement as _, PlatformInput, Render, Styled as _,
+      TestAppContext, TouchEvent, TouchId, TouchPhase, VisualTestContext, Window,
+    };
+
+    use super::super::{pressable, MIN_VISIBLE};
+
+    struct Host {
+      changes: Rc<RefCell<Vec<bool>>>,
+    }
+
+    impl Render for Host {
+      fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let changes = self.changes.clone();
+        div().size_full().child(
+          pressable("b", div().w(px(100.)).h(px(44.)))
+            .on_change(move |pressed| changes.borrow_mut().push(pressed)),
+        )
+      }
+    }
+
+    fn mount(cx: &mut TestAppContext) -> (VisualTestContext, Rc<RefCell<Vec<bool>>>) {
+      let changes = Rc::new(RefCell::new(Vec::new()));
+      let window = cx.add_window({
+        let changes = changes.clone();
+        move |_, _| Host { changes }
+      });
+      let mut cx = VisualTestContext::from_window(*window, cx);
+      cx.update(|window, cx| window.draw(cx).clear(cx));
+      (cx, changes)
+    }
+
+    fn touch(cx: &mut VisualTestContext, phase: TouchPhase, x: f32, y: f32) {
+      cx.update(|window, cx| {
+        window.dispatch_event(
+          PlatformInput::Touch(TouchEvent {
+            id: TouchId(1),
+            phase,
+            position: point(px(x), px(y)),
+            predicted_position: None,
+            force: None,
+          }),
+          cx,
+        );
+      });
+    }
+
+    /// The finger landing shows the press, before GPUI knows it's a tap,
+    /// and a quick tap stays visible for `MIN_VISIBLE`.
+    #[gpui::test]
+    fn a_touch_shows_the_press_from_touch_down(cx: &mut TestAppContext) {
+      let (mut cx, changes) = mount(cx);
+      touch(&mut cx, TouchPhase::Started, 50., 20.);
+      assert_eq!(*changes.borrow(), [true]);
+      touch(&mut cx, TouchPhase::Ended, 50., 20.);
+      assert_eq!(*changes.borrow(), [true], "still shown right after the tap");
+      cx.executor()
+        .advance_clock(MIN_VISIBLE + Duration::from_millis(1));
+      cx.run_until_parked();
+      assert_eq!(*changes.borrow(), [true, false]);
+    }
+
+    /// A finger that scrolls was never a tap: the press goes at once.
+    #[gpui::test]
+    fn a_scroll_cancels_the_press(cx: &mut TestAppContext) {
+      let (mut cx, changes) = mount(cx);
+      touch(&mut cx, TouchPhase::Started, 50., 20.);
+      touch(&mut cx, TouchPhase::Moved, 50., 80.);
+      assert_eq!(*changes.borrow(), [true, false]);
+    }
+
+    /// A touch elsewhere doesn't press it.
+    #[gpui::test]
+    fn a_touch_outside_does_not_press(cx: &mut TestAppContext) {
+      let (mut cx, changes) = mount(cx);
+      touch(&mut cx, TouchPhase::Started, 50., 200.);
+      touch(&mut cx, TouchPhase::Ended, 50., 200.);
+      assert!(changes.borrow().is_empty());
+    }
   }
 
   #[test]

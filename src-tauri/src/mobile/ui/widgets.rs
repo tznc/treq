@@ -311,35 +311,43 @@ pub fn markdown(id: impl Into<ElementId>, text: &str, cx: &App) -> Div {
 mod tests {
   use std::{cell::Cell, rc::Rc};
 
+  use gpui_kit::base::TextSelection;
   use gpui_kit::{
     component::{
       button::{Button, ButtonVariants as _},
       Sizable as _,
     },
     div, point, px, size, AnyWindowHandle, AppContext as _, Bounds, Context, IntoElement,
-    ParentElement as _, PlatformInput, Point, Render, TestAppContext, TouchEvent, TouchId,
-    TouchPhase, Window, WindowBounds, WindowOptions,
+    ParentElement as _, PlatformInput, Point, Render, Styled as _, TestAppContext, TouchEvent,
+    TouchId, TouchPhase, Window, WindowBounds, WindowOptions,
   };
 
   use gpui_kit::test::TestWindowExt as _;
 
   use super::TouchButton as _;
 
+  const ERROR: &str = "The host refused the connection.";
+  /// Where the error starts, below the 44pt button.
+  const ERROR_Y: f32 = 100.;
+
   struct Host {
     clicks: Rc<Cell<usize>>,
   }
 
   impl Render for Host {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
       let clicks = self.clicks.clone();
-      div().child(
-        Button::new("small")
-          .ghost()
-          .small()
-          .label("Go")
-          .on_click(move |_, _, _| clicks.set(clicks.get() + 1))
-          .touch(),
-      )
+      div()
+        .child(
+          Button::new("small")
+            .ghost()
+            .small()
+            .label("Go")
+            .on_click(move |_, _, _| clicks.set(clicks.get() + 1))
+            .touch(),
+        )
+        .child(div().h(px(ERROR_Y - 44.)))
+        .child(super::error_text(ERROR, cx))
     }
   }
 
@@ -400,5 +408,23 @@ mod tests {
     touch(cx, window, TouchPhase::Moved, 20., 60.);
     touch(cx, window, TouchPhase::Ended, 20., 60.);
     assert_eq!(clicks.get(), 0);
+  }
+
+  /// A long press on an error selects its text.
+  #[gpui_kit::test]
+  fn a_long_press_selects_error_text(cx: &mut TestAppContext) {
+    let (window, _) = mount(cx);
+    touch(cx, window, TouchPhase::Started, 20., ERROR_Y + 8.);
+    cx.executor()
+      .advance_clock(std::time::Duration::from_millis(600));
+    cx.run_until_parked();
+    touch(cx, window, TouchPhase::Ended, 20., ERROR_Y + 8.);
+    let selected = cx
+      .update_window(window, |_, w, cx| TextSelection::selected_text(w, cx))
+      .unwrap();
+    assert!(
+      !selected.is_empty() && ERROR.contains(selected.trim()),
+      "selected {selected:?}"
+    );
   }
 }
