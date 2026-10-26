@@ -3573,6 +3573,7 @@ fn skeleton(p: &Palette) -> Div {
 
 /// `HunkContextLineRow`: a line read by "Show more lines".
 fn context_row(
+  selector: String,
   (old, new): (i64, i64),
   line: &str,
   language: Option<&'static str>,
@@ -3582,17 +3583,28 @@ fn context_row(
   let border = p.border.opacity(0.4);
   div()
     .flex()
+    // Darker than the hunk's own lines: these were read in by an expander.
+    .bg(gpui::black().opacity(0.18))
     .child(
       div()
         .w_24()
         .flex_none()
         .flex()
         .items_center()
+        // As the hunk lines' gutter spaces its numbers.
+        .gap_1()
         .border_r_1()
         .border_color(border)
         .text_color(p.muted_foreground)
         .child(div().w_10().mr_1().flex().justify_end().child(number(old)))
-        .child(div().w_10().flex().justify_end().child(number(new))),
+        .child(
+          div()
+            .debug_selector(move || selector)
+            .w_10()
+            .flex()
+            .justify_end()
+            .child(number(new)),
+        ),
     )
     .child(div().w_6().flex_none())
     .child(div().w_5().flex_none())

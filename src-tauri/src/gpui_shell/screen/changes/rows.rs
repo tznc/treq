@@ -603,7 +603,15 @@ impl ChangesView {
           .unwrap_or_default();
         let line = lines.get(i).map_or("", String::as_str);
         let numbers = context_row_numbers(&hunk.header, dir == Dir::After, lines.len(), i);
-        context_row(numbers, line, language, p).into_any_element()
+        let side = if dir == Dir::After { "after" } else { "before" };
+        context_row(
+          format!("context-new-{path}-{h}-{side}-{i}"),
+          numbers,
+          line,
+          language,
+          p,
+        )
+        .into_any_element()
       }
       Row::Line(_, _, l) => {
         // Numbered with the card's other lines, not by counting up to this one.

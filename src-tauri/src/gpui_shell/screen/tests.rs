@@ -6255,6 +6255,21 @@ fn expand_all_reads_from_the_start_of_the_file(cx: &mut TestAppContext) {
   assert!(!h.drawn("expand-all-above-c.rs-0"));
 }
 
+/// Expanded lines number in the same columns as the hunk's own lines.
+#[gpui::test]
+fn expanded_line_numbers_align_with_the_hunk(cx: &mut TestAppContext) {
+  let host = committed_gap_host("@@ -100,4 +100,4 @@");
+  let (mut h, _) = workspace_harness(cx, host, show_committed_route());
+  h.click("expand-after-c.rs-0");
+  h.cx.run_until_parked();
+  let hunk = h.cx.debug_bounds("line-new-c.rs-0-1").expect("hunk line");
+  let context = h
+    .cx
+    .debug_bounds("context-new-c.rs-0-after-0")
+    .expect("expanded line");
+  assert_eq!(hunk.right(), context.right());
+}
+
 #[gpui::test]
 fn a_large_gap_offers_only_twenty_line_steps(cx: &mut TestAppContext) {
   let host = committed_gap_host("@@ -100,4 +100,4 @@");

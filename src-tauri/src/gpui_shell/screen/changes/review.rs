@@ -1054,6 +1054,10 @@ impl ChangesView {
           )
           .child(
             div()
+              .debug_selector({
+                let id = format!("line-new-{path}-{h}-{l}");
+                move || id
+              })
               .w_10()
               .flex()
               .justify_end()
