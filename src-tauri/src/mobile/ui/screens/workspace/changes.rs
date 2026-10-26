@@ -1,6 +1,7 @@
 //! The Changes tab: every changed file's diff in one list, grouped by file,
 //! so a review can comment across files without leaving the tab.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use std::{collections::HashMap, rc::Rc};
 
 use crate::{
@@ -253,7 +254,8 @@ impl WorkspaceScreen {
             .outline()
             .small()
             .label("Show diff")
-            .on_click(cx.listener(move |this, _, _, cx| this.open_deferred(path.clone(), cx))),
+            .on_click(cx.listener(move |this, _, _, cx| this.open_deferred(path.clone(), cx)))
+            .touch(),
         )
         .into_any_element(),
       _ => widgets::centered_message("Loading diff…", cx).into_any_element(),

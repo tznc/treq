@@ -3,6 +3,7 @@
 //! menu: edit description, undo (the tip only) and delete, which can be
 //! undone from the bar that follows.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use std::collections::HashSet;
 
 use crate::{
@@ -442,7 +443,8 @@ impl Render for CommitsScreen {
               .small()
               .on_click(cx.listener(move |this, _, _, cx| {
                 this.undo_delete(operation.clone(), short.clone(), cx)
-              })),
+              }))
+              .touch(),
           )
         })
     });
@@ -550,7 +552,8 @@ impl Render for DescribeSheet {
           .large()
           .w_full()
           .label("Save")
-          .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
+          .on_click(cx.listener(|this, _, _, cx| this.save(cx)))
+          .touch(),
       )
   }
 }

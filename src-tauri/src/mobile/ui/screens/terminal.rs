@@ -4,6 +4,7 @@
 //! session, attached, full screen. Leaving it detaches; the session keeps
 //! running on the host.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use crate::result_ext::ResultExt as _;
 use std::{collections::HashMap, rc::Rc, time::Duration};
 
@@ -609,7 +610,7 @@ impl Render for Sessions {
               .icon(IconName::Bot)
               .label("New agent")
               .disabled(!ready || no_agents)
-              .on_click(cx.listener(|this, _, _, cx| this.new_agent(cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.new_agent(cx))).touch(),
           )
           .child(
             Button::new("new-shell")
@@ -621,7 +622,7 @@ impl Render for Sessions {
               .disabled(!ready)
               .on_click(cx.listener(|this, _, _, cx| {
                 this.start(Program::Shell, Vec::new(), cx)
-              })),
+              })).touch(),
           ),
       )
       .when(no_agents && !no_multiplexer, |list| {
@@ -719,7 +720,8 @@ impl Render for AgentSheet {
               .w_full()
               .h(px(widgets::CTA_H - 8.))
               .label(start_label)
-              .on_click(cx.listener(|this, _, _, cx| this.start(cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.start(cx)))
+              .touch(),
           ),
       )
   }
@@ -1187,6 +1189,7 @@ impl TerminalScreen {
                   view.focus(window, cx);
                 });
               })
+              .touch()
           }),
       )
   }
@@ -1279,7 +1282,8 @@ impl Render for RenameSheet {
           .w_full()
           .label("Save")
           .loading(self.saving)
-          .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
+          .on_click(cx.listener(|this, _, _, cx| this.save(cx)))
+          .touch(),
       )
   }
 }
@@ -1342,7 +1346,8 @@ impl Render for TerminalScreen {
               .outline()
               .large()
               .label("Back to terminals")
-              .on_click(|_, _, cx| nav::pop(cx)),
+              .on_click(|_, _, cx| nav::pop(cx))
+              .touch(),
           )
           .into_any_element();
       }
@@ -1379,14 +1384,16 @@ impl Render for TerminalScreen {
                     } else {
                       "Start again"
                     })
-                    .on_click(cx.listener(|this, _, window, cx| this.restart(window, cx))),
+                    .on_click(cx.listener(|this, _, window, cx| this.restart(window, cx)))
+                    .touch(),
                 )
                 .child(
                   Button::new("leave")
                     .outline()
                     .flex_1()
                     .label("Back to terminals")
-                    .on_click(|_, _, cx| nav::pop(cx)),
+                    .on_click(|_, _, cx| nav::pop(cx))
+                    .touch(),
                 ),
             ),
         )
@@ -1406,7 +1413,8 @@ impl Render for TerminalScreen {
               Button::new("send")
                 .primary()
                 .icon(IconName::ArrowUp)
-                .on_click(cx.listener(|this, _, window, cx| this.send(window, cx))),
+                .on_click(cx.listener(|this, _, window, cx| this.send(window, cx)))
+                .touch(),
             ),
         )
       })

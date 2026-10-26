@@ -1,6 +1,7 @@
 //! A repository's GitHub pull requests: a state filter, a search, and
 //! pages of results. A tap opens one in [`super::pr_detail`].
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use crate::{
   core::remote::{GithubQuery, TreqCommandRequest},
   github::{GhListPage, GhPullRequest},
@@ -301,7 +302,8 @@ impl Render for PullRequestsScreen {
             Button::new("retry")
               .outline()
               .label("Retry")
-              .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
+              .touch(),
           ),
         ),
       Load::Ready(list) if list.is_empty() => widgets::card(cx).child(widgets::centered_message(
@@ -344,10 +346,12 @@ impl Render for PullRequestsScreen {
           !searching && filter == f,
         )
         .on_click(cx.listener(move |this, _, _, cx| this.set_filter(f, cx)))
+        .touch()
       }))
       .child(
         chip("filter-mine".into(), "Mine", mine)
-          .on_click(cx.listener(|this, _, _, cx| this.toggle_mine(cx))),
+          .on_click(cx.listener(|this, _, _, cx| this.toggle_mine(cx)))
+          .touch(),
       );
     div()
       .id("pull-requests")
@@ -372,7 +376,8 @@ impl Render for PullRequestsScreen {
                   .w(px(44.))
                   .outline()
                   .icon(IconName::Search)
-                  .on_click(cx.listener(|this, _, _, cx| this.search(cx))),
+                  .on_click(cx.listener(|this, _, _, cx| this.search(cx)))
+                  .touch(),
               ),
           )
           .child(chips)
@@ -392,7 +397,8 @@ impl Render for PullRequestsScreen {
                 .h(px(widgets::CTA_H - 8.))
                 .label("Load more")
                 .loading(self.loading_more)
-                .on_click(cx.listener(|this, _, _, cx| this.load_more(cx))),
+                .on_click(cx.listener(|this, _, _, cx| this.load_more(cx)))
+                .touch(),
             )
           }),
       )

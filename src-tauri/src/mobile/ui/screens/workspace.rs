@@ -2,6 +2,7 @@
 //! Changes, Commits, Code), with the workspace's actions in the ⋯ menu and a
 //! switcher to its siblings on the title.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use std::{cell::RefCell, collections::HashSet, rc::Rc, time::Duration};
 
 use crate::{
@@ -1042,7 +1043,8 @@ impl WorkspaceScreen {
               .label("Commit")
               .loading(committing)
               .disabled(self.busy.is_some())
-              .on_click(cx.listener(|this, _, window, cx| this.commit(window, cx))),
+              .on_click(cx.listener(|this, _, window, cx| this.commit(window, cx)))
+              .touch(),
           );
         div()
           .px_4()

@@ -3,6 +3,7 @@
 //! it per page (`ReviewScope`), so it survives leaving the page, relaunches
 //! and dropped connections. Shared by the Changes tab and the file viewer.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use std::rc::Rc;
 
 use crate::{
@@ -377,7 +378,8 @@ impl Render for Composer {
                 .outline()
                 .icon(IconName::Plus)
                 .label("Suggest change")
-                .on_click(cx.listener(|this, _, window, cx| this.suggest(window, cx))),
+                .on_click(cx.listener(|this, _, window, cx| this.suggest(window, cx)))
+                .touch(),
             )
           })
           .child(div().flex_1())
@@ -390,7 +392,8 @@ impl Render for Composer {
                 "Add comment"
               })
               .disabled(empty)
-              .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.submit(cx)))
+              .touch(),
           ),
       )
   }
@@ -461,7 +464,8 @@ pub fn comment_card(
             .on_click(move |_, _, cx| {
               let pending = pending_of(&for_edit);
               compose(edit.clone(), pending, Some(for_edit.clone()), cx);
-            }),
+            })
+            .touch(),
         )
         .child(
           Button::new(SharedString::from(format!("delete-{}", comment.id)))
@@ -470,7 +474,8 @@ pub fn comment_card(
             .label("Delete")
             .on_click(move |_, _, cx| {
               delete.update(cx, |review, cx| review.delete(&id, cx));
-            }),
+            })
+            .touch(),
         ),
     )
     .into_any_element()
@@ -630,7 +635,8 @@ pub fn selection_bar(
       Button::new("clear-picked")
         .outline()
         .label("Clear")
-        .on_click(move |_, window, cx| on_clear(window, cx)),
+        .on_click(move |_, window, cx| on_clear(window, cx))
+        .touch(),
     )
     .child(
       Button::new("comment-picked")
@@ -642,7 +648,8 @@ pub fn selection_bar(
             compose(review.clone(), p, None, cx);
             after(window, cx);
           }
-        }),
+        })
+        .touch(),
     )
     .into_any_element()
 }
@@ -698,7 +705,8 @@ pub fn bar(review: &Entity<Review>, sessions: &Entity<Sessions>, cx: &App) -> Op
               .primary()
               .icon(Icon::from(LucideIcon::Send))
               .label("Send review")
-              .on_click(move |_, _, cx| send(review.clone(), sessions.clone(), cx)),
+              .on_click(move |_, _, cx| send(review.clone(), sessions.clone(), cx))
+              .touch(),
           ),
       )
       .into_any_element(),
@@ -891,7 +899,7 @@ impl Render for SendSheet {
                   .on_click(cx.listener(|this, _, _, cx| {
                     this.plan = false;
                     cx.notify();
-                  })),
+                  })).touch(),
               )
               .child(
                 Button::new("mode-plan")
@@ -901,7 +909,7 @@ impl Render for SendSheet {
                   .on_click(cx.listener(|this, _, _, cx| {
                     this.plan = true;
                     cx.notify();
-                  })),
+                  })).touch(),
               ),
           )
         },
@@ -920,7 +928,7 @@ impl Render for SendSheet {
               .label(label)
               .loading(self.sending)
               .disabled(chosen.is_none() || self.sending)
-              .on_click(cx.listener(|this, _, _, cx| this.send(cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.send(cx))).touch(),
           )
           .when(chosen.is_none(), |c| {
             c.child(widgets::muted(

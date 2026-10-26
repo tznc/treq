@@ -2,6 +2,7 @@
 //! what's loaded, and the sheet that writes one. GitHub is reached with the
 //! host's `gh`, so the host's sign-in is the one used.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use std::rc::Rc;
 
 use crate::{
@@ -458,11 +459,13 @@ impl IssuesScreen {
       .gap_2()
       .child(
         button("filter-open", "Open", Filter::Open, self.filter)
-          .on_click(cx.listener(|this, _, _, cx| this.set_filter(Filter::Open, cx))),
+          .on_click(cx.listener(|this, _, _, cx| this.set_filter(Filter::Open, cx)))
+          .touch(),
       )
       .child(
         button("filter-closed", "Closed", Filter::Closed, self.filter)
-          .on_click(cx.listener(|this, _, _, cx| this.set_filter(Filter::Closed, cx))),
+          .on_click(cx.listener(|this, _, _, cx| this.set_filter(Filter::Closed, cx)))
+          .touch(),
       )
   }
 }
@@ -484,7 +487,8 @@ impl Render for IssuesScreen {
               .outline()
               .large()
               .label("Retry")
-              .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
+              .touch(),
           ),
         ),
       Load::Ready(listed) if listed.items.is_empty() => {
@@ -552,7 +556,8 @@ impl Render for IssuesScreen {
                     .h(px(44.))
                     .label("Load more")
                     .loading(self.loading_more)
-                    .on_click(cx.listener(|this, _, _, cx| this.load_more(cx))),
+                    .on_click(cx.listener(|this, _, _, cx| this.load_more(cx)))
+                    .touch(),
                 )
               }),
           ),
@@ -572,7 +577,8 @@ impl Render for IssuesScreen {
               .icon(IconName::Plus)
               .label("New issue")
               .loading(self.creating)
-              .on_click(cx.listener(|this, _, _, cx| this.create_sheet(cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.create_sheet(cx)))
+              .touch(),
           ),
       )
   }
@@ -670,7 +676,8 @@ impl Render for FormSheet {
           .h(px(widgets::CTA_H - 8.))
           .label(self.submit_label)
           .disabled(!title_ready(&self.title.read(cx).value()))
-          .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
+          .on_click(cx.listener(|this, _, _, cx| this.submit(cx)))
+          .touch(),
       )
   }
 }

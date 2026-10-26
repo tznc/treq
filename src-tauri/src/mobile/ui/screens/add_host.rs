@@ -7,6 +7,7 @@
 //! host's key changes, "Check host key" shows the old and new fingerprints
 //! and trusting the new one keeps the host's repositories.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use gpui_kit::component::Disableable as _;
 use gpui_kit::{
   component::{
@@ -352,7 +353,7 @@ impl AddHostScreen {
             .outline()
             .icon(IconName::Copy)
             .label("Copy public key")
-            .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(key.clone()))),
+            .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(key.clone()))).touch(),
           None => Button::new("show-key")
             .outline()
             .label("Show public key")
@@ -362,7 +363,7 @@ impl AddHostScreen {
               load::run(cx, managed::device_public_key_line(), |this, result, _| {
                 this.public_key = load::Load::from_result(result);
               });
-            })),
+            })).touch(),
         }),
     )
   }
@@ -431,7 +432,8 @@ impl AddHostScreen {
               } else {
                 "Trust and connect"
               })
-              .on_click(cx.listener(|this, _, _, cx| this.trust(cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.trust(cx)))
+              .touch(),
           )
           .child(
             Button::new("cancel")
@@ -440,7 +442,8 @@ impl AddHostScreen {
               .on_click(cx.listener(|this, _, _, cx| {
                 this.pending = None;
                 cx.notify();
-              })),
+              }))
+              .touch(),
           ),
       )
   }
@@ -477,7 +480,8 @@ impl Render for AddHostScreen {
           .label("Continue")
           .loading(self.probing)
           .disabled(self.probing || !self.form(cx).complete())
-          .on_click(cx.listener(|this, _, _, cx| this.probe(cx))),
+          .on_click(cx.listener(|this, _, _, cx| this.probe(cx)))
+          .touch(),
       ),
       (None, true) => v_flex()
         .gap_3()
@@ -487,7 +491,8 @@ impl Render for AddHostScreen {
             .large()
             .w_full()
             .label("Save")
-            .on_click(cx.listener(|this, _, _, cx| this.save_name(cx))),
+            .on_click(cx.listener(|this, _, _, cx| this.save_name(cx)))
+            .touch(),
         )
         .child(
           widgets::section("Host key", cx).child(
@@ -516,7 +521,8 @@ impl Render for AddHostScreen {
                     .label("Check host key")
                     .loading(self.probing)
                     .disabled(self.probing)
-                    .on_click(cx.listener(|this, _, _, cx| this.probe(cx))),
+                    .on_click(cx.listener(|this, _, _, cx| this.probe(cx)))
+                    .touch(),
                 ),
               ),
           ),
@@ -530,7 +536,8 @@ impl Render for AddHostScreen {
               } else {
                 "Remove host"
               })
-              .on_click(cx.listener(|this, _, _, cx| this.remove(cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.remove(cx)))
+              .touch(),
           ),
         ),
     };

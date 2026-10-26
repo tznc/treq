@@ -1,6 +1,7 @@
 //! One GitHub issue: its body and comments with reactions, a composer, and
 //! editing, closing, reopening and deleting it.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -495,6 +496,7 @@ impl IssueScreen {
           }
         })
         .on_click(cx.listener(move |this, _, _, cx| this.react(id.clone(), content.clone(), cx)))
+        .touch()
       }))
       .child(
         Button::new(SharedString::from(format!("reaction-add-{id}")))
@@ -503,7 +505,8 @@ impl IssueScreen {
           .h(px(36.))
           .min_w(px(44.))
           .icon(IconName::Plus)
-          .on_click(cx.listener(move |this, _, _, cx| this.reaction_picker(id.clone(), cx))),
+          .on_click(cx.listener(move |this, _, _, cx| this.reaction_picker(id.clone(), cx)))
+          .touch(),
       )
   }
 
@@ -576,7 +579,8 @@ impl IssueScreen {
                 } else {
                   this.reopen(cx)
                 }
-              })),
+              }))
+              .touch(),
           )
           .child(
             Button::new("issue-comment")
@@ -587,7 +591,8 @@ impl IssueScreen {
               .label("Comment")
               .loading(self.busy == Some("issue-comment"))
               .disabled(empty || self.issue.ready().is_none())
-              .on_click(cx.listener(|this, _, window, cx| this.comment(window, cx))),
+              .on_click(cx.listener(|this, _, window, cx| this.comment(window, cx)))
+              .touch(),
           ),
       )
   }
@@ -609,7 +614,8 @@ impl Render for IssueScreen {
               .outline()
               .large()
               .label("Retry")
-              .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
+              .touch(),
           ),
         )
         .into_any_element(),

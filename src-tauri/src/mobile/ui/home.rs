@@ -1,6 +1,7 @@
 //! Home: a landing page when signed out with no machines, otherwise the
 //! machine list (Treq Cloud and SSH hosts), each with its own connection.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -172,6 +173,7 @@ impl HomeScreen {
               }
               Fix::Reauthenticate => super::reauthenticate(cx),
             })
+            .touch()
         });
         col.child(
           v_flex()
@@ -219,7 +221,8 @@ impl HomeScreen {
                 .primary()
                 .label("Sign in")
                 .loading(busy)
-                .on_click(|_, _, cx| super::sign_in(cx)),
+                .on_click(|_, _, cx| super::sign_in(cx))
+                .touch(),
             ),
           )
           .children(error.map(|e| widgets::error_text(e, cx).px_4().pb_3())),
@@ -276,7 +279,8 @@ impl HomeScreen {
             .on_click(move |_, _, cx| {
               cx.stop_propagation();
               screens::add_host::edit(edit_record.clone(), cx);
-            });
+            })
+            .touch();
           let name = host.display_name.clone();
           self.machine_row(
             Machine::Host(host),
@@ -294,7 +298,8 @@ impl HomeScreen {
         .outline()
         .icon(IconName::Plus)
         .label("Add SSH host")
-        .on_click(|_, _, cx| screens::add_host::open(cx)),
+        .on_click(|_, _, cx| screens::add_host::open(cx))
+        .touch(),
     )
   }
 
@@ -316,7 +321,8 @@ impl HomeScreen {
                   .outline()
                   .label("Sign out")
                   .loading(busy)
-                  .on_click(|_, _, cx| super::sign_out(cx)),
+                  .on_click(|_, _, cx| super::sign_out(cx))
+                  .touch(),
               ),
           ),
         )
@@ -327,7 +333,8 @@ impl HomeScreen {
             .text_color(cx.theme().danger)
             .label("Delete account")
             .disabled(busy)
-            .on_click(move |_, _, cx| super::delete_account::open(delete_email.clone(), cx)),
+            .on_click(move |_, _, cx| super::delete_account::open(delete_email.clone(), cx))
+            .touch(),
         ),
     )
   }
@@ -363,7 +370,8 @@ impl HomeScreen {
               .h(px(widgets::CTA_H))
               .label("Sign in")
               .loading(busy)
-              .on_click(|_, _, cx| super::sign_in(cx)),
+              .on_click(|_, _, cx| super::sign_in(cx))
+              .touch(),
           )
           .children(error.map(|e| widgets::error_text(e, cx).text_center()))
           .children(notice.map(|n| widgets::muted(n, cx).text_center()))
@@ -374,7 +382,8 @@ impl HomeScreen {
               .w_full()
               .h(px(widgets::CTA_H))
               .label("Use your own SSH host")
-              .on_click(|_, _, cx| screens::add_host::open(cx)),
+              .on_click(|_, _, cx| screens::add_host::open(cx))
+              .touch(),
           ),
       )
   }
