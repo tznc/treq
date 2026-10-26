@@ -8,11 +8,12 @@ import { openTab, openWorkspace, settle } from "./helpers.ts";
 test.describe.configure({ mode: "serial" });
 
 // By place in the 1400x900 window, as in 13-changes-review: the gutter's x and
-// the first added line's y, overridable for a re-run after a layout change.
+// alerting.ts's first removed line's y. The drag spans removed, added and the
+// trailing context line.
 const X = Number(process.env.QA_GUTTER_X ?? 600);
-const TOP = Number(process.env.QA_GUTTER_Y ?? 277) - 60;
-const ROWS = 6;
-const ROW = 20;
+const TOP = Number(process.env.QA_GUTTER_Y ?? 245);
+const ROWS = 8;
+const ROW = 24;
 
 async function changes(page: Page): Promise<void> {
   await openWorkspace(page, "feat/alerting-logs");
@@ -35,7 +36,7 @@ async function drag(page: Page, from: number, to: number, name: string, title: s
     expectations: [
       "The dragged rows form one continuous blue band across the line-number gutter",
       "The row under the cursor is blue in its gutter too, not grey",
-      "Context and added rows in the band share the same blue",
+      "Removed, added and context rows in the band share the same blue",
     ],
   });
   await page.mouse.up();
@@ -54,7 +55,7 @@ test("diff drag selection: one band in both directions", async ({ page }) => {
     title: "Diff before any selection",
     expectations: ["Context lines and green added lines are visible in alerting.ts"],
   });
-  await drag(page, TOP, TOP + ROWS * ROW, "24-drag-01-down", "Drag down from context into added lines");
+  await drag(page, TOP, TOP + ROWS * ROW, "24-drag-01-down", "Drag down from removed through added to context");
   await page.keyboard.press("Escape");
-  await drag(page, TOP + ROWS * ROW, TOP, "24-drag-02-up", "Drag up from added into context lines");
+  await drag(page, TOP + ROWS * ROW, TOP, "24-drag-02-up", "Drag up from context through added to removed");
 });
