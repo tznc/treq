@@ -318,7 +318,7 @@ fn pr_review_submits_the_drafts_to_github(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn pr_review_stays_open_after_a_comment(cx: &mut TestAppContext) {
+fn pr_review_returns_to_the_pr_after_a_comment(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, pr_host(), pr_route());
   h.click("pr-review-finish");
   h.cx.run_until_parked();
@@ -329,7 +329,7 @@ fn pr_review_stays_open_after_a_comment(cx: &mut TestAppContext) {
     .writes()
     .iter()
     .any(|w| w.starts_with("submit review o/r 5 COMMENT")));
-  assert!(!h.sent().contains(&press("prReview.submitted")));
+  assert!(h.sent().contains(&press("prReview.submitted")));
 }
 
 #[gpui::test]

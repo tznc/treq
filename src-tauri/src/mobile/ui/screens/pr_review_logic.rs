@@ -166,12 +166,6 @@ impl Event {
   }
 }
 
-/// Whether a submitted review goes back to the PR: an approval ends the
-/// review, while a comment or change request usually continues it.
-pub fn returns_to_pr(event: Event) -> bool {
-  event == Event::Approve
-}
-
 /// Requesting changes needs a summary or a comment.
 pub fn can_submit(event: Event, body: &str, pending: usize) -> bool {
   event != Event::RequestChanges || !body.trim().is_empty() || pending > 0
@@ -384,13 +378,6 @@ deleted file mode 100644
     assert!(!allowed(Event::RequestChanges, me, me));
     assert!(allowed(Event::Approve, me, Some("you")));
     assert!(allowed(Event::Approve, None, me));
-  }
-
-  #[core::prelude::v1::test]
-  fn only_an_approval_returns_to_the_pr() {
-    assert!(returns_to_pr(Event::Approve));
-    assert!(!returns_to_pr(Event::Comment));
-    assert!(!returns_to_pr(Event::RequestChanges));
   }
 
   #[core::prelude::v1::test]
