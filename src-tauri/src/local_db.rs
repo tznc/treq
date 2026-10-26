@@ -3120,6 +3120,22 @@ mod tests {
   }
 
   #[test]
+  fn review_history_prunes_old_rows_when_the_repository_is_first_opened() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let db_path = init_local_db(repo).unwrap();
+    Connection::open(&db_path)
+      .unwrap()
+      .execute(
+        "INSERT INTO review_history (kind, target_type, body, outcome, created_at)
+         VALUES ('user_review', 'changes', 'old', 'sent', ?1)",
+        [(Utc::now() - chrono::Duration::days(31)).to_rfc3339()],
+      )
+      .unwrap();
+    assert!(list_review_history(repo, 100).unwrap().is_empty());
+  }
+
+  #[test]
   fn review_history_prunes_rows_older_than_the_cutoff() {
     let dir = TempDir::new().unwrap();
     let repo = dir.path().to_str().unwrap();
