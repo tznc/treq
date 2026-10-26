@@ -208,6 +208,24 @@ const checks = {
   "feat/alerting-logs": [check("build", "pass", 3), check("test", "pass", 8)],
 };
 
+// `gh pr list --json statusCheckRollup`, which the header reads its checks
+// from: check runs, and the WIP app's commit status as GitHub reports it.
+const CONCLUSION = { pass: "SUCCESS", fail: "FAILURE", skipping: "SKIPPED", cancel: "CANCELLED" };
+function rollupEntry(c) {
+  if (c.name === "WIP" && c.link === "https://github.com/apps/wip")
+    return { __typename: "StatusContext", context: "WIP", state: "PENDING", targetUrl: c.link };
+  return {
+    __typename: "CheckRun",
+    name: c.name,
+    status: c.bucket === "pending" ? "IN_PROGRESS" : "COMPLETED",
+    conclusion: CONCLUSION[c.bucket] ?? null,
+    detailsUrl: c.link,
+    startedAt: c.startedAt,
+    completedAt: c.completedAt,
+  };
+}
+for (const pr of prs) pr.statusCheckRollup = (checks[pr.headRefName] ?? []).map(rollupEntry);
+
 const reviewThreads = {
   418: [
     {

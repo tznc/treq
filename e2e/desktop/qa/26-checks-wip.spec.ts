@@ -9,8 +9,8 @@ test("checks-wip: WIP status is inactive, not counted", async ({ page }) => {
   await ready(page);
   await openWorkspace(page, "feat/keyvalues-cache");
   await settle(page, 1500);
-  const chip = page.getByRole("button", { name: /^Checks:/ });
-  await expect(chip).toHaveAccessibleName(/3\/3/);
+  const chip = page.getByRole("button", { name: /^Checks:.*3\/3/ });
+  await expect(chip).toBeVisible({ timeout: 15000 });
   await chip.click();
   await settle(page, 1200);
   await capture(page, {
