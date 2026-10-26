@@ -294,12 +294,15 @@ impl Model {
         self.return_home();
         return with(Effect::Refresh { revision: true });
       }
-      "prReview.close" => {
+      "prReview.close" | "prReview.submitted" => {
         if let Page::Github(github) = &mut self.page {
           let number = github.review.take();
           github.tab = GithubTab::Prs;
           github.selected = number.or(github.selected);
           github.creating = false;
+          if name == "prReview.submitted" {
+            github.reload += 1;
+          }
         }
       }
       name if name.starts_with("github.") => return self.github_press(name, arg, data),
@@ -1174,6 +1177,16 @@ mod tests {
       panic!("not GitHub");
     };
     assert_eq!((github.selected, github.review), (Some(12), None));
+    model.screen_action(&press("github.review:12"), &data);
+    model.screen_action(&press("prReview.submitted"), &data);
+    let Page::Github(github) = &model.page else {
+      panic!("not GitHub");
+    };
+    assert_eq!(
+      (github.selected, github.review, github.reload),
+      (Some(12), None, 1),
+      "back on the PR, which reads it again"
+    );
     model.screen_action(&press("github.openWorkspace:3"), &data);
     assert_eq!((model.selected, &model.page), (Some(3), &Page::Workspace));
   }

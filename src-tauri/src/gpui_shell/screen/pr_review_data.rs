@@ -650,6 +650,12 @@ impl Event {
 pub const OWN_PR_HINT: &str =
   "Pull request authors can't approve or request changes on their own pull request.";
 
+/// Whether a submitted review leaves for the PR view: an approval ends the
+/// review, while a comment or change request usually continues it.
+pub fn returns_to_pr(event: Event) -> bool {
+  event == Event::Approve
+}
+
 /// Requesting changes needs a summary or a comment.
 pub fn can_submit(event: Event, summary: &str, postable: usize) -> bool {
   event != Event::RequestChanges || !summary.trim().is_empty() || postable > 0

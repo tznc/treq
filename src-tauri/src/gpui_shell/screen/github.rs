@@ -340,6 +340,7 @@ impl GithubView {
     self.tips.dark = dark;
     if self.route != route {
       let checks_changed = self.route.running_checks != route.running_checks;
+      let reload = self.route.reload != route.reload;
       self.route = route;
       if self.route.repo_path != self.remote_for {
         self.remote_for = self.route.repo_path.clone();
@@ -348,6 +349,9 @@ impl GithubView {
         self.load_workspaces(cx);
       }
       self.sync(cx);
+      if reload {
+        self.load_detail(cx);
+      }
       if checks_changed {
         // A run that finished wrote its results.
         self.reload_checks(cx);

@@ -62,7 +62,7 @@ impl PrReviewHost for FakeHost {
       "submit review {full_name} {number} {event} body={body:?} comments={}",
       comments.len()
     ));
-    Ok(())
+    self.pr_submit_error.clone().map_or(Ok(()), Err)
   }
 
   fn drafts(
@@ -314,6 +314,45 @@ fn pr_review_submits_the_drafts_to_github(cx: &mut TestAppContext) {
   assert!(!h.drawn("pr-review-popover"));
   assert_eq!(event(&mut h), Event::Comment);
   assert_eq!(counts(&mut h), (0, 0));
+  assert!(h.sent().contains(&press("prReview.submitted")));
+}
+
+#[gpui::test]
+fn pr_review_stays_open_after_a_comment(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, pr_host(), pr_route());
+  h.click("pr-review-finish");
+  h.cx.run_until_parked();
+  h.cx.simulate_input("looks fine");
+  h.click("pr-review-submit");
+  h.cx.run_until_parked();
+  assert!(host.writes().iter().any(|w| w.starts_with("submit review o/r 5 COMMENT")));
+  assert!(!h.sent().contains(&press("prReview.submitted")));
+}
+
+#[gpui::test]
+fn pr_review_keeps_the_review_when_submitting_fails(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_submit_error: Some("HTTP 502".into()),
+    ..pr_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, pr_route());
+  h.click("pr-review-finish");
+  h.cx.run_until_parked();
+  h.cx.simulate_input("ship it");
+  h.click("pr-review-event-APPROVE");
+  h.click("pr-review-submit");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"notify toast Failed to submit review".to_string()));
+  assert!(!h.sent().contains(&press("prReview.submitted")));
+  assert!(h.drawn("pr-review-popover"));
+  assert_eq!(event(&mut h), Event::Approve);
+  h.click("pr-review-submit");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"submit review o/r 5 APPROVE body=\"ship it\" comments=0".to_string()));
 }
 
 #[gpui::test]

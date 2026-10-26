@@ -461,6 +461,27 @@ fn github_reads_a_new_filter_from_the_route(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn github_rereads_the_pr_when_the_route_asks(cx: &mut TestAppContext) {
+  let (mut h, host) = harness(cx, prs(), route("prs", Some(1), false));
+  h.cx.run_until_parked();
+  let reads = |host: &FakeHost| {
+    let calls = host.calls();
+    (
+      calls.iter().filter(|c| *c == "read pr 1").count(),
+      calls.iter().filter(|c| *c == "read checks 1").count(),
+    )
+  };
+  let before = reads(&host);
+  h.update(|s| {
+    if let View::Github(route) = &mut s.view {
+      route.reload += 1;
+    }
+  });
+  h.cx.run_until_parked();
+  assert_eq!(reads(&host), (before.0 + 1, before.1 + 1));
+}
+
+#[gpui::test]
 fn github_shows_list_failures_and_retries(cx: &mut TestAppContext) {
   let (mut h, host) = harness(
     cx,
@@ -870,6 +891,21 @@ fn github_pr_detail_shows_a_run_started_elsewhere_as_running(cx: &mut TestAppCon
   h.click("github-run-0");
   h.cx.run_until_parked();
   assert!(!host.calls().iter().any(|c| c.starts_with("run ")));
+}
+
+#[gpui::test]
+fn github_pr_detail_notes_when_no_treq_checks_are_configured(cx: &mut TestAppContext) {
+  let fake = Fake {
+    workspaces: vec![workspace(3, "feat/a", Some("main"))],
+    treq: TreqChecks {
+      trusted: true,
+      ..TreqChecks::default()
+    },
+    ..prs()
+  };
+  let (mut h, _) = harness(cx, fake, route("prs", Some(1), false));
+  assert!(!h.drawn("github-treq-checks"));
+  assert!(h.drawn("github-treq-none"));
 }
 
 #[gpui::test]

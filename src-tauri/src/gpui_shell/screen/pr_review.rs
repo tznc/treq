@@ -32,7 +32,7 @@ use super::{
   changes::{pr::PrTarget, ChangesView},
   changes_data::{review_prompt_for, split_path},
   pr_review_data::{
-    can_submit, comments_to_review, files_label, finish_text, review_summary, Event, PrReviewHost,
+    can_submit, comments_to_review, files_label, finish_text, returns_to_pr, review_summary, Event, PrReviewHost,
     OWN_PR_HINT, TARGET,
   },
   ActionSink, ScreenAction,
@@ -350,6 +350,14 @@ impl PrReviewView {
               "Review submitted",
               format!("#{number}: {}", event.label()),
             );
+            if returns_to_pr(event) {
+              view.send(
+                ScreenAction::Press {
+                  id: "prReview.submitted".into(),
+                },
+                cx,
+              );
+            }
           }
           Err(err) => view.toast(ToastTone::Error, "Failed to submit review", err),
         }

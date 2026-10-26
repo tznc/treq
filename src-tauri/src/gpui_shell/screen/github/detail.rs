@@ -1181,7 +1181,13 @@ impl GithubView {
   }
 
   /// `PrWorkspaceChecks`: the workflow checks of the PR's workspace.
-  fn treq_section(&self, ws: &Workspace, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+  fn treq_section(&self, ws: &Workspace, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+    if self.detail.treq.as_ref().is_some_and(|c| !c.configured()) {
+      return ui::text(named(div(), "github-treq-none"), TextSize::Sm)
+        .text_color(p.muted_foreground)
+        .child("No Treq checks configured for this repository.")
+        .into_any_element();
+    }
     let id = ws.id;
     let header = div()
       .flex()
@@ -1214,6 +1220,7 @@ impl GithubView {
           .overflow_hidden()
           .child(self.checks_panel(ws, p, cx)),
       )
+      .into_any_element()
   }
 
   fn run_check(&self, ws: &Workspace, filename: &str, job: Option<&str>, cx: &mut Context<Self>) {

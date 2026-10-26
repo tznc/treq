@@ -90,6 +90,9 @@ pub struct Route {
   /// `<workspace id>:<file>[:<job>]`).
   #[serde(default)]
   pub running_checks: Vec<String>,
+  /// Bumped to read the selected issue or PR again (a review was submitted).
+  #[serde(default)]
+  pub reload: u64,
 }
 
 /// A change to one issue.
@@ -123,6 +126,13 @@ pub struct TreqChecks {
   /// The latest run of each workflow that has run, by file.
   pub latest: HashMap<String, RunSummary>,
   pub setup: Option<SetupScriptStatus>,
+}
+
+impl TreqChecks {
+  /// Whether the repository declares any workflow or a setup script.
+  pub fn configured(&self) -> bool {
+    !self.workflows.is_empty() || self.setup.as_ref().is_some_and(|s| s.configured)
+  }
 }
 
 /// One line of a job's logs (`getRunLogs`).

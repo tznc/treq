@@ -801,7 +801,16 @@ impl Render for PrDetailScreen {
               .h(px(widgets::CTA_H))
               .label("Review changes")
               .on_click(cx.listener(|this, _, _, cx| {
-                super::pr_review::open(this.repo.clone(), this.number, cx)
+                let screen = cx.weak_entity();
+                let on_submitted = Rc::new(move |cx: &mut App| {
+                  screen
+                    .update(cx, |screen, cx| {
+                      screen.message = Some((true, "Review submitted.".into()));
+                      screen.reload(cx);
+                    })
+                    .ok();
+                });
+                super::pr_review::open(this.repo.clone(), this.number, on_submitted, cx)
               }))
               .touch(),
           ),

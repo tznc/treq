@@ -75,6 +75,8 @@ pub struct Github {
   pub creating: bool,
   /// The pull request whose review shows (`/review`).
   pub review: Option<u64>,
+  /// Bumped to read the selected PR again once a review was submitted.
+  pub reload: u64,
 }
 
 impl Github {
@@ -85,6 +87,7 @@ impl Github {
       selected: None,
       creating: false,
       review: None,
+      reload: 0,
     }
   }
 }
