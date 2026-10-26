@@ -51,7 +51,7 @@
     "lint:a11y": "ast-grep scan --filter '^gpui-control-needs-accessible-name$'",
     "lint:design": "ast-grep scan --filter '^(gpui-no-raw-color|gpui-no-raw-text-size|gpui-no-zpx-spacing|gpui-escape-via-layers|gpui-no-adhoc-controls|ui-copy-no-yes-no)$'",
     "design:audit": "node scripts/design-audit.mjs",
-    "icons:generate": "node scripts/generate-icons.js && npx @tauri-apps/cli icon assets/logo-white.imageset/logo-white-rounded.svg"
+    "icons:generate": "node scripts/generate-icons.js && npx @tauri-apps/cli icon assets/logo-white.imageset/logo-white-rounded.svg && node scripts/flatten-ios-icons.js"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.38.0",
@@ -59,6 +59,7 @@
     "@supabase/supabase-js": "^2.95.3",
     "@tauri-apps/cli": "^2.12.2",
     "@types/node": "^20.10.5",
+    "pngjs": "^7.0.0",
     "vitest": "^4.0.15"
   }
 }
