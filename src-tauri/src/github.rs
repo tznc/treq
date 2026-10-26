@@ -255,6 +255,67 @@ pub struct GhPullRequest {
   /// Each reviewer's latest review.
   #[serde(default, alias = "latest_reviews")]
   pub latest_reviews: Vec<GhLatestReview>,
+  /// Every submitted review, oldest first.
+  #[serde(default)]
+  pub reviews: Vec<GhReview>,
+}
+
+/// One submitted review (`reviews`).
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
+#[serde(rename_all(deserialize = "camelCase"))]
+pub struct GhReview {
+  pub author: GhAuthor,
+  /// APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED or PENDING.
+  pub state: String,
+  #[serde(default, alias = "submitted_at")]
+  pub submitted_at: String,
+}
+
+impl GhReview {
+  /// What the timeline says the reviewer did; `None` for reviews it leaves
+  /// out (plain comments, dismissed and pending ones).
+  pub fn verdict(&self) -> Option<&'static str> {
+    match self.state.as_str() {
+      "APPROVED" => Some("approved these changes"),
+      "CHANGES_REQUESTED" => Some("requested changes"),
+      _ => None,
+    }
+  }
+}
+
+/// One entry of a pull request's timeline.
+pub enum TimelineItem<'a> {
+  Comment(&'a GhIssueComment),
+  Review(&'a GhReview),
+}
+
+/// The comments and the reviews' verdicts, oldest first. GitHub's
+/// timestamps are ISO 8601 in UTC, so they sort as text.
+pub fn timeline<'a>(
+  comments: &'a [GhIssueComment],
+  reviews: &'a [GhReview],
+) -> Vec<TimelineItem<'a>> {
+  let mut items: Vec<(&str, TimelineItem)> = comments
+    .iter()
+    .map(|c| (c.created_at.as_str(), TimelineItem::Comment(c)))
+    .chain(
+      reviews
+        .iter()
+        .filter(|r| r.verdict().is_some())
+        .map(|r| (r.submitted_at.as_str(), TimelineItem::Review(r))),
+    )
+    .collect();
+  items.sort_by(|a, b| a.0.cmp(b.0));
+  items.into_iter().map(|(_, item)| item).collect()
+}
+
+/// `author`'s avatar: the one GitHub reported, else their profile image.
+pub fn avatar_url(author: &GhAuthor) -> String {
+  author
+    .avatar_url
+    .clone()
+    .filter(|url| !url.is_empty())
+    .unwrap_or_else(|| format!("https://github.com/{}.png?size=64", author.login))
 }
 
 /// One reviewer's latest review (`latestReviews`).
@@ -910,7 +971,7 @@ pub fn gh_view_pr_impl(
             "--repo",
             repo_full_name,
             "--json",
-            "number,title,state,url,body,author,labels,headRefName,baseRefName,mergeStateStatus,createdAt,updatedAt,comments,isDraft,reviewDecision,latestReviews",
+            "number,title,state,url,body,author,labels,headRefName,baseRefName,mergeStateStatus,createdAt,updatedAt,comments,isDraft,reviewDecision,latestReviews,reviews",
         ],
         extended_path,
     )?;
@@ -2209,6 +2270,79 @@ mod tests {
     assert!(collapsed_checks(&[check("b", "pass")]).is_empty());
   }
 
+  fn comment_at(id: &str, at: &str) -> GhIssueComment {
+    GhIssueComment {
+      id: id.into(),
+      body: String::new(),
+      author: GhAuthor {
+        login: "c".into(),
+        avatar_url: None,
+      },
+      created_at: at.into(),
+      reactions: vec![],
+    }
+  }
+
+  fn review_at(login: &str, state: &str, at: &str) -> GhReview {
+    GhReview {
+      author: GhAuthor {
+        login: login.into(),
+        avatar_url: None,
+      },
+      state: state.into(),
+      submitted_at: at.into(),
+    }
+  }
+
+  #[test]
+  fn timeline_puts_verdicts_among_comments_by_time() {
+    let comments = [
+      comment_at("c1", "2026-08-01T10:00:00Z"),
+      comment_at("c2", "2026-08-03T10:00:00Z"),
+    ];
+    let reviews = [
+      review_at("alice", "APPROVED", "2026-08-02T10:00:00Z"),
+      review_at("bob", "COMMENTED", "2026-08-02T11:00:00Z"),
+      review_at("carol", "CHANGES_REQUESTED", "2026-08-04T10:00:00Z"),
+      review_at("dave", "DISMISSED", "2026-08-04T11:00:00Z"),
+    ];
+    let order: Vec<String> = timeline(&comments, &reviews)
+      .iter()
+      .map(|item| match item {
+        TimelineItem::Comment(c) => c.id.clone(),
+        TimelineItem::Review(r) => format!("{} {}", r.author.login, r.state),
+      })
+      .collect();
+    assert_eq!(
+      order,
+      ["c1", "alice APPROVED", "c2", "carol CHANGES_REQUESTED"]
+    );
+  }
+
+  #[test]
+  fn review_event_names_the_verdict() {
+    assert_eq!(
+      review_at("a", "APPROVED", "").verdict(),
+      Some("approved these changes")
+    );
+    assert_eq!(
+      review_at("a", "CHANGES_REQUESTED", "").verdict(),
+      Some("requested changes")
+    );
+    assert_eq!(review_at("a", "COMMENTED", "").verdict(), None);
+  }
+
+  #[test]
+  fn avatar_url_falls_back_to_the_github_profile_image() {
+    let mut author = GhAuthor {
+      login: "alice".into(),
+      avatar_url: None,
+    };
+    assert_eq!(avatar_url(&author), "https://github.com/alice.png?size=64");
+    author.avatar_url = Some("https://avatars.example/a.png".into());
+    assert_eq!(avatar_url(&author), "https://avatars.example/a.png");
+  }
+
   #[test]
   fn review_state_follows_githubs_decision() {
     assert_eq!(
@@ -2444,6 +2578,7 @@ mod tests {
         is_draft: true,
         review_decision: None,
         latest_reviews: vec![],
+        reviews: vec![],
       }],
       has_more: true,
       end_cursor: Some("x".into()),

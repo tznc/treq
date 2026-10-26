@@ -5,7 +5,7 @@
 //! [`PrAction`].
 
 use crate::mobile::ui::widgets::TouchButton as _;
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
   core::remote::{GithubAction, GithubQuery, TreqCommandRequest},
@@ -20,9 +20,9 @@ use gpui_kit::{
     tag::Tag,
     v_flex, ActiveTheme, IconName, Sizable, StyledExt,
   },
-  div, px, App, AppContext, ClipboardItem, Context, Div, Entity, InteractiveElement, IntoElement,
-  ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
-  WeakEntity, Window,
+  div, img, px, AnyElement, App, AppContext, ClipboardItem, Context, Div, Entity, FontWeight,
+  Image, InteractiveElement, IntoElement, ParentElement, Render, ScrollHandle, SharedString,
+  StatefulInteractiveElement, Styled, WeakEntity, Window,
 };
 
 use super::{
@@ -260,6 +260,8 @@ const CHECKS_MAX_HEIGHT: f32 = 320.;
 pub struct PrDetailScreen {
   /// The checks list every check, not just the failing and running.
   checks_open: bool,
+  /// Reviewers' avatars by URL: `None` while loading or when it failed.
+  avatars: HashMap<String, Option<Arc<Image>>>,
   repo: String,
   number: u64,
   pr: Load<GhPullRequest>,
@@ -293,12 +295,36 @@ impl PrDetailScreen {
       busy: None,
       message: None,
       checks_open: false,
+      avatars: HashMap::new(),
       keys: IdempotencyKeys::default(),
       picker: None,
       scroll: ScrollHandle::new(),
     };
     this.fetch(true, cx);
     this
+  }
+
+  /// Loads the avatars of the reviewers the timeline shows, once per URL.
+  fn load_avatars(&mut self, pr: &GhPullRequest, cx: &mut Context<Self>) {
+    for review in pr.reviews.iter().filter(|r| r.verdict().is_some()) {
+      let url = gh::avatar_url(&review.author);
+      if self.avatars.contains_key(&url) {
+        continue;
+      }
+      self.avatars.insert(url.clone(), None);
+      let fetch = {
+        let url = url.clone();
+        async move {
+          let response = reqwest::get(&url).await.ok()?.error_for_status().ok()?;
+          Some(response.bytes().await.ok()?.to_vec())
+        }
+      };
+      load::run(cx, fetch, move |this, bytes, _| {
+        this
+          .avatars
+          .insert(url, bytes.and_then(treq_ui::image::decode));
+      });
+    }
   }
 
   pub fn reload(&mut self, cx: &mut Context<Self>) {
@@ -315,8 +341,11 @@ impl PrDetailScreen {
     load::run(
       cx,
       remote::read_cached::<GhPullRequest>(request(&self.repo, self.number), join),
-      |this, result, _| match result {
-        Ok(pr) => this.pr = Load::Ready(pr),
+      |this, result, cx| match result {
+        Ok(pr) => {
+          this.load_avatars(&pr, cx);
+          this.pr = Load::Ready(pr);
+        }
         Err(error) if this.pr.ready().is_some() => {
           this.message = Some((
             false,
@@ -612,6 +641,54 @@ impl PrDetailScreen {
     widgets::section(title, cx).child(card)
   }
 
+  /// A reviewer's verdict: their avatar (the initial until it loads), their
+  /// login and what they did.
+  fn review_event(&self, review: &gh::GhReview, cx: &mut Context<Self>) -> Div {
+    let theme = cx.theme();
+    let approved = review.state == "APPROVED";
+    let login = review.author.login.clone();
+    let image = self
+      .avatars
+      .get(&gh::avatar_url(&review.author))
+      .cloned()
+      .flatten();
+    let avatar: AnyElement = match image {
+      Some(image) => img(image).size(px(24.)).rounded_full().into_any_element(),
+      None => div()
+        .size(px(24.))
+        .rounded_full()
+        .bg(theme.muted)
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_xs()
+        .text_color(theme.muted_foreground)
+        .child(
+          login
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_default(),
+        )
+        .into_any_element(),
+    };
+    let tag = if approved {
+      Tag::success()
+    } else {
+      Tag::danger()
+    };
+    h_flex()
+      .gap_2()
+      .px_1()
+      .py_1()
+      .items_center()
+      .flex_wrap()
+      .child(avatar)
+      .child(div().font_weight(FontWeight::MEDIUM).child(login))
+      .child(tag.small().child(review.verdict().unwrap_or_default()))
+      .child(widgets::muted(day(&review.submitted_at), cx))
+  }
+
   fn comment_card(&self, i: usize, comment: &GhIssueComment, cx: &mut Context<Self>) -> Div {
     let theme = cx.theme();
     let picker_open = self.picker.as_deref() == Some(comment.id.as_str());
@@ -765,12 +842,25 @@ impl Render for PrDetailScreen {
         Some(body) => widgets::markdown("pr-body", &body, cx),
         None => widgets::muted("No description provided.", cx),
       }));
-    let comment_rows: Vec<Div> = comments
-      .iter()
-      .enumerate()
-      .map(|(i, c)| self.comment_card(i, c, cx))
+    let comment_rows: Vec<Div> = gh::timeline(&comments, &pr.reviews)
+      .into_iter()
+      .map(|item| match item {
+        gh::TimelineItem::Comment(c) => {
+          let i = comments
+            .iter()
+            .position(|x| x.id == c.id)
+            .unwrap_or_default();
+          self.comment_card(i, c, cx)
+        }
+        gh::TimelineItem::Review(r) => self.review_event(r, cx),
+      })
       .collect();
-    let comments_section = widgets::section(format!("Comments · {}", comments.len()), cx)
+    let heading = if comment_rows.len() > comments.len() {
+      format!("Activity · {}", comment_rows.len())
+    } else {
+      format!("Comments · {}", comments.len())
+    };
+    let comments_section = widgets::section(heading, cx)
       .when(comment_rows.is_empty(), |s| {
         s.child(widgets::card(cx).child(widgets::centered_message("No comments yet.", cx)))
       })

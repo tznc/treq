@@ -301,6 +301,69 @@ pub fn comment(author: &str, date: &str, body: gpui::AnyElement, p: &Palette) ->
     .child(body)
 }
 
+/// A reviewer's verdict in the timeline: their avatar (the initial until it
+/// loads), their login and what they did.
+pub fn review_event(
+  review: &crate::github::GhReview,
+  date: &str,
+  image: Option<std::sync::Arc<gpui::Image>>,
+  p: &Palette,
+) -> Div {
+  let login = review.author.login.clone();
+  let approved = review.state == "APPROVED";
+  let (icon, tone) = if approved {
+    (theme::ICON_CIRCLE_CHECK, Tone::Success)
+  } else {
+    (theme::ICON_CIRCLE_X, Tone::Danger)
+  };
+  let avatar: gpui::AnyElement = match image {
+    Some(image) => gpui::img(image)
+      .size(zpx(20.))
+      .flex_none()
+      .rounded_full()
+      .into_any_element(),
+    None => ui::text(div(), TextSize::Xs)
+      .size(zpx(20.))
+      .flex_none()
+      .rounded_full()
+      .bg(p.muted)
+      .flex()
+      .items_center()
+      .justify_center()
+      .font_weight(FontWeight::MEDIUM)
+      .text_color(p.muted_foreground)
+      .child(
+        review
+          .author
+          .login
+          .chars()
+          .next()
+          .map(|c| c.to_uppercase().to_string())
+          .unwrap_or_default(),
+      )
+      .into_any_element(),
+  };
+  ui::text(div(), TextSize::Sm)
+    .debug_selector(move || format!("github-review-event-{login}"))
+    .flex()
+    .items_center()
+    .gap_2()
+    .px_3()
+    .py_1()
+    .text_color(p.muted_foreground)
+    .child(ui::icon(icon, 14., tone.color(p)).flex_none())
+    .child(avatar)
+    .child(
+      div()
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(p.foreground)
+        .child(review.author.login.clone()),
+    )
+    .child(review.verdict().unwrap_or_default())
+    .child("·")
+    .child(date.to_string())
+}
+
 /// A dropdown menu's panel: `rounded-md border bg-popover p-1 shadow-md`.
 pub fn menu_panel(id: &'static str, p: &Palette) -> Stateful<Div> {
   named(div(), id)

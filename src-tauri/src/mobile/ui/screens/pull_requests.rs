@@ -443,6 +443,7 @@ pub(crate) mod tests {
       is_draft: draft,
       review_decision: None,
       latest_reviews: vec![],
+      reviews: vec![],
     }
   }
 

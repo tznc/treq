@@ -146,6 +146,8 @@ pub struct LogLine {
 /// `notify`, `open_url` and `refresh_pr_status` block, so they are called
 /// off the main thread.
 pub trait GithubHost: WorkspaceHost {
+  /// The image at `url`: a reviewer's avatar.
+  fn avatar(&self, url: &str) -> Result<Vec<u8>, String>;
   fn remote(&self, repo_path: &str) -> Result<Option<GitRemoteInfo>, String>;
   fn list_issues(
     &self,
@@ -209,6 +211,10 @@ pub trait GithubHost: WorkspaceHost {
 }
 
 impl GithubHost for Backend {
+  fn avatar(&self, url: &str) -> Result<Vec<u8>, String> {
+    super::settings_data::SettingsHost::fetch_image(self, url)
+  }
+
   fn remote(&self, repo_path: &str) -> Result<Option<GitRemoteInfo>, String> {
     core::github_cli::remote(repo_path)
   }
@@ -825,6 +831,7 @@ mod tests {
       is_draft: false,
       review_decision: None,
       latest_reviews: vec![],
+      reviews: vec![],
     }
   }
 

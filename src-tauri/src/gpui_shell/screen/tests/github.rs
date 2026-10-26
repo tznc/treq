@@ -87,6 +87,7 @@ pub(super) fn pr(number: u64, head: &str, base: &str) -> GhPullRequest {
     is_draft: false,
     review_decision: None,
     latest_reviews: vec![],
+    reviews: vec![],
   }
 }
 
@@ -117,6 +118,11 @@ impl FakeHost {
 }
 
 impl GithubHost for FakeHost {
+  fn avatar(&self, url: &str) -> Result<Vec<u8>, String> {
+    self.record(format!("read avatar {url}"));
+    Err("offline".into())
+  }
+
   fn remote(&self, _: &str) -> Result<Option<GitRemoteInfo>, String> {
     Ok(self.github.remote.clone())
   }
@@ -1188,6 +1194,37 @@ fn github_long_comment_thread_folds_the_middle_and_expands_in_place(cx: &mut Tes
   h.cx.run_until_parked();
   assert_eq!(shown(&mut h), (0..8).collect::<Vec<_>>());
   assert!(!h.drawn("github-comments-show-earlier"));
+}
+
+#[gpui::test]
+fn github_pr_timeline_shows_who_approved(cx: &mut TestAppContext) {
+  let mut approved = pr(1, "feat/a", "main");
+  approved.reviews = vec![
+    crate::github::GhReview {
+      author: author("alice"),
+      state: "APPROVED".into(),
+      submitted_at: "2026-08-02T10:00:00Z".into(),
+    },
+    crate::github::GhReview {
+      author: author("bob"),
+      state: "COMMENTED".into(),
+      submitted_at: "2026-08-02T11:00:00Z".into(),
+    },
+  ];
+  let fake = Fake {
+    pr: Some(approved),
+    ..prs()
+  };
+  let (mut h, host) = harness(cx, fake, route("prs", Some(1), false));
+  h.cx.run_until_parked();
+  assert!(h.drawn("github-review-event-alice"));
+  assert!(
+    !h.drawn("github-review-event-bob"),
+    "a plain comment review is not an event"
+  );
+  assert!(host
+    .calls()
+    .contains(&"read avatar https://github.com/alice.png?size=64".to_string()));
 }
 
 #[gpui::test]

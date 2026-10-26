@@ -61,7 +61,12 @@ test("pr review approve: back on the PR detail", async ({ page }) => {
   // GitHub records the approval: the PR's next read reports it.
   writeFileSync(
     join(fixture().home, "fake-gh-prs.json"),
-    JSON.stringify({ "fix/slack-retry": { reviewDecision: "APPROVED" } }),
+    JSON.stringify({
+      "fix/slack-retry": {
+        reviewDecision: "APPROVED",
+        reviews: [{ author: { login: "octocat" }, state: "APPROVED", submittedAt: "2026-08-13T09:30:00Z" }],
+      },
+    }),
   );
   await page.getByRole("button", { name: "Submit review" }).click();
   await expect(page.getByRole("button", { name: "Review changes" })).toBeVisible({ timeout: 10_000 });
@@ -70,8 +75,8 @@ test("pr review approve: back on the PR detail", async ({ page }) => {
     name: "21-pr-approve-03-back-on-pr",
     title: "After approving: back on #421's detail",
     expectations: [
-      "PR #421's detail, not the review screen",
-      "A green Approved badge beside Open",
+      "Back on #421's detail with a green Approved badge beside Open",
+      "Timeline: a check, octocat's avatar (or initial), octocat approved these changes · date",
       "A Review submitted toast reading #421: Approve",
     ],
     screen: true,

@@ -355,29 +355,49 @@ impl GithubView {
     )
   }
 
+  /// The comments and, on a pull request, its reviewers' verdicts.
   fn comments(
     &self,
     comments: &Option<Vec<GhIssueComment>>,
+    reviews: &[crate::github::GhReview],
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> Option<Div> {
-    let comments = comments.as_ref().filter(|c| !c.is_empty())?;
+    let comments = comments.as_deref().unwrap_or_default();
+    let items = crate::github::timeline(comments, reviews);
+    if items.is_empty() {
+      return None;
+    }
     // `None` stands for the fold.
-    let shown =
-      crate::gpui_shell::screen::rows::thread(comments.len(), self.detail.comments_expanded);
+    let shown = crate::gpui_shell::screen::rows::thread(items.len(), self.detail.comments_expanded);
     Some(
       div()
         .flex()
         .flex_col()
         .gap_3()
         .child(parts::section_heading(
-          format!("Comments ({})", comments.len()),
+          if items.len() > comments.len() {
+            format!("Activity ({})", items.len())
+          } else {
+            format!("Comments ({})", comments.len())
+          },
           Some(theme::ICON_MESSAGE),
           p,
         ))
         .children(shown.iter().map(|&shown_ix| match shown_ix {
           Some(ix) => {
-            let c = &comments[ix];
+            let c = match &items[ix] {
+              crate::github::TimelineItem::Comment(c) => *c,
+              crate::github::TimelineItem::Review(r) => {
+                let image = self
+                  .avatars
+                  .get(&crate::github::avatar_url(&r.author))
+                  .cloned()
+                  .flatten();
+                return parts::review_event(r, &time::date(&r.submitted_at), image, p)
+                  .into_any_element();
+              }
+            };
             parts::comment(
               &c.author.login,
               &time::date(&c.created_at),
@@ -402,7 +422,7 @@ impl GithubView {
           }
           None => parts::fold_row(
             "github-comments-show-earlier",
-            crate::gpui_shell::screen::rows::hidden(comments.len()),
+            crate::gpui_shell::screen::rows::hidden(items.len()),
             p,
             cx.listener(|view, _, _, cx| {
               view.detail.comments_expanded = true;
@@ -695,7 +715,7 @@ impl GithubView {
       .when(!editing, |d| {
         d.children(self.body("github-issue-body", &issue.body, p))
       })
-      .children(self.comments(&issue.comments, p, cx))
+      .children(self.comments(&issue.comments, &[], p, cx))
       .child(add)
   }
 
@@ -1089,7 +1109,7 @@ impl GithubView {
       .children(checks_list)
       .children(treq)
       .children(self.body("github-pr-body", &pr.body, p))
-      .children(self.comments(&pr.comments, p, cx))
+      .children(self.comments(&pr.comments, &pr.reviews, p, cx))
       .child(add)
   }
 

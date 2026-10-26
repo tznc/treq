@@ -9,6 +9,7 @@ pub mod badge;
 pub mod checkbox;
 pub mod dialog;
 pub mod empty_state;
+pub mod image;
 pub mod icon_button;
 pub mod kbd;
 pub mod menu;
