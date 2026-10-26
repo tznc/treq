@@ -1,4 +1,5 @@
-//! The GPUI interface: one navigation stack of full-screen pages.
+//! The GPUI interface: one navigation stack of full-screen pages. On a
+//! wide screen the page under the top one shows beside it; see [`panes`].
 //!
 //! [`Root`] owns the stack and the app-wide [`AppModel`] (sign-in and
 //! connection state). Screens push and pop pages through [`nav`].
@@ -151,6 +152,11 @@ pub struct Root {
   sheet: Option<sheet::Sheet>,
   /// Set briefly after a sheet closes; see [`sheet::dismiss`].
   tap_guard: bool,
+  /// Whether the window is wide enough to show two pages; see [`panes`].
+  split: bool,
+  /// Whether the last tap in a split was on the left pane, so a page it
+  /// opens replaces the one beside it instead of stacking on top.
+  list_focus: bool,
 }
 
 pub(crate) struct Nav {
@@ -228,7 +234,7 @@ pub mod nav {
         .update(cx, |_, window, cx| {
           let view = build(window, cx);
           root.update(cx, |root, cx| {
-            if replace && root.stack.len() > 1 {
+            if (replace || (root.split && root.list_focus)) && root.stack.len() > 1 {
               root.stack.pop();
             }
             root.stack.push(Page {
@@ -265,9 +271,15 @@ pub mod nav {
   }
 
   pub fn pop(cx: &mut App) {
-    update(cx, |root, cx| {
-      if root.stack.len() > 1 {
-        root.stack.pop();
+    pop_n(1, cx)
+  }
+
+  /// Pops `count` pages, keeping the home page.
+  pub fn pop_n(count: usize, cx: &mut App) {
+    update(cx, move |root, cx| {
+      let keep = root.stack.len().saturating_sub(count).max(1);
+      if keep < root.stack.len() {
+        root.stack.truncate(keep);
         root.stack_changed(cx);
       }
     });
@@ -347,6 +359,8 @@ impl Root {
       }],
       sheet: None,
       tap_guard: false,
+      split: false,
+      list_focus: false,
     };
     restore(cx);
     root
@@ -422,33 +436,34 @@ impl Root {
   }
 }
 
-impl Render for Root {
-  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    // Keep clear of the status bar, navigation bar and soft keyboard.
-    let visible = window.fully_visible_bounds();
-    let viewport = window.viewport_size();
-    let page = self.stack.last().expect("the stack keeps its root page");
-    let can_go_back = self.stack.len() > 1;
-    let model = self.model.read(cx);
-    // The landing page brings its own branding, so it drops the title bar.
-    let landing = !can_go_back && is_landing(model.user.as_deref(), has_machines(model));
-    let blocked = model.cutoff();
-    let managed = model
-      .connection
-      .as_ref()
-      .is_some_and(|c| c.kind == ConnectionKind::Managed);
-    let theme = cx.theme();
+/// The narrowest window that shows a page beside the one under it.
+const SPLIT_MIN_WIDTH: Pixels = px(768.);
+/// The width of the left pane in a split.
+const LIST_PANE_WIDTH: Pixels = px(360.);
 
+/// How many pages of a `depth`-page stack show side by side in a window
+/// `width` wide: on a tablet the page under the top one (usually the list it
+/// was opened from) stays on the left, on a phone only the top page shows.
+fn panes(width: Pixels, depth: usize) -> usize {
+  if width >= SPLIT_MIN_WIDTH && depth >= 2 {
+    2
+  } else {
+    1
+  }
+}
+
+impl Root {
+  /// A page with its title bar. `back` pops this many pages, `None` hides
+  /// Back.
+  fn pane(&self, ix: usize, back: Option<usize>, title_bar: bool, cx: &App) -> Stateful<Div> {
+    let page = &self.stack[ix];
+    let theme = cx.theme();
     v_flex()
+      .id(("pane", ix))
       .size_full()
-      .bg(theme.background)
-      .text_color(theme.foreground)
-      .pt(visible.origin.y)
-      .pl(visible.origin.x)
-      .pr(viewport.width - visible.right())
-      .pb(viewport.height - visible.bottom())
-      .when(!landing, |root| {
-        root.child(
+      .min_w_0()
+      .when(title_bar, |pane| {
+        pane.child(
           h_flex()
             .h(px(56.))
             .px_2()
@@ -456,13 +471,13 @@ impl Render for Root {
             .items_center()
             .border_b_1()
             .border_color(theme.border)
-            .when(can_go_back, |bar| {
+            .when_some(back, |bar, count| {
               bar.child(
                 Button::new("back")
                   .ghost()
                   .large()
                   .icon(IconName::ArrowLeft)
-                  .on_click(|_, _, cx| nav::pop(cx)),
+                  .on_click(move |_, _, cx| nav::pop_n(count, cx)),
               )
             })
             .child(
@@ -517,6 +532,75 @@ impl Render for Root {
               .cached(StyleRefinement::default().size_full()),
           ),
       )
+  }
+}
+
+impl Render for Root {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    // Keep clear of the status bar, navigation bar and soft keyboard.
+    let visible = window.fully_visible_bounds();
+    let viewport = window.viewport_size();
+    let depth = self.stack.len();
+    self.split = panes(visible.size.width, depth) == 2;
+    let model = self.model.read(cx);
+    // The landing page brings its own branding, so it drops the title bar.
+    let landing = depth == 1 && is_landing(model.user.as_deref(), has_machines(model));
+    let blocked = model.cutoff();
+    let managed = model
+      .connection
+      .as_ref()
+      .is_some_and(|c| c.kind == ConnectionKind::Managed);
+    let theme = cx.theme();
+    let (background, foreground, border) = (theme.background, theme.foreground, theme.border);
+
+    let content = if self.split {
+      let weak = cx.weak_entity();
+      let focus = move |list: bool| {
+        let weak = weak.clone();
+        move |_: &MouseDownEvent, _: &mut Window, cx: &mut App| {
+          weak.update(cx, |root, _| root.list_focus = list).ok();
+        }
+      };
+      // Back on the list closes it and the page beside it.
+      let list_back = (depth > 2).then_some(2);
+      h_flex()
+        .flex_1()
+        .min_h_0()
+        .child(
+          div()
+            .w(LIST_PANE_WIDTH)
+            .flex_none()
+            .h_full()
+            .border_r_1()
+            .border_color(border)
+            .on_any_mouse_down(focus(true))
+            .child(self.pane(depth - 2, list_back, true, cx)),
+        )
+        .child(
+          div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .on_any_mouse_down(focus(false))
+            .child(self.pane(depth - 1, Some(1), true, cx)),
+        )
+    } else {
+      let back = (depth > 1).then_some(1);
+      h_flex()
+        .flex_1()
+        .min_h_0()
+        .child(self.pane(depth - 1, back, !landing, cx))
+    };
+
+    v_flex()
+      .size_full()
+      .bg(background)
+      .text_color(foreground)
+      .pt(visible.origin.y)
+      .pl(visible.origin.x)
+      .pr(viewport.width - visible.right())
+      .pb(viewport.height - visible.bottom())
+      .child(content)
       .when_some(blocked, |root, reason| {
         root.child(cutoff_overlay(reason, managed, cx))
       })
@@ -986,7 +1070,23 @@ impl Root {
 
 #[cfg(test)]
 mod tests {
-  use super::is_landing;
+  use super::{is_landing, panes};
+  use gpui_kit::px;
+
+  #[test]
+  fn phones_show_one_page() {
+    assert_eq!(panes(px(412.), 1), 1);
+    assert_eq!(panes(px(412.), 3), 1);
+    // A phone in landscape is still too narrow for a list beside a page.
+    assert_eq!(panes(px(767.), 2), 1);
+  }
+
+  #[test]
+  fn wide_screens_show_the_page_beside_the_one_under_it() {
+    assert_eq!(panes(px(768.), 1), 1);
+    assert_eq!(panes(px(768.), 2), 2);
+    assert_eq!(panes(px(1366.), 4), 2);
+  }
 
   #[test]
   fn landing_only_when_signed_out_and_unconnected() {
