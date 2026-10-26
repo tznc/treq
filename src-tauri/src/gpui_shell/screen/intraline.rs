@@ -59,6 +59,12 @@ pub fn changed_ranges(lines: &[String]) -> HashMap<usize, Marks> {
   out
 }
 
+/// The changed byte ranges of one removed and one added line, `None` when
+/// they share too little to be worth marking.
+pub fn line_marks(old: &str, new: &str) -> Option<(Marks, Marks)> {
+  pair(old, new, &mut Vec::new())
+}
+
 fn text(line: &str) -> &str {
   line.get(1..).unwrap_or("")
 }
