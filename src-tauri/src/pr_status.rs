@@ -670,9 +670,7 @@ static GLOBAL: std::sync::OnceLock<PrStatusManager> = std::sync::OnceLock::new()
 
 fn production_fetch() -> PrFetchFn {
   Arc::new(|repo_path: &str, branch_name: &str| {
-    let gh = crate::binary_paths::get_binary_path("gh")
-      .or_else(|| crate::binary_paths::detect_binary_cached("gh"))
-      .ok_or_else(|| "gh CLI not found".to_string())?;
+    let gh = crate::core::github_cli::gh_path()?;
     let path = crate::binary_paths::get_extended_path();
     crate::github::get_pr_info_via_gh_impl(&gh, repo_path, branch_name, &path)
   })
@@ -680,9 +678,7 @@ fn production_fetch() -> PrFetchFn {
 
 fn production_ci_fetch() -> CiFetchFn {
   Arc::new(|repo_path: &str, branch_name: &str| {
-    let gh = crate::binary_paths::get_binary_path("gh")
-      .or_else(|| crate::binary_paths::detect_binary_cached("gh"))
-      .ok_or_else(|| "gh CLI not found".to_string())?;
+    let gh = crate::core::github_cli::gh_path()?;
     let path = crate::binary_paths::get_extended_path();
     crate::github::get_pr_checks_via_gh_impl(&gh, repo_path, branch_name, &path)
   })
@@ -692,9 +688,7 @@ fn production_ci_fetch() -> CiFetchFn {
 /// `gh pr view`/`checks`, since their PR may predate the page.
 fn production_bulk_fetch() -> BulkFetchFn {
   Arc::new(|repo_path: &str, branches: &[String]| {
-    let gh = crate::binary_paths::get_binary_path("gh")
-      .or_else(|| crate::binary_paths::detect_binary_cached("gh"))
-      .ok_or_else(|| "gh CLI not found".to_string())?;
+    let gh = crate::core::github_cli::gh_path()?;
     let path = crate::binary_paths::get_extended_path();
     let mut listing = crate::github::list_prs_with_checks_via_gh_impl(&gh, repo_path, &path)?;
     let mut result = BulkFetchResult::new();

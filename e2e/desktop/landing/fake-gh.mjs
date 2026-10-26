@@ -10,6 +10,11 @@ const args = process.argv.slice(2);
 if (process.env.TREQ_FAKE_GH_LOG) {
   appendFileSync(process.env.TREQ_FAKE_GH_LOG, `${JSON.stringify(args)}\n`);
 }
+// A QA spec signs gh out by leaving this file in HOME.
+if (existsSync(join(process.env.HOME ?? "", "fake-gh-signed-out"))) {
+  process.stderr.write("To get started with GitHub CLI, please run:  gh auth login\n");
+  process.exit(4);
+}
 const has = (flag) => args.includes(flag);
 const after = (flag) => args[args.indexOf(flag) + 1];
 const field = (prefix) =>
