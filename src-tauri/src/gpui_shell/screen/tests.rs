@@ -10035,6 +10035,24 @@ fn changes_tab_shift_click_extends_the_line_selection(cx: &mut TestAppContext) {
   );
 }
 
+#[test]
+fn terminal_label_shows_the_workspace_title_else_the_branch() {
+  let place = terminal::Place {
+    branches: vec![
+      ("/ws/a".into(), "feat-a".into()),
+      ("/ws/b".into(), "feat-b".into()),
+    ],
+    titles: vec![("/ws/a".into(), "Fix login flow".into())],
+    ..terminal::Place::default()
+  };
+  assert_eq!(
+    place.workspace_label("/ws/a").as_deref(),
+    Some("Fix login flow")
+  );
+  assert_eq!(place.workspace_label("/ws/b").as_deref(), Some("feat-b"));
+  assert_eq!(place.workspace_label("/elsewhere"), None);
+}
+
 #[gpui::test]
 fn workspace_header_controls_share_one_height(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
