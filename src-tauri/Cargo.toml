@@ -56,6 +56,11 @@ mobile-ui = [
   "dep:android_logger",
 ]
 
+[package.metadata.cargo-machete]
+# `mobile-ui` takes rust-embed only to turn on `debug-embed` for gpui-kit's
+# icons.
+ignored = ["rust-embed"]
+
 # Clippy's default set runs in CI with -D warnings; these add checks it
 # leaves out. clippy.toml lets tests unwrap and expect.
 [lints.clippy]
