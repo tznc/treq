@@ -936,15 +936,7 @@ impl ChangesView {
       .as_ref()
       .is_some_and(|s| s.path == path && s.head == (h, l));
     let kind = line_kind(line);
-    let bg = if selected {
-      Some(p.selected())
-    } else {
-      match kind {
-        LineKind::Added => Some(Tone::GitOpen.tint(p)),
-        LineKind::Removed => Some(Tone::GitClosed.tint(p)),
-        LineKind::Context => None,
-      }
-    };
+    let bg = row_fill(selected, kind, p);
     // The characters this line changed against its pair, a shade deeper.
     let mark = match kind {
       LineKind::Removed => Tone::GitClosed.color(p),
@@ -970,7 +962,8 @@ impl ChangesView {
       &|c| self.is_outdated_in(c, hunks),
     );
     let border = p.border.opacity(0.4);
-    let gutter_hover = p.muted.opacity(0.5);
+    let gutter_hover = p.hover();
+    let dragging = self.review.selection.as_ref().is_some_and(|s| s.dragging);
     let text = line.get(1..).filter(|t| !t.is_empty()).unwrap_or(" ");
     let at = (h, l);
     let (press, drag, add) = (path.to_string(), path.to_string(), path.to_string());
@@ -1017,7 +1010,9 @@ impl ChangesView {
           .border_color(border)
           .text_color(p.muted_foreground)
           .cursor_pointer()
-          .hover(move |s| s.bg(gutter_hover))
+          .when(gutter_hovers(selected, dragging), |this| {
+            this.hover(move |s| s.bg(gutter_hover))
+          })
           .when(!conflicted, |this| {
             this.on_mouse_down(
               MouseButton::Left,
@@ -2134,5 +2129,55 @@ impl ChangesView {
       )
       .with_priority(2),
     )
+  }
+}
+
+/// A diff row's fill. Selection wins over the add/remove tint, so a
+/// multi-line selection reads as one band across added, removed and context
+/// lines.
+pub(super) fn row_fill(selected: bool, kind: LineKind, p: &Palette) -> Option<Hsla> {
+  if selected {
+    return Some(p.selected());
+  }
+  match kind {
+    LineKind::Added => Some(Tone::GitOpen.tint(p)),
+    LineKind::Removed => Some(Tone::GitClosed.tint(p)),
+    LineKind::Context => None,
+  }
+}
+
+/// Whether the gutter shows its hover fill. The fill sits on the gutter cell,
+/// above the row's own fill, so on a selected row (the drag head is always
+/// under the cursor) it would cut a grey gap into the selection band.
+pub(super) fn gutter_hovers(selected: bool, dragging: bool) -> bool {
+  !selected && !dragging
+}
+
+#[cfg(test)]
+mod row_paint_tests {
+  use super::*;
+
+  #[test]
+  fn selection_beats_diff_tint_on_every_kind() {
+    let p = theme::palette(true);
+    for kind in [LineKind::Added, LineKind::Removed, LineKind::Context] {
+      assert_eq!(row_fill(true, kind, &p), Some(p.selected()));
+    }
+  }
+
+  #[test]
+  fn unselected_rows_keep_their_diff_tint() {
+    let p = theme::palette(true);
+    assert_eq!(row_fill(false, LineKind::Added, &p), Some(Tone::GitOpen.tint(&p)));
+    assert_eq!(row_fill(false, LineKind::Removed, &p), Some(Tone::GitClosed.tint(&p)));
+    assert_eq!(row_fill(false, LineKind::Context, &p), None);
+  }
+
+  #[test]
+  fn gutter_hover_never_paints_over_a_selection_or_a_drag() {
+    assert!(gutter_hovers(false, false));
+    assert!(!gutter_hovers(true, false), "selected row under the cursor");
+    assert!(!gutter_hovers(true, true), "drag head");
+    assert!(!gutter_hovers(false, true), "rows crossed mid-drag");
   }
 }
