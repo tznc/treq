@@ -79,10 +79,13 @@ pub fn run() {
           gpui_kit::component::input::set_native_touch_selection(true, cx);
         }),
       )?;
-      let window = tauri::WindowBuilder::new(app, "main")
-        .title("Treq")
-        .inner_size(420., 860.)
-        .build()?;
+      let window = tauri::WindowBuilder::new(app, "main").title("Treq");
+      // A phone-sized window for desktop runs only. On iOS tao takes
+      // `inner_size` as the UIWindow frame, so the app drew in a 420x860pt
+      // box with the rest of the screen black; mobile fills the screen.
+      #[cfg(desktop)]
+      let window = window.inner_size(420., 860.);
+      let window = window.build()?;
       window.attach_gpui_view(GpuiOptions::default(), move |window, cx| {
         let root = cx.new(|cx| ui::Root::new(events, window, cx));
         cx.new(|cx| gpui_kit::base::Root::new(root, window, cx))
