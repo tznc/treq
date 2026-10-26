@@ -1390,7 +1390,17 @@ impl ChangesView {
     if self.read_only() {
       return;
     }
-    let Some(hunks) = self.hunks.get(path).map(|d| &d.hunks) else {
+    // A committed card's lines are read from the working copy, which only
+    // matches the branch head while the file has no uncommitted edits.
+    if !self.hunks.contains_key(path)
+      && self
+        .snapshot
+        .as_ref()
+        .is_some_and(|s| s.files.iter().any(|f| f.path == path))
+    {
+      return;
+    }
+    let Some(hunks) = self.shown_hunks(path).map(|d| &d.hunks) else {
       return;
     };
     if h >= hunks.len() {
@@ -3524,12 +3534,12 @@ fn skeleton(p: &Palette) -> Div {
 
 /// `HunkContextLineRow`: a line read by "Show more lines".
 fn context_row(
-  n: i64,
+  (old, new): (i64, i64),
   line: &str,
   language: Option<&'static str>,
   p: &Palette,
 ) -> impl IntoElement {
-  let number = if n > 0 { n.to_string() } else { String::new() };
+  let number = |n: i64| if n > 0 { n.to_string() } else { String::new() };
   let border = p.border.opacity(0.4);
   div()
     .flex()
@@ -3542,15 +3552,8 @@ fn context_row(
         .border_r_1()
         .border_color(border)
         .text_color(p.muted_foreground)
-        .child(
-          div()
-            .w_10()
-            .mr_1()
-            .flex()
-            .justify_end()
-            .child(number.clone()),
-        )
-        .child(div().w_10().flex().justify_end().child(number)),
+        .child(div().w_10().mr_1().flex().justify_end().child(number(old)))
+        .child(div().w_10().flex().justify_end().child(number(new))),
     )
     .child(div().w_6().flex_none())
     .child(div().w_5().flex_none())

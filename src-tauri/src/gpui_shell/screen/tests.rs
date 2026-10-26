@@ -6092,6 +6092,54 @@ fn a_viewed_committed_file_stays_viewed_across_reloads(cx: &mut TestAppContext) 
   assert!(!host.writes().contains(&"unmark viewed c.rs".to_string()));
 }
 
+/// The committed card's "Show more lines" reads the working copy, which
+/// a file with no uncommitted edits shares with the branch head.
+#[gpui::test]
+fn show_more_lines_expands_a_committed_file(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.working = host.working.map(|mut diff| {
+    let committed: crate::jj::JjRevisionDiff = serde_json::from_value(serde_json::json!({
+      "committed_files": [
+        {"path": "c.rs", "status": "M", "previous_path": null, "changed_line_count": 2, "diff_deferred": false}
+      ],
+      "hunks_by_file": [
+        {"path": "c.rs", "hunks": [
+          {"id": "h0", "header": "@@ -1,4 +1,4 @@", "lines": ["-a", "+a", " b", " c", " d"], "patch": ""},
+          {"id": "h1", "header": "@@ -30,4 +30,4 @@", "lines": [" a", " b", " c", "-d", "+d"], "patch": ""}
+        ]}
+      ],
+      "too_large_to_render": false
+    }))
+    .expect("committed diff");
+    diff.committed_files = committed.committed_files;
+    diff.hunks_by_file.extend(committed.hunks_by_file);
+    diff
+  });
+  let mut route = changes_route();
+  if let View::Workspace(r) = &mut route.view {
+    r.show_committed = Some(true);
+  }
+  let (mut h, host) = workspace_harness(cx, host, route);
+  h.click("expand-after-c.rs-0");
+  h.cx.run_until_parked();
+  assert!(
+    host.calls().contains(&"read lines c.rs 5..24".to_string()),
+    "{:?}",
+    host.calls()
+  );
+  let read = h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
+    changes
+      .context
+      .get(&("c.rs".to_string(), 0, super::changes::Dir::After))
+      .cloned()
+      .unwrap_or_default()
+  });
+  assert_eq!(read.first().map(String::as_str), Some("line 5"));
+  assert_eq!(read.len(), 20);
+}
+
 #[gpui::test]
 fn changes_tab_discards_everything_once_confirmed(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());

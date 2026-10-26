@@ -26,8 +26,8 @@ use crate::{
   gpui_shell::{
     screen::{
       changes_data::{
-        body, conflict_lines, conflicts, is_collapsed, line_counts, new_lines, Body, BodyInput,
-        Conflict, FileHunks,
+        body, conflict_lines, conflicts, context_row_numbers, is_collapsed, line_counts, Body,
+        BodyInput, Conflict, FileHunks,
       },
       changes_review::FILE_HUNK,
       commits_data::{line_number, line_numbers},
@@ -329,7 +329,7 @@ impl ChangesView {
             .checked_sub(1)
             .is_some_and(|prev| read(prev, Dir::After) > 0));
       if !joined {
-        rows.push(Row::HunkHeader(c, h, !card.committed && above.is_some()));
+        rows.push(Row::HunkHeader(c, h, above.is_some()));
       }
       rows.extend((0..before).map(|i| Row::Context(c, h, Dir::Before, i)));
       for l in 0..hunk.lines.len() {
@@ -345,7 +345,6 @@ impl ChangesView {
         rows.push(Row::Line(c, h, l));
       }
       rows.extend((0..read(h, Dir::After)).map(|i| Row::Context(c, h, Dir::After, i)));
-      // Drawn for committed files too, where React's click finds no hunk.
       if below.is_some() {
         rows.push(Row::Below(c, h));
       }
@@ -540,6 +539,10 @@ impl ChangesView {
         gutter_cols(
           div()
             .id(SharedString::from(format!("hunk-header-{path}-{h}")))
+            .debug_selector({
+              let id = format!("hunk-header-{path}-{h}");
+              move || id
+            })
             .flex()
             .bg(p.muted.opacity(0.6))
             .when(expandable, |this| {
@@ -588,12 +591,8 @@ impl ChangesView {
           .map(Vec::as_slice)
           .unwrap_or_default();
         let line = lines.get(i).map_or("", String::as_str);
-        let (first, last) = new_lines(&hunk.header);
-        let n = match dir {
-          Dir::Before => first as i64 - lines.len() as i64 + i as i64,
-          Dir::After => (last + 1 + i) as i64,
-        };
-        context_row(n, line, language, p).into_any_element()
+        let numbers = context_row_numbers(&hunk.header, dir == Dir::After, lines.len(), i);
+        context_row(numbers, line, language, p).into_any_element()
       }
       Row::Line(_, _, l) => {
         // Numbered with the card's other lines, not by counting up to this one.
@@ -632,20 +631,21 @@ impl ChangesView {
       }
       Row::Below(..) => {
         let file = path.to_string();
-        let committed = card.committed;
         let hover = p.muted.opacity(0.5);
         gutter_cols(
           div()
             .id(SharedString::from(format!("expand-after-{path}-{h}")))
+            .debug_selector({
+              let id = format!("expand-after-{path}-{h}");
+              move || id
+            })
             .flex()
             .bg(p.muted.opacity(0.3))
             .cursor_pointer()
             .hover(move |s| s.bg(hover))
-            .on_click(cx.listener(move |view, _, _, cx| {
-              if !committed {
-                view.expand_context(&file, h, Dir::After, cx)
-              }
-            })),
+            .on_click(
+              cx.listener(move |view, _, _, cx| view.expand_context(&file, h, Dir::After, cx)),
+            ),
         )
         .child(
           ui::text(div(), TextSize::Xs)
