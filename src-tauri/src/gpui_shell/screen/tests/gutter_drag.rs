@@ -224,3 +224,84 @@ fn changes_tab_escape_clears_the_text_selection(cx: &mut TestAppContext) {
   });
   assert_eq!(text, None);
 }
+
+/// a.rs with `n` added lines, more than a window shows.
+fn changes_host_long(n: usize) -> FakeHost {
+  let mut host = changes_host();
+  let lines: Vec<String> = (0..n).map(|i| format!("+line {i}")).collect();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [],
+    "uncommitted_files": [
+      {"path": "a.rs", "status": "A", "previous_path": null, "changed_line_count": n, "diff_deferred": false}
+    ],
+    "hunks_by_file": [
+      {"path": "a.rs", "hunks": [{"id": "h", "header": format!("@@ -0,0 +1,{n} @@"), "lines": lines, "patch": ""}]}
+    ],
+    "too_large_to_render": false
+  }))
+  .ok();
+  host
+}
+
+/// Holds a drag below the diff for a second, then lets go: the head it
+/// reached.
+fn hold_below(
+  h: &mut Harness,
+  start: gpui::Point<gpui::Pixels>,
+  clicks: usize,
+) -> gpui::Point<gpui::Pixels> {
+  press_code(h, start, clicks);
+  let below = gpui::point(start.x, gpui::px(5000.));
+  h.cx
+    .simulate_mouse_move(below, Some(MouseButton::Left), Modifiers::none());
+  for _ in 0..60 {
+    h.cx
+      .executor()
+      .advance_clock(std::time::Duration::from_millis(16));
+    h.cx.run_until_parked();
+  }
+  below
+}
+
+#[gpui::test]
+fn changes_tab_gutter_drag_scrolls_the_diff_past_its_edge(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_long(200), changes_route());
+  h.cx.run_until_parked();
+  let start = h
+    .cx
+    .debug_bounds("gutter-a.rs-0-0")
+    .expect("gutter")
+    .center();
+  let end = hold_below(&mut h, start, 1);
+  let lines = selected_lines(&mut h).map(|(_, l)| l).unwrap_or_default();
+  h.cx
+    .simulate_mouse_up(end, MouseButton::Left, Modifiers::none());
+  assert!(
+    lines.len() > 80,
+    "selection stopped at {} lines",
+    lines.len()
+  );
+  assert_eq!(lines.first(), Some(&(0, 0)));
+}
+
+#[gpui::test]
+fn changes_tab_text_drag_scrolls_the_diff_past_its_edge(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_long(200), changes_route());
+  let b = h.cx.debug_bounds("code-a.rs-0-0").expect("code");
+  let start = gpui::point(b.left() + gpui::px(1.), b.center().y);
+  let end = hold_below(&mut h, start, 1);
+  h.cx
+    .simulate_mouse_up(end, MouseButton::Left, Modifiers::none());
+  let head = h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let t = workspace
+      .changes()
+      .expect("changes")
+      .read(cx)
+      .review
+      .text
+      .clone();
+    t.map(|t| t.head.0 .1).unwrap_or(0)
+  });
+  assert!(head > 80, "text selection stopped at line {head}");
+}

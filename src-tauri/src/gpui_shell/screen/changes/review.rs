@@ -74,6 +74,10 @@ pub(in crate::gpui_shell::screen) struct Review {
   pub selection: Option<LineSelection>,
   pub text: Option<TextSelection>,
   pub(super) layouts: Layouts,
+  /// Where the pointer is during a drag, wherever it is in the window.
+  pub(super) pointer: Option<Point<Pixels>>,
+  /// Scrolls the diff while a drag holds the pointer at or past its edge.
+  pub(super) autoscroll: Option<Task<()>>,
   /// Scroll the selection's head into view, within this many frames.
   pub reveal: u8,
   /// Where the selection's head was last drawn.
@@ -272,6 +276,8 @@ impl ChangesView {
   }
 
   pub(super) fn end_drag(&mut self, cx: &mut Context<Self>) {
+    self.review.pointer = None;
+    self.review.autoscroll = None;
     if let Some(s) = self.review.selection.as_mut().filter(|s| s.dragging) {
       s.dragging = false;
       cx.notify();
@@ -358,6 +364,84 @@ impl ChangesView {
         cx.notify();
       }
     }
+  }
+
+  /// Whether a line or text selection is being dragged.
+  pub(super) fn dragging(&self) -> bool {
+    self.review.selection.as_ref().is_some_and(|s| s.dragging)
+      || self.review.text.as_ref().is_some_and(|t| t.dragging)
+  }
+
+  /// The pointer moved during a drag: keeps where it is, and scrolls the diff
+  /// while it is at or past the diff's top or bottom.
+  pub(super) fn drag_pointer(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+    if !self.dragging() {
+      return;
+    }
+    self.review.pointer = Some(position);
+    if self.review.autoscroll.is_some()
+      || super::keys::autoscroll_step(position.y, self.diff.list.viewport_bounds()) == px(0.)
+    {
+      return;
+    }
+    self.review.autoscroll = Some(cx.spawn(async move |this, cx| loop {
+      cx.background_executor()
+        .timer(Duration::from_millis(16))
+        .await;
+      let more = this
+        .update(cx, |view, cx| view.autoscroll_tick(cx))
+        .unwrap_or(false);
+      if !more {
+        break;
+      }
+    }));
+  }
+
+  /// One step of a drag's scroll: moves the drag to the line now under the
+  /// pointer, then scrolls on. `false` once there is nothing more to do.
+  fn autoscroll_tick(&mut self, cx: &mut Context<Self>) -> bool {
+    let Some(pointer) = self.review.pointer.filter(|_| self.dragging()) else {
+      self.review.autoscroll = None;
+      return false;
+    };
+    let path = match (&self.review.selection, &self.review.text) {
+      (Some(s), _) if s.dragging => s.path.clone(),
+      (_, Some(t)) => t.path.clone(),
+      _ => return false,
+    };
+    if let Some(at) = self.line_under(&path, pointer.y) {
+      self.drag_line(&path, at, cx);
+      self.drag_text(&path, at, pointer, cx);
+    }
+    let step = super::keys::autoscroll_step(pointer.y, self.diff.list.viewport_bounds());
+    if step == px(0.) {
+      self.review.autoscroll = None;
+      return false;
+    }
+    self.diff.list.scroll_by(step);
+    cx.notify();
+    true
+  }
+
+  /// The drawn line of `path` nearest `y`, as of the last frame.
+  fn line_under(&self, path: &str, y: Pixels) -> Option<LineRef> {
+    let layouts = self.review.layouts.borrow();
+    layouts
+      .iter()
+      .filter(|((p, _), _)| p == path)
+      .map(|((_, at), layout)| {
+        let b = layout.bounds();
+        let off = if y < b.top() {
+          b.top() - y
+        } else if y > b.bottom() {
+          y - b.bottom()
+        } else {
+          px(0.)
+        };
+        (off, *at)
+      })
+      .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+      .map(|(_, at)| at)
   }
 
   /// The selected code, as Copy takes it; `None` when nothing is selected.

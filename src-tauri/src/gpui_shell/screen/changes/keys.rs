@@ -14,6 +14,25 @@ use crate::gpui_shell::screen::{
 const REVEAL_FRAMES: u8 = 3;
 /// Room kept above and below a revealed line.
 const REVEAL_MARGIN: f32 = 48.;
+/// How close to the diff's top or bottom a drag starts scrolling it.
+pub(super) const AUTOSCROLL_EDGE: Pixels = px(32.);
+/// The most a drag scrolls the diff per tick.
+pub(super) const AUTOSCROLL_MAX: Pixels = px(64.);
+
+/// How far a drag with the pointer at `y` scrolls the diff this tick: nothing
+/// away from the edges, then more the further into or past an edge it is.
+pub(super) fn autoscroll_step(y: Pixels, view: Bounds<Pixels>) -> Pixels {
+  let top = view.top() + AUTOSCROLL_EDGE;
+  let bottom = view.bottom() - AUTOSCROLL_EDGE;
+  let past = if y < top {
+    y - top
+  } else if y > bottom {
+    y - bottom
+  } else {
+    return px(0.);
+  };
+  past.clamp(-AUTOSCROLL_MAX, AUTOSCROLL_MAX)
+}
 
 impl ChangesView {
   /// The keys the diff takes while it has focus; `true` when handled.
@@ -203,5 +222,45 @@ impl ChangesView {
         cx.on_next_frame(window, |_, _, cx| cx.notify());
       }
     }
+  }
+}
+
+#[cfg(test)]
+mod autoscroll_tests {
+  use super::*;
+
+  fn view() -> Bounds<Pixels> {
+    Bounds::new(
+      gpui::point(px(0.), px(100.)),
+      gpui::size(px(500.), px(400.)),
+    )
+  }
+
+  #[test]
+  fn no_scroll_away_from_the_edges() {
+    assert_eq!(autoscroll_step(px(300.), view()), px(0.));
+    assert_eq!(autoscroll_step(px(100.) + AUTOSCROLL_EDGE, view()), px(0.));
+  }
+
+  #[test]
+  fn scrolls_up_near_and_above_the_top_faster_the_further_out() {
+    let near = autoscroll_step(px(110.), view());
+    let out = autoscroll_step(px(60.), view());
+    assert!(near < px(0.), "{near:?}");
+    assert!(out < near, "{out:?} vs {near:?}");
+    assert_eq!(autoscroll_step(px(-5000.), view()), -AUTOSCROLL_MAX);
+  }
+
+  #[test]
+  fn the_edge_zone_alone_scrolls_a_line_or_more_per_tick() {
+    // A window's pointer rarely gets past its edge, so the zone must move.
+    let at_edge = view().bottom() - px(4.);
+    assert!(autoscroll_step(at_edge, view()) >= px(24.));
+  }
+
+  #[test]
+  fn scrolls_down_near_and_below_the_bottom() {
+    assert!(autoscroll_step(px(490.), view()) > px(0.));
+    assert_eq!(autoscroll_step(px(9000.), view()), AUTOSCROLL_MAX);
   }
 }
