@@ -407,7 +407,7 @@ impl ChangesView {
     cx.notify();
   }
 
-  fn start_edit(&mut self, id: &str, text: &str, cx: &mut Context<Self>) {
+  pub(super) fn start_edit(&mut self, id: &str, text: &str, cx: &mut Context<Self>) {
     self.review.editing = Some(id.into());
     self.review.edit_text = text.into();
     self.review.edit_input = None;
@@ -887,7 +887,7 @@ impl ChangesView {
   /// [`is_outdated`] for `comment` against `hunks`, worked out once per
   /// layout: it reads the hunk's lines, and every row it could sit under
   /// asks.
-  fn is_outdated_in(&self, comment: &LineComment, hunks: &[JjDiffHunk]) -> bool {
+  pub(super) fn is_outdated_in(&self, comment: &LineComment, hunks: &[JjDiffHunk]) -> bool {
     let known = (self.layout_gen, comment.start_line, comment.end_line);
     let cached = self.review.outdated.borrow().get(&comment.id).copied();
     if let Some((generation, start, end, outdated)) = cached {
@@ -1210,7 +1210,9 @@ impl ChangesView {
     let card = box_()
       .id(SharedString::from(format!("comment-{id}")))
       .debug_selector(move || selector.into())
-      .group("comment-card")
+      .role(gpui::Role::Button)
+      .aria_label("Edit comment")
+      .test_support()
       .cursor_pointer()
       .hover(|s| s.shadow_md())
       .on_click(cx.listener(move |view, _, _, cx| view.start_edit(&edit, &body, cx)))
@@ -1219,14 +1221,6 @@ impl ChangesView {
           .flex()
           .items_start()
           .gap_2()
-          .child(
-            div()
-              .mt_0p5()
-              .flex_none()
-              .opacity(0.)
-              .group_hover("comment-card", |s| s.opacity(1.))
-              .child(ui::icon(theme::ICON_PENCIL, 12., muted)),
-          )
           .child(self.comment_body(id, text, p, cx))
           .child(
             self.tip(

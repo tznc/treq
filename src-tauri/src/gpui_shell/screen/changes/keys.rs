@@ -1,6 +1,7 @@
 //! The diff from the keyboard: Up and Down move a line cursor through
 //! every drawn file, Shift extends the selection within the file, Left
-//! opens the comment box on it and Escape clears it.
+//! opens the comment box on it, Enter edits the comment under it and
+//! Escape clears it.
 
 use super::review::LineSelection;
 use super::*;
@@ -20,6 +21,7 @@ impl ChangesView {
     match key {
       "down" | "up" => self.move_line(key == "down", shift, cx),
       "left" if !shift => self.comment_selection(cx),
+      "enter" if !shift => return self.edit_cursor_comment(cx),
       _ => return false,
     }
     true
@@ -137,6 +139,32 @@ impl ChangesView {
     if let Some(draft) = draft {
       self.open_draft(draft, cx);
     }
+  }
+
+  /// Enter: edits the pending comment drawn under the cursor's line.
+  fn edit_cursor_comment(&mut self, cx: &mut Context<Self>) -> bool {
+    let Some(s) = self.review.selection.as_ref() else {
+      return false;
+    };
+    let (path, head) = (s.path.clone(), s.head);
+    let Some(d) = self.file_hunks(&path) else {
+      return false;
+    };
+    let Some(hunk) = d.hunks.get(head.0) else {
+      return false;
+    };
+    let under = crate::core::review::comments_under(
+      &self.review.comments,
+      &path,
+      hunk,
+      crate::core::review::line_at(hunk, head.1),
+      &|c| self.is_outdated_in(c, &d.hunks),
+    );
+    let Some((id, text)) = under.first().map(|c| (c.id.clone(), c.text.clone())) else {
+      return false;
+    };
+    self.start_edit(&id, &text, cx);
+    true
   }
 
   /// Scrolls the cursor's line into view once it is drawn.

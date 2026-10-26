@@ -6451,6 +6451,26 @@ fn arrow_keys_move_and_extend_the_line_selection(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn enter_edits_the_comment_on_the_cursor_line(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  h.click("gutter-a.rs-0-1");
+  h.cx.simulate_keystrokes("enter");
+  assert!(
+    h.drawn("comment-edit"),
+    "Enter opens the line's comment to edit"
+  );
+}
+
+#[gpui::test]
+fn comment_cards_have_no_hover_pencil(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  assert!(h.drawn("inline-comment-card"));
+  assert!(!h.drawn("comment-card-pencil"));
+}
+
+#[gpui::test]
 fn left_comments_the_selected_lines(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   h.click("gutter-a.rs-0-1");
