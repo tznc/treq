@@ -44,7 +44,8 @@ jobs:
   landing-screenshots:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    # A cold e2e build takes up to 15 minutes, and the capture up to 10.
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v5
