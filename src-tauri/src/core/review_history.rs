@@ -3,8 +3,6 @@
 //! Rows are written by `local_db` as review comments are created and
 //! decided, and here as reviews are sent.
 
-use std::path::PathBuf;
-
 use crate::{
   core::checks_logs::{severity_number_for_text, severity_text_for_level, LogQuery, LogRecordView},
   local_db::{self, ReviewHistoryEntry},
@@ -101,43 +99,11 @@ pub fn log_records(repo_path: &str, query: &LogQuery) -> Result<Vec<LogRecordVie
   )
 }
 
-/// Writes the history to `.treq/review-history.json` for the tuning agent
-/// to read, and returns that path.
-pub fn export(repo_path: &str) -> Result<PathBuf, String> {
+/// The history as JSON, for the tuning agent to read
+/// (`core::review_prompt::write_snapshot`).
+pub fn export_json(repo_path: &str) -> Result<String, String> {
   let entries = local_db::list_review_history(repo_path, MAX_ROWS)?;
-  let dir = PathBuf::from(repo_path).join(".treq");
-  std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create .treq directory: {e}"))?;
-  let path = dir.join("review-history.json");
-  let json = serde_json::to_string_pretty(&entries).map_err(|e| e.to_string())?;
-  std::fs::write(&path, json).map_err(|e| format!("Failed to write review history: {e}"))?;
-  Ok(path)
-}
-
-/// What the tuning agent is asked: read the history, propose a revised
-/// review prompt, and leave applying it to the user.
-pub fn tune_prompt(current: Option<&str>, history_path: &str) -> String {
-  let current = match current.map(str::trim).filter(|p| !p.is_empty()) {
-    Some(prompt) => format!("The current custom review prompt:\n\n```\n{prompt}\n```"),
-    None => "There is no custom review prompt yet; the built-in one is used.".to_string(),
-  };
-  format!(
-    "Help me tune my code review agent's prompt from how I reacted to its reviews.\n\n\
-     {current}\n\n\
-     {history_path} holds the last 30 days of code review history as JSON. Rows with \
-     kind \"agent_comment\" are the review agent's comments, and their outcome is what I \
-     did: \"applied\" (I applied its suggestion), \"resolved\" (I agreed), \"dismissed\" (I \
-     deleted it) or \"open\" (no decision yet). Rows with kind \"user_review\" are reviews I \
-     wrote myself and sent to an agent: they show what the review agent missed.\n\n\
-     1. Find patterns: which kinds of comments I dismiss, which I act on, and what I keep \
-     having to point out myself. Quote a few examples for each.\n\
-     2. Propose a revised review prompt that asks for more of what I act on, less of what \
-     I dismiss, and covers what I raise myself. Keep the {{target_type}}, {{target_id}} and \
-     {{diff_summary}} placeholders.\n\
-     3. Show the change as a diff against the current prompt, then the full new prompt in \
-     one fenced block.\n\n\
-     Do not edit any settings or files. I will paste the prompt into Settings → Code Review \
-     myself."
-  )
+  serde_json::to_string_pretty(&entries).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -206,23 +172,12 @@ mod tests {
   }
 
   #[test]
-  fn export_writes_the_history_for_the_tuning_agent() {
+  fn export_json_holds_the_history_for_the_tuning_agent() {
     let dir = TempDir::new().unwrap();
     let repo = dir.path().to_str().unwrap();
     record_sent_review(repo, Some(3), "changes", "Nit", "plan").unwrap();
-    let path = export(repo).unwrap();
-    let rows: Vec<ReviewHistoryEntry> =
-      serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let rows: Vec<ReviewHistoryEntry> = serde_json::from_str(&export_json(repo).unwrap()).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].body, "Nit");
-  }
-
-  #[test]
-  fn tune_prompt_names_the_history_and_the_current_prompt() {
-    let prompt = tune_prompt(Some("Be strict"), "/r/.treq/review-history.json");
-    assert!(prompt.contains("/r/.treq/review-history.json"));
-    assert!(prompt.contains("```\nBe strict\n```"));
-    assert!(prompt.contains("{target_type}"));
-    assert!(tune_prompt(Some("  "), "p").contains("built-in one is used"));
   }
 }

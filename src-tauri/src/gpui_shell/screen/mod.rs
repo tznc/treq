@@ -25,6 +25,7 @@ use super::{
 };
 
 pub mod account_data;
+mod agent_card;
 #[doc(hidden)]
 pub mod bench;
 mod change_move;

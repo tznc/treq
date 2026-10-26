@@ -101,26 +101,15 @@ pub(super) fn handle_agent_review_command(
       let side = parse_side(get_arg_value(matches, "side").as_deref())?;
       // Linear content is reviewed from a snapshot; keep the exact text the
       // comment covers so a suggestion can be applied to the live content.
-      let quoted_text = if linear_review::is_linear_target(&target_type) {
-        Some(linear_review::quote_snapshot_lines(
-          &repo_path,
-          &target_type,
-          &target_id,
-          &file,
-          start_line,
-          end_line,
-        )?)
-      } else {
-        validate_add_target(
-          &repo_path,
-          &target_type,
-          &target_id,
-          &file,
-          end_line,
-          side.as_deref(),
-        )?;
-        None
-      };
+      let quoted_text = quoted_text_for(
+        &repo_path,
+        &target_type,
+        &target_id,
+        &file,
+        start_line,
+        end_line,
+        side.as_deref(),
+      )?;
       let comment = local_db::create_agent_review_comment(
         &repo_path,
         &target_type,
@@ -204,8 +193,8 @@ pub(super) fn handle_agent_review_command(
 /// so `add` only checks the id and that `--file` is a relative path.
 const GITHUB_PR_TARGET_TYPE: &str = "github_pr";
 
-/// Target types the app renders review comments for. The Linear ones are
-/// validated against their snapshot instead (`linear_review`).
+/// Target types the app renders review comments for. The Linear ones and the
+/// review prompt are validated against their snapshot instead.
 const KNOWN_TARGET_TYPES: &[&str] = &[
   DEFAULT_TARGET_TYPE,
   "file_browser_file",
@@ -213,7 +202,38 @@ const KNOWN_TARGET_TYPES: &[&str] = &[
   linear_review::TARGET_LINEAR_ISSUE,
   linear_review::TARGET_LINEAR_PROJECT,
   linear_review::TARGET_LINEAR_DOCUMENT,
+  core::review_prompt::TARGET_TYPE,
 ];
+
+/// Linear content and the review prompt are reviewed from a snapshot: the
+/// exact text a comment covers, so a suggestion can be applied to the live
+/// text. A diff or file target is checked instead and quotes nothing.
+fn quoted_text_for(
+  repo_path: &str,
+  target_type: &str,
+  target_id: &str,
+  file: &str,
+  start_line: i64,
+  end_line: i64,
+  side: Option<&str>,
+) -> Result<Option<String>, String> {
+  if linear_review::is_linear_target(target_type) {
+    return linear_review::quote_snapshot_lines(
+      repo_path,
+      target_type,
+      target_id,
+      file,
+      start_line,
+      end_line,
+    )
+    .map(Some);
+  }
+  if core::review_prompt::is_target(target_type) {
+    return core::review_prompt::quote_lines(repo_path, file, start_line, end_line).map(Some);
+  }
+  validate_add_target(repo_path, target_type, target_id, file, end_line, side)?;
+  Ok(None)
+}
 
 /// Rejects an `add` that nothing could display: an unknown target type, a
 /// target that does not exist, a `--file` that is not relative, or (on the
@@ -316,6 +336,16 @@ fn delete_comment(repo_path: &str, comment_id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn a_review_prompt_comment_quotes_the_prompt_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    core::review_prompt::write_snapshot(repo, Some("a\nb")).unwrap();
+    let quoted = quoted_text_for(repo, "review_prompt", "repo", "body.md", 2, 2, None).unwrap();
+    assert_eq!(quoted.as_deref(), Some("b"));
+    assert!(quoted_text_for(repo, "review_prompt", "repo", "x.md", 1, 1, None).is_err());
+  }
 
   #[test]
   fn strips_a_suggestion_fence() {

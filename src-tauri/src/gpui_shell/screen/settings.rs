@@ -8,7 +8,7 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
-use std::{rc::Rc, sync::Arc, time::Duration};
+use std::{collections::HashSet, rc::Rc, sync::Arc, time::Duration};
 
 use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
@@ -30,6 +30,7 @@ pub use account::{
 };
 
 use super::{
+  agent_card::{self, CardAction},
   checklist,
   settings_data::{self as data, AppFields, SettingsHost},
   ActionSink, ScreenAction,
@@ -51,8 +52,12 @@ use crate::{
     tooltips::{HasTooltips, Tooltips},
     ui::{self, Button, Size, TextSize, Variant},
   },
+  local_db::AgentReviewComment,
   repo_config::RepoConfig,
 };
+
+/// How often the tuning agent's proposed edits are read again.
+const PROMPT_EDITS_POLL: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -410,6 +415,10 @@ struct Repo {
   config_loading: bool,
   saving: bool,
   save_error: Option<String>,
+  /// The tuning agent's proposed review prompt edits, still open.
+  edits: Vec<AgentReviewComment>,
+  /// Edits an Apply or Dismiss runs for.
+  edits_busy: HashSet<String>,
 }
 
 impl Repo {
@@ -422,6 +431,8 @@ impl Repo {
       config_loading: true,
       saving: false,
       save_error: None,
+      edits: Vec::new(),
+      edits_busy: HashSet::new(),
     }
   }
 
@@ -526,6 +537,19 @@ impl SettingsView {
       this.load_linear(cx);
     }
     this.sync_account(cx);
+    // The tuning agent records its proposed edits while Settings is open.
+    cx.spawn(async move |this, cx| loop {
+      cx.background_executor().timer(PROMPT_EDITS_POLL).await;
+      let polled = this.update(cx, |view, cx| {
+        if view.route.tab == Tab::Repository {
+          view.load_prompt_edits(cx);
+        }
+      });
+      if polled.is_err() {
+        return;
+      }
+    })
+    .detach();
     cx.observe_global::<super::account_data::Account>(|view, cx| {
       view.sync_account(cx);
       cx.notify();
@@ -691,6 +715,115 @@ impl SettingsView {
         repo.loaded = Some(fields);
       },
     );
+    self.load_prompt_edits(cx);
+  }
+
+  fn load_prompt_edits(&mut self, cx: &mut Context<Self>) {
+    let Some(path) = self.repo.as_ref().map(|repo| repo.path.clone()) else {
+      return;
+    };
+    self.spawn(
+      cx,
+      {
+        let path = path.clone();
+        move |host| host.prompt_edits(&path)
+      },
+      move |view, edits, _| {
+        let Some(repo) = view.repo.as_mut().filter(|repo| repo.path == path) else {
+          return;
+        };
+        match edits {
+          Ok(edits) => repo.edits = edits,
+          Err(err) => log::warn!("Failed to read review prompt edits: {err}"),
+        }
+      },
+    );
+  }
+
+  /// Dismiss all: removes every proposed edit without applying any.
+  fn dismiss_all_prompt_edits(&mut self, cx: &mut Context<Self>) {
+    let Some(repo) = self.repo.as_mut().filter(|repo| repo.edits_busy.is_empty()) else {
+      return;
+    };
+    let ids: Vec<String> = repo.edits.iter().map(|edit| edit.id.clone()).collect();
+    repo.edits_busy.extend(ids.iter().cloned());
+    let path = repo.path.clone();
+    self.spawn(
+      cx,
+      move |host| {
+        ids
+          .iter()
+          .try_for_each(|id| host.delete_prompt_edit(&path, id))
+      },
+      |view, result, cx| {
+        if let Some(repo) = view.repo.as_mut() {
+          repo.edits_busy.clear();
+          if result.is_ok() {
+            repo.edits.clear();
+          }
+        }
+        if let Err(err) = result {
+          view
+            .host
+            .notify(toast(ToastTone::Error, "Review prompt", err));
+        }
+        view.load_prompt_edits(cx);
+      },
+    );
+  }
+
+  /// Apply or Dismiss on a proposed review prompt edit. Apply
+  /// writes into the prompt as edited here and saves it.
+  fn prompt_edit_action(&mut self, action: CardAction, id: String, cx: &mut Context<Self>) {
+    let Some(repo) = self
+      .repo
+      .as_mut()
+      .filter(|repo| !repo.edits_busy.contains(&id))
+    else {
+      return;
+    };
+    repo.edits_busy.insert(id.clone());
+    let (path, custom) = (repo.path.clone(), repo.fields().review_prompt);
+    let work = {
+      let id = id.clone();
+      move |host: &dyn SettingsHost| match action {
+        CardAction::Apply => host.apply_prompt_edit(&path, &id, &custom).map(Some),
+        CardAction::Resolve | CardAction::Dismiss => {
+          host.delete_prompt_edit(&path, &id).map(|()| None)
+        }
+      }
+    };
+    self.spawn(cx, work, move |view, result, cx| {
+      let Some(repo) = view.repo.as_mut() else {
+        return;
+      };
+      repo.edits_busy.remove(&id);
+      match result {
+        Ok(prompt) => {
+          repo.edits.retain(|edit| edit.id != id);
+          if let Some(prompt) = prompt {
+            for fields in [
+              repo.draft.as_mut(),
+              repo.loaded.as_mut().and_then(|l| l.as_mut().ok()),
+            ]
+            .into_iter()
+            .flatten()
+            {
+              fields.review_prompt = prompt.clone();
+            }
+            view.host.notify(toast(
+              ToastTone::Success,
+              "Review prompt updated",
+              String::new(),
+            ));
+          }
+        }
+        Err(err) => view
+          .host
+          .notify(toast(ToastTone::Error, "Review prompt", err)),
+      }
+      view.load_prompt_edits(cx);
+    });
   }
 
   /// Writes app settings now, as the theme, zoom and preview switches do.
@@ -1067,10 +1200,10 @@ impl SettingsView {
     let (path, current) = (repo.path.clone(), repo.fields().review_prompt);
     self.spawn(
       cx,
-      move |host| host.export_review_history(&path),
+      move |host| host.snapshot_review_prompt(&path, &current),
       move |view, result, cx| match result {
-        Ok(history) => {
-          let prompt = crate::core::review_history::tune_prompt(Some(&current), &history);
+        Ok(dir) => {
+          let prompt = crate::core::review_prompt::tune_prompt(&dir);
           (view.react)(
             ScreenAction::Field {
               field: "reviewPrompt.tune".into(),
@@ -1081,9 +1214,66 @@ impl SettingsView {
         }
         Err(err) => view
           .host
-          .notify(toast(ToastTone::Error, "Review history", err)),
+          .notify(toast(ToastTone::Error, "Review prompt", err)),
       },
     );
+  }
+
+  /// The tuning agent's proposed edits, each on the review card.
+  fn prompt_edits(
+    &self,
+    edits: &[AgentReviewComment],
+    busy: &HashSet<String>,
+    p: &Palette,
+  ) -> impl IntoElement {
+    div()
+      .debug_selector(|| "settings-prompt-edits".into())
+      .flex()
+      .flex_col()
+      .gap_3()
+      .child(
+        div()
+          .debug_selector(|| "prompt-edits-header".into())
+          .flex()
+          .items_center()
+          .justify_between()
+          .gap_2()
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .font_weight(FontWeight::MEDIUM)
+              .child(format!("Proposed edits ({})", edits.len())),
+          )
+          .child(
+            Button::new("prompt-edits-dismiss-all", p)
+              .variant(Variant::Ghost)
+              .size(Size::Xs)
+              .gap_1()
+              .disabled(!busy.is_empty())
+              .icon(theme::ICON_X, 12.)
+              .label("Dismiss all")
+              .on_click(self.press("repo.promptEdits.dismissAll")),
+          ),
+      )
+      .children(edits.iter().map(|edit| {
+        let location = if edit.end_line == edit.start_line {
+          format!("Line {}", edit.start_line)
+        } else {
+          format!("Lines {}-{}", edit.start_line, edit.end_line)
+        };
+        let spec = agent_card::CardSpec {
+          id_prefix: "prompt-edit",
+          location,
+          resolvable: false,
+          busy: busy.contains(&edit.id),
+        };
+        agent_card::agent_comment_card(edit, spec, p, |action| {
+          let name = match action {
+            CardAction::Apply => "apply",
+            CardAction::Resolve | CardAction::Dismiss => "dismiss",
+          };
+          Box::new(self.press(&format!("repo.promptEdit.{name}:{}", edit.id)))
+        })
+      }))
   }
 
   fn save_repository(&mut self, cx: &mut Context<Self>) {
@@ -1146,6 +1336,13 @@ impl SettingsView {
     match action {
       ScreenAction::Press { id } if self.press_account(&id, cx) => {}
       ScreenAction::Press { id } => match id.split_once(':') {
+        Some((action, edit)) if action.starts_with("repo.promptEdit.") => {
+          let action = match action {
+            "repo.promptEdit.apply" => CardAction::Apply,
+            _ => CardAction::Dismiss,
+          };
+          self.prompt_edit_action(action, edit.to_string(), cx);
+        }
         Some((action, skill)) if action.starts_with("skills.") => {
           let skill = skill.to_string();
           self.press_skill(action, &skill, cx);
@@ -1166,6 +1363,7 @@ impl SettingsView {
           },
           "app.setupScript.run" => self.run_setup(cx),
           "repo.reviewPrompt.tune" => self.tune_review_prompt(cx),
+          "repo.promptEdits.dismissAll" => self.dismiss_all_prompt_edits(cx),
           "repo.yaml.reload" => self.load_repo(cx),
           "skills.confirm.install" => self.answer_skill_link(true, cx),
           "skills.confirm.cancel" => self.answer_skill_link(false, cx),
@@ -2111,6 +2309,11 @@ impl SettingsView {
         )
     });
 
+    let (edits, edits_busy) = self
+      .repo
+      .as_ref()
+      .map(|r| (r.edits.clone(), r.edits_busy.clone()))
+      .unwrap_or_default();
     let body: AnyElement = if repo.loading {
       ui::delayed(
         "settings-loading",
@@ -2253,12 +2456,15 @@ impl SettingsView {
                     .label("Tune with agent")
                     .on_click(self.press("repo.reviewPrompt.tune")),
                 )
-                .child(help(
-                  "An agent reads the last 30 days of reviews (Logs → Reviews) and proposes a revised prompt for you to paste here.",
+                .child(div().flex_1().min_w_0().child(help(
+                  "An agent reads the last 30 days of reviews (Logs → Reviews) and proposes edits to this prompt for you to review below.",
                   p,
                   0.,
-                )),
+                ))),
             )
+            .when(!edits.is_empty(), |this| {
+              this.child(self.prompt_edits(&edits, &edits_busy, p))
+            })
             .child(field_block(
               "Review Agent",
               form::select_field("settings-review-agent", "Review Agent", &review_agent, managed("reviewAgent")),

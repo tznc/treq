@@ -30,7 +30,7 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{
-  changes::threads::suggestion_box,
+  agent_card,
   code::markdown,
   github::parts::busy_spinner,
   integrations_cache::cache,
@@ -3080,8 +3080,7 @@ impl LinearView {
       )
   }
 
-  /// `AgentReviewCommentCard` with `applyLabel="Apply to Linear"` and no
-  /// "Send to agent".
+  /// The shared agent card, with Resolve and no "Send to agent".
   fn agent_card(
     &self,
     of: &Commented,
@@ -3090,89 +3089,23 @@ impl LinearView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let busy = self.busy.contains(&comment.id);
-    let action = |action: Action| {
-      let (of, id) = (of.clone(), comment.id.clone());
-      move |view: &mut Self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
-        view.review_action(of.clone(), id.clone(), action, cx)
-      }
+    let spec = agent_card::CardSpec {
+      id_prefix: "linear-agent",
+      location,
+      resolvable: true,
+      busy: self.busy.contains(&comment.id),
     };
-    let id = &comment.id;
-    let mut actions = div().flex().flex_wrap().items_center().gap_2();
-    if comment.suggested_replacement.is_some() {
-      actions = actions.child(
-        Button::new(SharedString::from(format!("linear-agent-apply-{id}")), p)
-          .size(Size::Sm)
-          .gap_1p5()
-          .disabled(busy)
-          .icon(theme::ICON_WAND, 12.)
-          .label("Apply to Linear")
-          .on_click(cx.listener(action(Action::Apply))),
-      );
-    }
-    actions = actions
-      .child(
-        Button::new(SharedString::from(format!("linear-agent-resolve-{id}")), p)
-          .variant(Variant::Outline)
-          .size(Size::Sm)
-          .gap_1p5()
-          .disabled(busy)
-          .icon(theme::ICON_CHECK, 12.)
-          .label("Resolve")
-          .on_click(cx.listener(action(Action::Resolve))),
-      )
-      .child(
-        Button::new(SharedString::from(format!("linear-agent-delete-{id}")), p)
-          .variant(Variant::Ghost)
-          .size(Size::Sm)
-          .gap_1p5()
-          .text_color(p.muted_foreground)
-          .disabled(busy)
-          .icon(theme::ICON_TRASH, 12.)
-          .label("Delete")
-          .on_click(cx.listener(action(Action::Delete))),
-      );
-    div()
-      .debug_selector(|| "agent-review-comment-card".into())
-      .rounded(radius::MD)
-      .border_1()
-      .border_color(ui::Tone::GitMerged.border(p))
-      .bg(ui::Tone::GitMerged.tint(p))
-      .p_3()
-      .flex()
-      .flex_col()
-      .gap_2()
-      .child(
-        div()
-          .flex()
-          .items_center()
-          .gap_2()
-          .child(ui::icon(theme::ICON_BOT, 14., ui::Tone::GitMerged.color(p)))
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .font_weight(FontWeight::MEDIUM)
-              .text_color(ui::Tone::GitMerged.text(p))
-              .child("Local"),
-          )
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .text_color(p.muted_foreground)
-              .child(location),
-          ),
-      )
-      .child(
-        ui::text(div(), TextSize::Sm)
-          .whitespace_normal()
-          .child(comment.comment_text.clone()),
-      )
-      .when_some(comment.suggested_replacement.clone(), |this, suggested| {
-        this.child(suggestion_box(
-          comment.quoted_text.as_deref(),
-          &suggested,
-          p,
-        ))
-      })
-      .child(actions)
+    agent_card::agent_comment_card(comment, spec, p, |card| {
+      let action = match card {
+        agent_card::CardAction::Apply => Action::Apply,
+        agent_card::CardAction::Resolve => Action::Resolve,
+        agent_card::CardAction::Dismiss => Action::Delete,
+      };
+      let (of, id) = (of.clone(), comment.id.clone());
+      Box::new(cx.listener(move |view, _: &ClickEvent, _, cx| {
+        view.review_action(of.clone(), id.clone(), action, cx)
+      }))
+    })
   }
 }
 /// A review agent's session in the home repository of `repo`, named

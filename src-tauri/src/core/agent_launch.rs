@@ -472,6 +472,13 @@ pub fn diff_summary(branch: Option<&str>, files: usize) -> String {
   }
 }
 
+/// The repository's prompt when set, else the built-in one, unfilled.
+pub fn review_template(custom: Option<&str>) -> &str {
+  custom
+    .filter(|c| !c.trim().is_empty())
+    .unwrap_or(DEFAULT_REVIEW_PROMPT)
+}
+
 /// `buildReviewPrompt`: the repository's prompt when set, else the
 /// built-in one, with its placeholders filled.
 pub fn review_prompt(custom: Option<&str>, target_id: &str, summary: &str) -> String {
@@ -485,10 +492,7 @@ pub fn review_prompt_for(
   target_id: &str,
   summary: &str,
 ) -> String {
-  let template = custom
-    .filter(|c| !c.trim().is_empty())
-    .unwrap_or(DEFAULT_REVIEW_PROMPT);
-  template
+  review_template(custom)
     .replace("{target_type}", target_type)
     .replace("{target_id}", target_id)
     .replace("{workspace_id}", target_id)
