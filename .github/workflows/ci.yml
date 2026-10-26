@@ -51,7 +51,6 @@ jobs:
               - "Cargo.lock"
               - ".config/nextest.toml"
               - "deny.toml"
-              - "mobile-gpui/Cargo.toml"
               - ".github/workflows/ci.yml"
             js:
               - "*.{js,ts,mjs,cjs,mts,cts}"
@@ -153,7 +152,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: typos
 
-      # Unused Cargo dependencies, mobile-gpui included.
+      # Unused Cargo dependencies.
       - name: cargo-machete
         if: ${{ !cancelled() && env.RUST == 'true' }}
         run: cargo machete

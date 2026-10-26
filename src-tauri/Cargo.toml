@@ -35,13 +35,29 @@ gui = [
 ]
 # Desktop repo windows open in a GPUI shell, which draws the workspace sidebar.
 gpui-shell = ["gui", "dep:gtk", "dep:tauri-plugin-gpui", "dep:gpui-kit", "dep:treq-ui", "dep:syntect", "dep:two-face", "dep:alacritty_terminal", "dep:image", "dep:emojis"]
-# Linked into another Tauri app as a library (mobile-gpui): leaves out the
-# mobile entry point, whose JNI symbols would clash with the host app's.
-embed = []
 # Embeds a Playwright server (gpui-playwright) in the GPUI app so the
 # e2e/desktop suite can drive it. It only listens when `GPUI_PLAYWRIGHT` is
 # set, and release builds leave the feature out.
 e2e = ["gpui-shell", "dep:gpui-playwright"]
+# The GPUI mobile app (`mobile`). Mobile builds turn it on
+# (`tauri android|ios build --features mobile-ui`); it also builds on
+# desktop, for its unit tests.
+mobile-ui = [
+  "gui",
+  "dep:tauri-plugin-gpui",
+  "dep:gpui-kit",
+  "gpui-kit/assets",
+  "dep:treq-ui",
+  "dep:anyhow",
+  "dep:rust-embed",
+  "dep:env_logger",
+  "dep:android_logger",
+]
+
+[package.metadata.cargo-machete]
+# `mobile-ui` takes rust-embed only to turn on `debug-embed` for gpui-kit's
+# icons.
+ignored = ["rust-embed"]
 
 # Clippy's default set runs in CI with -D warnings; these add checks it
 # leaves out. clippy.toml lets tests unwrap and expect.
@@ -160,12 +176,11 @@ tauri-plugin-cli = { version = "2.4.1", optional = true }
 # Parses CLI args before Tauri starts (see `cli::args`); same version the plugin uses.
 clap = { version = "4", features = ["string"] }
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"], optional = true }
-# GPUI renderer for Tauri windows. Same source as mobile-gpui's, so both
-# resolve to one copy of GPUI when mobile-gpui links this crate.
+# GPUI renderer for Tauri windows; the mobile app takes the same source with
+# its `mobile` feature (below).
 tauri-plugin-gpui = { git = "https://github.com/ziinc/tauri-gpui", branch = "main", optional = true }
 # Widgets for the GPUI screens: text inputs, lists, tables, menus, markdown,
-# diffs and code views. The
-# fork mobile-gpui uses, on the same GPUI as tauri-plugin-gpui.
+# diffs and code views. The fork, on the same GPUI as tauri-plugin-gpui.
 gpui-kit = { git = "https://github.com/Ziinc/gpui-kit", branch = "main", default-features = false, features = ["component"], optional = true }
 # The design system: theme tokens and the `ui` components (crates/treq-ui).
 treq-ui = { path = "../crates/treq-ui", optional = true }
@@ -182,6 +197,16 @@ alacritty_terminal = { version = "0.26", default-features = false, optional = tr
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 # The Supabase session lives in the OS keychain (core::session_secrets).
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"], optional = true }
+env_logger = { version = "0.11", optional = true }
+
+# The mobile app (`mobile-ui`).
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-gpui = { git = "https://github.com/ziinc/tauri-gpui", branch = "main", features = ["mobile"], optional = true }
+gpui-kit = { git = "https://github.com/Ziinc/gpui-kit", branch = "main", default-features = false, features = ["component"], optional = true }
+treq-ui = { path = "../crates/treq-ui", optional = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = { version = "0.15", optional = true }
 
 [dependencies]
 tauri = { version = "2.12", features = ["unstable"], optional = true }
@@ -231,6 +256,10 @@ bytes = "1"
 getrandom = "0.4"
 tauri-plugin-keystore = { version = "2.1.0-alpha.1", optional = true }
 tauri-plugin-biometric = { version = "2", optional = true }
+anyhow = { version = "1", optional = true }
+# Only to turn on `debug-embed`, so gpui-kit's icons are compiled into debug
+# mobile builds (a phone cannot read the build machine's files).
+rust-embed = { version = "8.13", features = ["debug-embed"], optional = true }
 
 [dev-dependencies]
 mockall = "0.14.0"
@@ -247,6 +276,12 @@ gpui = { package = "gpui-pre", version = "=0.3.9", features = ["test-support"] }
 # Testing Library queries, user events and matchers for the GPUI screens. Its
 # `gpui-kit` feature reads what `.test_support()` observes.
 gpui-testing-library = { version = "=0.1.0", features = ["gpui-kit"] }
+# gpui-kit's UI test harness, for the `mobile` tests.
+gpui-kit = { git = "https://github.com/Ziinc/gpui-kit", branch = "main", default-features = false, features = ["component", "test-support"] }
+
+[[example]]
+name = "mobile"
+required-features = ["mobile-ui"]
 
 [[bench]]
 name = "commit_workspace"
