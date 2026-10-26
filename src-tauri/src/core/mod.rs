@@ -54,6 +54,7 @@ pub mod repo;
 pub mod resolve;
 pub mod review;
 pub mod review_drafts;
+pub mod review_history;
 pub mod running_checks;
 pub mod session_secrets;
 pub mod sessions;

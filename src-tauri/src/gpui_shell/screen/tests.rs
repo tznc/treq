@@ -503,6 +503,11 @@ impl settings_data::SettingsHost for FakeHost {
     self.customize_copy(name)
   }
 
+  fn export_review_history(&self, repo_path: &str) -> Result<String, String> {
+    self.record(format!("export review history {repo_path}"));
+    Ok(format!("{repo_path}/.treq/review-history.json"))
+  }
+
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String> {
     self.record(format!("fetch {url}"));
     Err("offline".into())
@@ -613,6 +618,10 @@ impl launch_data::LaunchHost for FakeHost {
   fn dismiss_send_asset(&self, id: &str) {
     self.record(format!("dismiss asset {id}"));
     self.send.lock().unwrap().retain(|a| a.id != id);
+  }
+
+  fn record_review(&self, _: &str, workspace_id: Option<i64>, scope: &str, _: &str, mode: &str) {
+    self.record(format!("record review {workspace_id:?} {scope} {mode}"));
   }
 }
 
@@ -1359,6 +1368,15 @@ impl logs_data::LogsHost for FakeHost {
     query: &crate::core::checks_logs::LogQuery,
   ) -> Result<Vec<crate::core::checks_logs::LogRecordView>, String> {
     self.record(format!("read system logs {:?}", query.search));
+    Ok(self.logs.clone())
+  }
+
+  fn review_history(
+    &self,
+    _: &str,
+    query: &crate::core::checks_logs::LogQuery,
+  ) -> Result<Vec<crate::core::checks_logs::LogRecordView>, String> {
+    self.record(format!("read review history {:?}", query.search));
     Ok(self.logs.clone())
   }
 
@@ -2761,6 +2779,30 @@ fn settings_switches_previews_itself(cx: &mut TestAppContext) {
       "notify settingsChanged",
       "open http://localhost:3001/docs/concepts/logs",
     ]
+  );
+}
+
+#[gpui::test]
+fn settings_tunes_the_review_prompt_with_an_agent(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, settings(), host.clone());
+  // Tall enough that the Code Review section is on screen.
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1100.), gpui::px(2400.)));
+  h.click("settings-tune-review-prompt");
+  h.cx.run_until_parked();
+  assert!(host
+    .calls()
+    .contains(&"export review history /repo".to_string()));
+  let sent = h.sent();
+  let ScreenAction::Field { field, value } = sent.last().expect("sent") else {
+    panic!("not a field: {sent:?}");
+  };
+  assert_eq!(field, "reviewPrompt.tune");
+  let prompt = value["prompt"].as_str().expect("prompt");
+  assert!(
+    prompt.contains("/repo/.treq/review-history.json"),
+    "{prompt}"
   );
 }
 
@@ -6730,6 +6772,12 @@ fn changes_tab_sends_the_review_to_an_agent(cx: &mut TestAppContext) {
   assert_eq!(request.session_name.as_deref(), Some("Code Review"));
   assert_eq!(request.mode.as_deref(), Some("plan"));
   assert_eq!(request.workspace_id, Some(7));
+  let recorded: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("record review"))
+    .collect();
+  assert_eq!(recorded, ["record review Some(7) changes plan"]);
   assert!(!select);
   let markdown = request.prompt.clone().unwrap_or_default();
   assert!(
@@ -7186,6 +7234,20 @@ fn logs_tab_switches_source_from_its_menu(cx: &mut TestAppContext) {
   h.pick("System");
   assert!(h.drawn("system-logs-output"));
   assert!(host.calls().contains(&"read system logs None".to_string()));
+}
+
+#[gpui::test]
+fn logs_tab_shows_review_history(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(Some("reviews")));
+  assert!(h.drawn("review-history-output"));
+  assert!(host
+    .calls()
+    .contains(&"read review history None".to_string()));
+  h.click("log-source");
+  h.pick("System");
+  h.click("log-source");
+  h.pick("Reviews");
+  assert!(h.drawn("review-history-output"));
 }
 
 #[gpui::test]
@@ -9837,3 +9899,103 @@ mod virtual_chaos;
 mod virtual_lists;
 mod workspace_actions;
 mod workspace_dialogs;
+
+/// Drags in the gutter from one line to another, through every line between.
+fn drag_gutter(h: &mut Harness, from: usize, to: usize) {
+  h.cx.run_until_parked();
+  let at = |h: &mut Harness, l: usize| {
+    h.cx
+      .debug_bounds(Box::leak(format!("gutter-a.rs-0-{l}").into_boxed_str()))
+      .expect("gutter")
+      .center()
+  };
+  let start = at(h, from);
+  h.cx
+    .simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+  let path: Vec<usize> = if from <= to {
+    (from..=to).collect()
+  } else {
+    (to..=from).rev().collect()
+  };
+  let mut last = start;
+  for l in path {
+    last = at(h, l);
+    h.cx
+      .simulate_mouse_move(last, Some(MouseButton::Left), Modifiers::none());
+    h.cx.run_until_parked();
+  }
+  h.cx
+    .simulate_mouse_up(last, MouseButton::Left, Modifiers::none());
+}
+
+#[gpui::test]
+fn changes_tab_drag_selects_lines_downward(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  drag_gutter(&mut h, 0, 2);
+  assert_eq!(
+    selected_lines(&mut h).map(|(_, l)| l),
+    Some(vec![(0, 0), (0, 1), (0, 2)])
+  );
+}
+
+#[gpui::test]
+fn changes_tab_drag_selects_lines_upward(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  drag_gutter(&mut h, 2, 0);
+  assert_eq!(
+    selected_lines(&mut h).map(|(_, l)| l),
+    Some(vec![(0, 0), (0, 1), (0, 2)])
+  );
+}
+
+/// a.rs as a replaced pair, more added lines and a trailing context line, the
+/// shape of the QA app's alerting.ts diff.
+fn changes_host_replaced() -> FakeHost {
+  let mut host = changes_host();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [],
+    "uncommitted_files": [
+      {"path": "a.rs", "status": "M", "previous_path": null, "changed_line_count": 8, "diff_deferred": false}
+    ],
+    "hunks_by_file": [
+      {"path": "a.rs", "hunks": [{"id": "h", "header": "@@ -1,3 +1,7 @@", "lines": [
+        "-fn f(line: &str) {", "-  g(line)", "+fn f(line: &str, level: u8) {", "+  g(line, level)",
+        "+}", "+", "+fn e(line: &str) {", "+  f(line, 3)", " }"
+      ], "patch": ""}]}
+    ],
+    "too_large_to_render": false
+  }))
+  .ok();
+  host
+}
+
+#[gpui::test]
+fn changes_tab_drag_selects_across_a_replaced_pair_both_ways(cx: &mut TestAppContext) {
+  let all: Vec<(usize, usize)> = (0..9).map(|l| (0, l)).collect();
+  let (mut h, _) = workspace_harness(cx, changes_host_replaced(), changes_route());
+  drag_gutter(&mut h, 0, 8);
+  assert_eq!(
+    selected_lines(&mut h).map(|(_, l)| l),
+    Some(all.clone()),
+    "down"
+  );
+  h.cx.simulate_keystrokes("escape");
+  drag_gutter(&mut h, 8, 0);
+  assert_eq!(selected_lines(&mut h).map(|(_, l)| l), Some(all), "up");
+}
+
+#[gpui::test]
+fn changes_tab_shift_click_extends_the_line_selection(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_replaced(), changes_route());
+  h.click("gutter-a.rs-0-6");
+  let at = h
+    .cx
+    .debug_bounds("gutter-a.rs-0-1")
+    .expect("gutter")
+    .center();
+  h.cx.simulate_click(at, Modifiers::shift());
+  assert_eq!(
+    selected_lines(&mut h).map(|(_, l)| l),
+    Some((1..=6).map(|l| (0, l)).collect())
+  );
+}

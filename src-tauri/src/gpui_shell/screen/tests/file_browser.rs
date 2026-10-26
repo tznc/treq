@@ -221,6 +221,14 @@ fn file_browser_keeps_comments_and_finishes_the_review(cx: &mut TestAppContext) 
   assert_eq!(launches[0].0.mode.as_deref(), Some("plan"));
   let markdown = launches[0].0.prompt.clone().unwrap_or_default();
   assert!(markdown.contains("README.md"), "{markdown}");
+  assert_eq!(
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("record review"))
+      .count(),
+    1
+  );
   assert!(markdown.contains("Say who"), "{markdown}");
   assert!(!h.drawn("file-browser-pending"));
   assert!(host.calls().contains(&"clear browser review 7".to_string()));

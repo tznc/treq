@@ -192,6 +192,25 @@ impl LaunchHost for Backend {
   fn dismiss_send_asset(&self, id: &str) {
     launch::dismiss_send_asset(id);
   }
+
+  fn record_review(
+    &self,
+    repo_path: &str,
+    workspace_id: Option<i64>,
+    scope: &str,
+    markdown: &str,
+    mode: &str,
+  ) {
+    if let Err(err) = crate::core::review_history::record_sent_review(
+      repo_path,
+      workspace_id,
+      scope,
+      markdown,
+      mode,
+    ) {
+      log::warn!("Failed to record review history: {err}");
+    }
+  }
 }
 
 /// The repositories window `label` shows: its main one, then supporting.

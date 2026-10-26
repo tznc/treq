@@ -89,6 +89,8 @@ impl crate::gpui_shell::screen::launch_data::LaunchHost for FakeHost {
   }
 
   fn dismiss_send_asset(&self, _: &str) {}
+
+  fn record_review(&self, _: &str, _: Option<i64>, _: &str, _: &str, _: &str) {}
 }
 
 impl crate::gpui_shell::screen::WorkspaceHost for FakeHost {

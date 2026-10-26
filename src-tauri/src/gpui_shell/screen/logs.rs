@@ -58,6 +58,8 @@ enum Column {
   Job,
   Role,
   Source,
+  File,
+  Outcome,
 }
 
 impl Column {
@@ -67,12 +69,16 @@ impl Column {
       Column::Job => "Job",
       Column::Role => "Role",
       Column::Source => "Source",
+      Column::File => "File",
+      Column::Outcome => "Outcome",
     }
   }
 
   fn width(self) -> f32 {
     match self {
       Column::Run | Column::Role => 67.,
+      Column::Outcome => 80.,
+      Column::File => 197.,
       Column::Job => 96.,
       Column::Source => 197.,
     }
@@ -81,7 +87,8 @@ impl Column {
   fn cell(self, record: &LogRecordView) -> String {
     match self {
       Column::Run => format!("#{}", record.run_id),
-      Column::Job | Column::Role | Column::Source => record.job_id.clone(),
+      Column::Job | Column::Role | Column::Source | Column::File => record.job_id.clone(),
+      Column::Outcome => record.step_name.clone(),
     }
   }
 }
@@ -120,6 +127,12 @@ fn feed_spec(source: Source) -> FeedSpec {
       line: "system-log-line",
       columns: &[Column::Source],
       prompt: "the Treq app's system logs",
+    },
+    Source::Reviews => FeedSpec {
+      output: "review-history-output",
+      line: "review-history-line",
+      columns: &[Column::Outcome, Column::File],
+      prompt: "my code review history",
     },
   }
 }
@@ -358,17 +371,15 @@ impl LogsView {
           cx,
         );
       }
-      Source::AppSetup | Source::System => {
+      Source::AppSetup | Source::System | Source::Reviews => {
         self.records = None;
         self.chart = Chart::default();
-        let system = self.source == Source::System;
+        let source = self.source;
         self.run(
-          move |host, _| {
-            if system {
-              host.system_logs(&query)
-            } else {
-              host.app_setup_logs(&query)
-            }
+          move |host, repo| match source {
+            Source::System => host.system_logs(&query),
+            Source::Reviews => host.review_history(repo, &query),
+            _ => host.app_setup_logs(&query),
           },
           |view, records, _| {
             view.records = Some(records.unwrap_or_else(|err| {
@@ -590,6 +601,7 @@ impl LogsView {
       let placeholder = match self.source {
         Source::Agent => "Search this conversation…",
         Source::System => "Search system logs…",
+        Source::Reviews => "Search reviews…",
         _ => "Search all runs…",
       };
       let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
@@ -804,6 +816,7 @@ impl LogsView {
       Source::Agent => "agent-chat-search",
       Source::System => "system-logs-search",
       Source::AppSetup => "app-setup-logs-search",
+      Source::Reviews => "review-history-search",
       Source::Checks => "repo-logs-search",
     };
     ui::text(div(), TextSize::Sm)
@@ -1019,6 +1032,9 @@ impl LogsView {
         "No app setup script runs yet. Set a script in Application settings and click Run."
       }
       Source::System => "No system logs recorded yet.",
+      Source::Reviews => {
+        "No code reviews in the last 30 days. Review agent comments and reviews you send to an agent show here."
+      }
     }
   }
 
@@ -1214,8 +1230,8 @@ impl LogsView {
           )
           .children(spec.columns.iter().map(|c| {
             let color = match c {
-              Column::Job | Column::Role => ui::Tone::Primary.text(&p),
-              Column::Run | Column::Source => p.muted_foreground,
+              Column::Job | Column::Role | Column::File => ui::Tone::Primary.text(&p),
+              Column::Run | Column::Source | Column::Outcome => p.muted_foreground,
             };
             cell(Some(c.width()))
               .text_color(color)
