@@ -18,6 +18,16 @@ fi
 
 appicon=$APP/gen/apple/Assets.xcassets/AppIcon.appiconset
 if [ -d "$appicon" ]; then
+  # App Store Connect rejects an app icon with an alpha channel (ITMS-90717).
+  # PNG colour types 4 and 6 carry one.
+  for icon in "$ICONS"/ios/*.png; do
+    case $(od -An -tu1 -j25 -N1 "$icon" | tr -d ' ') in
+      4 | 6)
+        echo "error: $icon has an alpha channel; run \`node scripts/flatten-ios-icons.js\`" >&2
+        exit 1
+        ;;
+    esac
+  done
   cp "$ICONS"/ios/*.png "$appicon"/
   echo "applied iOS icons to $appicon"
 fi
