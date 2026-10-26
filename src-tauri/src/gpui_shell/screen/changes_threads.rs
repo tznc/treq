@@ -480,9 +480,9 @@ mod tests {
   fn suggestions_mark_whitespace_and_unicode_changes() {
     let rows = suggestion_diff(Some("a  = 1"), "a = 1").expect("rows");
     assert_eq!(changed(&rows[0]), vec![" "]);
-    let rows = suggestion_diff(Some("caf\u{e9} au lait"), "caf\u{e8} au lait").expect("rows");
-    assert_eq!(changed(&rows[0]), vec!["\u{e9}"]);
-    assert_eq!(changed(&rows[1]), vec!["\u{e8}"]);
+    let rows = suggestion_diff(Some("na\u{ef}ve code"), "na\u{ee}ve code").expect("rows");
+    assert_eq!(changed(&rows[0]), vec!["\u{ef}"]);
+    assert_eq!(changed(&rows[1]), vec!["\u{ee}"]);
   }
 
   #[test]
