@@ -351,3 +351,7 @@ harness = false
 [[bench]]
 name = "code_files"
 harness = false
+
+[[bench]]
+name = "pr_cache"
+harness = false
