@@ -2402,11 +2402,11 @@ impl SettingsView {
                     .label("Tune with agent")
                     .on_click(self.press("repo.reviewPrompt.tune")),
                 )
-                .child(help(
+                .child(div().flex_1().min_w_0().child(help(
                   "An agent reads the last 30 days of reviews (Logs → Reviews) and proposes edits to this prompt for you to review below.",
                   p,
                   0.,
-                )),
+                ))),
             )
             .when(!edits.is_empty(), |this| {
               this.child(self.prompt_edits(&edits, &edits_busy, p))

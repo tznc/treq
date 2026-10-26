@@ -60,12 +60,20 @@ async function codeReviewSettings(page: Page): Promise<void> {
   }
   await page.getByRole("tab", { name: "Repository" }).click();
   await page.mouse.move(950, 500);
-  const tune = page.getByRole("button", { name: "Tune with agent" });
-  for (let i = 0; i < 8 && !(await tune.isVisible()); i++) {
-    await page.mouse.wheel(0, 400);
-    await settle(page, 500);
+  await expect(page.getByRole("button", { name: "Tune with agent" })).toBeVisible();
+  await scrollTo(page, "Tune with agent", 260);
+}
+
+/** Wheels the settings column until button `name` sits `top` px below the window top. */
+async function scrollTo(page: Page, name: string, top: number): Promise<void> {
+  const button = page.getByRole("button", { name }).first();
+  for (let i = 0; i < 12; i++) {
+    const box = await button.boundingBox();
+    if (!box || Math.abs(box.y - top) < 60) break;
+    await page.mouse.move(1300, 600);
+    await page.mouse.wheel(0, box.y - top);
+    await settle(page, 400);
   }
-  await expect(tune).toBeVisible();
   await settle(page, 600);
 }
 
@@ -97,8 +105,7 @@ test("tune review prompt: start, review edits, apply", async ({ page }) => {
   const apply = page.getByRole("button", { name: "Apply to prompt" });
   await expect(apply.first()).toBeVisible({ timeout: 20_000 });
   await expect(apply).toHaveCount(2);
-  await apply.first().scrollIntoViewIfNeeded();
-  await settle(page, 600);
+  await scrollTo(page, "Tune with agent", 120);
   await capture(page, {
     name: "24-tune-03-edits",
     title: "Settings: the agent's proposed edits on the review cards",
@@ -113,7 +120,7 @@ test("tune review prompt: start, review edits, apply", async ({ page }) => {
   await expect(apply).toHaveCount(1);
   const prompt = page.getByRole("textbox", { name: "Leave empty to use the built-in review prompt" });
   await expect(prompt).toHaveValue(/Lead with correctness bugs\./);
-  await settle(page, 800);
+  await scrollTo(page, "Tune with agent", 400);
   await capture(page, {
     name: "24-tune-04-applied",
     title: "Settings: one edit applied",
