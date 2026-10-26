@@ -2543,6 +2543,10 @@ fn terminal_place(
       .iter()
       .map(|w| (super::merge::full_path(w), w.branch_name.clone()))
       .collect(),
+    titles: workspaces
+      .iter()
+      .map(|w| (super::merge::full_path(w), super::code_data::display_title(w)))
+      .collect(),
     workspace_ids: workspaces
       .iter()
       .map(|w| (super::merge::full_path(w), w.id))

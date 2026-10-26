@@ -169,8 +169,22 @@ pub struct Place {
   pub current_branch: String,
   /// Workspace directories and their branches, for column labels.
   pub branches: Vec<(String, String)>,
+  /// Workspace directories and their display titles, which the labels show
+  /// in place of the branch.
+  pub titles: Vec<(String, String)>,
   /// Workspace ids by directory, so a new agent opens in its column's.
   pub workspace_ids: Vec<(String, i64)>,
+}
+
+impl Place {
+  /// What a column's chip calls the workspace at `dir`: its title, else its
+  /// branch. None for a directory outside every workspace.
+  pub fn workspace_label(&self, dir: &str) -> Option<String> {
+    let find = |list: &[(String, String)]| {
+      list.iter().find(|(path, _)| path == dir).map(|(_, v)| v.clone())
+    };
+    find(&self.titles).or_else(|| find(&self.branches))
+  }
 }
 
 /// `scrollTerminalFullyIntoView`: how far the row scrolls right (negative:
@@ -2541,9 +2555,8 @@ impl TerminalPane {
   /// `resolveTerminalWorkspace` for a shell: the workspace's branch for
   /// its directory, else the home branch.
   fn label(&self, dir: &str) -> (String, bool) {
-    let found = self.place.branches.iter().find(|(path, _)| path == dir);
-    match found {
-      Some((_, branch)) => (branch.clone(), false),
+    match self.place.workspace_label(dir) {
+      Some(name) => (name, false),
       None => {
         let agent = self.columns.iter().find_map(|c| match &c.kind {
           Kind::Agent {
@@ -3432,7 +3445,11 @@ impl TerminalPane {
         ..
       } => {
         let key = workspace_path.clone().unwrap_or_else(|| repo_path.clone());
-        let label_name = workspace_name.clone().unwrap_or_else(|| self.home_branch());
+        let label_name = self
+          .place
+          .workspace_label(&key)
+          .or_else(|| workspace_name.clone())
+          .unwrap_or_else(|| self.home_branch());
         let view = column.view.clone();
         let search = div()
           .id(SharedString::from(format!("terminal-search-{}", column.id)))
@@ -3485,11 +3502,12 @@ impl TerminalPane {
               .min_w_0()
               .child(ui::icon(agent_icon(agent), 16., d.foreground))
               .child(self.title(&column.id, name.clone(), d.foreground, cx))
-              .child(label(
-                label_name,
-                workspace_name.is_none(),
-                key,
-                self.react.clone(),
+              .child(self.tooltips.wrap(
+                format!("terminal-workspace-label-tip-{}", column.id),
+                Side::Top,
+                Some(TooltipContent::Text(label_name.clone().into())),
+                label(label_name, workspace_name.is_none(), key, self.react.clone()),
+                cx,
               )),
           )
           .child(
@@ -3623,7 +3641,13 @@ impl TerminalPane {
               .min_w_0()
               .child(ui::icon(theme::ICON_TERMINAL, 12., title_fg))
               .child(self.title(&column.id, column_title(&column.kind), title_fg, cx))
-              .child(label(name, main, dir.clone(), self.react.clone())),
+              .child(self.tooltips.wrap(
+                format!("terminal-workspace-label-tip-{}", column.id),
+                Side::Top,
+                Some(TooltipContent::Text(name.clone().into())),
+                label(name, main, dir.clone(), self.react.clone()),
+                cx,
+              )),
           )
           .child(close)
       }
