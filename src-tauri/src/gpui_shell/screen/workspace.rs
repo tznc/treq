@@ -2544,3 +2544,24 @@ fn terminal_place(
     repo_path: repo,
   }
 }
+
+#[cfg(test)]
+mod sync_state_tests {
+  use super::*;
+
+  fn sync(ahead: u32, behind: u32) -> Sync {
+    Sync {
+      ahead,
+      behind,
+      disabled: false,
+      spinning: false,
+    }
+  }
+
+  #[test]
+  fn names_what_to_push_and_pull() {
+    assert_eq!(sync_state(&sync(2, 0)), "2 to push");
+    assert_eq!(sync_state(&sync(0, 3)), "3 to pull");
+    assert_eq!(sync_state(&sync(2, 3)), "2 to push, 3 to pull");
+  }
+}
