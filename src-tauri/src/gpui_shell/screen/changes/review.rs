@@ -946,7 +946,14 @@ impl ChangesView {
       .as_ref()
       .is_some_and(|s| s.path == path && s.head == (h, l));
     let kind = line_kind(line);
-    let bg = row_fill(selected, kind, p);
+    let has_comment = line_has_comment(
+      &self.review.comments,
+      path,
+      hunk,
+      number_and_side(numbers, l),
+      &|c| self.is_outdated_in(c, hunks),
+    );
+    let bg = row_fill(selected, has_comment, kind, p);
     // The characters this line changed against its pair, a shade deeper.
     let mark = match kind {
       LineKind::Removed => Tone::GitClosed.color(p),
@@ -964,20 +971,12 @@ impl ChangesView {
       .selection
       .as_ref()
       .is_some_and(|s| s.lines.len() > 1);
-    let has_comment = line_has_comment(
-      &self.review.comments,
-      path,
-      hunk,
-      number_and_side(numbers, l),
-      &|c| self.is_outdated_in(c, hunks),
-    );
     let border = p.border.opacity(0.4);
     let gutter_hover = p.hover();
     let dragging = self.review.selection.as_ref().is_some_and(|s| s.dragging);
     let text = line.get(1..).filter(|t| !t.is_empty()).unwrap_or(" ");
     let at = (h, l);
     let (press, drag, add) = (path.to_string(), path.to_string(), path.to_string());
-    let primary = p.primary;
     let head_drawn = head.then(|| (self.review.head_drawn.clone(), path.to_string()));
     div()
       .id(SharedString::from(format!("diff-line-{path}-{h}-{l}")))
@@ -1035,13 +1034,6 @@ impl ChangesView {
                   view.press_line(&press, at, cx);
                 }
               }),
-            )
-          })
-          .when(has_comment, |this| {
-            this.child(
-              div()
-                .ml_1()
-                .child(ui::icon(theme::ICON_MESSAGE, 12., primary)),
             )
           })
           .child(
@@ -2137,12 +2129,20 @@ impl ChangesView {
   }
 }
 
-/// A diff row's fill. Selection wins over the add/remove tint, so a
-/// multi-line selection reads as one band across added, removed and context
-/// lines.
-pub(super) fn row_fill(selected: bool, kind: LineKind, p: &Palette) -> Option<Hsla> {
+/// A diff row's fill. Selection wins, so a multi-line selection reads as one
+/// band; then a comment's amber, marking its lines like GitHub; then the
+/// add/remove tint.
+pub(super) fn row_fill(
+  selected: bool,
+  commented: bool,
+  kind: LineKind,
+  p: &Palette,
+) -> Option<Hsla> {
   if selected {
     return Some(p.selected());
+  }
+  if commented {
+    return Some(Tone::Warning.tint(p));
   }
   match kind {
     LineKind::Added => Some(Tone::GitOpen.tint(p)),
@@ -2166,7 +2166,7 @@ mod row_paint_tests {
   fn selection_beats_diff_tint_on_every_kind() {
     let p = theme::palette(true);
     for kind in [LineKind::Added, LineKind::Removed, LineKind::Context] {
-      assert_eq!(row_fill(true, kind, &p), Some(p.selected()));
+      assert_eq!(row_fill(true, false, kind, &p), Some(p.selected()));
     }
   }
 
@@ -2174,14 +2174,34 @@ mod row_paint_tests {
   fn unselected_rows_keep_their_diff_tint() {
     let p = theme::palette(true);
     assert_eq!(
-      row_fill(false, LineKind::Added, &p),
+      row_fill(false, false, LineKind::Added, &p),
       Some(Tone::GitOpen.tint(&p))
     );
     assert_eq!(
-      row_fill(false, LineKind::Removed, &p),
+      row_fill(false, false, LineKind::Removed, &p),
       Some(Tone::GitClosed.tint(&p))
     );
-    assert_eq!(row_fill(false, LineKind::Context, &p), None);
+    assert_eq!(row_fill(false, false, LineKind::Context, &p), None);
+  }
+
+  #[test]
+  fn a_commented_row_is_tinted_over_its_diff_colour() {
+    let p = theme::palette(true);
+    for kind in [LineKind::Added, LineKind::Removed, LineKind::Context] {
+      assert_eq!(
+        row_fill(false, true, kind, &p),
+        Some(Tone::Warning.tint(&p))
+      );
+    }
+  }
+
+  #[test]
+  fn selection_beats_the_comment_tint() {
+    let p = theme::palette(true);
+    assert_eq!(
+      row_fill(true, true, LineKind::Added, &p),
+      Some(p.selected())
+    );
   }
 
   #[test]
