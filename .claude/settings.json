@@ -8,6 +8,10 @@
   },
   "permissions": {
     "deny": [
+      "ShowOnboardingRolePicker",
+      "SuggestPluginInstall",
+      "SuggestSkills",
+      "SearchPlugins",
       "Read(./target/**)",
       "Read(./src-tauri/target/**)",
       "Read(./src-tauri/gen/**)",
