@@ -46,7 +46,7 @@ pub mod jj;
 pub mod linear;
 pub mod local_db;
 pub mod lock_ext;
-/// The GPUI mobile app, run by the mobile app crate (mobile-gpui).
+/// The GPUI mobile app, which the iOS and Android builds run (`mobile_main`).
 #[cfg(feature = "mobile-ui")]
 pub mod mobile;
 pub mod notify_dispatch;
@@ -545,16 +545,13 @@ where
 /// The mobile app's entry point: the GPUI mobile UI (`mobile`), with the
 /// mobile Tauri config (`tauri.conf.json` plus `tauri.<platform>.conf.json`).
 #[cfg(all(mobile, feature = "mobile-ui"))]
-#[cfg_attr(not(feature = "embed"), tauri::mobile_entry_point)]
+#[tauri::mobile_entry_point]
 pub fn mobile_main() {
   mobile::run(tauri::generate_context!());
 }
 
 #[cfg(feature = "gui")]
-#[cfg_attr(
-  all(mobile, not(feature = "embed"), not(feature = "mobile-ui")),
-  tauri::mobile_entry_point
-)]
+#[cfg_attr(all(mobile, not(feature = "mobile-ui")), tauri::mobile_entry_point)]
 #[expect(
   clippy::exit,
   reason = "a CLI invocation hands its exit code to the shell, and `tauri::generate_context!` expands to an exit"

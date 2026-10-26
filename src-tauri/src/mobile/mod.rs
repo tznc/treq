@@ -1,7 +1,7 @@
 //! Treq mobile, rebuilt with GPUI (via tauri-plugin-gpui and gpui-kit).
 //!
 //! The same remote-control and review surface as the React mobile shell
-//! (see `mobile-gpui/SPEC.md`), but rendered natively. Repository work runs on the
+//! (see `SPEC.md`), but rendered natively. Repository work runs on the
 //! connected host through treq's own SSH transport and remote command
 //! protocol, linked directly from `treq_lib` instead of going through IPC.
 
@@ -16,7 +16,6 @@ mod store;
 mod terminal;
 mod ui;
 
-use crate::result_ext::ResultExt as _;
 use gpui_kit::AppContext as _;
 use tauri::Manager;
 use tauri_plugin_gpui::{GpuiConfig, GpuiOptions, GpuiWindowExt};
@@ -29,9 +28,12 @@ fn init_logging() {
       .with_tag("treq-gpui"),
   );
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
-  env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-    .try_init()
-    .best_effort();
+  {
+    use crate::result_ext::ResultExt as _;
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+      .try_init()
+      .best_effort();
+  }
 }
 
 /// Forwards `treq://auth/callback` links (at launch and while running).

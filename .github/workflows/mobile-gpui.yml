@@ -1,6 +1,7 @@
 name: Mobile GPUI
 
-# Experimental: the Treq mobile app rebuilt with GPUI (mobile-gpui/).
+# The Treq mobile app, built with GPUI: src-tauri with the `mobile-ui`
+# feature (src-tauri/src/mobile).
 # Produces an installable Android debug APK (signed with the debug key) as
 # the `treq-gpui-debug-apk` artifact, then smoke-tests it on an emulator.
 
@@ -15,15 +16,17 @@ on:
   push:
     branches: [main]
     paths:
-      - "mobile-gpui/**"
       - "src-tauri/**"
+      - "scripts/mobile/**"
       - "crates/**"
       - "package.json"
       - ".github/workflows/mobile-gpui.yml"
   pull_request:
     paths:
-      - "mobile-gpui/**"
       - "src-tauri/src/mobile/**"
+      - "src-tauri/tauri.android.conf.json"
+      - "src-tauri/tauri.ios.conf.json"
+      - "scripts/mobile/**"
       - ".github/workflows/mobile-gpui.yml"
   workflow_dispatch:
 
@@ -82,7 +85,7 @@ jobs:
           targets: aarch64-linux-android,x86_64-linux-android
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: ./mobile-gpui -> target
+          workspaces: ". -> target"
           key: android
           cache-on-failure: true
       - uses: actions/setup-java@v5
@@ -102,19 +105,18 @@ jobs:
       # The generated Gradle project calls back into the Tauri CLI, so it is
       # a local npm install.
       - name: Build debug APK (arm64 + x86_64)
-        working-directory: mobile-gpui
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run tauri -- android init --ci
-          scripts/apply-icons.sh
+          scripts/mobile/apply-icons.sh
           # `android init` regenerates gen/android without the plugin entries;
           # only this app's build script adds them back (tauri-plugin-gpui's
           # GpuiView), and a warm Rust cache skips it. Force it to rerun.
           for target in aarch64-linux-android x86_64-linux-android; do
-            cargo clean -p treq-gpui --target "$target"
+            cargo clean -p treq --target "$target"
           done
-          npm run tauri -- android build --debug --apk --target aarch64 --target x86_64 --ci
-          apk=$(find gen/android/app/build/outputs/apk -name '*universal-debug.apk' | head -1)
+          npm run tauri -- android build --features mobile-ui --debug --apk --target aarch64 --target x86_64 --ci
+          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*universal-debug.apk' | head -1)
           ls -la "$apk"
           cp "$apk" "$RUNNER_TEMP/treq-gpui-debug.apk"
       - uses: actions/upload-artifact@v6
@@ -149,7 +151,7 @@ jobs:
           target: google_apis
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: mobile-gpui/scripts/android-smoke.sh ${{ runner.temp }}/apk/treq-gpui-debug.apk target/android-smoke
+          script: scripts/mobile/android-smoke.sh ${{ runner.temp }}/apk/treq-gpui-debug.apk target/android-smoke
       - uses: actions/upload-artifact@v6
         if: always()
         with:

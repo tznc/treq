@@ -134,7 +134,7 @@ icons! {
   ICON_ROCKET => "rocket",
 }
 
-// Inter, as in the React app. The TTFs are shared with mobile-gpui.
+// Inter, as in the React app. The TTFs are shared with the mobile app.
 const INTER_REGULAR: &[u8] = include_bytes!("../../../src-tauri/assets/fonts/Inter-Regular.ttf");
 const INTER_MEDIUM: &[u8] = include_bytes!("../../../src-tauri/assets/fonts/Inter-Medium.ttf");
 const INTER_SEMIBOLD: &[u8] = include_bytes!("../../../src-tauri/assets/fonts/Inter-SemiBold.ttf");

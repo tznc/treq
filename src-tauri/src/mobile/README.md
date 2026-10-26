@@ -1,14 +1,14 @@
-# Treq GPUI (experimental mobile app)
+# Treq mobile (GPUI)
 
 The Treq mobile app rebuilt with a native [GPUI](https://www.gpui.rs) interface instead of the React shell. It renders through [tauri-plugin-gpui](https://github.com/ziinc/tauri-gpui) inside an ordinary Tauri Android app. Components come from [gpui-kit](https://crates.io/crates/gpui-kit).
 
-It is the Treq mobile app (`com.treq`, the same identifier as the desktop app). Repository work uses treq's own Rust code: `treq_lib` is linked directly (with its `embed` feature). Screens call the SSH transport, the remote command protocol and the settings database without going through IPC. The Supabase sign-in and the managed-instance control plane, which exist only in TypeScript in the React app, are ported to Rust in `src/auth.rs`, `src/control_plane.rs` and `src/managed.rs`.
+It is the Treq mobile app (`com.treq`, the same identifier as the desktop app), built from `src-tauri` with the `mobile-ui` feature (`tauri.ios.conf.json` and `tauri.android.conf.json` hold the mobile-only config). It is this module of `treq_lib`, so screens call the SSH transport, the remote command protocol and the settings database without going through IPC. The Supabase sign-in and the managed-instance control plane, which exist only in TypeScript in the React app, are ported to Rust (`managed.rs` here).
 
 [`SPEC.md`](SPEC.md) describes the React mobile shell this app replaces.
 
 ## Install the debug build
 
-Every push that touches `mobile-gpui/` or `src-tauri/` runs the **Mobile GPUI** workflow. Download its `treq-gpui-debug-apk` artifact, unzip it and install the APK on a device with USB debugging enabled:
+The **Mobile GPUI** workflow builds it on manual dispatch. Download its `treq-gpui-debug-apk` artifact, unzip it and install the APK on a device with USB debugging enabled:
 
 ```bash
 adb install -r treq-gpui-debug.apk
@@ -16,7 +16,7 @@ adb install -r treq-gpui-debug.apk
 
 Or copy the APK to the phone and open it, allowing installs from that source. The APK is signed with the debug key and contains arm64 (phones) and x86_64 (emulators) libraries. The workflow also uploads emulator screenshots (`treq-gpui-emulator-screenshots`).
 
-The [nightly release](https://github.com/tznc/treq/releases/tag/nightly) also carries `treq-nightly-android-arm64.apk`, this app built against tauri-gpui `main` (arm64 only). It also carries `treq-nightly-ios-simulator-arm64.zip`, an iOS simulator build (Apple silicon Macs; it does not install on a device): unzip it and run `xcrun simctl install booted <app>`.
+The [nightly release](https://github.com/tznc/treq/releases/tag/nightly) also carries `treq-nightly-android-arm64.apk` (arm64 only), and nightly iOS builds go to TestFlight when the signing secrets are set. It also carries `treq-nightly-ios-simulator-arm64.zip`, an iOS simulator build (Apple silicon Macs; it does not install on a device): unzip it and run `xcrun simctl install booted <app>`.
 
 ## What works
 
@@ -33,16 +33,18 @@ The [nightly release](https://github.com/tznc/treq/releases/tag/nightly) also ca
 
 ## Develop
 
-```bash
-cargo run                      # desktop window, for quick UI iteration
-cargo test --lib
+From the repository root:
 
-npm install
-npm run tauri -- android init  # generates gen/android (not committed)
-scripts/apply-icons.sh         # Treq icon (init uses the Tauri default)
-npm run tauri -- android build --debug --apk --target aarch64
+```bash
+cargo run -p treq --example mobile --features mobile-ui  # desktop window, for quick UI iteration
+cargo test -p treq --lib --features mobile-ui mobile::
+
+npm ci
+npm run tauri -- android init  # generates src-tauri/gen/android (not committed)
+scripts/mobile/apply-icons.sh  # Treq icon (init uses the Tauri default)
+npm run tauri -- android build --features mobile-ui --debug --apk --target aarch64
 ```
 
-The UI font is Inter (OFL 1.1, `assets/fonts/OFL.txt`), bundled so bold and semibold weights render on Android, where the system font is a single variable face.
+The UI font is Inter (OFL 1.1, `src-tauri/assets/fonts/Inter-OFL.txt`), bundled so bold and semibold weights render on Android, where the system font is a single variable face.
 
-Builds use the production Supabase project. Set `TREQ_GPUI_ENV=dev` at build time to use a local Supabase stack. The app is a separate Cargo workspace: tauri-plugin-gpui needs tauri 2.12, and this keeps the desktop app's lockfile unchanged.
+Builds use the production Supabase project. Set `TREQ_GPUI_ENV=dev` at build time to use a local Supabase stack.
