@@ -10767,6 +10767,90 @@ mod tests {
       .to_string()
   }
 
+
+  // A pushed origin plus a colocated home clone that tracks `main@origin`.
+  fn origin_and_home_clone() -> (TempDir, TempDir) {
+    let origin = TempDir::new().expect("origin");
+    git(&origin, &["init", "--bare", "-b", "main", "."]);
+    let home = TempDir::new().expect("home");
+    git(&home, &["init", "-b", "main", "."]);
+    git(&home, &["config", "user.name", "Test User"]);
+    git(&home, &["config", "user.email", "test@example.com"]);
+    git(&home, &["remote", "add", "origin", origin.path().to_str().unwrap()]);
+    fs::write(home.path().join("base.txt"), "base\n").expect("write");
+    git(&home, &["add", "."]);
+    git(&home, &["commit", "-m", "base"]);
+    git(&home, &["push", "origin", "main"]);
+    let home_path = home.path().to_str().unwrap();
+    init_jj_for_git_repo(home_path).expect("init jj");
+    jj_git_fetch(home_path).expect("fetch");
+    jj_bookmark_track(home_path, "main", "origin").expect("track");
+    (origin, home)
+  }
+
+  // Lands one commit on origin's `main` from a second clone; returns its id.
+  fn advance_origin_main(origin: &TempDir) -> String {
+    let other = TempDir::new().expect("other");
+    git(&other, &["clone", origin.path().to_str().unwrap(), "."]);
+    git(&other, &["config", "user.name", "Other"]);
+    git(&other, &["config", "user.email", "other@example.com"]);
+    fs::write(other.path().join("next.txt"), "next\n").expect("write");
+    git(&other, &["add", "."]);
+    git(&other, &["commit", "-m", "next"]);
+    git(&other, &["push", "origin", "main"]);
+    git_output(&other, &["rev-parse", "HEAD"])
+  }
+
+  // Two operations started from the same op head each move `main`: the race
+  // a background fetch and another jj op hit, leaving `main` conflicted.
+  fn race_main_into_conflict(repo_path: &str, a: &str, b: &str) {
+    let loaded = load_workspace_repo(repo_path).expect("load");
+    for (hex, name) in [(a, "race a"), (b, "race b")] {
+      let id = jj_lib::backend::CommitId::try_from_hex(hex).expect("hex");
+      let mut tx = loaded.repo.start_transaction();
+      tx.repo_mut()
+        .set_local_bookmark_target(RefName::new("main"), RefTarget::normal(id));
+      block_on(tx.commit(name)).expect("commit race op");
+    }
+    assert!(jj_is_bookmark_conflicted(repo_path, "main"));
+  }
+
+  #[test]
+  fn fetch_exports_moved_trunk_to_git() {
+    let (origin, home) = origin_and_home_clone();
+    let tip = advance_origin_main(&origin);
+    jj_git_fetch(home.path().to_str().unwrap()).expect("fetch");
+    assert_eq!(git_output(&home, &["rev-parse", "refs/heads/main"]), tip);
+  }
+
+  #[test]
+  fn fetch_resets_conflicted_trunk_when_origin_has_every_side() {
+    let (origin, home) = origin_and_home_clone();
+    let home_path = home.path().to_str().unwrap();
+    let base = git_output(&home, &["rev-parse", "main"]);
+    let tip = advance_origin_main(&origin);
+    jj_git_fetch(home_path).expect("fetch");
+    race_main_into_conflict(home_path, &base, &tip);
+    jj_git_fetch(home_path).expect("fetch resolves");
+    assert!(!jj_is_bookmark_conflicted(home_path, "main"));
+    assert_eq!(git_output(&home, &["rev-parse", "refs/heads/main"]), tip);
+  }
+
+  #[test]
+  fn fetch_keeps_conflicted_trunk_holding_a_local_only_commit() {
+    let (origin, home) = origin_and_home_clone();
+    let home_path = home.path().to_str().unwrap();
+    git(&home, &["switch", "-c", "local-work"]);
+    fs::write(home.path().join("mine.txt"), "mine\n").expect("write");
+    git(&home, &["add", "mine.txt"]);
+    git(&home, &["commit", "-m", "local only"]);
+    let local = git_output(&home, &["rev-parse", "HEAD"]);
+    let tip = advance_origin_main(&origin);
+    jj_git_fetch(home_path).expect("fetch");
+    race_main_into_conflict(home_path, &local, &tip);
+    jj_git_fetch(home_path).expect("fetch");
+    assert!(jj_is_bookmark_conflicted(home_path, "main"));
+  }
   fn init_colocated_repo_with_two_branches() -> TempDir {
     let temp = TempDir::new().expect("tempdir");
     init_git_repo(&temp);

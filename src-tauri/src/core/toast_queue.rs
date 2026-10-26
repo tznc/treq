@@ -110,6 +110,16 @@ mod tests {
   }
 
   #[test]
+  fn an_identical_toast_still_showing_is_not_stacked_again() {
+    let mut queue = ToastQueue::default();
+    let first = queue.push("Sync failed", Some("Push failed"), ToastKind::Error, None);
+    let again = queue.push("Sync failed", Some("Push failed"), ToastKind::Error, None);
+    assert_eq!(again.id, first.id);
+    let other = queue.push("Sync failed", Some("Other"), ToastKind::Error, None);
+    assert_eq!(ids(&queue), [first.id, other.id]);
+  }
+
+  #[test]
   fn keeps_toasts_in_arrival_order() {
     let mut queue = ToastQueue::default();
     let first = queue.push("Pushed", Some(""), ToastKind::Success, None);

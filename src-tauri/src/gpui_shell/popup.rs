@@ -1148,6 +1148,14 @@ impl PopupView {
   }
 }
 
+/// What a toast's Copy button puts on the clipboard: its title and description.
+fn toast_clipboard_text(toast: &Toast) -> String {
+  match &toast.description {
+    Some(description) => format!("{}: {}", toast.title, description),
+    None => toast.title.clone(),
+  }
+}
+
 impl PopupView {
   /// The toast stack: `ToastItem`s in `flex flex-col gap-2`.
   fn render_toasts(&self, toasts: &[Toast], cx: &mut Context<Self>) -> gpui::AnyElement {
@@ -1219,6 +1227,30 @@ impl PopupView {
               )
             }),
         )
+        .when(toast.kind == ToastKind::Error, |this| {
+          // Copies the error so it can be pasted into a report or a search.
+          let text = toast_clipboard_text(toast);
+          this.child(
+            div()
+              .id("copy")
+              .group("copy")
+              .flex_none()
+              .p_1()
+              .rounded_md()
+              .hover(|style| style.bg(palette.menu_accent))
+              .cursor_pointer()
+              .child(
+                svg()
+                  .path(theme::ICON_COPY)
+                  .size(zpx(16.))
+                  .text_color(palette.muted_foreground.opacity(0.7))
+                  .group_hover("copy", |style| style.text_color(palette.foreground)),
+              )
+              .on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))
+              }),
+          )
+        })
         .when(!compact, |this| {
           this.child(
             // `rounded-md p-1 text-muted-foreground/70 hover:bg-accent
@@ -2032,6 +2064,18 @@ mod tests {
       assert_eq!(width, 384.);
       assert!(height > 58. + 8. + 34. + 14. + 4. + 2. * LINE_HEIGHT);
     });
+  }
+
+  #[test]
+  fn an_error_toast_copies_its_title_and_description() {
+    let toast = Toast {
+      id: "t".into(),
+      title: "Sync failed".into(),
+      description: Some("Push failed".into()),
+      kind: ToastKind::Error,
+      action: None,
+    };
+    assert_eq!(toast_clipboard_text(&toast), "Sync failed: Push failed");
   }
 
   #[test]
