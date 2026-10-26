@@ -268,24 +268,9 @@ fn collect_garbage(
 #[cfg(test)]
 mod tests {
   use super::*;
-  use std::process::Command;
   use tempfile::TempDir;
 
-  fn jj(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("jj")
-      .current_dir(dir)
-      .env("JJ_USER", "Test User")
-      .env("JJ_EMAIL", "test@example.com")
-      .args(args)
-      .output()
-      .expect("jj should run");
-    assert!(
-      output.status.success(),
-      "jj {args:?} in {dir:?} failed: {}",
-      String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).into_owned()
-  }
+  use crate::test_cli::jj;
 
   fn op_count(dir: &Path) -> usize {
     jj(

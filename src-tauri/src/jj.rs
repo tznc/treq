@@ -10576,6 +10576,7 @@ fn import_remaining_git_refs(loaded: &mut LoadedWorkspaceRepo) -> Result<(), JjE
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::test_cli::git;
   use std::ffi::OsStr;
   use std::fs;
   use std::process::Command;
@@ -10780,12 +10781,7 @@ mod tests {
   }
 
   fn init_git_repo(temp: &TempDir) {
-    let status = Command::new("git")
-      .current_dir(temp.path())
-      .args(["init"])
-      .status()
-      .expect("git init should run");
-    assert!(status.success(), "git init should succeed");
+    git(temp.path(), &["init"]);
   }
 
   #[test]
@@ -10798,52 +10794,25 @@ mod tests {
   }
 
   fn init_jj_repo(temp: &TempDir) {
-    let status = Command::new("jj")
-      .current_dir(temp.path())
-      .args(["git", "init", "--colocate", "."])
-      .status()
-      .expect("jj git init should run");
-    assert!(status.success(), "jj git init should succeed");
-  }
-
-  fn git(temp: &TempDir, args: &[&str]) {
-    let status = Command::new("git")
-      .current_dir(temp.path())
-      .args(args)
-      .status()
-      .expect("git command should run");
-    assert!(status.success(), "git {:?} should succeed", args);
-  }
-
-  fn git_output(temp: &TempDir, args: &[&str]) -> String {
-    let output = Command::new("git")
-      .current_dir(temp.path())
-      .args(args)
-      .output()
-      .expect("git command should run");
-    assert!(output.status.success(), "git {:?} should succeed", args);
-    String::from_utf8(output.stdout)
-      .expect("git output should be utf8")
-      .trim()
-      .to_string()
+    crate::test_cli::jj(temp.path(), &["git", "init", "--colocate", "."]);
   }
 
   // A pushed origin plus a colocated home clone that tracks `main@origin`.
   fn origin_and_home_clone() -> (TempDir, TempDir) {
     let origin = TempDir::new().expect("origin");
-    git(&origin, &["init", "--bare", "-b", "main", "."]);
+    git(origin.path(), &["init", "--bare", "-b", "main", "."]);
     let home = TempDir::new().expect("home");
-    git(&home, &["init", "-b", "main", "."]);
-    git(&home, &["config", "user.name", "Test User"]);
-    git(&home, &["config", "user.email", "test@example.com"]);
+    git(home.path(), &["init", "-b", "main", "."]);
+    git(home.path(), &["config", "user.name", "Test User"]);
+    git(home.path(), &["config", "user.email", "test@example.com"]);
     git(
-      &home,
+      home.path(),
       &["remote", "add", "origin", origin.path().to_str().unwrap()],
     );
     fs::write(home.path().join("base.txt"), "base\n").expect("write");
-    git(&home, &["add", "."]);
-    git(&home, &["commit", "-m", "base"]);
-    git(&home, &["push", "origin", "main"]);
+    git(home.path(), &["add", "."]);
+    git(home.path(), &["commit", "-m", "base"]);
+    git(home.path(), &["push", "origin", "main"]);
     let home_path = home.path().to_str().unwrap();
     init_jj_for_git_repo(home_path).expect("init jj");
     jj_git_fetch(home_path).expect("fetch");
@@ -10854,15 +10823,18 @@ mod tests {
   // Lands one commit on origin's `main` from a second clone; returns its id.
   fn advance_origin_main(origin: &TempDir) -> String {
     let other = TempDir::new().expect("other");
-    git(&other, &["clone", origin.path().to_str().unwrap(), "."]);
-    git(&other, &["config", "user.name", "Other"]);
-    git(&other, &["config", "user.email", "other@example.com"]);
-    let count = git_output(&other, &["rev-list", "--count", "HEAD"]);
+    git(
+      other.path(),
+      &["clone", origin.path().to_str().unwrap(), "."],
+    );
+    git(other.path(), &["config", "user.name", "Other"]);
+    git(other.path(), &["config", "user.email", "other@example.com"]);
+    let count = git(other.path(), &["rev-list", "--count", "HEAD"]);
     fs::write(other.path().join(format!("next-{count}.txt")), "next\n").expect("write");
-    git(&other, &["add", "."]);
-    git(&other, &["commit", "-m", "next"]);
-    git(&other, &["push", "origin", "main"]);
-    git_output(&other, &["rev-parse", "HEAD"])
+    git(other.path(), &["add", "."]);
+    git(other.path(), &["commit", "-m", "next"]);
+    git(other.path(), &["push", "origin", "main"]);
+    git(other.path(), &["rev-parse", "HEAD"])
   }
 
   // Two operations started from the same op head each move `main`: the race
@@ -10912,49 +10884,52 @@ mod tests {
     let (origin, home) = origin_and_home_clone();
     let tip = advance_origin_main(&origin);
     jj_git_fetch(home.path().to_str().unwrap()).expect("fetch");
-    assert_eq!(git_output(&home, &["rev-parse", "refs/heads/main"]), tip);
+    assert_eq!(git(home.path(), &["rev-parse", "refs/heads/main"]), tip);
   }
 
   #[test]
   fn fetch_resets_conflicted_trunk_when_origin_has_every_side() {
     let (origin, home) = origin_and_home_clone();
     let home_path = home.path().to_str().unwrap();
-    let base = git_output(&home, &["rev-parse", "main"]);
+    let base = git(home.path(), &["rev-parse", "main"]);
     // Origin merges two sibling commits, so both race sides are on origin
     // and neither descends from the other.
     let other = TempDir::new().expect("other");
-    git(&other, &["clone", origin.path().to_str().unwrap(), "."]);
-    git(&other, &["config", "user.name", "Other"]);
-    git(&other, &["config", "user.email", "other@example.com"]);
+    git(
+      other.path(),
+      &["clone", origin.path().to_str().unwrap(), "."],
+    );
+    git(other.path(), &["config", "user.name", "Other"]);
+    git(other.path(), &["config", "user.email", "other@example.com"]);
     let mut sides = Vec::new();
     for side in ["left", "right"] {
-      git(&other, &["switch", "-C", side, &base]);
+      git(other.path(), &["switch", "-C", side, &base]);
       fs::write(other.path().join(format!("{side}.txt")), "x\n").expect("write");
-      git(&other, &["add", "."]);
-      git(&other, &["commit", "-m", side]);
-      sides.push(git_output(&other, &["rev-parse", "HEAD"]));
+      git(other.path(), &["add", "."]);
+      git(other.path(), &["commit", "-m", side]);
+      sides.push(git(other.path(), &["rev-parse", "HEAD"]));
     }
-    git(&other, &["switch", "-C", "main", &sides[0]]);
-    git(&other, &["merge", "--no-edit", "right"]);
-    git(&other, &["push", "origin", "main"]);
-    let tip = git_output(&other, &["rev-parse", "HEAD"]);
+    git(other.path(), &["switch", "-C", "main", &sides[0]]);
+    git(other.path(), &["merge", "--no-edit", "right"]);
+    git(other.path(), &["push", "origin", "main"]);
+    let tip = git(other.path(), &["rev-parse", "HEAD"]);
     jj_git_fetch(home_path).expect("fetch");
     race_main_into_conflict(home_path, &base, &sides[0], &sides[1]);
     jj_git_fetch(home_path).expect("fetch resolves");
     assert!(!jj_is_bookmark_conflicted(home_path, "main"));
-    assert_eq!(git_output(&home, &["rev-parse", "refs/heads/main"]), tip);
+    assert_eq!(git(home.path(), &["rev-parse", "refs/heads/main"]), tip);
   }
 
   #[test]
   fn fetch_keeps_conflicted_trunk_holding_a_local_only_commit() {
     let (origin, home) = origin_and_home_clone();
     let home_path = home.path().to_str().unwrap();
-    git(&home, &["switch", "-c", "local-work"]);
+    git(home.path(), &["switch", "-c", "local-work"]);
     fs::write(home.path().join("mine.txt"), "mine\n").expect("write");
-    git(&home, &["add", "mine.txt"]);
-    git(&home, &["commit", "-m", "local only"]);
-    let local = git_output(&home, &["rev-parse", "HEAD"]);
-    let base = git_output(&home, &["rev-parse", "main"]);
+    git(home.path(), &["add", "mine.txt"]);
+    git(home.path(), &["commit", "-m", "local only"]);
+    let local = git(home.path(), &["rev-parse", "HEAD"]);
+    let base = git(home.path(), &["rev-parse", "main"]);
     let tip = advance_origin_main(&origin);
     jj_git_fetch(home_path).expect("fetch");
     race_main_into_conflict(home_path, &base, &local, &tip);
@@ -10964,17 +10939,17 @@ mod tests {
   fn init_colocated_repo_with_two_branches() -> TempDir {
     let temp = TempDir::new().expect("tempdir");
     init_git_repo(&temp);
-    git(&temp, &["config", "user.name", "Test User"]);
-    git(&temp, &["config", "user.email", "test@example.com"]);
+    git(temp.path(), &["config", "user.name", "Test User"]);
+    git(temp.path(), &["config", "user.email", "test@example.com"]);
     fs::write(temp.path().join("base.txt"), "base\n").expect("write base");
-    git(&temp, &["add", "base.txt"]);
-    git(&temp, &["commit", "-m", "base"]);
-    git(&temp, &["branch", "branch-a"]);
-    git(&temp, &["switch", "-c", "branch-b"]);
+    git(temp.path(), &["add", "base.txt"]);
+    git(temp.path(), &["commit", "-m", "base"]);
+    git(temp.path(), &["branch", "branch-a"]);
+    git(temp.path(), &["switch", "-c", "branch-b"]);
     fs::write(temp.path().join("branch.txt"), "branch b\n").expect("write branch file");
-    git(&temp, &["add", "branch.txt"]);
-    git(&temp, &["commit", "-m", "branch b"]);
-    git(&temp, &["switch", "branch-a"]);
+    git(temp.path(), &["add", "branch.txt"]);
+    git(temp.path(), &["commit", "-m", "branch b"]);
+    git(temp.path(), &["switch", "branch-a"]);
     init_jj_repo(&temp);
     temp
   }
@@ -11026,7 +11001,7 @@ mod tests {
   #[test]
   fn reconcile_external_checkout_reparents_home_without_false_changes() {
     let temp = init_colocated_repo_with_two_branches();
-    git(&temp, &["switch", "branch-b"]);
+    git(temp.path(), &["switch", "branch-b"]);
     let repo_path = temp.path().to_str().expect("utf8 path");
 
     let changes = jj_get_changed_files(repo_path).expect("reconcile changes");
@@ -11037,20 +11012,20 @@ mod tests {
     );
     assert_eq!(
       home_wc_parent_id(repo_path),
-      git_output(&temp, &["rev-parse", "HEAD"])
+      git(temp.path(), &["rev-parse", "HEAD"])
     );
   }
 
   #[test]
   fn reconcile_reparents_when_git_head_was_already_imported() {
     let temp = init_colocated_repo_with_two_branches();
-    git(&temp, &["switch", "branch-b"]);
+    git(temp.path(), &["switch", "branch-b"]);
     let repo_path = temp.path().to_str().expect("utf8 path");
     let mut loaded = load_workspace_repo(repo_path).expect("load workspace");
     import_git_head_if_needed(&mut loaded, repo_path).expect("lightweight import");
     assert_ne!(
       home_wc_parent_id(repo_path),
-      git_output(&temp, &["rev-parse", "HEAD"])
+      git(temp.path(), &["rev-parse", "HEAD"])
     );
 
     let changes = jj_get_changed_files(repo_path).expect("reconcile changes");
@@ -11058,7 +11033,7 @@ mod tests {
     assert!(changes.is_empty());
     assert_eq!(
       home_wc_parent_id(repo_path),
-      git_output(&temp, &["rev-parse", "HEAD"])
+      git(temp.path(), &["rev-parse", "HEAD"])
     );
   }
 
@@ -11066,7 +11041,7 @@ mod tests {
   fn reconcile_external_checkout_preserves_real_local_edit() {
     let temp = init_colocated_repo_with_two_branches();
     fs::write(temp.path().join("local.txt"), "local edit\n").expect("write local edit");
-    git(&temp, &["switch", "branch-b"]);
+    git(temp.path(), &["switch", "branch-b"]);
     let repo_path = temp.path().to_str().expect("utf8 path");
 
     let changes = jj_get_changed_files(repo_path).expect("reconcile changes");
@@ -11079,7 +11054,7 @@ mod tests {
     );
     assert_eq!(
       home_wc_parent_id(repo_path),
-      git_output(&temp, &["rev-parse", "HEAD"])
+      git(temp.path(), &["rev-parse", "HEAD"])
     );
   }
 
@@ -11088,8 +11063,8 @@ mod tests {
     let temp = init_colocated_repo_with_two_branches();
     let repo_path = temp.path().to_str().expect("utf8 path");
     fs::write(temp.path().join("pulled.txt"), "new upstream content\n").expect("write file");
-    git(&temp, &["add", "pulled.txt"]);
-    git(&temp, &["commit", "-m", "advance checked-out branch"]);
+    git(temp.path(), &["add", "pulled.txt"]);
+    git(temp.path(), &["commit", "-m", "advance checked-out branch"]);
 
     let changes = jj_get_changed_files(repo_path).expect("reconcile changes");
 
@@ -11099,14 +11074,14 @@ mod tests {
     );
     assert_eq!(
       home_wc_parent_id(repo_path),
-      git_output(&temp, &["rev-parse", "HEAD"])
+      git(temp.path(), &["rev-parse", "HEAD"])
     );
   }
 
   #[test]
   fn reconcile_detached_external_checkout_reparents_home() {
     let temp = init_colocated_repo_with_two_branches();
-    git(&temp, &["checkout", "--detach", "branch-b"]);
+    git(temp.path(), &["checkout", "--detach", "branch-b"]);
     let repo_path = temp.path().to_str().expect("utf8 path");
 
     let changes = jj_get_changed_files(repo_path).expect("reconcile changes");
@@ -11114,7 +11089,7 @@ mod tests {
     assert!(changes.is_empty());
     assert_eq!(
       home_wc_parent_id(repo_path),
-      git_output(&temp, &["rev-parse", "HEAD"])
+      git(temp.path(), &["rev-parse", "HEAD"])
     );
   }
 
@@ -11217,14 +11192,14 @@ mod tests {
       .to_string_lossy()
       .into_owned();
     let child_parent_before = home_wc_parent_id(&child_path);
-    git(&temp, &["switch", "branch-b"]);
+    git(temp.path(), &["switch", "branch-b"]);
 
     reconcile_colocated_home_repo(repo_path).expect("reconcile home");
 
     assert_eq!(home_wc_parent_id(&child_path), child_parent_before);
     assert_eq!(
       home_wc_parent_id(repo_path),
-      git_output(&temp, &["rev-parse", "HEAD"])
+      git(temp.path(), &["rev-parse", "HEAD"])
     );
   }
 
@@ -11237,19 +11212,19 @@ mod tests {
       .status()
       .expect("git init should run");
     assert!(status.success(), "git init should succeed");
-    git(&temp, &["config", "user.name", "Test User"]);
-    git(&temp, &["config", "user.email", "test@example.com"]);
+    git(temp.path(), &["config", "user.name", "Test User"]);
+    git(temp.path(), &["config", "user.email", "test@example.com"]);
     fs::write(temp.path().join("base.txt"), "base\n").expect("write base");
-    git(&temp, &["add", "base.txt"]);
-    git(&temp, &["commit", "-m", "base"]);
-    git(&temp, &["switch", "-c", "feature"]);
+    git(temp.path(), &["add", "base.txt"]);
+    git(temp.path(), &["commit", "-m", "base"]);
+    git(temp.path(), &["switch", "-c", "feature"]);
     fs::write(temp.path().join("feature.txt"), "feature\n").expect("write feature");
-    git(&temp, &["add", "feature.txt"]);
-    git(&temp, &["commit", "-m", "feature work"]);
+    git(temp.path(), &["add", "feature.txt"]);
+    git(temp.path(), &["commit", "-m", "feature work"]);
     init_jj_repo(&temp);
     let repo_path = temp.path().to_str().expect("utf8 path");
-    let feature_tip = git_output(&temp, &["rev-parse", "feature"]);
-    git(&temp, &["checkout", "--detach", &feature_tip]);
+    let feature_tip = git(temp.path(), &["rev-parse", "feature"]);
+    git(temp.path(), &["checkout", "--detach", &feature_tip]);
     assert_eq!(
       read_git_head_branch(repo_path).expect("read HEAD"),
       "HEAD",
@@ -11981,11 +11956,11 @@ mod tests {
   fn jj_get_sparse_patterns_defaults_to_root_full_checkout() {
     let temp = TempDir::new().expect("tempdir");
     init_git_repo(&temp);
-    git(&temp, &["config", "user.name", "Test User"]);
-    git(&temp, &["config", "user.email", "test@example.com"]);
+    git(temp.path(), &["config", "user.name", "Test User"]);
+    git(temp.path(), &["config", "user.email", "test@example.com"]);
     fs::write(temp.path().join("base.txt"), "base\n").expect("write base");
-    git(&temp, &["add", "base.txt"]);
-    git(&temp, &["commit", "-m", "base"]);
+    git(temp.path(), &["add", "base.txt"]);
+    git(temp.path(), &["commit", "-m", "base"]);
     init_jj_repo(&temp);
     let repo_path = temp.path().to_str().expect("utf8 path");
 
@@ -12004,11 +11979,11 @@ mod tests {
   fn list_all_workspace_names_includes_default() {
     let temp = TempDir::new().expect("tempdir");
     init_git_repo(&temp);
-    git(&temp, &["config", "user.name", "Test User"]);
-    git(&temp, &["config", "user.email", "test@example.com"]);
+    git(temp.path(), &["config", "user.name", "Test User"]);
+    git(temp.path(), &["config", "user.email", "test@example.com"]);
     fs::write(temp.path().join("base.txt"), "base\n").expect("write base");
-    git(&temp, &["add", "base.txt"]);
-    git(&temp, &["commit", "-m", "base"]);
+    git(temp.path(), &["add", "base.txt"]);
+    git(temp.path(), &["commit", "-m", "base"]);
     init_jj_repo(&temp);
     let repo_path = temp.path().to_str().expect("utf8 path");
 
@@ -12020,13 +11995,13 @@ mod tests {
   fn jj_list_files_at_revision_lists_tree_contents() {
     let temp = TempDir::new().expect("tempdir");
     init_git_repo(&temp);
-    git(&temp, &["config", "user.name", "Test User"]);
-    git(&temp, &["config", "user.email", "test@example.com"]);
+    git(temp.path(), &["config", "user.name", "Test User"]);
+    git(temp.path(), &["config", "user.email", "test@example.com"]);
     fs::write(temp.path().join("base.txt"), "base\n").expect("write base");
     fs::create_dir_all(temp.path().join("dir")).expect("mkdir");
     fs::write(temp.path().join("dir/nested.txt"), "nested\n").expect("write nested");
-    git(&temp, &["add", "base.txt", "dir/nested.txt"]);
-    git(&temp, &["commit", "-m", "base"]);
+    git(temp.path(), &["add", "base.txt", "dir/nested.txt"]);
+    git(temp.path(), &["commit", "-m", "base"]);
     init_jj_repo(&temp);
     let repo_path = temp.path().to_str().expect("utf8 path");
 
@@ -12041,11 +12016,11 @@ mod tests {
   fn jj_log_revset_change_ids_returns_one_id_for_at_symbol() {
     let temp = TempDir::new().expect("tempdir");
     init_git_repo(&temp);
-    git(&temp, &["config", "user.name", "Test User"]);
-    git(&temp, &["config", "user.email", "test@example.com"]);
+    git(temp.path(), &["config", "user.name", "Test User"]);
+    git(temp.path(), &["config", "user.email", "test@example.com"]);
     fs::write(temp.path().join("base.txt"), "base\n").expect("write base");
-    git(&temp, &["add", "base.txt"]);
-    git(&temp, &["commit", "-m", "base"]);
+    git(temp.path(), &["add", "base.txt"]);
+    git(temp.path(), &["commit", "-m", "base"]);
     init_jj_repo(&temp);
     let repo_path = temp.path().to_str().expect("utf8 path");
 
@@ -12062,11 +12037,11 @@ mod tests {
   fn jj_log_entries_reports_description_and_emptiness() {
     let temp = TempDir::new().expect("tempdir");
     init_git_repo(&temp);
-    git(&temp, &["config", "user.name", "Test User"]);
-    git(&temp, &["config", "user.email", "test@example.com"]);
+    git(temp.path(), &["config", "user.name", "Test User"]);
+    git(temp.path(), &["config", "user.email", "test@example.com"]);
     fs::write(temp.path().join("base.txt"), "base\n").expect("write base");
-    git(&temp, &["add", "base.txt"]);
-    git(&temp, &["commit", "-m", "base"]);
+    git(temp.path(), &["add", "base.txt"]);
+    git(temp.path(), &["commit", "-m", "base"]);
     init_jj_repo(&temp);
     let repo_path = temp.path().to_str().expect("utf8 path");
 
@@ -12085,16 +12060,16 @@ mod tests {
   fn jj_import_remaining_git_refs_makes_git_only_branch_resolvable() {
     let temp = TempDir::new().expect("tempdir");
     init_git_repo(&temp);
-    git(&temp, &["config", "user.name", "Test User"]);
-    git(&temp, &["config", "user.email", "test@example.com"]);
+    git(temp.path(), &["config", "user.name", "Test User"]);
+    git(temp.path(), &["config", "user.email", "test@example.com"]);
     fs::write(temp.path().join("base.txt"), "base\n").expect("write base");
-    git(&temp, &["add", "base.txt"]);
-    git(&temp, &["commit", "-m", "base"]);
+    git(temp.path(), &["add", "base.txt"]);
+    git(temp.path(), &["commit", "-m", "base"]);
     init_jj_repo(&temp);
     let repo_path = temp.path().to_str().expect("utf8 path");
 
     // A branch created purely via git, never touched by jj, isn't yet a jj bookmark.
-    git(&temp, &["branch", "git-only-branch"]);
+    git(temp.path(), &["branch", "git-only-branch"]);
     assert!(
       jj_get_commit_id(repo_path, "git-only-branch").is_err(),
       "branch should not resolve as a jj revision before import"
