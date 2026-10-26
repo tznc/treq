@@ -17,6 +17,7 @@ test.describe.configure({ mode: "serial" });
 const PRS_TAB = { x: 422, y: 62 };
 const ROW_418 = { x: 700, y: 147 };
 const ROW_421 = { x: 700, y: 214 };
+const ROW_415 = { x: 700, y: 348 };
 const ROW_401 = { x: 700, y: 482 };
 const APPROVE = { x: 1064, y: 265 };
 
@@ -93,5 +94,26 @@ test("pr review approve: collapsed checks", async ({ page }) => {
     name: "21-pr-approve-05-checks-expanded",
     title: "PR #418: every check",
     expectations: ["All four checks listed, failing first", "The toggle reads Collapse"],
+  });
+});
+
+test("pr review approve: a comment also returns", async ({ page }) => {
+  await openPr(page, ROW_415);
+  await page.getByRole("button", { name: "Review changes" }).click();
+  await settle(page, 3000);
+  await page.getByRole("button", { name: /^Finish review/ }).click();
+  await settle(page, 800);
+  await page.keyboard.type("Looks good, one question on the timeout.");
+  await page.getByRole("button", { name: "Submit review" }).click();
+  await expect(page.getByRole("button", { name: "Review changes" })).toBeVisible({ timeout: 10_000 });
+  await settle(page, 1000);
+  await capture(page, {
+    name: "21-pr-approve-06-comment-back-on-pr",
+    title: "After commenting: back on #415's detail",
+    expectations: [
+      "PR #415's detail, not the review screen",
+      "A Review submitted toast reading #415: Comment",
+    ],
+    screen: true,
   });
 });
