@@ -26,6 +26,9 @@ pub trait LogsHost: ChangesHost {
   fn app_setup_logs(&self, query: &LogQuery) -> Result<Vec<LogRecordView>, String>;
   /// `get_system_logs`: the app's own log files.
   fn system_logs(&self, query: &LogQuery) -> Result<Vec<LogRecordView>, String>;
+  /// The repository's code review history (`core::review_history`).
+  fn review_history(&self, repo_path: &str, query: &LogQuery)
+    -> Result<Vec<LogRecordView>, String>;
   /// `open_system_log_dir`.
   fn open_system_log_dir(&self) -> Result<(), String>;
   fn workflows(&self, repo_path: &str) -> Result<Vec<WorkflowInfo>, String>;
@@ -58,6 +61,15 @@ impl LogsHost for Backend {
   fn log_timeseries(&self, repo_path: &str, query: &LogQuery) -> Result<Vec<LogBucket>, String> {
     self.local_only(repo_path, "Checks and logs")?;
     crate::core::checks_logs::query_log_timeseries(repo_path, query, 1)
+  }
+
+  fn review_history(
+    &self,
+    repo_path: &str,
+    query: &LogQuery,
+  ) -> Result<Vec<LogRecordView>, String> {
+    self.local_only(repo_path, "Review history")?;
+    crate::core::review_history::log_records(repo_path, query)
   }
 
   fn app_setup_logs(&self, query: &LogQuery) -> Result<Vec<LogRecordView>, String> {
@@ -111,12 +123,14 @@ pub enum Source {
   Agent,
   AppSetup,
   System,
+  Reviews,
 }
 
 impl Source {
-  pub const ALL: [Source; 4] = [
+  pub const ALL: [Source; 5] = [
     Source::Checks,
     Source::Agent,
+    Source::Reviews,
     Source::AppSetup,
     Source::System,
   ];
@@ -128,6 +142,7 @@ impl Source {
       "agent-chats" => Source::Agent,
       "app-setup" => Source::AppSetup,
       "system" => Source::System,
+      "reviews" => Source::Reviews,
       _ => Source::Checks,
     }
   }
@@ -138,6 +153,7 @@ impl Source {
       Source::Agent => "Agent",
       Source::AppSetup => "App setup",
       Source::System => "System",
+      Source::Reviews => "Reviews",
     }
   }
 }
