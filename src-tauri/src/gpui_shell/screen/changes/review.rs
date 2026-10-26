@@ -9,6 +9,7 @@ use crate::result_ext::ResultExt;
 use std::{ops::Range, time::Duration};
 
 use super::*;
+use crate::core::review::{selected_range, selected_text, word_at, TextPoint};
 use crate::gpui_shell::screen::{
   changes_review::{
     commented_text, comments_under, count_label, is_outdated, line_has_comment, line_location,
@@ -18,7 +19,7 @@ use crate::gpui_shell::screen::{
   },
   commits_data::{selection, LineRef},
 };
-use gpui::{MouseDownEvent, MouseMoveEvent, Task};
+use gpui::{MouseDownEvent, MouseMoveEvent, Point, Task, TextLayout};
 
 /// How long edits wait before the review is written (`useDebounce(…, 500)`).
 const SAVE_DELAY: Duration = Duration::from_millis(500);
@@ -39,6 +40,20 @@ pub(in crate::gpui_shell::screen) struct LineSelection {
   pub dragging: bool,
 }
 
+/// Code picked by dragging over the diff's text, apart from the gutter's
+/// line range: what Copy takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::gpui_shell::screen) struct TextSelection {
+  pub path: String,
+  pub anchor: TextPoint,
+  pub head: TextPoint,
+  pub dragging: bool,
+}
+
+/// Each drawn line's text layout, for finding the character under the mouse.
+pub(in crate::gpui_shell::screen) type Layouts =
+  Rc<RefCell<HashMap<(String, LineRef), TextLayout>>>;
+
 /// A text box and the subscription that keeps its text.
 pub(in crate::gpui_shell::screen) struct Input {
   pub state: Entity<TextareaState>,
@@ -57,6 +72,8 @@ enum Field {
 #[derive(Default)]
 pub(in crate::gpui_shell::screen) struct Review {
   pub selection: Option<LineSelection>,
+  pub text: Option<TextSelection>,
+  pub(super) layouts: Layouts,
   /// Scroll the selection's head into view, within this many frames.
   pub reveal: u8,
   /// Where the selection's head was last drawn.
@@ -212,6 +229,7 @@ impl ChangesView {
   // Line selection.
 
   pub(super) fn press_line(&mut self, path: &str, at: LineRef, cx: &mut Context<Self>) {
+    self.review.text = None;
     self.review.selection = Some(LineSelection {
       path: path.into(),
       anchor: at,
@@ -258,12 +276,96 @@ impl ChangesView {
       s.dragging = false;
       cx.notify();
     }
+    if let Some(t) = self.review.text.as_mut().filter(|t| t.dragging) {
+      t.dragging = false;
+      cx.notify();
+    }
   }
 
   pub(super) fn clear_selection(&mut self, cx: &mut Context<Self>) {
-    if self.review.selection.take().is_some() {
+    let had = self.review.selection.take().is_some() | self.review.text.take().is_some();
+    if had {
       cx.notify();
     }
+  }
+
+  // Text selection.
+
+  /// The byte of `at`'s code under `position`, once the line was drawn.
+  fn text_index(&self, path: &str, at: LineRef, position: Point<Pixels>) -> Option<usize> {
+    let layouts = self.review.layouts.borrow();
+    let layout = layouts.get(&(path.to_string(), at))?;
+    Some(layout.index_for_position(position).unwrap_or_else(|i| i))
+  }
+
+  /// A press on the code: one click starts a text selection, two pick the
+  /// word and three the line.
+  pub(super) fn press_text(
+    &mut self,
+    path: &str,
+    at: LineRef,
+    position: Point<Pixels>,
+    clicks: usize,
+    cx: &mut Context<Self>,
+  ) {
+    let Some(i) = self.text_index(path, at, position) else {
+      return;
+    };
+    let code = self
+      .file_hunks(path)
+      .and_then(|d| d.hunks.get(at.0)?.lines.get(at.1).cloned())
+      .map(|t| t.get(1..).unwrap_or("").to_string())
+      .unwrap_or_default();
+    let (from, to) = match clicks {
+      2 => {
+        let w = word_at(&code, i);
+        (w.start, w.end)
+      }
+      n if n >= 3 => (0, code.len()),
+      _ => (i, i),
+    };
+    self.review.selection = None;
+    self.review.text = Some(TextSelection {
+      path: path.into(),
+      anchor: (at, from),
+      head: (at, to),
+      dragging: clicks <= 1,
+    });
+    cx.notify();
+  }
+
+  pub(super) fn drag_text(
+    &mut self,
+    path: &str,
+    at: LineRef,
+    position: Point<Pixels>,
+    cx: &mut Context<Self>,
+  ) {
+    if !self
+      .review
+      .text
+      .as_ref()
+      .is_some_and(|t| t.dragging && t.path == path)
+    {
+      return;
+    }
+    let Some(i) = self.text_index(path, at, position) else {
+      return;
+    };
+    if let Some(t) = self.review.text.as_mut() {
+      if t.head != (at, i) {
+        t.head = (at, i);
+        cx.notify();
+      }
+    }
+  }
+
+  /// The selected code, as Copy takes it; `None` when nothing is selected.
+  pub(super) fn selected_code(&self) -> Option<String> {
+    let t = self.review.text.as_ref()?;
+    let hunks = self.file_hunks(&t.path)?.hunks;
+    let text = selected_text(&hunks, t.anchor, t.head);
+    (!text.is_empty()).then_some(text)
   }
 
   /// The selection's comment target, `None` when it mixes sides.
@@ -960,7 +1062,19 @@ impl ChangesView {
       _ => Tone::GitOpen.color(p),
     }
     .opacity(0.45);
-    let changed: Vec<(Range<usize>, Hsla)> = changed.iter().map(|r| (r.clone(), mark)).collect();
+    // The text selection first: where it overlaps a changed run, it shows.
+    let picked = self
+      .review
+      .text
+      .as_ref()
+      .filter(|t| t.path == path)
+      .and_then(|t| selected_range(hunks, t.anchor, t.head, (h, l)))
+      .filter(|r| !r.is_empty());
+    let changed: Vec<(Range<usize>, Hsla)> = picked
+      .map(|r| (r, p.selected()))
+      .into_iter()
+      .chain(changed.iter().map(|r| (r.clone(), mark)))
+      .collect();
     let marker = match kind {
       LineKind::Added => "+",
       LineKind::Removed => "-",
@@ -977,6 +1091,8 @@ impl ChangesView {
     let text = line.get(1..).filter(|t| !t.is_empty()).unwrap_or(" ");
     let at = (h, l);
     let (press, drag, add) = (path.to_string(), path.to_string(), path.to_string());
+    let (code_path, layout_path) = (path.to_string(), path.to_string());
+    let layouts = self.review.layouts.clone();
     let head_drawn = head.then(|| (self.review.head_drawn.clone(), path.to_string()));
     div()
       .id(SharedString::from(format!("diff-line-{path}-{h}-{l}")))
@@ -999,8 +1115,9 @@ impl ChangesView {
       })
       .when_some(bg, |this, bg| this.bg(bg))
       .when(!conflicted, |this| {
-        this.on_mouse_move(cx.listener(move |view, _: &MouseMoveEvent, _, cx| {
+        this.on_mouse_move(cx.listener(move |view, e: &MouseMoveEvent, _, cx| {
           view.drag_line(&drag, at, cx);
+          view.drag_text(&drag, at, e.position, cx);
         }))
       })
       .child(
@@ -1107,15 +1224,35 @@ impl ChangesView {
       )
       .child(
         div()
+          .id(SharedString::from(format!("code-{path}-{h}-{l}")))
+          .debug_selector({
+            let id = format!("code-{path}-{h}-{l}");
+            move || id
+          })
           .flex_1()
           .min_w_0()
           .px_2()
           .py_0p5()
+          .cursor_text()
+          .when(!conflicted, |this| {
+            this.on_mouse_down(
+              MouseButton::Left,
+              cx.listener(move |view, e: &MouseDownEvent, window, cx| {
+                window.focus(&view.focus, cx);
+                view.press_text(&code_path, at, e.position, e.click_count, cx);
+              }),
+            )
+          })
           .child(self.marked_text(
             super::search::MatchKey::Line(path.to_string(), h, l),
             text,
             language,
             &changed,
+            Some(Rc::new(move |layout| {
+              layouts
+                .borrow_mut()
+                .insert((layout_path.clone(), at), layout);
+            })),
           )),
       )
   }

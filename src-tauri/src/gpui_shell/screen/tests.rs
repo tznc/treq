@@ -9956,3 +9956,89 @@ fn workspace_header_controls_share_one_height(cx: &mut TestAppContext) {
   // The pip names what it signals.
   assert!(h.drawn("workspace-sync-pip"));
 }
+
+/// Presses the left button on `at` with `clicks` clicks, as a fast repeat does.
+fn press_code(h: &mut Harness, at: gpui::Point<gpui::Pixels>, clicks: usize) {
+  h.cx.simulate_event(gpui::MouseDownEvent {
+    position: at,
+    button: MouseButton::Left,
+    modifiers: Modifiers::none(),
+    click_count: clicks,
+    first_mouse: false,
+  });
+}
+
+fn code_bounds(h: &mut Harness, l: usize) -> gpui::Bounds<gpui::Pixels> {
+  h.cx.run_until_parked();
+  h.cx
+    .debug_bounds(Box::leak(format!("code-a.rs-0-{l}").into_boxed_str()))
+    .expect("code")
+}
+
+fn copy(h: &mut Harness) -> Option<String> {
+  h.cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+    "cmd-c"
+  } else {
+    "ctrl-c"
+  });
+  h.cx.run_until_parked();
+  h.cx.read_from_clipboard().and_then(|c| c.text())
+}
+
+#[gpui::test]
+fn changes_tab_drag_over_code_copies_the_plain_text(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_replaced(), changes_route());
+  let from = code_bounds(&mut h, 2);
+  let to = code_bounds(&mut h, 3);
+  let start = gpui::point(from.left() + gpui::px(1.), from.center().y);
+  let end = gpui::point(to.right() - gpui::px(1.), to.center().y);
+  press_code(&mut h, start, 1);
+  h.cx
+    .simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::none());
+  h.cx
+    .simulate_mouse_up(end, MouseButton::Left, Modifiers::none());
+  assert_eq!(
+    copy(&mut h).as_deref(),
+    Some("fn f(line: &str, level: u8) {\n  g(line, level)")
+  );
+  assert_eq!(selected_lines(&mut h), None, "no gutter range starts");
+}
+
+#[gpui::test]
+fn changes_tab_double_and_triple_click_select_a_word_and_a_line(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_replaced(), changes_route());
+  let b = code_bounds(&mut h, 3);
+  let on_g = gpui::point(b.left() + gpui::px(1.), b.center().y);
+  // "  g(line, level)": the first click lands on the leading spaces.
+  press_code(&mut h, on_g, 2);
+  h.cx
+    .simulate_mouse_up(on_g, MouseButton::Left, Modifiers::none());
+  assert_eq!(copy(&mut h).as_deref(), Some("  "));
+  press_code(&mut h, on_g, 3);
+  h.cx
+    .simulate_mouse_up(on_g, MouseButton::Left, Modifiers::none());
+  assert_eq!(copy(&mut h).as_deref(), Some("  g(line, level)"));
+}
+
+#[gpui::test]
+fn changes_tab_escape_clears_the_text_selection(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_replaced(), changes_route());
+  let b = code_bounds(&mut h, 3);
+  let at = gpui::point(b.left() + gpui::px(1.), b.center().y);
+  press_code(&mut h, at, 3);
+  h.cx
+    .simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  let text = h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    workspace
+      .changes()
+      .expect("changes")
+      .read(cx)
+      .review
+      .text
+      .clone()
+  });
+  assert_eq!(text, None);
+}

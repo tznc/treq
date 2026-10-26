@@ -1765,6 +1765,15 @@ impl Render for ChangesView {
           && view.diff_key(&k.key, held.shift, cx)
         {
           cx.stop_propagation();
+        } else if k.key == "c"
+          && (held.platform || held.control)
+          && !held.shift
+          && view.review.text.is_some()
+        {
+          if let Some(text) = view.selected_code() {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+          }
+          cx.stop_propagation();
         } else if k.key == "a"
           && (crate::gpui_shell::keys::held(k.modifiers).platform
             || crate::gpui_shell::keys::held(k.modifiers).control)
@@ -1774,7 +1783,9 @@ impl Render for ChangesView {
           let files = view.listed();
           view.staging.select_all(&files);
           cx.notify();
-        } else if ui::is_escape(k) && view.review.selection.is_some() {
+        } else if ui::is_escape(k)
+          && (view.review.selection.is_some() || view.review.text.is_some())
+        {
           view.clear_selection(cx);
         }
       }))
@@ -3356,6 +3367,7 @@ impl ChangesView {
             &raw,
             None,
             &[],
+            None,
           ))),
       );
       let deleted_notice = |side: &'static str, tone: Tone| {
