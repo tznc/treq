@@ -26,8 +26,8 @@ use crate::{
   gpui_shell::{
     screen::{
       changes_data::{
-        body, conflict_lines, conflicts, context_number, is_collapsed, line_counts, new_lines,
-        Body, BodyInput, Conflict, FileHunks,
+        body, conflict_lines, conflicts, context_row_numbers, is_collapsed, line_counts, Body,
+        BodyInput, Conflict, FileHunks,
       },
       changes_review::FILE_HUNK,
       commits_data::{line_number, line_numbers},
@@ -591,12 +591,7 @@ impl ChangesView {
           .map(Vec::as_slice)
           .unwrap_or_default();
         let line = lines.get(i).map_or("", String::as_str);
-        let (first, last) = new_lines(&hunk.header);
-        let n = match dir {
-          Dir::Before => (first + i).saturating_sub(lines.len()),
-          Dir::After => last + 1 + i,
-        };
-        let numbers = context_number(&hunk.header, dir == Dir::After, n);
+        let numbers = context_row_numbers(&hunk.header, dir == Dir::After, lines.len(), i);
         context_row(numbers, line, language, p).into_any_element()
       }
       Row::Line(_, _, l) => {

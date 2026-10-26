@@ -948,6 +948,18 @@ pub fn context_number(header: &str, after: bool, new: usize) -> (i64, i64) {
   (new as i64 + shift, new as i64)
 }
 
+/// The old and new numbers of row `i` of the `read` lines shown above (or,
+/// `after`, below) the hunk `header` opens.
+pub fn context_row_numbers(header: &str, after: bool, read: usize, i: usize) -> (i64, i64) {
+  let (first, last) = new_lines(header);
+  let new = if after {
+    last + 1 + i
+  } else {
+    (first + i).saturating_sub(read)
+  };
+  context_number(header, after, new)
+}
+
 /// Unchanged lines closing the hunk. The backend's diff keeps
 /// [`DIFF_CONTEXT`] of them unless the file ends first.
 fn trailing_context(hunk: &JjDiffHunk) -> usize {
@@ -1322,6 +1334,19 @@ mod tests {
       generated,
       ["Cargo.lock", "gen/api.ts", "web/package-lock.json"]
     );
+  }
+
+  #[test]
+  fn expanded_rows_number_old_and_new_sides() {
+    // The report: old 117-137 / new 130-150 hidden between two hunks.
+    let first = "@@ -110,8 +120,9 @@";
+    let next = "@@ -138,6 +151,17 @@";
+    // Twenty read below the first hunk: old 118.., new 129..
+    assert_eq!(context_row_numbers(first, true, 20, 0), (118, 129));
+    assert_eq!(context_row_numbers(first, true, 20, 19), (137, 148));
+    // Two read above the next: old 136-137, new 149-150.
+    assert_eq!(context_row_numbers(next, false, 2, 0), (136, 149));
+    assert_eq!(context_row_numbers(next, false, 2, 1), (137, 150));
   }
 
   #[test]
