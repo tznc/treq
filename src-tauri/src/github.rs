@@ -249,6 +249,61 @@ pub struct GhPullRequest {
   pub comments: Option<Vec<GhIssueComment>>,
   #[serde(default, alias = "is_draft")]
   pub is_draft: bool,
+  /// GitHub's `reviewDecision`; empty or missing without branch protection.
+  #[serde(default, alias = "review_decision")]
+  pub review_decision: Option<String>,
+  /// Each reviewer's latest review.
+  #[serde(default, alias = "latest_reviews")]
+  pub latest_reviews: Vec<GhLatestReview>,
+}
+
+/// One reviewer's latest review (`latestReviews`).
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
+pub struct GhLatestReview {
+  pub author: GhAuthor,
+  /// APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED or PENDING.
+  pub state: String,
+}
+
+/// Where a pull request's review stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReviewState {
+  Approved,
+  ChangesRequested,
+  ReviewRequired,
+}
+
+impl ReviewState {
+  pub fn label(self) -> &'static str {
+    match self {
+      ReviewState::Approved => "Approved",
+      ReviewState::ChangesRequested => "Changes requested",
+      ReviewState::ReviewRequired => "Review required",
+    }
+  }
+}
+
+/// GitHub's review decision when branch protection gives one, else what the
+/// reviewers' latest reviews add up to: a change request outweighs an
+/// approval, and dismissed reviews count for nothing. A draft is not asking
+/// for review yet.
+pub fn review_state(pr: &GhPullRequest) -> Option<ReviewState> {
+  let state = match pr.review_decision.as_deref() {
+    Some("APPROVED") => Some(ReviewState::Approved),
+    Some("CHANGES_REQUESTED") => Some(ReviewState::ChangesRequested),
+    Some("REVIEW_REQUIRED") => Some(ReviewState::ReviewRequired),
+    _ => {
+      let has = |s: &str| pr.latest_reviews.iter().any(|r| r.state == s);
+      if has("CHANGES_REQUESTED") {
+        Some(ReviewState::ChangesRequested)
+      } else if has("APPROVED") {
+        Some(ReviewState::Approved)
+      } else {
+        None
+      }
+    }
+  };
+  state.filter(|s| !(pr.is_draft && *s == ReviewState::ReviewRequired))
 }
 
 /// ETXTBSY: the target binary is momentarily open for writing elsewhere (e.g.
@@ -855,7 +910,7 @@ pub fn gh_view_pr_impl(
             "--repo",
             repo_full_name,
             "--json",
-            "number,title,state,url,body,author,labels,headRefName,baseRefName,mergeStateStatus,createdAt,updatedAt,comments,isDraft",
+            "number,title,state,url,body,author,labels,headRefName,baseRefName,mergeStateStatus,createdAt,updatedAt,comments,isDraft,reviewDecision,latestReviews",
         ],
         extended_path,
     )?;
@@ -1446,6 +1501,59 @@ struct GhCheck {
   started_at: Option<String>,
   #[serde(default, rename = "completedAt")]
   completed_at: Option<String>,
+}
+
+/// GitHub's "WIP" status marks a draft-in-progress, not a check that runs.
+pub fn is_inactive_check(check: &PrCheckEntry) -> bool {
+  check.name.eq_ignore_ascii_case("WIP")
+}
+
+/// The checks the PR view counts: all but the inactive ones.
+pub fn active_checks(checks: &[PrCheckEntry]) -> impl Iterator<Item = &PrCheckEntry> {
+  checks.iter().filter(|c| !is_inactive_check(c))
+}
+
+fn is_failing(check: &PrCheckEntry) -> bool {
+  matches!(check.bucket.as_str(), "fail" | "cancel")
+}
+
+fn is_running(check: &PrCheckEntry) -> bool {
+  !matches!(
+    check.bucket.as_str(),
+    "pass" | "skipping" | "fail" | "cancel"
+  )
+}
+
+/// The collapsed checks' one line: "16/17 passed · 1 failed · 1 running".
+pub fn checks_summary(checks: &[PrCheckEntry]) -> String {
+  let (mut total, mut passed, mut failed, mut running) = (0, 0, 0, 0);
+  for check in active_checks(checks) {
+    total += 1;
+    if is_failing(check) {
+      failed += 1;
+    } else if is_running(check) {
+      running += 1;
+    } else {
+      passed += 1;
+    }
+  }
+  let mut line = format!("{passed}/{total} passed");
+  if failed > 0 {
+    line.push_str(&format!(" · {failed} failed"));
+  }
+  if running > 0 {
+    line.push_str(&format!(" · {running} running"));
+  }
+  line
+}
+
+/// The checks the collapsed section still lists: at most three, failing
+/// ones first, then running ones.
+pub fn collapsed_checks(checks: &[PrCheckEntry]) -> Vec<&PrCheckEntry> {
+  let active: Vec<_> = active_checks(checks).collect();
+  let failing = active.iter().copied().filter(|c| is_failing(c));
+  let running = active.iter().copied().filter(|c| is_running(c));
+  failing.chain(running).take(3).collect()
 }
 
 /// Rolls a `gh pr checks --json name,bucket,link,startedAt,completedAt` result
@@ -2049,6 +2157,104 @@ pub fn gh_list_pr_review_threads_impl(
 
 #[cfg(test)]
 mod tests {
+  fn reviewed(draft: bool, decision: Option<&str>, reviews: &[&str]) -> GhPullRequest {
+    serde_json::from_value(serde_json::json!({
+      "number": 1, "title": "t", "state": "OPEN", "url": "", "body": null,
+      "author": {"login": "a"}, "labels": [], "headRefName": "h", "baseRefName": "main",
+      "mergeStateStatus": null, "createdAt": "", "updatedAt": "", "comments": null,
+      "isDraft": draft, "reviewDecision": decision,
+      "latestReviews": reviews.iter().map(|s| serde_json::json!({
+        "author": {"login": "r"}, "state": s
+      })).collect::<Vec<_>>(),
+    }))
+    .unwrap()
+  }
+
+  fn check(name: &str, bucket: &str) -> PrCheckEntry {
+    PrCheckEntry {
+      name: name.into(),
+      bucket: bucket.into(),
+      link: String::new(),
+      duration_secs: None,
+    }
+  }
+
+  #[test]
+  fn checks_summary_leaves_out_the_wip_status() {
+    let checks = [
+      check("build", "pass"),
+      check("test", "pending"),
+      check("WIP", "pending"),
+      check("lint", "fail"),
+    ];
+    assert_eq!(checks_summary(&checks), "1/3 passed · 1 failed · 1 running");
+    assert_eq!(checks_summary(&checks[..1]), "1/1 passed");
+  }
+
+  #[test]
+  fn collapsed_checks_show_up_to_three_failing_then_running() {
+    let checks = [
+      check("a", "pending"),
+      check("b", "pass"),
+      check("WIP", "pending"),
+      check("c", "fail"),
+      check("d", "pending"),
+      check("e", "pending"),
+    ];
+    let names: Vec<_> = collapsed_checks(&checks)
+      .iter()
+      .map(|c| c.name.as_str())
+      .collect();
+    assert_eq!(names, ["c", "a", "d"]);
+    assert!(collapsed_checks(&[check("b", "pass")]).is_empty());
+  }
+
+  #[test]
+  fn review_state_follows_githubs_decision() {
+    assert_eq!(
+      review_state(&reviewed(false, Some("APPROVED"), &[])),
+      Some(ReviewState::Approved)
+    );
+    assert_eq!(
+      review_state(&reviewed(false, Some("CHANGES_REQUESTED"), &["APPROVED"])),
+      Some(ReviewState::ChangesRequested)
+    );
+    assert_eq!(
+      review_state(&reviewed(false, Some("REVIEW_REQUIRED"), &[])),
+      Some(ReviewState::ReviewRequired)
+    );
+  }
+
+  #[test]
+  fn review_state_reads_latest_reviews_without_branch_protection() {
+    assert_eq!(review_state(&reviewed(false, None, &[])), None);
+    assert_eq!(
+      review_state(&reviewed(false, Some(""), &["APPROVED"])),
+      Some(ReviewState::Approved)
+    );
+    assert_eq!(
+      review_state(&reviewed(false, None, &["APPROVED", "CHANGES_REQUESTED"])),
+      Some(ReviewState::ChangesRequested),
+      "a change request outweighs an approval"
+    );
+    assert_eq!(
+      review_state(&reviewed(false, None, &["DISMISSED", "COMMENTED"])),
+      None,
+      "a dismissed approval no longer counts"
+    );
+  }
+
+  #[test]
+  fn review_state_leaves_drafts_unrequested() {
+    assert_eq!(
+      review_state(&reviewed(true, Some("REVIEW_REQUIRED"), &[])),
+      None
+    );
+    assert_eq!(
+      review_state(&reviewed(true, Some("APPROVED"), &[])),
+      Some(ReviewState::Approved)
+    );
+  }
   #[cfg(unix)]
   #[test]
   fn reports_an_unauthenticated_gh_apart_from_other_failures() {
@@ -2236,6 +2442,8 @@ mod tests {
         updated_at: "u".into(),
         comments: Some(vec![comment]),
         is_draft: true,
+        review_decision: None,
+        latest_reviews: vec![],
       }],
       has_more: true,
       end_cursor: Some("x".into()),

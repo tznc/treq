@@ -932,6 +932,7 @@ impl GithubView {
           .gap_2()
           .mt_1()
           .child(parts::state_chip(&pr.state, pr.is_draft, p))
+          .children(parts::review_chip(pr, p))
           .children(checks.as_ref().map(|c| self.ci_button(c, p, cx)))
           .child(
             ui::text(div(), TextSize::Sm)
@@ -952,47 +953,76 @@ impl GithubView {
           )),
       )
       .children(parts::labels(&pr.labels));
+    let open = self.detail.checks_open;
     let checks_list = checks.map(|c| {
+      let shown: Vec<_> = if open {
+        data::by_severity(&c.checks)
+          .into_iter()
+          .filter(|c| !crate::github::is_inactive_check(c))
+          .collect()
+      } else {
+        crate::github::collapsed_checks(&c.checks)
+      };
+      let toggle = Button::new("github-checks-toggle", p)
+        .variant(Variant::Ghost)
+        .size(Size::Sm)
+        .label(if open { "Collapse" } else { "Show all" })
+        .on_click(cx.listener(|view, _, _, cx| {
+          view.detail.checks_open = !view.detail.checks_open;
+          cx.notify();
+        }));
       div()
         .flex()
         .flex_col()
         .gap_2()
-        .child(parts::section_heading(
-          format!("Checks ({}/{})", c.passed, c.total),
-          Some(theme::ICON_LIST_CHECKS),
-          p,
-        ))
         .child(
           div()
-            .border_1()
-            .border_color(p.border)
-            .rounded(radius::MD)
-            .overflow_hidden()
-            .children(
-              data::by_severity(&c.checks)
-                .into_iter()
-                .enumerate()
-                .map(|(i, check)| {
-                  let link = check.link.clone();
-                  let copy_link = self.copy_link(link.clone());
-                  div()
-                    .when(i > 0, |d| d.border_t_1().border_color(p.border))
-                    .child(
-                      parts::check_row(
-                        format!("github-check-{i}"),
-                        check,
-                        p,
-                        Some(Box::new(
-                          cx.listener(move |view, _, _, _| view.open_url(&link)),
-                        )),
-                      )
-                      .when(!check.link.is_empty(), |row| {
-                        row.on_mouse_down(MouseButton::Right, copy_link)
-                      }),
-                    )
-                }),
-            ),
+            .flex()
+            .items_center()
+            .justify_between()
+            .child(parts::section_heading(
+              "Checks",
+              Some(theme::ICON_LIST_CHECKS),
+              p,
+            ))
+            .child(toggle),
         )
+        .child(
+          ui::text(named(div(), "github-checks-summary"), TextSize::Sm)
+            .text_color(p.muted_foreground)
+            .child(crate::github::checks_summary(&c.checks)),
+        )
+        .when(!shown.is_empty(), |d| {
+          d.child(
+            div()
+              .id("github-checks-list")
+              .debug_selector(|| "github-checks-list".into())
+              .max_h(zpx(data::CHECKS_MAX_HEIGHT))
+              .overflow_y_scroll()
+              .border_1()
+              .border_color(p.border)
+              .rounded(radius::MD)
+              .children(shown.into_iter().enumerate().map(|(i, check)| {
+                let link = check.link.clone();
+                let copy_link = self.copy_link(link.clone());
+                div()
+                  .when(i > 0, |d| d.border_t_1().border_color(p.border))
+                  .child(
+                    parts::check_row(
+                      format!("github-check-{i}"),
+                      check,
+                      p,
+                      Some(Box::new(
+                        cx.listener(move |view, _, _, _| view.open_url(&link)),
+                      )),
+                    )
+                    .when(!check.link.is_empty(), |row| {
+                      row.on_mouse_down(MouseButton::Right, copy_link)
+                    }),
+                  )
+              })),
+          )
+        })
     });
     let treq = existing.map(|ws| self.treq_section(&ws, p, cx));
     let busy = |b| self.detail.busy.contains(&b);

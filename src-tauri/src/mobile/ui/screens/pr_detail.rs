@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use crate::{
   core::remote::{GithubAction, GithubQuery, TreqCommandRequest},
-  github::{GhIssueComment, GhPullRequest, GhReactionGroup, PrCiStatus},
+  github::{self as gh, GhIssueComment, GhPullRequest, GhReactionGroup, PrCiStatus},
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -27,8 +27,8 @@ use gpui_kit::{
 
 use super::{
   mutation_message, on_epoch,
-  pull_request::{check_icon, checks_summary, duration, open_url},
-  pull_requests::state_tag,
+  pull_request::{check_icon, duration, open_url},
+  pull_requests::{review_tag, state_tag},
 };
 use crate::mobile::{
   errors,
@@ -254,7 +254,12 @@ pub fn open(repo: String, number: u64, cx: &mut App) {
   );
 }
 
+/// How tall the expanded checks list grows before it scrolls.
+const CHECKS_MAX_HEIGHT: f32 = 320.;
+
 pub struct PrDetailScreen {
+  /// The checks list every check, not just the failing and running.
+  checks_open: bool,
   repo: String,
   number: u64,
   pr: Load<GhPullRequest>,
@@ -287,6 +292,7 @@ impl PrDetailScreen {
       comment,
       busy: None,
       message: None,
+      checks_open: false,
       keys: IdempotencyKeys::default(),
       picker: None,
       scroll: ScrollHandle::new(),
@@ -548,9 +554,10 @@ impl PrDetailScreen {
 
   fn checks_section(&self, cx: &mut Context<Self>) -> Div {
     let title = match &self.checks {
-      Load::Ready(Some(checks)) => format!("Checks · {}", checks_summary(checks)),
+      Load::Ready(Some(checks)) => format!("Checks · {}", gh::checks_summary(&checks.checks)),
       _ => "Checks".into(),
     };
+    let open = self.checks_open;
     let card = widgets::card(cx);
     let card = match &self.checks {
       Load::Idle | Load::Loading => card.child(widgets::centered_message("Loading checks…", cx)),
@@ -562,25 +569,44 @@ impl PrDetailScreen {
         card.child(widgets::centered_message("No checks reported.", cx))
       }
       Load::Ready(Some(checks)) => {
-        card.children(checks.checks.iter().enumerate().map(|(i, check)| {
-          let link = check.link.clone();
-          widgets::row_full(
-            ("check", i),
-            Some(check_icon(check, cx)),
-            check.name.clone(),
-            check.duration_secs.map(|s| duration(s).into()),
-            None,
-            cx,
-          )
-          .when(!link.is_empty(), |row| {
-            row.on_click(cx.listener(move |this, _, _, cx| {
-              if let Err(error) = open_url(&link) {
-                this.message = Some((false, error));
-              }
+        let shown: Vec<_> = if open {
+          gh::active_checks(&checks.checks).collect()
+        } else {
+          gh::collapsed_checks(&checks.checks)
+        };
+        let rows = div()
+          .id("pr-checks-list")
+          .max_h(px(CHECKS_MAX_HEIGHT))
+          .overflow_y_scroll()
+          .children(shown.into_iter().enumerate().map(|(i, check)| {
+            let link = check.link.clone();
+            widgets::row_full(
+              ("check", i),
+              Some(check_icon(check, cx)),
+              check.name.clone(),
+              check.duration_secs.map(|s| duration(s).into()),
+              None,
+              cx,
+            )
+            .when(!link.is_empty(), |row| {
+              row.on_click(cx.listener(move |this, _, _, cx| {
+                if let Err(error) = open_url(&link) {
+                  this.message = Some((false, error));
+                }
+                cx.notify();
+              }))
+            })
+          }));
+        card.child(rows).child(
+          Button::new("pr-checks-toggle")
+            .ghost()
+            .w_full()
+            .label(if open { "Collapse" } else { "Show all checks" })
+            .on_click(cx.listener(|this, _, _, cx| {
+              this.checks_open = !this.checks_open;
               cx.notify();
-            }))
-          })
-        }))
+            })),
+        )
       }
     };
     widgets::section(title, cx).child(card)
@@ -711,6 +737,7 @@ impl Render for PrDetailScreen {
           .gap_2()
           .flex_wrap()
           .child(state_tag(&pr))
+          .children(review_tag(&pr))
           .child(widgets::muted(
             format!("#{} by {}", pr.number, pr.author.login),
             cx,

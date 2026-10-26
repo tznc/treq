@@ -41,6 +41,22 @@ pub fn state_chip(state: &str, draft: bool, p: &Palette) -> impl IntoElement {
   ui::Badge::new(label, p).tone(tone)
 }
 
+/// Where `pr`'s review stands, when it stands anywhere.
+pub fn review_chip(pr: &crate::github::GhPullRequest, p: &Palette) -> Option<impl IntoElement> {
+  use crate::github::ReviewState;
+  let state = crate::github::review_state(pr)?;
+  let tone = match state {
+    ReviewState::Approved => Tone::Success,
+    ReviewState::ChangesRequested => Tone::Danger,
+    ReviewState::ReviewRequired => Tone::Warning,
+  };
+  Some(
+    div()
+      .debug_selector(|| "github-review-state".into())
+      .child(ui::Badge::new(state.label(), p).tone(tone)),
+  )
+}
+
 /// A label's `#rrggbb` (or bare `rrggbb`) color.
 fn hex(color: &str) -> Hsla {
   u32::from_str_radix(color.trim_start_matches('#'), 16)

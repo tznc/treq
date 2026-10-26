@@ -85,6 +85,8 @@ pub(super) fn pr(number: u64, head: &str, base: &str) -> GhPullRequest {
     updated_at: "2026-10-18T10:00:00Z".into(),
     comments: None,
     is_draft: false,
+    review_decision: None,
+    latest_reviews: vec![],
   }
 }
 
@@ -503,6 +505,24 @@ fn github_shows_list_failures_and_retries(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn github_pr_detail_shows_the_review_decision(cx: &mut TestAppContext) {
+  let mut approved = pr(1, "feat/a", "main");
+  approved.review_decision = Some("APPROVED".into());
+  let fake = Fake {
+    pr: Some(approved),
+    ..prs()
+  };
+  let (mut h, _) = harness(cx, fake, route("prs", Some(1), false));
+  assert!(h.drawn("github-review-state"));
+}
+
+#[gpui::test]
+fn github_pr_detail_hides_the_review_decision_without_reviews(cx: &mut TestAppContext) {
+  let (mut h, _) = harness(cx, prs(), route("prs", Some(1), false));
+  assert!(!h.drawn("github-review-state"));
+}
+
+#[gpui::test]
 fn github_tabs_fit_their_triggers(cx: &mut TestAppContext) {
   // `TabsList` is `inline-flex`: as wide as its tabs, not the list.
   let (mut h, _) = harness(cx, issues(), route("issues", None, false));
@@ -746,6 +766,53 @@ fn checks() -> PrCiStatus {
     pending: 0,
     checks: vec![check("lint", "pass"), check("test", "fail")],
   }
+}
+
+#[gpui::test]
+fn github_pr_detail_collapses_passing_checks(cx: &mut TestAppContext) {
+  let (mut h, _) = harness(
+    cx,
+    Fake {
+      checks: Some(checks()),
+      ..prs()
+    },
+    route("prs", Some(1), false),
+  );
+  assert!(h.drawn("github-checks-summary"));
+  assert!(h.drawn("github-check-0"), "the failing check stays listed");
+  assert!(!h.drawn("github-check-1"), "the passing one folds away");
+  h.click("github-checks-toggle");
+  assert!(h.drawn("github-check-1"));
+  h.click("github-checks-toggle");
+  assert!(!h.drawn("github-check-1"));
+}
+
+#[gpui::test]
+fn github_pr_detail_caps_the_expanded_checks(cx: &mut TestAppContext) {
+  let mut many = checks();
+  many.checks = (0..40)
+    .map(|i| PrCheckEntry {
+      name: format!("job {i}"),
+      bucket: "pass".into(),
+      link: String::new(),
+      duration_secs: None,
+    })
+    .collect();
+  let (mut h, _) = harness(
+    cx,
+    Fake {
+      checks: Some(many),
+      ..prs()
+    },
+    route("prs", Some(1), false),
+  );
+  h.click("github-checks-toggle");
+  h.cx.run_until_parked();
+  let list = h.cx.debug_bounds("github-checks-list").expect("list");
+  assert!(
+    list.size.height <= gpui::px(crate::gpui_shell::screen::github_data::CHECKS_MAX_HEIGHT),
+    "{list:?}"
+  );
 }
 
 #[gpui::test]

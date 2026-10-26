@@ -5,13 +5,17 @@
 //
 // List rows, the view's tabs and the finish popover's verdicts are not
 // observable; they are clicked at their place in the 1400x900 window.
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { fixture } from "../fixture.ts";
 import { capture } from "./capture.ts";
 import { ready, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
 const PRS_TAB = { x: 422, y: 62 };
+const ROW_418 = { x: 700, y: 147 };
 const ROW_421 = { x: 700, y: 214 };
 const ROW_401 = { x: 700, y: 482 };
 const APPROVE = { x: 1064, y: 265 };
@@ -32,7 +36,7 @@ test("pr review approve: no treq checks note", async ({ page }) => {
     name: "21-pr-approve-01-no-treq-checks",
     title: "PR #401: its workspace has no Treq checks",
     expectations: [
-      "Checks (3/3) lists build, test and lint",
+      "Checks collapsed to one line: 3/3 passed, with Show all",
       "One muted line under it: No Treq checks configured for this repository.",
       "No Treq checks heading or panel",
     ],
@@ -53,6 +57,11 @@ test("pr review approve: back on the PR detail", async ({ page }) => {
   });
   await page.mouse.click(APPROVE.x, APPROVE.y);
   await settle(page, 500);
+  // GitHub records the approval: the PR's next read reports it.
+  writeFileSync(
+    join(fixture().home, "fake-gh-prs.json"),
+    JSON.stringify({ "fix/slack-retry": { reviewDecision: "APPROVED" } }),
+  );
   await page.getByRole("button", { name: "Submit review" }).click();
   await expect(page.getByRole("button", { name: "Review changes" })).toBeVisible({ timeout: 10_000 });
   await settle(page, 1000);
@@ -61,8 +70,28 @@ test("pr review approve: back on the PR detail", async ({ page }) => {
     title: "After approving: back on #421's detail",
     expectations: [
       "PR #421's detail, not the review screen",
+      "A green Approved badge beside Open",
       "A Review submitted toast reading #421: Approve",
     ],
     screen: true,
+  });
+});
+
+test("pr review approve: collapsed checks", async ({ page }) => {
+  await openPr(page, ROW_418);
+  await capture(page, {
+    name: "21-pr-approve-04-checks-collapsed",
+    title: "PR #418: checks collapsed",
+    expectations: [
+      "Summary line: 2/4 passed · 1 failed · 1 running",
+      "Only test (failed) and typecheck (running) are listed",
+    ],
+  });
+  await page.getByRole("button", { name: "Show all" }).click();
+  await settle(page, 600);
+  await capture(page, {
+    name: "21-pr-approve-05-checks-expanded",
+    title: "PR #418: every check",
+    expectations: ["All four checks listed, failing first", "The toggle reads Collapse"],
   });
 });

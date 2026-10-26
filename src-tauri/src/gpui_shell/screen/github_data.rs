@@ -796,6 +796,9 @@ pub fn check_duration(secs: u64) -> String {
 
 pub use crate::core::running_checks::run_key;
 
+/// How tall the expanded checks list grows before it scrolls.
+pub const CHECKS_MAX_HEIGHT: f32 = 240.;
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -820,6 +823,8 @@ mod tests {
       updated_at: "2026-10-19T00:00:00Z".into(),
       comments: None,
       is_draft: false,
+      review_decision: None,
+      latest_reviews: vec![],
     }
   }
 

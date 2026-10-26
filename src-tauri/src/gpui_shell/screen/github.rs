@@ -207,6 +207,8 @@ pub(super) struct Detail {
   /// The PR's checks and workspace are being read on a timer.
   polling: bool,
   generation: u64,
+  /// The PR's checks list every check, not just the failing and running.
+  pub(super) checks_open: bool,
 }
 
 /// The inline New Issue form (`CreateIssueForm`).
