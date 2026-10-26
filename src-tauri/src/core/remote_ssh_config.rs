@@ -621,12 +621,20 @@ mod tests {
 
   #[test]
   fn core_remote_typed_commands_never_shell_out_to_ssh() {
-    // Static inspection of `core::remote`, whose typed commands reach an
-    // endpoint only over the native transport: the only remaining `"ssh"`
-    // program-name reference in that file is `build_ssh_shell_command`, which
-    // builds an *interactive PTY* shell command line and is never called by
-    // the typed probe/clone/inspect commands.
-    let source = include_str!("remote.rs");
+    // Static inspection of `core::remote` and its submodules, whose typed
+    // commands reach an endpoint only over the native transport: the only
+    // remaining `"ssh"` program-name reference is `build_ssh_shell_command`,
+    // which builds an *interactive PTY* shell command line and is never called
+    // by the typed probe/clone/inspect commands.
+    let source = [
+      include_str!("remote.rs"),
+      include_str!("remote/github.rs"),
+      include_str!("remote/host.rs"),
+      include_str!("remote/local.rs"),
+      include_str!("remote/ssh.rs"),
+      include_str!("remote/verification.rs"),
+    ]
+    .concat();
     assert!(
       !source.contains("Command::new(\"ssh\")"),
       "core::remote must never spawn a system ssh subprocess"
