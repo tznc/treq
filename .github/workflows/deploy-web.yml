@@ -44,7 +44,8 @@ jobs:
   landing-screenshots:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    # A cold e2e build takes up to 15 minutes, and the capture up to 10.
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -115,7 +116,7 @@ jobs:
             web/static/img/code.png
             web/static/img/landing
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 30
 
       - name: Upload the capture report
         if: ${{ failure() }}
@@ -187,7 +188,7 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        # The nightly run keeps a fresh artifact on main (3-day retention).
+        # The nightly run keeps a fresh artifact on main (30-day retention).
         run: |
           run_id=$(gh run list -R "$GITHUB_REPOSITORY" --workflow deploy-web.yml \
             --branch main --status success --limit 1 --json databaseId -q '.[0].databaseId')
