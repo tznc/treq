@@ -47,7 +47,11 @@ fn location(entry: &ReviewHistoryEntry) -> String {
 /// in the File column.
 pub fn to_log_record(entry: &ReviewHistoryEntry) -> LogRecordView {
   let severity = severity_text_for_level(level(entry));
-  let who = if entry.kind == "user_review" { "You" } else { "Agent" };
+  let who = if entry.kind == "user_review" {
+    "You"
+  } else {
+    "Agent"
+  };
   let mut body = format!("{who}: {}", entry.body);
   if let Some(suggestion) = &entry.suggestion {
     body.push_str(&format!("\nSuggested:\n{suggestion}"));

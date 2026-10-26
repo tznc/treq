@@ -1230,8 +1230,8 @@ impl LogsView {
           )
           .children(spec.columns.iter().map(|c| {
             let color = match c {
-              Column::Job | Column::Role => ui::Tone::Primary.text(&p),
-              Column::Run | Column::Source => p.muted_foreground,
+              Column::Job | Column::Role | Column::File => ui::Tone::Primary.text(&p),
+              Column::Run | Column::Source | Column::Outcome => p.muted_foreground,
             };
             cell(Some(c.width()))
               .text_color(color)

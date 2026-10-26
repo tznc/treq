@@ -1166,7 +1166,10 @@ mod tests {
     let (mut model, data) = (model(), data());
     model.open_settings();
     let effects = model
-      .screen_action(&field("reviewPrompt.tune", json!({"prompt": "Tune it"})), &data)
+      .screen_action(
+        &field("reviewPrompt.tune", json!({"prompt": "Tune it"})),
+        &data,
+      )
       .unwrap_or_default();
     assert_eq!(model.page, Page::Workspace);
     assert!(effects.iter().any(|effect| matches!(

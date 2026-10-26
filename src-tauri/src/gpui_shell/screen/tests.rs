@@ -2786,6 +2786,9 @@ fn settings_switches_previews_itself(cx: &mut TestAppContext) {
 fn settings_tunes_the_review_prompt_with_an_agent(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
   let mut h = Harness::with_host(cx, settings(), host.clone());
+  // Tall enough that the Code Review section is on screen.
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1100.), gpui::px(2400.)));
   h.click("settings-tune-review-prompt");
   h.cx.run_until_parked();
   assert!(host
@@ -2797,7 +2800,10 @@ fn settings_tunes_the_review_prompt_with_an_agent(cx: &mut TestAppContext) {
   };
   assert_eq!(field, "reviewPrompt.tune");
   let prompt = value["prompt"].as_str().expect("prompt");
-  assert!(prompt.contains("/repo/.treq/review-history.json"), "{prompt}");
+  assert!(
+    prompt.contains("/repo/.treq/review-history.json"),
+    "{prompt}"
+  );
 }
 
 #[gpui::test]
@@ -7104,7 +7110,9 @@ fn logs_tab_switches_source_from_its_menu(cx: &mut TestAppContext) {
 fn logs_tab_shows_review_history(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(Some("reviews")));
   assert!(h.drawn("review-history-output"));
-  assert!(host.calls().contains(&"read review history None".to_string()));
+  assert!(host
+    .calls()
+    .contains(&"read review history None".to_string()));
   h.click("log-source");
   h.pick("System");
   h.click("log-source");

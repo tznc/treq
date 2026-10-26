@@ -201,9 +201,13 @@ impl LaunchHost for Backend {
     markdown: &str,
     mode: &str,
   ) {
-    if let Err(err) =
-      crate::core::review_history::record_sent_review(repo_path, workspace_id, scope, markdown, mode)
-    {
+    if let Err(err) = crate::core::review_history::record_sent_review(
+      repo_path,
+      workspace_id,
+      scope,
+      markdown,
+      mode,
+    ) {
       log::warn!("Failed to record review history: {err}");
     }
   }

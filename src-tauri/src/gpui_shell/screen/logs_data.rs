@@ -27,7 +27,8 @@ pub trait LogsHost: ChangesHost {
   /// `get_system_logs`: the app's own log files.
   fn system_logs(&self, query: &LogQuery) -> Result<Vec<LogRecordView>, String>;
   /// The repository's code review history (`core::review_history`).
-  fn review_history(&self, repo_path: &str, query: &LogQuery) -> Result<Vec<LogRecordView>, String>;
+  fn review_history(&self, repo_path: &str, query: &LogQuery)
+    -> Result<Vec<LogRecordView>, String>;
   /// `open_system_log_dir`.
   fn open_system_log_dir(&self) -> Result<(), String>;
   fn workflows(&self, repo_path: &str) -> Result<Vec<WorkflowInfo>, String>;
@@ -62,7 +63,11 @@ impl LogsHost for Backend {
     crate::core::checks_logs::query_log_timeseries(repo_path, query, 1)
   }
 
-  fn review_history(&self, repo_path: &str, query: &LogQuery) -> Result<Vec<LogRecordView>, String> {
+  fn review_history(
+    &self,
+    repo_path: &str,
+    query: &LogQuery,
+  ) -> Result<Vec<LogRecordView>, String> {
     self.local_only(repo_path, "Review history")?;
     crate::core::review_history::log_records(repo_path, query)
   }

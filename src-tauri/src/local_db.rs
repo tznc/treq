@@ -3046,8 +3046,18 @@ mod tests {
 
   fn agent_comment(repo: &str, target_type: &str) -> AgentReviewComment {
     create_agent_review_comment(
-      repo, target_type, "7", "a.rs", None, 2, 3, Some("new"), "use ?", Some("x?"),
-      "local-agent", None,
+      repo,
+      target_type,
+      "7",
+      "a.rs",
+      None,
+      2,
+      3,
+      Some("new"),
+      "use ?",
+      Some("x?"),
+      "local-agent",
+      None,
     )
     .unwrap()
   }
@@ -3085,7 +3095,10 @@ mod tests {
     assert_eq!(outcome(&applied.id), "applied");
     assert_eq!(outcome(&resolved.id), "resolved");
     assert_eq!(outcome(&dismissed.id), "dismissed");
-    let first = entries.iter().find(|e| e.comment_id.as_deref() == Some(&applied.id)).unwrap();
+    let first = entries
+      .iter()
+      .find(|e| e.comment_id.as_deref() == Some(&applied.id))
+      .unwrap();
     assert_eq!(first.body, "use ?");
     assert_eq!(first.suggestion.as_deref(), Some("x?"));
     assert_eq!((first.start_line, first.end_line), (Some(2), Some(3)));
