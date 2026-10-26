@@ -108,6 +108,10 @@ jobs:
             libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev \
             libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev
 
+      # rust-cache only keeps third-party crates; sccache also caches the
+      # treq crates, which are most of each build.
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
@@ -132,6 +136,8 @@ jobs:
           # for tagged releases.
           CARGO_PROFILE_RELEASE_LTO: "thin"
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -175,6 +181,8 @@ jobs:
     environment: prod
     env:
       CARGO_INCREMENTAL: 0
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
       CARGO_PROFILE_RELEASE_LTO: "thin"
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       NDK_VERSION: 27.0.12077973
@@ -192,6 +200,10 @@ jobs:
         with:
           toolchain: stable
           targets: aarch64-linux-android
+
+      # rust-cache only keeps third-party crates; sccache also caches the
+      # treq crates, which are most of each build.
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -279,6 +291,8 @@ jobs:
     environment: prod
     env:
       CARGO_INCREMENTAL: 0
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
       CARGO_PROFILE_RELEASE_LTO: "thin"
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       SIGNED: ${{ secrets.IOS_CERTIFICATE_P12 != '' && secrets.IOS_MOBILE_PROVISION != '' && secrets.APPLE_API_KEY_P8 != '' }}
@@ -290,6 +304,10 @@ jobs:
         with:
           toolchain: stable
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      # rust-cache only keeps third-party crates; sccache also caches the
+      # treq crates, which are most of each build.
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
