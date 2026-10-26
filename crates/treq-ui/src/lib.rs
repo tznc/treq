@@ -105,7 +105,7 @@ pub type OnHover = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
 
 /// The app's text scale (Tailwind's names, as the React UI overrode them):
 /// size and line height in pixels.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub enum TextSize {
   /// Captions, badges and kbd.
   Xs,

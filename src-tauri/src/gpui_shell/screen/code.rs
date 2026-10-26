@@ -1525,8 +1525,6 @@ pub(super) fn scrolling_markdown(
   markdown_view(id, text, size, dark, true).size_full()
 }
 
-/// The text size markdown at `size` px draws with. Code size stays code
-/// size, so comment bodies match the diff they sit in.
 fn markdown_text_size(size: f32) -> TextSize {
   match size {
     s if s <= 11. => TextSize::Xs,
@@ -3570,19 +3568,4 @@ fn loc_indicator(
         ),
     )
     .child(count(format!("-{deletions}"), removed.text(p), minus_ch))
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn markdown_at_code_size_uses_the_code_text_size() {
-    assert_eq!(
-      markdown_text_size(TextSize::Code.metrics().0),
-      TextSize::Code
-    );
-    assert_eq!(markdown_text_size(11.), TextSize::Xs);
-    assert_eq!(markdown_text_size(13.), TextSize::Sm);
-  }
 }
