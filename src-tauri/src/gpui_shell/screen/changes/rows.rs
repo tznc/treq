@@ -178,14 +178,22 @@ fn card_key(cards: &[Card], row: Row) -> Option<(&str, bool)> {
 }
 
 impl ChangesView {
-  /// The diff a card shows: the working copy's, else the branch's.
+  /// The diff a card shows: the branch's for a file in
+  /// [`Snapshot::shows_branch_diff`], else the working copy's, else the
+  /// branch's.
   pub(super) fn shown_hunks(&self, path: &str) -> Option<&FileHunks> {
-    self.hunks.get(path).or_else(|| {
-      self
-        .snapshot
-        .as_ref()
-        .and_then(|s| s.committed_hunks.get(path))
-    })
+    let branch = self
+      .snapshot
+      .as_ref()
+      .and_then(|s| s.committed_hunks.get(path));
+    if self
+      .snapshot
+      .as_ref()
+      .is_some_and(|s| s.shows_branch_diff(path))
+    {
+      return branch.or_else(|| self.hunks.get(path));
+    }
+    self.hunks.get(path).or(branch)
   }
 
   fn layout_key(&self) -> Key {

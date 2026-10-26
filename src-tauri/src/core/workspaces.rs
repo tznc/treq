@@ -4756,6 +4756,37 @@ fn workspace_diff_with_conflict_style(
   diff.committed_files.retain(|file| {
     !uncommitted_paths.contains(&file.path) || conflicted_paths.contains(&file.path)
   });
+  // A file both committed and dirty reviews as one diff, fork point to the
+  // working copy, not the committed half alone. Conflicted files keep their
+  // committed hunks: rebase conflicts live there.
+  let dirty_committed: std::collections::HashSet<String> = diff
+    .hunks_by_file
+    .iter()
+    .map(|f| f.path.clone())
+    .filter(|p| uncommitted_paths.contains(p) && !conflicted_paths.contains(p))
+    .collect();
+  if !dirty_committed.is_empty() && base_revision != "@" {
+    let whole = repo
+      .merge_diff_between_revisions(&base_revision, "@", conflict_marker_style)
+      .map_err(|e| format!("Failed to get workspace diff: {}", e))?;
+    let mut whole: std::collections::HashMap<String, jj::JjFileDiff> = whole
+      .hunks_by_file
+      .into_iter()
+      .filter(|f| dirty_committed.contains(&f.path))
+      .map(|f| (f.path.clone(), f))
+      .collect();
+    for file in &mut diff.hunks_by_file {
+      if dirty_committed.contains(&file.path) {
+        // Absent: the working copy reverted it back to the base.
+        *file = whole.remove(&file.path).unwrap_or_else(|| jj::JjFileDiff {
+          path: file.path.clone(),
+          hunks: Vec::new(),
+          conflict_style: Default::default(),
+          conflict_regions: Vec::new(),
+        });
+      }
+    }
+  }
   diff.uncommitted_files = uncommitted_files;
   diff.conflicted_files = conflicted_files;
   // As `list_file_hunks_batch` names its reads, so the Changes tab can tell

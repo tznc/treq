@@ -781,3 +781,63 @@ fn test_workspace_diff_rereads_the_committed_part_only_when_a_commit_moved() {
   assert!(paths.contains(&"one.txt".to_string()));
   assert!(paths.contains(&"wip.txt".to_string()));
 }
+
+fn committed_hunk_lines(diff: &treq_lib::jj::JjRevisionDiff, path: &str) -> Vec<String> {
+  diff
+    .hunks_by_file
+    .iter()
+    .find(|f| f.path == path)
+    .unwrap_or_else(|| panic!("{path} should have hunks"))
+    .hunks
+    .iter()
+    .flat_map(|h| h.lines.iter().cloned())
+    .collect()
+}
+
+/// A file both committed and dirty diffs from the fork point with the target
+/// to the working copy, not from HEAD: `hello` -> `testing`, never
+/// `testing123` -> `testing`. The target advancing after the fork must not
+/// move the base.
+#[test]
+fn test_workspace_diff_dirty_committed_file_diffs_fork_point_to_working_copy() {
+  let repo = TestRepo::new().unwrap();
+  repo.commit_file("a.txt", "hello\n", "base").unwrap();
+  repo
+    .commit_file("gone.txt", "hello\n", "base gone")
+    .unwrap();
+  let ws = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/dirty-committed",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .unwrap();
+  workspace_write_file(&repo, &ws, "a.txt", "testing123\n");
+  workspace_write_file(&repo, &ws, "gone.txt", "edited\n");
+  treq_lib::core::commit_workspace(&repo.repo_path, ws.id, "commit").unwrap();
+  // Target moves ahead, touching the same file, after the fork.
+  repo.commit_file("a.txt", "upstream\n", "upstream").unwrap();
+
+  workspace_write_file(&repo, &ws, "a.txt", "testing\n");
+  let dir = repo.workspaces_dir().join(&ws.workspace_path);
+  std::fs::remove_file(dir.join("gone.txt")).unwrap();
+
+  init_test_app_db(&repo, Some("git"));
+  let diff = treq_lib::core::workspace_diff(&repo.repo_path, ws.id).unwrap();
+
+  let a = committed_hunk_lines(&diff, "a.txt");
+  assert!(a.contains(&"-hello".to_string()), "{a:?}");
+  assert!(a.contains(&"+testing".to_string()), "{a:?}");
+  assert!(!a.iter().any(|l| l.contains("testing123")), "{a:?}");
+  assert!(!a.iter().any(|l| l.contains("upstream")), "{a:?}");
+
+  let gone = committed_hunk_lines(&diff, "gone.txt");
+  assert_eq!(
+    gone,
+    vec!["-hello".to_string()],
+    "deleted in the working copy"
+  );
+}

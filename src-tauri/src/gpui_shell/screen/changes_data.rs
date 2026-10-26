@@ -424,6 +424,9 @@ pub struct Snapshot {
   pub token: Option<String>,
   /// Each file's `content_id` in that diff, where known.
   pub content_ids: HashMap<String, String>,
+  /// Dirty files also committed, shown as one diff from the fork point to
+  /// the working copy (their `committed_hunks`) while Committed is on.
+  pub branch_diff: HashSet<String>,
 }
 
 impl Snapshot {
@@ -450,6 +453,16 @@ impl Snapshot {
         });
       }
     }
+    let branch_diff = if show_committed {
+      diff
+        .hunks_by_file
+        .iter()
+        .filter(|f| uncommitted.contains(f.path.as_str()) && !conflicted.contains(&f.path))
+        .map(|f| f.path.clone())
+        .collect()
+    } else {
+      HashSet::new()
+    };
     let committed_hunks = diff
       .hunks_by_file
       .into_iter()
@@ -472,7 +485,13 @@ impl Snapshot {
       generated: HashSet::new(),
       token: diff.working_copy_token,
       content_ids,
+      branch_diff,
     }
+  }
+
+  /// `path` shows its branch diff rather than the working copy's.
+  pub fn shows_branch_diff(&self, path: &str) -> bool {
+    self.branch_diff.contains(path)
   }
 
   /// Takes the hunks of committed files that read the same as in
@@ -1448,6 +1467,42 @@ mod tests {
       .map(|&ix| snap.committed[ix].path.as_str())
       .collect();
     assert_eq!(visible, ["clash.rs"]);
+  }
+
+  /// With Committed on, a file both committed and dirty shows the branch
+  /// diff (fork point to working copy), not the working copy's own diff;
+  /// with it off, or for dirty-only and conflicted files, the working copy's.
+  #[test]
+  fn dirty_committed_file_shows_the_branch_diff_with_committed_on() {
+    let change = |path: &str| JjFileChange {
+      path: path.into(),
+      status: "M".into(),
+      previous_path: None,
+      changed_line_count: 1,
+      diff_deferred: false,
+      content_id: None,
+    };
+    let hunks = |path: &str| crate::jj::JjFileDiff {
+      path: path.into(),
+      hunks: Vec::new(),
+      conflict_style: Default::default(),
+      conflict_regions: Vec::new(),
+    };
+    let diff = || JjRevisionDiff {
+      committed_files: vec![change("done.rs")],
+      hunks_by_file: vec![hunks("both.rs"), hunks("done.rs"), hunks("clash.rs")],
+      uncommitted_files: vec![change("both.rs"), change("dirty.rs"), change("clash.rs")],
+      conflicted_files: vec!["clash.rs".into()],
+      too_large_to_render: false,
+      render_block_reason: None,
+      working_copy_token: None,
+    };
+    let on = Snapshot::from_workspace_diff(diff(), true);
+    assert!(on.shows_branch_diff("both.rs"));
+    assert!(!on.shows_branch_diff("dirty.rs"));
+    assert!(!on.shows_branch_diff("clash.rs"));
+    let off = Snapshot::from_workspace_diff(diff(), false);
+    assert!(!off.shows_branch_diff("both.rs"));
   }
 
   #[test]
