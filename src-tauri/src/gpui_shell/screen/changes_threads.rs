@@ -152,10 +152,6 @@ pub struct Row {
   pub segments: Vec<Segment>,
 }
 
-/// Past this share of changed characters a replaced line reads better as
-/// a plain red/green pair than with its words marked.
-const WORD_LEVEL_CHANGE_LIMIT: f64 = 0.5;
-
 fn plain(kind: RowKind, text: &str) -> Row {
   Row {
     kind,
@@ -217,26 +213,6 @@ fn diff_tokens<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(ChangeTag, &'a str)
   out
 }
 
-/// Runs of whitespace and of everything else, as `diffWords` splits them.
-#[expect(clippy::string_slice, reason = "offsets come from char_indices()")]
-fn words(text: &str) -> Vec<&str> {
-  let mut out = Vec::new();
-  let mut start = 0;
-  let mut space = None;
-  for (i, c) in text.char_indices() {
-    let is_space = c.is_whitespace();
-    if space.is_some_and(|s| s != is_space) {
-      out.push(&text[start..i]);
-      start = i;
-    }
-    space = Some(is_space);
-  }
-  if start < text.len() {
-    out.push(&text[start..]);
-  }
-  out
-}
-
 fn split_lines(text: &str) -> Vec<&str> {
   let mut lines: Vec<&str> = text.split('\n').collect();
   if lines.len() > 1 && lines.last() == Some(&"") {
@@ -245,49 +221,43 @@ fn split_lines(text: &str) -> Vec<&str> {
   lines
 }
 
-fn word_rows(removed: &str, added: &str) -> Option<[Row; 2]> {
-  let changes = diff_tokens(&words(removed), &words(added));
-  let changed: usize = changes
-    .iter()
-    .filter(|(tag, _)| *tag != ChangeTag::Equal)
-    .map(|(_, text)| text.chars().count())
-    .sum();
-  let longest = removed.chars().count().max(added.chars().count()).max(1);
-  if changed as f64 / longest as f64 > WORD_LEVEL_CHANGE_LIMIT {
-    return None;
-  }
-  let (mut old, mut new) = (Vec::new(), Vec::new());
-  for (tag, text) in changes {
-    let text = text.to_string();
-    match tag {
-      ChangeTag::Delete => old.push(Segment {
-        text,
-        changed: true,
-      }),
-      ChangeTag::Insert => new.push(Segment {
-        text,
-        changed: true,
-      }),
-      ChangeTag::Equal => {
-        old.push(Segment {
-          text: text.clone(),
-          changed: false,
-        });
-        new.push(Segment {
-          text,
+/// A removed and an added line with the characters they changed marked,
+/// as the diff view marks them.
+#[expect(clippy::string_slice, reason = "ranges come from char_indices()")]
+fn char_rows(removed: &str, added: &str) -> Option<[Row; 2]> {
+  let (old, new) = super::intraline::line_marks(removed, added)?;
+  let segments = |text: &str, marks: &[std::ops::Range<usize>]| {
+    let mut out = Vec::new();
+    let mut at = 0;
+    for r in marks {
+      if r.start > at {
+        out.push(Segment {
+          text: text[at..r.start].to_string(),
           changed: false,
         });
       }
+      out.push(Segment {
+        text: text[r.clone()].to_string(),
+        changed: true,
+      });
+      at = r.end;
     }
-  }
+    if at < text.len() || out.is_empty() {
+      out.push(Segment {
+        text: text[at..].to_string(),
+        changed: false,
+      });
+    }
+    out
+  };
   Some([
     Row {
       kind: RowKind::Removed,
-      segments: old,
+      segments: segments(removed, &old),
     },
     Row {
       kind: RowKind::Added,
-      segments: new,
+      segments: segments(added, &new),
     },
   ])
 }
@@ -323,9 +293,10 @@ pub fn suggestion_diff(original: Option<&str>, suggested: &str) -> Option<Vec<Ro
           .filter(|(t, _)| *t == ChangeTag::Insert)
           .map(|(_, t)| split_lines(t));
         match added {
-          Some(added) if added.len() == lines.len() => {
+          // Lines pair up by place in the block, as in the diff view.
+          Some(added) => {
             for (old, new) in lines.iter().zip(&added) {
-              match word_rows(old, new) {
+              match char_rows(old, new) {
                 Some(pair) => rows.extend(pair),
                 None => {
                   rows.push(plain(RowKind::Removed, old));
@@ -333,9 +304,12 @@ pub fn suggestion_diff(original: Option<&str>, suggested: &str) -> Option<Vec<Ro
                 }
               }
             }
+            let paired = lines.len().min(added.len());
+            rows.extend(lines[paired..].iter().map(|l| plain(RowKind::Removed, l)));
+            rows.extend(added[paired..].iter().map(|l| plain(RowKind::Added, l)));
             i += 1;
           }
-          _ => rows.extend(lines.iter().map(|l| plain(RowKind::Removed, l))),
+          None => rows.extend(lines.iter().map(|l| plain(RowKind::Removed, l))),
         }
       }
       ChangeTag::Insert => rows.extend(lines.iter().map(|l| plain(RowKind::Added, l))),
@@ -466,7 +440,7 @@ mod tests {
   }
 
   #[test]
-  fn suggestions_mark_the_words_that_changed() {
+  fn suggestions_mark_the_characters_that_changed() {
     let rows = suggestion_diff(Some("let a = 1;\nkeep"), "let a = 2;\nkeep").expect("rows");
     assert_eq!(rows.len(), 3);
     assert_eq!(rows[0].kind, RowKind::Removed);
@@ -477,8 +451,49 @@ mod tests {
       .filter(|s| s.changed)
       .map(|s| s.text.as_str())
       .collect();
-    assert_eq!(changed, vec!["2;"]);
+    assert_eq!(changed, vec!["2"]);
     assert_eq!(rows[2], plain(RowKind::Unchanged, "keep"));
+  }
+
+  fn changed(row: &Row) -> Vec<&str> {
+    row
+      .segments
+      .iter()
+      .filter(|s| s.changed)
+      .map(|s| s.text.as_str())
+      .collect()
+  }
+
+  #[test]
+  fn suggestions_mark_characters_inside_a_word() {
+    let rows = suggestion_diff(
+      Some("defmodule Logflare.ShutdownDrain do"),
+      "defmodule Logflare.ShutdownDrainWorker do",
+    )
+    .expect("rows");
+    assert_eq!(rows.len(), 2);
+    assert!(changed(&rows[0]).is_empty(), "nothing was removed");
+    assert_eq!(changed(&rows[1]), vec!["Worker"]);
+  }
+
+  #[test]
+  fn suggestions_mark_whitespace_and_unicode_changes() {
+    let rows = suggestion_diff(Some("a  = 1"), "a = 1").expect("rows");
+    assert_eq!(changed(&rows[0]), vec![" "]);
+    let rows = suggestion_diff(Some("na\u{ef}ve code"), "na\u{ee}ve code").expect("rows");
+    assert_eq!(changed(&rows[0]), vec!["\u{ef}"]);
+    assert_eq!(changed(&rows[1]), vec!["\u{ee}"]);
+  }
+
+  #[test]
+  fn suggestions_pair_lines_of_uneven_blocks_in_place() {
+    let rows =
+      suggestion_diff(Some("let a = 1;\nlet b = 2;\nend"), "let a = 3;\nend").expect("rows");
+    assert_eq!(rows.len(), 4);
+    assert_eq!(changed(&rows[0]), vec!["1"]);
+    assert_eq!(changed(&rows[1]), vec!["3"]);
+    assert_eq!(rows[2], plain(RowKind::Removed, "let b = 2;"));
+    assert_eq!(rows[3], plain(RowKind::Unchanged, "end"));
   }
 
   #[test]
