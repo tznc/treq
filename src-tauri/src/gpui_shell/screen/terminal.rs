@@ -234,6 +234,36 @@ pub fn cell_size(advance: f32, height: f32, scale: f32) -> (f32, f32) {
   (down(advance), down(height))
 }
 
+/// Where cell (`row`, `col`) starts in the grid, for the text and the
+/// cursor alike. Plain pixels: `cell` is measured at the zoomed font size.
+pub fn cell_origin(row: usize, col: usize, (w, h): (f32, f32)) -> gpui::Point<Pixels> {
+  point(px(col as f32 * w), px(TOP_PAD + row as f32 * h))
+}
+
+/// The cursor on cell (`row`, `col`): a bar when focused (drawn while
+/// `on`, for the blink), an outlined cell when not.
+pub fn cursor_div(
+  (row, col): (usize, usize),
+  (w, h): (f32, f32),
+  (focused, on): (bool, bool),
+  color: gpui::Hsla,
+) -> Div {
+  // Plain pixels: the cell already carries the zoom, so rems would apply
+  // it twice and move the cursor off its row.
+  let origin = cell_origin(row, col, (w, h));
+  let base = div()
+    .debug_selector(|| "terminal-cursor".into())
+    .absolute()
+    .top(origin.y)
+    .left(origin.x)
+    .h(px(h));
+  if focused {
+    base.w(px(1.)).when(on, |d| d.bg(color))
+  } else {
+    base.w(px(w)).border_1().border_color(color)
+  }
+}
+
 /// Where a glyph the font placed at `x` draws once each cell is `cell`
 /// wide: at the start of its cell, as xterm's renderer puts it.
 pub fn cell_x(x: f32, advance: f32, cell: f32) -> f32 {
@@ -1351,21 +1381,12 @@ impl TerminalView {
     };
     let (font_size, advance) = (px(self.font_size), self.advance);
     let cursor = frame.cursor.map(|(row, col)| {
-      let base = div()
-        .absolute()
-        .top(zpx(TOP_PAD + row as f32 * h))
-        .left(zpx(col as f32 * w))
-        .h(zpx(h));
-      if focused {
-        base.w(zpx(1.)).when(self.cursor_on, |d| {
-          d.bg(theme::data_color(scheme.foreground))
-        })
-      } else {
-        base
-          .w(zpx(w))
-          .border_1()
-          .border_color(theme::data_color(scheme.foreground))
-      }
+      cursor_div(
+        (row, col),
+        (w, h),
+        (focused, self.cursor_on),
+        theme::data_color(scheme.foreground),
+      )
     });
     div()
       .absolute()
@@ -1375,9 +1396,8 @@ impl TerminalView {
           |_, _, _| {},
           move |bounds, _, window, cx| {
             for (row, runs) in frame.lines.iter().enumerate() {
-              let y = bounds.origin.y + px(TOP_PAD + row as f32 * h);
               for run in runs.iter() {
-                let x = bounds.origin.x + px(run.col as f32 * w);
+                let gpui::Point { x, y } = bounds.origin + cell_origin(row, run.col, (w, h));
                 if let Some(bg) = run.bg {
                   window.paint_quad(gpui::fill(
                     Bounds::new(point(x, y), gpui::size(px(run.cells as f32 * w), px(h))),
@@ -4289,6 +4309,42 @@ mod tests {
     assert_eq!(scroll_delta(row, (-150., 250.)), -150.);
     // Wider than the row: left edges line up.
     assert_eq!(scroll_delta(row, (300., 1500.)), 300.);
+  }
+
+  #[test]
+  fn places_the_cursor_on_the_cell_the_text_paints() {
+    // Cells are zoomed pixels already (the font size carries `ui_zoom`), so
+    // the cursor's offset from the grid's origin is plain pixels.
+    let cell = (7.5, 17.);
+    assert_eq!(cell_origin(0, 0, cell), point(px(0.), px(TOP_PAD)));
+    assert_eq!(cell_origin(40, 2, cell), point(px(15.), px(TOP_PAD + 680.)));
+  }
+
+  struct CursorOnly((usize, usize), (f32, f32));
+
+  impl Render for CursorOnly {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+      div()
+        .relative()
+        .size_full()
+        .child(cursor_div(self.0, self.1, (true, true), gpui::black()))
+    }
+  }
+
+  #[gpui::test]
+  fn draws_the_cursor_on_its_cell_at_any_ui_zoom(cx: &mut gpui::TestAppContext) {
+    let cell = (7.5, 17.);
+    let (_, cx) = cx.add_window_view(|_, _| CursorOnly((40, 2), cell));
+    for zoom in [0.8, 1., 1.5] {
+      cx.update(|window, cx| {
+        window.set_rem_size(px(crate::gpui_shell::ui::BASE_REM * zoom));
+        window.refresh();
+        window.draw(cx).clear(cx);
+      });
+      let bounds = cx.debug_bounds("terminal-cursor").expect("cursor drawn");
+      assert_eq!(bounds.origin, cell_origin(40, 2, cell), "zoom {zoom}");
+      assert_eq!(bounds.size.height, px(cell.1), "zoom {zoom}");
+    }
   }
 
   #[test]
