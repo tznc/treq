@@ -23,6 +23,8 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
+  /// The tuning agent's proposed review prompt edits.
+  prompt_edits: std::sync::Mutex<Vec<crate::local_db::AgentReviewComment>>,
   /// What the folder picker returns, and why starting a dev container fails.
   picked: Option<String>,
   container_error: Option<String>,
@@ -503,9 +505,31 @@ impl settings_data::SettingsHost for FakeHost {
     self.customize_copy(name)
   }
 
-  fn export_review_history(&self, repo_path: &str) -> Result<String, String> {
-    self.record(format!("export review history {repo_path}"));
-    Ok(format!("{repo_path}/.treq/review-history.json"))
+  fn snapshot_review_prompt(&self, repo_path: &str, custom: &str) -> Result<String, String> {
+    self.record(format!("snapshot review prompt {repo_path} {custom:?}"));
+    Ok(format!("{repo_path}/.treq/review-prompt"))
+  }
+
+  fn prompt_edits(&self, _: &str) -> Result<Vec<crate::local_db::AgentReviewComment>, String> {
+    Ok(self.prompt_edits.lock().unwrap().clone())
+  }
+
+  fn apply_prompt_edit(&self, _: &str, id: &str, _: &str) -> Result<String, String> {
+    self.record(format!("apply prompt edit {id}"));
+    self.prompt_edits.lock().unwrap().retain(|c| c.id != id);
+    Ok(format!("applied {id}"))
+  }
+
+  fn resolve_prompt_edit(&self, _: &str, id: &str) -> Result<(), String> {
+    self.record(format!("resolve prompt edit {id}"));
+    self.prompt_edits.lock().unwrap().retain(|c| c.id != id);
+    Ok(())
+  }
+
+  fn delete_prompt_edit(&self, _: &str, id: &str) -> Result<(), String> {
+    self.record(format!("delete prompt edit {id}"));
+    self.prompt_edits.lock().unwrap().retain(|c| c.id != id);
+    Ok(())
   }
 
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String> {
@@ -2782,28 +2806,73 @@ fn settings_switches_previews_itself(cx: &mut TestAppContext) {
   );
 }
 
+/// A Settings harness tall enough that the Code Review section is on screen.
+fn code_review_settings(cx: &mut TestAppContext, host: Arc<FakeHost>) -> Harness {
+  let h = Harness::with_host(cx, settings(), host);
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1100.), gpui::px(2400.)));
+  h
+}
+
+fn prompt_edit(id: &str) -> crate::local_db::AgentReviewComment {
+  let mut comment = agent_comment(Some("Skip style nits"));
+  comment.id = id.into();
+  comment.target_type = "review_prompt".into();
+  comment.target_id = "repo".into();
+  comment.file_path = "body.md".into();
+  comment.comment_text = "You dismiss style comments".into();
+  comment.quoted_text = Some("Flag style".into());
+  comment
+}
+
 #[gpui::test]
 fn settings_tunes_the_review_prompt_with_an_agent(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
-  let mut h = Harness::with_host(cx, settings(), host.clone());
-  // Tall enough that the Code Review section is on screen.
-  h.cx
-    .simulate_resize(gpui::size(gpui::px(1100.), gpui::px(2400.)));
+  let mut h = code_review_settings(cx, host.clone());
   h.click("settings-tune-review-prompt");
   h.cx.run_until_parked();
-  assert!(host
-    .calls()
-    .contains(&"export review history /repo".to_string()));
+  assert!(
+    host
+      .calls()
+      .iter()
+      .any(|c| c.starts_with("snapshot review prompt /repo")),
+    "{:?}",
+    host.calls()
+  );
   let sent = h.sent();
   let ScreenAction::Field { field, value } = sent.last().expect("sent") else {
     panic!("not a field: {sent:?}");
   };
   assert_eq!(field, "reviewPrompt.tune");
   let prompt = value["prompt"].as_str().expect("prompt");
+  assert!(prompt.contains("/repo/.treq/review-prompt"), "{prompt}");
+  assert!(prompt.contains("--target-type review_prompt"), "{prompt}");
+}
+
+#[gpui::test]
+fn settings_reviews_proposed_prompt_edits_with_the_review_cards(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    prompt_edits: std::sync::Mutex::new(vec![prompt_edit("e1"), prompt_edit("e2")]),
+    ..FakeHost::default()
+  });
+  let mut h = code_review_settings(cx, host.clone());
+  assert!(h.drawn("agent-review-comment-card"));
+  assert!(h.drawn("prompt-edit-apply-e1"));
+
+  h.click("prompt-edit-apply-e1");
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"apply prompt edit e1".to_string()));
+  let fields = drawn_settings(&mut h).repository.expect("drawn").fields;
+  assert_eq!(fields.review_prompt, "applied e1");
   assert!(
-    prompt.contains("/repo/.treq/review-history.json"),
-    "{prompt}"
+    !h.drawn("prompt-edit-apply-e1"),
+    "an applied edit leaves the list"
   );
+
+  h.click("prompt-edit-delete-e2");
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"delete prompt edit e2".to_string()));
+  assert!(!h.drawn("agent-review-comment-card"));
 }
 
 #[gpui::test]

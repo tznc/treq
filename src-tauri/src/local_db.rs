@@ -2605,9 +2605,10 @@ pub struct ReviewHistoryEntry {
   pub decided_at: Option<String>,
 }
 
-/// Linear reviews have their own prompt; history covers code review only.
+/// Linear reviews have their own prompt and review prompt edits are not
+/// code review; history covers code review only.
 fn is_code_review_target(target_type: &str) -> bool {
-  !target_type.starts_with("linear")
+  !target_type.starts_with("linear") && target_type != "review_prompt"
 }
 
 fn decide_review_history(

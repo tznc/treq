@@ -14,6 +14,7 @@ use crate::{
     },
   },
   gpui_shell::native::{Backend, NativeEvent},
+  local_db::AgentReviewComment,
   repo_config::{self, RepoConfig},
 };
 
@@ -73,9 +74,17 @@ pub trait SettingsHost: ToolsHost + AccountHost {
     source: &str,
     repo_path: &str,
   ) -> Result<CustomizedSkill, String>;
-  /// Writes the repository's review history where an agent can read it
-  /// (`core::review_history::export`); returns its path.
-  fn export_review_history(&self, repo_path: &str) -> Result<String, String>;
+  /// Writes the review prompt in use (`custom`, else the built-in one) and
+  /// the review history where the tuning agent reads them; returns that
+  /// directory (`core::review_prompt::write_snapshot`).
+  fn snapshot_review_prompt(&self, repo_path: &str, custom: &str) -> Result<String, String>;
+  /// The tuning agent's proposed edits still open.
+  fn prompt_edits(&self, repo_path: &str) -> Result<Vec<AgentReviewComment>, String>;
+  /// Applies edit `id` to `custom` (else the built-in prompt), saves the
+  /// result as the repository's review prompt and returns it.
+  fn apply_prompt_edit(&self, repo_path: &str, id: &str, custom: &str) -> Result<String, String>;
+  fn resolve_prompt_edit(&self, repo_path: &str, id: &str) -> Result<(), String>;
+  fn delete_prompt_edit(&self, repo_path: &str, id: &str) -> Result<(), String>;
   /// The bytes at `url`, for the account's avatar.
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String>;
   fn notify(&self, event: NativeEvent);
@@ -220,8 +229,27 @@ impl SettingsHost for Backend {
     skills::customize_global_skill(name, std::path::Path::new(source), repo_path)
   }
 
-  fn export_review_history(&self, repo_path: &str) -> Result<String, String> {
-    crate::core::review_history::export(repo_path).map(|path| path.display().to_string())
+  fn snapshot_review_prompt(&self, repo_path: &str, custom: &str) -> Result<String, String> {
+    crate::core::review_prompt::write_snapshot(repo_path, Some(custom))
+      .map(|dir| dir.display().to_string())
+  }
+
+  fn prompt_edits(&self, repo_path: &str) -> Result<Vec<AgentReviewComment>, String> {
+    crate::core::review_prompt::suggestions(repo_path)
+  }
+
+  fn apply_prompt_edit(&self, repo_path: &str, id: &str, custom: &str) -> Result<String, String> {
+    let prompt = crate::core::review_prompt::apply(repo_path, id, Some(custom))?;
+    self.set_repo_settings(repo_path, &[("review_prompt".to_string(), prompt.clone())])?;
+    Ok(prompt)
+  }
+
+  fn resolve_prompt_edit(&self, repo_path: &str, id: &str) -> Result<(), String> {
+    crate::core::agent_review::resolve_comment(repo_path, id)
+  }
+
+  fn delete_prompt_edit(&self, repo_path: &str, id: &str) -> Result<(), String> {
+    crate::core::agent_review::delete_comment(repo_path, id)
   }
 
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String> {

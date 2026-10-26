@@ -216,18 +216,28 @@ pub fn quote_snapshot_lines(
 /// Replaces the one occurrence of `quoted` in `live` with `replacement`.
 /// Fails rather than guessing when the text is gone or appears more than once.
 pub fn splice_quoted(live: &str, quoted: &str, replacement: &str) -> Result<String, String> {
+  splice_quoted_in(live, quoted, replacement, "the Linear content")
+}
+
+/// [`splice_quoted`] with `what` naming the text in its errors.
+pub fn splice_quoted_in(
+  live: &str,
+  quoted: &str,
+  replacement: &str,
+  what: &str,
+) -> Result<String, String> {
   if quoted.is_empty() {
     return Err("This review comment has no reviewed text to replace".to_string());
   }
   // Linear may hand back CRLF line endings; compare on LF.
   let live = live.replace("\r\n", "\n");
   match live.matches(quoted).count() {
-    0 => Err(
-      "The reviewed text is no longer in the Linear content; it changed after the review".to_string(),
-    ),
+    0 => Err(format!(
+      "The reviewed text is no longer in {what}; it changed after the review"
+    )),
     1 => Ok(live.replacen(quoted, replacement, 1)),
     n => Err(format!(
-      "The reviewed text appears {n} times in the Linear content, so the suggestion cannot be placed"
+      "The reviewed text appears {n} times in {what}, so the suggestion cannot be placed"
     )),
   }
 }
