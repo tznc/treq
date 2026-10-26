@@ -520,12 +520,6 @@ impl settings_data::SettingsHost for FakeHost {
     Ok(format!("applied {id}"))
   }
 
-  fn resolve_prompt_edit(&self, _: &str, id: &str) -> Result<(), String> {
-    self.record(format!("resolve prompt edit {id}"));
-    self.prompt_edits.lock().unwrap().retain(|c| c.id != id);
-    Ok(())
-  }
-
   fn delete_prompt_edit(&self, _: &str, id: &str) -> Result<(), String> {
     self.record(format!("delete prompt edit {id}"));
     self.prompt_edits.lock().unwrap().retain(|c| c.id != id);
@@ -2856,8 +2850,28 @@ fn settings_reviews_proposed_prompt_edits_with_the_review_cards(cx: &mut TestApp
     ..FakeHost::default()
   });
   let mut h = code_review_settings(cx, host.clone());
-  assert!(h.drawn("agent-review-comment-card"));
-  assert!(h.drawn("prompt-edit-apply-e1"));
+  assert!(h.drawn("prompt-edit-card"));
+  // Two actions only, Apply as the primary on the right; no source or line header.
+  assert!(!h.drawn("prompt-edit-resolve-e1"));
+  assert!(!h.drawn("prompt-edit-delete-e1"));
+  assert!(!h.drawn("prompt-edit-header"));
+  let dismiss = h
+    .cx
+    .debug_bounds("prompt-edit-dismiss-e1")
+    .expect("dismiss drawn");
+  let apply = h
+    .cx
+    .debug_bounds("prompt-edit-apply-e1")
+    .expect("apply drawn");
+  let card = h.cx.debug_bounds("prompt-edit-card").expect("card drawn");
+  assert!(
+    dismiss.right() <= apply.left(),
+    "{dismiss:?} then {apply:?}"
+  );
+  assert!(
+    card.right() - apply.right() < gpui::px(20.),
+    "Apply sits at the right edge"
+  );
 
   h.click("prompt-edit-apply-e1");
   h.cx.run_until_parked();
@@ -2869,10 +2883,10 @@ fn settings_reviews_proposed_prompt_edits_with_the_review_cards(cx: &mut TestApp
     "an applied edit leaves the list"
   );
 
-  h.click("prompt-edit-delete-e2");
+  h.click("prompt-edit-dismiss-e2");
   h.cx.run_until_parked();
   assert!(host.calls().contains(&"delete prompt edit e2".to_string()));
-  assert!(!h.drawn("agent-review-comment-card"));
+  assert!(!h.drawn("prompt-edit-card"));
 }
 
 #[gpui::test]

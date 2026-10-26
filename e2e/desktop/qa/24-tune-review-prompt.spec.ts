@@ -102,7 +102,7 @@ test("tune review prompt: start, review edits, apply", async ({ page }) => {
   propose(1, "You resolve most correctness comments; lead with them.", `${firstLine} Lead with correctness bugs.`);
   propose(3, "You dismissed 6 of 7 naming comments in the last 30 days.", "Do not comment on naming or style.");
   await codeReviewSettings(page);
-  const apply = page.getByRole("button", { name: "Apply to prompt" });
+  const apply = page.getByRole("button", { name: "Apply", exact: true });
   await expect(apply.first()).toBeVisible({ timeout: 20_000 });
   await expect(apply).toHaveCount(2);
   await scrollTo(page, "Tune with agent", 120);
@@ -110,9 +110,9 @@ test("tune review prompt: start, review edits, apply", async ({ page }) => {
     name: "24-tune-03-edits",
     title: "Settings: the agent's proposed edits on the review cards",
     expectations: [
-      "Proposed edits (2) under the prompt, each a Local agent card with its line",
+      "Proposed edits (2) under the prompt; cards show no Local label or line number",
       "Each card shows the reason and the suggestion as a red/green diff",
-      "Apply to prompt, Resolve and Delete buttons on each card",
+      "Only Dismiss (X icon, outline) then Apply (check icon, primary) pulled to the card's right edge",
     ],
   });
 
@@ -129,6 +129,6 @@ test("tune review prompt: start, review edits, apply", async ({ page }) => {
       "The prompt field now contains the applied text",
     ],
   });
-  await page.getByRole("button", { name: "Delete" }).first().click();
+  await page.getByRole("button", { name: "Dismiss" }).first().click();
   await expect(apply).toHaveCount(0);
 });

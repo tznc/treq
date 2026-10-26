@@ -117,3 +117,74 @@ pub fn agent_comment_card(
     })
     .child(actions)
 }
+
+/// What a [`suggestion_card`]'s buttons do.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SuggestionAction {
+  Apply,
+  Dismiss,
+}
+
+/// A proposed edit to text the user owns (the review prompt): the reason,
+/// the suggestion as a diff, then Dismiss and Apply, the primary on the
+/// right as in a dialog footer. Buttons are `<id_prefix>-apply-<id>` and
+/// `<id_prefix>-dismiss-<id>`.
+pub fn suggestion_card(
+  comment: &AgentReviewComment,
+  id_prefix: &str,
+  busy: bool,
+  p: &Palette,
+  mut on: impl FnMut(SuggestionAction) -> ClickHandler,
+) -> Div {
+  let id = &comment.id;
+  let card_id = format!("{id_prefix}-card");
+  div()
+    .debug_selector(move || card_id)
+    .rounded(radius::MD)
+    .border_1()
+    .border_color(ui::Tone::GitMerged.border(p))
+    .bg(ui::Tone::GitMerged.tint(p))
+    .p_3()
+    .flex()
+    .flex_col()
+    .gap_2()
+    .child(
+      ui::text(div(), TextSize::Sm)
+        .whitespace_normal()
+        .child(comment.comment_text.clone()),
+    )
+    .when_some(comment.suggested_replacement.clone(), |this, suggested| {
+      this.child(suggestion_box(
+        comment.quoted_text.as_deref(),
+        &suggested,
+        p,
+      ))
+    })
+    .child(
+      div()
+        .flex()
+        .justify_end()
+        .gap_2()
+        .child(
+          Button::new(SharedString::from(format!("{id_prefix}-dismiss-{id}")), p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .gap_1p5()
+            .disabled(busy)
+            .icon(theme::ICON_X, 12.)
+            .label("Dismiss")
+            .on_click(on(SuggestionAction::Dismiss)),
+        )
+        .when(comment.suggested_replacement.is_some(), |this| {
+          this.child(
+            Button::new(SharedString::from(format!("{id_prefix}-apply-{id}")), p)
+              .size(Size::Sm)
+              .gap_1p5()
+              .disabled(busy)
+              .icon(theme::ICON_CHECK, 12.)
+              .label("Apply")
+              .on_click(on(SuggestionAction::Apply)),
+          )
+        }),
+    )
+}

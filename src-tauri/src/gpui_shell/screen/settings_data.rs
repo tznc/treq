@@ -83,7 +83,7 @@ pub trait SettingsHost: ToolsHost + AccountHost {
   /// Applies edit `id` to `custom` (else the built-in prompt), saves the
   /// result as the repository's review prompt and returns it.
   fn apply_prompt_edit(&self, repo_path: &str, id: &str, custom: &str) -> Result<String, String>;
-  fn resolve_prompt_edit(&self, repo_path: &str, id: &str) -> Result<(), String>;
+  /// Dismiss: removes edit `id` without applying it.
   fn delete_prompt_edit(&self, repo_path: &str, id: &str) -> Result<(), String>;
   /// The bytes at `url`, for the account's avatar.
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String>;
@@ -242,10 +242,6 @@ impl SettingsHost for Backend {
     let prompt = crate::core::review_prompt::apply(repo_path, id, Some(custom))?;
     self.set_repo_settings(repo_path, &[("review_prompt".to_string(), prompt.clone())])?;
     Ok(prompt)
-  }
-
-  fn resolve_prompt_edit(&self, repo_path: &str, id: &str) -> Result<(), String> {
-    crate::core::agent_review::resolve_comment(repo_path, id)
   }
 
   fn delete_prompt_edit(&self, repo_path: &str, id: &str) -> Result<(), String> {
