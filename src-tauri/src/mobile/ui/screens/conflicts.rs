@@ -1,6 +1,7 @@
 //! Conflicted files, and resolving them by keeping one side or both.
 
 use crate::core::remote::TreqCommandRequest;
+use crate::mobile::ui::widgets::TouchButton as _;
 use gpui_kit::{component::Selectable as _, prelude::FluentBuilder as _};
 use gpui_kit::{
   component::{
@@ -184,7 +185,8 @@ impl Render for ConflictsScreen {
             .on_click(cx.listener(|this, _, _, cx| {
               this.resolve(cx);
               cx.notify();
-            })),
+            }))
+            .touch(),
         ),
       )
       .children(self.message.clone().map(|(ok, text)| {

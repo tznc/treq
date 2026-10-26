@@ -4,6 +4,7 @@
 //! there. Lines whose workspace is already open are left out: they do
 //! nothing.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use std::time::{Duration, Instant};
 
 use crate::core::{
@@ -444,14 +445,16 @@ impl NewWorkspacesSheet {
                   .outline()
                   .icon(LucideIcon::ListIndentDecrease)
                   .tooltip("Outdent")
-                  .on_click(cx.listener(|this, _, window, cx| this.indent(true, window, cx))),
+                  .on_click(cx.listener(|this, _, window, cx| this.indent(true, window, cx)))
+                  .touch(),
               )
               .child(
                 Button::new("indent")
                   .outline()
                   .icon(LucideIcon::ListIndentIncrease)
                   .tooltip("Indent")
-                  .on_click(cx.listener(|this, _, window, cx| this.indent(false, window, cx))),
+                  .on_click(cx.listener(|this, _, window, cx| this.indent(false, window, cx)))
+                  .touch(),
               ),
           )
           .when(self.legacy, |lines| {
@@ -472,7 +475,8 @@ impl NewWorkspacesSheet {
               self.plan.ready().map(|rows| make_count(rows)),
             ))
             .disabled(empty)
-            .on_click(cx.listener(|this, _, _, cx| this.preview(cx))),
+            .on_click(cx.listener(|this, _, _, cx| this.preview(cx)))
+            .touch(),
         ),
       )
   }
@@ -510,7 +514,8 @@ impl NewWorkspacesSheet {
                 .icon(IconName::ChevronLeft)
                 .tooltip("Back")
                 .disabled(self.running)
-                .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
+                .on_click(cx.listener(|this, _, window, cx| this.back(window, cx)))
+                .touch(),
             )
           })
           .child(
@@ -532,7 +537,8 @@ impl NewWorkspacesSheet {
                 } else {
                   this.run(cx);
                 }
-              })),
+              }))
+              .touch(),
           ),
       )
   }

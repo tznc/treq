@@ -1,6 +1,7 @@
 //! Repository picker for the connected host.
 
 use crate::core::remote::{RemoteRepoProbe, TreqCommandRequest};
+use crate::mobile::ui::widgets::TouchButton as _;
 use gpui_kit::{
   component::{
     button::{Button, ButtonVariants},
@@ -158,7 +159,8 @@ impl Render for ReposScreen {
                         "Inspect repository"
                       })
                       .loading(self.probing)
-                      .on_click(cx.listener(|this, _, _, cx| this.inspect(cx))),
+                      .on_click(cx.listener(|this, _, _, cx| this.inspect(cx)))
+                      .touch(),
                   ),
                 )
                 .children(self.error.clone().map(|e| widgets::error_text(e, cx))),

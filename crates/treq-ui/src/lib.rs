@@ -14,6 +14,7 @@ pub mod kbd;
 pub mod menu;
 pub mod picker;
 pub mod popover;
+pub mod press;
 pub mod row;
 pub mod split_button;
 pub mod tabs;

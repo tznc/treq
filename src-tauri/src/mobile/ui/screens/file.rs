@@ -3,6 +3,7 @@
 //! batch into the Code tab's review, sent to an agent from the bar at the
 //! bottom, as in desktop's file browser.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use crate::{
   core::remote::{FileRevision, TreqCommandRequest},
   jj::JjFileLines,
@@ -246,7 +247,8 @@ impl FileScreen {
                 "Show more lines"
               })
               .loading(self.loading)
-              .on_click(cx.listener(move |this, _, _, cx| this.read_from(from, cx))),
+              .on_click(cx.listener(move |this, _, _, cx| this.read_from(from, cx)))
+              .touch(),
           ),
         )
       })
@@ -273,7 +275,8 @@ impl FileScreen {
                 .ghost()
                 .small()
                 .label("Changes")
-                .on_click(move |_, window, cx| show_changes(window, cx)),
+                .on_click(move |_, window, cx| show_changes(window, cx))
+                .touch(),
             )
           })
           .child(review::file_comment_button(

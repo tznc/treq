@@ -4,6 +4,7 @@
 //! sheet that submits the review with a verdict. The rules live in
 //! [`super::pr_review_logic`].
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use std::collections::HashSet;
 
 use crate::{
@@ -534,6 +535,7 @@ impl PrReviewScreen {
           .when_some(known, |b, content| {
             b.on_click(cx.listener(move |this, _, _, cx| this.react(id.clone(), content, cx)))
           })
+          .touch()
       }))
       .child(
         Button::new(SharedString::from(format!("re-add-{}", comment.id)))
@@ -544,7 +546,8 @@ impl PrReviewScreen {
           .on_click(cx.listener(move |this, _, _, cx| {
             this.picker = if picker_open { None } else { Some(id.clone()) };
             cx.notify();
-          })),
+          }))
+          .touch(),
       );
     let picker = picker_open.then(|| {
       h_flex()
@@ -559,6 +562,7 @@ impl PrReviewScreen {
             .ghost()
             .label(*e)
             .on_click(cx.listener(move |this, _, _, cx| this.react(id.clone(), content, cx)))
+            .touch()
         }))
     });
     v_flex().gap_1().child(chips).children(picker)
@@ -663,9 +667,12 @@ impl PrReviewScreen {
             .outline()
             .small()
             .label("Reply")
-            .on_click(cx.listener(move |this, _, window, cx| {
-              this.start_reply(thread_id.clone(), window, cx)
-            })),
+            .on_click(
+              cx.listener(move |this, _, window, cx| {
+                this.start_reply(thread_id.clone(), window, cx)
+              }),
+            )
+            .touch(),
         ),
       )
       .into_any_element()
@@ -700,7 +707,8 @@ impl PrReviewScreen {
               .outline()
               .small()
               .label("Edit")
-              .on_click(cx.listener(move |this, _, window, cx| this.edit(i, window, cx))),
+              .on_click(cx.listener(move |this, _, window, cx| this.edit(i, window, cx)))
+              .touch(),
           )
           .child(
             Button::new(("pending-remove", i))
@@ -708,7 +716,8 @@ impl PrReviewScreen {
               .ghost()
               .small()
               .label("Remove")
-              .on_click(cx.listener(move |this, _, window, cx| this.remove(i, window, cx))),
+              .on_click(cx.listener(move |this, _, window, cx| this.remove(i, window, cx)))
+              .touch(),
           ),
       )
   }
@@ -912,7 +921,8 @@ impl PrReviewScreen {
                 .h(px(TAP))
                 .ghost()
                 .label("Cancel")
-                .on_click(cx.listener(|this, _, window, cx| this.cancel(window, cx))),
+                .on_click(cx.listener(|this, _, window, cx| this.cancel(window, cx)))
+                .touch(),
             )
             .when(*compose == Compose::New, |row| {
               row.child(
@@ -920,7 +930,8 @@ impl PrReviewScreen {
                   .h(px(TAP))
                   .outline()
                   .label("Suggest")
-                  .on_click(cx.listener(|this, _, window, cx| this.insert_suggestion(window, cx))),
+                  .on_click(cx.listener(|this, _, window, cx| this.insert_suggestion(window, cx)))
+                  .touch(),
               )
             })
             .child(
@@ -930,7 +941,8 @@ impl PrReviewScreen {
                 .primary()
                 .label(action)
                 .loading(replying && self.busy == Some("pr-review-reply"))
-                .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
+                .on_click(cx.listener(|this, _, window, cx| this.save(window, cx)))
+                .touch(),
             ),
         );
     }
@@ -946,14 +958,16 @@ impl PrReviewScreen {
             .icon(IconName::ChevronLeft)
             .label("Previous")
             .disabled(i == 0)
-            .on_click(cx.listener(move |this, _, _, cx| this.show_file(Some(i - 1), cx))),
+            .on_click(cx.listener(move |this, _, _, cx| this.show_file(Some(i - 1), cx)))
+            .touch(),
         )
         .child(
           Button::new("file-list")
             .h(px(TAP))
             .outline()
             .label("Files")
-            .on_click(cx.listener(|this, _, _, cx| this.show_file(None, cx))),
+            .on_click(cx.listener(|this, _, _, cx| this.show_file(None, cx)))
+            .touch(),
         )
         .child(
           Button::new("file-next")
@@ -963,7 +977,8 @@ impl PrReviewScreen {
             .icon(IconName::ChevronRight)
             .label("Next")
             .disabled(i + 1 >= total)
-            .on_click(cx.listener(move |this, _, _, cx| this.show_file(Some(i + 1), cx))),
+            .on_click(cx.listener(move |this, _, _, cx| this.show_file(Some(i + 1), cx)))
+            .touch(),
         )
     });
     let label = match self.pending.len() {
@@ -978,7 +993,8 @@ impl PrReviewScreen {
         .h(px(widgets::CTA_H))
         .label(label)
         .loading(self.busy == Some("pr-review-submit"))
-        .on_click(cx.listener(|this, _, _, cx| this.open_submit(cx))),
+        .on_click(cx.listener(|this, _, _, cx| this.open_submit(cx)))
+        .touch(),
     )
   }
 }
@@ -1004,7 +1020,8 @@ impl Render for PrReviewScreen {
                     .h(px(TAP))
                     .outline()
                     .label("Retry")
-                    .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
+                    .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
+                    .touch(),
                 ),
               ),
           )
@@ -1114,7 +1131,8 @@ impl Render for SubmitSheet {
               .update(cx, |screen, cx| screen.submit(event, body, window, cx))
               .ok();
             sheet::close(cx);
-          })),
+          }))
+          .touch(),
       )
   }
 }

@@ -5,7 +5,9 @@ use std::sync::{Arc, LazyLock};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
+    button::Button,
     h_flex,
+    text::SelectionFormat,
     text::{TextView, TextViewStyle},
     v_flex, ActiveTheme, IconName,
   },
@@ -13,6 +15,8 @@ use gpui_kit::{
   InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement, SharedString, Stateful,
   StatefulInteractiveElement, Styled,
 };
+
+use treq_ui::press::{self, press_overlay, pressable, Press};
 
 // The blue "T" mark, shared with the website and desktop app.
 const LOGO_PNG: &[u8] = include_bytes!("../../../../assets/logo.imageset/logo@3x.png");
@@ -140,6 +144,7 @@ fn row_base(
     .items_center()
     .relative()
     .active(|s| s.bg(theme.accent))
+    .child(press_overlay())
     // The divider sits just below the row: on the next row's top edge, or
     // on the card's bottom border under the last row. It stops short of
     // the card's rounded corners, which the card's mask doesn't clip to.
@@ -222,11 +227,52 @@ pub fn muted(text: impl Into<SharedString>, cx: &App) -> Div {
     .child(text.into())
 }
 
+/// An error, selectable with a long press so it can be copied whole.
 pub fn error_text(text: impl Into<SharedString>, cx: &App) -> Div {
-  div()
-    .text_sm()
-    .text_color(cx.theme().danger)
-    .child(text.into())
+  let text: SharedString = text.into();
+  let id = SharedString::from(format!("error-{:x}", hash(&text)));
+  div().text_sm().text_color(cx.theme().danger).child(
+    TextView::markdown(id, escape_markdown(&text))
+      .selectable(true)
+      .selection_format(SelectionFormat::Plain),
+  )
+}
+
+fn hash(text: &str) -> u64 {
+  use std::hash::{Hash, Hasher};
+  let mut hasher = std::collections::hash_map::DefaultHasher::new();
+  text.hash(&mut hasher);
+  hasher.finish()
+}
+
+/// `text` as Markdown that renders as itself.
+fn escape_markdown(text: &str) -> String {
+  let mut out = String::with_capacity(text.len());
+  for c in text.chars() {
+    if c.is_ascii_punctuation() {
+      out.push('\\');
+    }
+    out.push(c);
+  }
+  out
+}
+
+/// Touch sizing and press feedback for a button.
+pub trait TouchButton {
+  /// At least 44pt square, and darkened while a finger is on it.
+  fn touch(self) -> Press;
+}
+
+impl TouchButton for Button {
+  fn touch(mut self) -> Press {
+    let id = self
+      .interactivity()
+      .element_id
+      .clone()
+      .unwrap_or_else(|| "button".into());
+    let min = px(press::MIN_TOUCH_TARGET);
+    pressable(id, self.min_h(min).min_w(min)).rounded(px(6.))
+  }
 }
 
 /// Monospace text that keeps whitespace, for diffs and logs.
@@ -259,4 +305,126 @@ pub fn markdown(id: impl Into<ElementId>, text: &str, cx: &App) -> Div {
       .style(style)
       .selectable(true),
   )
+}
+
+#[cfg(test)]
+mod tests {
+  use std::{cell::Cell, rc::Rc};
+
+  use gpui_kit::base::TextSelection;
+  use gpui_kit::{
+    component::{
+      button::{Button, ButtonVariants as _},
+      Sizable as _,
+    },
+    div, point, px, size, AnyWindowHandle, AppContext as _, Bounds, Context, IntoElement,
+    ParentElement as _, PlatformInput, Point, Render, Styled as _, TestAppContext, TouchEvent,
+    TouchId, TouchPhase, Window, WindowBounds, WindowOptions,
+  };
+
+  use gpui_kit::test::TestWindowExt as _;
+
+  use super::TouchButton as _;
+
+  const ERROR: &str = "The host refused the connection.";
+  /// Where the error starts, below the 44pt button.
+  const ERROR_Y: f32 = 100.;
+
+  struct Host {
+    clicks: Rc<Cell<usize>>,
+  }
+
+  impl Render for Host {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+      let clicks = self.clicks.clone();
+      div()
+        .child(
+          Button::new("small")
+            .ghost()
+            .small()
+            .label("Go")
+            .on_click(move |_, _, _| clicks.set(clicks.get() + 1))
+            .touch(),
+        )
+        .child(div().h(px(ERROR_Y - 44.)))
+        .child(super::error_text(ERROR, cx))
+    }
+  }
+
+  fn mount(cx: &mut TestAppContext) -> (AnyWindowHandle, Rc<Cell<usize>>) {
+    cx.update(super::super::theme::init);
+    let clicks = Rc::new(Cell::new(0));
+    let window = cx.update(|cx| {
+      let clicks = clicks.clone();
+      gpui_kit::open_window(
+        WindowOptions {
+          window_bounds: Some(WindowBounds::Windowed(Bounds {
+            origin: Point::default(),
+            size: size(px(412.), px(892.)),
+          })),
+          ..Default::default()
+        },
+        cx,
+        move |_, cx| cx.new(|_| Host { clicks }),
+      )
+      .expect("open test window")
+      .0
+    });
+    cx.update_window(window, |_, w, cx| w.render_frame(cx))
+      .unwrap();
+    (window, clicks)
+  }
+
+  fn touch(cx: &mut TestAppContext, window: AnyWindowHandle, phase: TouchPhase, x: f32, y: f32) {
+    cx.update_window(window, |_, w, cx| {
+      w.dispatch_event(
+        PlatformInput::Touch(TouchEvent {
+          id: TouchId(1),
+          phase,
+          position: point(px(x), px(y)),
+          predicted_position: None,
+          force: None,
+        }),
+        cx,
+      );
+    })
+    .unwrap();
+  }
+
+  /// A small button still takes a tap anywhere in its 44pt target.
+  #[gpui_kit::test]
+  fn a_tap_inside_the_touch_target_clicks(cx: &mut TestAppContext) {
+    let (window, clicks) = mount(cx);
+    touch(cx, window, TouchPhase::Started, 20., 40.);
+    touch(cx, window, TouchPhase::Ended, 20., 40.);
+    assert_eq!(clicks.get(), 1);
+  }
+
+  /// A finger that moves past the slop is a scroll, not a tap.
+  #[gpui_kit::test]
+  fn a_drag_does_not_click(cx: &mut TestAppContext) {
+    let (window, clicks) = mount(cx);
+    touch(cx, window, TouchPhase::Started, 20., 20.);
+    touch(cx, window, TouchPhase::Moved, 20., 60.);
+    touch(cx, window, TouchPhase::Ended, 20., 60.);
+    assert_eq!(clicks.get(), 0);
+  }
+
+  /// A long press on an error selects its text.
+  #[gpui_kit::test]
+  fn a_long_press_selects_error_text(cx: &mut TestAppContext) {
+    let (window, _) = mount(cx);
+    touch(cx, window, TouchPhase::Started, 20., ERROR_Y + 8.);
+    cx.executor()
+      .advance_clock(std::time::Duration::from_millis(600));
+    cx.run_until_parked();
+    touch(cx, window, TouchPhase::Ended, 20., ERROR_Y + 8.);
+    let selected = cx
+      .update_window(window, |_, w, cx| TextSelection::selected_text(w, cx))
+      .unwrap();
+    assert!(
+      !selected.is_empty() && ERROR.contains(selected.trim()),
+      "selected {selected:?}"
+    );
+  }
 }

@@ -2,6 +2,7 @@
 //! header, the checks rows [`super::pr_detail`] shows, and the sheet that creates one. GitHub
 //! is reached with the host's `gh`, so the host's sign-in is the one used.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use crate::{
   core::remote::{RemotePullRequestStatus, TreqCommandRequest},
   github::{PrCheckEntry, PrCiStatus, PrInfo},
@@ -178,7 +179,8 @@ impl Render for CreateSheet {
               .outline()
               .large()
               .label("Create draft")
-              .on_click(cx.listener(|this, _, _, cx| this.create(true, cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.create(true, cx)))
+              .touch(),
           )
           .child(
             Button::new("pr-create")
@@ -186,7 +188,8 @@ impl Render for CreateSheet {
               .large()
               .flex_1()
               .label("Create pull request")
-              .on_click(cx.listener(|this, _, _, cx| this.create(false, cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.create(false, cx)))
+              .touch(),
           ),
       )
   }

@@ -17,6 +17,7 @@ mod terminal_view;
 pub mod theme;
 mod widgets;
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use crate::result_ext::ResultExt as _;
 use futures::{channel::mpsc::UnboundedReceiver, StreamExt};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -481,7 +482,8 @@ impl Root {
                   .ghost()
                   .large()
                   .icon(IconName::ArrowLeft)
-                  .on_click(move |_, _, cx| nav::pop_n(count, cx)),
+                  .on_click(move |_, _, cx| nav::pop_n(count, cx))
+                  .touch(),
               )
             })
             .child(
@@ -517,7 +519,8 @@ impl Root {
                   .ghost()
                   .large()
                   .icon(IconName::Ellipsis)
-                  .on_click(move |_, window, cx| action(window, cx)),
+                  .on_click(move |_, window, cx| action(window, cx))
+                  .touch(),
               )
             }),
         )
@@ -650,7 +653,8 @@ fn cutoff_overlay(reason: String, managed: bool, cx: &App) -> impl IntoElement {
                 .primary()
                 .large()
                 .label("Reauthenticate")
-                .on_click(|_, _, cx| reauthenticate(cx)),
+                .on_click(|_, _, cx| reauthenticate(cx))
+                .touch(),
             )
           })
           .child(
@@ -658,7 +662,8 @@ fn cutoff_overlay(reason: String, managed: bool, cx: &App) -> impl IntoElement {
               .outline()
               .large()
               .label("Other machines")
-              .on_click(|_, _, cx| show_machines(cx)),
+              .on_click(|_, _, cx| show_machines(cx))
+              .touch(),
           )
           .into_any_element(),
       ]),

@@ -2,6 +2,7 @@
 //! workspaces under their base and status dots. A tap opens a workspace;
 //! holding one starts selecting, and the title bar's ⋯ acts on the picks.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -837,7 +838,8 @@ impl WorkspacesScreen {
               .outline()
               .large()
               .label("Done")
-              .on_click(cx.listener(|this, _, _, cx| this.end_selection(cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.end_selection(cx)))
+              .touch(),
           )
       }
       None => bar.child(
@@ -848,7 +850,8 @@ impl WorkspacesScreen {
           .h(px(widgets::CTA_H - 8.))
           .icon(IconName::Plus)
           .label("New workspaces")
-          .on_click(cx.listener(|this, _, _, cx| this.new_workspace(None, cx))),
+          .on_click(cx.listener(|this, _, _, cx| this.new_workspace(None, cx)))
+          .touch(),
       ),
     }
   }
@@ -872,7 +875,7 @@ impl WorkspacesScreen {
               Button::new("retry")
                 .outline()
                 .label("Retry")
-                .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
+                .on_click(cx.listener(|this, _, _, cx| this.reload(cx))).touch(),
             ),
           )
       }
@@ -926,7 +929,8 @@ impl WorkspacesScreen {
               .small()
               .icon(IconName::RefreshCw)
               .loading(self.list.is_loading())
-              .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
+              .touch(),
           ),
       )
       .children(
@@ -1093,7 +1097,8 @@ impl Render for RenameSheet {
           .w_full()
           .label("Save")
           .loading(self.saving)
-          .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
+          .on_click(cx.listener(|this, _, _, cx| this.save(cx)))
+          .touch(),
       )
   }
 }

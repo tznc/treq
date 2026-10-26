@@ -4,6 +4,7 @@
 //! the title bar's ⋯ menu ([`menu_items`]), so another one is one more
 //! [`PrAction`].
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use std::rc::Rc;
 
 use crate::{
@@ -615,6 +616,7 @@ impl PrDetailScreen {
         .when_some(known, |b, content| {
           b.on_click(cx.listener(move |this, _, _, cx| this.react(id.clone(), content, cx)))
         })
+        .touch()
       }))
       .child(
         Button::new(("reaction-add", i))
@@ -625,7 +627,8 @@ impl PrDetailScreen {
           .on_click(cx.listener(move |this, _, _, cx| {
             this.picker = if picker_open { None } else { Some(id.clone()) };
             cx.notify();
-          })),
+          }))
+          .touch(),
       );
     let picker = picker_open.then(|| {
       h_flex()
@@ -640,6 +643,7 @@ impl PrDetailScreen {
             .ghost()
             .label(*e)
             .on_click(cx.listener(move |this, _, _, cx| this.react(id.clone(), content, cx)))
+            .touch()
         }))
     });
     widgets::card(cx)
@@ -683,7 +687,8 @@ impl Render for PrDetailScreen {
                   Button::new("retry")
                     .outline()
                     .label("Retry")
-                    .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
+                    .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
+                    .touch(),
                 ),
               ),
           )
@@ -752,7 +757,8 @@ impl Render for PrDetailScreen {
         .h(px(widgets::CTA_H - 8.))
         .label("Comment")
         .loading(busy == Some("pr-comment"))
-        .on_click(cx.listener(|this, _, window, cx| this.send_comment(window, cx))),
+        .on_click(cx.listener(|this, _, window, cx| this.send_comment(window, cx)))
+        .touch(),
     );
     let checks = self.checks_section(cx);
     v_flex()
@@ -796,7 +802,8 @@ impl Render for PrDetailScreen {
               .label("Review changes")
               .on_click(cx.listener(|this, _, _, cx| {
                 super::pr_review::open(this.repo.clone(), this.number, cx)
-              })),
+              }))
+              .touch(),
           ),
       )
       .into_any_element()

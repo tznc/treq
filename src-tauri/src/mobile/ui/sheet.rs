@@ -2,6 +2,7 @@
 //! closes it. Menus (a list of actions) and confirmations are sheets; so is
 //! any view a screen opens with [`open`].
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use std::{rc::Rc, time::Duration};
 
 use gpui_kit::prelude::FluentBuilder as _;
@@ -270,7 +271,8 @@ impl Render for Confirm {
               .on_click(move |_, window, cx| {
                 close(cx);
                 action(window, cx);
-              }),
+              })
+              .touch(),
           )
           .child(
             Button::new("cancel")
@@ -279,7 +281,8 @@ impl Render for Confirm {
               .w_full()
               .h(px(widgets::CTA_H - 8.))
               .label("Cancel")
-              .on_click(|_, _, cx| close(cx)),
+              .on_click(|_, _, cx| close(cx))
+              .touch(),
           ),
       )
   }

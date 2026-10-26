@@ -5,6 +5,7 @@
 //! the account is gone. A refusal (the user is the last owner of an
 //! organization) shows the server's sentence.
 
+use crate::mobile::ui::widgets::TouchButton as _;
 use gpui_kit::component::Disableable as _;
 use gpui_kit::{
   component::{
@@ -143,7 +144,7 @@ impl Render for DeleteAccountSheet {
               .label("Delete account")
               .loading(self.deleting)
               .disabled(!confirmable)
-              .on_click(cx.listener(|this, _, _, cx| this.delete(cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.delete(cx))).touch(),
           )
           .child(
             Button::new("delete-account-cancel")
@@ -153,7 +154,7 @@ impl Render for DeleteAccountSheet {
               .h(px(widgets::CTA_H - 8.))
               .label("Cancel")
               .disabled(self.deleting)
-              .on_click(|_, _, cx| sheet::close(cx)),
+              .on_click(|_, _, cx| sheet::close(cx)).touch(),
           ),
       )
   }
