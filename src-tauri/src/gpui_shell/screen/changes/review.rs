@@ -2168,8 +2168,14 @@ mod row_paint_tests {
   #[test]
   fn unselected_rows_keep_their_diff_tint() {
     let p = theme::palette(true);
-    assert_eq!(row_fill(false, LineKind::Added, &p), Some(Tone::GitOpen.tint(&p)));
-    assert_eq!(row_fill(false, LineKind::Removed, &p), Some(Tone::GitClosed.tint(&p)));
+    assert_eq!(
+      row_fill(false, LineKind::Added, &p),
+      Some(Tone::GitOpen.tint(&p))
+    );
+    assert_eq!(
+      row_fill(false, LineKind::Removed, &p),
+      Some(Tone::GitClosed.tint(&p))
+    );
     assert_eq!(row_fill(false, LineKind::Context, &p), None);
   }
 
