@@ -283,7 +283,8 @@ jobs:
     name: ios build (gpui)
     needs: check
     if: needs.check.outputs.should_run == 'true'
-    runs-on: macos-15
+    # App Store Connect only accepts builds from the iOS 26 SDK (Xcode 26).
+    runs-on: macos-26
     timeout-minutes: 90
     # The signing secrets live in the prod environment, as for the desktop
     # release job.
@@ -326,6 +327,9 @@ jobs:
           sed -i.bak 's/^crate-type = .*/crate-type = ["staticlib", "rlib"]/' Cargo.toml
           grep -qx 'crate-type = \["staticlib", "rlib"\]' Cargo.toml
           rm Cargo.toml.bak
+
+      - name: Show Xcode version
+        run: xcodebuild -version
 
       - name: Generate the Xcode project
         working-directory: mobile-gpui
