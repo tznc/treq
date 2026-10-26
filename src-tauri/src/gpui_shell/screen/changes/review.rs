@@ -1282,7 +1282,7 @@ impl ChangesView {
     );
     if !under.is_empty() {
       let mut list = div()
-        .bg(p.muted.opacity(0.6))
+        .bg(comment_strip_fill(p))
         .border_y_1()
         .border_color(p.border.opacity(0.4))
         .px_4()
@@ -1320,7 +1320,6 @@ impl ChangesView {
     // Comment text reads at the diff's code size, so it follows zoom with it.
     let box_ = || {
       ui::text(div(), TextSize::Code)
-        .bg(p.background)
         .rounded(radius::MD)
         .p_3()
         .border_1()
@@ -1329,6 +1328,7 @@ impl ChangesView {
     if self.review.editing.as_deref() == Some(id) {
       let discard = id.to_string();
       return box_()
+        .bg(p.background)
         .child(self.edit_box(
           p,
           cx.listener(move |view, _, _, cx| {
@@ -2279,13 +2279,19 @@ pub(super) fn row_fill(
     return Some(p.selected());
   }
   if commented {
-    return Some(Tone::Warning.tint(p));
+    return Some(p.commented());
   }
   match kind {
     LineKind::Added => Some(Tone::GitOpen.tint(p)),
     LineKind::Removed => Some(Tone::GitClosed.tint(p)),
     LineKind::Context => None,
   }
+}
+
+/// Behind the comments under a line: the same amber as the commented rows,
+/// so the band runs on into the comments.
+pub(super) fn comment_strip_fill(p: &Palette) -> Hsla {
+  p.commented()
 }
 
 /// Whether the gutter shows its hover fill. The fill sits on the gutter cell,
@@ -2328,6 +2334,17 @@ mod row_paint_tests {
       assert_eq!(
         row_fill(false, true, kind, &p),
         Some(Tone::Warning.tint(&p))
+      );
+    }
+  }
+
+  #[test]
+  fn the_comment_strip_matches_its_commented_rows() {
+    for dark in [true, false] {
+      let p = theme::palette(dark);
+      assert_eq!(
+        Some(comment_strip_fill(&p)),
+        row_fill(false, true, LineKind::Added, &p)
       );
     }
   }

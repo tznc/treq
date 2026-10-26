@@ -60,7 +60,7 @@ test("diff text selection and commented lines", async ({ page }) => {
     expectations: [
       "The three commented rows have an amber background across the gutter and the code",
       "No chat-bubble icon appears in the line-number gutter",
-      "The comment card sits under the commented rows",
+      "The comment card sits under the commented rows, on the same amber as them",
     ],
   });
 });

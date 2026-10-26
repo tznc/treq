@@ -481,6 +481,12 @@ impl Palette {
     self.primary.opacity(if self.dark { 0.22 } else { 0.12 })
   }
 
+  /// Lines with a review comment, and the comments under them: one amber,
+  /// so a comment reads as part of the lines it is on.
+  pub fn commented(&self) -> Hsla {
+    self.warning.opacity(if self.dark { 0.15 } else { 0.1 })
+  }
+
   /// Behind every modal dialog, and behind controls laid over an image.
   pub fn scrim(&self) -> Hsla {
     gpui::black().opacity(if self.dark { 0.55 } else { 0.4 })

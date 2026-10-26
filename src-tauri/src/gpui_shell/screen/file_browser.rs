@@ -2081,12 +2081,17 @@ fn line_fill(selected: bool, commented: bool, added: bool, p: &Palette) -> Optio
   if selected {
     Some(p.selected())
   } else if commented {
-    Some(ui::Tone::Warning.tint(p))
+    Some(p.commented())
   } else if added {
     Some(ui::Tone::GitOpen.tint(p))
   } else {
     None
   }
+}
+
+/// Behind a line's comments: the amber of the lines they are on.
+pub(super) fn comment_section_fill(p: &Palette) -> Hsla {
+  p.commented()
 }
 
 #[cfg(test)]
