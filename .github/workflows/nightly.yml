@@ -125,12 +125,6 @@ jobs:
           grep -qx 'crate-type = \["rlib"\]' src-tauri/Cargo.toml
           rm src-tauri/Cargo.toml.bak
 
-      # tauri-action finds the app by globbing for tauri.conf.json and takes
-      # the first match, which is mobile-gpui/ (sorted before src-tauri/).
-      # It then looks for the desktop bundles under mobile-gpui/target.
-      - name: Hide the mobile-gpui Tauri config from tauri-action
-        run: rm mobile-gpui/tauri.conf.json
-
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           # Nightlies trade a slightly larger binary for a much faster link.
@@ -159,8 +153,8 @@ jobs:
         if: runner.os == 'macOS'
         run: bash scripts/verify-macos-bundle.sh "${{ matrix.app_bundle }}"
 
-  # Release builds of the GPUI mobile app (mobile-gpui/), rendered through
-  # tauri-plugin-gpui. They only run nightly (not on every PR) since the
+  # Release builds of the GPUI mobile app (src-tauri with the `mobile-ui`
+  # feature), rendered through tauri-plugin-gpui. They only run nightly (not on every PR) since the
   # Android/iOS toolchains are slow. mobile-gpui.yml builds and smoke-tests
   # the same app per push.
   #
@@ -168,9 +162,6 @@ jobs:
   # nightly release (plus a signed AAB artifact for Play), iOS uploads to
   # TestFlight. Without them both fall back to the unsigned debug builds.
   # The run number is the build number, so every nightly upgrades in place.
-  #
-  # Nightlies track tauri-gpui main: each job bumps the locked plugin commit
-  # to main's head before building, without committing the lockfile.
   android:
     name: android build (gpui)
     # Runs alongside the desktop builds; mobile-assets attaches the APK once
@@ -206,7 +197,7 @@ jobs:
         with:
           cache-on-failure: true
           key: nightly-android
-          workspaces: ./mobile-gpui -> target
+          workspaces: ". -> target"
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -229,41 +220,38 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Track tauri-gpui main
-        working-directory: mobile-gpui
-        run: cargo update -p tauri-plugin-gpui
-
       # arm64 only: phones. The generated Gradle project calls back into the
       # Tauri CLI, so it is a local npm install.
       - name: Generate the Android project
-        working-directory: mobile-gpui
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run tauri -- android init --ci
-          scripts/apply-icons.sh
+          scripts/mobile/apply-icons.sh
+          # `android init` regenerates gen/android without the plugin entries;
+          # only treq's build script adds them back (tauri-plugin-gpui's
+          # GpuiView), and a warm Rust cache skips it. Force it to rerun.
+          cargo clean -p treq --target aarch64-linux-android
 
       - name: Add release signing
         if: env.SIGNED == 'true'
-        working-directory: mobile-gpui
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: scripts/android-signing.sh
+        run: scripts/mobile/android-signing.sh
 
       - name: Build APK
-        working-directory: mobile-gpui
         run: |
           config='{"bundle":{"android":{"versionCode":${{ github.run_number }}}}}'
           if [ "$SIGNED" = true ]; then
-            npm run tauri -- android build --apk --aab --target aarch64 --ci --config "$config"
-            apk=$(find gen/android/app/build/outputs/apk -name '*-release.apk' | head -n1)
-            aab=$(find gen/android/app/build/outputs/bundle -name '*-release.aab' | head -n1)
+            npm run tauri -- android build --features mobile-ui --apk --aab --target aarch64 --ci --config "$config"
+            apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release.apk' | head -n1)
+            aab=$(find src-tauri/gen/android/app/build/outputs/bundle -name '*-release.aab' | head -n1)
             test -n "$aab"
             cp "$aab" "$GITHUB_WORKSPACE/treq-nightly-android.aab"
           else
-            npm run tauri -- android build --debug --apk --target aarch64 --ci --config "$config"
-            apk=$(find gen/android/app/build/outputs/apk -name '*.apk' | head -n1)
+            npm run tauri -- android build --features mobile-ui --debug --apk --target aarch64 --ci --config "$config"
+            apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -n1)
           fi
           test -n "$apk"
           ls -la "$apk"
@@ -307,48 +295,42 @@ jobs:
         with:
           cache-on-failure: true
           key: nightly-ios
-          workspaces: ./mobile-gpui -> target
+          workspaces: ". -> target"
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: "24"
 
-      # - Track tauri-gpui main, as the Android job does.
-      # - libc 0.2.190 made the `_dyld_*` functions macOS-only, which breaks
-      #   `backtrace` (and with it GPUI) on iOS. tauri-gpui's README pins 0.2.189.
-      # - No `cdylib` on iOS: GPUI's core-video dependency asks rustc to link
-      #   the OpenGL framework, which iOS lacks. Xcode links the staticlib.
+      # No `cdylib` on iOS: GPUI's core-video dependency asks rustc to link
+      # the OpenGL framework, which iOS lacks. Xcode links the staticlib.
+      # (The lockfile keeps libc at 0.2.189: 0.2.190 made the `_dyld_*`
+      # functions macOS-only, which breaks `backtrace`, and GPUI, on iOS.)
       - name: Prepare the crate for iOS
-        working-directory: mobile-gpui
         run: |
-          cargo update -p tauri-plugin-gpui
-          cargo update -p libc --precise 0.2.189
-          sed -i.bak 's/^crate-type = .*/crate-type = ["staticlib", "rlib"]/' Cargo.toml
-          grep -qx 'crate-type = \["staticlib", "rlib"\]' Cargo.toml
-          rm Cargo.toml.bak
+          sed -i.bak 's/^crate-type = .*/crate-type = ["staticlib", "rlib"]/' src-tauri/Cargo.toml
+          grep -qx 'crate-type = \["staticlib", "rlib"\]' src-tauri/Cargo.toml
+          rm src-tauri/Cargo.toml.bak
 
       - name: Show Xcode version
         run: xcodebuild -version
 
       - name: Generate the Xcode project
-        working-directory: mobile-gpui
         env:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           # An empty team fails `ios init`; unset it for the unsigned build.
           [ -n "$APPLE_DEVELOPMENT_TEAM" ] || unset APPLE_DEVELOPMENT_TEAM
           command -v xcodegen >/dev/null || brew install xcodegen
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run tauri -- ios init --ci
-          scripts/apply-icons.sh
+          scripts/mobile/apply-icons.sh
 
       # The Tauri CLI imports IOS_CERTIFICATE into a temporary keychain and
       # signs with the App Store profile in IOS_MOBILE_PROVISION; it ignores
       # the certificate without the profile.
       - name: Build signed .ipa
         if: env.SIGNED == 'true'
-        working-directory: mobile-gpui
         env:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
           IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE_P12 }}
@@ -363,8 +345,8 @@ jobs:
           printf '%s' "$APPLE_API_KEY_P8" > "$keydir/AuthKey_$APPLE_API_KEY.p8"
           export APPLE_API_KEY_PATH="$keydir/AuthKey_$APPLE_API_KEY.p8"
           config='{"bundle":{"iOS":{"bundleVersion":"${{ github.run_number }}"}}}'
-          npm run tauri -- ios build --target aarch64 --export-method app-store-connect --ci --config "$config"
-          ipa=$(find gen/apple/build -name '*.ipa' | head -n 1)
+          npm run tauri -- ios build --features mobile-ui --target aarch64 --export-method app-store-connect --ci --config "$config"
+          ipa=$(find src-tauri/gen/apple/build -name '*.ipa' | head -n 1)
           test -n "$ipa"
           # App Store Connect rejects an .ipa without its profile.
           unzip -Z1 "$ipa" | grep 'Payload/.*\.app/embedded\.mobileprovision$' >/dev/null \
@@ -388,10 +370,9 @@ jobs:
       # development team and certificate.
       - name: Build debug app bundle (simulator)
         if: env.SIGNED != 'true'
-        working-directory: mobile-gpui
         run: |
-          npm run tauri -- ios build --debug --target aarch64-sim --no-sign --ci
-          app=$(find gen/apple/build -name '*.app' -path '*arm64-sim*' -maxdepth 3 | head -n 1)
+          npm run tauri -- ios build --features mobile-ui --debug --target aarch64-sim --no-sign --ci
+          app=$(find src-tauri/gen/apple/build -name '*.app' -path '*arm64-sim*' -maxdepth 3 | head -n 1)
           test -n "$app"
           # Simulator only: unzip, then `xcrun simctl install booted <app>`.
           ditto -c -k --keepParent "$app" "$GITHUB_WORKSPACE/treq-nightly-ios-simulator-arm64.zip"

@@ -46,6 +46,9 @@ pub mod jj;
 pub mod linear;
 pub mod local_db;
 pub mod lock_ext;
+/// The GPUI mobile app, which the iOS and Android builds run (`mobile_main`).
+#[cfg(feature = "mobile-ui")]
+pub mod mobile;
 pub mod notify_dispatch;
 #[cfg(feature = "gui")]
 pub(crate) mod open_new_window;
@@ -60,6 +63,8 @@ pub mod send_dispatch;
 #[cfg(feature = "gui")]
 pub(crate) mod startup;
 pub mod telemetry;
+#[cfg(test)]
+mod test_alloc;
 pub mod tracker;
 pub mod unified_patch;
 
@@ -537,8 +542,16 @@ where
   !first_arg.starts_with("treq://") && !first_arg.starts_with("-psn_")
 }
 
+/// The mobile app's entry point: the GPUI mobile UI (`mobile`), with the
+/// mobile Tauri config (`tauri.conf.json` plus `tauri.<platform>.conf.json`).
+#[cfg(all(mobile, feature = "mobile-ui"))]
+#[tauri::mobile_entry_point]
+pub fn mobile_main() {
+  mobile::run(tauri::generate_context!());
+}
+
 #[cfg(feature = "gui")]
-#[cfg_attr(all(mobile, not(feature = "embed")), tauri::mobile_entry_point)]
+#[cfg_attr(all(mobile, not(feature = "mobile-ui")), tauri::mobile_entry_point)]
 #[expect(
   clippy::exit,
   reason = "a CLI invocation hands its exit code to the shell, and `tauri::generate_context!` expands to an exit"

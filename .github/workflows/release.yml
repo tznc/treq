@@ -105,12 +105,6 @@ jobs:
           grep -qx 'crate-type = \["rlib"\]' src-tauri/Cargo.toml
           rm src-tauri/Cargo.toml.bak
 
-      # tauri-action finds the app by globbing for tauri.conf.json and takes
-      # the first match, which is mobile-gpui/ (sorted before src-tauri/).
-      # It then looks for the desktop bundles under mobile-gpui/target.
-      - name: Hide the mobile-gpui Tauri config from tauri-action
-        run: rm mobile-gpui/tauri.conf.json
-
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
