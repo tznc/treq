@@ -1894,13 +1894,7 @@ impl FileBrowserView {
       .any(|c| n >= c.start_line && n <= c.end_line);
     let selected = self.selection.is_some_and(|(s, e)| n >= s && n <= e);
     let width = line_number_width(lines.len());
-    let bg = if selected {
-      Some(p.selected())
-    } else if added {
-      Some(ui::Tone::GitOpen.tint(&p))
-    } else {
-      None
-    };
+    let bg = line_fill(selected, has_comment, added, &p);
     let hover = p.muted.opacity(0.3);
     let selecting = self.selecting;
     let accent = p.primary;
@@ -1954,16 +1948,6 @@ impl FileBrowserView {
             MouseButton::Left,
             cx.listener(move |view, e: &MouseDownEvent, _, cx| view.press_line(n, e, cx)),
           )
-          .when(has_comment, |this| {
-            this.child(
-              div()
-                .ml_1()
-                .h(zpx(LINE_HEIGHT))
-                .flex()
-                .items_center()
-                .child(ui::icon(theme::ICON_MESSAGE, 12., p.primary)),
-            )
-          })
           .child(
             div()
               .min_w(zpx(width as f32 * CH))
@@ -2088,5 +2072,44 @@ fn copy_button(
     button.outline()
   } else {
     button
+  }
+}
+
+/// A source line's fill: the selection, then a comment's amber (marking its
+/// lines like GitHub), then the added-line tint.
+fn line_fill(selected: bool, commented: bool, added: bool, p: &Palette) -> Option<Hsla> {
+  if selected {
+    Some(p.selected())
+  } else if commented {
+    Some(p.commented())
+  } else if added {
+    Some(ui::Tone::GitOpen.tint(p))
+  } else {
+    None
+  }
+}
+
+/// Behind a line's comments: the amber of the lines they are on.
+pub(super) fn comment_section_fill(p: &Palette) -> Hsla {
+  p.commented()
+}
+
+#[cfg(test)]
+mod line_fill_tests {
+  use super::*;
+
+  #[test]
+  fn selection_then_comment_then_added() {
+    let p = theme::palette(true);
+    assert_eq!(line_fill(true, true, true, &p), Some(p.selected()));
+    assert_eq!(
+      line_fill(false, true, true, &p),
+      Some(ui::Tone::Warning.tint(&p))
+    );
+    assert_eq!(
+      line_fill(false, false, true, &p),
+      Some(ui::Tone::GitOpen.tint(&p))
+    );
+    assert_eq!(line_fill(false, false, false, &p), None);
   }
 }

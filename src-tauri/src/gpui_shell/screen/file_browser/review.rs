@@ -18,7 +18,7 @@ impl FileBrowserView {
       .debug_selector(|| "file-comment-section".into())
       .border_b_1()
       .border_color(p.border)
-      .bg(p.muted.opacity(0.2))
+      .bg(comment_section_fill(p))
       .px_4()
       .py_3()
       .flex()
@@ -42,7 +42,6 @@ impl FileBrowserView {
   ) -> gpui::AnyElement {
     let box_ = || {
       div()
-        .bg(p.background)
         .rounded(radius::MD)
         .p_3()
         .border_1()
@@ -51,6 +50,7 @@ impl FileBrowserView {
     if self.editing.as_deref() == Some(c.id.as_str()) {
       let discard = c.id.clone();
       return box_()
+        .bg(p.background)
         .child(self.edit_box(
           p,
           cx.listener(move |view, _, _, cx| view.delete_comment(&discard, cx)),

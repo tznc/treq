@@ -3,7 +3,7 @@
 //! markdown an agent gets (`useLineSelection`, `useComments`, `useReview`
 //! and `lib/review.ts`). Shared by the desktop and mobile apps.
 
-use std::sync::LazyLock;
+use std::{ops::Range, sync::LazyLock};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -77,6 +77,103 @@ pub fn selection(hunks: &[JjDiffHunk], from: LineRef, to: LineRef) -> Vec<LineRe
     }
   }
   out
+}
+
+/// A place in a diff's code: its line, and a byte offset into the line's
+/// text after the `+`/`-`/` ` marker.
+pub type TextPoint = (LineRef, usize);
+
+/// The two points in reading order.
+fn ordered(a: TextPoint, b: TextPoint) -> (TextPoint, TextPoint) {
+  if (a.0 .0, a.0 .1, a.1) <= (b.0 .0, b.0 .1, b.1) {
+    (a, b)
+  } else {
+    (b, a)
+  }
+}
+
+/// A diff line's code, after its marker.
+fn code_of(hunks: &[JjDiffHunk], (h, l): LineRef) -> &str {
+  hunks
+    .get(h)
+    .and_then(|h| h.lines.get(l))
+    .and_then(|t| t.get(1..))
+    .unwrap_or("")
+}
+
+/// The bytes of line `at`'s code that the selection from `a` to `b` covers,
+/// `None` when it covers none of the line.
+pub fn selected_range(
+  hunks: &[JjDiffHunk],
+  a: TextPoint,
+  b: TextPoint,
+  at: LineRef,
+) -> Option<Range<usize>> {
+  let (start, end) = ordered(a, b);
+  if !selection(hunks, start.0, end.0).contains(&at) {
+    return None;
+  }
+  let t = code_of(hunks, at);
+  let clamp = |i: usize| {
+    let mut i = i.min(t.len());
+    while !t.is_char_boundary(i) {
+      i -= 1;
+    }
+    i
+  };
+  let from = if at == start.0 { clamp(start.1) } else { 0 };
+  let to = if at == end.0 { clamp(end.1) } else { t.len() };
+  Some(from..to.max(from))
+}
+
+/// The code between two points, in either order, one line per diff line:
+/// what copying a text selection gives, without markers or line numbers.
+pub fn selected_text(hunks: &[JjDiffHunk], a: TextPoint, b: TextPoint) -> String {
+  let (start, end) = ordered(a, b);
+  selection(hunks, start.0, end.0)
+    .into_iter()
+    .map(|at| {
+      let r = selected_range(hunks, a, b, at).unwrap_or(0..0);
+      code_of(hunks, at).get(r).unwrap_or("")
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
+}
+
+/// The word around byte `at` for a double-click: a run of identifier
+/// characters, a run of whitespace, or else the single character there.
+pub fn word_at(text: &str, at: usize) -> Range<usize> {
+  let Some((i, c)) = text.char_indices().find(|(i, c)| at < i + c.len_utf8()) else {
+    return text.len()..text.len();
+  };
+  let class = |c: char| {
+    if c.is_alphanumeric() || c == '_' {
+      1
+    } else if c.is_whitespace() {
+      2
+    } else {
+      0
+    }
+  };
+  let kind = class(c);
+  if kind == 0 {
+    return i..i + c.len_utf8();
+  }
+  let start = text
+    .get(..i)
+    .unwrap_or("")
+    .char_indices()
+    .rev()
+    .take_while(|(_, c)| class(*c) == kind)
+    .last()
+    .map_or(i, |(j, _)| j);
+  let end = text
+    .get(i..)
+    .unwrap_or("")
+    .char_indices()
+    .find(|(_, c)| class(*c) != kind)
+    .map_or(text.len(), |(j, _)| i + j);
+  start..end
 }
 
 /// `L12` or `L12-14`, as the comment box labels its lines.
@@ -603,6 +700,55 @@ pub fn parse_suggestion(text: &str) -> Option<Suggestion> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  fn text_hunks() -> Vec<JjDiffHunk> {
+    vec![
+      hunk(
+        "a",
+        "@@ -1,2 +1,2 @@",
+        &[" let a = 1;", "-let b = 2;", "+let b = 3;"],
+      ),
+      hunk("b", "@@ -9 +9 @@", &["+fn main() {}"]),
+    ]
+  }
+
+  #[test]
+  fn selected_text_within_one_line_drops_the_marker() {
+    let h = text_hunks();
+    assert_eq!(selected_text(&h, ((0, 0), 4), ((0, 0), 9)), "a = 1");
+  }
+
+  #[test]
+  fn selected_text_spans_lines_and_hunks_in_either_order() {
+    let h = text_hunks();
+    let want = "= 1;\nlet b = 2;\nlet b = 3;\nfn main";
+    assert_eq!(selected_text(&h, ((0, 0), 6), ((1, 0), 7)), want);
+    assert_eq!(selected_text(&h, ((1, 0), 7), ((0, 0), 6)), want);
+  }
+
+  #[test]
+  fn selected_text_clamps_offsets_past_the_line_end() {
+    let h = text_hunks();
+    assert_eq!(selected_text(&h, ((0, 2), 4), ((0, 2), 99)), "b = 3;");
+  }
+
+  #[test]
+  fn selected_range_gives_each_line_its_part() {
+    let h = text_hunks();
+    let (a, b) = (((0, 0), 6), ((0, 2), 3));
+    assert_eq!(selected_range(&h, b, a, (0, 0)), Some(6..10));
+    assert_eq!(selected_range(&h, a, b, (0, 1)), Some(0..10));
+    assert_eq!(selected_range(&h, a, b, (0, 2)), Some(0..3));
+    assert_eq!(selected_range(&h, a, b, (1, 0)), None);
+  }
+
+  #[test]
+  fn word_at_finds_identifiers_and_single_symbols() {
+    assert_eq!(word_at("let foo_bar = 1;", 6), 4..11);
+    assert_eq!(word_at("let foo_bar = 1;", 12), 12..13);
+    assert_eq!(word_at("a  b", 2), 1..3);
+    assert_eq!(word_at("", 0), 0..0);
+  }
 
   fn hunk(id: &str, header: &str, lines: &[&str]) -> JjDiffHunk {
     serde_json::from_value(serde_json::json!({

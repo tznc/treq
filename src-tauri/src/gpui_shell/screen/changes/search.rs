@@ -363,9 +363,11 @@ impl ChangesView {
     text: &str,
     language: Option<&'static str>,
     changed: &[(Range<usize>, Hsla)],
+    record: Option<RecordLayout>,
   ) -> AnyElement {
     if !self.search.index.contains_key(&key) {
-      return highlight::styled_marked(text, language, self.dark, changed).into_any_element();
+      let styled = highlight::styled_marked(text, language, self.dark, changed);
+      return with_layout(styled, record).into_any_element();
     }
     let current = self.current_in(&key);
     let primary = theme::palette(self.dark).primary;
@@ -383,12 +385,10 @@ impl ChangesView {
       .collect();
     let styled: StyledText = highlight::styled_marked(text, language, self.dark, &marks);
     if current.is_none() {
-      return styled.into_any_element();
+      return with_layout(styled, record).into_any_element();
     }
     let target = self.search.target.clone();
-    div()
-      .relative()
-      .child(styled)
+    with_layout(styled, record)
       .child(
         gpui::canvas(
           move |bounds, _, _| {
@@ -543,6 +543,25 @@ impl ChangesView {
         ),
     )
   }
+}
+
+/// Takes a drawn line's text layout, once it is laid out and placed.
+pub(super) type RecordLayout = Rc<dyn Fn(gpui::TextLayout)>;
+
+/// `styled` in a box that hands its layout to `record` at prepaint, when
+/// asking it where a point falls is safe.
+fn with_layout(styled: StyledText, record: Option<RecordLayout>) -> Div {
+  let layout = styled.layout().clone();
+  div()
+    .relative()
+    .child(styled)
+    .when_some(record, |this, record| {
+      this.child(
+        gpui::canvas(move |_, _, _| record(layout.clone()), |_, _, _, _| {})
+          .absolute()
+          .size_0(),
+      )
+    })
 }
 
 #[cfg(test)]
