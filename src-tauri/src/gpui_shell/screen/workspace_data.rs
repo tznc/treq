@@ -614,7 +614,16 @@ pub fn workspace_view(
   let pr_info = pr.pr.clone().flatten();
   let pr_loaded = pr.pr.is_some();
   let has_remote = loaded.remote.is_some();
-  let commits_ahead = status.map_or(0, |s| s.commits_ahead_of_target.len());
+  // The badge counts the list the Commits tab draws, so the two can't drift
+  // apart when history is rewritten between two reads.
+  let commits_ahead = match loaded.commits.as_ref() {
+    Some(log) => log
+      .commits
+      .iter()
+      .filter(|c| !c.on_target_only && !c.is_working_copy)
+      .count(),
+    None => status.map_or(0, |s| s.commits_ahead_of_target.len()),
+  };
   let has_workspace_commits = loaded.commits.as_ref().is_some_and(|log| {
     log
       .commits

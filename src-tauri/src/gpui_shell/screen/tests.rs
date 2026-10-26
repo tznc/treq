@@ -2813,7 +2813,7 @@ const WORKSPACE_JSON: &str = r#"{
   },
   "tabRow": {
     "tab": "overview",
-    "commits": {"kind": "count", "count": 3, "tone": "muted"},
+    "commits": {"kind": "count", "count": 2, "tone": "muted"},
     "changes": {"count": 5, "tone": "uncommitted"},
     "logs": false,
     "busy": null,

@@ -455,8 +455,10 @@ impl WorkspaceView {
       return;
     }
     let moved = self.route.key() != route.key();
-    let stale = moved || self.route.revision != route.revision;
     let changed = self.route.changes_revision != route.changes_revision;
+    // A changed checkout or a refocused window (`changes_revision`) may mean
+    // history was rewritten outside treq: the tab badges read again too.
+    let stale = moved || changed || self.route.revision != route.revision;
     let left = std::mem::replace(&mut self.route, route);
     self.dark = dark;
     if moved {
