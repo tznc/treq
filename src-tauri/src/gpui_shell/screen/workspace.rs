@@ -2545,7 +2545,12 @@ fn terminal_place(
       .collect(),
     titles: workspaces
       .iter()
-      .map(|w| (super::merge::full_path(w), super::code_data::display_title(w)))
+      .map(|w| {
+        (
+          super::merge::full_path(w),
+          super::code_data::display_title(w),
+        )
+      })
       .collect(),
     workspace_ids: workspaces
       .iter()

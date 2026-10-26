@@ -9947,7 +9947,10 @@ fn terminal_label_shows_the_workspace_title_else_the_branch() {
     titles: vec![("/ws/a".into(), "Fix login flow".into())],
     ..terminal::Place::default()
   };
-  assert_eq!(place.workspace_label("/ws/a").as_deref(), Some("Fix login flow"));
+  assert_eq!(
+    place.workspace_label("/ws/a").as_deref(),
+    Some("Fix login flow")
+  );
   assert_eq!(place.workspace_label("/ws/b").as_deref(), Some("feat-b"));
   assert_eq!(place.workspace_label("/elsewhere"), None);
 }

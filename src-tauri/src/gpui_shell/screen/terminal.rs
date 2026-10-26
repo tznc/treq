@@ -181,7 +181,10 @@ impl Place {
   /// branch. None for a directory outside every workspace.
   pub fn workspace_label(&self, dir: &str) -> Option<String> {
     let find = |list: &[(String, String)]| {
-      list.iter().find(|(path, _)| path == dir).map(|(_, v)| v.clone())
+      list
+        .iter()
+        .find(|(path, _)| path == dir)
+        .map(|(_, v)| v.clone())
     };
     find(&self.titles).or_else(|| find(&self.branches))
   }
@@ -3506,7 +3509,12 @@ impl TerminalPane {
                 format!("terminal-workspace-label-tip-{}", column.id),
                 Side::Top,
                 Some(TooltipContent::Text(label_name.clone().into())),
-                label(label_name, workspace_name.is_none(), key, self.react.clone()),
+                label(
+                  label_name,
+                  workspace_name.is_none(),
+                  key,
+                  self.react.clone(),
+                ),
                 cx,
               )),
           )
