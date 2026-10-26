@@ -35,16 +35,16 @@ jobs:
         shell: pwsh
         run: Add-MpPreference -ExclusionPath "${{ github.workspace }}"
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           components: rustfmt
           toolchain: stable
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-nextest
 
@@ -55,7 +55,7 @@ jobs:
           echo "RUSTFLAGS=-C linker=lld-link" >> "$GITHUB_ENV"
 
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Configure sccache
         run: |
@@ -77,7 +77,7 @@ jobs:
 
       - name: Restore jj CLI cache
         id: jj-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: .ci-bin
           key: jj-${{ runner.os }}-${{ runner.arch }}-${{ steps.jj.outputs.tag }}
@@ -104,7 +104,7 @@ jobs:
       - name: Save jj CLI cache
         if: steps.jj-cache.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: .ci-bin
           key: ${{ steps.jj-cache.outputs.cache-primary-key }}
@@ -118,7 +118,7 @@ jobs:
           jj --version
           gh --version
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-on-failure: true
           workspaces: |

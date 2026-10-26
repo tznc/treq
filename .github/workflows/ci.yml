@@ -81,10 +81,10 @@ jobs:
       JS: ${{ needs.detect-changes.outputs.js_changed }}
       RUST: ${{ needs.detect-changes.outputs.rust_changed }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -131,7 +131,7 @@ jobs:
 
       - name: Install rustfmt
         if: ${{ !cancelled() && env.RUST == 'true' }}
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           components: rustfmt
           toolchain: stable
@@ -143,7 +143,7 @@ jobs:
 
       - name: Install typos and cargo-machete
         if: ${{ !cancelled() }}
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: typos,cargo-machete
 
@@ -171,21 +171,21 @@ jobs:
     name: test-desktop-e2e / playwright / ubuntu-22.04
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
 
       - name: Use mold linker
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
+        uses: rui314/setup-mold@da13e0b42e392e3a45d1215033a2270b849d7d36 # v1
 
       # test-rust's packages, plus Xvfb and Mesa's software Vulkan
       # (lavapipe), which GPUI renders with on a runner without a GPU, and
       # xdotool, which presses keys through X for the text shortcut tests.
       - name: install dependencies (ubuntu only)
-        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers xdotool
           version: webkit-4.1-gpui-e2e-2
@@ -193,7 +193,7 @@ jobs:
 
       # Reads test-rust's cache (warm-caches.yml saves it on main); the
       # dependencies build the same, only treq itself differs.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: test
           save-if: false
@@ -205,7 +205,7 @@ jobs:
         run: cargo build --locked --features e2e --bin treq
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -227,7 +227,7 @@ jobs:
 
       - name: Upload the report
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-e2e-report
           path: |
@@ -245,10 +245,10 @@ jobs:
     name: cargo-deny / ubuntu-22.04
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-deny
 
@@ -264,29 +264,29 @@ jobs:
     name: test-rust / clippy + test / ubuntu-22.04
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           components: rustfmt, clippy
           toolchain: stable
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-nextest
 
       # mold links the large test binaries several times faster than ld.
       - name: Use mold linker
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
+        uses: rui314/setup-mold@da13e0b42e392e3a45d1215033a2270b849d7d36 # v1
 
       # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
       # cache on subsequent runs. execute_install_scripts is required so dpkg
       # postinst (ldconfig, alternatives) still runs on restore.
       - name: install dependencies (ubuntu only)
         # Tauri links WebKit/GTK; GPUI needs the X11/Wayland/Vulkan libraries.
-        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev mesa-vulkan-drivers
           version: webkit-4.1-gpui-2
@@ -307,7 +307,7 @@ jobs:
 
       - name: Restore jj CLI cache
         id: jj-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: .ci-bin
           key: jj-${{ runner.os }}-${{ runner.arch }}-${{ steps.jj.outputs.tag }}
@@ -357,7 +357,7 @@ jobs:
       - name: Save jj CLI cache
         if: steps.jj-cache.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: .ci-bin
           key: ${{ steps.jj-cache.outputs.cache-primary-key }}
@@ -374,7 +374,7 @@ jobs:
       # Restores the cache warm-caches.yml saves on main. PR runs don't save:
       # a PR's cache can only be read by that PR, and the multi-GB saves
       # evict main's caches from the repo's 10 GB quota.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: test
           save-if: ${{ github.ref == 'refs/heads/main' }}
