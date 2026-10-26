@@ -1175,6 +1175,23 @@ mod tests {
   }
 
   #[test]
+  fn list_cached_shares_one_snapshot_until_the_next_write() {
+    let fetch: PrFetchFn = Arc::new(|_, branch| Ok(Some(sample_pr(7, branch))));
+    let (mgr, _) = manager_with(fetch, vec!["feat".into()]);
+    mgr.refresh_repo_now("/tmp/repo");
+
+    let a = mgr.list_cached("/tmp/repo");
+    let b = mgr.list_cached("/tmp/repo");
+    assert!(Arc::ptr_eq(&a, &b), "reads must not copy the map");
+
+    mgr.put_cached("/tmp/repo", "other", None);
+    let c = mgr.list_cached("/tmp/repo");
+    assert!(!Arc::ptr_eq(&a, &c));
+    assert_eq!(a.len(), 1, "a held snapshot must not see later writes");
+    assert_eq!(c.len(), 2);
+  }
+
+  #[test]
   fn get_cached_distinguishes_missing_vs_no_pr() {
     let fetch: PrFetchFn = Arc::new(|_, branch| {
       if branch == "has-pr" {

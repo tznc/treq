@@ -343,3 +343,18 @@ fn idle(h: &mut Harness, time: Duration) {
     h.cx.run_until_parked();
   }
 }
+
+/// Frames share the header snapshot rather than copying it: a redraw with
+/// nothing new keeps the same one.
+#[gpui::test]
+fn redraws_share_the_workspace_snapshot(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, two_workspaces(commits_host()), commits_route());
+  set_workspace(&mut h, 7);
+  h.cx.run_until_parked();
+  let view = workspace_view(&mut h);
+  let before = view.read_with(&h.cx, |w, _| w.snapshot()).expect("snapshot");
+  first_frame(&mut h);
+  h.cx.run_until_parked();
+  let after = view.read_with(&h.cx, |w, _| w.snapshot()).expect("snapshot");
+  assert!(std::rc::Rc::ptr_eq(&before, &after));
+}
