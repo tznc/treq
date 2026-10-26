@@ -642,6 +642,32 @@ fn checks_list_pull_request_checks_failed_first(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn checks_list_the_wip_status_last_as_inactive(cx: &mut TestAppContext) {
+  let mut input = checks_input();
+  let check = |name: &str, bucket: &str| PrCheckEntry {
+    name: name.into(),
+    bucket: bucket.into(),
+    link: String::new(),
+    duration_secs: None,
+  };
+  input.ci = Some(PrCiStatus {
+    state: "success".into(),
+    total: 1,
+    passed: 1,
+    failed: 0,
+    pending: 0,
+    checks: vec![
+      check("WIP", crate::github::INACTIVE),
+      check("build", "pass"),
+    ],
+  });
+  let mut h = Harness::new(cx, checks(input), FakeHost::default());
+  // Below the counted checks, labelled instead of spinning.
+  assert!(h.drawn("ci-inactive-1"));
+  assert!(!h.drawn("ci-inactive-0"));
+}
+
+#[gpui::test]
 fn checks_follow_the_workspace_view(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, checks(checks_input()), FakeHost::default());
   assert!(!h.drawn("checks-workflow-2"));

@@ -202,6 +202,8 @@ const checks = {
     check("build", "pass", 2),
     check("test", "pass", 5),
     check("lint", "pass", 1),
+    // The WIP app's commit status: pending for as long as the title says WIP.
+    { name: "WIP", bucket: "pending", link: "https://github.com/apps/wip" },
   ],
   "feat/alerting-logs": [check("build", "pass", 3), check("test", "pass", 8)],
 };

@@ -61,6 +61,7 @@ pub fn ci_state(bucket: &str) -> &'static str {
   match bucket {
     "pass" | "skipping" => "success",
     "fail" | "cancel" => "failure",
+    crate::github::INACTIVE => "inactive",
     _ => "pending",
   }
 }
@@ -70,6 +71,7 @@ fn severity(check: &PrCheckEntry) -> u8 {
   match ci_state(&check.bucket) {
     "failure" => 0,
     "pending" => 1,
+    "inactive" => 3,
     _ => 2,
   }
 }
@@ -323,7 +325,10 @@ impl Popover {
     let rows = checks.into_iter().enumerate().map(|(i, check)| {
       let state = ci_state(&check.bucket);
       let color = ci_color(state, &p);
-      let icon = if state == "pending" {
+      let inactive = state == "inactive";
+      let icon = if inactive {
+        ui::icon(theme::ICON_MINUS, 16., p.muted_foreground).into_any_element()
+      } else if state == "pending" {
         ui::spinner(SharedString::from(format!("ci-spin-{i}")), 16., color).into_any_element()
       } else {
         ui::icon(
@@ -356,9 +361,20 @@ impl Popover {
             .flex_1()
             .min_w_0()
             .truncate()
+            .when(inactive, |d| d.text_color(p.muted_foreground))
             .child(check.name.clone()),
         )
-        .children(check.duration_secs.map(|secs| {
+        .when(inactive, |row| {
+          let selector = format!("ci-inactive-{i}");
+          row.child(
+            div()
+              .debug_selector(move || selector)
+              .flex_none()
+              .text_color(p.muted_foreground)
+              .child("inactive"),
+          )
+        })
+        .children(check.duration_secs.filter(|_| !inactive).map(|secs| {
           div()
             .flex_none()
             .text_color(p.muted_foreground)
