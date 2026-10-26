@@ -32,6 +32,8 @@ gui = [
   "dep:tauri-plugin-biometric",
   "dep:tauri-plugin-cli",
   "dep:tauri-plugin-single-instance",
+  "dep:tauri-plugin-updater",
+  "dep:tauri-plugin-process",
 ]
 # Desktop repo windows open in a GPUI shell, which draws the workspace sidebar.
 gpui-shell = ["gui", "dep:gtk", "dep:tauri-plugin-gpui", "dep:gpui-kit", "dep:treq-ui", "dep:syntect", "dep:two-face", "dep:alacritty_terminal", "dep:image", "dep:emojis"]
@@ -160,6 +162,9 @@ tauri-plugin-cli = { version = "2.4.1", optional = true }
 # Parses CLI args before Tauri starts (see `cli::args`); same version the plugin uses.
 clap = { version = "4", features = ["string"] }
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"], optional = true }
+# In-app updates from signed release artifacts (treq.dev/version.json).
+tauri-plugin-updater = { version = "2", optional = true }
+tauri-plugin-process = { version = "2", optional = true }
 # GPUI renderer for Tauri windows. Same source as mobile-gpui's, so both
 # resolve to one copy of GPUI when mobile-gpui links this crate.
 tauri-plugin-gpui = { git = "https://github.com/ziinc/tauri-gpui", branch = "main", optional = true }
