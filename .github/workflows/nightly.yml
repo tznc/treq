@@ -253,14 +253,26 @@ jobs:
 
       - name: Build APK
         working-directory: mobile-gpui
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           config='{"bundle":{"android":{"versionCode":${{ github.run_number }}}}}'
           if [ "$SIGNED" = true ]; then
-            npm run tauri -- android build --apk --aab --target aarch64 --ci --config "$config"
-            apk=$(find gen/android/app/build/outputs/apk -name '*-release.apk' | head -n1)
+            # `--apk --aab` runs Gradle's Rust build once per output. Build
+            # the AAB only and derive a signed universal APK from it.
+            npm run tauri -- android build --aab --target aarch64 --ci --config "$config"
             aab=$(find gen/android/app/build/outputs/bundle -name '*-release.aab' | head -n1)
             test -n "$aab"
             cp "$aab" "$GITHUB_WORKSPACE/treq-nightly-android.aab"
+            curl -fsSL -o "$RUNNER_TEMP/bundletool.jar" \
+              https://github.com/google/bundletool/releases/download/1.18.1/bundletool-all-1.18.1.jar
+            java -jar "$RUNNER_TEMP/bundletool.jar" build-apks --mode=universal \
+              --bundle="$aab" --output="$RUNNER_TEMP/treq.apks" \
+              --ks=gen/android/upload.jks --ks-key-alias="$ANDROID_KEY_ALIAS" \
+              --ks-pass=env:ANDROID_KEYSTORE_PASSWORD --key-pass=env:ANDROID_KEYSTORE_PASSWORD
+            unzip -o -q "$RUNNER_TEMP/treq.apks" universal.apk -d "$RUNNER_TEMP"
+            apk=$RUNNER_TEMP/universal.apk
           else
             npm run tauri -- android build --debug --apk --target aarch64 --ci --config "$config"
             apk=$(find gen/android/app/build/outputs/apk -name '*.apk' | head -n1)
