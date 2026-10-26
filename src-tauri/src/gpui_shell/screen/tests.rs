@@ -2876,6 +2876,10 @@ fn settings_reviews_proposed_prompt_edits_with_the_review_cards(cx: &mut TestApp
     apply.size.height <= gpui::px(24.),
     "condensed buttons: {apply:?}"
   );
+  assert_eq!(
+    dismiss.size.height, apply.size.height,
+    "Dismiss matches Apply"
+  );
 
   h.click("prompt-edit-apply-e1");
   h.cx.run_until_parked();

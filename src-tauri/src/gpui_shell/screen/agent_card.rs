@@ -63,7 +63,7 @@ pub fn agent_comment_card(
   }
   actions = actions.child(
     button("dismiss", theme::ICON_X, "Dismiss")
-      .variant(Variant::Outline)
+      .variant(Variant::Ghost)
       .on_click(on(CardAction::Dismiss)),
   );
   if comment.suggested_replacement.is_some() {

@@ -112,7 +112,7 @@ test("tune review prompt: start, review edits, apply", async ({ page }) => {
     expectations: [
       "Proposed edits (2) under the prompt, each a condensed Local card with its line in the header",
       "Each card shows the reason and the suggestion as a red/green diff",
-      "Small Dismiss (X, outline) then Apply (check, primary) pulled to the card's right edge",
+      "Ghost Dismiss (X) then Apply (check, primary) pulled to the card's right edge",
     ],
   });
 
