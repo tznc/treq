@@ -3,52 +3,17 @@
 //! test binary; only the ignored benchmarks read it:
 //! `cargo test --features gpui-shell --lib allocs_ -- --ignored --nocapture --test-threads=1`.
 
-use std::{
-  alloc::{GlobalAlloc, Layout, System},
-  sync::atomic::{AtomicIsize, AtomicUsize, Ordering::Relaxed},
-};
+use std::sync::atomic::Ordering::Relaxed;
 
 use gpui::TestAppContext;
+
+use crate::test_alloc::{ALLOCS, BYTES, LIVE};
 
 use super::{
   changes_large, commits_large,
   kept_tabs::{set_workspace, workspace},
   *,
 };
-
-struct Counting;
-
-static ALLOCS: AtomicUsize = AtomicUsize::new(0);
-static BYTES: AtomicUsize = AtomicUsize::new(0);
-static LIVE: AtomicIsize = AtomicIsize::new(0);
-
-// SAFETY: forwards every call to `System` unchanged, only counting.
-unsafe impl GlobalAlloc for Counting {
-  unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-    ALLOCS.fetch_add(1, Relaxed);
-    BYTES.fetch_add(layout.size(), Relaxed);
-    LIVE.fetch_add(layout.size() as isize, Relaxed);
-    // SAFETY: the caller upholds `alloc`'s contract.
-    unsafe { System.alloc(layout) }
-  }
-
-  unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-    LIVE.fetch_sub(layout.size() as isize, Relaxed);
-    // SAFETY: the caller upholds `dealloc`'s contract.
-    unsafe { System.dealloc(ptr, layout) }
-  }
-
-  unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-    ALLOCS.fetch_add(1, Relaxed);
-    BYTES.fetch_add(new_size, Relaxed);
-    LIVE.fetch_add(new_size as isize - layout.size() as isize, Relaxed);
-    // SAFETY: the caller upholds `realloc`'s contract.
-    unsafe { System.realloc(ptr, layout, new_size) }
-  }
-}
-
-#[global_allocator]
-static COUNTING: Counting = Counting;
 
 /// The running (allocations, bytes) totals, for the other benchmarks.
 pub(super) fn counts() -> (usize, usize) {

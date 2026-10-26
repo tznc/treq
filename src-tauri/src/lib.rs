@@ -46,6 +46,9 @@ pub mod jj;
 pub mod linear;
 pub mod local_db;
 pub mod lock_ext;
+/// The GPUI mobile app, run by the mobile app crate (mobile-gpui).
+#[cfg(feature = "mobile-ui")]
+pub mod mobile;
 pub mod notify_dispatch;
 #[cfg(feature = "gui")]
 pub(crate) mod open_new_window;
@@ -60,6 +63,8 @@ pub mod send_dispatch;
 #[cfg(feature = "gui")]
 pub(crate) mod startup;
 pub mod telemetry;
+#[cfg(test)]
+mod test_alloc;
 pub mod tracker;
 pub mod unified_patch;
 

@@ -135,10 +135,9 @@ icons! {
 }
 
 // Inter, as in the React app. The TTFs are shared with mobile-gpui.
-const INTER_REGULAR: &[u8] = include_bytes!("../../../mobile-gpui/assets/fonts/Inter-Regular.ttf");
-const INTER_MEDIUM: &[u8] = include_bytes!("../../../mobile-gpui/assets/fonts/Inter-Medium.ttf");
-const INTER_SEMIBOLD: &[u8] =
-  include_bytes!("../../../mobile-gpui/assets/fonts/Inter-SemiBold.ttf");
+const INTER_REGULAR: &[u8] = include_bytes!("../../../src-tauri/assets/fonts/Inter-Regular.ttf");
+const INTER_MEDIUM: &[u8] = include_bytes!("../../../src-tauri/assets/fonts/Inter-Medium.ttf");
+const INTER_SEMIBOLD: &[u8] = include_bytes!("../../../src-tauri/assets/fonts/Inter-SemiBold.ttf");
 
 /// The React app's mono face, converted from its web font
 /// (`src/public/fonts/jetbrains-mono-400-latin.woff2`) with the same subset.

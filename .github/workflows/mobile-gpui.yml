@@ -23,6 +23,7 @@ on:
   pull_request:
     paths:
       - "mobile-gpui/**"
+      - "src-tauri/src/mobile/**"
       - ".github/workflows/mobile-gpui.yml"
   workflow_dispatch:
 
@@ -46,10 +47,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
           toolchain: stable
+      # The app's code is treq's `mobile` module (the `mobile-ui` feature),
+      # so its tests run in the root workspace.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: ./mobile-gpui -> target
-          key: host
+          workspaces: ". -> target"
+          key: mobile-host
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: System dependencies
         run: |
@@ -58,8 +61,7 @@ jobs:
             libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev \
             libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev
       - name: cargo test
-        working-directory: mobile-gpui
-        run: cargo test --lib
+        run: cargo test --locked -p treq --lib --features mobile-ui "mobile::"
 
   # The APK build and emulator smoke run on manual dispatch only; nightly.yml
   # builds the mobile apps every day. Push and PR runs keep the unit tests.
