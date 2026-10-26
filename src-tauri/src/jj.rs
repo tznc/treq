@@ -7555,6 +7555,10 @@ pub fn jj_push_bookmark(workspace_path: &str, branch_name: &str) -> Result<Strin
     }
   }
 
+  let repo_lock = repo_op_lock(workspace_path);
+  let _guard = repo_lock
+    .lock()
+    .unwrap_or_else(|poisoned| poisoned.into_inner());
   let loaded = load_workspace_repo(workspace_path)?;
   let mut tx = loaded.repo.start_transaction();
   let subprocess_options = git_subprocess_options(&loaded.settings)?;
@@ -7576,7 +7580,9 @@ pub fn jj_push_bookmark(workspace_path: &str, branch_name: &str) -> Result<Strin
     RefPushAction::AlreadyMatches => None,
     RefPushAction::LocalConflicted => {
       return Err(JjError::IoError(
-        "Cannot push conflicted local bookmark".to_string(),
+        format!(
+          "Cannot push: local bookmark '{branch_name}' is conflicted. Run `jj bookmark list --conflicted`, then `jj bookmark set {branch_name} -r <commit>` to pick a side."
+        ),
       ))
     }
     RefPushAction::RemoteConflicted => {
@@ -7894,6 +7900,10 @@ fn fetch_origin(repo_path: &str) -> Result<String, JjError> {
   if !get_git_remotes(repo_path).contains("origin") {
     return Ok(String::new());
   }
+  let repo_lock = repo_op_lock(repo_path);
+  let _guard = repo_lock
+    .lock()
+    .unwrap_or_else(|poisoned| poisoned.into_inner());
   let mut loaded = load_workspace_repo(repo_path)?;
   let subprocess_options = git_subprocess_options(&loaded.settings)?;
   let import_options = git::GitImportOptions {
@@ -7918,6 +7928,11 @@ fn fetch_origin(repo_path: &str) -> Result<String, JjError> {
     .map_err(|e| JjError::IoError(format!("Fetch failed: {}", e)))?;
   block_on(fetch.import_refs())
     .map_err(|e| JjError::IoError(format!("Fetch failed to import refs: {}", e)))?;
+  reset_conflicted_bookmarks_origin_contains(tx.repo_mut());
+  // The fetch can move tracked local bookmarks such as `main`. Without an
+  // export, git's `refs/heads/main` stays on the old commit, and the next git
+  // command that moves it splits jj's `main` into a conflict.
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs after fetch");
   if tx.repo().has_changes() {
     block_on(tx.repo_mut().rebase_descendants())
       .map_err(|e| JjError::IoError(format!("Failed to rebase after fetch: {}", e)))?;
@@ -7927,6 +7942,52 @@ fn fetch_origin(repo_path: &str) -> Result<String, JjError> {
   import_colocated_git_state(&mut loaded, repo_path)?;
 
   Ok(String::new())
+}
+
+/// A local bookmark split by racing operations, every side of which origin
+/// already has, loses nothing when reset to its `@origin` target. Any other
+/// conflict holds a commit only this machine has and is left for the user.
+fn reset_conflicted_bookmarks_origin_contains(repo: &mut MutableRepo) {
+  let origin = RemoteName::new("origin");
+  let resets: Vec<_> = repo
+    .view()
+    .local_bookmarks()
+    .filter(|(_, local)| local.has_conflict())
+    .filter_map(|(name, local)| {
+      let symbol = RemoteRefSymbol {
+        name,
+        remote: origin,
+      };
+      let remote = repo
+        .view()
+        .get_remote_bookmark(symbol)
+        .target
+        .as_normal()?
+        .clone();
+      let contained = local
+        .added_ids()
+        .all(|id| repo.index().is_ancestor(id, &remote).unwrap_or(false));
+      contained.then(|| (name.to_owned(), remote))
+    })
+    .collect();
+  for (name, remote) in resets {
+    repo.set_local_bookmark_target(&name, RefTarget::normal(remote));
+  }
+}
+
+/// Serializes operations that move bookmarks (fetch, push) across the home
+/// repo and all its workspaces, which share one operation log. Two of them
+/// started from the same operation each move a bookmark, and jj records the
+/// merge as a conflicted bookmark.
+fn repo_op_lock(workspace_path: &str) -> std::sync::Arc<std::sync::Mutex<()>> {
+  let repo_root =
+    derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
+  working_copy_lock(
+    &Path::new(&repo_root)
+      .join(".jj")
+      .join("repo")
+      .to_string_lossy(),
+  )
 }
 
 /// Git subprocess options for jj-lib fetch/push, resolving a compatible Git
@@ -10767,6 +10828,139 @@ mod tests {
       .to_string()
   }
 
+  // A pushed origin plus a colocated home clone that tracks `main@origin`.
+  fn origin_and_home_clone() -> (TempDir, TempDir) {
+    let origin = TempDir::new().expect("origin");
+    git(&origin, &["init", "--bare", "-b", "main", "."]);
+    let home = TempDir::new().expect("home");
+    git(&home, &["init", "-b", "main", "."]);
+    git(&home, &["config", "user.name", "Test User"]);
+    git(&home, &["config", "user.email", "test@example.com"]);
+    git(
+      &home,
+      &["remote", "add", "origin", origin.path().to_str().unwrap()],
+    );
+    fs::write(home.path().join("base.txt"), "base\n").expect("write");
+    git(&home, &["add", "."]);
+    git(&home, &["commit", "-m", "base"]);
+    git(&home, &["push", "origin", "main"]);
+    let home_path = home.path().to_str().unwrap();
+    init_jj_for_git_repo(home_path).expect("init jj");
+    jj_git_fetch(home_path).expect("fetch");
+    jj_bookmark_track(home_path, "main", "origin").expect("track");
+    (origin, home)
+  }
+
+  // Lands one commit on origin's `main` from a second clone; returns its id.
+  fn advance_origin_main(origin: &TempDir) -> String {
+    let other = TempDir::new().expect("other");
+    git(&other, &["clone", origin.path().to_str().unwrap(), "."]);
+    git(&other, &["config", "user.name", "Other"]);
+    git(&other, &["config", "user.email", "other@example.com"]);
+    let count = git_output(&other, &["rev-list", "--count", "HEAD"]);
+    fs::write(other.path().join(format!("next-{count}.txt")), "next\n").expect("write");
+    git(&other, &["add", "."]);
+    git(&other, &["commit", "-m", "next"]);
+    git(&other, &["push", "origin", "main"]);
+    git_output(&other, &["rev-parse", "HEAD"])
+  }
+
+  // Two operations started from the same op head each move `main`: the race
+  // a background fetch and another jj op hit, leaving `main` conflicted.
+  fn race_main_into_conflict(repo_path: &str, start: &str, a: &str, b: &str) {
+    let set_main = |repo: &Arc<ReadonlyRepo>, hex: &str, name: &str| {
+      let id = jj_lib::backend::CommitId::try_from_hex(hex).expect("hex");
+      let mut tx = repo.start_transaction();
+      tx.repo_mut()
+        .set_local_bookmark_target(RefName::new("main"), RefTarget::normal(id));
+      block_on(tx.commit(name)).expect("commit race op")
+    };
+    let loaded = load_workspace_repo(repo_path).expect("load");
+    let started = set_main(&loaded.repo, start, "race start");
+    set_main(&started, a, "race a");
+    set_main(&started, b, "race b");
+    assert!(jj_is_bookmark_conflicted(repo_path, "main"));
+  }
+
+  #[test]
+  fn fetch_waits_for_an_op_holding_the_repo_lock_from_a_workspace() {
+    let (origin, home) = origin_and_home_clone();
+    let home_path = home.path().to_str().unwrap().to_string();
+    advance_origin_main(&origin);
+    // A workspace path shares the home repo's lock: one operation log.
+    let workspace_path = home.path().join(".treq").join("workspaces").join("ws");
+    let lock = repo_op_lock(workspace_path.to_str().unwrap());
+    let held = lock.lock().unwrap();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let fetching = std::thread::spawn(move || {
+      jj_git_fetch(&home_path).expect("fetch");
+      done_tx.send(()).unwrap();
+    });
+    let finished_while_held = done_rx
+      .recv_timeout(std::time::Duration::from_secs(3))
+      .is_ok();
+    drop(held);
+    fetching.join().unwrap();
+    assert!(
+      !finished_while_held,
+      "fetch ran while another op held the lock"
+    );
+  }
+
+  #[test]
+  fn fetch_exports_moved_trunk_to_git() {
+    let (origin, home) = origin_and_home_clone();
+    let tip = advance_origin_main(&origin);
+    jj_git_fetch(home.path().to_str().unwrap()).expect("fetch");
+    assert_eq!(git_output(&home, &["rev-parse", "refs/heads/main"]), tip);
+  }
+
+  #[test]
+  fn fetch_resets_conflicted_trunk_when_origin_has_every_side() {
+    let (origin, home) = origin_and_home_clone();
+    let home_path = home.path().to_str().unwrap();
+    let base = git_output(&home, &["rev-parse", "main"]);
+    // Origin merges two sibling commits, so both race sides are on origin
+    // and neither descends from the other.
+    let other = TempDir::new().expect("other");
+    git(&other, &["clone", origin.path().to_str().unwrap(), "."]);
+    git(&other, &["config", "user.name", "Other"]);
+    git(&other, &["config", "user.email", "other@example.com"]);
+    let mut sides = Vec::new();
+    for side in ["left", "right"] {
+      git(&other, &["switch", "-C", side, &base]);
+      fs::write(other.path().join(format!("{side}.txt")), "x\n").expect("write");
+      git(&other, &["add", "."]);
+      git(&other, &["commit", "-m", side]);
+      sides.push(git_output(&other, &["rev-parse", "HEAD"]));
+    }
+    git(&other, &["switch", "-C", "main", &sides[0]]);
+    git(&other, &["merge", "--no-edit", "right"]);
+    git(&other, &["push", "origin", "main"]);
+    let tip = git_output(&other, &["rev-parse", "HEAD"]);
+    jj_git_fetch(home_path).expect("fetch");
+    race_main_into_conflict(home_path, &base, &sides[0], &sides[1]);
+    jj_git_fetch(home_path).expect("fetch resolves");
+    assert!(!jj_is_bookmark_conflicted(home_path, "main"));
+    assert_eq!(git_output(&home, &["rev-parse", "refs/heads/main"]), tip);
+  }
+
+  #[test]
+  fn fetch_keeps_conflicted_trunk_holding_a_local_only_commit() {
+    let (origin, home) = origin_and_home_clone();
+    let home_path = home.path().to_str().unwrap();
+    git(&home, &["switch", "-c", "local-work"]);
+    fs::write(home.path().join("mine.txt"), "mine\n").expect("write");
+    git(&home, &["add", "mine.txt"]);
+    git(&home, &["commit", "-m", "local only"]);
+    let local = git_output(&home, &["rev-parse", "HEAD"]);
+    let base = git_output(&home, &["rev-parse", "main"]);
+    let tip = advance_origin_main(&origin);
+    jj_git_fetch(home_path).expect("fetch");
+    race_main_into_conflict(home_path, &base, &local, &tip);
+    jj_git_fetch(home_path).expect("fetch");
+    assert!(jj_is_bookmark_conflicted(home_path, "main"));
+  }
   fn init_colocated_repo_with_two_branches() -> TempDir {
     let temp = TempDir::new().expect("tempdir");
     init_git_repo(&temp);
