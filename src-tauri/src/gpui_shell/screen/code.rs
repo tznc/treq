@@ -1525,6 +1525,18 @@ pub(super) fn scrolling_markdown(
   markdown_view(id, text, size, dark, true).size_full()
 }
 
+/// The text size markdown at `size` px draws with. Code size stays code
+/// size, so comment bodies match the diff they sit in.
+fn markdown_text_size(size: f32) -> TextSize {
+  match size {
+    s if s <= 11. => TextSize::Xs,
+    s if s <= 12. => TextSize::Code,
+    s if s <= 14. => TextSize::Sm,
+    s if s <= 17. => TextSize::Lg,
+    _ => TextSize::Xl,
+  }
+}
+
 fn markdown_view(
   id: impl Into<SharedString>,
   text: &str,
@@ -1533,13 +1545,7 @@ fn markdown_view(
   scrollable: bool,
 ) -> Div {
   let id: SharedString = id.into();
-  let text_size = match size {
-    s if s <= 11. => TextSize::Xs,
-    s if s <= 12. => TextSize::Code,
-    s if s <= 14. => TextSize::Sm,
-    s if s <= 17. => TextSize::Lg,
-    _ => TextSize::Xl,
-  };
+  let text_size = markdown_text_size(size);
   let size = text_size.metrics().0;
   let style = TextViewStyle {
     is_dark: dark,
@@ -3564,4 +3570,19 @@ fn loc_indicator(
         ),
     )
     .child(count(format!("-{deletions}"), removed.text(p), minus_ch))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn markdown_at_code_size_uses_the_code_text_size() {
+    assert_eq!(
+      markdown_text_size(TextSize::Code.metrics().0),
+      TextSize::Code
+    );
+    assert_eq!(markdown_text_size(11.), TextSize::Xs);
+    assert_eq!(markdown_text_size(13.), TextSize::Sm);
+  }
 }
