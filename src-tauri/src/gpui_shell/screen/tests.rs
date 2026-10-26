@@ -9755,3 +9755,103 @@ mod virtual_chaos;
 mod virtual_lists;
 mod workspace_actions;
 mod workspace_dialogs;
+
+/// Drags in the gutter from one line to another, through every line between.
+fn drag_gutter(h: &mut Harness, from: usize, to: usize) {
+  h.cx.run_until_parked();
+  let at = |h: &mut Harness, l: usize| {
+    h.cx
+      .debug_bounds(Box::leak(format!("gutter-a.rs-0-{l}").into_boxed_str()))
+      .expect("gutter")
+      .center()
+  };
+  let start = at(h, from);
+  h.cx
+    .simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+  let path: Vec<usize> = if from <= to {
+    (from..=to).collect()
+  } else {
+    (to..=from).rev().collect()
+  };
+  let mut last = start;
+  for l in path {
+    last = at(h, l);
+    h.cx
+      .simulate_mouse_move(last, Some(MouseButton::Left), Modifiers::none());
+    h.cx.run_until_parked();
+  }
+  h.cx
+    .simulate_mouse_up(last, MouseButton::Left, Modifiers::none());
+}
+
+#[gpui::test]
+fn changes_tab_drag_selects_lines_downward(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  drag_gutter(&mut h, 0, 2);
+  assert_eq!(
+    selected_lines(&mut h).map(|(_, l)| l),
+    Some(vec![(0, 0), (0, 1), (0, 2)])
+  );
+}
+
+#[gpui::test]
+fn changes_tab_drag_selects_lines_upward(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  drag_gutter(&mut h, 2, 0);
+  assert_eq!(
+    selected_lines(&mut h).map(|(_, l)| l),
+    Some(vec![(0, 0), (0, 1), (0, 2)])
+  );
+}
+
+/// a.rs as a replaced pair, more added lines and a trailing context line, the
+/// shape of the QA app's alerting.ts diff.
+fn changes_host_replaced() -> FakeHost {
+  let mut host = changes_host();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [],
+    "uncommitted_files": [
+      {"path": "a.rs", "status": "M", "previous_path": null, "changed_line_count": 8, "diff_deferred": false}
+    ],
+    "hunks_by_file": [
+      {"path": "a.rs", "hunks": [{"id": "h", "header": "@@ -1,3 +1,7 @@", "lines": [
+        "-fn f(line: &str) {", "-  g(line)", "+fn f(line: &str, level: u8) {", "+  g(line, level)",
+        "+}", "+", "+fn e(line: &str) {", "+  f(line, 3)", " }"
+      ], "patch": ""}]}
+    ],
+    "too_large_to_render": false
+  }))
+  .ok();
+  host
+}
+
+#[gpui::test]
+fn changes_tab_drag_selects_across_a_replaced_pair_both_ways(cx: &mut TestAppContext) {
+  let all: Vec<(usize, usize)> = (0..9).map(|l| (0, l)).collect();
+  let (mut h, _) = workspace_harness(cx, changes_host_replaced(), changes_route());
+  drag_gutter(&mut h, 0, 8);
+  assert_eq!(
+    selected_lines(&mut h).map(|(_, l)| l),
+    Some(all.clone()),
+    "down"
+  );
+  h.cx.simulate_keystrokes("escape");
+  drag_gutter(&mut h, 8, 0);
+  assert_eq!(selected_lines(&mut h).map(|(_, l)| l), Some(all), "up");
+}
+
+#[gpui::test]
+fn changes_tab_shift_click_extends_the_line_selection(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_replaced(), changes_route());
+  h.click("gutter-a.rs-0-6");
+  let at = h
+    .cx
+    .debug_bounds("gutter-a.rs-0-1")
+    .expect("gutter")
+    .center();
+  h.cx.simulate_click(at, Modifiers::shift());
+  assert_eq!(
+    selected_lines(&mut h).map(|(_, l)| l),
+    Some((1..=6).map(|l| (0, l)).collect())
+  );
+}
