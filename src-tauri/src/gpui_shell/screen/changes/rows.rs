@@ -546,9 +546,12 @@ impl ChangesView {
             .flex()
             .bg(p.muted.opacity(0.6))
             .when(expandable, |this| {
-              this.cursor_pointer().hover(move |s| s.bg(hover)).on_click(
-                cx.listener(move |view, _, _, cx| view.expand_context(&file, h, Dir::Before, cx)),
-              )
+              this
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover))
+                .on_click(cx.listener(move |view, _, _, cx| {
+                  view.expand_context(&file, h, Dir::Before, false, cx)
+                }))
             }),
         )
         .child(
@@ -580,7 +583,15 @@ impl ChangesView {
                   .text_color(muted)
                   .child("Show more lines above"),
               )
-            }),
+            })
+            // Between hunks the row above offers it, for the same gap.
+            .when_some(
+              (h == 0)
+                .then(|| self.expand_all_range(path, hunks, h, Dir::Before))
+                .flatten()
+                .map(|(start, end)| end + 1 - start),
+              |this, count| this.child(self.expand_all_button(path, h, Dir::Before, count, cx)),
+            ),
         )
         .into_any_element()
       }
@@ -592,7 +603,15 @@ impl ChangesView {
           .unwrap_or_default();
         let line = lines.get(i).map_or("", String::as_str);
         let numbers = context_row_numbers(&hunk.header, dir == Dir::After, lines.len(), i);
-        context_row(numbers, line, language, p).into_any_element()
+        let side = if dir == Dir::After { "after" } else { "before" };
+        context_row(
+          format!("context-new-{path}-{h}-{side}-{i}"),
+          numbers,
+          line,
+          language,
+          p,
+        )
+        .into_any_element()
       }
       Row::Line(_, _, l) => {
         // Numbered with the card's other lines, not by counting up to this one.
@@ -643,9 +662,9 @@ impl ChangesView {
             .bg(p.muted.opacity(0.3))
             .cursor_pointer()
             .hover(move |s| s.bg(hover))
-            .on_click(
-              cx.listener(move |view, _, _, cx| view.expand_context(&file, h, Dir::After, cx)),
-            ),
+            .on_click(cx.listener(move |view, _, _, cx| {
+              view.expand_context(&file, h, Dir::After, false, cx)
+            })),
         )
         .child(
           ui::text(div(), TextSize::Xs)
@@ -658,12 +677,50 @@ impl ChangesView {
             .py_0p5()
             .text_color(muted)
             .child(ui::icon(theme::ICON_CHEVRON_DOWN, 12., muted))
-            .child("Show more lines below"),
+            .child("Show more lines below")
+            .when_some(
+              self
+                .expand_all_range(path, hunks, h, Dir::After)
+                .map(|(start, end)| end + 1 - start),
+              |this, count| this.child(self.expand_all_button(path, h, Dir::After, count, cx)),
+            ),
         )
         .into_any_element()
       }
       Row::Head(..) | Row::Conflict(..) | Row::End => div().into_any_element(),
     }
+  }
+
+  /// "Expand all (N lines)": reads the whole gap in one click.
+  fn expand_all_button(
+    &self,
+    path: &str,
+    h: usize,
+    dir: Dir,
+    count: usize,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let p = theme::palette(self.dark);
+    let id = match dir {
+      Dir::Before => format!("expand-all-above-{path}-{h}"),
+      Dir::After => format!("expand-all-{path}-{h}"),
+    };
+    let file = path.to_string();
+    let hover = p.foreground;
+    ui::text(div(), TextSize::Xs)
+      .id(SharedString::from(id.clone()))
+      .debug_selector(move || id)
+      .ml_3()
+      .flex_none()
+      .text_color(p.muted_foreground)
+      .cursor_pointer()
+      .hover(move |s| s.text_color(hover))
+      .on_click(cx.listener(move |view, _, _, cx| {
+        // The row behind it reads twenty lines.
+        cx.stop_propagation();
+        view.expand_context(&file, h, dir, true, cx);
+      }))
+      .child(format!("Expand all ({count} lines)"))
   }
 
   /// Added and removed lines of a card, for its header.

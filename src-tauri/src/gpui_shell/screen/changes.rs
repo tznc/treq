@@ -38,11 +38,11 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   changes_data::{
     body, check_message, commit_label, conflict_lines, conflicts, context_ranges, deleted_sides,
-    diff_summary, discarded, draws_hunks, full_path, hunks_hash, pending_label, review_prompt,
-    section_label, select_all_label, split_path, stashed, total_lines, visible_committed_at, Body,
-    BodyInput, ChangedFile, ChangesHost, CommitAction, Conflict, ContextReads, EditorApps,
-    FileHunks, Host, List, Snapshot, Staging, BATCH, FIRST_BATCH, HOME_ENDPOINT,
-    LARGE_CHANGESET_LINES,
+    diff_summary, discarded, draws_hunks, full_path, gap_ranges, hunks_hash, pending_label,
+    review_prompt, section_label, select_all_label, split_path, stashed, total_lines,
+    visible_committed_at, Body, BodyInput, ChangedFile, ChangesHost, CommitAction, Conflict,
+    ContextReads, EditorApps, FileHunks, Host, List, Snapshot, Staging, BATCH, EXPAND_ALL_MAX,
+    FIRST_BATCH, HOME_ENDPOINT, LARGE_CHANGESET_LINES,
   },
   code::Parent,
   commits_data::{line_kind, line_numbers, LineKind},
@@ -1385,7 +1385,42 @@ impl ChangesView {
     )
   }
 
-  fn expand_context(&mut self, path: &str, h: usize, dir: Dir, cx: &mut Context<Self>) {
+  /// [`gap_ranges`] for hunk `h` of `path`, from the lines read so far.
+  fn gap_ranges(&self, path: &str, hunks: &[JjDiffHunk], h: usize) -> ContextReads {
+    let read = |i: usize, dir: Dir| {
+      self
+        .context
+        .get(&(path.to_string(), i, dir))
+        .map_or(0, Vec::len)
+    };
+    let ended = self.context_ended.contains(&(path.to_string(), h));
+    gap_ranges(
+      hunks,
+      h,
+      |i| (read(i, Dir::Before), read(i, Dir::After)),
+      ended,
+    )
+  }
+
+  /// The hidden gap "Expand all" reads above or below hunk `h`, when it
+  /// is small enough to offer.
+  pub(super) fn expand_all_range(
+    &self,
+    path: &str,
+    hunks: &[JjDiffHunk],
+    h: usize,
+    dir: Dir,
+  ) -> Option<(usize, usize)> {
+    let (before, after) = self.gap_ranges(path, hunks, h);
+    match dir {
+      Dir::Before => before,
+      Dir::After => after,
+    }
+    .filter(|(start, end)| end + 1 - start <= EXPAND_ALL_MAX)
+  }
+
+  /// `handleExpandContext`; `all` reads the whole gap ("Expand all").
+  fn expand_context(&mut self, path: &str, h: usize, dir: Dir, all: bool, cx: &mut Context<Self>) {
     // The PR's files are not checked out.
     if self.read_only() {
       return;
@@ -1406,10 +1441,14 @@ impl ChangesView {
     if h >= hunks.len() {
       return;
     }
-    let (before, after) = self.context_ranges(path, hunks, h);
-    let range = match dir {
-      Dir::Before => before,
-      Dir::After => after,
+    let range = if all {
+      self.expand_all_range(path, hunks, h, dir)
+    } else {
+      let (before, after) = self.context_ranges(path, hunks, h);
+      match dir {
+        Dir::Before => before,
+        Dir::After => after,
+      }
     };
     let Some((start, end)) = range else {
       return;
@@ -3534,6 +3573,7 @@ fn skeleton(p: &Palette) -> Div {
 
 /// `HunkContextLineRow`: a line read by "Show more lines".
 fn context_row(
+  selector: String,
   (old, new): (i64, i64),
   line: &str,
   language: Option<&'static str>,
@@ -3543,17 +3583,28 @@ fn context_row(
   let border = p.border.opacity(0.4);
   div()
     .flex()
+    // Darker than the hunk's own lines: these were read in by an expander.
+    .bg(p.inset)
     .child(
       div()
         .w_24()
         .flex_none()
         .flex()
         .items_center()
+        // As the hunk lines' gutter spaces its numbers.
+        .gap_1()
         .border_r_1()
         .border_color(border)
         .text_color(p.muted_foreground)
         .child(div().w_10().mr_1().flex().justify_end().child(number(old)))
-        .child(div().w_10().flex().justify_end().child(number(new))),
+        .child(
+          div()
+            .debug_selector(move || selector)
+            .w_10()
+            .flex()
+            .justify_end()
+            .child(number(new)),
+        ),
     )
     .child(div().w_6().flex_none())
     .child(div().w_5().flex_none())

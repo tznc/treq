@@ -453,6 +453,9 @@ pub struct Palette {
   /// Toast icons: `text-green-500`, and `text-yellow-600 dark:text-yellow-400`.
   pub toast_success: Hsla,
   pub toast_warning: Hsla,
+  /// A shade darker than `background`, for recessed rows such as diff
+  /// lines an expander read in.
+  pub inset: Hsla,
   pub card: Hsla,
   pub card_foreground: Hsla,
   pub primary_foreground: Hsla,
@@ -535,6 +538,7 @@ pub fn palette(dark: bool) -> Palette {
       stack_guide: rgb(0x93c5fd).into(),
       toast_success: rgb(0x22c55e).into(),
       toast_warning: rgb(0xfacc15).into(),
+      inset: token(0., 0., 11.),
       card: token(0., 0., 20.),
       card_foreground: token(0., 0., 95.),
       primary_foreground: token(0., 0., 100.),
@@ -569,6 +573,7 @@ pub fn palette(dark: bool) -> Palette {
       stack_guide: rgb(0x1e3a8a).into(),
       toast_success: rgb(0x22c55e).into(),
       toast_warning: rgb(0xca8a04).into(),
+      inset: token(0., 0., 95.),
       card: token(0., 0., 100.),
       card_foreground: token(0., 0., 13.),
       primary_foreground: token(0., 0., 100.),

@@ -18,9 +18,10 @@ import { openTab, openWorkspace, settle } from "./helpers.ts";
 
 const BRANCH = "feat/diff-context";
 const FILE = "packages/api/src/routes.ts";
-// The first hunk's "Show more lines below" and the second hunk's header.
-const BELOW = { x: 1029, y: 483 };
+// The second hunk's header.
 const ABOVE = { x: 1029, y: 505 };
+// "Expand all" beside the first hunk's "Show more lines below".
+const EXPAND_ALL = { x: 1113, y: 483 };
 
 const lines = (edit: (n: number) => string) =>
   Array.from({ length: 60 }, (_, i) => edit(i + 1)).join("\n") + "\n";
@@ -61,7 +62,7 @@ test("diff context: a committed file's gap expands between hunks", async ({ page
     name: "14-diff-context-03-committed-gap",
     title: "routes.ts committed: two hunks with a gap between them",
     expectations: [
-      "A 'Show more lines below' row sits under the first hunk",
+      "A 'Show more lines below' row sits under the first hunk, with 'Expand all (23 lines)'",
       "The second hunk's header follows it, with lines hidden in between",
     ],
   });
@@ -74,14 +75,14 @@ test("diff context: a committed file's gap expands between hunks", async ({ page
     expectations: [
       "Twenty lines sit above the second hunk, numbered old 17-36 and new 19-38",
       "The lines are syntax highlighted like the hunk's context lines",
-      "'Show more lines below' still sits under the first hunk: three lines stay hidden",
+      "'Show more lines below' still sits under the first hunk, now with 'Expand all (3 lines)'",
     ],
   });
-  await page.mouse.click(BELOW.x, BELOW.y);
+  await page.mouse.click(EXPAND_ALL.x, EXPAND_ALL.y);
   await settle(page, 1000);
   await capture(page, {
     name: "14-diff-context-05-committed-closed",
-    title: "routes.ts after the gap is fully expanded",
+    title: "routes.ts after 'Expand all' reads the last three lines",
     expectations: [
       "Old 14-16 / new 16-18 follow the first hunk and run into old 17 / new 19",
       "No 'Show more lines' row or second hunk header remains between the hunks",

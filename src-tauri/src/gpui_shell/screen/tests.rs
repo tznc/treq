@@ -6182,6 +6182,103 @@ fn show_more_lines_expands_a_committed_file(cx: &mut TestAppContext) {
   assert_eq!(read.len(), 20);
 }
 
+fn committed_gap_host(second: &str) -> FakeHost {
+  let mut host = changes_host();
+  let second = second.to_string();
+  host.working = host.working.map(|mut diff| {
+    let committed: crate::jj::JjRevisionDiff = serde_json::from_value(serde_json::json!({
+      "committed_files": [
+        {"path": "c.rs", "status": "M", "previous_path": null, "changed_line_count": 2, "diff_deferred": false}
+      ],
+      "hunks_by_file": [
+        {"path": "c.rs", "hunks": [
+          {"id": "h0", "header": "@@ -1,4 +1,4 @@", "lines": ["-a", "+a", " b", " c", " d"], "patch": ""},
+          {"id": "h1", "header": second, "lines": [" a", " b", " c", "-d", "+d"], "patch": ""}
+        ]}
+      ],
+      "too_large_to_render": false
+    }))
+    .expect("committed diff");
+    diff.committed_files = committed.committed_files;
+    diff.hunks_by_file.extend(committed.hunks_by_file);
+    diff
+  });
+  host
+}
+
+fn show_committed_route() -> ScreenSnapshot {
+  let mut route = changes_route();
+  if let View::Workspace(r) = &mut route.view {
+    r.show_committed = Some(true);
+  }
+  route
+}
+
+/// A gap of at most [`EXPAND_ALL_MAX`] lines offers "Expand all", which
+/// reads the whole gap in one click and closes it.
+#[gpui::test]
+fn expand_all_fills_a_small_gap_between_hunks(cx: &mut TestAppContext) {
+  let host = committed_gap_host("@@ -30,4 +30,4 @@");
+  let (mut h, host) = workspace_harness(cx, host, show_committed_route());
+  h.click("expand-all-c.rs-0");
+  h.cx.run_until_parked();
+  assert!(
+    host.calls().contains(&"read lines c.rs 5..29".to_string()),
+    "{:?}",
+    host.calls()
+  );
+  assert!(!h.drawn("expand-after-c.rs-0"));
+  assert!(!h.drawn("expand-all-c.rs-0"));
+}
+
+/// Above the first hunk the gap runs from line 1.
+#[gpui::test]
+fn expand_all_reads_from_the_start_of_the_file(cx: &mut TestAppContext) {
+  let mut host = committed_gap_host("@@ -60,4 +60,4 @@");
+  host.working = host.working.map(|mut diff| {
+    for f in &mut diff.hunks_by_file {
+      if f.path == "c.rs" {
+        f.hunks.remove(0);
+        f.hunks[0].header = "@@ -30,4 +30,4 @@".into();
+      }
+    }
+    diff
+  });
+  let (mut h, host) = workspace_harness(cx, host, show_committed_route());
+  h.click("expand-all-above-c.rs-0");
+  h.cx.run_until_parked();
+  assert!(
+    host.calls().contains(&"read lines c.rs 1..29".to_string()),
+    "{:?}",
+    host.calls()
+  );
+  assert!(!h.drawn("expand-all-above-c.rs-0"));
+}
+
+/// Expanded lines number in the same columns as the hunk's own lines.
+#[gpui::test]
+fn expanded_line_numbers_align_with_the_hunk(cx: &mut TestAppContext) {
+  let host = committed_gap_host("@@ -100,4 +100,4 @@");
+  let (mut h, _) = workspace_harness(cx, host, show_committed_route());
+  h.click("expand-after-c.rs-0");
+  h.cx.run_until_parked();
+  let hunk = h.cx.debug_bounds("line-new-c.rs-0-1").expect("hunk line");
+  let context = h
+    .cx
+    .debug_bounds("context-new-c.rs-0-after-0")
+    .expect("expanded line");
+  assert_eq!(hunk.right(), context.right());
+}
+
+#[gpui::test]
+fn a_large_gap_offers_only_twenty_line_steps(cx: &mut TestAppContext) {
+  let host = committed_gap_host("@@ -100,4 +100,4 @@");
+  let (mut h, _) = workspace_harness(cx, host, show_committed_route());
+  h.cx.run_until_parked();
+  assert!(h.drawn("expand-after-c.rs-0"));
+  assert!(!h.drawn("expand-all-c.rs-0"));
+}
+
 #[gpui::test]
 fn changes_tab_discards_everything_once_confirmed(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());

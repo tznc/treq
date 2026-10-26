@@ -28,6 +28,8 @@ pub const LARGE_FILE_LINES: usize = 250;
 pub const LARGE_CHANGESET_LINES: usize = 1000;
 /// Lines each "Show more lines" click reads.
 pub const CONTEXT_STEP: usize = 20;
+/// The largest hidden gap "Expand all" offers to read in one click.
+pub const EXPAND_ALL_MAX: usize = 40;
 /// Unchanged lines the backend's diff keeps around each change.
 const DIFF_CONTEXT: usize = 3;
 /// The first files read before the rest (`INITIAL_FILE_BATCH`).
@@ -1009,6 +1011,33 @@ pub fn context_ranges(
   (before, after)
 }
 
+/// The whole of the hidden gaps above and below hunk `h`, as
+/// [`context_ranges`] reads them a step at a time. Below the last hunk the
+/// file's end is unknown, so that gap is `None`.
+pub fn gap_ranges(
+  hunks: &[JjDiffHunk],
+  h: usize,
+  loaded: impl Fn(usize) -> (usize, usize),
+  ended: bool,
+) -> ContextReads {
+  let (first, last) = new_lines(&hunks[h].header);
+  let (above, below) = loaded(h);
+  let floor = match h.checked_sub(1) {
+    Some(prev) => new_lines(&hunks[prev].header).1 + loaded(prev).1,
+    None => 0,
+  };
+  let before = (first - 1)
+    .checked_sub(above)
+    .filter(|end| *end > floor)
+    .map(|end| (floor + 1, end));
+  let after = hunks.get(h + 1).and_then(|next| {
+    let start = last + 1 + below;
+    let ceiling = new_lines(&next.header).0.saturating_sub(loaded(h + 1).0);
+    (!ended && start < ceiling).then(|| (start, ceiling - 1))
+  });
+  (before, after)
+}
+
 /// A conflict region as the tab numbers it (`useConflicts`).
 #[derive(Debug, Clone)]
 pub struct Conflict {
@@ -1363,6 +1392,26 @@ mod tests {
     let removed = "@@ -5,2 +4,0 @@";
     assert_eq!(context_number(removed, false, 4), (4, 4));
     assert_eq!(context_number(removed, true, 5), (7, 5));
+  }
+
+  #[test]
+  fn gap_ranges_cover_the_whole_hidden_gap() {
+    let hunks = [
+      hunk("@@ -1,4 +1,4 @@", &["-a", "+a", " b", " c", " d"]),
+      hunk("@@ -30,4 +30,4 @@", &[" a", " b", " c", "-d", "+d"]),
+    ];
+    let none = |_| (0, 0);
+    // Lines 5-29 between the hunks; the file's end is unknown below the last.
+    assert_eq!(gap_ranges(&hunks, 0, none, false), (None, Some((5, 29))));
+    assert_eq!(gap_ranges(&hunks, 1, none, false), (Some((5, 29)), None));
+    // Twenty read below the first leave 25-29.
+    let loaded = |i| if i == 0 { (0, 20) } else { (0, 0) };
+    assert_eq!(gap_ranges(&hunks, 0, loaded, false).1, Some((25, 29)));
+    // Twenty read above the second leave 5-9.
+    let loaded = |i| if i == 1 { (20, 0) } else { (0, 0) };
+    assert_eq!(gap_ranges(&hunks, 0, loaded, false).1, Some((5, 9)));
+    // Above the first hunk the gap runs from line 1.
+    assert_eq!(gap_ranges(&hunks[1..], 0, none, false).0, Some((1, 29)));
   }
 
   #[test]
