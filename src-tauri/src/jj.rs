@@ -10883,6 +10883,31 @@ mod tests {
   }
 
   #[test]
+  fn fetch_waits_for_an_op_holding_the_repo_lock_from_a_workspace() {
+    let (origin, home) = origin_and_home_clone();
+    let home_path = home.path().to_str().unwrap().to_string();
+    advance_origin_main(&origin);
+    // A workspace path shares the home repo's lock: one operation log.
+    let workspace_path = home.path().join(".treq").join("workspaces").join("ws");
+    let lock = repo_op_lock(workspace_path.to_str().unwrap());
+    let held = lock.lock().unwrap();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let fetching = std::thread::spawn(move || {
+      jj_git_fetch(&home_path).expect("fetch");
+      done_tx.send(()).unwrap();
+    });
+    let finished_while_held = done_rx
+      .recv_timeout(std::time::Duration::from_secs(3))
+      .is_ok();
+    drop(held);
+    fetching.join().unwrap();
+    assert!(
+      !finished_while_held,
+      "fetch ran while another op held the lock"
+    );
+  }
+
+  #[test]
   fn fetch_exports_moved_trunk_to_git() {
     let (origin, home) = origin_and_home_clone();
     let tip = advance_origin_main(&origin);
