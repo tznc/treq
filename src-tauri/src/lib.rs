@@ -542,8 +542,19 @@ where
   !first_arg.starts_with("treq://") && !first_arg.starts_with("-psn_")
 }
 
+/// The mobile app's entry point: the GPUI mobile UI (`mobile`), with the
+/// mobile Tauri config (`tauri.conf.json` plus `tauri.<platform>.conf.json`).
+#[cfg(all(mobile, feature = "mobile-ui"))]
+#[cfg_attr(not(feature = "embed"), tauri::mobile_entry_point)]
+pub fn mobile_main() {
+  mobile::run(tauri::generate_context!());
+}
+
 #[cfg(feature = "gui")]
-#[cfg_attr(all(mobile, not(feature = "embed")), tauri::mobile_entry_point)]
+#[cfg_attr(
+  all(mobile, not(feature = "embed"), not(feature = "mobile-ui")),
+  tauri::mobile_entry_point
+)]
 #[expect(
   clippy::exit,
   reason = "a CLI invocation hands its exit code to the shell, and `tauri::generate_context!` expands to an exit"

@@ -3,7 +3,7 @@
 # landing page, swipes it, and checks the app renders without crashing. Screenshots
 # and logcat go to the output directory.
 #
-#   mobile-gpui/scripts/android-smoke.sh <app.apk> [output-dir]
+#   scripts/mobile/android-smoke.sh <app.apk> [output-dir]
 set -euo pipefail
 
 APK=$1

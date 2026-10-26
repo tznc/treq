@@ -8,10 +8,10 @@
 #
 # The key password is the keystore password (PKCS12 keystores have one).
 #
-#   mobile-gpui/scripts/android-signing.sh
+#   scripts/mobile/android-signing.sh
 set -euo pipefail
 
-APP=$(cd "$(dirname "$0")/.." && pwd)
+APP=$(cd "$(dirname "$0")/../../src-tauri" && pwd)
 ANDROID=$APP/gen/android
 GRADLE=$ANDROID/app/build.gradle.kts
 

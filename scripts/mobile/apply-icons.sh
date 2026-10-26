@@ -4,11 +4,11 @@
 # init` creates with Tauri's default icon. Run after init; skips a platform
 # whose project has not been generated.
 #
-#   mobile-gpui/scripts/apply-icons.sh
+#   scripts/mobile/apply-icons.sh
 set -euo pipefail
 
-APP=$(cd "$(dirname "$0")/.." && pwd)
-ICONS=$APP/../src-tauri/icons
+APP=$(cd "$(dirname "$0")/../../src-tauri" && pwd)
+ICONS=$APP/icons
 
 res=$APP/gen/android/app/src/main/res
 if [ -d "$res" ]; then
