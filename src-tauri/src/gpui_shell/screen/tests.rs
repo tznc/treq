@@ -503,6 +503,11 @@ impl settings_data::SettingsHost for FakeHost {
     self.customize_copy(name)
   }
 
+  fn export_review_history(&self, repo_path: &str) -> Result<String, String> {
+    self.record(format!("export review history {repo_path}"));
+    Ok(format!("{repo_path}/.treq/review-history.json"))
+  }
+
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String> {
     self.record(format!("fetch {url}"));
     Err("offline".into())
@@ -613,6 +618,10 @@ impl launch_data::LaunchHost for FakeHost {
   fn dismiss_send_asset(&self, id: &str) {
     self.record(format!("dismiss asset {id}"));
     self.send.lock().unwrap().retain(|a| a.id != id);
+  }
+
+  fn record_review(&self, _: &str, workspace_id: Option<i64>, scope: &str, _: &str, mode: &str) {
+    self.record(format!("record review {workspace_id:?} {scope} {mode}"));
   }
 }
 
@@ -1359,6 +1368,15 @@ impl logs_data::LogsHost for FakeHost {
     query: &crate::core::checks_logs::LogQuery,
   ) -> Result<Vec<crate::core::checks_logs::LogRecordView>, String> {
     self.record(format!("read system logs {:?}", query.search));
+    Ok(self.logs.clone())
+  }
+
+  fn review_history(
+    &self,
+    _: &str,
+    query: &crate::core::checks_logs::LogQuery,
+  ) -> Result<Vec<crate::core::checks_logs::LogRecordView>, String> {
+    self.record(format!("read review history {:?}", query.search));
     Ok(self.logs.clone())
   }
 
@@ -2762,6 +2780,24 @@ fn settings_switches_previews_itself(cx: &mut TestAppContext) {
       "open http://localhost:3001/docs/concepts/logs",
     ]
   );
+}
+
+#[gpui::test]
+fn settings_tunes_the_review_prompt_with_an_agent(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, settings(), host.clone());
+  h.click("settings-tune-review-prompt");
+  h.cx.run_until_parked();
+  assert!(host
+    .calls()
+    .contains(&"export review history /repo".to_string()));
+  let sent = h.sent();
+  let ScreenAction::Field { field, value } = sent.last().expect("sent") else {
+    panic!("not a field: {sent:?}");
+  };
+  assert_eq!(field, "reviewPrompt.tune");
+  let prompt = value["prompt"].as_str().expect("prompt");
+  assert!(prompt.contains("/repo/.treq/review-history.json"), "{prompt}");
 }
 
 #[gpui::test]
@@ -6600,6 +6636,12 @@ fn changes_tab_sends_the_review_to_an_agent(cx: &mut TestAppContext) {
   assert_eq!(request.session_name.as_deref(), Some("Code Review"));
   assert_eq!(request.mode.as_deref(), Some("plan"));
   assert_eq!(request.workspace_id, Some(7));
+  let recorded: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("record review"))
+    .collect();
+  assert_eq!(recorded, ["record review Some(7) changes plan"]);
   assert!(!select);
   let markdown = request.prompt.clone().unwrap_or_default();
   assert!(
@@ -7056,6 +7098,18 @@ fn logs_tab_switches_source_from_its_menu(cx: &mut TestAppContext) {
   h.pick("System");
   assert!(h.drawn("system-logs-output"));
   assert!(host.calls().contains(&"read system logs None".to_string()));
+}
+
+#[gpui::test]
+fn logs_tab_shows_review_history(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(Some("reviews")));
+  assert!(h.drawn("review-history-output"));
+  assert!(host.calls().contains(&"read review history None".to_string()));
+  h.click("log-source");
+  h.pick("System");
+  h.click("log-source");
+  h.pick("Reviews");
+  assert!(h.drawn("review-history-output"));
 }
 
 #[gpui::test]

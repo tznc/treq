@@ -64,7 +64,7 @@ static INIT_LOCK: Mutex<()> = Mutex::new(());
 /// Schema version stored in `PRAGMA user_version`. Bump it whenever
 /// `init_local_db` gains a table, column, index or migration so existing
 /// databases re-run it once; databases at this version skip it entirely.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 fn workspace_from_row(repo_path: &str, row: &Row<'_>) -> rusqlite::Result<Workspace> {
   let moved_files_json: Option<String> = row.get(10)?;
@@ -687,6 +687,35 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
     )
     .map_err(|e| format!("Failed to create instance_registry heartbeat index: {}", e))?;
 
+  // What happened in each code review, kept 30 days so an agent can tune
+  // the review prompt from it: every review-agent comment with what the
+  // user did about it, and every review the user sent to an agent.
+  conn
+    .execute_batch(
+      "CREATE TABLE IF NOT EXISTS review_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            comment_id TEXT,
+            source TEXT,
+            workspace_id INTEGER,
+            target_type TEXT NOT NULL,
+            target_id TEXT,
+            file_path TEXT,
+            start_line INTEGER,
+            end_line INTEGER,
+            body TEXT NOT NULL,
+            suggestion TEXT,
+            quoted_text TEXT,
+            mode TEXT,
+            outcome TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            decided_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_review_history_created_at ON review_history(created_at);
+        CREATE INDEX IF NOT EXISTS idx_review_history_comment ON review_history(comment_id);",
+    )
+    .map_err(|e| format!("Failed to create review_history table: {}", e))?;
+
   conn
     .execute(
       "CREATE TABLE IF NOT EXISTS prompt_history (
@@ -1008,6 +1037,8 @@ fn get_connection(repo_path: &str) -> Result<PooledConnection<'static>, String> 
       drop(guard);
       init_local_db(repo_path)?;
       initialized.lock_or_recover().insert(db_key);
+      prune_review_history_now(repo_path);
+      start_review_history_pruner();
     }
   }
 
@@ -2423,6 +2454,28 @@ pub fn create_agent_review_comment(
     )
     .map_err(|e| format!("Failed to insert agent review comment: {}", e))?;
 
+  if is_code_review_target(&comment.target_type) {
+    conn
+      .execute(
+        "INSERT INTO review_history (kind, comment_id, source, target_type, target_id, file_path, start_line, end_line, body, suggestion, quoted_text, outcome, created_at)
+         VALUES ('agent_comment', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'open', ?11)",
+        params![
+          comment.id,
+          comment.source,
+          comment.target_type,
+          comment.target_id,
+          comment.file_path,
+          comment.start_line,
+          comment.end_line,
+          comment.comment_text,
+          comment.suggested_replacement,
+          comment.quoted_text,
+          comment.created_at,
+        ],
+      )
+      .map_err(|e| format!("Failed to record review history: {}", e))?;
+  }
+
   Ok(comment)
 }
 
@@ -2480,7 +2533,13 @@ pub fn resolve_agent_review_comment(repo_path: &str, id: &str) -> Result<(), Str
       params![id, now],
     )
     .map_err(|e| format!("Failed to resolve agent review comment: {}", e))?;
-  Ok(())
+  decide_review_history(&conn, id, "resolved", &["open"])
+}
+
+/// Records that the user applied comment `id`'s suggestion.
+pub fn mark_review_history_applied(repo_path: &str, id: &str) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  decide_review_history(&conn, id, "applied", &["open", "resolved"])
 }
 
 /// Edit a comment's text, or record the hash and text of the lines it
@@ -2511,7 +2570,165 @@ pub fn delete_agent_review_comment(repo_path: &str, id: &str) -> Result<(), Stri
   conn
     .execute("DELETE FROM agent_review_comments WHERE id = ?1", [id])
     .map_err(|e| format!("Failed to delete agent review comment: {}", e))?;
+  decide_review_history(&conn, id, "dismissed", &["open"])
+}
+
+// Review History Functions
+
+/// How long review history is kept.
+pub const REVIEW_HISTORY_MAX_AGE: chrono::Duration = chrono::Duration::days(30);
+/// How often every open repository's review history is pruned.
+const REVIEW_HISTORY_PRUNE_EVERY: std::time::Duration =
+  std::time::Duration::from_secs(12 * 60 * 60);
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ReviewHistoryEntry {
+  pub id: i64,
+  /// `agent_comment` or `user_review`.
+  pub kind: String,
+  pub comment_id: Option<String>,
+  pub source: Option<String>,
+  pub workspace_id: Option<i64>,
+  pub target_type: String,
+  pub target_id: Option<String>,
+  pub file_path: Option<String>,
+  pub start_line: Option<i64>,
+  pub end_line: Option<i64>,
+  pub body: String,
+  pub suggestion: Option<String>,
+  pub quoted_text: Option<String>,
+  pub mode: Option<String>,
+  /// `open`, `resolved`, `applied` or `dismissed` for an agent comment;
+  /// `sent` for a user review.
+  pub outcome: String,
+  pub created_at: String,
+  pub decided_at: Option<String>,
+}
+
+/// Linear reviews have their own prompt; history covers code review only.
+fn is_code_review_target(target_type: &str) -> bool {
+  !target_type.starts_with("linear")
+}
+
+fn decide_review_history(
+  conn: &Connection,
+  comment_id: &str,
+  outcome: &str,
+  from: &[&str],
+) -> Result<(), String> {
+  let from = from
+    .iter()
+    .map(|o| format!("'{o}'"))
+    .collect::<Vec<_>>()
+    .join(",");
+  conn
+    .execute(
+      &format!(
+        "UPDATE review_history SET outcome = ?2, decided_at = ?3
+         WHERE comment_id = ?1 AND outcome IN ({from})"
+      ),
+      params![comment_id, outcome, Utc::now().to_rfc3339()],
+    )
+    .map_err(|e| format!("Failed to record review outcome: {}", e))?;
   Ok(())
+}
+
+/// Records a review the user sent to an agent: `scope` is `changes` or
+/// `files`, `body` the markdown sent.
+pub fn add_user_review_history(
+  repo_path: &str,
+  workspace_id: Option<i64>,
+  scope: &str,
+  body: &str,
+  mode: &str,
+) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .execute(
+      "INSERT INTO review_history (kind, workspace_id, target_type, body, mode, outcome, created_at)
+       VALUES ('user_review', ?1, ?2, ?3, ?4, 'sent', ?5)",
+      params![workspace_id, scope, body, mode, Utc::now().to_rfc3339()],
+    )
+    .map_err(|e| format!("Failed to record review history: {}", e))?;
+  Ok(())
+}
+
+/// The newest `limit` review history rows, newest first.
+pub fn list_review_history(
+  repo_path: &str,
+  limit: usize,
+) -> Result<Vec<ReviewHistoryEntry>, String> {
+  let conn = get_connection(repo_path)?;
+  let mut stmt = conn
+    .prepare(
+      "SELECT id, kind, comment_id, source, workspace_id, target_type, target_id, file_path,
+              start_line, end_line, body, suggestion, quoted_text, mode, outcome, created_at, decided_at
+       FROM review_history ORDER BY created_at DESC, id DESC LIMIT ?1",
+    )
+    .map_err(|e| format!("Failed to prepare query: {}", e))?;
+  let rows = stmt
+    .query_map([limit as i64], |row| {
+      Ok(ReviewHistoryEntry {
+        id: row.get(0)?,
+        kind: row.get(1)?,
+        comment_id: row.get(2)?,
+        source: row.get(3)?,
+        workspace_id: row.get(4)?,
+        target_type: row.get(5)?,
+        target_id: row.get(6)?,
+        file_path: row.get(7)?,
+        start_line: row.get(8)?,
+        end_line: row.get(9)?,
+        body: row.get(10)?,
+        suggestion: row.get(11)?,
+        quoted_text: row.get(12)?,
+        mode: row.get(13)?,
+        outcome: row.get(14)?,
+        created_at: row.get(15)?,
+        decided_at: row.get(16)?,
+      })
+    })
+    .map_err(|e| format!("Failed to list review history: {}", e))?
+    .collect::<rusqlite::Result<Vec<_>>>()
+    .map_err(|e| format!("Failed to read review history: {}", e))?;
+  Ok(rows)
+}
+
+/// Deletes review history created before `cutoff`; returns how many rows.
+pub fn prune_review_history(
+  repo_path: &str,
+  cutoff: chrono::DateTime<Utc>,
+) -> Result<usize, String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .execute(
+      "DELETE FROM review_history WHERE created_at < ?1",
+      [cutoff.to_rfc3339()],
+    )
+    .map_err(|e| format!("Failed to prune review history: {}", e))
+}
+
+fn prune_review_history_now(repo_path: &str) {
+  if let Err(err) = prune_review_history(repo_path, Utc::now() - REVIEW_HISTORY_MAX_AGE) {
+    log::warn!("Failed to prune review history for {repo_path}: {err}");
+  }
+}
+
+/// Once per process: prunes every repository opened so far, every 12 hours.
+fn start_review_history_pruner() {
+  static STARTED: OnceLock<()> = OnceLock::new();
+  STARTED.get_or_init(|| {
+    std::thread::spawn(|| loop {
+      std::thread::sleep(REVIEW_HISTORY_PRUNE_EVERY);
+      let repos: Vec<String> = INITIALIZED_DBS
+        .get()
+        .map(|dbs| dbs.lock_or_recover().iter().cloned().collect())
+        .unwrap_or_default();
+      for repo in repos {
+        prune_review_history_now(&repo);
+      }
+    });
+  });
 }
 
 // Prompt History Functions
@@ -2825,6 +3042,89 @@ mod tests {
       cached_at: "2026-08-26T00:00:00Z".to_string(),
       mtime: None,
     }
+  }
+
+  fn agent_comment(repo: &str, target_type: &str) -> AgentReviewComment {
+    create_agent_review_comment(
+      repo, target_type, "7", "a.rs", None, 2, 3, Some("new"), "use ?", Some("x?"),
+      "local-agent", None,
+    )
+    .unwrap()
+  }
+
+  fn outcomes(repo: &str) -> Vec<(String, String)> {
+    list_review_history(repo, 100)
+      .unwrap()
+      .into_iter()
+      .map(|e| (e.kind, e.outcome))
+      .collect()
+  }
+
+  #[test]
+  fn review_history_records_each_agent_comment_and_its_outcome() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let applied = agent_comment(repo, "workspace_diff");
+    let resolved = agent_comment(repo, "workspace_diff");
+    let dismissed = agent_comment(repo, "file");
+    agent_comment(repo, "linear_issue");
+    resolve_agent_review_comment(repo, &applied.id).unwrap();
+    mark_review_history_applied(repo, &applied.id).unwrap();
+    resolve_agent_review_comment(repo, &resolved.id).unwrap();
+    delete_agent_review_comment(repo, &dismissed.id).unwrap();
+
+    let entries = list_review_history(repo, 100).unwrap();
+    assert_eq!(entries.len(), 3, "linear targets are not code review");
+    let outcome = |id: &str| {
+      entries
+        .iter()
+        .find(|e| e.comment_id.as_deref() == Some(id))
+        .map(|e| e.outcome.clone())
+        .unwrap()
+    };
+    assert_eq!(outcome(&applied.id), "applied");
+    assert_eq!(outcome(&resolved.id), "resolved");
+    assert_eq!(outcome(&dismissed.id), "dismissed");
+    let first = entries.iter().find(|e| e.comment_id.as_deref() == Some(&applied.id)).unwrap();
+    assert_eq!(first.body, "use ?");
+    assert_eq!(first.suggestion.as_deref(), Some("x?"));
+    assert_eq!((first.start_line, first.end_line), (Some(2), Some(3)));
+    assert!(first.decided_at.is_some());
+  }
+
+  #[test]
+  fn review_history_records_one_row_per_sent_review() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    add_user_review_history(repo, Some(3), "changes", "## a.rs:4\nrename", "plan").unwrap();
+    add_user_review_history(repo, None, "files", "## b.rs:1\nwhy", "acceptEdits").unwrap();
+    let entries = list_review_history(repo, 100).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].body, "## b.rs:1\nwhy", "newest first");
+    assert_eq!(entries[1].target_type, "changes");
+    assert_eq!(entries[1].mode.as_deref(), Some("plan"));
+    assert_eq!(outcomes(repo)[0], ("user_review".into(), "sent".into()));
+  }
+
+  #[test]
+  fn review_history_prunes_rows_older_than_the_cutoff() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    add_user_review_history(repo, None, "changes", "old", "plan").unwrap();
+    get_connection(repo)
+      .unwrap()
+      .execute(
+        "UPDATE review_history SET created_at = ?1",
+        [(Utc::now() - chrono::Duration::days(31)).to_rfc3339()],
+      )
+      .unwrap();
+    add_user_review_history(repo, None, "changes", "new", "plan").unwrap();
+
+    let removed = prune_review_history(repo, Utc::now() - REVIEW_HISTORY_MAX_AGE).unwrap();
+    assert_eq!(removed, 1);
+    let left = list_review_history(repo, 100).unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].body, "new");
   }
 
   #[test]

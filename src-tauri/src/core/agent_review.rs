@@ -41,7 +41,8 @@ pub fn apply_agent_review_suggestion(repo_path: String, comment_id: String) -> R
     None,
     replacement,
   )?;
-  local_db::resolve_agent_review_comment(&repo_path, &comment.id)
+  local_db::resolve_agent_review_comment(&repo_path, &comment.id)?;
+  local_db::mark_review_history_applied(&repo_path, &comment.id)
 }
 
 /// Replaces lines `start_line..=end_line` (1-based) of `file_path` with

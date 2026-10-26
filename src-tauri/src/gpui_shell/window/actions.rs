@@ -520,6 +520,18 @@ impl Model {
           select: true,
         });
       }
+      "reviewPrompt.tune" => {
+        self.page = Page::Workspace;
+        return with(Effect::StartAgent {
+          repo_path: repo,
+          workspace_id: None,
+          agent: None,
+          prompt: value["prompt"].as_str().map(str::to_string),
+          mode: Some("plan".into()),
+          name: Some("Tune review prompt".into()),
+          select: true,
+        });
+      }
       // A review of text not tied to a workspace runs in the home repository.
       "linear.startReview" | "prReview.startAgentReview" => {
         return with(Effect::StartAgent {
@@ -1146,6 +1158,25 @@ mod tests {
         select: true,
         ..
       } if prompt == "Edit the skill"
+    )));
+  }
+
+  #[test]
+  fn tuning_the_review_prompt_starts_an_agent_in_the_home_repository() {
+    let (mut model, data) = (model(), data());
+    model.open_settings();
+    let effects = model
+      .screen_action(&field("reviewPrompt.tune", json!({"prompt": "Tune it"})), &data)
+      .unwrap_or_default();
+    assert_eq!(model.page, Page::Workspace);
+    assert!(effects.iter().any(|effect| matches!(
+      effect,
+      Effect::StartAgent {
+        workspace_id: None,
+        prompt: Some(prompt),
+        name: Some(name),
+        ..
+      } if prompt == "Tune it" && name == "Tune review prompt"
     )));
   }
 

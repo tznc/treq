@@ -73,6 +73,9 @@ pub trait SettingsHost: ToolsHost + AccountHost {
     source: &str,
     repo_path: &str,
   ) -> Result<CustomizedSkill, String>;
+  /// Writes the repository's review history where an agent can read it
+  /// (`core::review_history::export`); returns its path.
+  fn export_review_history(&self, repo_path: &str) -> Result<String, String>;
   /// The bytes at `url`, for the account's avatar.
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String>;
   fn notify(&self, event: NativeEvent);
@@ -215,6 +218,10 @@ impl SettingsHost for Backend {
       ));
     }
     skills::customize_global_skill(name, std::path::Path::new(source), repo_path)
+  }
+
+  fn export_review_history(&self, repo_path: &str) -> Result<String, String> {
+    crate::core::review_history::export(repo_path).map(|path| path.display().to_string())
   }
 
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String> {

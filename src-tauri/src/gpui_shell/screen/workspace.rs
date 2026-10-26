@@ -1891,6 +1891,14 @@ impl WorkspaceView {
       }
       "changes.review" | "fileBrowser.review" => {
         let (markdown, mode) = (text("markdown"), text("mode"));
+        let scope = if field == "changes.review" { "changes" } else { "files" };
+        let (host, workspace_id) = (self.code_host.clone(), self.route.workspace_id);
+        let (record_repo, record_markdown, record_mode) =
+          (repo.clone(), markdown.clone(), mode.clone());
+        cx.background_spawn(async move {
+          host.record_review(&record_repo, workspace_id, scope, &record_markdown, &record_mode);
+        })
+        .detach();
         if value["useIdleAgent"].as_bool() == Some(true) {
           match self.send_to_idle(&markdown, cx) {
             None => return (self.react)(ScreenAction::Field { field, value }, cx),

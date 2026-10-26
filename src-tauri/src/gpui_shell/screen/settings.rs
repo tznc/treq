@@ -1058,6 +1058,34 @@ impl SettingsView {
     );
   }
 
+  /// Tune with agent: exports the review history, then asks the window for
+  /// an agent that proposes a revised review prompt from it.
+  fn tune_review_prompt(&mut self, cx: &mut Context<Self>) {
+    let Some(repo) = self.repo.as_ref() else {
+      return;
+    };
+    let (path, current) = (repo.path.clone(), repo.fields().review_prompt.clone());
+    self.spawn(
+      cx,
+      move |host| host.export_review_history(&path),
+      move |view, result, cx| match result {
+        Ok(history) => {
+          let prompt = crate::core::review_history::tune_prompt(Some(&current), &history);
+          (view.react)(
+            ScreenAction::Field {
+              field: "reviewPrompt.tune".into(),
+              value: serde_json::json!({ "prompt": prompt }),
+            },
+            cx,
+          );
+        }
+        Err(err) => view
+          .host
+          .notify(toast(ToastTone::Error, "Review history", err)),
+      },
+    );
+  }
+
   fn save_repository(&mut self, cx: &mut Context<Self>) {
     let Some(repo) = self.repo.as_mut().filter(|repo| !repo.saving) else {
       return;
@@ -1137,6 +1165,7 @@ impl SettingsView {
             _ => {}
           },
           "app.setupScript.run" => self.run_setup(cx),
+          "repo.reviewPrompt.tune" => self.tune_review_prompt(cx),
           "repo.yaml.reload" => self.load_repo(cx),
           "skills.confirm.install" => self.answer_skill_link(true, cx),
           "skills.confirm.cancel" => self.answer_skill_link(false, cx),
@@ -2212,6 +2241,24 @@ impl SettingsView {
               Some("Overrides the built-in prompt. {target_type}, {target_id} and {diff_summary} are substituted before the prompt is sent."),
               p,
             ))
+            .child(
+              div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(
+                  Button::new("settings-tune-review-prompt", p)
+                    .variant(Variant::Outline)
+                    .size(Size::Sm)
+                    .label("Tune with agent")
+                    .on_click(self.press("repo.reviewPrompt.tune")),
+                )
+                .child(help(
+                  "An agent reads the last 30 days of reviews (Logs → Reviews) and proposes a revised prompt for you to paste here.",
+                  p,
+                  0.,
+                )),
+            )
             .child(field_block(
               "Review Agent",
               form::select_field("settings-review-agent", "Review Agent", &review_agent, managed("reviewAgent")),
