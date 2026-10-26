@@ -1534,7 +1534,8 @@ fn markdown_view(
 ) -> Div {
   let id: SharedString = id.into();
   let text_size = match size {
-    s if s <= 12. => TextSize::Xs,
+    s if s <= 11. => TextSize::Xs,
+    s if s <= 12. => TextSize::Code,
     s if s <= 14. => TextSize::Sm,
     s if s <= 17. => TextSize::Lg,
     _ => TextSize::Xl,

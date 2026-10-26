@@ -115,3 +115,29 @@ test("changes review: character marks, keyboard, suggestion, stale banner", asyn
     ],
   });
 });
+
+test("changes review: comment text matches the code size", async ({ page }) => {
+  await changes(page);
+  await page.mouse.click(600, 277);
+  await page.keyboard.press("ArrowLeft");
+  const input = page.getByRole("textbox", { name: "Add a comment..." });
+  await expect(input).toBeVisible();
+  await input.fill("use `Ex2ms` for this for readability");
+  await settle(page, 400);
+  await capture(page, {
+    name: "13-review-07-draft-size",
+    title: "The comment box types at the code's size",
+    expectations: ["The typed comment text is the same height as the diff's code text"],
+  });
+  await page.getByRole("button", { name: "Add Comment", exact: true }).click();
+  await expect(input).toHaveCount(0);
+  await settle(page, 800);
+  await capture(page, {
+    name: "13-review-08-card-size",
+    title: "A pending comment reads at the code's size",
+    expectations: [
+      "The comment card's text is the same height as the code lines above it",
+      "The card's text starts left-aligned with its pencil icon slot, not clipped",
+    ],
+  });
+});

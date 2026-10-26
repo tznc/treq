@@ -1179,8 +1179,9 @@ impl ChangesView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> gpui::AnyElement {
+    // Comment text reads at the diff's code size, so it follows zoom with it.
     let box_ = || {
-      div()
+      ui::text(div(), TextSize::Code)
         .bg(p.background)
         .rounded(radius::MD)
         .p_3()
@@ -1336,7 +1337,7 @@ impl ChangesView {
           .review
           .edit_input
           .as_ref()
-          .map(|i| Textarea::new(&i.state)),
+          .map(|i| ui::text(Textarea::new(&i.state), TextSize::Code)),
       )
       .child(
         div()
@@ -1382,7 +1383,7 @@ impl ChangesView {
       .draft
       .as_ref()
       .is_some_and(|d| suggestion_block(d).is_some());
-    div()
+    ui::text(div(), TextSize::Code)
       .debug_selector(|| "comment-input".into())
       .bg(p.muted)
       .border_1()
@@ -1428,13 +1429,11 @@ impl ChangesView {
             .child(d.line_content.join(" ")),
         )
       }))
-      .children(
-        self
-          .review
-          .draft_input
-          .as_ref()
-          .map(|i| div().mb_2().child(Textarea::new(&i.state))),
-      )
+      .children(self.review.draft_input.as_ref().map(|i| {
+        div()
+          .mb_2()
+          .child(ui::text(Textarea::new(&i.state), TextSize::Code))
+      }))
       .child(
         div()
           .flex()
@@ -1678,13 +1677,11 @@ impl ChangesView {
           .py_3()
           .font_family(theme::SANS_FONT)
           .child(div().mb_2().text_color(p.muted_foreground).child(label))
-          .children(
-            self
-              .review
-              .note_input
-              .as_ref()
-              .map(|i| div().mb_2().child(Textarea::new(&i.state))),
-          )
+          .children(self.review.note_input.as_ref().map(|i| {
+            div()
+              .mb_2()
+              .child(ui::text(Textarea::new(&i.state), TextSize::Code))
+          }))
           .child(
             div()
               .flex()
