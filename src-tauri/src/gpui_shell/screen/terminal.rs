@@ -234,6 +234,12 @@ pub fn cell_size(advance: f32, height: f32, scale: f32) -> (f32, f32) {
   (down(advance), down(height))
 }
 
+/// Where cell (`row`, `col`) starts in the grid, for the text and the
+/// cursor alike. Plain pixels: `cell` is measured at the zoomed font size.
+pub fn cell_origin(row: usize, col: usize, (w, h): (f32, f32)) -> gpui::Point<Pixels> {
+  point(px(col as f32 * w), px(TOP_PAD + row as f32 * h))
+}
+
 /// Where a glyph the font placed at `x` draws once each cell is `cell`
 /// wide: at the start of its cell, as xterm's renderer puts it.
 pub fn cell_x(x: f32, advance: f32, cell: f32) -> f32 {
@@ -1351,18 +1357,19 @@ impl TerminalView {
     };
     let (font_size, advance) = (px(self.font_size), self.advance);
     let cursor = frame.cursor.map(|(row, col)| {
+      let origin = cell_origin(row, col, (w, h));
       let base = div()
         .absolute()
-        .top(zpx(TOP_PAD + row as f32 * h))
-        .left(zpx(col as f32 * w))
-        .h(zpx(h));
+        .top(origin.y)
+        .left(origin.x)
+        .h(px(h));
       if focused {
-        base.w(zpx(1.)).when(self.cursor_on, |d| {
+        base.w(px(1.)).when(self.cursor_on, |d| {
           d.bg(theme::data_color(scheme.foreground))
         })
       } else {
         base
-          .w(zpx(w))
+          .w(px(w))
           .border_1()
           .border_color(theme::data_color(scheme.foreground))
       }
@@ -1375,9 +1382,8 @@ impl TerminalView {
           |_, _, _| {},
           move |bounds, _, window, cx| {
             for (row, runs) in frame.lines.iter().enumerate() {
-              let y = bounds.origin.y + px(TOP_PAD + row as f32 * h);
               for run in runs.iter() {
-                let x = bounds.origin.x + px(run.col as f32 * w);
+                let gpui::Point { x, y } = bounds.origin + cell_origin(row, run.col, (w, h));
                 if let Some(bg) = run.bg {
                   window.paint_quad(gpui::fill(
                     Bounds::new(point(x, y), gpui::size(px(run.cells as f32 * w), px(h))),
@@ -4289,6 +4295,15 @@ mod tests {
     assert_eq!(scroll_delta(row, (-150., 250.)), -150.);
     // Wider than the row: left edges line up.
     assert_eq!(scroll_delta(row, (300., 1500.)), 300.);
+  }
+
+  #[test]
+  fn places_the_cursor_on_the_cell_the_text_paints() {
+    // Cells are zoomed pixels already (the font size carries `ui_zoom`), so
+    // the cursor's offset from the grid's origin is plain pixels.
+    let cell = (7.5, 17.);
+    assert_eq!(cell_origin(0, 0, cell), point(px(0.), px(TOP_PAD)));
+    assert_eq!(cell_origin(40, 2, cell), point(px(15.), px(TOP_PAD + 680.)));
   }
 
   #[test]
