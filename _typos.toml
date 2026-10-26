@@ -25,6 +25,8 @@ unparseable = "unparseable"
 PN = "PN"
 # Azure Kubernetes Service.
 AKS = "AKS"
+# App Store Connect error codes (ITMS-90717).
+ITMS = "ITMS"
 # three.js material property.
 metalness = "metalness"
 # Paket (.NET package manager) lockfile.
