@@ -914,6 +914,40 @@ pub fn new_lines(header: &str) -> (usize, usize) {
   }
 }
 
+#[expect(clippy::expect_used, reason = "constant pattern")]
+static OLD_RANGE: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"@@ -(\d+)(?:,(\d+))?").expect("hunk header regex"));
+
+/// The old-side lines a hunk shows, as [`new_lines`] numbers the new side.
+fn old_lines(header: &str) -> (usize, usize) {
+  let (start, count) = OLD_RANGE
+    .captures(header)
+    .map(|c| {
+      (
+        c[1].parse().unwrap_or(1),
+        c.get(2).map_or(1, |n| n.as_str().parse().unwrap_or(1)),
+      )
+    })
+    .unwrap_or((1, 1));
+  match count {
+    0 => (start + 1, start),
+    _ => (start, start + count - 1),
+  }
+}
+
+/// The old and new numbers of new-side line `new`, an unchanged line read
+/// above (or, `after`, below) the hunk `header` opens.
+pub fn context_number(header: &str, after: bool, new: usize) -> (i64, i64) {
+  let (old_first, old_last) = old_lines(header);
+  let (new_first, new_last) = new_lines(header);
+  let shift = if after {
+    old_last as i64 - new_last as i64
+  } else {
+    old_first as i64 - new_first as i64
+  };
+  (new as i64 + shift, new as i64)
+}
+
 /// Unchanged lines closing the hunk. The backend's diff keeps
 /// [`DIFF_CONTEXT`] of them unless the file ends first.
 fn trailing_context(hunk: &JjDiffHunk) -> usize {
@@ -1288,6 +1322,22 @@ mod tests {
       generated,
       ["Cargo.lock", "gen/api.ts", "web/package-lock.json"]
     );
+  }
+
+  #[test]
+  fn context_lines_number_both_sides() {
+    // Old 117-137 / new 130-150 hidden between the hunks.
+    let header = "@@ -110,7 +123,7 @@";
+    assert_eq!(context_number(header, false, 122), (109, 122));
+    assert_eq!(context_number(header, true, 130), (117, 130));
+    // A hunk that only adds lines: the old side resumes after its start.
+    let added = "@@ -5,0 +6,3 @@";
+    assert_eq!(context_number(added, false, 5), (5, 5));
+    assert_eq!(context_number(added, true, 9), (6, 9));
+    // One that only removes them.
+    let removed = "@@ -5,2 +4,0 @@";
+    assert_eq!(context_number(removed, false, 4), (4, 4));
+    assert_eq!(context_number(removed, true, 5), (7, 5));
   }
 
   #[test]

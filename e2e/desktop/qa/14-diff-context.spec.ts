@@ -1,7 +1,7 @@
 // The Changes tab diff's "Show more lines above / below" rows. An
 // uncommitted file whose last hunk reaches the end of the file offers no
 // "below" row, and the "above" header goes once the expansion reaches
-// line 1. Only working-copy files expand; committed ones do not.
+// line 1. Committed files expand too: see 14-diff-context-committed.
 //
 // File rows and the context rows are not observable, so those steps click
 // fixed points (for this seed and the 1400x900 window); each then settles.
