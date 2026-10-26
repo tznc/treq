@@ -539,11 +539,16 @@ pub enum TreqCommandRequest {
     workspace: String,
   },
   // -- Phase 7: VM-local persistent PTY supervisor (`pty-remote`) -----------------
-  /// Starts (or reuses, if already running) a persistent tmux/screen-backed
-  /// PTY session. Does not itself attach — the client attaches over a
+  /// Starts (or reuses, if already running) a persistent PTY session. Does not itself attach — the client attaches over a
   /// separate SSH PTY channel using `PtyAttachCommand`'s returned command
   /// line, matching how `core::remote_pty::build_launch_command` is used.
   PtyStart {
+    /// Which program holds the session; omitted for the default daemon.
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
     repo: String,
     workspace: String,
     label: String,
@@ -555,17 +560,48 @@ pub enum TreqCommandRequest {
   },
   /// Lists persistent PTY sessions, optionally scoped to `workspace`.
   PtyList {
+    /// Which program holds the session; omitted for the default daemon.
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
     repo: String,
     workspace: Option<String>,
   },
+  /// Ends every Treq session on the host under `backend`, whatever its
+  /// repository, and for the daemon stops the daemon: a machine's "Reset
+  /// terminals".
+  /// What holds Treq's terminals on the host right now: the daemon (its
+  /// pid, version and sessions) and Treq's sessions in tmux.
+  PtyStatus,
+  PtyReset {
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
+  },
   /// Stops (kills) a persistent PTY session. Idempotent.
   PtyStop {
+    /// Which program holds the session; omitted for the default daemon.
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
     repo: String,
     workspace: String,
     label: String,
   },
   /// Names a persistent PTY session; an empty title clears it. Idempotent.
   PtyRename {
+    /// Which program holds the session; omitted for the default daemon.
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
     repo: String,
     workspace: String,
     label: String,
@@ -574,6 +610,12 @@ pub enum TreqCommandRequest {
   /// Returns the literal command line an SSH PTY channel should exec to
   /// attach (creating first if necessary) to a persistent session.
   PtyAttachCommand {
+    /// Which program holds the session; omitted for the default daemon.
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
     repo: String,
     workspace: String,
     label: String,
@@ -586,6 +628,12 @@ pub enum TreqCommandRequest {
   /// paste, then presses Enter when `submit`: how a review reaches an
   /// agent's terminal.
   PtyPaste {
+    /// Which program holds the session; omitted for the default daemon.
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
     repo: String,
     workspace: String,
     label: String,
@@ -695,6 +743,7 @@ impl TreqCommandRequest {
       | Self::AgentStatus { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
+      | Self::PtyStatus
       | Self::PtyAttachCommand { .. }
       | Self::WorkspaceChangeMarker { .. }
       | Self::MachineUsage { .. }
@@ -741,6 +790,7 @@ impl TreqCommandRequest {
       | Self::PtyStart { .. }
       | Self::PtyStop { .. }
       | Self::PtyRename { .. }
+      | Self::PtyReset { .. }
       | Self::PtyPaste { .. }
       | Self::ReviewSave { .. }
       | Self::ReviewClear { .. } => true,
@@ -820,8 +870,10 @@ impl TreqCommandRequest {
       | Self::AgentStop { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
+      | Self::PtyStatus
       | Self::PtyStop { .. }
       | Self::PtyRename { .. }
+      | Self::PtyReset { .. }
       | Self::PtyAttachCommand { .. }
       | Self::ReviewLoad { .. }
       | Self::ReviewSave { .. }
@@ -899,6 +951,8 @@ impl TreqCommandRequest {
       Self::PtyList { .. } => "PtyList",
       Self::PtyStop { .. } => "PtyStop",
       Self::PtyRename { .. } => "PtyRename",
+      Self::PtyReset { .. } => "PtyReset",
+      Self::PtyStatus => "PtyStatus",
       Self::PtyAttachCommand { .. } => "PtyAttachCommand",
       Self::PtyPaste { .. } => "PtyPaste",
       Self::ReviewLoad { .. } => "ReviewLoad",
@@ -969,6 +1023,8 @@ impl TreqCommandRequest {
     "PtyList",
     "PtyStop",
     "PtyRename",
+    "PtyReset",
+    "PtyStatus",
     "PtyAttachCommand",
     "PtyPaste",
     "ReviewLoad",
@@ -1563,7 +1619,7 @@ pub struct PtyLaunchPayload {
   clippy::expect_used,
   reason = "the payload is plain data that always serializes"
 )]
-fn pty_launch_payload(
+pub fn pty_launch_payload(
   remote_dir: &str,
   launch: &crate::core::remote_pty::PtyLaunchSpec,
   cols: u16,
@@ -1615,6 +1671,16 @@ fn hunk_specs_arg(hunks: &[crate::core::workspaces::HunkSpec]) -> Option<String>
       .collect::<Vec<_>>()
       .join(","),
   )
+}
+
+/// Adds `--backend` for a machine on tmux; the daemon is the CLI's default.
+fn push_backend(
+  fields: &mut CliArgFields,
+  backend: crate::core::pty_remote_supervisor::PtyBackend,
+) {
+  if !backend.is_default() {
+    fields.extra.push(("backend", backend.as_str().to_string()));
+  }
 }
 
 impl TreqCommandRequest {
@@ -2117,6 +2183,7 @@ impl TreqCommandRequest {
         ("agent-remote", "logs", repo)
       }
       Self::PtyStart {
+        backend,
         repo,
         workspace,
         label,
@@ -2126,37 +2193,55 @@ impl TreqCommandRequest {
         rows,
         idempotency_key,
       } => {
+        push_backend(&mut fields, *backend);
         fields.workspace = Some(workspace);
         fields.target = Some(label);
         fields.value = Some(pty_launch_payload(remote_dir, launch, *cols, *rows));
         fields.idempotency_key = Some(idempotency_key);
         ("pty-remote", "start", repo)
       }
-      Self::PtyList { repo, workspace } => {
+      Self::PtyList {
+        backend,
+        repo,
+        workspace,
+      } => {
+        push_backend(&mut fields, *backend);
         fields.workspace = workspace.as_deref();
         ("pty-remote", "list", repo)
       }
+      Self::PtyStatus => ("pty-remote", "status", "/"),
+      Self::PtyReset { backend } => {
+        push_backend(&mut fields, *backend);
+        // Reset reaches every repository on the host; `--repo` only
+        // satisfies the CLI's shared argument shape.
+        ("pty-remote", "reset", "/")
+      }
       Self::PtyStop {
+        backend,
         repo,
         workspace,
         label,
       } => {
+        push_backend(&mut fields, *backend);
         fields.workspace = Some(workspace);
         fields.target = Some(label);
         ("pty-remote", "stop", repo)
       }
       Self::PtyRename {
+        backend,
         repo,
         workspace,
         label,
         title,
       } => {
+        push_backend(&mut fields, *backend);
         fields.workspace = Some(workspace);
         fields.target = Some(label);
         fields.value = Some(title.clone());
         ("pty-remote", "rename", repo)
       }
       Self::PtyAttachCommand {
+        backend,
         repo,
         workspace,
         label,
@@ -2165,12 +2250,14 @@ impl TreqCommandRequest {
         cols,
         rows,
       } => {
+        push_backend(&mut fields, *backend);
         fields.workspace = Some(workspace);
         fields.target = Some(label);
         fields.value = Some(pty_launch_payload(remote_dir, launch, *cols, *rows));
         ("pty-remote", "attach-command", repo)
       }
       Self::PtyPaste {
+        backend,
         repo,
         workspace,
         label,
@@ -2178,6 +2265,7 @@ impl TreqCommandRequest {
         submit,
         idempotency_key,
       } => {
+        push_backend(&mut fields, *backend);
         fields.workspace = Some(workspace);
         fields.target = Some(label);
         fields.value = Some(text.clone());
@@ -3210,6 +3298,7 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       json(crate::core::agent_supervisor::agent_logs(&repo, &workspace))
     }
     TreqCommandRequest::PtyStart {
+      backend,
       repo,
       workspace,
       label,
@@ -3225,6 +3314,7 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       request_snapshot.as_ref().expect("PtyStart is a mutation"),
       || {
         json(crate::core::pty_remote_supervisor::start_session(
+          backend,
           &repo,
           &remote_dir,
           &workspace,
@@ -3235,25 +3325,38 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
         ))
       },
     ),
-    TreqCommandRequest::PtyList { repo, workspace } => json(
-      crate::core::pty_remote_supervisor::list_sessions(&repo, workspace.as_deref()),
-    ),
+    TreqCommandRequest::PtyList {
+      backend,
+      repo,
+      workspace,
+    } => json(crate::core::pty_remote_supervisor::list_sessions(
+      backend,
+      &repo,
+      workspace.as_deref(),
+    )),
+    TreqCommandRequest::PtyStatus => json(crate::core::pty_remote_supervisor::terminal_status()),
+    TreqCommandRequest::PtyReset { backend } => {
+      json(crate::core::pty_remote_supervisor::reset_sessions(backend))
+    }
     TreqCommandRequest::PtyStop {
+      backend,
       repo,
       workspace,
       label,
     } => json(crate::core::pty_remote_supervisor::stop_session(
-      &repo, &workspace, &label,
+      backend, &repo, &workspace, &label,
     )),
     TreqCommandRequest::PtyRename {
+      backend,
       repo,
       workspace,
       label,
       title,
     } => json(crate::core::pty_remote_supervisor::rename_session(
-      &repo, &workspace, &label, &title,
+      backend, &repo, &workspace, &label, &title,
     )),
     TreqCommandRequest::PtyAttachCommand {
+      backend,
       repo,
       workspace,
       label,
@@ -3262,6 +3365,7 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       cols,
       rows,
     } => json(crate::core::pty_remote_supervisor::build_attach_command(
+      backend,
       &repo,
       &remote_dir,
       &workspace,
@@ -3271,6 +3375,7 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       rows,
     )),
     TreqCommandRequest::PtyPaste {
+      backend,
       repo,
       workspace,
       label,
@@ -3284,7 +3389,7 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       request_snapshot.as_ref().expect("PtyPaste is a mutation"),
       || {
         json(crate::core::pty_remote_supervisor::paste_text(
-          &repo, &workspace, &label, &text, submit,
+          backend, &repo, &workspace, &label, &text, submit,
         ))
       },
     ),
@@ -3915,10 +4020,28 @@ pub struct RemoteHostCheck {
   /// `root` with `~` expanded, and whether it exists.
   pub root: String,
   pub root_exists: bool,
-  /// `tmux` or `screen`, which persistent terminals and agents need.
+  /// What holds persistent terminals and agents by default: `daemon`, the
+  /// Treq terminal daemon, on Linux and macOS hosts. Older hosts reported
+  /// `tmux` or `screen` here.
   pub terminal: Option<String>,
+  /// Whether tmux is installed, for machines set to tmux terminals.
+  #[serde(default)]
+  pub tmux: bool,
   /// The allow-listed agent CLIs installed on the host.
   pub agents: Vec<crate::core::remote_pty::RemoteAgentId>,
+}
+
+impl RemoteHostCheck {
+  /// Whether the host can keep persistent terminals under `backend`. A host
+  /// whose treq predates the daemon reports the multiplexer it found in
+  /// `terminal`, and keeps using it.
+  pub fn holds_terminals(&self, backend: crate::core::pty_remote_supervisor::PtyBackend) -> bool {
+    use crate::core::pty_remote_supervisor::PtyBackend;
+    match backend {
+      PtyBackend::Daemon => self.terminal.is_some(),
+      PtyBackend::Tmux => self.tmux || self.terminal.as_deref() == Some("tmux"),
+    }
+  }
 }
 
 fn host_check(root: &str) -> RemoteHostCheck {
@@ -3928,13 +4051,8 @@ fn host_check(root: &str) -> RemoteHostCheck {
     treq_version: env!("CARGO_PKG_VERSION").to_string(),
     root_exists: Path::new(&root).is_dir(),
     root,
-    terminal: crate::core::pty_remote_supervisor::detect_backend().map(|b| {
-      match b {
-        PtyBackend::Tmux => "tmux",
-        PtyBackend::Screen => "screen",
-      }
-      .to_string()
-    }),
+    terminal: cfg!(unix).then(|| PtyBackend::Daemon.as_str().to_string()),
+    tmux: crate::core::pty_remote_supervisor::tmux_available(),
     agents: RemoteAgentId::ALL
       .into_iter()
       .filter(|agent| crate::binary_paths::detect_binary(agent.binary_name()).is_some())
@@ -6012,12 +6130,75 @@ mod tests {
   }
 
   #[test]
+  fn a_host_holds_terminals_by_its_backend_and_older_hosts_by_their_multiplexer() {
+    use crate::core::pty_remote_supervisor::PtyBackend;
+    let check = |terminal: Option<&str>, tmux: bool| RemoteHostCheck {
+      treq_version: "0.3.0".into(),
+      root: "/".into(),
+      root_exists: true,
+      terminal: terminal.map(str::to_string),
+      tmux,
+      agents: vec![],
+    };
+    assert!(check(Some("daemon"), false).holds_terminals(PtyBackend::Daemon));
+    assert!(!check(Some("daemon"), false).holds_terminals(PtyBackend::Tmux));
+    assert!(check(Some("daemon"), true).holds_terminals(PtyBackend::Tmux));
+    assert!(check(Some("tmux"), false).holds_terminals(PtyBackend::Tmux));
+    assert!(!check(None, false).holds_terminals(PtyBackend::Daemon));
+    // A host check from before the field existed.
+    let old: RemoteHostCheck = serde_json::from_value(serde_json::json!({
+      "treq_version": "0.2.0", "root": "/", "root_exists": true,
+      "terminal": "tmux", "agents": []
+    }))
+    .unwrap();
+    assert!(!old.tmux);
+    assert!(old.holds_terminals(PtyBackend::Daemon));
+  }
+
+  #[test]
+  fn this_host_reports_the_daemon() {
+    let report = host_check("/");
+    assert_eq!(report.terminal.as_deref(), Some("daemon"));
+    assert_eq!(
+      report.tmux,
+      crate::core::pty_remote_supervisor::tmux_available()
+    );
+  }
+
+  #[test]
+  fn pty_requests_name_tmux_only_when_the_machine_uses_it() {
+    use crate::core::pty_remote_supervisor::PtyBackend;
+    let list = |backend| TreqCommandRequest::PtyList {
+      backend,
+      repo: "/r".into(),
+      workspace: None,
+    };
+    let daemon = list(PtyBackend::Daemon).cli_args().unwrap();
+    assert!(!daemon.contains(&"--backend".to_string()), "{daemon:?}");
+    let tmux = list(PtyBackend::Tmux).cli_args().unwrap();
+    let at = tmux.iter().position(|a| a == "--backend").unwrap();
+    assert_eq!(tmux[at + 1], "tmux");
+    assert_eq!(
+      TreqCommandRequest::PtyStatus.cli_args().unwrap()[..2],
+      ["pty-remote".to_string(), "status".to_string()]
+    );
+    assert_eq!(
+      TreqCommandRequest::PtyReset {
+        backend: PtyBackend::Daemon
+      }
+      .cli_args()
+      .unwrap()[..2],
+      ["pty-remote".to_string(), "reset".to_string()]
+    );
+  }
+
+  #[test]
   fn kind_names_match_serde_kind_tags() {
     let sample = TreqCommandRequest::GitFetch { repo: "/r".into() };
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 73);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 75);
   }
 
   #[test]

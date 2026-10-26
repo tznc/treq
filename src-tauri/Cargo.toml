@@ -143,6 +143,9 @@ tauri-build = { version = "2", features = [], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+# Keeps each `pty-remote` daemon session's screen and history for replay on
+# reattach (core::pty_daemon).
+vt100 = "0.18"
 
 # Asks GDK whether a compositor draws transparent GPUI popups (gpui_shell::popup).
 # Optional behind `gpui-shell` so the headless CLI build links no GTK.

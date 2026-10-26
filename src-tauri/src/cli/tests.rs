@@ -1152,22 +1152,30 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       cols: 80,
       rows: 24,
       idempotency_key: key(),
+      backend: Default::default(),
     },
     R::PtyList {
       repo: repo(),
       workspace: Some("1".into()),
+      backend: Default::default(),
     },
     R::PtyStop {
       repo: repo(),
       workspace: "1".into(),
       label: "shell".into(),
+      backend: crate::core::pty_remote_supervisor::PtyBackend::Tmux,
+    },
+    R::PtyReset {
+      backend: crate::core::pty_remote_supervisor::PtyBackend::Tmux,
     },
     R::PtyRename {
+      backend: crate::core::pty_remote_supervisor::PtyBackend::Tmux,
       repo: repo(),
       workspace: "1".into(),
       label: "claude-1".into(),
       title: "Fix login redirect".into(),
     },
+    R::PtyStatus,
     R::PtyAttachCommand {
       repo: repo(),
       workspace: "1".into(),
@@ -1176,6 +1184,7 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       launch: PtyLaunchSpec::Shell,
       cols: 80,
       rows: 24,
+      backend: Default::default(),
     },
     R::PtyPaste {
       repo: repo(),
@@ -1184,6 +1193,7 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       text: "## Code Review\n\n> tidy".into(),
       submit: true,
       idempotency_key: key(),
+      backend: Default::default(),
     },
     R::ReviewLoad {
       repo: repo(),

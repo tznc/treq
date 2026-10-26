@@ -69,6 +69,26 @@ The current implementation can list SSH host aliases, show remote prerequisite r
 
 When you start a shell or coding-agent session from the connected remote repository screen, Treq opens a local PTY whose command is an SSH invocation. The remote shell changes into the selected repository or workspace directory before launching the shell or agent. Any files created or edited by the terminal or agent are written directly on the remote filesystem.
 
+### Persistent terminals on the host
+
+Remote terminals and agents keep running when the connection drops. When you reconnect, Treq reattaches and shows the current screen plus the last 250 lines of output.
+
+By default the Treq terminal daemon holds these sessions. The `treq` CLI starts it on the host the first time it is needed, and it stops itself a minute after the last session ends. The daemon listens on a socket in `~/.treq/pty/` that only your user can open, and opens no network port. It runs on Linux and macOS hosts.
+
+The host's tools popover on the start screen shows what holds its terminals right now, for example **Treq daemon running (pid 4242, treq 0.3.0): 2 terminals**. To ask the host yourself, run `treq pty-remote status` there:
+
+```text
+$ treq pty-remote status
+Treq daemon: running (pid 4242, treq 0.3.0), 2 sessions
+tmux: installed, 0 Treq sessions
+```
+
+Add `--format json` for the same report as JSON.
+
+To keep sessions in tmux instead, open the host's tools popover on the start screen and click **Use tmux…**. The host then needs tmux installed. Switching closes the terminals and agents that are running on the host.
+
+To close every Treq terminal and agent on a host, click **Reset terminals…** in the same popover. With the daemon, this also stops the daemon.
+
 ## Read-only review CLI
 
 The remote CLI exposes typed JSON commands that return the same core DTOs used locally:

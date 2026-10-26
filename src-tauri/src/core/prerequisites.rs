@@ -8,7 +8,8 @@ pub const PREREQUISITE_BINARIES: [&str; 6] =
   ["git", "claude", "codex", "cursor-agent", "copilot", "gh"];
 
 /// What a machine Treq works on over SSH (or in a container) needs: the
-/// local list plus jj and tmux, which the host runs itself.
+/// local list plus jj, which the host runs itself, and tmux, which a host
+/// set to tmux terminals needs.
 pub const HOST_BINARIES: [&str; 8] = [
   "git",
   "jj",

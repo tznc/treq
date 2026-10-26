@@ -105,6 +105,13 @@ pub struct SshEndpoint {
   /// which all dial directly, so it defaults to [`SshTransport::Direct`].
   #[serde(default, skip_serializing_if = "SshTransport::is_direct")]
   pub transport: SshTransport,
+  /// What holds the machine's persistent terminals: the Treq daemon unless
+  /// the user picked tmux. Absent in older serialized endpoints.
+  #[serde(
+    default,
+    skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+  )]
+  pub terminal_backend: crate::core::pty_remote_supervisor::PtyBackend,
 }
 
 /// The byte path to an endpoint's sshd. SSH (host-key pinning and client

@@ -162,6 +162,7 @@ fn it_config() -> Option<ItConfig> {
       host_keys,
       authentication: SshAuthentication::PublicKey { key_reference },
       transport: Default::default(),
+      terminal_backend: Default::default(),
     },
   })
 }

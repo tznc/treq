@@ -687,6 +687,9 @@ impl RemoteHost for Backend {
       auth_identity_reference: values.auth_identity_reference.clone(),
       alias: values.alias.clone(),
       created_at: now_iso(),
+      // New hosts keep terminals in the Treq daemon; the machine's popover
+      // switches to tmux.
+      terminal_backend: Default::default(),
     };
     let endpoint = record.to_endpoint();
     self.with_db(|db| remote_records::save_user_managed_endpoint(db, record));

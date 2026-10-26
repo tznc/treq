@@ -126,6 +126,7 @@ pub async fn reattach(
   } = request;
   let cancellation = CancellationToken::new();
   let attach_request = TreqCommandRequest::PtyAttachCommand {
+    backend: endpoint.terminal_backend,
     repo: repository_id.clone(),
     workspace: workspace_id.clone(),
     label,

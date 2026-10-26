@@ -5,7 +5,7 @@
 // with their installers and starting each as an agent, and a dropped connection. Opt-in: set QA_SSH_HOST, QA_SSH_PORT, QA_SSH_USER,
 // QA_SSH_KEY (a private key with its `.pub` beside it) and QA_SSH_REPO (a
 // path on the server the run replaces with a fresh Git repository). The
-// server needs `treq`, jj, git, tmux and curl, and must reach
+// server needs `treq`, jj, git and curl (tmux only for tmux mode), and must reach
 // claude.ai, cursor.com, nodejs.org and registry.npmjs.org;
 // `ssh-server/up.sh` starts one in Docker and prints the
 // variables.
@@ -30,6 +30,45 @@ const sshPort = port + 4;
 let app: ChildProcess;
 let browser: Browser;
 let page: Page;
+let fixture: ReturnType<typeof makeFixture>;
+
+/** Starts the app on the fixture's home and connects Playwright to it. */
+async function launch(): Promise<void> {
+  app = spawn(appBinary, [], {
+    stdio: process.env.QA_DEBUG ? "inherit" : "ignore",
+    env: { ...appEnv(fixture), GPUI_PLAYWRIGHT: String(sshPort), GDK_SCALE: process.env.GDK_SCALE ?? "2" },
+  });
+  const deadline = Date.now() + 120_000;
+  for (;;) {
+    try {
+      if ((await fetch(`http://127.0.0.1:${sshPort}/`)).ok) break;
+    } catch {}
+    if (Date.now() > deadline) throw new Error("ssh app did not start");
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  // The server can answer before the window is ready for a context.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      browser = await chromium.connect(`ws://127.0.0.1:${sshPort}/`);
+      page = await (await browser.newContext()).newPage();
+      break;
+    } catch (error) {
+      await browser?.close().catch(() => {});
+      if (attempt >= 10) throw error;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+  await page.setViewportSize({ width: 1400, height: 900 });
+}
+
+/** What the host's own treq says holds its terminals. */
+function terminalStatus(): {
+  daemon: { pid: number; version: string; sessions: number } | null;
+  tmux_installed: boolean;
+  tmux_sessions: number;
+} {
+  return JSON.parse(onServer("treq pty-remote status --repo / --format json"));
+}
 
 test.describe.configure({ mode: "serial" });
 test.skip(!env.host, "QA_SSH_HOST is not set");
@@ -58,9 +97,10 @@ test.beforeAll(async () => {
      git add .; git commit -qm 'Initial commit'
      printf 'pub fn add(a: i32, b: i32) -> i32 { a + b }\\n' > src/lib.rs
      git add .; git commit -qm 'Add lib'
+     treq pty-remote reset --repo / --format json >/dev/null 2>&1 || true
      tmux kill-server 2>/dev/null || true`,
   );
-  const fixture = makeFixture("treq-qa-ssh-");
+  fixture = makeFixture("treq-qa-ssh-");
   const ssh = join(fixture.home, ".ssh");
   mkdirSync(ssh, { recursive: true, mode: 0o700 });
   copyFileSync(env.key, join(ssh, "id_ed25519"));
@@ -72,21 +112,7 @@ test.beforeAll(async () => {
   db.exec("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('theme', ?)").run(theme);
   db.close();
-  app = spawn(appBinary, [], {
-    stdio: process.env.QA_DEBUG ? "inherit" : "ignore",
-    env: { ...appEnv(fixture), GPUI_PLAYWRIGHT: String(sshPort), GDK_SCALE: process.env.GDK_SCALE ?? "2" },
-  });
-  const deadline = Date.now() + 120_000;
-  for (;;) {
-    try {
-      if ((await fetch(`http://127.0.0.1:${sshPort}/`)).ok) break;
-    } catch {}
-    if (Date.now() > deadline) throw new Error("ssh app did not start");
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  browser = await chromium.connect(`ws://127.0.0.1:${sshPort}/`);
-  page = await (await browser.newContext()).newPage();
-  await page.setViewportSize({ width: 1400, height: 900 });
+  await launch();
 });
 
 test.afterAll(async () => {
@@ -148,9 +174,14 @@ test("ssh remote: connect and open a Git repository", async () => {
   await page.getByRole("checkbox", { name: "Show hidden folders" }).click();
   await page.getByRole("button", { name: /on QA container$/ }).click();
   await expect(page.getByRole("button", { name: "Remove host…" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Use tmux…" })).toBeVisible();
+  expect(terminalStatus().daemon).toBeNull();
+  await expect(page.getByRole("status", { name: /Treq daemon not running/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Reset terminals…" })).toBeVisible();
   await page.waitForTimeout(3000);
   await shot("host-tools", "The SSH host's tools popover", [
-    "Asked over SSH (`treq repo tools`): Git, Jujutsu and tmux are installed",
+    "Asked over SSH (`treq repo tools`): Git and Jujutsu are installed; tmux is listed under Optional",
+    "A Terminals section says they are held by the Treq daemon and that the daemon is not running yet (no terminal has started), with Use tmux… and Reset terminals…",
     "Claude Code is not installed yet; Remove host… at the bottom",
   ]);
   await page.keyboard.press("Escape");
@@ -325,16 +356,100 @@ test("ssh remote: install Claude Code and run it as an agent", async () => {
 });
 
 test("ssh remote: dropped connection reattaches on its own", async () => {
+  // A shell of its own: the agent steps before stop each other's terminals,
+  // and an agent missing from the host exits at once.
+  for (const stop of await page.getByRole("button", { name: "Stop", exact: true }).all()) await stop.click();
+  const workspace = page.getByRole("button", { name: WORKSPACE, exact: true });
+  await workspace.click();
+  await workspace.hover();
+  await workspace.getByRole("button", { name: "Open shell" }).click();
+  await page.waitForTimeout(4000);
+  await page.mouse.click(700, 780);
+  await page.keyboard.type("echo before-drop-$((40+2))\n");
+  await page.waitForTimeout(2000);
+  expect(terminalStatus().daemon?.sessions).toBeGreaterThanOrEqual(1);
   // Detached, so killing this command's own connection does not stop it
   // half way through.
   onServer(`setsid sh -c "sleep 1; pkill -f 'sshd: .*@'" </dev/null >/dev/null 2>&1 &`);
   await page.waitForTimeout(10_000);
   await expect(page.getByRole("button", { name: "Reattach" })).toHaveCount(0);
+  // The Treq daemon holds the sessions, not tmux, as the host's treq says.
+  const status = terminalStatus();
+  expect(status.daemon?.sessions).toBeGreaterThanOrEqual(1);
+  expect(status.tmux_sessions).toBe(0);
   await shot("reattached", "After the server drops every SSH connection", [
     "Every remote terminal reattached on its own, with no Reattach/Close overlay",
-    "The shell and agent show their earlier output: the tmux sessions survived on the server",
+    "The shell still shows 'before-drop-42' from before the drop: the treq daemon kept the session on the server",
   ]);
   await page.getByRole("button", { name: "Refresh" }).click();
   await page.getByRole("tab", { name: "Changes" }).click();
   await shot("refreshed", "Refresh after the drop", ["The tab reloads over a new connection with no error"]);
+});
+
+test("ssh remote: the machine shows the daemon holding its terminals after a restart", async () => {
+  // The host's own treq, in its words and as JSON.
+  const said = onServer("treq pty-remote status --repo /");
+  expect(said).toMatch(/Treq daemon: running \(pid \d+, treq [\d.]+\), \d+ sessions?/);
+  const before = terminalStatus();
+  expect(before.daemon?.sessions).toBeGreaterThanOrEqual(1);
+  // Quit the app and come back to the Overview: the terminals keep running
+  // on the host without it.
+  await browser.close().catch(() => {});
+  app.kill("SIGTERM");
+  await new Promise((r) => app.once("exit", r));
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(join(fixture.home, ".local/share/com.treq/treq.db"));
+  db.exec(
+    "DELETE FROM settings WHERE key IN ('last_opened_remote_repo_id', 'last_opened_remote_repo', 'last_opened_repo_path')",
+  );
+  db.close();
+  expect(terminalStatus().daemon?.pid).toBe(before.daemon?.pid);
+  await launch();
+  await expect(page.getByRole("button", { name: /on QA container$/ })).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: /on QA container$/ }).click();
+  const line = page.getByRole("status", { name: /Treq daemon running/ });
+  await expect(line).toBeVisible({ timeout: 30_000 });
+  await expect(line).toHaveAccessibleName(
+    new RegExp(`pid ${before.daemon!.pid}, treq ${before.daemon!.version}\\): ${before.daemon!.sessions} terminal`),
+  );
+  await shot("host-terminals-live", "The machine's popover with terminals running on the host", [
+    `The Terminals section has a green dot and reads 'Treq daemon running (pid ${before.daemon!.pid}, treq ${before.daemon!.version}): ${before.daemon!.sessions} terminal(s)', the same as \`treq pty-remote status\` on the host`,
+    "The app was restarted; the terminals kept running on the host meanwhile",
+  ]);
+});
+
+test("ssh remote: switching the machine to tmux keeps its terminals in tmux", async () => {
+  // The popover from the previous step is open on the Overview.
+  await page.getByRole("button", { name: "Use tmux…" }).click();
+  await page.getByRole("button", { name: "Use tmux", exact: true }).click();
+  // Confirming closes the popover; open it again to read the result.
+  await page.waitForTimeout(3000);
+  await page.getByRole("button", { name: /on QA container$/ }).click();
+  // Switching closed the daemon's terminals and stopped it.
+  await expect(page.getByRole("status", { name: /^tmux: 0 terminals/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Use Treq daemon…" })).toBeVisible();
+  expect(terminalStatus().daemon).toBeNull();
+  await shot("host-terminals-tmux", "The machine switched to tmux", [
+    "The Terminals section reads 'Terminals are held by tmux.' and 'tmux: 0 terminals.'",
+    "The switch button now reads Use Treq daemon…",
+  ]);
+  await page.keyboard.press("Escape");
+  await page.getByRole("listitem", { name: env.repo }).first().click();
+  const row = page.getByRole("button", { name: WORKSPACE, exact: true });
+  await expect(row).toBeVisible({ timeout: 60_000 });
+  await row.click();
+  await row.hover();
+  await row.getByRole("button", { name: "Open shell" }).click();
+  await page.waitForTimeout(4000);
+  await page.mouse.click(700, 780);
+  await page.keyboard.type("echo in-tmux-$((6*7))\n");
+  await page.waitForTimeout(2000);
+  const status = terminalStatus();
+  expect(status.daemon).toBeNull();
+  expect(status.tmux_sessions).toBeGreaterThanOrEqual(1);
+  expect(onServer("treq pty-remote status --repo /")).toMatch(/tmux: installed, [1-9]\d* Treq sessions?/);
+  await shot("shell-tmux", "A remote shell on a machine set to tmux", [
+    "The shell shows 'in-tmux-42' from the server",
+    "No tmux status line at the bottom of the pane",
+  ]);
 });

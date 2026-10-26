@@ -763,7 +763,7 @@
           ]
         },
         "pty-remote": {
-          "description": "VM-local persistent PTY sessions (tmux/screen-backed) for full terminal streaming and reattach",
+          "description": "Persistent PTY sessions on this host (held by the Treq terminal daemon, or tmux) for full terminal streaming and reattach",
           "afterHelp": "Example:\n  treq pty-remote list --repo . --workspace 1",
           "args": [
             {
@@ -771,7 +771,12 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Command action: start, list, stop, rename, attach-command, paste"
+              "description": "Command action: start, list, stop, rename, attach-command, attach, paste, status, reset, daemon"
+            },
+            {
+              "name": "backend",
+              "takesValue": true,
+              "description": "What holds the sessions: daemon (default) or tmux"
             },
             {
               "name": "repo",

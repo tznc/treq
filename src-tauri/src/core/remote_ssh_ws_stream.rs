@@ -11,8 +11,8 @@
 //! Relay connections are short-lived by design: Supabase caps how long an
 //! Edge Function worker lives (minutes, not hours), and the cap includes an
 //! open WebSocket. A drop looks like any other dead connection to the pool,
-//! which reconnects on the next command; PTY sessions run inside tmux on the
-//! VM and reattach.
+//! which reconnects on the next command; PTY sessions are held by the treq
+//! terminal daemon on the VM (`core::pty_daemon`) and reattach.
 
 use std::io;
 use std::pin::Pin;

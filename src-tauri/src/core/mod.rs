@@ -34,6 +34,8 @@ pub mod palette_commands;
 pub mod pr_stacks;
 pub mod pr_sync;
 pub mod prerequisites;
+#[cfg(unix)]
+pub mod pty_daemon;
 pub mod pty_remote_supervisor;
 pub mod remote;
 pub mod remote_control_plane;

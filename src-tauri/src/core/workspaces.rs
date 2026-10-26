@@ -1541,8 +1541,7 @@ pub struct WorkspaceSummary {
 pub fn workspace_summaries(repo_path: &str) -> Result<Vec<WorkspaceSummary>, String> {
   let statuses = list_workspace_statuses(repo_path)?;
   let default_branch = jj::get_default_branch(repo_path).unwrap_or_default();
-  let sessions =
-    crate::core::pty_remote_supervisor::list_sessions(repo_path, None).unwrap_or_default();
+  let sessions = crate::core::pty_remote_supervisor::list_all_sessions(repo_path, None);
   Ok(
     statuses
       .into_iter()

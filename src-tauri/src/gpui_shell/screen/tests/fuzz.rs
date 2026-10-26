@@ -731,3 +731,76 @@ fn the_file_picker_survives_random_searches() {
     },
   );
 }
+
+// The Overview's machine popover: switching a host's terminals and
+// resetting them only after the confirmation, whatever else is clicked.
+
+const MACHINE_CLICKS: &[&str] = &[
+  "machine-tools-ssh:ep-1",
+  "machine-tools-local",
+  "machine-terminal-backend",
+  "machine-reset-terminals",
+  "machine-remove",
+];
+
+#[test]
+fn machine_terminal_controls_change_nothing_unconfirmed() {
+  fuzz::check(
+    "machine_terminal_controls_change_nothing_unconfirmed",
+    4,
+    vec(step(), 1..20),
+    |cx, steps| {
+      let scenario = Scenario {
+        snapshot: onboarding(),
+        host: FakeHost {
+          listing: listing(),
+          host_tools: Some(Ok(vec![])),
+          terminal_status: Some(Ok(running_daemon(1))),
+          ..FakeHost::default()
+        },
+        wide: true,
+        clicks: MACHINE_CLICKS,
+        fields: &[],
+        layers: &[],
+      };
+      let mut run = fuzz(cx, scenario, &steps);
+      run.settle();
+      // A change to a host's terminals follows its confirmation, so there
+      // are never more of them than confirmations answered with the action.
+      let changes = run
+        .host
+        .calls()
+        .iter()
+        .filter(|c| c.starts_with("terminals ") || c.starts_with("reset terminals "))
+        .count();
+      // Confirmations: a click on the dialog's action, or Enter/Space on
+      // its focused button.
+      let confirmed = run
+        .log
+        .iter()
+        .filter(|l| {
+          l.ends_with("\"Use tmux\"")
+            || l.ends_with("\"Use Treq daemon\"")
+            || l.ends_with("\"Reset terminals\"")
+            || *l == "key {Enter}"
+            || *l == "key {Space}"
+        })
+        .count();
+      assert!(
+        changes <= confirmed,
+        "{changes} terminal changes for {confirmed} confirmations {}",
+        run.context()
+      );
+      // An open popover never stays on "Asking the host…" once the host
+      // has answered.
+      if run.h.drawn("machine-terminals-status") {
+        let asking = run
+          .screen
+          .get_all_by_role(by::role(Role::Status))
+          .iter()
+          .any(|n| n.name().is_some_and(|name| name.starts_with("Asking")));
+        assert!(!asking, "the status stayed on Asking {}", run.context());
+      }
+    },
+  );
+}

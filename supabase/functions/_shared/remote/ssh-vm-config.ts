@@ -48,7 +48,7 @@ export const MANAGED_SSHD_SERVICE_NAME = "treq-sshd";
 export const MANAGED_SSHD_LAUNCHER = "/usr/local/bin/treq-sshd";
 const MANAGED_SSH_USER = "treq";
 
-// Idempotent sshd install for a Sprite: installs openssh-server and tmux when absent,
+// Idempotent sshd install for a Sprite: installs openssh-server when absent,
 // creates the login user, generates any missing host keys, and writes the
 // launcher script the Sprites service runs. The launcher passes every
 // security-relevant option on the command line so a base-image
@@ -59,11 +59,10 @@ export function installSshdCommand(): string[] {
 set -eu
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then SUDO="sudo -n"; fi
-# tmux backs persistent remote PTY sessions (pty_remote_supervisor.rs), so
-# a terminal survives a relay drop and reattaches on reconnect.
+# Persistent terminals need nothing here: the treq CLI's own daemon holds
+# them (pty_daemon.rs), so a terminal survives a relay drop and reattaches.
 missing=""
 [ -x /usr/sbin/sshd ] || missing="$missing openssh-server"
-command -v tmux >/dev/null 2>&1 || missing="$missing tmux"
 if [ -n "$missing" ]; then
   $SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -q
   $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -q $missing

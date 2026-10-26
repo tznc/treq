@@ -21,7 +21,7 @@ use gpui_kit::{
 };
 use treq_lib::{
   core::{
-    pty_remote_supervisor::PtySessionInfo,
+    pty_remote_supervisor::{PtyBackend, PtySessionInfo},
     remote::{RemoteHostCheck, TreqCommandRequest},
     remote_pty::{AttachCommandCache, PtyLaunchSpec, RemoteAgentId, RemotePtyBinding},
   },
@@ -336,8 +336,17 @@ pub struct Sessions {
   drafts: HashMap<String, String>,
 }
 
+/// What holds the connected machine's terminals.
+fn terminal_backend() -> PtyBackend {
+  backend::get()
+    .endpoint()
+    .map(|endpoint| endpoint.terminal_backend)
+    .unwrap_or_default()
+}
+
 fn list_request(repo: &str, workspace: &Workspace) -> TreqCommandRequest {
   TreqCommandRequest::PtyList {
+    backend: terminal_backend(),
     repo: repo.to_string(),
     workspace: Some(workspace.workspace_name.clone()),
   }
@@ -435,6 +444,7 @@ impl Sessions {
       return done(Err("This workspace is still loading.".into()), cx);
     };
     let request = TreqCommandRequest::PtyPaste {
+      backend: terminal_backend(),
       repo: self.target.repo.clone(),
       workspace: workspace.workspace_name.clone(),
       label: label.clone(),
@@ -569,7 +579,9 @@ impl Sessions {
 impl Render for Sessions {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let check = host_check(cx);
-    let no_multiplexer = check.as_ref().is_some_and(|c| c.terminal.is_none());
+    let no_multiplexer = check
+      .as_ref()
+      .is_some_and(|c| !c.holds_terminals(terminal_backend()));
     let no_agents = agents_on(check.as_ref()).is_empty();
     let ready = self.workspace.is_some() && !no_multiplexer;
     v_flex()
@@ -577,7 +589,7 @@ impl Render for Sessions {
       .children(self.notice.clone().map(|n| widgets::muted(n, cx)))
       .when(no_multiplexer, |list| {
         list.child(widgets::error_text(
-          "Terminals need tmux or screen on the host. Install one there, then reconnect.",
+          "This host can't keep terminals. Treq supports Linux and macOS hosts; a host set to tmux needs tmux installed.",
           cx,
         ))
       })
@@ -886,6 +898,7 @@ impl TerminalScreen {
     let (cols, rows) = terminal_view::last_size().unwrap_or(INITIAL_SIZE);
     let (tx, rx) = mpsc::unbounded::<PtyEvent>();
     let request = TreqCommandRequest::PtyAttachCommand {
+      backend: endpoint.terminal_backend,
       repo: repo.clone(),
       workspace: workspace.workspace_name.clone(),
       label,
@@ -1041,6 +1054,7 @@ impl TerminalScreen {
     cx: &mut Context<Self>,
   ) {
     let request = TreqCommandRequest::PtyRename {
+      backend: terminal_backend(),
       repo: self.target.repo.clone(),
       workspace: self.workspace.workspace_name.clone(),
       label: self.label.clone(),
@@ -1113,6 +1127,7 @@ impl TerminalScreen {
 
   fn stop(&mut self, cx: &mut Context<Self>) {
     let request = TreqCommandRequest::PtyStop {
+      backend: terminal_backend(),
       repo: self.target.repo.clone(),
       workspace: self.workspace.workspace_name.clone(),
       label: self.label.clone(),
@@ -1447,7 +1462,8 @@ mod tests {
       treq_version: "0.4.0".into(),
       root: "/home/dev".into(),
       root_exists: true,
-      terminal: Some("tmux".into()),
+      terminal: Some("daemon".into()),
+      tmux: false,
       agents: vec![RemoteAgentId::Codex],
     };
     assert_eq!(agents_on(Some(&check)), vec![RemoteAgentId::Codex]);

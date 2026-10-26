@@ -32,6 +32,8 @@ struct FakeHost {
   containers: (Vec<machines::Machine>, Vec<machines::Recent>),
   /// What a host machine says is installed on it.
   host_tools: Option<Result<Vec<crate::core::PrerequisiteStatus>, String>>,
+  /// What a host says holds its terminals (`treq pty-remote status`).
+  terminal_status: Option<Result<crate::core::pty_remote_supervisor::TerminalStatus, String>>,
   /// What `check_prerequisites` reports.
   installed: Vec<(&'static str, bool)>,
   /// App and repository settings, by key.
@@ -318,6 +320,31 @@ impl machines::MachinesHost for FakeHost {
   fn remove_machine(&self, place: &machines::Place) -> bool {
     self.record(format!("remove {place:?}"));
     true
+  }
+
+  fn set_terminal_backend(
+    &self,
+    place: &machines::Place,
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
+  ) -> Result<(), String> {
+    self.record(format!("terminals {place:?} {backend:?}"));
+    Ok(())
+  }
+
+  fn reset_terminals(&self, place: &machines::Place) -> Result<(), String> {
+    self.record(format!("reset terminals {place:?}"));
+    Ok(())
+  }
+
+  fn terminal_status(
+    &self,
+    place: &machines::Place,
+  ) -> Result<crate::core::pty_remote_supervisor::TerminalStatus, String> {
+    self.record(format!("read terminal status {place:?}"));
+    self
+      .terminal_status
+      .clone()
+      .unwrap_or_else(|| Err("ssh: connection refused".into()))
   }
 
   fn pick_folder(&self) -> Option<String> {
@@ -1932,6 +1959,7 @@ fn listing() -> machines::Listing {
         place: Place::Local,
         name: "This computer".into(),
         detail: "laptop".into(),
+        terminals: None,
       },
       Machine {
         id: "ssh:ep-1".into(),
@@ -1940,6 +1968,7 @@ fn listing() -> machines::Listing {
         },
         name: "Dev box".into(),
         detail: "me@devbox".into(),
+        terminals: Some(Default::default()),
       },
       Machine {
         id: "cloud".into(),
@@ -1949,6 +1978,7 @@ fn listing() -> machines::Listing {
         },
         name: "Cloud workspace".into(),
         detail: "Not created yet".into(),
+        terminals: None,
       },
       Machine {
         id: "devcontainer:c1".into(),
@@ -1959,6 +1989,7 @@ fn listing() -> machines::Listing {
         },
         name: "web".into(),
         detail: "Stopped".into(),
+        terminals: None,
       },
     ],
     recents: vec![
@@ -2072,6 +2103,7 @@ fn onboarding_adds_the_dev_containers_docker_lists_to_its_rows(cx: &mut TestAppC
         },
         name: "api".into(),
         detail: "Running".into(),
+        terminals: None,
       }],
       vec![Recent {
         machine_id: "devcontainer:c2".into(),
@@ -2138,7 +2170,7 @@ fn onboarding_checks_a_host_only_when_its_popover_opens(cx: &mut TestAppContext)
   assert_eq!(host.calls(), ["check"]);
   h.click("machine-tools-ssh:ep-1");
   assert!(h.drawn("machine-tools-popover"));
-  // jj and tmux are required on a host; Git is there.
+  // jj is required on a host and tmux is offered; Git is there.
   assert!(h.drawn("install-tmux"));
   assert!(h.drawn("install-jj"));
   assert!(!h.drawn("install-git"));
@@ -2153,6 +2185,167 @@ fn onboarding_checks_a_host_only_when_its_popover_opens(cx: &mut TestAppContext)
   h.click("machine-remove");
   h.answer("Remove host");
   assert!(host.calls().iter().any(|c| c.starts_with("remove Ssh")));
+}
+
+#[gpui::test]
+fn onboarding_switches_a_hosts_terminals_to_tmux_after_confirming(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  h.click("machine-tools-ssh:ep-1");
+  assert!(h.drawn("machine-terminals"));
+  h.click("machine-terminal-backend");
+  // Switching closes the host's open terminals, so it asks first.
+  h.answer("Cancel");
+  assert!(!host.calls().iter().any(|c| c.starts_with("terminals")));
+  h.click("machine-tools-ssh:ep-1");
+  h.click("machine-terminal-backend");
+  h.answer("Use tmux");
+  assert!(
+    host
+      .calls()
+      .iter()
+      .any(|c| c.starts_with("terminals Ssh") && c.ends_with("Tmux")),
+    "{:?}",
+    host.calls()
+  );
+}
+
+fn running_daemon(sessions: usize) -> crate::core::pty_remote_supervisor::TerminalStatus {
+  crate::core::pty_remote_supervisor::TerminalStatus {
+    daemon: Some(crate::core::pty_remote_supervisor::DaemonStatus {
+      pid: 4242,
+      version: "0.3.0".into(),
+      sessions,
+    }),
+    tmux_installed: true,
+    tmux_sessions: 0,
+  }
+}
+
+/// Opens the SSH host's popover and reads what it says about terminals.
+fn host_terminals_text(cx: &mut TestAppContext, host: Arc<FakeHost>) -> (Harness, Vec<String>) {
+  use gpui_testing_library::prelude::*;
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  h.click("machine-tools-ssh:ep-1");
+  assert!(h.drawn("machine-terminals-status"));
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  let status: Vec<String> = screen
+    .get_all_by_role(by::role(gpui::Role::Status))
+    .iter()
+    .filter_map(|n| n.name())
+    .collect();
+  let texts = [
+    "Treq daemon running",
+    "Treq daemon not running",
+    "Couldn't ask the host",
+    "tmux",
+  ]
+  .iter()
+  .filter(|t| status.iter().any(|s| s.contains(**t)))
+  .map(|t| t.to_string())
+  .collect();
+  (h, texts)
+}
+
+#[gpui::test]
+fn onboarding_shows_the_daemon_the_host_reports(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    terminal_status: Some(Ok(running_daemon(2))),
+    ..FakeHost::default()
+  });
+  let (mut h, texts) = host_terminals_text(cx, host.clone());
+  assert!(
+    texts.contains(&"Treq daemon running".to_string()),
+    "{texts:?}"
+  );
+  assert!(h.drawn("machine-terminals-status"));
+  assert!(host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("read terminal status Ssh")));
+}
+
+#[gpui::test]
+fn onboarding_says_when_the_daemon_is_not_running(cx: &mut TestAppContext) {
+  let mut status = running_daemon(0);
+  status.daemon = None;
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    terminal_status: Some(Ok(status)),
+    ..FakeHost::default()
+  });
+  let (_, texts) = host_terminals_text(cx, host);
+  assert!(
+    texts.contains(&"Treq daemon not running".to_string()),
+    "{texts:?}"
+  );
+}
+
+#[gpui::test]
+fn onboarding_says_when_the_host_cannot_report_its_terminals(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    terminal_status: Some(Err("ssh: connection refused".into())),
+    ..FakeHost::default()
+  });
+  let (_, texts) = host_terminals_text(cx, host);
+  assert!(
+    texts.contains(&"Couldn't ask the host".to_string()),
+    "{texts:?}"
+  );
+}
+
+#[gpui::test]
+fn onboarding_resets_a_hosts_terminals_after_confirming(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  h.click("machine-tools-ssh:ep-1");
+  h.click("machine-reset-terminals");
+  h.answer("Cancel");
+  assert!(!host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("reset terminals")));
+  h.click("machine-tools-ssh:ep-1");
+  h.click("machine-reset-terminals");
+  h.answer("Reset terminals");
+  assert!(
+    host
+      .calls()
+      .iter()
+      .any(|c| c.starts_with("reset terminals Ssh")),
+    "{:?}",
+    host.calls()
+  );
+}
+
+#[gpui::test]
+fn onboarding_shows_no_terminal_settings_for_this_computer(cx: &mut TestAppContext) {
+  let mut h = Harness::with_host(
+    cx,
+    onboarding(),
+    Arc::new(FakeHost {
+      listing: listing(),
+      ..FakeHost::default()
+    }),
+  );
+  h.click("machine-tools-local");
+  assert!(h.drawn("machine-tools-popover"));
+  assert!(!h.drawn("machine-terminals"));
 }
 
 #[gpui::test]

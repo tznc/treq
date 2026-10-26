@@ -469,6 +469,7 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
     // Sprites have no raw TCP ingress: the response routes SSH through the
     // `remote-ssh-relay` Edge Function.
     transport: serde_json::from_value(endpoint_json["transport"].clone()).unwrap_or_default(),
+    terminal_backend: Default::default(),
   };
 
   let pool = SshConnectionPool::new();

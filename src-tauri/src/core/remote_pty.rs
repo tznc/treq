@@ -581,6 +581,7 @@ mod tests {
       host_keys: vec![trusted_host_key(host_key)],
       authentication: SshAuthentication::PublicKey { key_reference },
       transport: Default::default(),
+      terminal_backend: Default::default(),
     }
   }
 
@@ -1361,6 +1362,7 @@ mod tests {
       launch: PtyLaunchSpec::Shell,
       cols,
       rows: 24,
+      backend: Default::default(),
     };
     let cache = AttachCommandCache::default();
     let key = AttachCommandCache::key(&endpoint, &request(80));
