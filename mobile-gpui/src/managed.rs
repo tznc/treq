@@ -23,8 +23,6 @@ use treq_lib::core::{
 
 use crate::backend::{self, AppEvent, Connection, ConnectionKind};
 
-pub const NO_MANAGED_INSTANCE: &str =
-  "No managed instance for this account yet. Set one up from Treq on desktop, then connect here.";
 pub const SECURE_STORAGE_PREFIX: &str = "secure_storage_unavailable:";
 const DEVICE_KEY_COMMENT: &str = "treq-mobile-device";
 const RELAY_TOKEN_SYNC: Duration = Duration::from_secs(60);
@@ -60,30 +58,67 @@ pub async fn device_public_key_line() -> Result<String, String> {
   device_public_key().await.map(|(key, _)| key)
 }
 
-/// Connects to the managed instance, waking it first if needed. `progress`
+/// What `connect` does first for the account's instance as the control
+/// plane reports it.
+#[derive(Debug, PartialEq, Eq)]
+enum Step {
+  Provision,
+  Wake,
+  Wait,
+  Ready,
+}
+
+fn first_step(instance: Option<&control_plane::ManagedInstance>) -> Step {
+  match instance.map(|i| i.status.as_str()) {
+    None => Step::Provision,
+    Some("suspended") => Step::Wake,
+    Some("ready") => Step::Ready,
+    Some(_) => Step::Wait,
+  }
+}
+
+/// Connects to the managed instance, creating it when the account has none
+/// and waking it first if needed. `progress`
 /// receives the step text the UI shows.
 pub async fn connect(progress: impl Fn(&'static str) + Send + Sync) -> Result<Connection, String> {
   let supabase = &backend::get().supabase;
   progress("Checking the managed instance");
-  let mut instance = control_plane::instance_status(supabase)
+  let current = control_plane::instance_status(supabase)
     .await
     .map_err(|e| e.to_string())?
-    .instance
-    .ok_or_else(|| NO_MANAGED_INSTANCE.to_string())?;
+    .instance;
 
-  if instance.status == "suspended" {
-    progress("Waking the managed instance");
-    let key =
-      control_plane::wake_idempotency_key(&instance.instance_id, &uuid::Uuid::new_v4().to_string());
-    control_plane::wake(supabase, &instance.instance_id, &key)
-      .await
-      .map_err(|e| e.to_string())?;
-    instance.status = "waking".into();
+  match first_step(current.as_ref()) {
+    Step::Provision => {
+      // Provisioning is server-side (`remote-instance` "ensure"), which
+      // checks Pro and ownership, as on desktop. One key per attempt so a
+      // retry after a failure is not a replay of it.
+      progress("Creating the managed instance");
+      let key = format!("provision-managed-{}", uuid::Uuid::new_v4());
+      control_plane::ensure(supabase, &key)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    Step::Wake => {
+      progress("Waking the managed instance");
+      let id = &current.as_ref().unwrap().instance_id;
+      let key = control_plane::wake_idempotency_key(id, &uuid::Uuid::new_v4().to_string());
+      control_plane::wake(supabase, id, &key)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    Step::Wait | Step::Ready => {}
   }
-  if instance.status != "ready" {
-    progress("Waiting for the managed instance");
-    shared::wait_for_ready(supabase, READY_POLL, READY_TIMEOUT, &|_| {}).await?;
-  }
+  let instance = match current {
+    Some(instance) if instance.status == "ready" => instance,
+    _ => {
+      progress("Waiting for the managed instance");
+      shared::wait_for_ready(supabase, READY_POLL, READY_TIMEOUT, &|_| {})
+        .await?
+        .instance
+        .ok_or("Managed instance became ready without an instance id.")?
+    }
+  };
 
   progress("Getting a certificate");
   let (lease, endpoint) = issue(&instance.instance_id, false).await?;
@@ -291,6 +326,22 @@ pub fn stop() {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  fn instance(status: &str) -> control_plane::ManagedInstance {
+    serde_json::from_value(serde_json::json!({"instance_id": "i1", "status": status})).unwrap()
+  }
+
+  #[test]
+  fn provisions_when_the_account_has_no_instance() {
+    assert_eq!(first_step(None), Step::Provision);
+  }
+
+  #[test]
+  fn wakes_a_suspended_instance_and_waits_on_any_other_non_ready_state() {
+    assert_eq!(first_step(Some(&instance("suspended"))), Step::Wake);
+    assert_eq!(first_step(Some(&instance("provisioning"))), Step::Wait);
+    assert_eq!(first_step(Some(&instance("ready"))), Step::Ready);
+  }
   use std::sync::atomic::{AtomicUsize, Ordering};
 
   async fn run(

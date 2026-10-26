@@ -48,6 +48,12 @@ pub fn describe(raw: &str) -> Problem {
   let lower = raw.to_lowercase();
   let has = |needle: &str| lower.contains(needle);
 
+  if has("pro_required") {
+    return Problem::new(
+      "Treq Cloud machines need a Pro plan. Upgrade at treq.dev, then try again.",
+      Some(Fix::Retry),
+    );
+  }
   if has("credential_cut_off") || has("is cut off") {
     return Problem::new(
       "This device's access to the machine ended. Reauthenticate to continue.",
@@ -191,6 +197,16 @@ fn strip_codes(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn a_cloud_machine_without_pro_says_so() {
+    let problem = describe("[pro_required] Pro is required\nHTTP 402");
+    assert_eq!(
+      problem.message,
+      "Treq Cloud machines need a Pro plan. Upgrade at treq.dev, then try again."
+    );
+    assert_eq!(problem.fix, Some(Fix::Retry));
+  }
 
   #[test]
   fn doubled_codes_are_dropped() {
