@@ -11,6 +11,7 @@ Area guides (read the one for the area you are changing):
 - Keep `commands/*.rs` thin: no business logic there — delegate to `core/`
 - Prefer **jj-lib** or **gix** over subprocess calls; never shell out to `jj` or `git` from Rust
 - `jj.rs` functions that accept a workspace path must validate the path exists and return an empty/default value on missing path rather than propagating an IO error
+- GitHub MCP tools: pass `minimal_output: true` unless you need full fields, and paginate lists 5–10 at a time
 
 ## TDD (Required)
 
