@@ -60,11 +60,21 @@ impl ToastQueue {
     kind: ToastKind,
     action: Option<&str>,
   ) -> QueuedToast {
+    let description = description.filter(|d| !d.is_empty());
+    // A retry or a second caller failing the same way shows nothing new.
+    if let Some((_, showing)) = self.toasts.iter().find(|(_, t)| {
+      t.title == title
+        && t.description.as_deref() == description
+        && t.kind == kind
+        && t.action.as_deref() == action
+    }) {
+      return showing.clone();
+    }
     self.next += 1;
     let toast = QueuedToast {
       id: format!("{OWN_PREFIX}{}", self.next),
       title: title.into(),
-      description: description.filter(|d| !d.is_empty()).map(str::to_string),
+      description: description.map(str::to_string),
       kind,
       action: action.map(str::to_string),
     };

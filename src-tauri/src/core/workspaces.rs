@@ -1846,8 +1846,8 @@ pub fn workspace_status(
 #[cfg(test)]
 mod tests {
   use super::{
-    merge_linear_issue_metadata_json, merge_tracker_item_metadata_json, parse_hunk_spec,
-    parse_workspace_metadata, plan_merge_landing, plan_workspace_target_move,
+    diff_target_revision, merge_linear_issue_metadata_json, merge_tracker_item_metadata_json,
+    parse_hunk_spec, parse_workspace_metadata, plan_merge_landing, plan_workspace_target_move,
     resolve_workspace_diff_base_revision_from_last_rebased,
     resolve_workspace_diff_conflict_marker_style,
     resolve_workspace_diff_tip_revision_from_workspace_state,
@@ -2943,6 +2943,16 @@ mod tests {
     assert!(diff.committed_files.is_empty());
     assert!(!diff.too_large_to_render);
     assert!(jj::revision_diff_if_workspace_missing(temp_dir.path()).is_none());
+  }
+
+  #[test]
+  fn diff_bases_on_origin_when_the_local_target_is_conflicted() {
+    assert_eq!(
+      diff_target_revision("main", |_| true, |_| true),
+      "main@origin"
+    );
+    assert_eq!(diff_target_revision("main", |_| false, |_| true), "main");
+    assert_eq!(diff_target_revision("main", |_| true, |_| false), "main");
   }
 
   #[test]
@@ -4760,7 +4770,12 @@ fn resolve_workspace_diff_base_revision(
   workspace: &local_db::Workspace,
   repo: &jj::WorkspaceRepo,
 ) -> Result<String, String> {
-  let target_branch = workspace.target_branch.as_deref().unwrap_or("main");
+  let target_branch = diff_target_revision(
+    workspace.target_branch.as_deref().unwrap_or("main"),
+    |name| repo.is_bookmark_conflicted(name),
+    |name| repo.bookmark_presence(name, "origin").1,
+  );
+  let target_branch = target_branch.as_str();
   let last_rebased_target_commit =
     local_db::get_workspace_last_rebased_commit(repo_path, workspace.id)?;
   let base_revision = resolve_workspace_diff_base_revision_from_last_rebased(
@@ -4833,6 +4848,20 @@ fn resolve_workspace_diff_tip_revision_from_workspace_state(
     "@-".to_string()
   } else {
     branch_name.to_string()
+  }
+}
+
+/// The revision a diff bases on for `target`. A conflicted local bookmark
+/// cannot be named in a revset, so the diff falls back to its `@origin` copy.
+fn diff_target_revision(
+  target: &str,
+  is_conflicted: impl Fn(&str) -> bool,
+  on_origin: impl Fn(&str) -> bool,
+) -> String {
+  if is_conflicted(target) && on_origin(target) {
+    format!("{target}@origin")
+  } else {
+    target.to_string()
   }
 }
 
