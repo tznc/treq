@@ -455,8 +455,10 @@ impl WorkspaceView {
       return;
     }
     let moved = self.route.key() != route.key();
-    let stale = moved || self.route.revision != route.revision;
     let changed = self.route.changes_revision != route.changes_revision;
+    // A changed checkout or a refocused window (`changes_revision`) may mean
+    // history was rewritten outside treq: the tab badges read again too.
+    let stale = moved || changed || self.route.revision != route.revision;
     let left = std::mem::replace(&mut self.route, route);
     self.dark = dark;
     if moved {
@@ -2208,6 +2210,10 @@ impl WorkspaceView {
     let host: Arc<dyn CommitsHost> = host;
     if tab == Tab::Commits {
       self.code_shown = false;
+      // The log reads again with the tab badges when the checkout changes
+      // (`changes_revision`), so the list and its count stay one read.
+      let mut parent = parent;
+      parent.revision += self.route.changes_revision;
       let scroll_to = self.route.scroll_to_commit.clone();
       let was_drawn = self.drawn.is_some_and(|id| self.commits.has(id));
       let view = self.commits.view(

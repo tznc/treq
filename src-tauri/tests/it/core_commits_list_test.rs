@@ -1276,3 +1276,46 @@ fn list_commits_keeps_conflict_a_later_commit_leaves_unresolved() {
     ]
   );
 }
+
+/// The Commits badge (`workspace_status`) and the Commits list (`list_commits`)
+/// agree with each other and with the true range after history is rewritten
+/// outside treq: an abandon, then a rebase onto an advanced target.
+#[test]
+fn badge_count_matches_list_after_history_is_rewritten_outside_treq() {
+  let repo = TestRepo::new().expect("repo");
+  let ws = repo.create_workspace_simple("feat/rewrite").expect("ws");
+  let path = repo.workspace_full_path(&ws);
+  for idx in 0..4 {
+    TestRepo::write_workspace_file(&path, &format!("f{idx}.txt"), &format!("{idx}\n"))
+      .expect("write");
+    treq_lib::core::commit_workspace(&repo.repo_path, ws.id, &format!("stack {idx}"))
+      .expect("commit");
+  }
+  let counts = || {
+    let badge = treq_lib::core::workspace_status(&repo.repo_path, Some(ws.id))
+      .expect("status")
+      .commits_ahead_of_target
+      .len();
+    let list = treq_lib::core::list_commits(&repo.repo_path, Some(ws.id), true, None, None)
+      .expect("list")
+      .commits
+      .iter()
+      .filter(|c| !c.on_target_only)
+      .count();
+    (badge, list)
+  };
+  assert_eq!(counts(), (4, 4));
+
+  // An agent abandons one commit of the stack.
+  let doomed = TestRepo::jj_change_id(&path, "@--").expect("change id");
+  treq_lib::jj::jj_abandon(&path, &doomed).expect("abandon");
+  assert_eq!(counts(), (3, 3));
+
+  // The target advances and the stack is rebased onto it.
+  repo
+    .commit_file("main.txt", "main\n", "main moves on")
+    .expect("main commit");
+  treq_lib::jj::jj_rebase_workspace_bookmark_onto(&path, "feat/rewrite", repo.default_branch())
+    .expect("rebase");
+  assert_eq!(counts(), (3, 3));
+}
