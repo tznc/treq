@@ -501,6 +501,18 @@ fn linear_agent_review_cards_apply_and_resolve(cx: &mut TestAppContext) {
   assert!(h.drawn("linear-agent-review-body"));
   assert!(h.drawn("linear-agent-apply-r1"));
   assert!(h.drawn("linear-agent-apply-r2"));
+  // The same card as Settings' prompt edits, plus Resolve.
+  assert!(h.drawn("linear-agent-header"));
+  assert!(h.drawn("linear-agent-dismiss-r1"));
+  let resolve = h
+    .cx
+    .debug_bounds("linear-agent-resolve-r1")
+    .expect("resolve drawn");
+  let apply = h
+    .cx
+    .debug_bounds("linear-agent-apply-r1")
+    .expect("apply drawn");
+  assert!(resolve.right() <= apply.left(), "Apply is the last action");
   h.click("linear-agent-apply-r1");
   h.cx.run_until_parked();
   let calls = host.calls();

@@ -2850,11 +2850,11 @@ fn settings_reviews_proposed_prompt_edits_with_the_review_cards(cx: &mut TestApp
     ..FakeHost::default()
   });
   let mut h = code_review_settings(cx, host.clone());
+  // The shared agent card: its header row, then Dismiss and Apply only,
+  // Apply as the primary on the right, at the condensed size.
   assert!(h.drawn("prompt-edit-card"));
-  // Two actions only, Apply as the primary on the right; no source or line header.
+  assert!(h.drawn("prompt-edit-header"));
   assert!(!h.drawn("prompt-edit-resolve-e1"));
-  assert!(!h.drawn("prompt-edit-delete-e1"));
-  assert!(!h.drawn("prompt-edit-header"));
   let dismiss = h
     .cx
     .debug_bounds("prompt-edit-dismiss-e1")
@@ -2869,8 +2869,12 @@ fn settings_reviews_proposed_prompt_edits_with_the_review_cards(cx: &mut TestApp
     "{dismiss:?} then {apply:?}"
   );
   assert!(
-    card.right() - apply.right() < gpui::px(20.),
+    card.right() - apply.right() < gpui::px(12.),
     "Apply sits at the right edge"
+  );
+  assert!(
+    apply.size.height <= gpui::px(24.),
+    "condensed buttons: {apply:?}"
   );
 
   h.click("prompt-edit-apply-e1");

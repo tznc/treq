@@ -1,6 +1,5 @@
 //! `AgentReviewCommentCard` for text reviewed from a snapshot: a Linear
-//! issue, project or document, and the review prompt. The comment, its
-//! suggestion as a diff, then Apply, Resolve and Delete.
+//! issue, project or document, and the review prompt.
 
 use tauri_plugin_gpui::gpui::{
   div, prelude::*, App, ClickEvent, Div, FontWeight, SharedString, Window,
@@ -20,20 +19,25 @@ use crate::{
 pub enum CardAction {
   Apply,
   Resolve,
-  Delete,
+  Dismiss,
 }
 
 pub type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
-/// How one screen draws the card: `id_prefix` starts each button's id
-/// (`<prefix>-apply-<comment id>`), `apply_label` names where Apply writes.
+/// How one screen draws the card: `id_prefix` names its parts
+/// (`<prefix>-card`, `<prefix>-header`, `<prefix>-apply-<comment id>`),
+/// `location` is the header's where, and `resolvable` adds Resolve for
+/// text whose comments can be agreed with rather than applied.
 pub struct CardSpec<'a> {
   pub id_prefix: &'a str,
-  pub apply_label: &'a str,
   pub location: String,
+  pub resolvable: bool,
   pub busy: bool,
 }
 
+/// `AgentReviewCommentCard`, condensed: the header (who, where), the
+/// comment, its suggestion as a diff, then the actions pulled right with
+/// Apply, the primary, last as in a dialog footer.
 pub fn agent_comment_card(
   comment: &AgentReviewComment,
   spec: CardSpec<'_>,
@@ -41,56 +45,49 @@ pub fn agent_comment_card(
   mut on: impl FnMut(CardAction) -> ClickHandler,
 ) -> Div {
   let (id, prefix, busy) = (&comment.id, spec.id_prefix, spec.busy);
-  let mut actions = div().flex().flex_wrap().items_center().gap_2();
-  if comment.suggested_replacement.is_some() {
+  let button = |name: &str, icon: &'static str, label: &'static str| {
+    Button::new(SharedString::from(format!("{prefix}-{name}-{id}")), p)
+      .size(Size::Xs)
+      .gap_1()
+      .disabled(busy)
+      .icon(icon, 12.)
+      .label(label)
+  };
+  let mut actions = div().flex().justify_end().gap_2();
+  if spec.resolvable {
     actions = actions.child(
-      Button::new(SharedString::from(format!("{prefix}-apply-{id}")), p)
-        .size(Size::Sm)
-        .gap_1p5()
-        .disabled(busy)
-        .icon(theme::ICON_WAND, 12.)
-        .label(spec.apply_label.to_string())
-        .on_click(on(CardAction::Apply)),
+      button("resolve", theme::ICON_CIRCLE_CHECK, "Resolve")
+        .variant(Variant::Ghost)
+        .on_click(on(CardAction::Resolve)),
     );
   }
-  actions = actions
-    .child(
-      Button::new(SharedString::from(format!("{prefix}-resolve-{id}")), p)
-        .variant(Variant::Outline)
-        .size(Size::Sm)
-        .gap_1p5()
-        .disabled(busy)
-        .icon(theme::ICON_CHECK, 12.)
-        .label("Resolve")
-        .on_click(on(CardAction::Resolve)),
-    )
-    .child(
-      Button::new(SharedString::from(format!("{prefix}-delete-{id}")), p)
-        .variant(Variant::Ghost)
-        .size(Size::Sm)
-        .gap_1p5()
-        .text_color(p.muted_foreground)
-        .disabled(busy)
-        .icon(theme::ICON_TRASH, 12.)
-        .label("Delete")
-        .on_click(on(CardAction::Delete)),
-    );
+  actions = actions.child(
+    button("dismiss", theme::ICON_X, "Dismiss")
+      .variant(Variant::Outline)
+      .on_click(on(CardAction::Dismiss)),
+  );
+  if comment.suggested_replacement.is_some() {
+    actions =
+      actions.child(button("apply", theme::ICON_CHECK, "Apply").on_click(on(CardAction::Apply)));
+  }
+  let (card, header) = (format!("{prefix}-card"), format!("{prefix}-header"));
   div()
-    .debug_selector(|| "agent-review-comment-card".into())
+    .debug_selector(move || card)
     .rounded(radius::MD)
     .border_1()
     .border_color(ui::Tone::GitMerged.border(p))
     .bg(ui::Tone::GitMerged.tint(p))
-    .p_3()
+    .p_2()
     .flex()
     .flex_col()
-    .gap_2()
+    .gap_1p5()
     .child(
       div()
+        .debug_selector(move || header)
         .flex()
         .items_center()
-        .gap_2()
-        .child(ui::icon(theme::ICON_BOT, 14., ui::Tone::GitMerged.color(p)))
+        .gap_1p5()
+        .child(ui::icon(theme::ICON_BOT, 12., ui::Tone::GitMerged.color(p)))
         .child(
           ui::text(div(), TextSize::Xs)
             .font_weight(FontWeight::MEDIUM)
@@ -116,75 +113,4 @@ pub fn agent_comment_card(
       ))
     })
     .child(actions)
-}
-
-/// What a [`suggestion_card`]'s buttons do.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum SuggestionAction {
-  Apply,
-  Dismiss,
-}
-
-/// A proposed edit to text the user owns (the review prompt): the reason,
-/// the suggestion as a diff, then Dismiss and Apply, the primary on the
-/// right as in a dialog footer. Buttons are `<id_prefix>-apply-<id>` and
-/// `<id_prefix>-dismiss-<id>`.
-pub fn suggestion_card(
-  comment: &AgentReviewComment,
-  id_prefix: &str,
-  busy: bool,
-  p: &Palette,
-  mut on: impl FnMut(SuggestionAction) -> ClickHandler,
-) -> Div {
-  let id = &comment.id;
-  let card_id = format!("{id_prefix}-card");
-  div()
-    .debug_selector(move || card_id)
-    .rounded(radius::MD)
-    .border_1()
-    .border_color(ui::Tone::GitMerged.border(p))
-    .bg(ui::Tone::GitMerged.tint(p))
-    .p_3()
-    .flex()
-    .flex_col()
-    .gap_2()
-    .child(
-      ui::text(div(), TextSize::Sm)
-        .whitespace_normal()
-        .child(comment.comment_text.clone()),
-    )
-    .when_some(comment.suggested_replacement.clone(), |this, suggested| {
-      this.child(suggestion_box(
-        comment.quoted_text.as_deref(),
-        &suggested,
-        p,
-      ))
-    })
-    .child(
-      div()
-        .flex()
-        .justify_end()
-        .gap_2()
-        .child(
-          Button::new(SharedString::from(format!("{id_prefix}-dismiss-{id}")), p)
-            .variant(Variant::Outline)
-            .size(Size::Sm)
-            .gap_1p5()
-            .disabled(busy)
-            .icon(theme::ICON_X, 12.)
-            .label("Dismiss")
-            .on_click(on(SuggestionAction::Dismiss)),
-        )
-        .when(comment.suggested_replacement.is_some(), |this| {
-          this.child(
-            Button::new(SharedString::from(format!("{id_prefix}-apply-{id}")), p)
-              .size(Size::Sm)
-              .gap_1p5()
-              .disabled(busy)
-              .icon(theme::ICON_CHECK, 12.)
-              .label("Apply")
-              .on_click(on(SuggestionAction::Apply)),
-          )
-        }),
-    )
 }

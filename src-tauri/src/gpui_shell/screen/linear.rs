@@ -3080,8 +3080,7 @@ impl LinearView {
       )
   }
 
-  /// `AgentReviewCommentCard` with `applyLabel="Apply to Linear"` and no
-  /// "Send to agent".
+  /// The shared agent card, with Resolve and no "Send to agent".
   fn agent_card(
     &self,
     of: &Commented,
@@ -3092,15 +3091,15 @@ impl LinearView {
   ) -> impl IntoElement {
     let spec = agent_card::CardSpec {
       id_prefix: "linear-agent",
-      apply_label: "Apply to Linear",
       location,
+      resolvable: true,
       busy: self.busy.contains(&comment.id),
     };
     agent_card::agent_comment_card(comment, spec, p, |card| {
       let action = match card {
         agent_card::CardAction::Apply => Action::Apply,
         agent_card::CardAction::Resolve => Action::Resolve,
-        agent_card::CardAction::Delete => Action::Delete,
+        agent_card::CardAction::Dismiss => Action::Delete,
       };
       let (of, id) = (of.clone(), comment.id.clone());
       Box::new(cx.listener(move |view, _: &ClickEvent, _, cx| {

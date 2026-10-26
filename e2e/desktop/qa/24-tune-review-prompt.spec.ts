@@ -110,9 +110,9 @@ test("tune review prompt: start, review edits, apply", async ({ page }) => {
     name: "24-tune-03-edits",
     title: "Settings: the agent's proposed edits on the review cards",
     expectations: [
-      "Proposed edits (2) under the prompt; cards show no Local label or line number",
+      "Proposed edits (2) under the prompt, each a condensed Local card with its line in the header",
       "Each card shows the reason and the suggestion as a red/green diff",
-      "Only Dismiss (X icon, outline) then Apply (check icon, primary) pulled to the card's right edge",
+      "Small Dismiss (X, outline) then Apply (check, primary) pulled to the card's right edge",
     ],
   });
 

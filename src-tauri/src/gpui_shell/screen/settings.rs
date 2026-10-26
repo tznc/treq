@@ -30,7 +30,7 @@ pub use account::{
 };
 
 use super::{
-  agent_card::{self, SuggestionAction},
+  agent_card::{self, CardAction},
   checklist,
   settings_data::{self as data, AppFields, SettingsHost},
   ActionSink, ScreenAction,
@@ -742,7 +742,7 @@ impl SettingsView {
 
   /// Apply or Dismiss on a proposed review prompt edit. Apply
   /// writes into the prompt as edited here and saves it.
-  fn prompt_edit_action(&mut self, action: SuggestionAction, id: String, cx: &mut Context<Self>) {
+  fn prompt_edit_action(&mut self, action: CardAction, id: String, cx: &mut Context<Self>) {
     let Some(repo) = self
       .repo
       .as_mut()
@@ -755,8 +755,10 @@ impl SettingsView {
     let work = {
       let id = id.clone();
       move |host: &dyn SettingsHost| match action {
-        SuggestionAction::Apply => host.apply_prompt_edit(&path, &id, &custom).map(Some),
-        SuggestionAction::Dismiss => host.delete_prompt_edit(&path, &id).map(|()| None),
+        CardAction::Apply => host.apply_prompt_edit(&path, &id, &custom).map(Some),
+        CardAction::Resolve | CardAction::Dismiss => {
+          host.delete_prompt_edit(&path, &id).map(|()| None)
+        }
       }
     };
     self.spawn(cx, work, move |view, result, cx| {
@@ -1199,10 +1201,21 @@ impl SettingsView {
       .gap_3()
       .child(label(format!("Proposed edits ({})", edits.len())))
       .children(edits.iter().map(|edit| {
-        agent_card::suggestion_card(edit, "prompt-edit", busy.contains(&edit.id), p, |action| {
+        let location = if edit.end_line == edit.start_line {
+          format!("Line {}", edit.start_line)
+        } else {
+          format!("Lines {}-{}", edit.start_line, edit.end_line)
+        };
+        let spec = agent_card::CardSpec {
+          id_prefix: "prompt-edit",
+          location,
+          resolvable: false,
+          busy: busy.contains(&edit.id),
+        };
+        agent_card::agent_comment_card(edit, spec, p, |action| {
           let name = match action {
-            SuggestionAction::Apply => "apply",
-            SuggestionAction::Dismiss => "dismiss",
+            CardAction::Apply => "apply",
+            CardAction::Resolve | CardAction::Dismiss => "dismiss",
           };
           Box::new(self.press(&format!("repo.promptEdit.{name}:{}", edit.id)))
         })
@@ -1271,8 +1284,8 @@ impl SettingsView {
       ScreenAction::Press { id } => match id.split_once(':') {
         Some((action, edit)) if action.starts_with("repo.promptEdit.") => {
           let action = match action {
-            "repo.promptEdit.apply" => SuggestionAction::Apply,
-            _ => SuggestionAction::Dismiss,
+            "repo.promptEdit.apply" => CardAction::Apply,
+            _ => CardAction::Dismiss,
           };
           self.prompt_edit_action(action, edit.to_string(), cx);
         }
