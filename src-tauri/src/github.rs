@@ -383,13 +383,28 @@ fn run_gh_with_stdin(
   }
 }
 
+pub const GH_NOT_AUTHENTICATED: &str =
+  "gh is not authenticated. Run `gh auth login` in a terminal, then try again.";
+
 fn check_gh_output(output: std::process::Output) -> Result<Vec<u8>, String> {
   if output.status.success() {
     Ok(output.stdout)
   } else {
     let stderr = String::from_utf8_lossy(&output.stderr);
+    if is_gh_auth_error(&stderr) {
+      return Err(GH_NOT_AUTHENTICATED.to_string());
+    }
     Err(format!("gh exited with error: {stderr}"))
   }
+}
+
+/// gh's messages when it has no usable token: never logged in, or a token
+/// GitHub no longer accepts.
+fn is_gh_auth_error(stderr: &str) -> bool {
+  let stderr = stderr.to_ascii_lowercase();
+  stderr.contains("gh auth login")
+    || stderr.contains("not logged into any github hosts")
+    || stderr.contains("http 401")
 }
 
 /// Parse `<n>` from a `gh ... create` output line shaped like
@@ -2034,6 +2049,31 @@ pub fn gh_list_pr_review_threads_impl(
 
 #[cfg(test)]
 mod tests {
+  #[cfg(unix)]
+  #[test]
+  fn reports_an_unauthenticated_gh_apart_from_other_failures() {
+    use std::os::unix::process::ExitStatusExt;
+    let failed = |stderr: &str| std::process::Output {
+      status: std::process::ExitStatus::from_raw(1 << 8),
+      stdout: Vec::new(),
+      stderr: stderr.as_bytes().to_vec(),
+    };
+    for stderr in [
+      "To get started with GitHub CLI, please run:  gh auth login\n",
+      "You are not logged into any GitHub hosts. To log in, run: gh auth login\n",
+      "HTTP 401: Bad credentials (https://api.github.com/graphql)\n",
+    ] {
+      assert_eq!(
+        super::check_gh_output(failed(stderr)),
+        Err(super::GH_NOT_AUTHENTICATED.to_string())
+      );
+    }
+    assert_eq!(
+      super::check_gh_output(failed("HTTP 404: Not Found")),
+      Err("gh exited with error: HTTP 404: Not Found".to_string())
+    );
+  }
+
   fn listed_pr(number: u64, branch: &str, state: &str, cross_repo: bool, rollup: &str) -> String {
     format!(
       r#"{{"number":{number},"title":"t{number}","state":"{state}","url":"u{number}","headRefName":"{branch}","baseRefName":"main","mergeStateStatus":"CLEAN","isDraft":false,"isCrossRepository":{cross_repo},"statusCheckRollup":{rollup}}}"#

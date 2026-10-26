@@ -107,6 +107,10 @@ fn build_extended_path() -> (String, bool) {
         }
       }
     }
+    append_dirs(
+      &mut all_paths,
+      install_dirs(home_dir().as_deref(), true, |key| env::var(key).ok()),
+    );
     return (all_paths.join(";"), false);
   }
 
@@ -142,7 +146,88 @@ fn build_extended_path() -> (String, bool) {
     }
   }
 
+  append_dirs(
+    &mut all_paths,
+    install_dirs(home_dir().as_deref(), false, |key| env::var(key).ok()),
+  );
+
   (all_paths.join(":"), from_shell)
+}
+
+fn home_dir() -> Option<PathBuf> {
+  let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+  env::var_os(key)
+    .filter(|home| !home.is_empty())
+    .map(PathBuf::from)
+}
+
+/// Adds each of `extra` to the end of `dirs` unless it is there already, so
+/// the user's own PATH order still wins.
+fn append_dirs(dirs: &mut Vec<String>, extra: Vec<String>) {
+  for dir in extra {
+    if !dirs.contains(&dir) {
+      dirs.push(dir);
+    }
+  }
+}
+
+/// Where package managers put CLIs such as `gh`. A GUI launch (Finder, Dock,
+/// a desktop launcher) inherits a bare PATH, and the login shell that would
+/// supply the real one can be missing, slow or broken; these keep the usual
+/// tools findable then.
+pub(crate) fn install_dirs(
+  home: Option<&Path>,
+  windows: bool,
+  var: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
+  let mut dirs = Vec::new();
+  if windows {
+    for key in ["ProgramFiles", "ProgramFiles(x86)"] {
+      if let Some(base) = var(key) {
+        dirs.push(format!(r"{base}\GitHub CLI"));
+      }
+    }
+    if let Some(local) = var("LOCALAPPDATA") {
+      dirs.push(format!(r"{local}\Programs\GitHub CLI"));
+      dirs.push(format!(r"{local}\Microsoft\WinGet\Links"));
+    }
+    if let Some(home) = home {
+      dirs.push(
+        home
+          .join("scoop")
+          .join("shims")
+          .to_string_lossy()
+          .into_owned(),
+      );
+    }
+    return dirs;
+  }
+  dirs.extend(
+    [
+      "/opt/homebrew/bin",
+      "/usr/local/bin",
+      "/home/linuxbrew/.linuxbrew/bin",
+      "/opt/local/bin",
+      "/nix/var/nix/profiles/default/bin",
+      "/run/current-system/sw/bin",
+      "/snap/bin",
+      "/usr/bin",
+      "/bin",
+    ]
+    .map(String::from),
+  );
+  if let Some(home) = home {
+    for rel in [
+      ".local/bin",
+      ".nix-profile/bin",
+      ".local/share/mise/shims",
+      ".asdf/shims",
+      "bin",
+    ] {
+      dirs.push(home.join(rel).to_string_lossy().into_owned());
+    }
+  }
+  dirs
 }
 
 #[cfg(unix)]
@@ -410,6 +495,43 @@ mod tests {
   }
 
   use super::*;
+
+  #[test]
+  fn appends_common_unix_install_dirs_after_the_path_without_duplicates() {
+    let mut dirs = vec!["/usr/bin".to_string(), "/usr/local/bin".to_string()];
+    append_dirs(
+      &mut dirs,
+      install_dirs(Some(Path::new("/home/me")), false, |_| None),
+    );
+    assert_eq!(&dirs[..2], ["/usr/bin", "/usr/local/bin"]);
+    for wanted in [
+      "/opt/homebrew/bin",
+      "/home/linuxbrew/.linuxbrew/bin",
+      "/home/me/.local/bin",
+      "/home/me/.nix-profile/bin",
+      "/nix/var/nix/profiles/default/bin",
+      "/home/me/.local/share/mise/shims",
+      "/home/me/.asdf/shims",
+    ] {
+      assert!(dirs.iter().any(|d| d == wanted), "missing {wanted}");
+    }
+    assert_eq!(dirs.iter().filter(|d| *d == "/usr/local/bin").count(), 1);
+  }
+
+  #[test]
+  fn appends_github_cli_install_dirs_on_windows() {
+    let env = |key: &str| match key {
+      "ProgramFiles" => Some(r"C:\Program Files".to_string()),
+      "LOCALAPPDATA" => Some(r"C:\Users\me\AppData\Local".to_string()),
+      _ => None,
+    };
+    let dirs = install_dirs(Some(Path::new(r"C:\Users\me")), true, env);
+    assert!(dirs.contains(&r"C:\Program Files\GitHub CLI".to_string()));
+    assert!(dirs.contains(&r"C:\Users\me\AppData\Local\Programs\GitHub CLI".to_string()));
+    assert!(dirs
+      .iter()
+      .any(|d| d.ends_with("scoop\\shims") || d.ends_with("scoop/shims")));
+  }
 
   #[cfg(unix)]
   #[test]

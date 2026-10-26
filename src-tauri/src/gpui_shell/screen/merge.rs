@@ -169,7 +169,7 @@ impl MergeHost for Backend {
     workspace_id: i64,
     request: &GithubMerge,
   ) -> Result<MergeResult, String> {
-    let gh = gh_path().ok_or("gh CLI not found")?;
+    let gh = crate::core::github_cli::gh_path()?;
     let plan = core::merge_workspace_on_github(
       repo_path,
       workspace_id,
@@ -196,10 +196,6 @@ fn github_pr(repo_path: &str, branch: &str) -> Option<GithubPr> {
     .get_cached(repo_path, branch)
     .flatten();
   core::merge_preview::github_pr(repo_path, cached)
-}
-
-fn gh_path() -> Option<String> {
-  crate::binary_paths::get_binary_path("gh").or_else(|| crate::binary_paths::detect_binary("gh"))
 }
 
 /// Every merge's tail: move child PRs onto the new base, and refresh the PR

@@ -8,21 +8,38 @@ use crate::github::{
   PrCiStatus, GH_LIST_PAGE_SIZE,
 };
 
-const GH_NOT_FOUND: &str = "gh CLI not found";
+/// Why `gh` was not found, naming where Treq looked.
+fn gh_not_found(search_path: &str) -> String {
+  let sep = if cfg!(windows) { ';' } else { ':' };
+  let dirs: Vec<&str> = search_path.split(sep).filter(|d| !d.is_empty()).collect();
+  format!(
+    "gh CLI not found. Install it (https://cli.github.com) or make sure it is on your login shell's PATH. Treq looked in: {}",
+    dirs.join(", ")
+  )
+}
 
-/// The `gh` binary: the configured path, else one found on the system.
+/// The `gh` binary: the configured path if it still exists, else one found
+/// on the system.
 fn resolve_gh_with(
   configured: impl FnOnce() -> Option<String>,
+  exists: impl Fn(&str) -> bool,
   detected: impl FnOnce() -> Option<String>,
+  search_path: impl FnOnce() -> String,
 ) -> Result<String, String> {
   configured()
+    .filter(|path| exists(path))
     .or_else(detected)
-    .ok_or_else(|| GH_NOT_FOUND.to_string())
+    .ok_or_else(|| gh_not_found(&search_path()))
 }
 
 /// The `gh` binary's path.
 pub fn gh_path() -> Result<String, String> {
-  resolve_gh_with(|| get_binary_path("gh"), || detect_binary_cached("gh"))
+  resolve_gh_with(
+    || get_binary_path("gh"),
+    |path| std::path::Path::new(path).is_file(),
+    || detect_binary_cached("gh"),
+    get_extended_path,
+  )
 }
 
 /// The `gh` binary and the PATH to run it with.
@@ -239,24 +256,61 @@ pub fn set_pr_draft(repo: &str, number: u64, draft: bool) -> Result<(), String> 
 mod tests {
   use super::*;
 
+  fn path() -> String {
+    "/usr/bin".into()
+  }
+
   #[test]
   fn prefers_the_configured_gh_over_a_detected_one() {
-    let found = resolve_gh_with(|| Some("/cfg/gh".into()), || Some("/usr/bin/gh".into()));
+    let found = resolve_gh_with(
+      || Some("/cfg/gh".into()),
+      |_| true,
+      || Some("/usr/bin/gh".into()),
+      path,
+    );
     assert_eq!(found.as_deref(), Ok("/cfg/gh"));
   }
 
   #[test]
   fn falls_back_to_the_detected_gh() {
-    let found = resolve_gh_with(|| None, || Some("/usr/bin/gh".into()));
+    let found = resolve_gh_with(|| None, |_| true, || Some("/usr/bin/gh".into()), path);
     assert_eq!(found.as_deref(), Ok("/usr/bin/gh"));
   }
 
   #[test]
-  fn reports_gh_not_found_when_neither_lookup_finds_it() {
-    assert_eq!(
-      resolve_gh_with(|| None, || None),
-      Err("gh CLI not found".to_string())
+  fn skips_a_configured_gh_that_no_longer_exists() {
+    let found = resolve_gh_with(
+      || Some("/gone/gh".into()),
+      |_| false,
+      || Some("/opt/homebrew/bin/gh".into()),
+      path,
     );
+    assert_eq!(found.as_deref(), Ok("/opt/homebrew/bin/gh"));
+  }
+
+  #[test]
+  fn reports_where_it_looked_when_gh_is_not_found() {
+    let err = resolve_gh_with(
+      || None,
+      |_| true,
+      || None,
+      || {
+        if cfg!(windows) {
+          "C:\\a;C:\\b"
+        } else {
+          "/usr/bin:/opt/homebrew/bin"
+        }
+        .into()
+      },
+    )
+    .unwrap_err();
+    assert!(err.starts_with("gh CLI not found"), "{err}");
+    let listed = if cfg!(windows) {
+      "C:\\a, C:\\b"
+    } else {
+      "/usr/bin, /opt/homebrew/bin"
+    };
+    assert!(err.ends_with(listed), "{err}");
   }
 
   #[test]

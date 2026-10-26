@@ -191,14 +191,32 @@ pub fn error_state(
         .text_color(p.muted_foreground)
         .child(error.to_string()),
     )
-    .children(on_retry.map(|retry| {
-      Button::new(SharedString::from(format!("{id}-retry")), p)
-        .variant(Variant::Outline)
-        .size(Size::Sm)
+    .child({
+      let error = error.to_string();
+      div()
+        .flex()
+        .flex_wrap()
+        .justify_center()
+        .gap_2()
         .mt_1()
-        .label("Try again")
-        .on_click(retry)
-    }))
+        .children(on_retry.map(|retry| {
+          Button::new(SharedString::from(format!("{id}-retry")), p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .label("Try again")
+            .on_click(retry)
+        }))
+        .child(
+          Button::new(SharedString::from(format!("{id}-copy-error")), p)
+            .variant(Variant::Ghost)
+            .size(Size::Sm)
+            .icon(theme::ICON_COPY, 12.)
+            .label("Copy error")
+            .on_click(move |_, _, cx| {
+              cx.write_to_clipboard(gpui::ClipboardItem::new_string(error.clone()))
+            }),
+        )
+    })
 }
 
 /// `LoadMoreButton`.
