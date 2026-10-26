@@ -521,6 +521,8 @@ impl WindowHost for Backend {
     }
     let (tx, changes) = unbounded();
     let mut gitignore = GitignoreFilter::new(Path::new(path));
+    let ops = op_heads_dir(Path::new(path));
+    let ops_dir = ops.clone();
     let watcher: Arc<Mutex<Option<CheckoutWatcher>>> = Arc::default();
     let weak = Arc::downgrade(&watcher);
     // `NoCache` on every platform: the default `FileIdMap` (macOS, Windows)
@@ -537,7 +539,8 @@ impl WindowHost for Backend {
         Ok(events) => {
           let mut changed = false;
           for path in events.iter().flat_map(|e| e.paths.iter()) {
-            if is_ignored(path) || gitignore.ignores(path) {
+            let op = ops.as_deref().is_some_and(|ops| path.starts_with(ops));
+            if !changes_matter(path, ops.as_deref()) || !op && gitignore.ignores(path) {
               continue;
             }
             changed = true;
@@ -570,6 +573,14 @@ impl WindowHost for Backend {
       watched: HashSet::new(),
     };
     checkout.watch_tree(Path::new(path));
+    if let Some(ops) = ops_dir {
+      if let Err(err) = checkout
+        .debouncer
+        .watch(&ops, notify::RecursiveMode::NonRecursive)
+      {
+        log::warn!("Failed to watch {}: {err}", ops.display());
+      }
+    }
     if checkout.watched.is_empty() {
       log::warn!("Failed to watch {path}");
       return None;
@@ -817,6 +828,25 @@ impl RemoteHost for Backend {
 /// How long edits must settle before the Changes tab reads again.
 const WATCH_SETTLE: Duration = Duration::from_millis(500);
 
+/// Where jj records each new operation for `checkout`'s repository, so a
+/// rewrite that touches no file (an agent's `jj squash`, `abandon` or
+/// `rebase`) still reads the counts again. `None` outside a jj repository.
+fn op_heads_dir(checkout: &Path) -> Option<PathBuf> {
+  let repo = checkout
+    .to_str()
+    .and_then(crate::jj::derive_repo_path_from_workspace)
+    .map(PathBuf::from)
+    .unwrap_or_else(|| checkout.to_path_buf());
+  let heads = repo.join(".jj/repo/op_heads/heads");
+  heads.is_dir().then_some(heads)
+}
+
+/// Whether a write under the watch is one to read again for: a new jj
+/// operation, or a file nobody ignores.
+fn changes_matter(path: &Path, ops: Option<&Path>) -> bool {
+  ops.is_some_and(|ops| path.starts_with(ops)) || !is_ignored(path)
+}
+
 /// Writes nobody reviews: jj's and git's own state (jj writes `.jj` on
 /// every read, so watching it would loop), dependencies and build output.
 fn is_ignored(path: &Path) -> bool {
@@ -966,6 +996,28 @@ impl GitignoreFilter {
 #[cfg(test)]
 mod watch_tests {
   use super::*;
+
+  /// A workspace's jj operations land in its repository's op heads: a
+  /// rewrite that touches no file still counts as a change.
+  #[test]
+  fn jj_operations_count_as_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().canonicalize().unwrap();
+    let heads = repo.join(".jj/repo/op_heads/heads");
+    std::fs::create_dir_all(&heads).unwrap();
+    let workspace = repo.join(".treq/workspaces/a");
+    std::fs::create_dir_all(&workspace).unwrap();
+    for checkout in [&repo, &workspace] {
+      assert_eq!(op_heads_dir(checkout).as_deref(), Some(heads.as_path()));
+    }
+    assert!(changes_matter(&heads.join("abc123"), Some(&heads)));
+    assert!(!changes_matter(
+      &repo.join(".jj/repo/store/x"),
+      Some(&heads)
+    ));
+    assert!(changes_matter(&workspace.join("src.rs"), Some(&heads)));
+    assert_eq!(op_heads_dir(tempfile::tempdir().unwrap().path()), None);
+  }
 
   #[test]
   fn a_repo_prepared_moments_ago_is_not_prepared_again() {

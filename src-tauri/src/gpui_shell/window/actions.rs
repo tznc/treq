@@ -672,6 +672,10 @@ impl Model {
         }
       }
       "terminal.summaries" => {
+        let streaming = |terminals: &[TerminalSummary]| {
+          terminals.iter().filter(|t| t.agent && t.streaming).count()
+        };
+        let was = streaming(&self.terminals);
         self.terminals = value
           .as_array()
           .map(|list| {
@@ -686,6 +690,11 @@ impl Model {
               .collect()
           })
           .unwrap_or_default();
+        // An agent's turn ended: it may have rewritten history outside
+        // treq, so the tab counts and the Changes tab read again.
+        if streaming(&self.terminals) < was {
+          self.view.changes_revision += 1;
+        }
       }
       "terminal.dismissAsset" => {
         if let Some(id) = value.as_str() {
@@ -1289,6 +1298,28 @@ mod tests {
     assert_eq!(model.selected, Some(1));
     model.screen_action(&field("terminal.shortcut", "k".into()), &data);
     assert!(model.dialogs.palette);
+  }
+
+  /// An agent's turn ends when its terminal stops streaming: it may have
+  /// rewritten history, so the tab counts and the Changes tab read again.
+  #[test]
+  fn an_agent_turn_ending_reads_the_counts_again() {
+    let (mut model, data) = (model(), data());
+    let summary = |kind: &str, streaming: bool| json!([{"kind": kind, "branchName": "a", "repoPath": "/repo", "isStreaming": streaming}]);
+    let before = model.view.changes_revision;
+    model.screen_action(&field("terminal.summaries", summary("agent", true)), &data);
+    assert_eq!(model.view.changes_revision, before, "a turn running");
+    model.screen_action(&field("terminal.summaries", summary("agent", false)), &data);
+    assert_eq!(model.view.changes_revision, before + 1, "the turn ended");
+    model.screen_action(&field("terminal.summaries", summary("agent", false)), &data);
+    assert_eq!(model.view.changes_revision, before + 1, "still idle");
+    model.screen_action(&field("terminal.summaries", summary("shell", true)), &data);
+    model.screen_action(&field("terminal.summaries", summary("shell", false)), &data);
+    assert_eq!(
+      model.view.changes_revision,
+      before + 1,
+      "a shell is no agent"
+    );
   }
 
   #[test]

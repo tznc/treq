@@ -109,3 +109,14 @@ fn the_tab_badges_read_again_when_the_checkout_changes(cx: &mut TestAppContext) 
   bump_changes_revision(&mut h);
   assert_eq!(count_calls(&host, "read workspace 0"), reads + 1);
 }
+
+/// The shown Commits list reads again with the badges when the checkout
+/// changes, so a commit made outside treq shows in both at once.
+#[gpui::test]
+fn the_shown_commits_list_reads_again_when_the_checkout_changes(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
+  assert!(h.drawn("workspace-commits"));
+  let reads = count_calls(&host, "read log Some(7)");
+  bump_changes_revision(&mut h);
+  assert_eq!(count_calls(&host, "read log Some(7)"), reads + 1);
+}
