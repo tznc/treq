@@ -3584,7 +3584,7 @@ fn context_row(
   div()
     .flex()
     // Darker than the hunk's own lines: these were read in by an expander.
-    .bg(gpui::black().opacity(0.18))
+    .bg(p.inset)
     .child(
       div()
         .w_24()
