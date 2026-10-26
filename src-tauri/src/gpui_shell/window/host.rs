@@ -36,7 +36,7 @@ use crate::{
     workspaces::WorkspaceSummary,
     SingleRebaseResult, WorkspaceSidebarStatus,
   },
-  github::{GitRemoteInfo, PrInfo},
+  github::GitRemoteInfo,
   gpui_shell::{
     native::{Backend, ToastTone},
     remote_repo::{self, Cutoff, Mutation, RemoteRepository, Transport},
@@ -87,7 +87,7 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   }
   fn remote(&self, repo: &str) -> Option<GitRemoteInfo>;
   /// The pull request poller's cache, by branch.
-  fn prs(&self, repo: &str) -> HashMap<String, Option<PrInfo>>;
+  fn prs(&self, repo: &str) -> crate::pr_status::SharedPrCache;
   fn supporting(&self, main_repo: &str) -> Vec<SupportingRepo>;
   fn setting(&self, key: &str) -> Option<String>;
   fn flags(&self) -> Flags;
@@ -381,10 +381,10 @@ impl WindowHost for Backend {
     crate::core::github_cli::remote(repo).ok().flatten()
   }
 
-  fn prs(&self, repo: &str) -> HashMap<String, Option<PrInfo>> {
+  fn prs(&self, repo: &str) -> crate::pr_status::SharedPrCache {
     // The poller watches local checkouts only.
     if Backend::remote(self, repo).is_some() {
-      return HashMap::new();
+      return Default::default();
     }
     crate::pr_status::global().list_cached(repo)
   }

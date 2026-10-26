@@ -15,7 +15,7 @@ use std::{
 
 use crate::{
   core::{repo::RepoBranch, supporting_repos::SupportingRepo, WorkspaceSidebarStatus},
-  github::{GitRemoteInfo, PrInfo},
+  github::GitRemoteInfo,
   local_db::{Session, Workspace},
 };
 
@@ -66,7 +66,7 @@ pub struct RepoRead {
   pub default_branch: Option<Option<String>>,
   pub remote: Option<Option<GitRemoteInfo>>,
   /// Always read: the PR poller's cache.
-  pub prs: HashMap<String, Option<PrInfo>>,
+  pub prs: crate::pr_status::SharedPrCache,
 }
 
 /// What the window knows of one repository.
@@ -82,7 +82,7 @@ pub struct RepoData {
   pub remote: Option<GitRemoteInfo>,
   /// Whether the remote was read yet (`useGitRemoteInfo`'s `isLoading`).
   pub remote_read: bool,
-  pub prs: HashMap<String, Option<PrInfo>>,
+  pub prs: crate::pr_status::SharedPrCache,
   /// Workspaces being removed: their rows are gone before the removal
   /// finishes, and a read made meanwhile must not bring them back.
   pub hidden: HashSet<i64>,

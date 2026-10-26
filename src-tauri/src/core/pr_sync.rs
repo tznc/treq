@@ -207,7 +207,8 @@ pub fn resync_workspace(repo_path: &str, workspace_id: i64) -> Result<(), String
     .ok_or_else(|| "Workspace not found".to_string())?;
   let pr = crate::pr_status::global()
     .list_cached(repo_path)
-    .remove(&workspace.branch_name)
+    .get(&workspace.branch_name)
+    .cloned()
     .flatten()
     .ok_or_else(|| "The pull request hasn't loaded yet. Try again in a minute.".to_string())?;
   resync(repo_path, workspace_id, &pr)

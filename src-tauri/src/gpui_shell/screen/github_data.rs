@@ -180,7 +180,7 @@ pub trait GithubHost: WorkspaceHost {
   ) -> Result<u64, String>;
   fn workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String>;
   /// The PR-status poller's cache, by branch.
-  fn pr_statuses(&self, repo_path: &str) -> HashMap<String, Option<PrInfo>>;
+  fn pr_statuses(&self, repo_path: &str) -> crate::pr_status::SharedPrCache;
   fn default_branch(&self, repo_path: &str) -> Result<String, String>;
   fn push_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
   /// The workspace for a PR's head branch, made when there is none: its
@@ -294,7 +294,7 @@ impl GithubHost for Backend {
     core::list_workspaces(repo_path)
   }
 
-  fn pr_statuses(&self, repo_path: &str) -> HashMap<String, Option<PrInfo>> {
+  fn pr_statuses(&self, repo_path: &str) -> crate::pr_status::SharedPrCache {
     crate::pr_status::global().list_cached(repo_path)
   }
 

@@ -225,8 +225,8 @@ impl GithubHost for FakeHost {
     Ok(self.github.workspaces.clone())
   }
 
-  fn pr_statuses(&self, _: &str) -> HashMap<String, Option<PrInfo>> {
-    self.github.statuses.clone()
+  fn pr_statuses(&self, _: &str) -> crate::pr_status::SharedPrCache {
+    self.github.statuses.clone().into()
   }
 
   fn default_branch(&self, _: &str) -> Result<String, String> {

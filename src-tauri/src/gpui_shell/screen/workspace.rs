@@ -331,7 +331,7 @@ pub struct WorkspaceView {
   /// Another load was asked for while one ran.
   reload: bool,
   /// What `loaded` draws as, `None` before it is.
-  snapshot: Option<Workspace>,
+  snapshot: Option<Rc<Workspace>>,
   /// The other workspaces' header reads, by route key, with the revision
   /// each was read at: the last read of those shown lately, and those read
   /// ahead of a switch (`prefetch`). A switch draws one at once and reads
@@ -834,7 +834,7 @@ impl WorkspaceView {
       return;
     };
     let (header, tab_row) = workspace_view(&route, loaded, &self.pr, self.pending);
-    let snapshot = Some(Workspace { header, tab_row });
+    let snapshot = Some(Rc::new(Workspace { header, tab_row }));
     if self.snapshot != snapshot {
       self.snapshot = snapshot;
       cx.notify();
@@ -2308,6 +2308,12 @@ impl WorkspaceView {
     self.commits.newest()
   }
 
+  /// What the header and tab row draw, shared with each frame.
+  #[cfg(test)]
+  pub(super) fn snapshot(&self) -> Option<Rc<Workspace>> {
+    self.snapshot.clone()
+  }
+
   /// The branch the header draws, once it has read.
   #[cfg(test)]
   pub(super) fn branch(&self) -> Option<&str> {
@@ -2418,8 +2424,9 @@ impl Render for WorkspaceView {
         .debug_selector(|| "workspace-header".into()),
     };
     let tab_row = snapshot
-      .and_then(|snapshot| snapshot.tab_row)
-      .map(|row| self.tab_row(&row, &p));
+      .as_ref()
+      .and_then(|snapshot| snapshot.tab_row.as_ref())
+      .map(|row| self.tab_row(row, &p));
     let code = self.tab_body(cx);
     let remote = self.route.remote_chrome.clone();
     let cut_off = remote.as_ref().is_some_and(|r| r.cut_off);

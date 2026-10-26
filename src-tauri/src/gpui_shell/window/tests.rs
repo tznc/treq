@@ -33,7 +33,7 @@ use crate::{
     workspaces::WorkspaceSummary,
     SingleRebaseResult, WorkspaceSidebarStatus,
   },
-  github::{GitRemoteInfo, PrInfo},
+  github::GitRemoteInfo,
   gpui_shell::{
     confirm::Question,
     native::{NativeEvent, ToastTone},
@@ -168,8 +168,8 @@ impl WindowHost for FakeHost {
     None
   }
 
-  fn prs(&self, _: &str) -> HashMap<String, Option<PrInfo>> {
-    HashMap::new()
+  fn prs(&self, _: &str) -> crate::pr_status::SharedPrCache {
+    Default::default()
   }
 
   fn supporting(&self, _: &str) -> Vec<SupportingRepo> {

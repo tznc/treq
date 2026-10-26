@@ -58,11 +58,15 @@ pub type OnUpdateFn = Arc<
 /// Per-repo map of `branch_name -> Option<PrInfo>` (None = no open/known PR).
 pub type RepoPrCache = HashMap<String, Option<PrInfo>>;
 
+/// A repo's PR cache as readers hold it: refreshes swap in a new map, so a
+/// read is a pointer copy and a held snapshot never changes under its reader.
+pub type SharedPrCache = Arc<RepoPrCache>;
+
 /// Per-repo map of `branch_name -> Option<PrCiStatus>` (None = no PR / no checks).
 pub type RepoCiCache = HashMap<String, Option<PrCiStatus>>;
 
 struct Inner {
-  cache: Mutex<HashMap<String, RepoPrCache>>,
+  cache: Mutex<HashMap<String, SharedPrCache>>,
   ci_cache: Mutex<HashMap<String, RepoCiCache>>,
   watched: Mutex<HashSet<String>>,
   fetch: PrFetchFn,
@@ -300,9 +304,7 @@ impl PrStatusManager {
   /// Overwrite a single branch entry (e.g. after an on-demand `gh pr view`).
   pub fn put_cached(&self, repo_path: &str, branch_name: &str, info: Option<PrInfo>) {
     let mut cache = self.inner.cache.lock_or_recover();
-    cache
-      .entry(repo_path.to_string())
-      .or_default()
+    Arc::make_mut(cache.entry(repo_path.to_string()).or_default())
       .insert(branch_name.to_string(), info);
   }
 
@@ -316,7 +318,7 @@ impl PrStatusManager {
   }
 
   /// Cache snapshot for a repo. Empty if never polled.
-  pub fn list_cached(&self, repo_path: &str) -> RepoPrCache {
+  pub fn list_cached(&self, repo_path: &str) -> SharedPrCache {
     self
       .inner
       .cache
@@ -515,7 +517,7 @@ fn poll_one_repo(inner: &Inner, repo_path: &str) {
 
   {
     let mut cache = inner.cache.lock_or_recover();
-    cache.insert(repo_path.to_string(), next.clone());
+    cache.insert(repo_path.to_string(), Arc::new(next.clone()));
   }
   {
     let mut ci_cache = inner.ci_cache.lock_or_recover();
@@ -545,7 +547,7 @@ fn poll_ci_only(inner: &Inner, repo_path: &str) {
   }
 
   let mut next_ci: RepoCiCache = HashMap::new();
-  for (branch, pr_info) in &pr_cache {
+  for (branch, pr_info) in pr_cache.iter() {
     fetch_ci_for_branch(inner, repo_path, branch, pr_info.is_some(), &mut next_ci);
   }
 
@@ -583,9 +585,7 @@ fn poll_one_branch(inner: &Inner, repo_path: &str, branch_name: &str) {
 
   {
     let mut cache = inner.cache.lock_or_recover();
-    cache
-      .entry(repo_path.to_string())
-      .or_default()
+    Arc::make_mut(cache.entry(repo_path.to_string()).or_default())
       .insert(branch_name.to_string(), pr_info.clone());
   }
 
