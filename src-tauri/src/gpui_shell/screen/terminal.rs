@@ -2909,8 +2909,8 @@ impl TerminalPane {
       return;
     };
     let review = matches!(column.kind, Kind::Agent { .. });
-    let host = self.host.clone();
-    let lightbox = cx.new(|cx| Lightbox::new(host, assets, index, review, cx));
+    let (host, dark) = (self.host.clone(), self.dark);
+    let lightbox = cx.new(|cx| Lightbox::new(host, assets, index, review, dark, cx));
     let id = column_id.to_string();
     let subscription = cx.subscribe(&lightbox, move |pane, _, event: &LightboxEvent, cx| {
       pane.on_lightbox(&id, event.clone(), cx)
@@ -2983,6 +2983,7 @@ impl TerminalPane {
       let shown = hovered.as_deref() == Some(id.as_str());
       let (open_column, open_id) = (column_id.clone(), id.clone());
       let (hover_asset, dismiss_id) = (asset.clone(), id.clone());
+      let icon = send_asset_icon(&asset);
       let media = if asset.is_image() {
         div().size_full().child(
           img(std::path::PathBuf::from(&asset.path))
@@ -2999,14 +3000,28 @@ impl TerminalPane {
           .items_center()
           .justify_center()
           .gap_1()
-          .child(ui::icon(theme::ICON_FILE_TEXT, 16., dark.foreground))
+          .child(ui::icon(icon, 16., dark.foreground))
           .child(
-            div()
+            // Clipped at the end, so the name's start shows; hovering it
+            // shows the whole name.
+            self
+              .tooltips
+              .wrap(
+                format!("terminal-send-title-{id}"),
+                Side::Bottom,
+                Some(TooltipContent::Text(asset.title.clone().into())),
+                div()
+                  .debug_selector({
+                    let id = id.clone();
+                    move || format!("terminal-send-title-{id}")
+                  })
+                  .w_full()
+                  .truncate()
+                  .child(asset.title.clone()),
+                cx,
+              )
               .w_full()
-              .truncate()
-              .flex()
-              .justify_center()
-              .child(asset.title.clone()),
+              .min_w_0(),
           )
       };
       let drag = SendAssetDrag {
@@ -3792,6 +3807,15 @@ impl TerminalPane {
 struct SendAssetDrag {
   path: String,
   title: String,
+}
+
+/// A text attachment card's file-type icon: Markdown has its own.
+pub(super) fn send_asset_icon(asset: &SendAsset) -> &'static str {
+  if super::terminal_send::renders_markdown(asset) {
+    theme::ICON_FILE_MARKDOWN
+  } else {
+    theme::ICON_FILE_TEXT
+  }
 }
 
 impl Render for SendAssetDrag {

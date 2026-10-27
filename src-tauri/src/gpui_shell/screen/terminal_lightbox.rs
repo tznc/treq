@@ -3,6 +3,7 @@
 //! highlighted regions (`ImageHighlightLayer`), text files line comments
 //! (`TextAssetLineReview`).
 
+use crate::core::review::parse_suggestion;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -21,11 +22,13 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{
+  changes::threads::suggestion_box,
   rows::Rows,
   terminal_data::Host,
   terminal_send::{
-    fitted_size, has_unsent, highlighted_png, image_size, rect_from_drag, review_prompt,
-    shell_quote, text_lines, Highlight, LineComment, Rect, Review, SendAsset,
+    block_at_or_before, fitted_size, has_unsent, highlighted_png, image_size, markdown_blocks,
+    rect_from_drag, renders_markdown, resolve_relative_links, review_prompt, shell_quote,
+    suggestion_for, text_lines, text_panel_dark, Highlight, LineComment, Rect, Review, SendAsset,
   },
 };
 use crate::gpui_shell::{
@@ -95,8 +98,17 @@ pub struct Lightbox {
   focus_composer: bool,
   /// The line a drag across lines started on.
   anchor: Option<usize>,
+  /// The rendered Markdown's blocks as source line ranges, and the block a
+  /// drag across blocks started on.
+  blocks: Vec<(usize, usize)>,
+  block_anchor: Option<(usize, usize)>,
   /// Text attachments' contents, once read, line by line.
   texts: HashMap<String, Rc<Vec<String>>>,
+  /// The app's theme. The lightbox is dark, but rendered Markdown follows
+  /// the app, as gpui-kit's Markdown view does.
+  dark: bool,
+  /// Markdown attachments, by id, switched to their Markdown (source) tab.
+  source: HashSet<String>,
   /// The shown text's rows, by the asset's index.
   text_rows: Rows<(usize, TextRow)>,
   reading: HashSet<String>,
@@ -118,8 +130,74 @@ pub struct Lightbox {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextRow {
   Line(usize),
+  /// A rendered Markdown block, by its index.
+  Block(usize),
   Composer,
-  Comment(u64),
+}
+
+/// The margin beside a text, where its comments show as annotations.
+const MARGIN_WIDTH: f32 = 280.;
+/// How far the margin's cards may hang below the last block of the Preview.
+const MARGIN_OVERHANG: f32 = 240.;
+
+/// A comment in the margin: the lines it is on, then what it says.
+fn comment_card(comment: &LineComment, palette: &Palette) -> gpui::AnyElement {
+  let id = comment.id;
+  let range = if comment.start == comment.end {
+    format!("Line {}", comment.start)
+  } else {
+    format!("Lines {}–{}", comment.start, comment.end)
+  };
+  ui::text(div(), TextSize::Sm)
+    .debug_selector(move || format!("treq-send-line-comment-{id}"))
+    .flex()
+    .flex_col()
+    .gap_1()
+    .px_3()
+    .py_2()
+    .rounded(radius::MD)
+    .border_1()
+    .border_color(ui::Tone::Warning.text(palette).opacity(0.4))
+    .bg(palette.popover)
+    .shadow_sm()
+    .font_family(theme::SANS_FONT)
+    .text_color(palette.foreground)
+    .child(
+      ui::text(div(), TextSize::Xs)
+        .text_color(palette.muted_foreground)
+        .child(range),
+    )
+    .child(comment_body(comment, palette))
+    .into_any_element()
+}
+
+/// A comment's text, with a suggested change drawn as a diff against the
+/// lines it is on, as code review draws one, without Apply.
+fn comment_body(comment: &LineComment, palette: &Palette) -> gpui::AnyElement {
+  let Some(suggestion) = parse_suggestion(&comment.text) else {
+    return div()
+      .whitespace_normal()
+      .child(comment.text.clone())
+      .into_any_element();
+  };
+  let original = comment.lines.join("\n");
+  div()
+    .min_w_0()
+    .flex()
+    .flex_col()
+    .gap_2()
+    .when(!suggestion.before.is_empty(), |this| {
+      this.child(div().whitespace_normal().child(suggestion.before.clone()))
+    })
+    .child(suggestion_box(
+      Some(&original),
+      &suggestion.suggested,
+      palette,
+    ))
+    .when(!suggestion.after.is_empty(), |this| {
+      this.child(div().whitespace_normal().child(suggestion.after.clone()))
+    })
+    .into_any_element()
 }
 
 /// A text this long draws its lines as a virtual list in a box of fixed
@@ -134,6 +212,7 @@ impl Lightbox {
     assets: Vec<SendAsset>,
     index: usize,
     can_review: bool,
+    dark: bool,
     cx: &mut Context<Self>,
   ) -> Self {
     let mut this = Self {
@@ -142,6 +221,7 @@ impl Lightbox {
       index,
       zoom: ZOOM_MIN,
       can_review,
+      dark,
       general: None,
       general_text: String::new(),
       general_disabled: None,
@@ -155,7 +235,10 @@ impl Lightbox {
       composer_text: String::new(),
       focus_composer: false,
       anchor: None,
+      blocks: Vec::new(),
+      block_anchor: None,
       texts: HashMap::new(),
+      source: HashSet::new(),
       text_rows: Rows::default(),
       reading: HashSet::new(),
       sizes: HashMap::new(),
@@ -231,6 +314,87 @@ impl Lightbox {
       })
       .detach();
     }
+  }
+
+  /// Whether the shown attachment draws as rendered Markdown, its Preview
+  /// tab, commented on by block.
+  fn rendered(&self) -> bool {
+    self
+      .current()
+      .is_some_and(|a| renders_markdown(a) && !self.source.contains(&a.id))
+  }
+
+  fn set_source(&mut self, source: bool, cx: &mut Context<Self>) {
+    let Some(id) = self.current().map(|a| a.id.clone()) else {
+      return;
+    };
+    if source {
+      self.source.insert(id);
+    } else {
+      self.source.remove(&id);
+    }
+    cx.notify();
+  }
+
+  /// A rendered Markdown block, its relative links and images pointed at
+  /// the file's folder. A click comments on its source lines.
+  fn block_row(&self, b: usize, palette: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+    let (Some(asset), Some(&(start, end))) = (self.current(), self.blocks.get(b)) else {
+      return div().into_any_element();
+    };
+    let text = self
+      .texts
+      .get(&asset.path)
+      .and_then(|lines| lines.get(start - 1..end.min(lines.len())))
+      .map(|lines| lines.join("\n"))
+      .unwrap_or_default();
+    let dir = Path::new(&asset.path)
+      .parent()
+      .map(|d| d.display().to_string())
+      .unwrap_or_default();
+    let pending = self
+      .pending
+      .is_some_and(|p| start <= p.end && p.start <= end);
+    let commented = self
+      .current_lines()
+      .iter()
+      .any(|c| start <= c.end && c.start <= end);
+    let row = div()
+      .id(SharedString::from(format!("treq-send-block-{b}")))
+      .debug_selector(move || format!("treq-send-block-{b}"))
+      .px_8()
+      .py_1p5()
+      .cursor_pointer()
+      .hover(|s| s.bg(palette.muted.opacity(0.5)))
+      .when(pending, |d| d.bg(ui::Tone::Danger.tint(palette)))
+      .when(commented, |d| d.bg(ui::Tone::Warning.tint(palette)))
+      .on_mouse_down(
+        MouseButton::Left,
+        cx.listener(move |view, e: &MouseDownEvent, _, cx| view.block_down((start, end), e, cx)),
+      )
+      .on_mouse_move(
+        cx.listener(move |view, e: &MouseMoveEvent, _, cx| view.block_over((start, end), e, cx)),
+      )
+      .child(super::code::markdown(
+        format!("treq-send-md-{}-{b}", asset.id),
+        &resolve_relative_links(&text, &dir),
+        14.,
+        self.dark,
+      ));
+    // In the Preview the box is written in the margin, beside the first
+    // block it covers, so the text never moves.
+    let writing_here = self.composer.is_some()
+      && self
+        .pending
+        .is_some_and(|p| block_at_or_before(&self.blocks, p.start) == Some(b));
+    let composer = writing_here.then(|| self.composer_box(palette, false, cx));
+    let blocks = &self.blocks;
+    self.annotated(
+      row.into_any_element(),
+      |c| block_at_or_before(blocks, c.start) == Some(b),
+      composer,
+      palette,
+    )
   }
 
   fn current_highlights(&self) -> &[Highlight] {
@@ -527,6 +691,7 @@ impl Lightbox {
 
   fn on_mouse_up(&mut self, position: gpui::Point<Pixels>, cx: &mut Context<Self>) {
     self.anchor = None;
+    self.block_anchor = None;
     let Some(start) = self.drag.take() else {
       return;
     };
@@ -600,6 +765,68 @@ impl Lightbox {
       self.pending = Some(next);
       cx.notify();
     }
+  }
+
+  /// A click on a rendered block picks its source lines, as a click on a
+  /// line does; Shift+click grows the range open to the block.
+  fn block_down(&mut self, block: (usize, usize), event: &MouseDownEvent, cx: &mut Context<Self>) {
+    let shift = event.modifiers.shift;
+    let extending = shift && self.pending.is_some();
+    self.select_line(block.0, shift);
+    self.select_line(block.1, true);
+    if !extending {
+      self.block_anchor = Some(block);
+    }
+    cx.stop_propagation();
+    cx.notify();
+  }
+
+  fn block_over(&mut self, block: (usize, usize), event: &MouseMoveEvent, cx: &mut Context<Self>) {
+    let Some(anchor) = self.block_anchor else {
+      return;
+    };
+    if event.pressed_button != Some(MouseButton::Left) {
+      self.block_anchor = None;
+      return;
+    }
+    let next = Pending {
+      start: anchor.0.min(block.0),
+      end: anchor.1.max(block.1),
+    };
+    if self.pending != Some(next) {
+      self.pending = Some(next);
+      cx.notify();
+    }
+  }
+
+  /// The source lines `pending` covers.
+  fn pending_lines(&self, pending: Pending) -> Vec<String> {
+    self
+      .current()
+      .and_then(|a| self.texts.get(&a.path))
+      .and_then(|lines| lines.get(pending.start - 1..pending.end.min(lines.len())))
+      .map(<[String]>::to_vec)
+      .unwrap_or_default()
+  }
+
+  /// "Suggest change": the picked lines as a suggestion block, at the
+  /// cursor. Nothing applies it; the agent reads it in the review.
+  fn suggest_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let (Some(pending), Some(composer)) = (self.pending, self.composer.clone()) else {
+      return;
+    };
+    let block = suggestion_for(&self.pending_lines(pending));
+    let lead = if self.composer_text.is_empty() || self.composer_text.ends_with('\n') {
+      ""
+    } else {
+      "\n"
+    };
+    composer.update(cx, |s, cx| {
+      s.insert(format!("{lead}{block}"), window, cx);
+      s.focus(window, cx);
+    });
+    self.composer_text = composer.read(cx).value().to_string();
+    cx.notify();
   }
 
   fn commit_line_comment(&mut self, cx: &mut Context<Self>) {
@@ -912,20 +1139,22 @@ impl Lightbox {
   /// comment, the box being written and the comments made.
   fn sync_text_rows(&mut self, window: &Window) {
     let mut rows = Vec::new();
-    if let Some(asset) = self.current().filter(|a| !a.is_image()) {
+    self.blocks = match self.current().filter(|_| self.rendered()) {
+      Some(asset) => self.texts.get(&asset.path).map_or_else(Vec::new, |lines| {
+        markdown_blocks(&lines.iter().map(String::as_str).collect::<Vec<_>>())
+      }),
+      None => Vec::new(),
+    };
+    if self.rendered() {
+      // Comments and the comment box sit in the margin (`annotated`).
+      rows.extend((0..self.blocks.len()).map(|b| (self.index, TextRow::Block(b))));
+    } else if let Some(asset) = self.current().filter(|a| !a.is_image()) {
       let count = self.texts.get(&asset.path).map_or(1, |t| t.len());
-      let comments = self.current_lines();
       for n in 1..=count {
         rows.push((self.index, TextRow::Line(n)));
         if self.composer.is_some() && self.pending.is_some_and(|p| p.end == n) {
           rows.push((self.index, TextRow::Composer));
         }
-        rows.extend(
-          comments
-            .iter()
-            .filter(|c| c.end == n)
-            .map(|c| (self.index, TextRow::Comment(c.id))),
-        );
       }
     }
     self.text_rows.sync(window, rows, |a, b| a == b);
@@ -935,8 +1164,9 @@ impl Lightbox {
     let Some(&(_, row)) = self.text_rows.get(ix) else {
       return div().into_any_element();
     };
-    let palette = theme::palette(true);
+    let palette = theme::palette(text_panel_dark(self.rendered(), self.dark));
     match row {
+      TextRow::Block(b) => self.block_row(b, &palette, cx),
       TextRow::Line(n) => {
         let line = self
           .current()
@@ -947,7 +1177,7 @@ impl Lightbox {
           .current_lines()
           .iter()
           .any(|c| n >= c.start && n <= c.end);
-        div()
+        let row = div()
           .id(SharedString::from(format!("treq-send-text-line-{n}")))
           .debug_selector(move || format!("treq-send-text-line-{n}"))
           .flex()
@@ -985,93 +1215,210 @@ impl Lightbox {
               } else {
                 line.to_string()
               }),
-          )
-          .into_any_element()
+          );
+        self.annotated(row.into_any_element(), |c| c.start == n, None, &palette)
       }
-      TextRow::Composer => {
-        let Some(composer) = &self.composer else {
-          return div().into_any_element();
-        };
-        let blank = self.composer_text.trim().is_empty();
-        div()
-          .debug_selector(|| "treq-send-line-comment-composer".into())
-          .border_t_1()
-          .border_color(chrome(0.1))
-          .bg(palette.background)
-          .px_4()
-          .py_3()
-          .font_family(theme::SANS_FONT)
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .min_h(zpx(72.))
-              .px_3()
-              .py_2()
-              .rounded(radius::MD)
-              .border_1()
-              .border_color(palette.input)
-              .bg(palette.background)
-              .text_color(palette.foreground)
-              .child(Textarea::new(composer).appearance(false).bordered(false)),
-          )
-          .child(
-            div()
-              .mt_2()
-              .flex()
-              .justify_end()
-              .gap_2()
-              .child(
-                Button::new("treq-send-line-comment-cancel", &palette)
-                  .variant(Variant::Ghost)
-                  .size(ui::Size::Xs)
-                  .label("Cancel")
-                  .on_click(cx.listener(|view, _, _, cx| {
-                    view.pending = None;
-                    cx.notify();
-                  })),
-              )
-              .child(
-                Button::new("treq-send-line-comment-save", &palette)
-                  .size(ui::Size::Xs)
-                  .disabled(blank)
-                  .label("Add comment")
-                  .on_click(cx.listener(|view, _, _, cx| view.commit_line_comment(cx))),
-              ),
-          )
-          .into_any_element()
-      }
-      TextRow::Comment(id) => {
-        let Some(comment) = self.current_lines().iter().find(|c| c.id == id) else {
-          return div().into_any_element();
-        };
-        let range = if comment.start == comment.end {
-          format!("LINES {}", comment.start)
-        } else {
-          format!("LINES {}–{}", comment.start, comment.end)
-        };
-        ui::text(div(), TextSize::Sm)
-          .debug_selector(move || format!("treq-send-line-comment-{id}"))
-          .border_t_1()
-          .border_color(chrome(0.1))
-          .bg(palette.background.opacity(0.8))
-          .px_4()
-          .py_2()
-          .font_family(theme::SANS_FONT)
-          .text_color(palette.foreground)
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .text_color(palette.muted_foreground)
-              .child(range),
-          )
-          .child(div().whitespace_normal().child(comment.text.clone()))
-          .into_any_element()
-      }
+      TextRow::Composer => self.composer_box(&palette, true, cx),
     }
   }
 
+  /// The box a comment is written in: under the lines in the Markdown
+  /// tab, or a card in the comments column in the Preview.
+  fn composer_box(
+    &self,
+    palette: &Palette,
+    inline: bool,
+    cx: &mut Context<Self>,
+  ) -> gpui::AnyElement {
+    let Some(composer) = &self.composer else {
+      return div().into_any_element();
+    };
+    let blank = self.composer_text.trim().is_empty();
+    div()
+      .debug_selector(|| "treq-send-line-comment-composer".into())
+      .bg(palette.background)
+      .map(|this| {
+        if inline {
+          this.border_t_1().border_color(palette.border).px_4().py_3()
+        } else {
+          // A card in the comments column, like the comments in it.
+          this
+            .rounded(radius::MD)
+            .border_1()
+            .border_color(palette.border)
+            .shadow_md()
+            .px_3()
+            .py_2()
+        }
+      })
+      .font_family(theme::SANS_FONT)
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .min_h(zpx(72.))
+          .px_3()
+          .py_2()
+          .rounded(radius::MD)
+          .border_1()
+          .border_color(palette.input)
+          .bg(palette.background)
+          .text_color(palette.foreground)
+          .child(Textarea::new(composer).appearance(false).bordered(false)),
+      )
+      .child(
+        div()
+          .mt_2()
+          .flex()
+          .flex_wrap()
+          .justify_end()
+          .gap_2()
+          .child(
+            Button::new("treq-send-suggest-change", palette)
+              .variant(Variant::Ghost)
+              .size(ui::Size::Xs)
+              .icon(theme::ICON_FILE_DIFF, 14.)
+              .label("Suggest change")
+              .on_click(cx.listener(|view, _, window, cx| view.suggest_change(window, cx))),
+          )
+          .child(div().flex_1())
+          .child(
+            Button::new("treq-send-line-comment-cancel", palette)
+              .variant(Variant::Ghost)
+              .size(ui::Size::Xs)
+              .label("Cancel")
+              .on_click(cx.listener(|view, _, _, cx| {
+                view.pending = None;
+                cx.notify();
+              })),
+          )
+          .child(
+            Button::new("treq-send-line-comment-save", palette)
+              .size(ui::Size::Xs)
+              .disabled(blank)
+              .label("Add comment")
+              .on_click(cx.listener(|view, _, _, cx| view.commit_line_comment(cx))),
+          ),
+      )
+      .into_any_element()
+  }
+
+  /// Whether the comments column shows: once the text has a comment, or
+  /// while one is written in it in the Preview.
+  fn margin_shown(&self) -> bool {
+    let writing = self.rendered() && self.composer.is_some() && self.pending.is_some();
+    !self.current_lines().is_empty() || writing
+  }
+
+  /// A row of the text beside its margin, which holds the comments that
+  /// start on it, as annotations. Without comments there is no margin.
+  fn annotated(
+    &self,
+    content: gpui::AnyElement,
+    starts_here: impl Fn(&LineComment) -> bool,
+    composer: Option<gpui::AnyElement>,
+    palette: &Palette,
+  ) -> gpui::AnyElement {
+    // The margin shows once the text has a comment, or one is being
+    // written in it; until then the text takes the whole width.
+    if !self.margin_shown() {
+      return content;
+    }
+    let mut cards: Vec<_> = self
+      .current_lines()
+      .iter()
+      .filter(|c| starts_here(c))
+      .map(|c| comment_card(c, palette))
+      .collect();
+    cards.extend(composer);
+    div()
+      .flex()
+      .w_full()
+      .child(div().flex_1().min_w_0().child(content))
+      .child(
+        // The cards hang from the row without growing it, so the text keeps
+        // its spacing; the margin's empty rows let them show through.
+        div()
+          .debug_selector(|| "treq-send-margin".into())
+          .w(zpx(MARGIN_WIDTH))
+          .flex_none()
+          .relative()
+          .border_l_1()
+          .border_color(palette.border)
+          .when(!cards.is_empty(), |this| {
+            this.child(
+              div()
+                .absolute()
+                .top_1()
+                .left_3()
+                .right_3()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .children(cards),
+            )
+          }),
+      )
+      .into_any_element()
+  }
+
+  /// Over a text: how to comment, and for Markdown, its Preview and
+  /// Markdown tabs.
+  fn text_bar(&self, d: &Palette, cx: &mut Context<Self>) -> Div {
+    let markdown = self.current().is_some_and(renders_markdown);
+    let rendered = self.rendered();
+    let hint = if rendered {
+      "Click a block to comment. Drag or Shift+click to select multiple blocks."
+    } else {
+      "Click a line to comment. Drag or Shift+click to select multiple lines."
+    };
+    let comments = self.current_lines().len();
+    let source = ui::Tab::new("treq-send-view-markdown", "Markdown");
+    let source = if comments > 0 {
+      source.count(comments)
+    } else {
+      source
+    };
+    ui::text(div(), TextSize::Xs)
+      .flex_none()
+      .flex()
+      .items_center()
+      .justify_between()
+      .gap_3()
+      .border_b_1()
+      .border_color(d.border)
+      .px_4()
+      .py_1p5()
+      .text_color(d.muted_foreground)
+      .child(
+        div()
+          .debug_selector(|| "treq-send-text-hint".into())
+          .child(hint),
+      )
+      .when(markdown, |this| {
+        let view = cx.entity().downgrade();
+        this.child(
+          ui::Tabs::new("treq-send-view", d)
+            .tab(ui::Tab::new("treq-send-view-preview", "Preview"))
+            .tab(source)
+            .selected(usize::from(!rendered))
+            .on_select(move |ix, _, cx| {
+              view
+                .update(cx, |view, cx| view.set_source(ix == 1, cx))
+                .ignore_closed();
+            }),
+        )
+      })
+  }
+
   fn text_slide(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-    let d = theme::palette(true);
     let count = self.text_rows.len();
-    let long = count > LONG_TEXT;
+    let rendered = self.rendered();
+    // Blocks span many lines: a long file draws its blocks as a virtual list.
+    let lines = self
+      .current()
+      .and_then(|a| self.texts.get(&a.path))
+      .map_or(0, |t| t.len());
+    let long = count > LONG_TEXT || (rendered && lines > LONG_TEXT);
+    let d = theme::palette(text_panel_dark(rendered, self.dark));
     let max_h = f32::from(window.viewport_size().height) * 0.8;
     let panel = div()
       .id("treq-send-text-preview")
@@ -1086,22 +1433,24 @@ impl Lightbox {
       .rounded(radius::LG)
       .bg(d.background)
       .shadow_2xl()
-      .child(
-        ui::text(div(), TextSize::Xs)
-          .flex_none()
-          .border_b_1()
-          .border_color(chrome(0.1))
-          .px_4()
-          .py_1p5()
-          .text_color(d.muted_foreground)
-          .child("Click a line to comment. Drag or Shift+click to select multiple lines."),
-      )
+      .child(self.text_bar(&d, cx))
       .child(
         ui::text(div(), TextSize::Code)
           .id("treq-send-text-scroll")
           .min_h_0()
           .flex_shrink(1.)
-          .font_family(theme::MONO_FONT)
+          .when(rendered, |this| {
+            this
+              .debug_selector(|| "treq-send-markdown".into())
+              .py_4()
+              .font_family(theme::SANS_FONT)
+          })
+          // Room under the last block for the cards hanging in the margin,
+          // the same while writing and after, so the text never moves.
+          .when(rendered && self.margin_shown(), |this| {
+            this.pb(zpx(MARGIN_OVERHANG))
+          })
+          .when(!rendered, |this| this.font_family(theme::MONO_FONT))
           .text_color(d.foreground)
           .map(|this| {
             if long {

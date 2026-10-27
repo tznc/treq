@@ -1066,6 +1066,8 @@ fn terminal_shows_its_send_attachments_and_dismisses_them(cx: &mut TestAppContex
   assert!(!h.drawn("terminal-send-dismiss-t1"));
   hover(&mut h, "terminal-send-preview-t1");
   assert!(h.drawn("terminal-send-dismiss-t1"));
+  // The name is its own element, clipped at the end, with a tooltip.
+  assert!(h.drawn("terminal-send-title-t1"));
   // Cmd+C over a thumbnail copies its quoted path.
   h.cx.simulate_keystrokes("cmd-c");
   assert_eq!(
@@ -1147,6 +1149,148 @@ fn lightbox_moves_between_attachments(cx: &mut TestAppContext) {
   assert!(h.drawn("treq-send-zoom-in"));
   h.cx.simulate_keystrokes("left");
   assert!(h.drawn("treq-send-text-preview"));
+}
+
+#[gpui::test]
+fn lightbox_comments_on_markdown_in_preview_and_markdown_tabs(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  *host.send.lock().unwrap() = serde_json::from_value(serde_json::json!([
+    { "id": "m1", "repo": "/repo", "ptySessionId": agent_pty(), "mediaType": "text",
+      "path": "/tmp/HANDOFF.md", "title": "HANDOFF.md" },
+  ]))
+  .expect("assets");
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-send-preview-m1");
+  // Markdown opens as a preview, commented on by block.
+  assert!(h.drawn("treq-send-markdown"));
+  assert!(!h.drawn("treq-send-text-line-2"));
+  h.click("treq-send-block-0");
+  assert!(h.drawn("treq-send-line-comment-composer"));
+  h.cx.simulate_input("reword");
+  h.click("treq-send-line-comment-save");
+  assert!(h.drawn("treq-send-line-comment-1"));
+  // The block's comment is a line comment on its source lines.
+  h.click("treq-send-view-markdown");
+  assert!(!h.drawn("treq-send-markdown"));
+  assert!(h.drawn("treq-send-line-comment-1"));
+  h.click("treq-send-text-line-2");
+  h.cx.simulate_input("rename this");
+  h.click("treq-send-line-comment-save");
+  assert!(h.drawn("treq-send-line-comment-2"));
+  // Both show in the preview, in one review.
+  h.click("treq-send-view-preview");
+  assert!(h.drawn("treq-send-line-comment-1"));
+  assert!(h.drawn("treq-send-line-comment-2"));
+  h.click("treq-send-review-input");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  let calls = host.calls().join("\n");
+  assert!(calls.contains("HANDOFF.md:1:3"), "{calls}");
+  assert!(calls.contains("HANDOFF.md:2"), "{calls}");
+}
+
+#[gpui::test]
+fn lightbox_shows_comments_in_a_margin_beside_what_they_annotate(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  *host.send.lock().unwrap() = serde_json::from_value(serde_json::json!([
+    { "id": "m1", "repo": "/repo", "ptySessionId": agent_pty(), "mediaType": "text",
+      "path": "/tmp/HANDOFF.md", "title": "HANDOFF.md" },
+  ]))
+  .expect("assets");
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-send-preview-m1");
+  // No comments, no margin.
+  assert!(!h.drawn("treq-send-margin"));
+  h.click("treq-send-block-0");
+  // The Preview's comment box is written in the margin.
+  assert!(h.drawn("treq-send-margin"));
+  h.cx.simulate_input("reword");
+  h.click("treq-send-line-comment-save");
+  h.cx.run_until_parked();
+  assert!(h.drawn("treq-send-margin"));
+  let beside = |h: &mut Harness, anchor: &'static str| {
+    let doc = h.cx.debug_bounds(anchor).expect(anchor);
+    let card = h.cx.debug_bounds("treq-send-line-comment-1").expect("card");
+    assert!(card.left() >= doc.right(), "{card:?} not right of {doc:?}");
+    assert!(
+      card.top() >= doc.top() && card.top() < doc.bottom(),
+      "{card:?} not beside {doc:?}"
+    );
+  };
+  beside(&mut h, "treq-send-block-0");
+  h.click("treq-send-view-markdown");
+  h.cx.run_until_parked();
+  beside(&mut h, "treq-send-text-line-1");
+}
+
+#[gpui::test]
+fn lightbox_comments_can_suggest_a_change_without_applying_it(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  *host.send.lock().unwrap() = serde_json::from_value(serde_json::json!([
+    { "id": "m1", "repo": "/repo", "ptySessionId": agent_pty(), "mediaType": "text",
+      "path": "/tmp/HANDOFF.md", "title": "HANDOFF.md" },
+  ]))
+  .expect("assets");
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-send-preview-m1");
+  h.click("treq-send-view-markdown");
+  h.click("treq-send-text-line-2");
+  // As in code review: the picked lines, as a suggestion block to edit.
+  h.click("treq-send-suggest-change");
+  h.cx.simulate_input("2nd");
+  h.click("treq-send-line-comment-save");
+  h.cx.run_until_parked();
+  assert!(h.drawn("treq-send-line-comment-1"));
+  assert!(h.drawn("agent-review-suggestion"));
+  // Nothing to apply it to: the agent gets it in the review.
+  assert!(!h.drawn("apply-suggestion"));
+  h.click("treq-send-view-preview");
+  assert!(h.drawn("agent-review-suggestion"));
+  h.click("treq-send-review-input");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  let calls = host.calls().join("\n");
+  assert!(calls.contains("```suggestion"), "{calls}");
+}
+
+#[gpui::test]
+fn lightbox_preview_writes_comments_in_the_margin_without_moving_the_text(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  *host.send.lock().unwrap() = serde_json::from_value(serde_json::json!([
+    { "id": "m1", "repo": "/repo", "ptySessionId": agent_pty(), "mediaType": "text",
+      "path": "/tmp/HANDOFF.md", "title": "HANDOFF.md" },
+  ]))
+  .expect("assets");
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-send-preview-m1");
+  h.click("treq-send-block-0");
+  h.cx.run_until_parked();
+  let block = h.cx.debug_bounds("treq-send-block-0").expect("block");
+  let input = h
+    .cx
+    .debug_bounds("treq-send-line-comment-composer")
+    .expect("composer");
+  // The box is in the comments column, beside the block, not under it.
+  assert!(
+    input.left() >= block.right(),
+    "{input:?} not right of {block:?}"
+  );
+  assert!(
+    input.top() >= block.top() && input.top() < block.bottom(),
+    "{input:?} not beside {block:?}"
+  );
+  // Saving it leaves the block where and as tall as it was.
+  h.cx.simulate_input("reword");
+  h.click("treq-send-line-comment-save");
+  h.cx.run_until_parked();
+  assert_eq!(
+    h.cx
+      .debug_bounds("treq-send-block-0")
+      .expect("block")
+      .size
+      .height,
+    block.size.height
+  );
 }
 
 #[gpui::test]
