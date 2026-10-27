@@ -726,6 +726,9 @@ pub enum CiState {
   Success,
   Failure,
   Pending,
+  /// A status that reports nothing about the code (the WIP app's): listed,
+  /// muted, never spinning.
+  Inactive,
 }
 
 impl CiState {
@@ -743,6 +746,7 @@ impl CiState {
     match bucket {
       "pass" | "skipping" => CiState::Success,
       "fail" | "cancel" => CiState::Failure,
+      crate::github::INACTIVE => CiState::Inactive,
       _ => CiState::Pending,
     }
   }
@@ -752,6 +756,7 @@ impl CiState {
       CiState::Success => "CI passed",
       CiState::Failure => "CI failed",
       CiState::Pending => "CI running",
+      CiState::Inactive => "CI inactive",
     }
   }
 
@@ -760,6 +765,7 @@ impl CiState {
       CiState::Failure => 0,
       CiState::Pending => 1,
       CiState::Success => 2,
+      CiState::Inactive => 3,
     }
   }
 }
@@ -999,6 +1005,10 @@ mod tests {
     assert_eq!(CiState::of_bucket("skipping"), CiState::Success);
     assert_eq!(CiState::of_bucket("cancel"), CiState::Failure);
     assert_eq!(CiState::of_bucket("queued"), CiState::Pending);
+    assert_eq!(
+      CiState::of_bucket(crate::github::INACTIVE),
+      CiState::Inactive
+    );
     assert_eq!(CiState::parse("weird"), CiState::Pending);
     assert_eq!(check_duration(5), "5s");
     assert_eq!(check_duration(65), "1m 5s");
@@ -1013,11 +1023,12 @@ mod tests {
       check("a", "pass"),
       check("b", "pending"),
       check("c", "fail"),
+      check("d", crate::github::INACTIVE),
     ];
     let names: Vec<_> = by_severity(&checks)
       .iter()
       .map(|c| c.name.as_str())
       .collect();
-    assert_eq!(names, ["c", "b", "a"]);
+    assert_eq!(names, ["c", "b", "a", "d"]);
   }
 }

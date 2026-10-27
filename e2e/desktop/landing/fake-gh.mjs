@@ -202,9 +202,28 @@ const checks = {
     check("build", "pass", 2),
     check("test", "pass", 5),
     check("lint", "pass", 1),
+    // The WIP app's check run: in progress for as long as the title says
+    // WIP, with no details URL.
+    { name: "WIP", bucket: "pending", link: "" },
   ],
   "feat/alerting-logs": [check("build", "pass", 3), check("test", "pass", 8)],
 };
+
+// `gh pr list --json statusCheckRollup`, which the header reads its checks
+// from, as check runs.
+const CONCLUSION = { pass: "SUCCESS", fail: "FAILURE", skipping: "SKIPPED", cancel: "CANCELLED" };
+function rollupEntry(c) {
+  return {
+    __typename: "CheckRun",
+    name: c.name,
+    status: c.bucket === "pending" ? "IN_PROGRESS" : "COMPLETED",
+    conclusion: CONCLUSION[c.bucket] ?? null,
+    detailsUrl: c.link,
+    startedAt: c.startedAt,
+    completedAt: c.completedAt,
+  };
+}
+for (const pr of prs) pr.statusCheckRollup = (checks[pr.headRefName] ?? []).map(rollupEntry);
 
 const reviewThreads = {
   418: [

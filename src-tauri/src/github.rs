@@ -1419,7 +1419,7 @@ fn check_duration_secs(started_at: Option<&str>, completed_at: Option<&str>) -> 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PrCheckEntry {
   pub name: String,
-  /// "pass" | "fail" | "pending" | "skipping" | "cancel"
+  /// "pass" | "fail" | "pending" | "skipping" | "cancel" | [`INACTIVE`]
   pub bucket: String,
   pub link: String,
   #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1448,6 +1448,28 @@ struct GhCheck {
   completed_at: Option<String>,
 }
 
+/// The bucket of a check that reports nothing about the code, such as the
+/// WIP app's status. It is listed but not counted, and never spins.
+pub const INACTIVE: &str = "inactive";
+
+/// The GitHub WIP app (github.com/wip/app) posts a check run named "WIP"
+/// that stays in progress while the PR title says WIP; it never completes.
+/// It sets no details URL, so GitHub reports the app's homepage or nothing.
+/// Matched by name and that link, so a real CI job named WIP, which links to
+/// its run, still counts.
+fn is_wip_app_status(check: &GhCheck) -> bool {
+  const APP_LINKS: [&str; 4] = [
+    "",
+    "https://github.com/apps/wip",
+    "https://github.com/marketplace/wip",
+    "https://github.com/wip/app",
+  ];
+  let link = check.link.trim_end_matches('/');
+  check.name == "WIP"
+    && check.bucket == "pending"
+    && APP_LINKS.iter().any(|app| link.eq_ignore_ascii_case(app))
+}
+
 /// Rolls a `gh pr checks --json name,bucket,link,startedAt,completedAt` result
 /// up into an overall CI status. Shared by every entry point that surfaces PR
 /// CI status (the workspace header's live indicator and the GitHub panel's PR
@@ -1460,12 +1482,17 @@ fn rollup_pr_checks(raw: Vec<GhCheck>) -> Option<PrCiStatus> {
   let mut passed = 0u32;
   let mut failed = 0u32;
   let mut pending = 0u32;
+  let mut inactive = 0u32;
   let checks: Vec<PrCheckEntry> = raw
     .into_iter()
-    .map(|c| {
+    .map(|mut c| {
+      if is_wip_app_status(&c) {
+        c.bucket = INACTIVE.into();
+      }
       match c.bucket.as_str() {
         "pass" | "skipping" => passed += 1,
         "fail" | "cancel" => failed += 1,
+        INACTIVE => inactive += 1,
         _ => pending += 1,
       }
       let duration_secs = check_duration_secs(c.started_at.as_deref(), c.completed_at.as_deref());
@@ -1489,7 +1516,7 @@ fn rollup_pr_checks(raw: Vec<GhCheck>) -> Option<PrCiStatus> {
 
   Some(PrCiStatus {
     state,
-    total: checks.len() as u32,
+    total: checks.len() as u32 - inactive,
     passed,
     failed,
     pending,
@@ -2072,6 +2099,71 @@ mod tests {
       super::check_gh_output(failed("HTTP 404: Not Found")),
       Err("gh exited with error: HTTP 404: Not Found".to_string())
     );
+  }
+
+  fn gh_check(name: &str, bucket: &str, link: &str) -> super::GhCheck {
+    super::GhCheck {
+      name: name.into(),
+      bucket: bucket.into(),
+      link: link.into(),
+      started_at: None,
+      completed_at: None,
+    }
+  }
+
+  #[test]
+  fn the_wip_app_status_is_inactive_and_left_out_of_the_rollup() {
+    let ci = super::rollup_pr_checks(vec![
+      gh_check("WIP", "pending", "https://github.com/apps/wip"),
+      gh_check("build", "pass", "https://ci/1"),
+    ])
+    .unwrap();
+    assert_eq!(ci.state, "success");
+    assert_eq!((ci.passed, ci.pending, ci.total), (1, 0, 1));
+    // Still listed, as inactive.
+    assert_eq!(ci.checks[0].bucket, "inactive");
+    assert_eq!(ci.checks.len(), 2);
+  }
+
+  #[test]
+  fn the_wip_app_check_run_matches_by_whichever_app_link_github_reports() {
+    // The app sets no details URL, so GitHub reports the app's homepage, or
+    // nothing; a real CI job named WIP links to its run.
+    for link in [
+      "",
+      "https://github.com/apps/wip",
+      "https://github.com/marketplace/wip",
+      "https://github.com/wip/app/",
+    ] {
+      let ci = super::rollup_pr_checks(vec![gh_check("WIP", "pending", link)]).unwrap();
+      assert_eq!(ci.checks[0].bucket, "inactive", "{link:?}");
+    }
+    let ci = super::rollup_pr_checks(vec![gh_check(
+      "WIP",
+      "pending",
+      "https://github.com/tznc/treq/actions/runs/1",
+    )])
+    .unwrap();
+    assert_eq!(ci.checks[0].bucket, "pending");
+  }
+
+  #[test]
+  fn a_real_check_named_wip_still_counts() {
+    let ci =
+      super::rollup_pr_checks(vec![gh_check("WIP", "pending", "https://ci.example/wip")]).unwrap();
+    assert_eq!((ci.state.as_str(), ci.pending, ci.total), ("pending", 1, 1));
+    assert_eq!(ci.checks[0].bucket, "pending");
+  }
+
+  #[test]
+  fn only_the_wip_app_status_leaves_no_checks_to_count() {
+    let ci = super::rollup_pr_checks(vec![gh_check(
+      "WIP",
+      "pending",
+      "https://github.com/apps/wip",
+    )])
+    .unwrap();
+    assert_eq!((ci.state.as_str(), ci.total), ("success", 0));
   }
 
   fn listed_pr(number: u64, branch: &str, state: &str, cross_repo: bool, rollup: &str) -> String {

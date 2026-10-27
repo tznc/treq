@@ -57,7 +57,7 @@ test("merge: header popovers and menus", async ({ page }) => {
     name: "12-merge-checks-popover",
     title: "Checks popover (GH 3/3)",
     expectations: [
-      "Each check with status icon, name and duration",
+      "Each check with status icon, name and duration; WIP last, muted, reading inactive",
       "Popover stays inside the window at the right edge",
     ],
   });

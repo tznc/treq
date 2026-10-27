@@ -1070,6 +1070,7 @@ impl GithubView {
       CiState::Success => Tone::Success,
       CiState::Failure => Tone::Danger,
       CiState::Pending => Tone::Warning,
+      CiState::Inactive => Tone::Neutral,
     };
     let (border, text, hover) = (tone.color(p), tone.text(p), tone.tint(p));
     let summary = format!(

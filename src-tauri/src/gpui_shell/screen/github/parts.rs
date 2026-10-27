@@ -82,6 +82,7 @@ pub fn ci_style(state: CiState, p: &Palette) -> (&'static str, Hsla) {
     CiState::Success => (theme::ICON_CIRCLE_CHECK, Tone::Success.text(p)),
     CiState::Failure => (theme::ICON_CIRCLE_X, Tone::Danger.text(p)),
     CiState::Pending => (theme::ICON_SPINNER, Tone::Warning.text(p)),
+    CiState::Inactive => (theme::ICON_MINUS, p.muted_foreground),
   }
 }
 
