@@ -124,38 +124,27 @@ pub fn check_row(
   check: &PrCheckEntry,
   p: &Palette,
   on_open: Option<OnClick>,
-) -> Stateful<Div> {
+) -> ui::Row {
   let id: SharedString = id.into();
   let state = CiState::of_bucket(&check.bucket);
-  let row = ui::text(div(), TextSize::Sm)
-    .flex()
-    .items_center()
-    .gap_2()
+  let row = ui::Row::new(id.clone(), p)
+    .label(check.name.clone())
+    .w_full()
     .py_1p5()
-    .px_2()
-    .child(ci_icon(format!("{id}-spin"), state, 16., p))
-    .child(
-      div()
-        .flex_1()
-        .min_w_0()
-        .truncate()
-        .child(check.name.clone()),
-    )
-    .children(check.duration_secs.map(|secs| {
-      ui::text(div(), TextSize::Sm)
-        .flex_none()
-        .text_color(p.muted_foreground)
-        .child(data::check_duration(secs))
-    }));
+    .rounded(radius::SM)
+    .leading(ci_icon(format!("{id}-spin"), state, 16., p))
+    .title(check.name.clone())
+    .when_some(check.duration_secs, |row, secs| {
+      row.trailing(
+        ui::text(div(), TextSize::Sm)
+          .flex_none()
+          .text_color(p.muted_foreground)
+          .child(data::check_duration(secs)),
+      )
+    });
   match on_open.filter(|_| !check.link.is_empty()) {
-    Some(open) => named(div(), id)
-      .w_full()
-      .rounded(radius::SM)
-      .cursor_pointer()
-      .hover(move |s| s.bg(p.hover()))
-      .on_click(open)
-      .child(row),
-    None => named(div(), id).child(row),
+    Some(open) => row.on_click(open),
+    None => row.interactive(false),
   }
 }
 
@@ -233,25 +222,6 @@ pub fn error_state(
             }),
         )
     })
-}
-
-/// `LoadMoreButton`.
-pub fn load_more(id: &'static str, loading: bool, p: &Palette, on_click: OnClick) -> Div {
-  div().p_3().child(
-    Button::new(id, p)
-      .variant(Variant::Outline)
-      .w_full()
-      .disabled(loading)
-      .when(loading, |b| {
-        b.child(ui::spinner(
-          SharedString::from(format!("{id}-spin")),
-          16.,
-          p.foreground,
-        ))
-      })
-      .label("Load more")
-      .on_click(on_click),
-  )
 }
 
 /// `OpenInWebButton`.

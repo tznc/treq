@@ -1472,7 +1472,6 @@ impl OpenWorkspacesDialog {
         view.toggle_pr(&pr_for_click, cx);
       }
     }))
-    .test_support()
   }
 
   /// A Linear issue with its checkbox.
@@ -1497,7 +1496,6 @@ impl OpenWorkspacesDialog {
         view.toggle_issue(&issue_for_click, cx);
       }
     }))
-    .test_support()
   }
 }
 
@@ -1579,28 +1577,25 @@ fn pick_row(
   disabled: bool,
   item: Div,
   p: &Palette,
-) -> gpui::Stateful<Div> {
-  div()
-    .id(SharedString::from(format!("{id}-row")))
+) -> ui::Row {
+  ui::Row::new(SharedString::from(format!("{id}-row")), p)
     .role(gpui::Role::CheckBox)
-    .aria_label(SharedString::from(name))
+    .label(name)
     .aria_toggled(if checked {
       gpui::accesskit::Toggled::True
     } else {
       gpui::accesskit::Toggled::False
     })
+    .density(ui::RowDensity::Default)
+    .selected(checked)
     .w_full()
     .px_3()
     .py_2p5()
     .border_b_1()
     .border_color(p.border)
-    .flex()
+    .rounded_none()
     .items_start()
-    .gap_2()
-    .cursor_pointer()
-    .when(checked, |d| d.bg(p.selected()))
-    .when(!checked, |d| d.hover(move |s| s.bg(p.hover())))
-    .child(
+    .leading(
       div().mt_1().child(
         ui::Checkbox::new(SharedString::from(format!("{id}-check")), p)
           .checked(checked)
@@ -1774,12 +1769,10 @@ fn result_row(
           .text_color(p.destructive)
           .child(reason.clone()),
       )
-      .test_support()
       .into_any_element(),
     None => row(id.clone(), format!("{raw}: checking"), p)
       .child(ui::spinner(id, 14., p.muted_foreground))
       .child(mono(raw))
-      .test_support()
       .into_any_element(),
   }
 }
@@ -1816,23 +1809,16 @@ fn target_row(id: SharedString, target: &Target, repo_path: &str, p: &Palette) -
         .text_color(p.muted_foreground)
         .child(detail),
     )
-    .test_support()
 }
 
 /// A line of the list under the text, named by its line and what it opens.
-fn row(id: SharedString, name: String, p: &Palette) -> gpui::Stateful<Div> {
-  let selector = id.to_string();
-  ui::text(div(), TextSize::Sm)
-    .id(id)
-    .debug_selector(move || selector)
-    .role(gpui::Role::ListItem)
-    .aria_label(SharedString::from(name))
-    .flex()
-    .flex_none()
-    .items_center()
-    .gap_2()
+/// It takes no click.
+fn row(id: SharedString, name: String, p: &Palette) -> ui::Row {
+  ui::Row::new(id, p)
+    .label(name)
+    .interactive(false)
+    .px_0()
     .min_w_0()
-    .text_color(p.foreground)
 }
 
 fn mono(text: &str) -> Div {

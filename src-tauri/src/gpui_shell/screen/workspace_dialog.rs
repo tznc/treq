@@ -1358,25 +1358,19 @@ impl WorkspaceDialog {
         div()
           .children(branches.into_iter().enumerate().map(|(i, name)| {
             let id = SharedString::from(format!("branch-option-{i}"));
-            let selector = id.to_string();
             let active = selected.as_deref() == Some(name.as_str());
             let checked = target.as_deref() == Some(name.as_str());
             let pick = name.clone();
-            ui::text(div(), TextSize::Sm)
-              .id(id)
-              .debug_selector(move || selector)
+            ui::Row::new(id, &p)
+              .role(gpui::Role::ListBoxOption)
+              .label(name.clone())
+              .selected(active)
               .px_3()
-              .py_1p5()
-              .flex()
-              .items_center()
-              .gap_2()
-              .cursor_pointer()
+              .rounded_none()
               .font_family(theme::MONO_FONT)
-              .when(active, |this| this.bg(p.menu_accent))
-              .when(!active, |this| this.hover(move |s| s.bg(p.hover())))
               .child(div().flex_1().min_w_0().truncate().child(name))
               .when(checked, |this| {
-                this.child(ui::icon(theme::ICON_CHECK, 16., p.popover_foreground))
+                this.trailing(ui::icon(theme::ICON_CHECK, 16., p.popover_foreground))
               })
               .on_click(cx.listener(move |view, _, _, cx| view.pick_branch(pick.clone(), cx)))
           }))

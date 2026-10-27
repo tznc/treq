@@ -1771,6 +1771,7 @@ impl GithubView {
         self
           .row(
             format!("github-issue-{n}"),
+            &issue.title,
             selected == Some(n),
             &p,
             cx,
@@ -1822,6 +1823,7 @@ impl GithubView {
         self
           .row(
             format!("github-pr-{n}"),
+            &pr.title,
             selected == Some(n),
             &p,
             cx,
@@ -1850,36 +1852,34 @@ impl GithubView {
       Tab::Issues => self.issues.fetching_next,
       Tab::Prs => self.prs.fetching_next,
     };
-    parts::load_more(
-      "github-load-more",
-      next,
-      p,
-      Box::new(cx.listener(|view, _, _, cx| view.reload_list(true, cx))),
-    )
-    .into_any_element()
+    ui::Row::load_more("github-load-more", next, p)
+      .when(!next, |row| {
+        row.on_click(cx.listener(|view, _, _, cx| view.reload_list(true, cx)))
+      })
+      .into_any_element()
   }
 
-  /// An `IssueListItem` or `PrListItem` button.
+  /// An `IssueListItem` or `PrListItem` row, named by its title.
   fn row(
     &self,
     id: String,
+    label: &str,
     selected: bool,
     p: &Palette,
     cx: &mut Context<Self>,
     on_click: impl Fn(&mut Self, &mut Context<Self>) + 'static,
-  ) -> gpui::Stateful<Div> {
-    named(div(), id)
+  ) -> ui::Row {
+    ui::Row::new(id, p)
+      .density(ui::RowDensity::Default)
+      .label(label.to_string())
+      .selected(selected)
       .w_full()
       .px_3()
       .py_2p5()
       .border_b_1()
       .border_color(p.border)
-      .flex()
+      .rounded_none()
       .items_start()
-      .gap_2()
-      .cursor_pointer()
-      .when(selected, |d| d.bg(p.selected()))
-      .when(!selected, |d| d.hover(move |s| s.bg(p.hover())))
       .on_click(cx.listener(move |view, _, _, cx| on_click(view, cx)))
   }
 

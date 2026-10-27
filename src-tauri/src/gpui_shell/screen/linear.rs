@@ -1753,7 +1753,6 @@ impl LinearView {
         self.agent_button(format!("linear-kickoff-{id}"), &id, p, cx),
         24.,
       )
-      .cursor_pointer()
       .when(indent, |this| this.ml_6())
       .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| view.open_issue(&id, cx)))
   }

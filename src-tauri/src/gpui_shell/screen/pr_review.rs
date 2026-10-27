@@ -603,7 +603,6 @@ impl PrReviewView {
 
   fn nav_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
     let p = theme::palette(self.dark);
-    let accent = p.accent;
     let files: Vec<_> = self
       .changes
       .as_ref()
@@ -620,24 +619,20 @@ impl PrReviewView {
         let (name, _) = split_path(&file.path);
         let path = file.path.clone();
         let active = self.active.as_deref() == Some(file.path.as_str());
-        let row = ui::text(div(), TextSize::Xs)
-          .id(SharedString::from(format!("pr-file-{}", file.path)))
-          .debug_selector({
-            let id = format!("pr-file-{}", file.path);
-            move || id
-          })
+        let row = ui::Row::new(SharedString::from(format!("pr-file-{}", file.path)), &p)
+          .label(file.path.clone())
+          .selected(active)
           .w_full()
-          .flex()
-          .items_center()
-          .gap_2()
           .px_3()
-          .py_1()
-          .cursor_pointer()
-          .hover(move |s| s.bg(p.hover()))
-          .when(active, |this| this.bg(accent))
-          .child(ui::icon(theme::ICON_FILE_TEXT, 12., p.muted_foreground).flex_none())
-          .child(div().truncate().flex_1().child(name))
+          .rounded_none()
+          .leading(ui::icon(theme::ICON_FILE_TEXT, 12., p.muted_foreground).flex_none())
           .child(
+            ui::text(div(), TextSize::Xs)
+              .truncate()
+              .flex_1()
+              .child(name),
+          )
+          .trailing(
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(file.status.clone()),

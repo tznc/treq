@@ -334,6 +334,11 @@ pub const CONTROL_SM: f32 = 24.;
 pub const CONTROL_MD: f32 = 28.;
 pub const CONTROL_LG: f32 = 32.;
 
+/// List row heights ([`crate::RowDensity`]): compact for the sidebar, file
+/// trees and menus; the default for lists in screens, dialogs and settings.
+pub const ROW_HEIGHT_COMPACT: f32 = 28.;
+pub const ROW_HEIGHT: f32 = 32.;
+
 /// gpui-bootstrap's theme in treq's tokens, at `zoom` (1.0 at 100%).
 ///
 /// Every gpui-bootstrap component the `ui` facade builds on reads it: its

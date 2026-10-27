@@ -1877,7 +1877,6 @@ impl CodeView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let accent = p.accent;
     div()
       .debug_selector(|| "task-mentions".into())
       .mx_2()
@@ -1899,21 +1898,15 @@ impl CodeView {
       )
       .children(mention.results.iter().enumerate().map(|(i, path)| {
         let id = SharedString::from(format!("task-mention-{i}"));
-        let selector = id.to_string();
         let selected = i == mention.index;
-        div()
-          .id(id)
-          .debug_selector(move || selector)
+        ui::Row::new(id, p)
+          .role(gpui::Role::ListBoxOption)
+          .label(path.clone())
+          .selected(selected)
           .w_full()
           .px_3()
-          .py_1p5()
-          .flex()
-          .items_center()
-          .gap_2()
-          .cursor_pointer()
-          .when(selected, |this| this.bg(accent.opacity(0.5)))
-          .when(!selected, |this| this.hover(move |s| s.bg(p.hover())))
-          .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
+          .rounded_none()
+          .leading(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
           .child(
             ui::text(div(), TextSize::Xs)
               .font_family(theme::MONO_FONT)
@@ -2604,7 +2597,6 @@ impl CodeView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let id = SharedString::from(format!("workspace-stack-item-{}", row.workspace.id));
-    let selector = id.to_string();
     let title = display_title(&row.workspace);
     let created = row.workspace.created_at.clone();
     let time = self.tips.wrap(
@@ -2618,29 +2610,17 @@ impl CodeView {
     );
     let (ins, del) = row.stats;
     let workspace = row.workspace.clone();
-    div()
-      .id(id)
-      .debug_selector(move || selector)
+    ui::Row::new(id, p)
+      .label(title.clone())
+      .selected(row.current)
       .relative()
-      .flex()
       .w_full()
       .items_start()
       .gap_3()
       .py_2()
-      .px_2()
       .mx_neg_2()
       .rounded(radius::MD)
-      .cursor_pointer()
-      .when(row.current, |this| {
-        this
-          // Opaque, or the shadow below shows through.
-          .bg(p.background.blend(p.primary.opacity(0.1)))
-          .border_1()
-          .border_color(p.primary.opacity(0.4))
-          .shadow_sm()
-      })
-      .when(!row.current, |this| this.hover(move |s| s.bg(p.hover())))
-      .child(stack_dot(row.current, p))
+      .leading(stack_dot(row.current, p))
       .child(
         div()
           .flex_1()
@@ -3210,30 +3190,17 @@ impl CodeView {
     if home && own.len() + 1 >= self.history_limit {
       let loading = self.history_loading && self.history_limit > HISTORY_PAGE;
       track = track.child(
-        ui::text(div(), TextSize::Xs)
-          .id("history-load-more")
-          .debug_selector(|| "history-load-more".into())
-          .mt_3()
-          .pl_7()
-          .text_color(p.muted_foreground)
-          .cursor_pointer()
-          .when(loading, |this| {
-            this
-              .flex()
-              .items_center()
-              .gap_1p5()
-              .child(ui::spinner("history-loading", 12., p.muted_foreground))
-              .child("Loading...")
-          })
-          .when(!loading, |this| {
-            this
-              .child("Load more commits")
-              .on_click(cx.listener(|view, _, _, cx| {
+        div().mt_3().pl_7().child(
+          ui::Row::load_more("history-load-more", loading, p)
+            .title("Load more commits")
+            .when(!loading, |row| {
+              row.on_click(cx.listener(|view, _, _, cx| {
                 view.history_limit += HISTORY_PAGE;
                 view.load_history(cx);
                 cx.notify();
               }))
-          }),
+            }),
+        ),
       );
     }
     if diverged || target_section {

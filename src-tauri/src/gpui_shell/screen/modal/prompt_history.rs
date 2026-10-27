@@ -271,7 +271,7 @@ impl PromptHistoryView {
   fn rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
     self.read_ahead(range.end, cx);
     let p = theme::palette(self.dark);
-    let (selected_bg, muted) = (p.selected(), p.muted_foreground);
+    let muted = p.muted_foreground;
     let Some(entries) = self.entries.clone() else {
       return Vec::new();
     };
@@ -285,40 +285,41 @@ impl PromptHistoryView {
         div()
           .pb_1()
           .child(
-            ui::text(div(), TextSize::Xs)
-              .id(SharedString::from(selector.clone()))
-              .debug_selector(move || selector)
-              .w_full()
-              .px_2()
-              .py_2()
-              .rounded(radius::MD)
-              .cursor_pointer()
-              .when(selected, |this| this.bg(selected_bg))
-              .when(!selected, |this| this.hover(move |s| s.bg(p.hover())))
-              .child(
-                div()
-                  .font_family(theme::MONO_FONT)
-                  .font_weight(FontWeight::MEDIUM)
-                  .truncate()
-                  .child(workspace_label(entry)),
-              )
-              .child(
-                div()
-                  .text_color(muted)
-                  .truncate()
-                  .child(time::locale(&entry.created_at)),
-              )
-              .child(
-                div()
-                  .mt_1()
-                  .text_color(muted)
-                  .truncate()
-                  .child(preview(&entry.prompt_text)),
-              )
-              .on_click(cx.listener(move |view, _, _, cx| {
-                view.selected = Some(id);
-                cx.notify();
-              })),
+            ui::text(
+              ui::Row::new(SharedString::from(selector), &p)
+                .density(ui::RowDensity::TwoLine)
+                .label(workspace_label(entry))
+                .selected(selected),
+              TextSize::Xs,
+            )
+            .w_full()
+            .py_2()
+            .rounded(radius::MD)
+            .items_start()
+            .child(
+              div()
+                .font_family(theme::MONO_FONT)
+                .font_weight(FontWeight::MEDIUM)
+                .truncate()
+                .child(workspace_label(entry)),
+            )
+            .child(
+              div()
+                .text_color(muted)
+                .truncate()
+                .child(time::locale(&entry.created_at)),
+            )
+            .child(
+              div()
+                .mt_1()
+                .text_color(muted)
+                .truncate()
+                .child(preview(&entry.prompt_text)),
+            )
+            .on_click(cx.listener(move |view, _, _, cx| {
+              view.selected = Some(id);
+              cx.notify();
+            })),
           )
           .into_any_element()
       })

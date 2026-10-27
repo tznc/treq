@@ -1418,21 +1418,15 @@ impl MergeView {
   fn file_row(&self, i: usize, path: &str, p: &Palette) -> impl IntoElement {
     let expanded = !self.collapsed.contains(path);
     let id = SharedString::from(format!("merge-file-{path}"));
-    let selector = id.to_string();
     div()
       .when(i > 0, |this| this.border_t_1().border_color(p.border))
       .child(
-        div()
-          .id(id)
-          .debug_selector(move || selector)
+        ui::Row::new(id, p)
+          .label(path.to_string())
           .w_full()
           .p_3()
-          .flex()
-          .items_center()
-          .gap_2()
-          .cursor_pointer()
-          .hover(|s| s.bg(p.hover()))
-          .child(ui::icon(
+          .rounded_none()
+          .leading(ui::icon(
             if expanded {
               theme::ICON_CHEVRON_DOWN
             } else {
@@ -1441,7 +1435,7 @@ impl MergeView {
             16.,
             p.muted_foreground,
           ))
-          .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
+          .leading(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
           .child(
             ui::text(div(), TextSize::Sm)
               .font_family(theme::MONO_FONT)

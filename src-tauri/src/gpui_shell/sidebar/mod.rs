@@ -1079,8 +1079,7 @@ impl Sidebar {
       conflicted: false,
       pr: None,
     };
-    div()
-      .id(key.clone())
+    ui::Row::new(key.clone(), palette)
       .debug_selector({
         let selector = match &repo.label {
           Some(name) if !repo.active => format!("home-{name}"),
@@ -1089,24 +1088,16 @@ impl Sidebar {
         move || selector
       })
       .role(Role::Button)
-      .aria_label(label)
-      .aria_selected(repo.home_selected)
-      .test_support()
+      .label(label)
+      .density(ui::RowDensity::Default)
+      .selected(repo.home_selected)
       .relative()
-      .flex()
-      .items_center()
       .gap_1p5()
       .mx_2()
-      .px_2()
-      .h(zpx(32.))
       .rounded_md()
-      .when(repo.home_selected, |this| this.bg(palette.selected()))
-      .cursor_pointer()
-      .when(!repo.home_selected, |this| {
-        this.hover(|style| style.bg(palette.hover()))
-      })
+      .text_color(palette.sidebar_foreground)
       .when(repo.missing, |this| this.opacity(0.5))
-      .child(icon(theme::ICON_HOUSE, 16., palette.sidebar_foreground))
+      .leading(icon(theme::ICON_HOUSE, 16., palette.sidebar_foreground))
       .child(title)
       .when(repo.missing, |this| {
         this.child(
@@ -1124,7 +1115,7 @@ impl Sidebar {
         move |this, hovered: &bool, _, cx| this.hover_row_tooltip(key.clone(), *hovered, cx)
       }))
       .when(shown, |this| {
-        this.child(self.tooltip_anchor(key.clone(), Side::Right, tip, 0.))
+        this.overlay(self.tooltip_anchor(key.clone(), Side::Right, tip, 0.))
       })
       .on_click(self.on_action(SidebarAction::SelectHome {
         repo_path: repo.path.clone(),
@@ -1150,26 +1141,16 @@ impl Sidebar {
     action: SidebarAction,
     palette: &Palette,
   ) -> impl IntoElement {
-    div()
-      .id(id)
-      .debug_selector(move || id.into())
+    ui::Row::new(id, palette)
       .role(Role::Button)
-      .aria_label(text)
-      .aria_selected(active)
-      .test_support()
-      .flex()
-      .items_center()
+      .label(text)
+      .density(ui::RowDensity::Default)
+      .selected(active)
       .gap_1p5()
       .mx_2()
-      .px_2()
-      .h(zpx(32.))
       .rounded_md()
-      .cursor_pointer()
-      .when(active, |this| this.bg(palette.selected()))
-      .when(!active, |this| {
-        this.hover(|style| style.bg(palette.hover()))
-      })
-      .child(icon(icon_path, 16., palette.sidebar_foreground))
+      .text_color(palette.sidebar_foreground)
+      .leading(icon(icon_path, 16., palette.sidebar_foreground))
       .child(div().flex_1().min_w_0().truncate().child(text))
       .on_click(self.on_action(action))
   }
@@ -1363,31 +1344,23 @@ impl Sidebar {
       });
 
     let interactive = repo_active && !row.archiving;
-    let row_el = div()
-      .id(("workspace", id as u64))
-      .debug_selector(move || selector)
+    let row_el = ui::Row::new(selector, palette)
       .role(Role::Button)
-      .aria_label(label.clone())
-      .aria_selected(row.selected)
-      .test_support()
+      .label(label.clone())
+      .density(ui::RowDensity::Default)
+      .selected(row.selected)
+      .interactive(!row.archiving)
       .group(group.clone())
       .relative()
-      .flex()
-      .items_center()
       .gap_1p5()
-      .h(zpx(32.))
       .pl(zpx(row_indent(row.depth)))
       .pr_2()
       .rounded_md()
-      .when(!row.archiving, |this| this.cursor_pointer())
-      .when(row.selected, |this| this.bg(palette.selected()))
-      .when(!row.selected && !row.archiving, |this| {
-        this.hover(|style| style.bg(palette.hover()))
-      })
+      .text_color(palette.sidebar_foreground)
       .when(row.archiving, |this| this.opacity(0.5))
       .when(row.depth > 0, |this| {
         // An elbow into the row, not a bar that reads as a selection marker.
-        this.child(
+        this.overlay(
           div()
             .absolute()
             .top_0()
@@ -1400,7 +1373,7 @@ impl Sidebar {
             .rounded_bl(ui::radius::SM),
         )
       })
-      .child(leading)
+      .leading(leading)
       .child(
         div()
           .debug_selector({
@@ -1454,7 +1427,7 @@ impl Sidebar {
         }
       }))
       .when(self.tooltip_shown(&key), |this| {
-        this.child(self.tooltip_anchor(key.clone(), Side::Right, tip, 0.))
+        this.overlay(self.tooltip_anchor(key.clone(), Side::Right, tip, 0.))
       })
       .when(!row.archiving && repo_active, |this| {
         this.on_click(self.on_row_click(id))

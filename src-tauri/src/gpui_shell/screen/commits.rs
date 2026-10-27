@@ -1717,32 +1717,13 @@ impl CommitsView {
     } else {
       "commits-load-more"
     };
-    let muted = p.muted_foreground;
-    let fg = p.foreground;
+    let loading = self.loading_more;
     div().pl_7().child(
-      ui::text(div(), TextSize::Sm)
-        .id(id)
-        .debug_selector(move || id.into())
-        .text_color(muted)
-        .when(!self.loading_more, |this| {
-          this
-            .cursor_pointer()
-            .hover(move |s| s.text_color(fg))
-            .on_click(cx.listener(move |view, _, _, cx| view.load_more(target, cx)))
-        })
-        .when(self.loading_more, |this| {
-          this
-            .flex()
-            .items_center()
-            .gap_1p5()
-            .child(ui::spinner(
-              SharedString::from(format!("{id}-spin")),
-              12.,
-              muted,
-            ))
-            .child("Loading...")
-        })
-        .when(!self.loading_more, |this| this.child("Load more commits")),
+      ui::Row::load_more(id, loading, p)
+        .title("Load more commits")
+        .when(!loading, |row| {
+          row.on_click(cx.listener(move |view, _, _, cx| view.load_more(target, cx)))
+        }),
     )
   }
 }
@@ -1823,116 +1804,108 @@ impl CommitsView {
       let id = commit.commit_id.clone();
       cx.listener(move |view, hovered: &bool, _, cx| view.hover_commit(id.clone(), *hovered, cx))
     });
-    let row = div()
-      .id(SharedString::from(format!(
-        "commit-row-{}",
-        commit.commit_id
-      )))
-      .debug_selector({
-        let id = format!("commit-row-{}", commit.commit_id);
-        move || id
-      })
-      .relative()
-      .flex()
-      .items_start()
-      .gap_3()
-      .py_2()
-      .px_2()
-      .mx_neg_2()
-      .w_full()
-      .rounded(radius::MD)
-      .cursor_pointer()
-      .when(tentative, |this| this.bg(yellow))
-      .hover(move |s| s.bg(p.hover()))
-      .child(
-        div().relative().flex_none().child(
-          div()
-            .size(zpx(14.))
-            .rounded_full()
-            .border_2()
-            .border_color(p.background)
-            .bg(dot),
-        ),
-      )
-      .child(
+    let row = ui::Row::new(
+      SharedString::from(format!("commit-row-{}", commit.commit_id)),
+      p,
+    )
+    .label(headline(commit))
+    .relative()
+    .items_start()
+    .gap_3()
+    .py_2()
+    .mx_neg_2()
+    .w_full()
+    .rounded(radius::MD)
+    .when(tentative, |this| this.bg(yellow))
+    .leading(
+      div().relative().flex_none().child(
         div()
-          .flex_1()
-          .min_w_0()
-          .pt_0p5()
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .gap_1p5()
-              .child(ui::icon(
-                if expanded {
-                  theme::ICON_CHEVRON_DOWN
-                } else {
-                  theme::ICON_CHEVRON_RIGHT
-                },
-                16.,
-                p.muted_foreground,
-              ))
-              .child(title)
-              .children(edit_description),
-          )
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .gap_2()
-              .mt_0p5()
-              .pl_5()
-              .when(commit.has_conflicts, |this| {
-                this.child(
-                  div()
-                    .flex_none()
-                    .debug_selector({
-                      let id = format!("commit-conflict-badge-{}", commit.change_id);
-                      move || id
-                    })
-                    .child(ui::Badge::new("Conflict", p).tone(ui::Tone::Danger)),
-                )
-              })
-              .when(commit.is_immutable, |this| {
-                this.child(ui::Badge::new("Immutable", p))
-              })
-              .child(time)
-              .children(edit_timestamp)
-              .when(commit.insertions > 0 || commit.deletions > 0, |this| {
-                this.child(
-                  div()
-                    .ml_auto()
-                    .flex()
-                    .child(
-                      div()
-                        .text_color(ui::Tone::GitOpen.text(p))
-                        .child(format!("+{}", commit.insertions)),
-                    )
-                    .child("\u{a0}")
-                    .child(
-                      div()
-                        .text_color(ui::Tone::GitClosed.text(p))
-                        .child(format!("-{}", commit.deletions)),
-                    ),
-                )
-              }),
-          ),
-      )
-      .when_some(read_ahead, |this, listener| this.on_hover(listener))
-      .when(!tentative, |this| {
-        let commit = commit.clone();
-        this.on_mouse_down(
-          MouseButton::Right,
-          cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
-            view.commit_menu(&commit, kind, e.position, cx);
-          }),
+          .size(zpx(14.))
+          .rounded_full()
+          .border_2()
+          .border_color(p.background)
+          .bg(dot),
+      ),
+    )
+    .child(
+      div()
+        .flex_1()
+        .min_w_0()
+        .pt_0p5()
+        .child(
+          div()
+            .flex()
+            .items_center()
+            .gap_1p5()
+            .child(ui::icon(
+              if expanded {
+                theme::ICON_CHEVRON_DOWN
+              } else {
+                theme::ICON_CHEVRON_RIGHT
+              },
+              16.,
+              p.muted_foreground,
+            ))
+            .child(title)
+            .children(edit_description),
         )
-      })
-      .on_click({
-        let id = commit.commit_id.clone();
-        cx.listener(move |view, _, _, cx| view.toggle(&id, cx))
-      });
+        .child(
+          div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .mt_0p5()
+            .pl_5()
+            .when(commit.has_conflicts, |this| {
+              this.child(
+                div()
+                  .flex_none()
+                  .debug_selector({
+                    let id = format!("commit-conflict-badge-{}", commit.change_id);
+                    move || id
+                  })
+                  .child(ui::Badge::new("Conflict", p).tone(ui::Tone::Danger)),
+              )
+            })
+            .when(commit.is_immutable, |this| {
+              this.child(ui::Badge::new("Immutable", p))
+            })
+            .child(time)
+            .children(edit_timestamp)
+            .when(commit.insertions > 0 || commit.deletions > 0, |this| {
+              this.child(
+                div()
+                  .ml_auto()
+                  .flex()
+                  .child(
+                    div()
+                      .text_color(ui::Tone::GitOpen.text(p))
+                      .child(format!("+{}", commit.insertions)),
+                  )
+                  .child("\u{a0}")
+                  .child(
+                    div()
+                      .text_color(ui::Tone::GitClosed.text(p))
+                      .child(format!("-{}", commit.deletions)),
+                  ),
+              )
+            }),
+        ),
+    )
+    .when_some(read_ahead, |this, listener| this.on_hover(listener))
+    .when(!tentative, |this| {
+      let commit = commit.clone();
+      this.on_mouse_down(
+        MouseButton::Right,
+        cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
+          view.commit_menu(&commit, kind, e.position, cx);
+        }),
+      )
+    })
+    .on_click({
+      let id = commit.commit_id.clone();
+      cx.listener(move |view, _, _, cx| view.toggle(&id, cx))
+    });
     div()
       .debug_selector({
         let id = format!("commit-{}", commit.commit_id);
@@ -2339,49 +2312,45 @@ impl CommitsView {
       _ => (p.foreground, gpui::transparent_black()),
     };
     let (id, path) = (commit.commit_id.clone(), file.path.clone());
-    div()
-      .id(SharedString::from(format!(
-        "commit-file-{}-{}",
-        commit.commit_id, file.path
-      )))
-      .debug_selector(|| "commit-file-row".into())
-      .flex()
-      .items_center()
-      .gap_2()
-      .px_3()
-      .py_1p5()
-      .w_full()
-      .cursor_pointer()
-      .hover(move |s| s.bg(p.hover()))
-      .child(ui::icon(
-        if open {
-          theme::ICON_CHEVRON_DOWN
-        } else {
-          theme::ICON_CHEVRON_RIGHT
-        },
-        16.,
-        p.muted_foreground,
-      ))
-      .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
-      .child(
-        div()
-          .flex_1()
-          .min_w_0()
-          .truncate()
-          .font_family(theme::MONO_FONT)
-          .child(file.path.clone()),
-      )
-      .child(
-        div()
-          .font_weight(FontWeight::MEDIUM)
-          .px_1p5()
-          .py_0p5()
-          .rounded(radius::SM)
-          .text_color(fg)
-          .bg(bg)
-          .child(file.status.clone()),
-      )
-      .on_click(cx.listener(move |view, _, _, cx| view.toggle_file(&id, &path, cx)))
+    ui::Row::new(
+      SharedString::from(format!("commit-file-{}-{}", commit.commit_id, file.path)),
+      p,
+    )
+    .debug_selector(|| "commit-file-row".into())
+    .label(file.path.clone())
+    .density(ui::RowDensity::Default)
+    .px_3()
+    .w_full()
+    .rounded_none()
+    .leading(ui::icon(
+      if open {
+        theme::ICON_CHEVRON_DOWN
+      } else {
+        theme::ICON_CHEVRON_RIGHT
+      },
+      16.,
+      p.muted_foreground,
+    ))
+    .leading(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
+    .child(
+      div()
+        .flex_1()
+        .min_w_0()
+        .truncate()
+        .font_family(theme::MONO_FONT)
+        .child(file.path.clone()),
+    )
+    .trailing(
+      div()
+        .font_weight(FontWeight::MEDIUM)
+        .px_1p5()
+        .py_0p5()
+        .rounded(radius::SM)
+        .text_color(fg)
+        .bg(bg)
+        .child(file.status.clone()),
+    )
+    .on_click(cx.listener(move |view, _, _, cx| view.toggle_file(&id, &path, cx)))
   }
 
   /// `CommentInput` with Plan and Edit.

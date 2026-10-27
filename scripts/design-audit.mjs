@@ -26,6 +26,8 @@ const RULES = [
   "gpui-escape-via-layers",
   "gpui-no-adhoc-controls",
   "gpui-button-no-restyle",
+  "gpui-row-selected-token",
+  "gpui-no-local-row",
   "ui-copy-no-yes-no",
 ];
 const NOT_MIGRATED = /^\s*#\s*Not migrated yet/;

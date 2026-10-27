@@ -427,7 +427,7 @@ impl StashView {
 
 impl StashView {
   fn list(&self, entries: &[StashEntry], p: &Palette, cx: &mut Context<Self>) -> gpui::Div {
-    let (selected_bg, muted) = (p.selected(), p.muted_foreground);
+    let muted = p.muted_foreground;
     div()
       .debug_selector(|| "stash-list".into())
       .w(zpx(288.))
@@ -448,61 +448,62 @@ impl StashView {
             let id = entry.id;
             let selected = self.selected == Some(id);
             let selector = format!("stash-list-item-{i}");
-            ui::text(div(), TextSize::Xs)
-              .id(SharedString::from(selector.clone()))
-              .debug_selector(move || selector)
-              .w_full()
-              .flex_none()
-              .px_2()
-              .py_2()
-              .rounded(radius::MD)
-              .cursor_pointer()
-              .when(selected, |this| this.bg(selected_bg))
-              .when(!selected, |this| this.hover(move |s| s.bg(p.hover())))
-              .child(
-                div()
-                  .font_family(theme::MONO_FONT)
-                  .font_weight(FontWeight::MEDIUM)
-                  .truncate()
-                  .child(entry.workspace_label.clone()),
-              )
-              .child(
-                div()
-                  .mt_0p5()
-                  .flex()
-                  .items_center()
-                  .gap_2()
-                  .text_color(muted)
-                  .child(
-                    div()
-                      .font_family(theme::MONO_FONT)
-                      .child(entry.short_commit_id.clone()),
-                  )
-                  .child(time::locale(&entry.created_at)),
-              )
-              .child(
-                div()
-                  .mt_1()
-                  .flex()
-                  .items_center()
-                  .gap_2()
-                  .child(
-                    div()
-                      .text_color(ui::Tone::GitOpen.text(p))
-                      .child(format!("+{}", entry.additions)),
-                  )
-                  .child(
-                    div()
-                      .text_color(ui::Tone::GitClosed.text(p))
-                      .child(format!("-{}", entry.deletions)),
-                  )
-                  .child(
-                    div()
-                      .text_color(muted)
-                      .child(files_label(entry.files_changed.len())),
-                  ),
-              )
-              .on_click(cx.listener(move |view, _, _, cx| view.select(id, cx)))
+            ui::text(
+              ui::Row::new(SharedString::from(selector), p)
+                .density(ui::RowDensity::TwoLine)
+                .label(entry.workspace_label.clone())
+                .selected(selected),
+              TextSize::Xs,
+            )
+            .w_full()
+            .flex_none()
+            .py_2()
+            .rounded(radius::MD)
+            .items_start()
+            .child(
+              div()
+                .font_family(theme::MONO_FONT)
+                .font_weight(FontWeight::MEDIUM)
+                .truncate()
+                .child(entry.workspace_label.clone()),
+            )
+            .child(
+              div()
+                .mt_0p5()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_color(muted)
+                .child(
+                  div()
+                    .font_family(theme::MONO_FONT)
+                    .child(entry.short_commit_id.clone()),
+                )
+                .child(time::locale(&entry.created_at)),
+            )
+            .child(
+              div()
+                .mt_1()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                  div()
+                    .text_color(ui::Tone::GitOpen.text(p))
+                    .child(format!("+{}", entry.additions)),
+                )
+                .child(
+                  div()
+                    .text_color(ui::Tone::GitClosed.text(p))
+                    .child(format!("-{}", entry.deletions)),
+                )
+                .child(
+                  div()
+                    .text_color(muted)
+                    .child(files_label(entry.files_changed.len())),
+                ),
+            )
+            .on_click(cx.listener(move |view, _, _, cx| view.select(id, cx)))
           })),
       )
   }
@@ -694,20 +695,15 @@ impl StashView {
     };
     let filtered = self.filtered_targets();
     let selected = self.apply_index;
-    let accent = p.menu_accent;
-    let row = |id: SharedString, active: bool| {
-      let selector = id.to_string();
-      ui::text(div(), TextSize::Xs)
-        .id(id)
-        .debug_selector(move || selector)
-        .flex()
-        .items_center()
-        .gap_2()
-        .px_2()
-        .py_1p5()
-        .rounded(radius::MD)
-        .cursor_pointer()
-        .when(active, |this| this.bg(accent))
+    let row = |id: SharedString, label: SharedString, active: bool| {
+      ui::text(
+        ui::Row::new(id, p)
+          .role(gpui::Role::ListBoxOption)
+          .label(label)
+          .selected(active),
+        TextSize::Xs,
+      )
+      .rounded(radius::MD)
     };
     let list = if filtered.is_empty() {
       ui::text(div(), TextSize::Xs)
@@ -731,6 +727,7 @@ impl StashView {
           let (entry, branch) = (entry.clone(), target.branch.clone());
           row(
             SharedString::from(format!("stash-apply-option-{}", target.branch)),
+            SharedString::from(target.label.clone()),
             i == selected,
           )
           .child(div().truncate().child(target.label.clone()))
@@ -796,12 +793,16 @@ impl StashView {
               .border_t_1()
               .border_color(p.border)
               .child(
-                row(SharedString::from("stash-apply-new-workspace"), new_active)
-                  .child(ui::icon(theme::ICON_PLUS, 14., p.popover_foreground))
-                  .child("New workspace...")
-                  .on_click(cx.listener(move |view, _, window, cx| {
-                    view.apply_to_new(&new_entry, window, cx)
-                  })),
+                row(
+                  SharedString::from("stash-apply-new-workspace"),
+                  SharedString::from("New workspace..."),
+                  new_active,
+                )
+                .child(ui::icon(theme::ICON_PLUS, 14., p.popover_foreground))
+                .child("New workspace...")
+                .on_click(
+                  cx.listener(move |view, _, window, cx| view.apply_to_new(&new_entry, window, cx)),
+                ),
               ),
           ),
       );

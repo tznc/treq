@@ -1,0 +1,41 @@
+id: gpui-row-selected-token
+language: rust
+severity: error
+message: >
+  A selected (active, highlighted) row fills with `p.selected()` and nothing
+  else: not `p.muted`, `p.menu_accent`, an accent tint or a shadow. Better,
+  build the row with `ui::Row` and pass `.selected(..)`.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+utils:
+  selected-cond:
+    regex: (^|[^a-z_])(is_)?(selected|highlighted|active)(\(\))?$|selected
+  not-token:
+    not:
+      pattern: $P.selected()
+rule:
+  all:
+    - kind: call_expression
+    - any:
+        - pattern: $R.when($C, |$S| $S.bg($X))
+        - pattern: $R.when($C, |$S| $S.bg($X).$M())
+        - pattern: $R.bg(if $C { $X } else { $Y })
+    - has:
+        field: arguments
+        has:
+          nthChild: 1
+          matches: selected-cond
+    - not:
+        any:
+          - pattern: $R.when($C, |$S| $S.bg($P.selected()))
+          - pattern: $R.bg(if $C { $P.selected() } else { $Y })
+    - not:
+        inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end

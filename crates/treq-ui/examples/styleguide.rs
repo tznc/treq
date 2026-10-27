@@ -548,7 +548,7 @@ fn navigation() -> Vec<Example> {
         )
         .child(
           Row::new("ws-3", &p)
-            .density(RowDensity::Comfortable)
+            .density(RowDensity::Default)
             .title("main")
             .meta("default branch"),
         )
@@ -566,6 +566,34 @@ fn navigation() -> Vec<Example> {
     })
     .component("Row")
     .title("Densities and selection"),
+    example!("row/slots", |_, _, cx| {
+      let p = p(cx);
+      div()
+        .w(px(360.))
+        .flex()
+        .flex_col()
+        .child(
+          Row::new("file-1", &p)
+            .density(RowDensity::Default)
+            .leading(Checkbox::new("file-1-check", &p).checked(CheckState::On))
+            .title("src/main.rs")
+            .meta("src")
+            .trailing(Badge::new("M", &p).tone(Tone::Warning)),
+        )
+        .child(
+          Row::new("file-2", &p)
+            .density(RowDensity::Default)
+            .leading(Checkbox::new("file-2-check", &p))
+            .title("src/lib.rs")
+            .meta("src")
+            .selected(true)
+            .trailing(Badge::new("A", &p).tone(Tone::GitOpen)),
+        )
+        .child(Row::load_more("files-more", false, &p))
+        .child(Row::load_more("files-loading", true, &p))
+    })
+    .component("Row")
+    .title("Slots and load more"),
     example!("menu/items", |_, _, cx| {
       let p = p(cx);
       div()

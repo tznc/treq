@@ -1636,7 +1636,7 @@ impl WorkspaceView {
       .on_right_click(self.copy_link(self.pr_url().map(|url| format!("{url}/checks"))))
   }
 
-  fn tab_row(&self, row: &TabRow, p: &Palette) -> Div {
+  fn workspace_tabs(&self, row: &TabRow, p: &Palette) -> Div {
     // Counts are neutral; a conflict shows once, as a danger dot.
     let pill = |count: u32, tone: Tone, id: &'static str| {
       div()
@@ -2410,7 +2410,7 @@ impl Render for WorkspaceView {
     };
     let tab_row = snapshot
       .and_then(|snapshot| snapshot.tab_row)
-      .map(|row| self.tab_row(&row, &p));
+      .map(|row| self.workspace_tabs(&row, &p));
     let code = self.tab_body(cx);
     let remote = self.route.remote_chrome.clone();
     let cut_off = remote.as_ref().is_some_and(|r| r.cut_off);

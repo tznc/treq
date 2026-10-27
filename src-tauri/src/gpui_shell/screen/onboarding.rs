@@ -700,7 +700,7 @@ impl OnboardingView {
       .child(
         Row::new(row_id, &p)
           .density(if machine.detail.is_empty() {
-            RowDensity::Comfortable
+            RowDensity::Default
           } else {
             RowDensity::TwoLine
           })
@@ -981,7 +981,7 @@ impl OnboardingView {
       None => press(format!("machines.openLocal:{}", recent.path)),
     };
     Row::new(format!("recent-{}-{i}", recent.machine_id), &p)
-      .density(RowDensity::Comfortable)
+      .density(RowDensity::Default)
       .icon(theme::ICON_FOLDER_GIT)
       .title(recent.name.clone())
       .meta(recent.path.clone())

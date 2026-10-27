@@ -1070,7 +1070,6 @@ impl AgentPromptView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let accent = p.accent;
     div()
       .debug_selector(|| "task-mentions".into())
       .mx_2()
@@ -1092,21 +1091,15 @@ impl AgentPromptView {
       )
       .children(mention.results.iter().enumerate().map(|(i, path)| {
         let id = SharedString::from(format!("task-mention-{i}"));
-        let selector = id.to_string();
         let selected = i == mention.index;
-        div()
-          .id(id)
-          .debug_selector(move || selector)
+        ui::Row::new(id, p)
+          .role(gpui::Role::ListBoxOption)
+          .label(path.clone())
+          .selected(selected)
           .w_full()
           .px_3()
-          .py_1p5()
-          .flex()
-          .items_center()
-          .gap_2()
-          .cursor_pointer()
-          .when(selected, |this| this.bg(accent.opacity(0.5)))
-          .when(!selected, |this| this.hover(move |s| s.bg(p.hover())))
-          .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
+          .rounded_none()
+          .leading(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
           .child(
             ui::text(div(), TextSize::Xs)
               .font_family(theme::MONO_FONT)

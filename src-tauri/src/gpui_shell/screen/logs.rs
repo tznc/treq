@@ -735,21 +735,19 @@ fn cell(width: Option<f32>) -> Div {
 }
 
 /// A checkbox row of a filter's list (`DropdownMenuCheckboxItem`).
-fn check_row(id: SharedString, label: String, checked: bool, p: &Palette) -> gpui::Stateful<Div> {
-  ui::text(div(), TextSize::Sm)
-    .id(id.clone())
-    .debug_selector(move || id.to_string())
+fn check_row(id: SharedString, label: String, checked: bool, p: &Palette) -> ui::Row {
+  ui::Row::new(id, p)
+    .role(gpui::Role::MenuItemCheckBox)
+    .aria_toggled(if checked {
+      gpui::accesskit::Toggled::True
+    } else {
+      gpui::accesskit::Toggled::False
+    })
     .relative()
-    .flex()
-    .items_center()
-    .rounded(radius::SM)
-    .py_1p5()
     .pl_8()
     .pr_2()
-    .cursor_pointer()
-    .hover(move |s| s.bg(p.hover()))
     .when(checked, |this| {
-      this.child(
+      this.leading(
         div()
           .absolute()
           .left_2()
@@ -760,7 +758,7 @@ fn check_row(id: SharedString, label: String, checked: bool, p: &Palette) -> gpu
           .child(ui::icon(theme::ICON_CHECK, 16., p.foreground)),
       )
     })
-    .child(label)
+    .title(label)
 }
 
 impl LogsView {
@@ -1197,17 +1195,17 @@ impl LogsView {
             .with_highlights(marks)
             .into_any_element()
         };
-        div()
-          .id(("log-line", i))
+        ui::Row::new(SharedString::from(format!("log-line-{i}")), &p)
           .debug_selector(move || spec.line.into())
+          .label(record.body.clone())
+          .selected(selected)
           .h(zpx(ROW_HEIGHT))
+          .min_h(zpx(ROW_HEIGHT))
           .w_full()
           .overflow_hidden()
-          .flex()
-          .items_center()
-          .cursor_pointer()
-          .when(selected, |this| this.bg(p.primary.opacity(0.2)))
-          .when(!selected, |this| this.hover(move |s| s.bg(p.hover())))
+          .gap_0()
+          .px_0()
+          .rounded_none()
           .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |view, _, _, cx| {

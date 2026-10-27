@@ -995,7 +995,7 @@ impl PopupView {
           } else {
             palette.popover_foreground
           };
-          menu_row(("item", index), text, *icon, color, &palette, false)
+          menu_row(format!("item-{index}"), text, *icon, color, &palette, false)
             .debug_selector(move || format!("menu-item-{id}"))
             .when_some(*radio, |row, checked| {
               row.relative().pl(zpx(RADIO_INSET)).child(
@@ -1062,7 +1062,7 @@ impl PopupView {
         } => {
           let items = items.clone();
           menu_row(
-            ("submenu", index),
+            format!("submenu-{index}"),
             text,
             *icon,
             palette.popover_foreground,
@@ -1287,30 +1287,29 @@ impl PopupView {
   }
 }
 
-/// A menu row: `rounded-sm px-2 py-1.5 text-sm`, `bg-accent` on hover.
+/// A menu row: `rounded-sm px-2 py-1.5 text-sm`, the hover fill on hover and
+/// the selected fill while its submenu is open.
 fn menu_row(
-  id: impl Into<gpui::ElementId>,
+  id: impl Into<SharedString>,
   text: &str,
   icon: Option<MenuIcon>,
   color: Hsla,
   palette: &Palette,
-  highlighted: bool,
-) -> gpui::Stateful<gpui::Div> {
-  let hover_bg = palette.menu_accent;
-  div()
-    .id(id)
-    .flex()
+  open: bool,
+) -> ui::Row {
+  ui::Row::new(id, palette)
+    .role(gpui::Role::MenuItem)
+    .label(text.to_string())
+    .density(ui::RowDensity::Default)
+    .selected(open)
     .flex_none()
-    .items_center()
     .h(zpx(ITEM_HEIGHT))
     .px(zpx(ITEM_PADDING_X))
+    .gap_0()
     .rounded_sm()
     .text_color(color)
-    .when(highlighted, |this| this.bg(hover_bg))
-    .cursor_pointer()
-    .hover(move |style| style.bg(palette.hover()))
     .when_some(icon, |this, icon| {
-      this.child(
+      this.leading(
         svg()
           .path(icon.path())
           .size(zpx(ITEM_ICON))
