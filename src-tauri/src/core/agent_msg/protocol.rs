@@ -319,7 +319,11 @@ mod tests {
         },
       };
       let json = serde_json::to_string(&request).unwrap();
-      assert_eq!(serde_json::from_str::<Request>(&json).unwrap(), request, "{json}");
+      assert_eq!(
+        serde_json::from_str::<Request>(&json).unwrap(),
+        request,
+        "{json}"
+      );
     }
   }
 

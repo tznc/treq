@@ -160,7 +160,12 @@ pub fn expired(sent_at_ms: u64, now_ms: u64) -> bool {
 /// A fresh message id: `m-` and eight hex digits, unique enough within the
 /// hour a row lives.
 pub fn new_id() -> String {
-  let hex: String = uuid::Uuid::new_v4().simple().to_string().chars().take(8).collect();
+  let hex: String = uuid::Uuid::new_v4()
+    .simple()
+    .to_string()
+    .chars()
+    .take(8)
+    .collect();
   format!("m-{hex}")
 }
 
