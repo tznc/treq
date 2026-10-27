@@ -517,7 +517,11 @@ fn poll_one_repo(inner: &Inner, repo_path: &str) {
 
   {
     let mut cache = inner.cache.lock_or_recover();
-    cache.insert(repo_path.to_string(), Arc::new(next.clone()));
+    // Keep the held snapshot when nothing changed, so readers compare by
+    // pointer instead of walking the map.
+    if cache.get(repo_path).is_none_or(|held| **held != next) {
+      cache.insert(repo_path.to_string(), Arc::new(next.clone()));
+    }
   }
   {
     let mut ci_cache = inner.ci_cache.lock_or_recover();
@@ -1189,6 +1193,17 @@ mod tests {
     assert!(!Arc::ptr_eq(&a, &c));
     assert_eq!(a.len(), 1, "a held snapshot must not see later writes");
     assert_eq!(c.len(), 2);
+  }
+
+  #[test]
+  fn an_unchanged_refresh_keeps_the_same_snapshot() {
+    let fetch: PrFetchFn = Arc::new(|_, branch| Ok(Some(sample_pr(7, branch))));
+    let (mgr, _) = manager_with(fetch, vec!["feat".into()]);
+    mgr.refresh_repo_now("/tmp/repo");
+    let a = mgr.list_cached("/tmp/repo");
+    mgr.refresh_repo_now("/tmp/repo");
+    let b = mgr.list_cached("/tmp/repo");
+    assert!(Arc::ptr_eq(&a, &b), "readers compare by pointer when nothing changed");
   }
 
   #[test]
