@@ -898,11 +898,9 @@ impl MergeView {
         base.to_string()
       }
     };
-    let green = Tone::Success.color(p);
     let confirm = Button::new("merge-confirm", p)
       .disabled(disabled)
-      .bg(green)
-      .hover_bg(green)
+      .variant(Variant::Success)
       .rounded_r_none()
       .child(if self.merging {
         ui::spinner("merge-merging", 16., p.primary_foreground).into_any_element()
@@ -914,8 +912,7 @@ impl MergeView {
     let menu = Button::new("merge-strategy", p)
       .aria_label("Merge strategy")
       .disabled(disabled)
-      .bg(green)
-      .hover_bg(green)
+      .variant(Variant::Success)
       .rounded_l_none()
       .px_2()
       .icon(theme::ICON_CHEVRON_DOWN, 16.)

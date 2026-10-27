@@ -25,6 +25,7 @@ const RULES = [
   "gpui-no-zpx-spacing",
   "gpui-escape-via-layers",
   "gpui-no-adhoc-controls",
+  "gpui-button-no-restyle",
   "ui-copy-no-yes-no",
 ];
 const NOT_MIGRATED = /^\s*#\s*Not migrated yet/;

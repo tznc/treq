@@ -2812,12 +2812,9 @@ impl SettingsView {
           .child(
             Button::new(format!("skill-uninstall-{id}"), p)
               .aria_label("Uninstall")
-              .variant(Variant::Outline)
+              .variant(Variant::DestructiveOutline)
               .size(Size::IconSm)
               .disabled(row.busy)
-              .border_color(p.destructive.opacity(0.3))
-              .text_color(p.destructive)
-              .hover_bg(p.destructive.opacity(0.1))
               .icon(theme::ICON_TRASH, 14.)
               .on_click(self.press(&format!("skills.uninstall:{id}"))),
           )

@@ -2203,9 +2203,7 @@ impl LinearView {
               .child(
                 busy_spinner(
                   Button::new("linear-delete-confirm", p)
-                    .bg(p.destructive)
-                    .hover_bg(p.destructive.opacity(0.9))
-                    .text_color(p.destructive_foreground)
+                    .variant(Variant::Destructive)
                     .gap_1()
                     .disabled(pending),
                   "linear-delete-confirm",

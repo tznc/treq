@@ -1398,21 +1398,16 @@ impl WorkspaceView {
       right = right.child(self.sync(sync, p, cx));
     }
     if let Some(merge) = &h.merge {
-      let green = ui::Tone::Success.color(p);
-      let hover = green.opacity(0.85);
       let button = Button::new("workspace-merge", p)
         .aria_label("Merge...")
         .variant(if merge.passing {
-          Variant::Default
+          Variant::Success
         } else {
           Variant::Outline
         })
         .size(Size::Md)
         .gap_1()
         .disabled(merge.disabled)
-        .when(merge.passing, |b| {
-          b.bg(green).text_color(p.primary_foreground).hover_bg(hover)
-        })
         .icon(theme::ICON_COMPARE, 16.)
         .label("Merge...")
         .on_click(self.press("workspace.merge"));
@@ -1505,15 +1500,11 @@ impl WorkspaceView {
   }
 
   fn create_pr(&self, create: &CreatePr, p: &Palette, cx: &mut Context<Self>) -> Div {
-    let bg = p.github();
-    let hover = bg.opacity(0.85);
     let white = p.primary_foreground;
     let styled = |b: Button| {
       b.size(Size::Sm)
         .disabled(create.disabled)
-        .bg(bg)
-        .text_color(white)
-        .hover_bg(hover)
+        .variant(Variant::Github)
     };
     let main = styled(Button::new("workspace-create-pr", p))
       .gap_1()

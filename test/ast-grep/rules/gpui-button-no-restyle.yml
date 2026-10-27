@@ -1,0 +1,39 @@
+id: gpui-button-no-restyle
+language: rust
+severity: error
+message: >
+  Do not restyle a button's fill by hand. Pick the `ui::Variant` that
+  carries the look (`Destructive`, `Success`, `DestructiveOutline`, ..)
+  so hover, disabled and focus states stay in step with the design system.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  any:
+    # `hover_bg` only exists on `ui::Button`; any call overrides a variant.
+    - pattern: $R.hover_bg($$$)
+    # A destructive fill on a chain rooted at `Button::new`.
+    - all:
+        - pattern: $R.bg($C)
+        - has:
+            field: arguments
+            has:
+              regex: ^[A-Za-z_][A-Za-z_0-9]*\.destructive\b
+        - has:
+            field: function
+            has:
+              field: value
+              stopBy: end
+              kind: call_expression
+              has:
+                field: function
+                regex: (^|::)Button::new$
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end
