@@ -11,13 +11,28 @@ fn setup(jobs: i64) -> (TempDir, String) {
   let repo = dir.path().to_string_lossy().to_string();
   local_db::init_local_db(&repo).unwrap();
   let steps: Vec<String> = (0..20)
-    .map(|i| format!(r#"{{"name":"step {i}","status":"success","output":"{}"}}"#, "x".repeat(200)))
+    .map(|i| {
+      format!(
+        r#"{{"name":"step {i}","status":"success","output":"{}"}}"#,
+        "x".repeat(200)
+      )
+    })
     .collect();
   let steps = format!("[{}]", steps.join(","));
   let run = local_db::create_workflow_run(&repo, 1, "ci.yaml").unwrap();
   for job in 0..jobs {
-    local_db::add_workflow_job_result(&repo, run, &format!("job{job}"), job, "success", "t0", "t1", &steps, None)
-      .unwrap();
+    local_db::add_workflow_job_result(
+      &repo,
+      run,
+      &format!("job{job}"),
+      job,
+      "success",
+      "t0",
+      "t1",
+      &steps,
+      None,
+    )
+    .unwrap();
   }
   local_db::finish_workflow_run(&repo, run, "success").unwrap();
   (dir, repo)
