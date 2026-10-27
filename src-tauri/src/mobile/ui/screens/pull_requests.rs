@@ -125,7 +125,7 @@ pub fn state_tag(pr: &GhPullRequest) -> Tag {
 /// Where `pr`'s review stands, when it stands anywhere.
 pub fn review_tag(pr: &GhPullRequest) -> Option<Tag> {
   use crate::github::ReviewState;
-  let state = crate::github::review_state(pr)?;
+  let state = crate::core::pr_view::review_state(pr)?;
   let tag = match state {
     ReviewState::Approved => Tag::success(),
     ReviewState::ChangesRequested => Tag::danger(),

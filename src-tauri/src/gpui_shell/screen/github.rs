@@ -623,7 +623,7 @@ impl GithubView {
   /// per URL.
   fn load_avatars(&mut self, pr: &crate::github::GhPullRequest, cx: &mut Context<Self>) {
     for review in pr.reviews.iter().filter(|r| r.verdict().is_some()) {
-      let url = crate::github::avatar_url(&review.author);
+      let url = crate::core::pr_view::avatar_url(&review.author);
       if self.avatars.contains_key(&url) {
         continue;
       }

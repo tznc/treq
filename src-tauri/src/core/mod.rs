@@ -33,6 +33,7 @@ pub mod new_workspaces;
 pub mod palette_commands;
 pub mod pr_stacks;
 pub mod pr_sync;
+pub mod pr_view;
 pub mod prerequisites;
 #[cfg(unix)]
 pub mod pty_daemon;

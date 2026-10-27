@@ -307,7 +307,7 @@ impl PrDetailScreen {
   /// Loads the avatars of the reviewers the timeline shows, once per URL.
   fn load_avatars(&mut self, pr: &GhPullRequest, cx: &mut Context<Self>) {
     for review in pr.reviews.iter().filter(|r| r.verdict().is_some()) {
-      let url = gh::avatar_url(&review.author);
+      let url = crate::core::pr_view::avatar_url(&review.author);
       if self.avatars.contains_key(&url) {
         continue;
       }
@@ -583,7 +583,10 @@ impl PrDetailScreen {
 
   fn checks_section(&self, cx: &mut Context<Self>) -> Div {
     let title = match &self.checks {
-      Load::Ready(Some(checks)) => format!("Checks · {}", gh::checks_summary(&checks.checks)),
+      Load::Ready(Some(checks)) => format!(
+        "Checks · {}",
+        crate::core::pr_view::checks_summary(&checks.checks)
+      ),
       _ => "Checks".into(),
     };
     let open = self.checks_open;
@@ -599,9 +602,9 @@ impl PrDetailScreen {
       }
       Load::Ready(Some(checks)) => {
         let shown: Vec<_> = if open {
-          gh::active_checks(&checks.checks).collect()
+          crate::core::pr_view::active_checks(&checks.checks).collect()
         } else {
-          gh::collapsed_checks(&checks.checks)
+          crate::core::pr_view::collapsed_checks(&checks.checks)
         };
         let rows = div()
           .id("pr-checks-list")
@@ -649,7 +652,7 @@ impl PrDetailScreen {
     let login = review.author.login.clone();
     let image = self
       .avatars
-      .get(&gh::avatar_url(&review.author))
+      .get(&crate::core::pr_view::avatar_url(&review.author))
       .cloned()
       .flatten();
     let avatar: AnyElement = match image {
@@ -842,7 +845,7 @@ impl Render for PrDetailScreen {
         Some(body) => widgets::markdown("pr-body", &body, cx),
         None => widgets::muted("No description provided.", cx),
       }));
-    let comment_rows: Vec<Div> = gh::timeline(&comments, &pr.reviews)
+    let comment_rows: Vec<Div> = crate::core::pr_view::timeline(&comments, &pr.reviews)
       .into_iter()
       .map(|item| match item {
         gh::TimelineItem::Comment(c) => {

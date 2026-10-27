@@ -364,7 +364,7 @@ impl GithubView {
     cx: &mut Context<Self>,
   ) -> Option<Div> {
     let comments = comments.as_deref().unwrap_or_default();
-    let items = crate::github::timeline(comments, reviews);
+    let items = crate::core::pr_view::timeline(comments, reviews);
     if items.is_empty() {
       return None;
     }
@@ -391,7 +391,7 @@ impl GithubView {
               crate::github::TimelineItem::Review(r) => {
                 let image = self
                   .avatars
-                  .get(&crate::github::avatar_url(&r.author))
+                  .get(&crate::core::pr_view::avatar_url(&r.author))
                   .cloned()
                   .flatten();
                 return parts::review_event(r, &time::date(&r.submitted_at), image, p)
@@ -978,10 +978,10 @@ impl GithubView {
       let shown: Vec<_> = if open {
         data::by_severity(&c.checks)
           .into_iter()
-          .filter(|c| !crate::github::is_inactive_check(c))
+          .filter(|c| !crate::core::pr_view::is_inactive_check(c))
           .collect()
       } else {
-        crate::github::collapsed_checks(&c.checks)
+        crate::core::pr_view::collapsed_checks(&c.checks)
       };
       let toggle = Button::new("github-checks-toggle", p)
         .variant(Variant::Ghost)
@@ -1010,7 +1010,7 @@ impl GithubView {
         .child(
           ui::text(named(div(), "github-checks-summary"), TextSize::Sm)
             .text_color(p.muted_foreground)
-            .child(crate::github::checks_summary(&c.checks)),
+            .child(crate::core::pr_view::checks_summary(&c.checks)),
         )
         .when(!shown.is_empty(), |d| {
           d.child(

@@ -44,7 +44,7 @@ pub fn state_chip(state: &str, draft: bool, p: &Palette) -> impl IntoElement {
 /// Where `pr`'s review stands, when it stands anywhere.
 pub fn review_chip(pr: &crate::github::GhPullRequest, p: &Palette) -> Option<impl IntoElement> {
   use crate::github::ReviewState;
-  let state = crate::github::review_state(pr)?;
+  let state = crate::core::pr_view::review_state(pr)?;
   let tone = match state {
     ReviewState::Approved => Tone::Success,
     ReviewState::ChangesRequested => Tone::Danger,
