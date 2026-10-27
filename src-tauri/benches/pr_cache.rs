@@ -1,4 +1,3 @@
-#![expect(clippy::unwrap_used, reason = "test code")]
 //! What the sidebar and GitHub panel pay to read the PR poller's cache, with
 //! 10 and 100 branches whose PRs carry a 2 KiB description each.
 
