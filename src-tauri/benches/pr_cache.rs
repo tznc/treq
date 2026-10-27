@@ -2,7 +2,9 @@
 //! What the sidebar and GitHub panel pay to read the PR poller's cache, with
 //! 10 and 100 branches whose PRs carry a 2 KiB description each.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 use std::sync::Arc;
 use treq_lib::{
   github::PrInfo,
