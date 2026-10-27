@@ -223,6 +223,7 @@ mod tests {
       harness: handle.split('-').next().unwrap().into(),
       repo: "/src/app".into(),
       workspace: Some("main".into()),
+      ledger: None,
     }
   }
 

@@ -1409,3 +1409,22 @@ fn waiting_messages_show_a_badge_and_a_banner(cx: &mut TestAppContext) {
   h.click("terminal-msg-deliver");
   assert!(host.calls().contains(&format!("msg deliver {pty}")), "{:?}", host.calls());
 }
+
+#[gpui::test]
+fn a_remote_agent_session_registers_for_messages_and_a_shell_does_not(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  assert!(!host.calls().iter().any(|c| c.starts_with("msg register remote")));
+
+  let mut agent = open_remote_command(2);
+  agent["commands"][0]["remote"]["label"] = "agent-k2".into();
+  agent["commands"][0]["remote"]["launch"] = serde_json::json!({ "type": "agent", "agent": "codex", "args": [] });
+  set_terminal(&mut h, agent);
+  let registered: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("msg register remote"))
+    .collect();
+  assert_eq!(registered.len(), 1, "{:?}", host.calls());
+  assert!(registered[0].ends_with(" agent-k2"), "{registered:?}");
+}

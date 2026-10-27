@@ -112,6 +112,7 @@ impl Network for InstanceNetwork {
             harness: agent["harness"].as_str()?.to_string(),
             repo: agent["repo"].as_str()?.to_string(),
             workspace: agent["workspace"].as_str().map(str::to_string),
+            ledger: agent["ledger"].as_str().map(str::to_string),
           })
         })
         .collect(),
@@ -127,6 +128,10 @@ impl Network for InstanceNetwork {
         },
       )
       .map(drop)
+  }
+
+  fn mirror(&self, envelope: &Envelope) -> Result<(), String> {
+    super::service::mirror(envelope)
   }
 
   fn report(&self, endpoint: &str, report: &Report) -> Result<(), String> {

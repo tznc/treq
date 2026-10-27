@@ -31,6 +31,12 @@ pub trait Network {
   fn list(&self, endpoint: &str) -> Result<Vec<SessionInfo>, String>;
   fn deliver(&self, endpoint: &str, envelope: &Envelope) -> Result<(), String>;
   fn report(&self, endpoint: &str, report: &Report) -> Result<(), String>;
+  /// Copies a message queued for one of this instance's terminals to where
+  /// its agent reads it, when that is not here: a remote terminal's host.
+  fn mirror(&self, envelope: &Envelope) -> Result<(), String> {
+    let _ = envelope;
+    Ok(())
+  }
 }
 
 /// `treq agent msg` as the sending agent asks it.
@@ -126,6 +132,7 @@ impl Coordinator<'_> {
       request.all,
       request.repo.as_deref(),
     )?;
+    let ledger_repo = from.ledger.clone().unwrap_or_else(|| from.repo.clone());
     let message = Envelope {
       id: request.id.clone().unwrap_or_else(model::new_id),
       kind: request.kind,
@@ -137,13 +144,13 @@ impl Coordinator<'_> {
       sent_at_ms: now_ms,
       timeout_ms: request.timeout_ms,
       origin: self.network.own_endpoint(),
-      origin_repo: from.repo.clone(),
+      origin_repo: ledger_repo.clone(),
     };
     let rows: Vec<(String, String)> = targets
       .iter()
       .map(|peer| (peer.session.handle.clone(), peer.via.label()))
       .collect();
-    self.ledger.insert(&from.repo, &message, &rows)?;
+    self.ledger.insert(&ledger_repo, &message, &rows)?;
 
     let mut sent = Vec::new();
     for peer in targets {
@@ -153,14 +160,17 @@ impl Coordinator<'_> {
         ..message.clone()
       };
       let handed = match &peer.via {
-        Via::Local => self.hub.enqueue(envelope),
+        Via::Local => self
+          .network
+          .mirror(&envelope)
+          .and_then(|()| self.hub.enqueue(envelope)),
         Via::Socket(endpoint) => self.network.deliver(endpoint, &envelope),
       };
       let outcome = match handed {
         Ok(()) => "queued".to_string(),
         Err(error) => {
           if let Err(error) = self.ledger.update(
-            &from.repo,
+            &ledger_repo,
             &message.id,
             &peer.session.handle,
             State::TimedOut,
@@ -187,6 +197,7 @@ impl Coordinator<'_> {
 
   /// Holds a message another instance sent to one of this one's terminals.
   pub fn receive(&self, envelope: Envelope) -> Result<(), String> {
+    self.network.mirror(&envelope)?;
     self.hub.enqueue(envelope)
   }
 
@@ -218,6 +229,45 @@ impl Coordinator<'_> {
     }
   }
 
+  /// Acts on what a remote agent did on its host since the last poll
+  /// ([`super::mailbox::poll`]), as `pty`'s agent. Returns the last event's
+  /// number, for the next poll.
+  pub fn apply_remote(&self, pty: &str, events: &[super::mailbox::Event], since: u64, now_ms: u64) -> u64 {
+    use super::mailbox::Event;
+    let mut last = since;
+    for event in events {
+      last = last.max(event.seq());
+      match event {
+        Event::State { id, state, .. } => {
+          let ids = std::slice::from_ref(id);
+          let reports = match state {
+            State::Read => self.hub.mark_read(pty, ids),
+            State::Acked | State::Replied => self.hub.finish(pty, ids, *state),
+            State::Queued | State::Delivered | State::TimedOut => Vec::new(),
+          };
+          self.record(&reports, now_ms);
+        }
+        Event::Send { message, .. } => {
+          let request = SendRequest {
+            from_pty: pty.to_string(),
+            to: message.to.clone(),
+            all: message.all,
+            repo: message.repo.clone(),
+            kind: message.kind,
+            body: message.body.clone(),
+            reply_to: message.reply_to.clone(),
+            timeout_ms: message.timeout_ms,
+            id: Some(message.id.clone()),
+          };
+          if let Err(error) = self.send(&request, now_ms) {
+            log::warn!("agent msg: could not route {} from {pty}: {error}", message.id);
+          }
+        }
+      }
+    }
+    last
+  }
+
   /// `--reply <id>`: ends message `id` for `pty` as replied and sends the
   /// answer back to whoever asked.
   pub fn reply(&self, pty: &str, id: &str, body: &str, now_ms: u64) -> Result<SendResult, String> {
@@ -247,6 +297,7 @@ impl Coordinator<'_> {
 
 #[cfg(test)]
 mod tests {
+  use super::super::mailbox::{Event, Outgoing};
   use super::super::testing::{FakeLedger, FakeNetwork};
   use super::*;
   use std::collections::HashMap;
@@ -258,6 +309,7 @@ mod tests {
       harness: handle.split('-').next().unwrap().into(),
       repo: repo.into(),
       workspace: None,
+      ledger: None,
     }
   }
 
@@ -390,6 +442,102 @@ mod tests {
     request.from_pty = "pty-unknown".into();
     let error = coordinator.send(&request, 0).unwrap_err();
     assert!(error.contains("treq"), "{error}");
+  }
+
+  #[test]
+  fn a_remote_sender_records_in_its_ledger_repo() {
+    let (hub, ledger, network) = (hub(), FakeLedger::default(), network());
+    hub.register(SessionInfo {
+      ledger: Some("remote:app".into()),
+      ..session("pty-remote", "claude-agent-1", "/srv/app")
+    });
+    let coordinator = Coordinator { hub: &hub, ledger: &ledger, network: &network };
+    let mut request = ask(Some("codex-1"), false);
+    request.from_pty = "pty-remote".into();
+    coordinator.send(&request, 0).unwrap();
+    assert_eq!(ledger.inserted.borrow()[0].0, "remote:app");
+    let (waiting, _) = hub.inbox("pty-codex", true, 0);
+    assert_eq!(waiting[0].origin_repo, "remote:app");
+  }
+
+  #[test]
+  fn local_deliveries_are_mirrored_for_remote_terminals() {
+    let (hub, ledger, network) = (hub(), FakeLedger::default(), network());
+    let coordinator = Coordinator { hub: &hub, ledger: &ledger, network: &network };
+    coordinator.send(&ask(Some("claude-2"), false), 0).unwrap();
+    assert_eq!(network.mirrored.borrow()[0].to_pty, "pty-claude");
+  }
+
+  #[test]
+  fn a_failed_mirror_is_not_delivered() {
+    let hub = hub();
+    let ledger = FakeLedger::default();
+    let mut network = network();
+    network.mirror_down = true;
+    let coordinator = Coordinator { hub: &hub, ledger: &ledger, network: &network };
+    let result = coordinator.send(&ask(Some("claude-2"), false), 0).unwrap();
+    assert!(result.targets[0].outcome.starts_with("not delivered"), "{:?}", result.targets);
+    assert_eq!(hub.waiting("pty-claude", 0), 0);
+    assert_eq!(ledger.updates.borrow()[0].3, State::TimedOut);
+  }
+
+  fn state(seq: u64, id: &str, state: State) -> Event {
+    Event::State {
+      seq,
+      at_ms: 0,
+      id: id.into(),
+      state,
+    }
+  }
+
+  #[test]
+  fn remote_reads_acks_and_replies_are_recorded_at_the_origin() {
+    let (hub, ledger, network) = (hub(), FakeLedger::default(), network());
+    let coordinator = Coordinator { hub: &hub, ledger: &ledger, network: &network };
+    let id = coordinator.send(&ask(Some("claude-2"), false), 0).unwrap().id;
+
+    let last = coordinator.apply_remote(
+      "pty-claude",
+      &[state(1, &id, State::Read), state(2, &id, State::Acked)],
+      0,
+      5,
+    );
+    assert_eq!(last, 2);
+    let states: Vec<State> = ledger.updates.borrow().iter().map(|u| u.3).collect();
+    assert_eq!(states, vec![State::Read, State::Acked]);
+    assert_eq!(hub.waiting("pty-claude", 5), 0);
+  }
+
+  #[test]
+  fn a_remote_send_is_routed_with_its_own_id() {
+    let (hub, ledger, network) = (hub(), FakeLedger::default(), network());
+    let coordinator = Coordinator { hub: &hub, ledger: &ledger, network: &network };
+    let send = Event::Send {
+      seq: 4,
+      at_ms: 0,
+      message: Outgoing {
+        id: "m-host0001".into(),
+        to: Some("codex-1".into()),
+        all: false,
+        repo: None,
+        kind: Kind::Status,
+        body: "done".into(),
+        reply_to: None,
+        timeout_ms: 60_000,
+      },
+    };
+    assert_eq!(coordinator.apply_remote("pty-claude", &[send], 3, 5), 4);
+    let (waiting, _) = hub.inbox("pty-codex", true, 5);
+    assert_eq!(waiting[0].id, "m-host0001");
+    assert_eq!(waiting[0].from, "claude-2");
+    assert_eq!(waiting[0].kind, Kind::Status);
+  }
+
+  #[test]
+  fn nothing_new_keeps_the_poll_where_it_was() {
+    let (hub, ledger, network) = (hub(), FakeLedger::default(), network());
+    let coordinator = Coordinator { hub: &hub, ledger: &ledger, network: &network };
+    assert_eq!(coordinator.apply_remote("pty-claude", &[], 7, 0), 7);
   }
 
   #[test]

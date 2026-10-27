@@ -546,6 +546,20 @@ impl TerminalView {
 
   /// Lets `treq agent msg` reach this agent terminal, now `cols`×`rows`.
   fn register_for_messages(&mut self, cols: usize, rows: usize, cx: &mut Context<Self>) {
+    if let Start::Remote { target } = &self.start {
+      if matches!(
+        target.launch,
+        Some(crate::core::remote_pty::PtyLaunchSpec::Agent { .. })
+      ) {
+        self
+          .host
+          .agent_msg_register_remote(&self.pty, target, cols as u16, rows as u16);
+        if self._msg_watch.is_none() {
+          self._msg_watch = Some(watch_messages(self.host.clone(), cx));
+        }
+      }
+      return;
+    }
     let Start::Agent {
       start,
       workspace_name,
@@ -560,6 +574,7 @@ impl TerminalView {
       harness: start.agent.clone(),
       repo: start.repo_path.clone(),
       workspace: workspace_name.clone(),
+      ledger: None,
     };
     self.host.agent_msg_register(&session, cols as u16, rows as u16);
     if self._msg_watch.is_none() {
@@ -984,7 +999,7 @@ impl TerminalView {
   /// the wake line itself once the agent is idle and the user stops typing;
   /// "Deliver now" types it at once.
   fn msg_banner(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Div> {
-    if self.status != Status::Ready || !self.is_agent() {
+    if self.status != Status::Ready || self._msg_watch.is_none() {
       return None;
     }
     let waiting = self.host.agent_msg_waiting(&self.pty)?;

@@ -46,6 +46,8 @@ pub struct FakeNetwork {
   pub down: Vec<String>,
   pub delivered: RefCell<Vec<(String, Envelope)>>,
   pub reported: RefCell<Vec<(String, Report)>>,
+  pub mirrored: RefCell<Vec<Envelope>>,
+  pub mirror_down: bool,
 }
 
 impl Network for FakeNetwork {
@@ -74,6 +76,14 @@ impl Network for FakeNetwork {
       .push((endpoint.into(), envelope.clone()));
     Ok(())
   }
+  fn mirror(&self, envelope: &Envelope) -> Result<(), String> {
+    if self.mirror_down {
+      return Err("host unreachable".into());
+    }
+    self.mirrored.borrow_mut().push(envelope.clone());
+    Ok(())
+  }
+
   fn report(&self, endpoint: &str, report: &Report) -> Result<(), String> {
     self
       .reported

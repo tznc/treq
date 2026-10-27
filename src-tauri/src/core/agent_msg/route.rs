@@ -105,6 +105,7 @@ mod tests {
         harness: handle.split('-').next().unwrap().into(),
         repo: repo.into(),
         workspace: None,
+        ledger: None,
       },
     }
   }

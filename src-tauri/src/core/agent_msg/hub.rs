@@ -23,6 +23,10 @@ pub struct SessionInfo {
   pub harness: String,
   pub repo: String,
   pub workspace: Option<String>,
+  /// The app db its sent messages are recorded in, when not `repo`: a
+  /// remote terminal's repository exists only on its host.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub ledger: Option<String>,
 }
 
 /// `<harness>-<session id>`, as in `claude-2`.
@@ -265,6 +269,23 @@ impl Hub {
     (messages, reports)
   }
 
+  /// Marks the given messages of `pty_id` read, as a remote agent's
+  /// `--inbox` did on its host.
+  pub fn mark_read(&self, pty_id: &str, ids: &[String]) -> Vec<Report> {
+    let mut waiting = self.waiting.lock_or_recover();
+    let Some(queue) = waiting.get_mut(pty_id) else {
+      return Vec::new();
+    };
+    let mut reports = Vec::new();
+    for known in queue.iter_mut() {
+      if !known.read && ids.contains(&known.envelope.id) {
+        known.read = true;
+        reports.push(report(&known.envelope, State::Read, None));
+      }
+    }
+    reports
+  }
+
   /// Ends the given messages of `pty_id` as acked (or `Replied`). Ids that
   /// are not waiting are ignored.
   pub fn finish(&self, pty_id: &str, ids: &[String], state: State) -> Vec<Report> {
@@ -373,6 +394,7 @@ mod tests {
       harness: "claude".into(),
       repo: "/repo".into(),
       workspace: Some("fix/rebase".into()),
+      ledger: None,
     });
     hub
   }
@@ -415,6 +437,7 @@ mod tests {
       harness: "claude".into(),
       repo: "/repo".into(),
       workspace: Some("renamed".into()),
+      ledger: None,
     });
     assert_eq!(hub.sessions().len(), 1);
     assert_eq!(
@@ -645,6 +668,19 @@ mod tests {
       hub.last_sender("pty-claude"),
       Some(("copilot-3".to_string(), "/other".to_string()))
     );
+  }
+
+  #[test]
+  fn mark_read_reports_each_message_once() {
+    let hub = hub();
+    hub.enqueue(envelope("m-1", 0)).unwrap();
+    let ids = vec!["m-1".to_string(), "m-9".to_string()];
+    assert_eq!(
+      states(&hub.mark_read("pty-claude", &ids)),
+      vec![("m-1".into(), State::Read, None)]
+    );
+    assert!(hub.mark_read("pty-claude", &ids).is_empty());
+    assert_eq!(hub.waiting("pty-claude", 0), 0);
   }
 
   #[test]
