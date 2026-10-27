@@ -271,7 +271,7 @@ impl PromptHistoryView {
   fn rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
     self.read_ahead(range.end, cx);
     let p = theme::palette(self.dark);
-    let (selected_bg, hover_bg, muted) = (p.selected(), p.hover(), p.muted_foreground);
+    let (selected_bg, muted) = (p.selected(), p.muted_foreground);
     let Some(entries) = self.entries.clone() else {
       return Vec::new();
     };
@@ -294,7 +294,7 @@ impl PromptHistoryView {
               .rounded(radius::MD)
               .cursor_pointer()
               .when(selected, |this| this.bg(selected_bg))
-              .when(!selected, |this| this.hover(move |s| s.bg(hover_bg)))
+              .when(!selected, |this| this.hover(move |s| s.bg(p.hover())))
               .child(
                 div()
                   .font_family(theme::MONO_FONT)

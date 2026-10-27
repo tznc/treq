@@ -392,7 +392,6 @@ impl ChangesView {
     let first = thread.comments.first();
     let muted = p.muted_foreground;
     let id = thread.id.clone();
-    let toggle_hover = sky(p, 0.1);
     let mut toggle = div()
       .id(SharedString::from(format!("github-thread-{}", thread.id)))
       .debug_selector(|| "github-thread-toggle".into())
@@ -404,7 +403,7 @@ impl ChangesView {
       .px_3()
       .py_1p5()
       .cursor_pointer()
-      .hover(move |s| s.bg(toggle_hover))
+      .hover(move |s| s.bg(p.hover()))
       .on_click(cx.listener(move |view, _, _, cx| view.toggle_thread(&id, cx)))
       .child(ui::icon(
         if collapsed {
@@ -490,7 +489,6 @@ impl ChangesView {
   ) -> impl IntoElement {
     use chrono::Datelike;
     let this_year = chrono::Local::now().year();
-    let accent = p.accent;
     let fg = p.foreground;
     let quoted = comment.clone();
     let file = path.to_string();
@@ -550,7 +548,7 @@ impl ChangesView {
             .cursor_pointer()
             .opacity(0.)
             .group_hover("github-comment", |s| s.opacity(1.))
-            .hover(move |s| s.bg(accent).text_color(fg))
+            .hover(move |s| s.bg(p.hover()).text_color(fg))
             .child(ui::icon(theme::ICON_QUOTE, 14., p.muted_foreground))
             .on_click(cx.listener(move |view, _, _, cx| {
               view.quote(&quoted, &file, anchor.clone(), line, side, cx)

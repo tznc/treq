@@ -1,0 +1,78 @@
+id: gpui-hover-token
+valid:
+  - |
+    fn row(p: &Palette) -> Div {
+      div().hover(|s| s.bg(p.hover()))
+    }
+  - |
+    fn row(palette: Palette) -> Div {
+      div().hover(move |s| s.bg(palette.hover()).text_color(palette.foreground))
+    }
+  - |
+    fn row(p: Palette, active: bool) -> Div {
+      div().when(!active, |this| this.hover(move |s| s.bg(p.hover())))
+    }
+  - |
+    fn row(p: Palette) -> Div {
+      div().bg(p.selected()).hover(move |s| s.bg(p.selected_hover()))
+    }
+  - |
+    fn chrome(p: Palette) -> Div {
+      div().hover(move |s| s.bg(p.hover_on_dark()))
+    }
+  - |
+    fn row(p: Palette) -> Div {
+      div().group_hover("row", move |s| s.bg(p.hover()))
+    }
+  - |
+    fn row(p: Palette) -> Div {
+      div().shadow_md().bg(p.muted).hover(|s| s.border_color(p.ring))
+    }
+  - |
+    fn divider(p: Palette) -> Div {
+      div().bg(p.border).hover(move |s| s.bg(p.handle_hover()))
+    }
+  - |
+    fn add(p: Palette) -> Div {
+      div().bg(p.primary).hover(move |s| s.bg(p.primary_hover()))
+    }
+invalid:
+  - |
+    fn row(p: &Palette) -> Div {
+      div().hover(|s| s.bg(p.accent.opacity(0.3)))
+    }
+  - |
+    fn row(p: &Palette) -> Div {
+      div().hover(|s| s.bg(p.muted.opacity(0.5)))
+    }
+  - |
+    fn row(p: &Palette) -> Div {
+      div().hover(|s| s.bg(p.menu_accent))
+    }
+  - |
+    fn row(p: &Palette) -> Div {
+      let hover = p.hover();
+      div().hover(move |s| s.bg(hover))
+    }
+  - |
+    fn chrome() -> Div {
+      div().hover(|s| s.bg(chrome(0.15)))
+    }
+  - |
+    fn card() -> Div {
+      div().hover(|s| s.shadow_md())
+    }
+  - |
+    fn row(p: Palette) -> Div {
+      div().group_hover("row", move |s| s.bg(p.muted))
+    }
+  - |
+    fn row(p: Palette) -> Div {
+      div().active(move |s| s.bg(p.accent.opacity(0.5)))
+    }
+  - |
+    fn row(p: Palette, on: bool) -> Div {
+      div().hover(move |s| {
+        s.bg(if on { p.primary } else { p.muted })
+      })
+    }

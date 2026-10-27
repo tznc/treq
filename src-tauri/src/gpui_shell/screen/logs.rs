@@ -736,7 +736,6 @@ fn cell(width: Option<f32>) -> Div {
 
 /// A checkbox row of a filter's list (`DropdownMenuCheckboxItem`).
 fn check_row(id: SharedString, label: String, checked: bool, p: &Palette) -> gpui::Stateful<Div> {
-  let accent = p.accent;
   ui::text(div(), TextSize::Sm)
     .id(id.clone())
     .debug_selector(move || id.to_string())
@@ -748,7 +747,7 @@ fn check_row(id: SharedString, label: String, checked: bool, p: &Palette) -> gpu
     .pl_8()
     .pr_2()
     .cursor_pointer()
-    .hover(move |s| s.bg(accent))
+    .hover(move |s| s.bg(p.hover()))
     .when(checked, |this| {
       this.child(
         div()
@@ -1187,7 +1186,6 @@ impl LogsView {
       .filter_map(|i| records.get(i).map(|r| (i, r)))
       .map(|(i, record)| {
         let selected = self.selection.selected.contains(&i);
-        let hover = p.muted.opacity(0.5);
         let body: gpui::AnyElement = if query.is_empty() {
           record.body.clone().into_any_element()
         } else {
@@ -1209,7 +1207,7 @@ impl LogsView {
           .items_center()
           .cursor_pointer()
           .when(selected, |this| this.bg(p.primary.opacity(0.2)))
-          .when(!selected, |this| this.hover(move |s| s.bg(hover)))
+          .when(!selected, |this| this.hover(move |s| s.bg(p.hover())))
           .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |view, _, _, cx| {
@@ -1720,7 +1718,6 @@ impl LogsView {
         longest as f32 * 6.6 + 24.
       })
       .collect();
-    let hover = p.muted.opacity(0.5);
     ui::text(div(), TextSize::Xs)
       .debug_selector(|| "sql-results".into())
       .font_family(theme::MONO_FONT)
@@ -1748,7 +1745,7 @@ impl LogsView {
         div()
           .id(("sql-row", r))
           .flex()
-          .hover(move |s| s.bg(hover))
+          .hover(move |s| s.bg(p.hover()))
           .children(row.iter().zip(&widths).map(|(value, w)| {
             let cell = div()
               .flex_none()
@@ -1841,7 +1838,6 @@ impl LogsView {
         }
       }
       Open::Templates => {
-        let accent = p.accent;
         for (i, (label, description, sql)) in TEMPLATES.iter().enumerate() {
           list = list.child(
             div()
@@ -1854,7 +1850,7 @@ impl LogsView {
               .py_2()
               .rounded(radius::SM)
               .cursor_pointer()
-              .hover(move |s| s.bg(accent))
+              .hover(move |s| s.bg(p.hover()))
               .child(
                 ui::text(div(), TextSize::Sm)
                   .font_weight(FontWeight::MEDIUM)

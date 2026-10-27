@@ -485,6 +485,27 @@ impl Palette {
     self.primary.opacity(if self.dark { 0.22 } else { 0.12 })
   }
 
+  /// Hover on something already filled with [`Palette::selected`].
+  pub fn selected_hover(&self) -> Hsla {
+    self.primary.opacity(if self.dark { 0.32 } else { 0.2 })
+  }
+
+  /// Hover on a solid `primary` control.
+  pub fn primary_hover(&self) -> Hsla {
+    self.primary.opacity(0.85)
+  }
+
+  /// Hover on a drag handle: dividers, resize edges and scrollbar thumbs.
+  pub fn handle_hover(&self) -> Hsla {
+    self.primary.opacity(0.5)
+  }
+
+  /// Hover on chrome that is dark in both themes, such as the terminal
+  /// and the lightbox controls over media.
+  pub fn hover_on_dark(&self) -> Hsla {
+    palette(true).foreground.opacity(0.15)
+  }
+
   /// Lines with a review comment, and the comments under them: one amber,
   /// so a comment reads as part of the lines it is on.
   pub fn commented(&self) -> Hsla {
@@ -598,6 +619,27 @@ pub fn palette(dark: bool) -> Palette {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn hover_tokens_differ_from_their_resting_fill() {
+    for dark in [false, true] {
+      let p = palette(dark);
+      assert_eq!(p.hover(), p.accent);
+      assert_ne!(p.selected_hover(), p.selected());
+      assert_eq!(p.selected_hover().h, p.primary.h);
+      assert!(p.selected_hover().a > p.selected().a);
+      assert_ne!(p.primary_hover(), p.primary);
+      assert!(p.handle_hover().a < 1.);
+    }
+  }
+
+  #[test]
+  fn hover_on_dark_is_one_light_tint_in_both_themes() {
+    let (light, dark) = (palette(false), palette(true));
+    assert_eq!(light.hover_on_dark(), dark.hover_on_dark());
+    assert_eq!(dark.hover_on_dark().l, dark.foreground.l);
+    assert!(dark.hover_on_dark().a < 0.5);
+  }
 
   #[test]
   fn serves_every_bundled_icon() {

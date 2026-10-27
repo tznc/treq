@@ -1262,7 +1262,7 @@ impl MergeView {
                 .pr_2()
                 .rounded(radius::MD)
                 .cursor_pointer()
-                .hover(move |s| s.bg(p.menu_accent))
+                .hover(move |s| s.bg(p.hover()))
                 .child(
                   div()
                     .absolute()
@@ -1434,7 +1434,7 @@ impl MergeView {
           .items_center()
           .gap_2()
           .cursor_pointer()
-          .hover(|s| s.bg(p.muted.opacity(0.5)))
+          .hover(|s| s.bg(p.hover()))
           .child(ui::icon(
             if expanded {
               theme::ICON_CHEVRON_DOWN

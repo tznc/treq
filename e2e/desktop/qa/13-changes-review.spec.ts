@@ -89,6 +89,17 @@ test("changes review: character marks, keyboard, suggestion, stale banner", asyn
       "Changed words marked; Apply suggestion button at the bottom right",
     ],
   });
+  await page.getByRole("button", { name: "Edit comment" }).hover();
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-review-04b-comment-card-hover",
+    title: "A hovered comment card",
+    rest: false,
+    expectations: [
+      "Hovered comment card fills with the same grey tint as a hovered sidebar row",
+      "No drop shadow appears under the hovered card",
+    ],
+  });
 
   // An agent edits another file while the review is open.
   writeFileSync(

@@ -1373,7 +1373,7 @@ impl WorkspaceDialog {
               .cursor_pointer()
               .font_family(theme::MONO_FONT)
               .when(active, |this| this.bg(p.menu_accent))
-              .when(!active, |this| this.hover(move |s| s.bg(p.menu_accent)))
+              .when(!active, |this| this.hover(move |s| s.bg(p.hover())))
               .child(div().flex_1().min_w_0().truncate().child(name))
               .when(checked, |this| {
                 this.child(ui::icon(theme::ICON_CHECK, 16., p.popover_foreground))
@@ -1651,7 +1651,6 @@ impl WorkspaceDialog {
     let tab_trigger =
       |id: &'static str, label: &'static str, count: usize, active: bool, disabled: bool| {
         let fg = p.foreground;
-        let bg = p.background.opacity(0.5);
         ui::text(div(), TextSize::Xs)
           .id(id)
           .debug_selector(move || id.into())
@@ -1669,7 +1668,7 @@ impl WorkspaceDialog {
           .when(!active && !disabled, |this| {
             this
               .cursor_pointer()
-              .hover(move |s| s.bg(bg).text_color(fg))
+              .hover(move |s| s.bg(p.hover()).text_color(fg))
           })
           .when(disabled, |this| this.opacity(0.5))
           .aria_label(format!("{label} ({count})"))
@@ -1748,7 +1747,6 @@ impl WorkspaceDialog {
           let checked = is_locked || self.selected_commits.contains(&commit.hash);
           let id = SharedString::from(format!("dialog-commit-{i}"));
           let selector = id.to_string();
-          let hover = p.muted.opacity(0.5);
           let hash = commit.hash.clone();
           let short: String = commit.hash.chars().take(8).collect();
           let message = if commit.message.is_empty() {
@@ -1771,7 +1769,7 @@ impl WorkspaceDialog {
             .when(!is_locked, |this| {
               this
                 .cursor_pointer()
-                .hover(move |s| s.bg(hover))
+                .hover(move |s| s.bg(p.hover()))
                 .on_click(cx.listener(move |view, _, _, cx| view.toggle_commit(&hash, cx)))
             })
             .child(
@@ -1868,7 +1866,6 @@ impl WorkspaceDialog {
           let expanded = self.expanded.contains(&path);
           let state = self.file_state(&path);
           let (letter, color) = file_status(&file.status, &p);
-          let hover = p.muted.opacity(0.5);
           let fg = p.foreground;
           let row = div()
             .id(SharedString::from(format!("dialog-file-{i}")))
@@ -1877,7 +1874,7 @@ impl WorkspaceDialog {
             .gap_1()
             .px_2()
             .py_1p5()
-            .hover(move |s| s.bg(hover))
+            .hover(move |s| s.bg(p.hover()))
             .child(
               div()
                 .id(SharedString::from(format!("dialog-file-expand-{i}")))
@@ -2012,7 +2009,6 @@ impl WorkspaceDialog {
         div().children(data.hunks.iter().enumerate().map(|(i, hunk)| {
           let key = hunk_key(path, &hunk.id);
           let checked = self.selected_hunks.contains(&key);
-          let hover = p.muted.opacity(0.3);
           let selector = format!("dialog-hunk-{file}-{i}");
           div()
             .id(SharedString::from(selector.clone()))
@@ -2026,7 +2022,7 @@ impl WorkspaceDialog {
             .bg(muted_bg)
             .border_t_1()
             .border_color(p.border.opacity(0.3))
-            .hover(move |s| s.bg(hover))
+            .hover(move |s| s.bg(p.hover()))
             .child(
               div().mt_0p5().child(
                 ui::Checkbox::new(

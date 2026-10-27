@@ -1511,7 +1511,6 @@ impl GithubView {
   ) -> impl IntoElement {
     let open = self.detail.history_open.contains(filename);
     let file = filename.to_string();
-    let muted = p.muted;
     let toggle = ui::text(named(div(), format!("github-history-{w}")), TextSize::Xs)
       .flex()
       .w_full()
@@ -1522,7 +1521,7 @@ impl GithubView {
       .font_weight(FontWeight::MEDIUM)
       .text_color(p.muted_foreground)
       .cursor_pointer()
-      .hover(move |s| s.bg(muted.opacity(0.5)))
+      .hover(move |s| s.bg(p.hover()))
       .child(chevron(open, p))
       .child("Run history")
       .on_click(cx.listener(move |view, _, _, cx| {
@@ -1567,7 +1566,7 @@ impl GithubView {
               .px_6()
               .py_1p5()
               .cursor_pointer()
-              .hover(move |s| s.bg(muted.opacity(0.5)))
+              .hover(move |s| s.bg(p.hover()))
               .child(chevron(open, p))
               .child(status_icon(
                 format!("github-run-{run_id}-status"),

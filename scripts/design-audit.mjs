@@ -19,6 +19,7 @@ import { parse, stringify } from "yaml";
 
 const root = new URL("..", import.meta.url).pathname;
 const RULES = [
+  "gpui-hover-token",
   "gpui-no-raw-color",
   "gpui-no-raw-text-size",
   "gpui-no-zpx-spacing",

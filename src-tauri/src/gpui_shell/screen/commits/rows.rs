@@ -678,7 +678,6 @@ impl CommitsView {
       .as_ref()
       .is_some_and(|s| s.commit_id == commit.commit_id && s.path == path && s.lines.contains(&at));
     let gutter_fg = p.muted_foreground.opacity(0.6);
-    let gutter_hover = p.muted.opacity(0.5);
     let kind = line_kind(line);
     let bg = if selected {
       Some(ui::Tone::Primary.tint(p))
@@ -705,7 +704,7 @@ impl CommitsView {
         .justify_end()
         .text_color(gutter_fg)
         .cursor_pointer()
-        .hover(move |s| s.bg(gutter_hover))
+        .hover(move |s| s.bg(p.hover()))
         .child(n.map(|n| n.to_string()).unwrap_or_default())
         .on_mouse_down(
           MouseButton::Left,

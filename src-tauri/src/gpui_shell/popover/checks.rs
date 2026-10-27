@@ -383,7 +383,7 @@ impl Popover {
         .when_some(link, |this, link| {
           this
             .cursor_pointer()
-            .hover(|s| s.bg(p.muted.opacity(0.5)))
+            .hover(|s| s.bg(p.hover()))
             .on_click(cx.listener(move |this, _, _, _| this.host.open_url(&link)))
         })
     });

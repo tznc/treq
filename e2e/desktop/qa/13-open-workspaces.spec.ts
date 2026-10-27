@@ -62,6 +62,18 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     ],
   });
 
+  await page.getByRole("checkbox", { name: /^#418/ }).hover();
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-open-workspaces-row-hover",
+    title: "New Workspaces dialog: a hovered pull request row",
+    rest: false,
+    expectations: [
+      "Hovered #418 row fills with the same grey tint as a hovered sidebar row",
+      "The other pull request rows stay unfilled",
+    ],
+  });
+
   await page
     .getByLabel("Workspaces", { exact: true })
     .fill(

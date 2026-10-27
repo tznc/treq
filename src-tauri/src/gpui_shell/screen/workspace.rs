@@ -1357,7 +1357,7 @@ impl WorkspaceView {
           .font_weight(FontWeight::MEDIUM)
           .text_color(p.muted_foreground)
           .cursor_pointer()
-          .hover(|s| s.bg(p.muted.opacity(0.8)))
+          .hover(|s| s.bg(p.hover()))
           .child(linear.key.clone())
           .on_click(move |_, _, cx| sink(ScreenAction::OpenUrl { url: url.clone() }, cx)),
       );
@@ -1723,7 +1723,7 @@ impl WorkspaceView {
             if active {
               this.bg(p.background).shadow_sm()
             } else {
-              this.hover(|s| s.bg(p.background.opacity(0.5)).text_color(p.foreground))
+              this.hover(|s| s.bg(p.hover()).text_color(p.foreground))
             }
           })
           .child(ui::icon(icon, 16., color))

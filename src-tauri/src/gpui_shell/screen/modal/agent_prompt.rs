@@ -1105,9 +1105,7 @@ impl AgentPromptView {
           .gap_2()
           .cursor_pointer()
           .when(selected, |this| this.bg(accent.opacity(0.5)))
-          .when(!selected, |this| {
-            this.hover(move |s| s.bg(accent.opacity(0.3)))
-          })
+          .when(!selected, |this| this.hover(move |s| s.bg(p.hover())))
           .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
           .child(
             ui::text(div(), TextSize::Xs)

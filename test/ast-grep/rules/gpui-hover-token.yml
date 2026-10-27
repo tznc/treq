@@ -1,0 +1,59 @@
+id: gpui-hover-token
+language: rust
+severity: error
+message: >
+  A hover (or group_hover, active) style fills with a Palette hover token:
+  `p.hover()`, or `p.selected_hover()` on a selected fill,
+  `p.primary_hover()` on a solid primary control, `p.handle_hover()` on a
+  drag handle and `p.hover_on_dark()` on dark terminal and lightbox chrome.
+  Not a raw color, an opacity tint, a local alias or a shadow.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+utils:
+  in-hover-style:
+    inside:
+      stopBy: end
+      kind: closure_expression
+      inside:
+        kind: arguments
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            kind: field_expression
+            has:
+              field: field
+              regex: ^(hover|group_hover|active)$
+rule:
+  all:
+    - kind: call_expression
+    - matches: in-hover-style
+    - any:
+        - all:
+            - pattern: $S.bg($X)
+            - not:
+                pattern: $S.bg($P.hover())
+            - not:
+                pattern: $S.bg($P.selected_hover())
+            - not:
+                pattern: $S.bg($P.hover_on_dark())
+            - not:
+                pattern: $S.bg($P.primary_hover())
+            - not:
+                pattern: $S.bg($P.handle_hover())
+        - has:
+            field: function
+            kind: field_expression
+            has:
+              field: field
+              regex: ^shadow_
+    - not:
+        inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end

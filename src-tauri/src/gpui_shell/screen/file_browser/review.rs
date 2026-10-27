@@ -60,13 +60,12 @@ impl FileBrowserView {
     }
     let (edit, delete, body) = (c.id.clone(), c.id.clone(), c.text.clone());
     let muted = p.muted_foreground;
-    let accent = p.accent;
     box_()
       .id(SharedString::from(format!("comment-{}", c.id)))
       .debug_selector(|| "file-comment-card".into())
       .group("comment-card")
       .cursor_pointer()
-      .hover(|s| s.shadow_md())
+      .hover(|s| s.bg(p.hover()))
       .on_click(cx.listener(move |view, _, _, cx| view.start_edit(&edit, &body, cx)))
       .child(
         div()
@@ -94,7 +93,7 @@ impl FileBrowserView {
                 .p_1()
                 .rounded(radius::SM)
                 .cursor_pointer()
-                .hover(move |s| s.bg(accent))
+                .hover(move |s| s.bg(p.hover()))
                 .child(ui::icon(theme::ICON_X, 12., muted))
                 .on_click(cx.listener(move |view, _, _, cx| {
                   cx.stop_propagation();

@@ -265,7 +265,7 @@ impl Render for WorkspaceDeletion {
               this.bg(p.menu_accent.opacity(0.5))
             })
             .when(Some(i) != highlighted, |this| {
-              this.hover(move |s| s.bg(p.menu_accent.opacity(0.3)))
+              this.hover(move |s| s.bg(p.hover()))
             })
             .child(ui::icon(theme::ICON_BRANCH, 16., p.muted_foreground))
             .child(

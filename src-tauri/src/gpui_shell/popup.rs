@@ -1237,7 +1237,7 @@ impl PopupView {
               .flex_none()
               .p_1()
               .rounded_md()
-              .hover(|style| style.bg(palette.menu_accent))
+              .hover(|style| style.bg(palette.hover()))
               .cursor_pointer()
               .child(
                 svg()
@@ -1261,7 +1261,7 @@ impl PopupView {
               .flex_none()
               .p_1()
               .rounded_md()
-              .hover(|style| style.bg(palette.menu_accent))
+              .hover(|style| style.bg(palette.hover()))
               .cursor_pointer()
               .child(
                 svg()
@@ -1308,7 +1308,7 @@ fn menu_row(
     .text_color(color)
     .when(highlighted, |this| this.bg(hover_bg))
     .cursor_pointer()
-    .hover(move |style| style.bg(hover_bg))
+    .hover(move |style| style.bg(palette.hover()))
     .when_some(icon, |this, icon| {
       this.child(
         svg()

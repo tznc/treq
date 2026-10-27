@@ -797,7 +797,6 @@ impl RemoteView {
                 mode: Mode,
                 cx: &mut Context<Self>| {
       let hover_border = p.primary.opacity(0.6);
-      let hover_bg = p.muted.opacity(0.4);
       div()
         .id(id)
         .debug_selector(|| id.into())
@@ -808,7 +807,7 @@ impl RemoteView {
         .border_1()
         .border_color(p.border.opacity(0.6))
         .p_4()
-        .hover(move |s| s.border_color(hover_border).bg(hover_bg))
+        .hover(move |s| s.border_color(hover_border).bg(p.hover()))
         .child(div().font_weight(FontWeight::MEDIUM).child(title))
         .child(
           div()
@@ -948,7 +947,6 @@ impl RemoteView {
     let anchor = self.bounds.borrow().get(id).copied();
     let bounds = self.bounds.clone();
     let list = anchor.filter(|_| !matches.is_empty()).map(|anchor| {
-      let menu_accent = p.menu_accent;
       let rows = matches.into_iter().enumerate().map(|(i, alias)| {
         let (state, value) = (state.clone(), alias.clone());
         div()
@@ -958,7 +956,7 @@ impl RemoteView {
           .py_1()
           .rounded(radius::SM)
           .cursor_pointer()
-          .hover(move |s| s.bg(menu_accent))
+          .hover(move |s| s.bg(p.hover()))
           .child(alias)
           .on_mouse_down(
             MouseButton::Left,

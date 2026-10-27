@@ -181,9 +181,7 @@ impl Render for FilePicker {
             .gap_3()
             .cursor_pointer()
             .when(i == selected, |this| this.bg(p.accent.opacity(0.5)))
-            .when(i != selected, |this| {
-              this.hover(move |s| s.bg(p.accent.opacity(0.3)))
-            })
+            .when(i != selected, |this| this.hover(move |s| s.bg(p.hover())))
             .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
             .child(
               ui::text(div(), TextSize::Sm)

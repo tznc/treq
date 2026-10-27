@@ -543,7 +543,6 @@ impl ChangesView {
     match row {
       Row::HunkHeader(_, _, expandable) => {
         let file = path.to_string();
-        let hover = p.muted.opacity(0.8);
         gutter_cols(
           div()
             .id(SharedString::from(format!("hunk-header-{path}-{h}")))
@@ -556,7 +555,7 @@ impl ChangesView {
             .when(expandable, |this| {
               this
                 .cursor_pointer()
-                .hover(move |s| s.bg(hover))
+                .hover(move |s| s.bg(p.hover()))
                 .on_click(cx.listener(move |view, _, _, cx| {
                   view.expand_context(&file, h, Dir::Before, false, cx)
                 }))
@@ -658,7 +657,6 @@ impl ChangesView {
       }
       Row::Below(..) => {
         let file = path.to_string();
-        let hover = p.muted.opacity(0.5);
         gutter_cols(
           div()
             .id(SharedString::from(format!("expand-after-{path}-{h}")))
@@ -669,7 +667,7 @@ impl ChangesView {
             .flex()
             .bg(p.muted.opacity(0.3))
             .cursor_pointer()
-            .hover(move |s| s.bg(hover))
+            .hover(move |s| s.bg(p.hover()))
             .on_click(cx.listener(move |view, _, _, cx| {
               view.expand_context(&file, h, Dir::After, false, cx)
             })),

@@ -26,6 +26,18 @@ test("palette-overlays: command palette", async ({ page, context }) => {
       "Dialog centred over the window with a dimmed backdrop",
     ],
   });
+  await palette.getByRole("option").nth(3).hover();
+  await settle(page, 400);
+  await capture(page, {
+    name: "08-palette-row-hover",
+    title: "Command palette: a hovered row",
+    screen: true,
+    rest: false,
+    expectations: [
+      "The fourth row under the pointer fills with the same grey tint as a hovered sidebar row",
+      "The first row keeps its selected highlight",
+    ],
+  });
   await palette.keyboard.press("ArrowDown");
   await palette.keyboard.press("ArrowDown");
   await settle(page, 400);
