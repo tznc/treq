@@ -1203,7 +1203,10 @@ mod tests {
     let a = mgr.list_cached("/tmp/repo");
     mgr.refresh_repo_now("/tmp/repo");
     let b = mgr.list_cached("/tmp/repo");
-    assert!(Arc::ptr_eq(&a, &b), "readers compare by pointer when nothing changed");
+    assert!(
+      Arc::ptr_eq(&a, &b),
+      "readers compare by pointer when nothing changed"
+    );
   }
 
   #[test]
