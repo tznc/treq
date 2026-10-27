@@ -14,7 +14,9 @@ interface Call {
 
 // Records each query builder chain the handler runs; every call resolves to
 // `result`.
-function fakeSupabase(result: { error: { message: string } | null } = { error: null }) {
+function fakeSupabase(
+  result: { error: { message: string } | null } = { error: null },
+) {
   const calls: Call[] = [];
   const client = {
     from(table: string) {
@@ -49,15 +51,27 @@ function fakeSupabase(result: { error: { message: string } | null } = { error: n
 function removed(count: number): GitHubWebhookPayload {
   return {
     action: "removed",
-    installation: { id: 7, app_id: 1, account: { login: "acme", type: "Organization" } },
-    repositories_removed: Array.from({ length: count }, (_, i) => ({ id: 100 + i })),
+    installation: {
+      id: 7,
+      app_id: 1,
+      account: { login: "acme", type: "Organization" },
+    },
+    repositories_removed: Array.from({ length: count }, (_, i) => ({
+      id: 100 + i,
+    })),
   };
 }
 
 describe("installation_repositories removed", () => {
-  it.each([1, 10, 100])("deletes %i repositories in one round trip", async (count) => {
+  it.each([
+    1, 10, 100,
+  ])("deletes %i repositories in one round trip", async (count) => {
     const { client, calls } = fakeSupabase();
-    await applyInstallationFacts(client, "installation_repositories", removed(count));
+    await applyInstallationFacts(
+      client,
+      "installation_repositories",
+      removed(count),
+    );
     const deletes = calls.filter((c) => c.op === "delete");
     expect(deletes).toEqual([
       {
@@ -71,7 +85,11 @@ describe("installation_repositories removed", () => {
 
   it("sends no delete when nothing was removed", async () => {
     const { client, calls } = fakeSupabase();
-    await applyInstallationFacts(client, "installation_repositories", removed(0));
+    await applyInstallationFacts(
+      client,
+      "installation_repositories",
+      removed(0),
+    );
     expect(calls.filter((c) => c.op === "delete")).toEqual([]);
   });
 
