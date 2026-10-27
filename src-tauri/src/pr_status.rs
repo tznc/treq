@@ -1240,7 +1240,11 @@ esac
     let result = bulk_fetch_via(&gh, &path, dir.path().to_str().unwrap(), &branches).unwrap();
     assert_eq!(result.len(), 20);
     assert!(result.values().all(|(pr, _)| pr.is_some()));
-    assert_eq!(gh_calls(dir.path()), 1 + 20, "one list, then one call per branch");
+    assert_eq!(
+      gh_calls(dir.path()),
+      1 + 20,
+      "one list, then one call per branch"
+    );
   }
 
   /// `cargo test --lib bulk_fetch_wall_time -- --ignored --nocapture`
@@ -1261,7 +1265,11 @@ esac
         })
         .collect();
       times.sort();
-      println!("{count} missing branches: {} gh calls/poll, median {:?}", gh_calls(dir.path()) / 5, times[2]);
+      println!(
+        "{count} missing branches: {} gh calls/poll, median {:?}",
+        gh_calls(dir.path()) / 5,
+        times[2]
+      );
     }
   }
 
@@ -1269,11 +1277,18 @@ esac
   fn one_branchs_gh_error_keeps_the_others() {
     let dir = tempfile::TempDir::new().unwrap();
     let gh = fake_gh(dir.path());
-    let branches = vec!["feat/a".to_string(), "bad".to_string(), "feat/b".to_string()];
+    let branches = vec![
+      "feat/a".to_string(),
+      "bad".to_string(),
+      "feat/b".to_string(),
+    ];
     let path = std::env::var("PATH").unwrap();
     let result = bulk_fetch_via(&gh, &path, dir.path().to_str().unwrap(), &branches).unwrap();
     assert!(result.contains_key("feat/a") && result.contains_key("feat/b"));
-    assert!(!result.contains_key("bad"), "left for the per-branch fallback");
+    assert!(
+      !result.contains_key("bad"),
+      "left for the per-branch fallback"
+    );
   }
 
   #[test]
