@@ -60,7 +60,11 @@ mod tests {
   #[test]
   fn log_values_with_spaces_or_quotes_are_quoted() {
     assert_eq!(
-      log_line("queued", "m-1", &[("via", "ssh:build box"), ("note", "say \"hi\"")]),
+      log_line(
+        "queued",
+        "m-1",
+        &[("via", "ssh:build box"), ("note", "say \"hi\"")]
+      ),
       "event=queued id=m-1 via=\"ssh:build box\" note=\"say \\\"hi\\\"\""
     );
   }

@@ -20,7 +20,8 @@ pub fn call(endpoint: &str, request: &Request, io_timeout: Duration) -> Result<V
     .set_read_timeout(Some(io_timeout))
     .and_then(|()| stream.set_write_timeout(Some(io_timeout)))
     .map_err(|e| format!("failed to set ipc timeout: {e}"))?;
-  let payload = serde_json::to_vec(request).map_err(|e| format!("failed to encode request: {e}"))?;
+  let payload =
+    serde_json::to_vec(request).map_err(|e| format!("failed to encode request: {e}"))?;
   stream
     .write_all(&payload)
     .and_then(|()| stream.shutdown(Shutdown::Write))

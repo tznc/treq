@@ -114,7 +114,12 @@ fn to_json<T: Serialize>(value: &T) -> Result<Value, String> {
   serde_json::to_value(value).map_err(|e| format!("failed to encode response: {e}"))
 }
 
-fn answer(coordinator: &Coordinator, rows: Rows, request: &Request, now_ms: u64) -> Result<Value, String> {
+fn answer(
+  coordinator: &Coordinator,
+  rows: Rows,
+  request: &Request,
+  now_ms: u64,
+) -> Result<Value, String> {
   let hub = coordinator.hub;
   match &request.op {
     Op::Send(send) => to_json(&coordinator.send(send, now_ms)?),
@@ -399,7 +404,11 @@ mod tests {
     );
     assert_eq!(taken.data["body"], "done");
     assert_eq!(taken.data["reply_to"], id.as_str());
-    assert_eq!(fixture.hub.waiting("pty-codex", 2_500), 0, "taking the reply acks it");
+    assert_eq!(
+      fixture.hub.waiting("pty-codex", 2_500),
+      0,
+      "taking the reply acks it"
+    );
   }
 
   #[test]
@@ -459,8 +468,20 @@ mod tests {
       .network
       .remote
       .insert("127.0.0.1:7".into(), vec![session("pty-x", "copilot-3")]);
-    let all = fixture.call(Op::List { repo: None, local_only: false }, 0);
-    let local = fixture.call(Op::List { repo: None, local_only: true }, 0);
+    let all = fixture.call(
+      Op::List {
+        repo: None,
+        local_only: false,
+      },
+      0,
+    );
+    let local = fixture.call(
+      Op::List {
+        repo: None,
+        local_only: true,
+      },
+      0,
+    );
     assert_eq!(all.data["agents"].as_array().unwrap().len(), 3);
     assert_eq!(local.data["agents"].as_array().unwrap().len(), 2);
   }

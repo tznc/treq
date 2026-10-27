@@ -576,7 +576,9 @@ impl TerminalView {
       workspace: workspace_name.clone(),
       ledger: None,
     };
-    self.host.agent_msg_register(&session, cols as u16, rows as u16);
+    self
+      .host
+      .agent_msg_register(&session, cols as u16, rows as u16);
     if self._msg_watch.is_none() {
       self._msg_watch = Some(watch_messages(self.host.clone(), cx));
     }
@@ -1077,7 +1079,14 @@ impl TerminalView {
                   "{summary} treq delivers it once the agent is idle and you stop typing."
                 )),
             )
-            .child(div().flex().items_center().gap_2().child(deliver).child(show)),
+            .child(
+              div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(deliver)
+                .child(show),
+            ),
         )
         .when(self.msg_shown, |d| {
           d.child(

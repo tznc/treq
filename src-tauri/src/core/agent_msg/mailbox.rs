@@ -150,7 +150,11 @@ fn file_stem(session: &str) -> String {
 
 /// Opens `session`'s file under a lock, lets `change` read and change it,
 /// and writes it back.
-fn with_mail<T>(dir: &Path, session: &str, change: impl FnOnce(&mut Mail) -> Result<T, String>) -> Result<T, String> {
+fn with_mail<T>(
+  dir: &Path,
+  session: &str,
+  change: impl FnOnce(&mut Mail) -> Result<T, String>,
+) -> Result<T, String> {
   std::fs::create_dir_all(dir).map_err(|e| format!("failed to create {}: {e}", dir.display()))?;
   let stem = file_stem(session);
   let lock_path = dir.join(format!("{stem}.lock"));
@@ -399,7 +403,13 @@ mod tests {
     let dir = TempDir::new().unwrap();
     deliver(dir.path(), SESSION, &envelope("m-1", 0)).unwrap();
     deliver(dir.path(), SESSION, &envelope("m-1", 0)).unwrap();
-    assert_eq!(inbox(dir.path(), true, 0)["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(
+      inbox(dir.path(), true, 0)["messages"]
+        .as_array()
+        .unwrap()
+        .len(),
+      1
+    );
   }
 
   #[test]
@@ -431,7 +441,10 @@ mod tests {
     let last = first.last().unwrap().seq();
     let again = poll(dir.path(), SESSION, last, 10).unwrap();
     assert!(again.is_empty());
-    assert!(poll(dir.path(), SESSION, 0, 10).unwrap().is_empty(), "taken events are gone");
+    assert!(
+      poll(dir.path(), SESSION, 0, 10).unwrap().is_empty(),
+      "taken events are gone"
+    );
   }
 
   #[test]
@@ -449,9 +462,18 @@ mod tests {
     )
     .unwrap();
     assert_eq!(acked["acked"], 1);
-    assert!(inbox(dir.path(), true, 5)["messages"].as_array().unwrap().is_empty());
+    assert!(inbox(dir.path(), true, 5)["messages"]
+      .as_array()
+      .unwrap()
+      .is_empty());
     let events = poll(dir.path(), SESSION, 0, 5).unwrap();
-    assert!(matches!(&events[0], Event::State { state: State::Acked, .. }));
+    assert!(matches!(
+      &events[0],
+      Event::State {
+        state: State::Acked,
+        ..
+      }
+    ));
   }
 
   #[test]
@@ -628,7 +650,10 @@ mod tests {
       .unwrap()
       .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
       .collect();
-    assert!(names.iter().all(|n| !n.contains('/') && !n.contains(' ')), "{names:?}");
+    assert!(
+      names.iter().all(|n| !n.contains('/') && !n.contains(' ')),
+      "{names:?}"
+    );
     assert_eq!(inbox_of(dir.path(), "a/../b c"), 1);
   }
 

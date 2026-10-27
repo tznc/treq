@@ -76,9 +76,7 @@ pub fn resolve(
         [] => Err(format!(
           "no agent called {handle}. See treq agent msg --list"
         )),
-        [peer] if peer.session.pty_id == from_pty => {
-          Err("an agent cannot message itself".into())
-        }
+        [peer] if peer.session.pty_id == from_pty => Err("an agent cannot message itself".into()),
         [peer] => Ok(vec![(*peer).clone()]),
         many => {
           let repos: Vec<&str> = many.iter().map(|peer| peer.session.repo.as_str()).collect();
@@ -149,7 +147,10 @@ mod tests {
   fn a_handle_in_two_repos_needs_the_repo() {
     let error = resolve(&peers(), SENDER, Some("claude-2"), false, None).unwrap_err();
     assert!(error.contains("--repo"), "{error}");
-    assert!(error.contains("/src/api") && error.contains("/src/app"), "{error}");
+    assert!(
+      error.contains("/src/api") && error.contains("/src/app"),
+      "{error}"
+    );
 
     let found = resolve(&peers(), SENDER, Some("claude-2"), false, Some("api")).unwrap();
     assert_eq!(handles(&found), vec!["claude-2@/src/api"]);
@@ -158,7 +159,10 @@ mod tests {
   #[test]
   fn an_unknown_handle_is_an_error_that_points_at_list() {
     let error = resolve(&peers(), SENDER, Some("gemini-9"), false, None).unwrap_err();
-    assert!(error.contains("gemini-9") && error.contains("--list"), "{error}");
+    assert!(
+      error.contains("gemini-9") && error.contains("--list"),
+      "{error}"
+    );
   }
 
   #[test]
@@ -166,14 +170,21 @@ mod tests {
     let found = resolve(&peers(), SENDER, None, true, None).unwrap();
     assert_eq!(
       handles(&found),
-      vec!["claude-2@/src/app", "copilot-3@/src/app", "claude-2@/src/api"]
+      vec![
+        "claude-2@/src/app",
+        "copilot-3@/src/app",
+        "claude-2@/src/api"
+      ]
     );
   }
 
   #[test]
   fn all_with_a_repo_keeps_that_repo() {
     let found = resolve(&peers(), SENDER, None, true, Some("app")).unwrap();
-    assert_eq!(handles(&found), vec!["claude-2@/src/app", "copilot-3@/src/app"]);
+    assert_eq!(
+      handles(&found),
+      vec!["claude-2@/src/app", "copilot-3@/src/app"]
+    );
   }
 
   #[test]
@@ -196,6 +207,9 @@ mod tests {
   #[test]
   fn via_labels_match_the_ledger() {
     assert_eq!(Via::Local.label(), "local");
-    assert_eq!(Via::Socket("127.0.0.1:7".into()).label(), "socket:127.0.0.1:7");
+    assert_eq!(
+      Via::Socket("127.0.0.1:7".into()).label(),
+      "socket:127.0.0.1:7"
+    );
   }
 }

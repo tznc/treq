@@ -30,6 +30,8 @@ The `treq` CLI is non-destructive. It can create and inspect workspaces, move ch
 
 Workspace deletion stays in the desktop UI, where you confirm context before removing local state. The CLI has no force-push path.
 
+`treq agent msg` passes messages between agents over a connection that stays on your computer. Only terminals Treq started can send. For an agent on a remote machine, Treq writes its messages to `~/.treq/agent-msg` on that machine over your SSH connection. Treq never types a message's text into a terminal.
+
 ## Website Analytics
 
 The documentation site at treq.dev uses Google Analytics to measure traffic. IP addresses are anonymized before Google records them.

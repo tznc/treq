@@ -17,7 +17,12 @@ pub enum Harness {
 }
 
 impl Harness {
-  pub const ALL: [Harness; 4] = [Harness::Claude, Harness::Codex, Harness::Cursor, Harness::Copilot];
+  pub const ALL: [Harness; 4] = [
+    Harness::Claude,
+    Harness::Codex,
+    Harness::Cursor,
+    Harness::Copilot,
+  ];
 
   pub fn id(self) -> &'static str {
     match self {
@@ -110,7 +115,10 @@ pub fn classify(harness: Harness, screen: &vt100::Screen) -> Screen {
     return Screen::Asking;
   }
   let visible = &lines[..end];
-  let Some(prompt) = visible.iter().rposition(|line| prompt_text(&line.text).is_some()) else {
+  let Some(prompt) = visible
+    .iter()
+    .rposition(|line| prompt_text(&line.text).is_some())
+  else {
     return Screen::Busy;
   };
   if end - prompt > WINDOW {
@@ -146,7 +154,11 @@ fn rows(screen: &vt100::Screen) -> Vec<Line> {
         if cell.is_wide_continuation() {
           continue;
         }
-        let contents = if cell.has_contents() { cell.contents() } else { " " };
+        let contents = if cell.has_contents() {
+          cell.contents()
+        } else {
+          " "
+        };
         line.text.push_str(contents);
         if is_faint(cell) {
           line.solid.extend(contents.chars().map(|_| ' '));
@@ -198,11 +210,7 @@ fn inside_border(row: &str) -> Option<String> {
 }
 
 fn strip_right_border(text: &str) -> String {
-  text
-    .trim_end()
-    .trim_end_matches(BORDERS)
-    .trim()
-    .to_string()
+  text.trim_end().trim_end_matches(BORDERS).trim().to_string()
 }
 
 #[cfg(test)]
@@ -234,19 +242,28 @@ mod tests {
 
   #[test]
   fn claude_at_an_empty_prompt_is_idle() {
-    assert_eq!(check(Harness::Claude, &claude("", "? for shortcuts")), Screen::IdleEmpty);
+    assert_eq!(
+      check(Harness::Claude, &claude("", "? for shortcuts")),
+      Screen::IdleEmpty
+    );
   }
 
   #[test]
   fn claude_placeholder_text_is_not_a_draft() {
     let prompt = format!("{DIM}Try \"refactor <filepath>\"{RESET}");
-    assert_eq!(check(Harness::Claude, &claude(&prompt, "? for shortcuts")), Screen::IdleEmpty);
+    assert_eq!(
+      check(Harness::Claude, &claude(&prompt, "? for shortcuts")),
+      Screen::IdleEmpty
+    );
   }
 
   #[test]
   fn claude_with_a_draft_is_typed() {
     assert_eq!(
-      check(Harness::Claude, &claude("now also squash the fixups", "? for shortcuts")),
+      check(
+        Harness::Claude,
+        &claude("now also squash the fixups", "? for shortcuts")
+      ),
       Screen::IdleTyped
     );
   }
@@ -336,7 +353,8 @@ mod tests {
 
   #[test]
   fn copilot_with_a_draft_is_typed() {
-    let text = "╭────────────────────────────────╮\n│ > pin serde too\n╰────────────────────────────────╯\n";
+    let text =
+      "╭────────────────────────────────╮\n│ > pin serde too\n╰────────────────────────────────╯\n";
     assert_eq!(check(Harness::Copilot, text), Screen::IdleTyped);
   }
 
@@ -363,7 +381,11 @@ mod tests {
   #[test]
   fn a_shell_prompt_after_the_agent_exits_is_busy() {
     for harness in Harness::ALL {
-      assert_eq!(check(harness, "user@host:~/app$ \n"), Screen::Busy, "{harness:?}");
+      assert_eq!(
+        check(harness, "user@host:~/app$ \n"),
+        Screen::Busy,
+        "{harness:?}"
+      );
     }
   }
 

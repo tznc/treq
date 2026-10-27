@@ -160,7 +160,8 @@ pub fn expired(sent_at_ms: u64, now_ms: u64) -> bool {
 /// A fresh message id: `m-` and eight hex digits, unique enough within the
 /// hour a row lives.
 pub fn new_id() -> String {
-  format!("m-{}", &uuid::Uuid::new_v4().simple().to_string()[..8])
+  let hex: String = uuid::Uuid::new_v4().simple().to_string().chars().take(8).collect();
+  format!("m-{hex}")
 }
 
 #[cfg(test)]
@@ -169,7 +170,10 @@ mod tests {
 
   #[test]
   fn states_move_forward_and_may_skip_a_step() {
-    assert_eq!(State::Queued.advance(State::Delivered), Ok(State::Delivered));
+    assert_eq!(
+      State::Queued.advance(State::Delivered),
+      Ok(State::Delivered)
+    );
     assert_eq!(State::Queued.advance(State::Read), Ok(State::Read));
     assert_eq!(State::Delivered.advance(State::Replied), Ok(State::Replied));
     assert_eq!(State::Read.advance(State::Acked), Ok(State::Acked));
@@ -178,7 +182,10 @@ mod tests {
 
   #[test]
   fn repeating_a_state_is_a_no_op() {
-    assert_eq!(State::Delivered.advance(State::Delivered), Ok(State::Delivered));
+    assert_eq!(
+      State::Delivered.advance(State::Delivered),
+      Ok(State::Delivered)
+    );
     assert_eq!(State::Acked.advance(State::Acked), Ok(State::Acked));
   }
 

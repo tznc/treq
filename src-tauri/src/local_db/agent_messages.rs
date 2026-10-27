@@ -195,7 +195,9 @@ pub fn update_agent_message_state(
 pub fn agent_message_rows(repo_path: &str, id: &str) -> Result<Vec<AgentMessageRow>, String> {
   let conn = get_connection(repo_path)?;
   let mut statement = conn
-    .prepare(&format!("SELECT {COLUMNS} FROM agent_messages WHERE id = ?1 ORDER BY target"))
+    .prepare(&format!(
+      "SELECT {COLUMNS} FROM agent_messages WHERE id = ?1 ORDER BY target"
+    ))
     .map_err(|e| format!("Failed to read agent messages: {}", e))?;
   let rows = statement
     .query_map([id], row_from_sql)
@@ -252,7 +254,10 @@ pub fn sweep_agent_messages(repo_path: &str, now_ms: u64) -> Result<AgentMessage
   .map_err(|e| format!("Failed to time out agent messages: {}", e))?;
   if let Some(cutoff) = now_ms.checked_sub(model::RETENTION.as_millis() as u64) {
     sweep.deleted = tx
-      .execute("DELETE FROM agent_messages WHERE sent_at <= ?1", [cutoff as i64])
+      .execute(
+        "DELETE FROM agent_messages WHERE sent_at <= ?1",
+        [cutoff as i64],
+      )
       .map_err(|e| format!("Failed to delete old agent messages: {}", e))?;
   }
   tx.commit()
@@ -302,7 +307,10 @@ mod tests {
     insert_agent_message(
       repo,
       &message("m-1", 1_000),
-      &[target("claude-2", "local"), target("cursor-4", "ssh:build-box")],
+      &[
+        target("claude-2", "local"),
+        target("cursor-4", "ssh:build-box"),
+      ],
     )
     .unwrap();
 
@@ -334,7 +342,11 @@ mod tests {
     let rows = agent_message_rows(repo, "m-1").unwrap();
     let claude = rows.iter().find(|r| r.target == "claude-2").unwrap();
     assert_eq!(claude.state, State::Replied);
-    assert_eq!(claude.mode.as_deref(), Some("wake"), "a later change keeps the mode");
+    assert_eq!(
+      claude.mode.as_deref(),
+      Some("wake"),
+      "a later change keeps the mode"
+    );
     assert_eq!(claude.updated_at_ms, 9);
     let copilot = rows.iter().find(|r| r.target == "copilot-3").unwrap();
     assert_eq!(copilot.state, State::Queued);
@@ -373,12 +385,18 @@ mod tests {
     .unwrap();
     update_agent_message_state(repo, "m-1", "claude-2", State::Acked, None, 10).unwrap();
 
-    assert_eq!(sweep_agent_messages(repo, 59_999).unwrap(), AgentMessageSweep::default());
+    assert_eq!(
+      sweep_agent_messages(repo, 59_999).unwrap(),
+      AgentMessageSweep::default()
+    );
     let sweep = sweep_agent_messages(repo, 60_000).unwrap();
     assert_eq!(sweep.timed_out, vec![("m-1".into(), "copilot-3".into())]);
     assert_eq!(sweep.deleted, 0);
     let rows = states(repo, "m-1");
-    assert!(rows.contains(&("claude-2".into(), State::Acked)), "acked rows stay acked");
+    assert!(
+      rows.contains(&("claude-2".into(), State::Acked)),
+      "acked rows stay acked"
+    );
     assert!(rows.contains(&("copilot-3".into(), State::TimedOut)));
   }
 
@@ -388,8 +406,12 @@ mod tests {
     let repo = dir.path().to_str().unwrap();
     insert_agent_message(repo, &message("old", 0), &[target("claude-2", "local")]).unwrap();
     update_agent_message_state(repo, "old", "claude-2", State::Replied, None, 1).unwrap();
-    insert_agent_message(repo, &message("new", 3_000_000), &[target("claude-2", "local")])
-      .unwrap();
+    insert_agent_message(
+      repo,
+      &message("new", 3_000_000),
+      &[target("claude-2", "local")],
+    )
+    .unwrap();
 
     let sweep = sweep_agent_messages(repo, 3_600_000).unwrap();
     assert_eq!(sweep.deleted, 1);

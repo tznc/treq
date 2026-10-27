@@ -62,7 +62,8 @@ impl ScreenTracker {
     let Some(tracked) = self.get(pty_id) else {
       return;
     };
-    let nonzero = |value: u16| std::num::NonZeroU16::new(value).unwrap_or(std::num::NonZeroU16::MIN);
+    let nonzero =
+      |value: u16| std::num::NonZeroU16::new(value).unwrap_or(std::num::NonZeroU16::MIN);
     tracked
       .parser
       .lock_or_recover()
@@ -130,11 +131,20 @@ mod tests {
   fn reads_the_screen_from_the_pty_output() {
     let tracker = ScreenTracker::new();
     tracker.track("msg-track-1", 80, 24);
-    assert_eq!(tracker.screen("msg-track-1", Harness::Claude), Some(Screen::Busy));
+    assert_eq!(
+      tracker.screen("msg-track-1", Harness::Claude),
+      Some(Screen::Busy)
+    );
     crate::pty_stream::publish("msg-track-1", idle_claude());
-    assert_eq!(tracker.screen("msg-track-1", Harness::Claude), Some(Screen::IdleEmpty));
+    assert_eq!(
+      tracker.screen("msg-track-1", Harness::Claude),
+      Some(Screen::IdleEmpty)
+    );
     crate::pty_stream::publish("msg-track-1", b"\x1b[2;5Hdraft");
-    assert_eq!(tracker.screen("msg-track-1", Harness::Claude), Some(Screen::IdleTyped));
+    assert_eq!(
+      tracker.screen("msg-track-1", Harness::Claude),
+      Some(Screen::IdleTyped)
+    );
   }
 
   #[test]
@@ -153,7 +163,10 @@ mod tests {
     tracker.track("msg-track-3", 80, 24);
     crate::pty_stream::publish("msg-track-3", idle_claude());
     tracker.track("msg-track-3", 80, 24);
-    assert_eq!(tracker.screen("msg-track-3", Harness::Claude), Some(Screen::IdleEmpty));
+    assert_eq!(
+      tracker.screen("msg-track-3", Harness::Claude),
+      Some(Screen::IdleEmpty)
+    );
   }
 
   #[test]
@@ -199,7 +212,12 @@ mod tests {
     tracker.track("msg-track-7", 80, 24);
     tracker.resize("msg-track-7", 120, 40);
     let tracked = tracker.tracked.lock().unwrap();
-    let size = tracked["msg-track-7"].parser.lock().unwrap().screen().size();
+    let size = tracked["msg-track-7"]
+      .parser
+      .lock()
+      .unwrap()
+      .screen()
+      .size();
     assert_eq!((u16::from(size.0), u16::from(size.1)), (40, 120));
   }
 }

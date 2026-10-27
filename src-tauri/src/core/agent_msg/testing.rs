@@ -6,14 +6,24 @@ use super::model::State;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+/// `(repo, message, [(target, via)])` per insert.
+type Inserted = (String, Envelope, Vec<(String, String)>);
+/// `(repo, id, target, state, mode)` per update.
+type Update = (String, String, String, State, Option<String>);
+
 #[derive(Default)]
 pub struct FakeLedger {
-  pub inserted: RefCell<Vec<(String, Envelope, Vec<(String, String)>)>>,
-  pub updates: RefCell<Vec<(String, String, String, State, Option<String>)>>,
+  pub inserted: RefCell<Vec<Inserted>>,
+  pub updates: RefCell<Vec<Update>>,
 }
 
 impl Ledger for FakeLedger {
-  fn insert(&self, repo: &str, message: &Envelope, targets: &[(String, String)]) -> Result<(), String> {
+  fn insert(
+    &self,
+    repo: &str,
+    message: &Envelope,
+    targets: &[(String, String)],
+  ) -> Result<(), String> {
     self
       .inserted
       .borrow_mut()
@@ -92,4 +102,3 @@ impl Network for FakeNetwork {
     Ok(())
   }
 }
-

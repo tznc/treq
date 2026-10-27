@@ -475,7 +475,10 @@ mod tests {
       )]
     );
 
-    assert!(hub.tick(&terms, 2_000).is_empty(), "delivered messages are not typed again");
+    assert!(
+      hub.tick(&terms, 2_000).is_empty(),
+      "delivered messages are not typed again"
+    );
     assert_eq!(terms.typed.borrow().len(), 1);
   }
 
@@ -502,7 +505,10 @@ mod tests {
 
     let terms = terminals(Screen::IdleEmpty);
     let reports = hub.tick(&terms, 5_000);
-    assert!(reports.is_empty(), "already delivered, so nothing new to record");
+    assert!(
+      reports.is_empty(),
+      "already delivered, so nothing new to record"
+    );
     assert_eq!(terms.typed.borrow().len(), 1, "but the wake line is typed");
     assert!(hub.tick(&terms, 6_000).is_empty());
     assert_eq!(terms.typed.borrow().len(), 1);

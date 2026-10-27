@@ -94,7 +94,7 @@ workspace in that repository:
 
 ```bash
 treq add -r <repo> <branch_name> [-d <description>]
-treq agent start -r <repo> <branch_name> "<prompt>"
+treq agent start -r <repo> <branch_name> "<prompt>" [-a <agent>]
 treq st -r <repo> [<workspace_name>]
 treq diff -r <repo> <workspace_name>
 ```
@@ -106,6 +106,30 @@ treq diff -r <repo> <workspace_name>
   repository.
 - `treq agent start` returns once the agent is started. Poll `treq st -r` to follow
   its progress.
+
+## Message other agents
+
+Agents treq started can message each other, in this window, in another
+Treq window, or on a remote machine. Each agent has a handle such as
+`claude-2`.
+
+```bash
+treq agent msg --list                         # who you can message
+treq agent msg <handle> "<text>"              # send
+treq agent msg <handle> "<question>" --ask    # send, then wait for the reply
+treq agent msg --all [--repo <repo>] "<text>" # every other agent
+treq agent msg --inbox [--wait]               # read what waits for you
+treq agent msg --ack <id>                     # done with a message
+treq agent msg --reply <id> "<text>"          # answer an --ask
+treq agent msg --status <working|blocked|done> [--note "<text>"]
+```
+
+- When a line starting with `[treq]` appears in your prompt, run
+  `treq agent msg --inbox`, then ack or reply to each message.
+- A message waits one minute (`--timeout`, at most `1m`). `--ask` exits 3
+  when no reply comes in time.
+- `--status` goes to the agent that last messaged you unless you name one.
+- Add `--json` for output you parse.
 
 ## Send files to the user
 

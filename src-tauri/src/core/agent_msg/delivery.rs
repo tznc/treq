@@ -51,20 +51,32 @@ mod tests {
   #[test]
   fn wakes_an_agent_at_an_empty_prompt_the_user_left_alone() {
     assert_eq!(decide(Screen::IdleEmpty, None), Action::Wake);
-    assert_eq!(decide(Screen::IdleEmpty, Some(Duration::from_secs(41))), Action::Wake);
+    assert_eq!(
+      decide(Screen::IdleEmpty, Some(Duration::from_secs(41))),
+      Action::Wake
+    );
   }
 
   #[test]
   fn badges_while_the_user_has_typed_in_the_last_three_seconds() {
-    assert_eq!(decide(Screen::IdleEmpty, Some(Duration::from_millis(400))), Action::Badge);
-    assert_eq!(decide(Screen::IdleEmpty, Some(Duration::from_millis(2_999))), Action::Badge);
+    assert_eq!(
+      decide(Screen::IdleEmpty, Some(Duration::from_millis(400))),
+      Action::Badge
+    );
+    assert_eq!(
+      decide(Screen::IdleEmpty, Some(Duration::from_millis(2_999))),
+      Action::Badge
+    );
     assert_eq!(decide(Screen::IdleEmpty, Some(TYPING_QUIET)), Action::Wake);
   }
 
   #[test]
   fn badges_while_the_prompt_holds_a_draft_however_old() {
     assert_eq!(decide(Screen::IdleTyped, None), Action::Badge);
-    assert_eq!(decide(Screen::IdleTyped, Some(Duration::from_secs(600))), Action::Badge);
+    assert_eq!(
+      decide(Screen::IdleTyped, Some(Duration::from_secs(600))),
+      Action::Badge
+    );
   }
 
   #[test]

@@ -191,7 +191,13 @@ pub trait TerminalHost:
   /// are not Treq's temporary files are left alone.
   fn remove_session_files(&self, _paths: &[String]) {}
   /// `treq agent msg`: an agent terminal treq launched, `cols`×`rows`.
-  fn agent_msg_register(&self, _session: &crate::core::agent_msg::hub::SessionInfo, _cols: u16, _rows: u16) {}
+  fn agent_msg_register(
+    &self,
+    _session: &crate::core::agent_msg::hub::SessionInfo,
+    _cols: u16,
+    _rows: u16,
+  ) {
+  }
   /// A remote agent's persistent session attached as `pty`.
   fn agent_msg_register_remote(&self, _pty: &str, _target: &RemoteTarget, _cols: u16, _rows: u16) {}
   /// The user typed into terminal `pty`.
@@ -248,7 +254,9 @@ impl Backend {
     let backend = self.clone();
     CONNECTED.call_once(move || {
       let writer = backend.clone();
-      service::set_writer(Box::new(move |id: &str, text: &str| writer.write_pty(id, text)));
+      service::set_writer(Box::new(move |id: &str, text: &str| {
+        writer.write_pty(id, text)
+      }));
       service::set_remote_runner(std::sync::Arc::new(move |endpoint, request| {
         Transport::read(&backend, endpoint, request)
       }));
@@ -412,7 +420,7 @@ impl TerminalHost for Backend {
     let now = crate::agent_dispatch::now_millis();
     let count = hub.waiting(pty, now);
     let latest = hub.latest(pty, now)?;
-    (count > 0).then(|| WaitingMessages {
+    (count > 0).then_some(WaitingMessages {
       count,
       from: latest.from,
       body: latest.body,

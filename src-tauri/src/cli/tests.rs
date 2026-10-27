@@ -1942,10 +1942,38 @@ fn agent_start_parses_branch_prompt_and_repo() {
   assert_eq!(sub.name, "agent");
   let start = sub.matches.subcommand.expect("start subcommand");
   assert_eq!(start.name, "start");
-  let arg = |name: &str| start.matches.args.get(name).and_then(|a| a.value.as_str().map(String::from));
+  let arg = |name: &str| {
+    start
+      .matches
+      .args
+      .get(name)
+      .and_then(|a| a.value.as_str().map(String::from))
+  };
   assert_eq!(arg("branch").as_deref(), Some("feat/x"));
   assert_eq!(arg("prompt").as_deref(), Some("do it"));
   assert_eq!(arg("repo").as_deref(), Some("svc"));
+}
+
+#[test]
+fn agent_start_takes_the_harness_to_start() {
+  let sub = parsed_subcommand(&[
+    "treq", "agent", "start", "feat/x", "do it", "--agent", "codex",
+  ]);
+  let start = sub.matches.subcommand.expect("start subcommand");
+  assert_eq!(
+    super::workspace_handlers::start_agent_kind(&start.matches, "/no/repo"),
+    Ok("codex".to_string())
+  );
+}
+
+#[test]
+fn agent_start_refuses_a_harness_treq_does_not_launch() {
+  let sub = parsed_subcommand(&[
+    "treq", "agent", "start", "feat/x", "do it", "--agent", "gemini",
+  ]);
+  let start = sub.matches.subcommand.expect("start subcommand");
+  let error = super::workspace_handlers::start_agent_kind(&start.matches, "/no/repo").unwrap_err();
+  assert!(error.contains("claude, codex, cursor, copilot"), "{error}");
 }
 
 #[test]

@@ -17,7 +17,12 @@ const PEER_TIMEOUT: Duration = Duration::from_secs(2);
 pub struct DbLedger;
 
 impl Ledger for DbLedger {
-  fn insert(&self, repo: &str, message: &Envelope, targets: &[(String, String)]) -> Result<(), String> {
+  fn insert(
+    &self,
+    repo: &str,
+    message: &Envelope,
+    targets: &[(String, String)],
+  ) -> Result<(), String> {
     let targets: Vec<AgentMessageTarget> = targets
       .iter()
       .map(|(handle, via)| AgentMessageTarget {

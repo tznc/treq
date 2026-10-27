@@ -1067,7 +1067,7 @@ fn dispatch_to_repo_instance<T: serde::Serialize>(
     Duration::from_millis(250),
     Duration::from_millis(600),
   )?;
-  Ok((instance.instance_id.clone(), response))
+  Ok((instance.instance_id, response))
 }
 
 pub(super) fn dispatch_send_request(

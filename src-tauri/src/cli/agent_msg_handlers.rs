@@ -80,7 +80,13 @@ pub fn parse(matches: &Matches) -> Result<Command, String> {
   let status = text("status");
   let acks = values("ack");
   let (inbox, list) = (flag("inbox"), flag("list"));
-  let modes = [reply.is_some(), inbox, !acks.is_empty(), status.is_some(), list];
+  let modes = [
+    reply.is_some(),
+    inbox,
+    !acks.is_empty(),
+    status.is_some(),
+    list,
+  ];
   if modes.iter().filter(|on| **on).count() > 1 {
     return Err("use one of --reply, --inbox, --ack, --status and --list at a time".into());
   }
@@ -133,9 +139,8 @@ pub fn parse(matches: &Matches) -> Result<Command, String> {
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .map(|name| {
-          Kind::parse(name).ok_or_else(|| {
-            format!("unknown type '{name}'. Use message, ask, reply or status")
-          })
+          Kind::parse(name)
+            .ok_or_else(|| format!("unknown type '{name}'. Use message, ask, reply or status"))
         })
         .collect::<Result<_, _>>()?,
     };
@@ -155,7 +160,9 @@ pub fn parse(matches: &Matches) -> Result<Command, String> {
   if let Some(state) = status {
     refuse(&send_flags, "--status")?;
     if !["working", "blocked", "done"].contains(&state.as_str()) {
-      return Err(format!("unknown status '{state}'. Use working, blocked or done"));
+      return Err(format!(
+        "unknown status '{state}'. Use working, blocked or done"
+      ));
     }
     let to = match positional.as_slice() {
       [] => None,
@@ -348,7 +355,14 @@ pub fn run(
       }))?;
       let id = data["id"].as_str().unwrap_or_default().to_string();
       if !*ask {
-        write(out, if json { pretty(&data) } else { sent_lines(&data) })?;
+        write(
+          out,
+          if json {
+            pretty(&data)
+          } else {
+            sent_lines(&data)
+          },
+        )?;
         return Ok(0);
       }
       if !json {
@@ -375,14 +389,23 @@ pub fn run(
               })),
             )?;
           } else {
-            write(out, format!("{} replied: {text}\n", reply["from"].as_str().unwrap_or("?")))?;
+            write(
+              out,
+              format!(
+                "{} replied: {text}\n",
+                reply["from"].as_str().unwrap_or("?")
+              ),
+            )?;
           }
           return Ok(0);
         }
         sleep(POLL);
       }
       if json {
-        write(out, pretty(&serde_json::json!({ "id": id, "state": "timed_out" })))?;
+        write(
+          out,
+          pretty(&serde_json::json!({ "id": id, "state": "timed_out" })),
+        )?;
       } else {
         write(out, format!("timed out waiting for a reply to {id}\n"))?;
       }
@@ -394,7 +417,14 @@ pub fn run(
         id: id.clone(),
         body: body.clone(),
       })?;
-      write(out, if json { pretty(&data) } else { sent_lines(&data) })?;
+      write(
+        out,
+        if json {
+          pretty(&data)
+        } else {
+          sent_lines(&data)
+        },
+      )?;
       Ok(0)
     }
     Command::Inbox { peek, wait, kinds } => {
@@ -443,7 +473,10 @@ pub fn run(
       if json {
         write(out, pretty(&data))?;
       } else {
-        write(out, format!("acked {}\n", data["acked"].as_u64().unwrap_or(0)))?;
+        write(
+          out,
+          format!("acked {}\n", data["acked"].as_u64().unwrap_or(0)),
+        )?;
       }
       Ok(0)
     }
@@ -453,7 +486,14 @@ pub fn run(
         to: to.clone(),
         body: body.clone(),
       })?;
-      write(out, if json { pretty(&data) } else { sent_lines(&data) })?;
+      write(
+        out,
+        if json {
+          pretty(&data)
+        } else {
+          sent_lines(&data)
+        },
+      )?;
       Ok(0)
     }
   }
@@ -490,12 +530,14 @@ fn inbox_lines(messages: &[Value]) -> String {
       message["id"].as_str().unwrap_or("?"),
       message["kind"].as_str().unwrap_or("message"),
       message["from"].as_str().unwrap_or("?"),
-      message["body"].as_str().unwrap_or_default().replace('\n', "\n  "),
+      message["body"]
+        .as_str()
+        .unwrap_or_default()
+        .replace('\n', "\n  "),
     ));
   }
-  text.push_str(
-    "\nAck: treq agent msg --ack <id>   Reply: treq agent msg --reply <id> \"<text>\"\n",
-  );
+  text
+    .push_str("\nAck: treq agent msg --ack <id>   Reply: treq agent msg --reply <id> \"<text>\"\n");
   text
 }
 
@@ -557,7 +599,15 @@ mod tests {
   #[test]
   fn parses_an_ask_with_a_timeout_and_repo() {
     assert_eq!(
-      parsed(&["cursor-4", "hit rate?", "--ask", "--timeout", "30s", "-r", "app"]),
+      parsed(&[
+        "cursor-4",
+        "hit rate?",
+        "--ask",
+        "--timeout",
+        "30s",
+        "-r",
+        "app"
+      ]),
       Ok(Command::Send {
         to: Some("cursor-4".into()),
         all: false,
@@ -640,7 +690,12 @@ mod tests {
         body: "working".into()
       })
     );
-    assert_eq!(parsed(&["--list", "-r", "app"]), Ok(Command::List { repo: Some("app".into()) }));
+    assert_eq!(
+      parsed(&["--list", "-r", "app"]),
+      Ok(Command::List {
+        repo: Some("app".into())
+      })
+    );
   }
 
   #[test]
@@ -729,7 +784,9 @@ mod tests {
     let client = FakeClient::new(vec![
       Ok(sent("m-1")),
       Ok(Value::Null),
-      Ok(json!({ "id": "m-2", "from": "claude-2", "body": "done, head 9c41e2a", "reply_to": "m-1" })),
+      Ok(
+        json!({ "id": "m-2", "from": "claude-2", "body": "done, head 9c41e2a", "reply_to": "m-1" }),
+      ),
     ]);
     let (code, out) = run_with(send(true), false, &client);
     assert_eq!(code, Ok(0));
@@ -818,7 +875,10 @@ mod tests {
     ]}))]);
     let (code, out) = run_with(Command::List { repo: None }, false, &client);
     assert_eq!(code, Ok(0));
-    assert!(out.contains("HANDLE") && out.contains("claude-2") && out.contains("fix/x"), "{out}");
+    assert!(
+      out.contains("HANDLE") && out.contains("claude-2") && out.contains("fix/x"),
+      "{out}"
+    );
   }
 
   #[test]
@@ -833,7 +893,14 @@ mod tests {
   fn list_works_outside_a_treq_terminal() {
     let client = FakeClient::new(vec![Ok(json!({ "agents": [] }))]);
     let mut out = Vec::new();
-    let code = run(&Command::List { repo: None }, None, false, &client, &mut out, &|_| {});
+    let code = run(
+      &Command::List { repo: None },
+      None,
+      false,
+      &client,
+      &mut out,
+      &|_| {},
+    );
     assert_eq!(code, Ok(0));
   }
 

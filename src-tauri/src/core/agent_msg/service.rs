@@ -12,9 +12,9 @@ use crate::core::remote_control_plane::SshEndpoint;
 use crate::lock_ext::LockExt;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// How often the delivery loop looks at the terminals.
@@ -60,7 +60,8 @@ pub struct RemoteSession {
 }
 
 /// Runs a typed command on a host over SSH (the window code's transport).
-pub type RemoteRunner = Arc<dyn Fn(&SshEndpoint, TreqCommandRequest) -> Result<Value, String> + Send + Sync>;
+pub type RemoteRunner =
+  Arc<dyn Fn(&SshEndpoint, TreqCommandRequest) -> Result<Value, String> + Send + Sync>;
 
 /// Each remote terminal, and the last host event taken from it.
 fn remotes() -> &'static Mutex<HashMap<String, (RemoteSession, u64)>> {
@@ -95,7 +96,8 @@ pub fn mirror(envelope: &super::hub::Envelope) -> Result<(), String> {
     .lock_or_recover()
     .clone()
     .ok_or("treq cannot reach remote hosts yet")?;
-  let json = serde_json::to_string(envelope).map_err(|e| format!("failed to encode message: {e}"))?;
+  let json =
+    serde_json::to_string(envelope).map_err(|e| format!("failed to encode message: {e}"))?;
   run(
     &remote.endpoint,
     TreqCommandRequest::PtyMsgDeliver {
@@ -140,9 +142,8 @@ fn poll_remotes() {
     if events.is_empty() {
       continue;
     }
-    let last = with_coordinator(|coordinator| {
-      coordinator.apply_remote(&pty, &events, since, now_millis())
-    });
+    let last =
+      with_coordinator(|coordinator| coordinator.apply_remote(&pty, &events, since, now_millis()));
     if let (Some(last), Some(entry)) = (last, remotes().lock_or_recover().get_mut(&pty)) {
       entry.1 = last;
     }
@@ -207,10 +208,9 @@ pub fn handle(request: &Request) -> Response {
     let rows = crate::local_db::agent_message_rows(repo, id)?;
     serde_json::to_value(rows).map_err(|e| e.to_string())
   };
-  let response = with_coordinator(|coordinator| {
-    protocol::handle(coordinator, &rows, request, now_millis())
-  })
-  .unwrap_or_else(|| Response::error("this treq instance is still starting"));
+  let response =
+    with_coordinator(|coordinator| protocol::handle(coordinator, &rows, request, now_millis()))
+      .unwrap_or_else(|| Response::error("this treq instance is still starting"));
   changed();
   response
 }
@@ -317,13 +317,17 @@ mod tests {
       origin_repo: "/src/app".into(),
     };
     mirror(&envelope).unwrap();
-    let mut local = envelope.clone();
+    let mut local = envelope;
     local.to_pty = "pty-local-service".into();
     mirror(&local).unwrap();
 
     poll_remotes();
     let calls = calls.lock().unwrap().clone();
-    assert_eq!(calls.len(), 2, "one deliver for the remote terminal, one poll: {calls:?}");
+    assert_eq!(
+      calls.len(),
+      2,
+      "one deliver for the remote terminal, one poll: {calls:?}"
+    );
     match &calls[0] {
       TreqCommandRequest::PtyMsgDeliver {
         repo,
@@ -331,12 +335,18 @@ mod tests {
         label,
         envelope,
       } => {
-        assert_eq!((repo.as_str(), workspace.as_str(), label.as_str()), ("/srv/app", "main", "agent-1"));
+        assert_eq!(
+          (repo.as_str(), workspace.as_str(), label.as_str()),
+          ("/srv/app", "main", "agent-1")
+        );
         assert!(envelope.contains("\"m-1\""));
       }
       other => panic!("{other:?}"),
     }
-    assert!(matches!(&calls[1], TreqCommandRequest::PtyMsgPoll { since: 0, .. }));
+    assert!(matches!(
+      &calls[1],
+      TreqCommandRequest::PtyMsgPoll { since: 0, .. }
+    ));
     unregister("remote-pty-service-1");
   }
 

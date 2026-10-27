@@ -207,6 +207,12 @@
                   "short": "r",
                   "takesValue": true,
                   "description": "Supporting repository (path or directory name) to act on"
+                },
+                {
+                  "name": "agent",
+                  "short": "a",
+                  "takesValue": true,
+                  "description": "Agent to start: claude, codex, cursor or copilot (default: the repository's default agent)"
                 }
               ]
             },
