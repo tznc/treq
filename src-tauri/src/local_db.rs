@@ -359,6 +359,12 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
     )
     .map_err(|e| format!("Failed to create sessions table: {}", e))?;
 
+  // Before the rebuild below, which copies `model`: sessions tables that
+  // predate it still have `worktree_id`.
+  conn
+    .execute("ALTER TABLE sessions ADD COLUMN model TEXT", [])
+    .best_effort();
+
   let has_worktree_col: Result<i64, _> = conn.query_row(
     "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='worktree_id'",
     [],
@@ -400,10 +406,6 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
         .map_err(|e| format!("Failed to commit sessions migration: {}", e))?;
     }
   }
-
-  conn
-    .execute("ALTER TABLE sessions ADD COLUMN model TEXT", [])
-    .best_effort();
 
   conn
     .execute(
@@ -3316,6 +3318,187 @@ mod tests {
     assert!(RepoStateScope::Remote("ssh:ep:gen0:/srv")
       .db_path(None)
       .is_err());
+  }
+
+  /// The schema as the app reads it: per table, its columns (sorted by name,
+  /// since `ALTER TABLE ADD COLUMN` appends), foreign keys and indexes.
+  fn schema_shape(conn: &Connection) -> String {
+    let names = |sql: &str| -> Vec<String> {
+      let mut stmt = conn.prepare(sql).expect("prepare");
+      stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("query")
+        .map(|r| r.expect("row"))
+        .collect()
+    };
+    let rows = |sql: &str| -> Vec<String> {
+      let mut stmt = conn.prepare(sql).expect("prepare");
+      let n = stmt.column_count();
+      let mut out: Vec<String> = stmt
+        .query_map([], |row| {
+          Ok(
+            (0..n)
+              .map(|i| match row.get_ref(i).expect("cell") {
+                rusqlite::types::ValueRef::Null => "NULL".to_string(),
+                rusqlite::types::ValueRef::Integer(v) => v.to_string(),
+                rusqlite::types::ValueRef::Real(v) => v.to_string(),
+                rusqlite::types::ValueRef::Text(v) | rusqlite::types::ValueRef::Blob(v) => {
+                  String::from_utf8_lossy(v).into_owned()
+                }
+              })
+              .collect::<Vec<_>>()
+              .join("|"),
+          )
+        })
+        .expect("query")
+        .map(|r| r.expect("row"))
+        .collect();
+      out.sort();
+      out
+    };
+    let mut shape = Vec::new();
+    for table in names(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    ) {
+      shape.push(format!("table {table}"));
+      for col in rows(&format!(
+        "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('{table}')"
+      )) {
+        shape.push(format!("  column {col}"));
+      }
+      for fk in rows(&format!(
+        "SELECT \"table\", \"from\", \"to\", on_update, on_delete FROM pragma_foreign_key_list('{table}')"
+      )) {
+        shape.push(format!("  fk {fk}"));
+      }
+      for index in rows(&format!(
+        "SELECT l.name || '|' || l.\"unique\" || '|' || group_concat(i.name, ',')
+           FROM pragma_index_list('{table}') l, pragma_index_info(l.name) i
+          WHERE l.origin = 'c' GROUP BY l.name"
+      )) {
+        shape.push(format!("  index {index}"));
+      }
+    }
+    shape.join("\n") + "\n"
+  }
+
+  fn fresh_schema_shape() -> String {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let db_path = init_local_db(temp_dir.path().to_str().unwrap()).expect("fresh init");
+    schema_shape(&Connection::open(db_path).expect("open fresh database"))
+  }
+
+  /// An upgraded database must read and write as a fresh install does: every
+  /// fresh table, column, foreign key and index is present and identical.
+  /// Tables and columns the app no longer uses may stay behind, as long as no
+  /// insert can trip on them (nullable, or with a default).
+  fn assert_upgrade_matches_fresh(db_path: &Path, label: &str) {
+    let parse = |shape: String| {
+      let mut tables: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+      let mut current = String::new();
+      for line in shape.lines() {
+        if let Some(name) = line.strip_prefix("table ") {
+          current = name.to_string();
+          tables.entry(current.clone()).or_default();
+        } else {
+          tables
+            .get_mut(&current)
+            .expect("table")
+            .push(line.trim().to_string());
+        }
+      }
+      tables
+    };
+    let upgraded = parse(schema_shape(
+      &Connection::open(db_path).expect("open upgraded database"),
+    ));
+    let fresh = parse(fresh_schema_shape());
+    for (table, fresh_lines) in &fresh {
+      let Some(upgraded_lines) = upgraded.get(table) else {
+        panic!("{label}: table {table} missing after upgrade");
+      };
+      for line in fresh_lines {
+        assert!(
+          upgraded_lines.contains(line),
+          "{label}: {table} lacks `{line}` after upgrade; has {upgraded_lines:#?}"
+        );
+      }
+      for line in upgraded_lines {
+        if fresh_lines.contains(line) {
+          continue;
+        }
+        let blocks_inserts = line.strip_prefix("column ").is_some_and(|col| {
+          let parts: Vec<_> = col.split('|').collect();
+          parts[2] == "1" && parts[3] == "NULL"
+        });
+        let stale_constraint = !line.starts_with("column ");
+        assert!(
+          !blocks_inserts && !stale_constraint,
+          "{label}: {table} keeps legacy `{line}` after upgrade"
+        );
+      }
+    }
+  }
+
+  /// Every schema a past release created on a fresh install, replayed from
+  /// that commit's `local_db.rs` (see `local_db/upgrade_fixtures`).
+  #[test]
+  fn every_released_schema_upgrades_to_the_current_one() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/local_db/upgrade_fixtures");
+    let mut fixtures: Vec<_> = fs::read_dir(&dir)
+      .expect("fixtures dir")
+      .map(|e| e.expect("entry").path())
+      .collect();
+    fixtures.sort();
+    assert!(fixtures.len() > 30, "found {} fixtures", fixtures.len());
+    let failures: Vec<String> = fixtures
+      .iter()
+      .filter_map(|fixture| {
+        let label = fixture.file_name().unwrap().to_string_lossy().into_owned();
+        std::panic::catch_unwind(|| upgrade_fixture(fixture, &label))
+          .err()
+          .map(|e| {
+            e.downcast_ref::<String>()
+              .cloned()
+              .unwrap_or_else(|| label.clone())
+          })
+      })
+      .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+  }
+
+  fn upgrade_fixture(fixture: &Path, label: &str) {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let sql = fs::read_to_string(fixture).expect("read fixture");
+    let (repo_path, db_path) = open_legacy_db(&temp_dir, &sql);
+    init_local_db(&repo_path).unwrap_or_else(|e| panic!("{label}: {e}"));
+    assert_upgrade_matches_fresh(&db_path, label);
+    // The app's own writes and reads work on the upgraded file.
+    let id = add_workspace(
+      &repo_path,
+      "ws".into(),
+      format!("{repo_path}/.treq/workspaces/ws"),
+      "feat/ws".into(),
+      None,
+      None,
+      None,
+    )
+    .unwrap_or_else(|e| panic!("{label}: add_workspace: {e}"));
+    let workspaces = get_workspaces(&repo_path).unwrap_or_else(|e| panic!("{label}: {e}"));
+    assert!(
+      workspaces.iter().any(|w| w.id == id),
+      "{label}: workspace not read back"
+    );
+  }
+
+  #[test]
+  fn fresh_schema_matches_the_snapshot() {
+    // A change here is a schema change: it needs a migration for existing
+    // databases. Update `local_db/schema.snapshot` alongside the migration.
+    assert_eq!(
+      fresh_schema_shape(),
+      include_str!("local_db/schema.snapshot")
+    );
   }
 
   fn open_legacy_db(temp_dir: &TempDir, schema: &str) -> (String, PathBuf) {

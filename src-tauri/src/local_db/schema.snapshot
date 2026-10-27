@@ -1,0 +1,183 @@
+table agent_review_comments
+  column comment_text|TEXT|1|NULL|0
+  column created_at|TEXT|1|NULL|0
+  column end_line|INTEGER|1|NULL|0
+  column file_path|TEXT|1|NULL|0
+  column hunk_id|TEXT|0|NULL|0
+  column id|TEXT|0|NULL|1
+  column line_hash|TEXT|0|NULL|0
+  column quoted_text|TEXT|0|NULL|0
+  column repo_path|TEXT|1|NULL|0
+  column resolved_at|TEXT|0|NULL|0
+  column side|TEXT|0|NULL|0
+  column source|TEXT|1|NULL|0
+  column start_line|INTEGER|1|NULL|0
+  column status|TEXT|1|NULL|0
+  column suggested_replacement|TEXT|0|NULL|0
+  column target_id|TEXT|1|NULL|0
+  column target_type|TEXT|1|NULL|0
+  index idx_agent_review_comments_target|0|repo_path,target_type,target_id
+table changed_files
+  column file_path|TEXT|1|NULL|0
+  column hunks_json|TEXT|0|NULL|0
+  column id|INTEGER|0|NULL|1
+  column is_untracked|INTEGER|1|0|0
+  column updated_at|TEXT|1|NULL|0
+  column workspace_id|INTEGER|0|NULL|0
+  column workspace_status|TEXT|0|NULL|0
+  fk workspaces|workspace_id|id|NO ACTION|CASCADE
+  index idx_changed_files_workspace|0|workspace_id
+table commit_diff_stats
+  column author_name|TEXT|0|NULL|0
+  column change_id|TEXT|0|NULL|0
+  column commit_id|TEXT|1|NULL|1
+  column deletions|INTEGER|1|NULL|0
+  column description|TEXT|0|NULL|0
+  column insertions|INTEGER|1|NULL|0
+  column timestamp|TEXT|0|NULL|0
+  column updated_at|TEXT|1|NULL|0
+table file_browser_reviews
+  column comments|TEXT|1|NULL|0
+  column created_at|TEXT|1|NULL|0
+  column id|INTEGER|0|NULL|1
+  column summary_text|TEXT|0|NULL|0
+  column updated_at|TEXT|1|NULL|0
+  column workspace_id|INTEGER|1|NULL|0
+  fk workspaces|workspace_id|id|NO ACTION|CASCADE
+  index idx_file_browser_reviews_workspace|0|workspace_id
+table instance_registry
+  column endpoint|TEXT|1|NULL|0
+  column instance_id|TEXT|1|NULL|1
+  column last_heartbeat_at|INTEGER|1|NULL|0
+  column pid|INTEGER|1|NULL|0
+  column started_at|INTEGER|1|NULL|0
+  column updated_at|TEXT|1|NULL|0
+  column windows_json|TEXT|1|NULL|0
+  index idx_instance_registry_last_heartbeat_at|0|last_heartbeat_at
+table pending_reviews
+  column comments|TEXT|1|NULL|0
+  column conflict_comments|TEXT|0|NULL|0
+  column created_at|TEXT|1|NULL|0
+  column id|INTEGER|0|NULL|1
+  column summary_text|TEXT|0|NULL|0
+  column updated_at|TEXT|1|NULL|0
+  column viewed_files|TEXT|0|NULL|0
+  column workspace_id|INTEGER|1|NULL|0
+  fk workspaces|workspace_id|id|NO ACTION|CASCADE
+  index idx_pending_reviews_workspace|0|workspace_id
+table prompt_history
+  column agent|TEXT|0|NULL|0
+  column created_at|TEXT|1|NULL|0
+  column id|INTEGER|0|NULL|1
+  column prompt_text|TEXT|1|NULL|0
+  column session_id|INTEGER|0|NULL|0
+  column workspace_id|INTEGER|0|NULL|0
+  fk sessions|session_id|id|NO ACTION|CASCADE
+  fk workspaces|workspace_id|id|NO ACTION|CASCADE
+  index idx_prompt_history_created_at|0|created_at
+  index idx_prompt_history_workspace|0|workspace_id
+table repo_trust
+  column id|INTEGER|0|NULL|1
+  column trusted_at|TEXT|1|NULL|0
+table review_history
+  column body|TEXT|1|NULL|0
+  column comment_id|TEXT|0|NULL|0
+  column created_at|TEXT|1|NULL|0
+  column decided_at|TEXT|0|NULL|0
+  column end_line|INTEGER|0|NULL|0
+  column file_path|TEXT|0|NULL|0
+  column id|INTEGER|0|NULL|1
+  column kind|TEXT|1|NULL|0
+  column mode|TEXT|0|NULL|0
+  column outcome|TEXT|1|NULL|0
+  column quoted_text|TEXT|0|NULL|0
+  column source|TEXT|0|NULL|0
+  column start_line|INTEGER|0|NULL|0
+  column suggestion|TEXT|0|NULL|0
+  column target_id|TEXT|0|NULL|0
+  column target_type|TEXT|1|NULL|0
+  column workspace_id|INTEGER|0|NULL|0
+  index idx_review_history_comment|0|comment_id
+  index idx_review_history_created_at|0|created_at
+table sessions
+  column created_at|TEXT|1|NULL|0
+  column id|INTEGER|0|NULL|1
+  column last_accessed|TEXT|1|NULL|0
+  column model|TEXT|0|NULL|0
+  column name|TEXT|1|NULL|0
+  column workspace_id|INTEGER|0|NULL|0
+  fk workspaces|workspace_id|id|NO ACTION|CASCADE
+  index idx_sessions_workspace|0|workspace_id
+table stashes
+  column additions|INTEGER|1|0|0
+  column bookmark_name|TEXT|1|NULL|0
+  column change_id|TEXT|1|NULL|0
+  column commit_id|TEXT|1|NULL|0
+  column created_at|TEXT|1|NULL|0
+  column deletions|INTEGER|1|0|0
+  column files_changed|TEXT|1|'[]'|0
+  column id|INTEGER|0|NULL|1
+  column short_commit_id|TEXT|1|NULL|0
+  column workspace_id|INTEGER|0|NULL|0
+  column workspace_label|TEXT|1|NULL|0
+  fk workspaces|workspace_id|id|NO ACTION|SET NULL
+  index idx_stashes_created_at|0|created_at
+table supporting_repos
+  column added_at|TEXT|1|NULL|0
+  column id|INTEGER|0|NULL|1
+  column repo_path|TEXT|1|NULL|0
+table workflow_job_results
+  column completed_at|TEXT|0|NULL|0
+  column id|INTEGER|0|NULL|1
+  column job_id|TEXT|1|NULL|0
+  column log_path|TEXT|0|NULL|0
+  column position|INTEGER|1|NULL|0
+  column run_id|INTEGER|1|NULL|0
+  column started_at|TEXT|0|NULL|0
+  column status|TEXT|1|NULL|0
+  column steps_json|TEXT|1|NULL|0
+  index idx_workflow_job_results_run|0|run_id,position
+table workflow_runs
+  column completed_at|TEXT|0|NULL|0
+  column filename|TEXT|1|NULL|0
+  column id|INTEGER|0|NULL|1
+  column started_at|TEXT|1|NULL|0
+  column status|TEXT|1|NULL|0
+  column workspace_id|INTEGER|0|NULL|0
+  index idx_workflow_runs_lookup|0|workspace_id,filename,id
+table workspace_files
+  column cached_at|TEXT|1|NULL|0
+  column file_path|TEXT|1|NULL|0
+  column id|INTEGER|0|NULL|1
+  column is_directory|INTEGER|1|0|0
+  column mtime|INTEGER|0|NULL|0
+  column parent_path|TEXT|0|NULL|0
+  column relative_path|TEXT|1|NULL|0
+  column workspace_id|INTEGER|0|NULL|0
+  fk workspaces|workspace_id|id|NO ACTION|CASCADE
+  index idx_workspace_files_parent|0|workspace_id,parent_path
+  index idx_workspace_files_workspace|0|workspace_id
+table workspace_pr_sync
+  column description|TEXT|0|NULL|0
+  column pr_number|INTEGER|1|NULL|0
+  column title|TEXT|0|NULL|0
+  column workspace_id|INTEGER|0|NULL|1
+  fk workspaces|workspace_id|id|NO ACTION|CASCADE
+table workspaces
+  column archived|BOOLEAN|0|0|0
+  column branch_name|TEXT|1|NULL|0
+  column created_at|TEXT|1|NULL|0
+  column description|TEXT|0|NULL|0
+  column has_conflicts|BOOLEAN|0|0|0
+  column id|INTEGER|0|NULL|1
+  column metadata|TEXT|0|NULL|0
+  column moved_files|TEXT|0|NULL|0
+  column not_on_remote|BOOLEAN|0|0|0
+  column pr_base_branch|TEXT|0|NULL|0
+  column refreshed_at|TEXT|0|NULL|0
+  column sparse_patterns|TEXT|0|NULL|0
+  column target_branch|TEXT|0|NULL|0
+  column title|TEXT|0|NULL|0
+  column workspace_name|TEXT|1|NULL|0
+  column workspace_path|TEXT|1|NULL|0
+  index idx_workspaces_branch|0|branch_name
