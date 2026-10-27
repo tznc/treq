@@ -98,6 +98,8 @@ use tauri_plugin_log::{Target, TargetKind};
 #[cfg(test)]
 extern crate self as treq_lib;
 
+#[cfg(test)]
+mod test_cli;
 /// The real-repository fixture the integration tests use (`tests/common`).
 #[cfg(test)]
 mod test_repo;
