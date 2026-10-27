@@ -170,13 +170,169 @@ pub(super) fn workspace_id(value: Option<&String>) -> Result<Option<i64>, String
 /// Dispatches typed CLI requests to the same core functions used by Tauri.
 pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::Value, String> {
   request.cli_args()?;
+  reject_unsupported(&request)?;
+  // The idempotency store fingerprints the whole request and, on a stale
+  // claim, hands it to `verification_for`.
+  match idempotency(&request) {
+    Some((scope, operation, key)) => {
+      with_idempotency_key(scope, operation, key, &request, || execute(&request))
+    }
+    None => execute(&request),
+  }
+}
+
+/// Refuses requests this host cannot carry out, before the idempotency store
+/// records a claim for them.
+fn reject_unsupported(request: &TreqCommandRequest) -> Result<(), String> {
+  match request {
+    // The underlying split works on whole files of the working copy. Hunk
+    // selections would silently become whole-file splits.
+    TreqCommandRequest::SplitCommit { hunks, .. } if !hunks.is_empty() => Err(
+      "unsupported: SplitCommit does not support hunk selections yet; select whole files"
+        .to_string(),
+    ),
+    _ => Ok(()),
+  }
+}
+
+/// Where a mutation's idempotency claim is stored, the operation it is
+/// recorded under, and its key. `None` for reads.
+pub(crate) fn idempotency(
+  request: &TreqCommandRequest,
+) -> Option<(&str, &'static str, Option<&str>)> {
+  match request {
+    TreqCommandRequest::InitRepo {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "repo.init", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::CloneRepo {
+      destination,
+      idempotency_key,
+      ..
+    } => Some((
+      // `destination` does not exist yet — cloning is the whole point —
+      // so the idempotency store (which eagerly creates `<repo>/.treq/`
+      // when opened) must not be scoped there or `git clone` will refuse
+      // to write into an already-non-empty destination. Its parent
+      // directory is guaranteed to exist since the caller chose a path
+      // under it.
+      Path::new(destination)
+        .parent()
+        .and_then(|parent| parent.to_str())
+        .unwrap_or("."),
+      "repo.clone",
+      Some(idempotency_key.as_str()),
+    )),
+    TreqCommandRequest::NewWorkspaces {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "workspace.new", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::CreateWorkspace {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "workspace.create", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::RenameWorkspace {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "workspace.rename", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::MoveWorkspaceChanges {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "workspace.move", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::RebaseWorkspace {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "workspace.rebase", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::PatchFile {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "file.patch", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::StashWorkspaceChanges {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "stash.workspace", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::CreateCommit {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "commit.create", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::MoveCommit {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "commit.move", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::AbandonCommit {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "commit.abandon", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::RevertCommit {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "commit.revert", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::ResolveConflict {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "conflict.resolve", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::GitPush {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "git.push", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::CreatePullRequest {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "git.pr-create", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::GithubWrite {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "git.github-write", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::AgentStart {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "agent.start", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::AgentInput {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "agent.input", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::PtyStart {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "pty.start", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::PtyPaste {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "pty.paste", Some(idempotency_key.as_str()))),
+    TreqCommandRequest::SplitCommit {
+      repo,
+      idempotency_key,
+      ..
+    } => Some((repo, "commit.split", Some(idempotency_key.as_str()))),
+    _ => None,
+  }
+}
+
+fn execute(request: &TreqCommandRequest) -> Result<serde_json::Value, String> {
   fn json<T: Serialize>(result: Result<T, String>) -> Result<serde_json::Value, String> {
     serde_json::to_value(result?).map_err(|error| error.to_string())
   }
-  // Matched by reference: mutation arms hand the whole request to the
-  // idempotency store, for its fingerprint and, on a stale claim, for
-  // `verification_for`.
-  match &request {
+  match request {
     TreqCommandRequest::InspectRepository { repo } => json(inspect_repository_path(repo)),
     // These return defaults for a non-repository path, so fail first instead.
     TreqCommandRequest::RepositoryStatus { repo } => {
@@ -336,98 +492,54 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       path,
     )),
     TreqCommandRequest::ProbeRepo { repo } => json(probe_repo_path(repo)),
-    TreqCommandRequest::InitRepo {
-      repo,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "repo.init",
-      Some(idempotency_key.as_str()),
-      &request,
-      || json(init_repo_path(repo)),
-    ),
+    TreqCommandRequest::InitRepo { repo, .. } => json(init_repo_path(repo)),
     TreqCommandRequest::CloneRepo {
       repo_url,
       destination,
-      idempotency_key,
-    } => with_idempotency_key(
-      // `destination` does not exist yet — cloning is the whole point —
-      // so the idempotency store (which eagerly creates `<repo>/.treq/`
-      // when opened) must not be scoped there or `git clone` will refuse
-      // to write into an already-non-empty destination. Its parent
-      // directory is guaranteed to exist since the caller chose a path
-      // under it.
-      Path::new(&destination)
-        .parent()
-        .and_then(|parent| parent.to_str())
-        .unwrap_or("."),
-      "repo.clone",
-      Some(idempotency_key.as_str()),
-      &request,
-      || json(clone_repo_local(repo_url, destination)),
-    ),
+      ..
+    } => json(clone_repo_local(repo_url, destination)),
     TreqCommandRequest::NewWorkspaces {
       repo,
       text,
       stack_on,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "workspace.new",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        require_existing_repo(repo)?;
-        json(crate::core::new_workspaces::run(
-          repo,
-          text,
-          stack_on.as_deref(),
-        ))
-      },
-    ),
+      ..
+    } => {
+      require_existing_repo(repo)?;
+      json(crate::core::new_workspaces::run(
+        repo,
+        text,
+        stack_on.as_deref(),
+      ))
+    }
     TreqCommandRequest::CreateWorkspace {
       repo,
       branch_name,
       source_branch,
       metadata,
-      idempotency_key,
-    } => with_idempotency_key(
+      ..
+    } => json(create_workspace_from_metadata(
       repo,
-      "workspace.create",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        json(create_workspace_from_metadata(
-          repo,
-          branch_name,
-          source_branch.as_deref(),
-          metadata.as_deref(),
-        ))
-      },
-    ),
+      branch_name,
+      source_branch.as_deref(),
+      metadata.as_deref(),
+    )),
     TreqCommandRequest::RenameWorkspace {
       repo,
       workspace,
       new_name,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "workspace.rename",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        let result = crate::core::workspaces::rename_workspace(
-          repo,
-          workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?,
-          new_name,
-          false,
-        )?;
-        if !result.success {
-          return Err(format!("invalid_arguments: {}", result.message));
-        }
-        json(Ok(result))
-      },
-    ),
+      ..
+    } => {
+      let result = crate::core::workspaces::rename_workspace(
+        repo,
+        workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?,
+        new_name,
+        false,
+      )?;
+      if !result.success {
+        return Err(format!("invalid_arguments: {}", result.message));
+      }
+      json(Ok(result))
+    }
     TreqCommandRequest::UpdateWorkspace {
       repo,
       workspace,
@@ -465,51 +577,38 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       files,
       hunks,
       commits,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "workspace.move",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        let request = crate::core::workspaces::WorkspaceMoveRequest {
-          files: files.iter().filter(|&f| !f.is_empty()).cloned().collect(),
-          hunks: hunks.clone(),
-          commits: commits.iter().filter(|&c| !c.is_empty()).cloned().collect(),
-        };
-        json(crate::core::workspaces::move_workspace_changes(
-          repo,
-          workspace,
-          destination,
-          request,
-        ))
-      },
-    ),
+      ..
+    } => {
+      let request = crate::core::workspaces::WorkspaceMoveRequest {
+        files: files.iter().filter(|&f| !f.is_empty()).cloned().collect(),
+        hunks: hunks.clone(),
+        commits: commits.iter().filter(|&c| !c.is_empty()).cloned().collect(),
+      };
+      json(crate::core::workspaces::move_workspace_changes(
+        repo,
+        workspace,
+        destination,
+        request,
+      ))
+    }
     TreqCommandRequest::RebaseWorkspace {
       repo,
       workspace,
       target_branch,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "workspace.rebase",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        let id =
-          workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
-        // Stack planning needs the repository's real default branch; a
-        // hardcoded "main" misplans retargets in repos that use another name.
-        let default_branch = crate::jj::get_default_branch(repo)
-          .map_err(|error| format!("jj_command_failed: {error}"))?;
-        json(crate::core::workspaces::retarget_workspace(
-          repo,
-          id,
-          target_branch,
-          &default_branch,
-        ))
-      },
-    ),
+      ..
+    } => {
+      let id = workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
+      // Stack planning needs the repository's real default branch; a
+      // hardcoded "main" misplans retargets in repos that use another name.
+      let default_branch = crate::jj::get_default_branch(repo)
+        .map_err(|error| format!("jj_command_failed: {error}"))?;
+      json(crate::core::workspaces::retarget_workspace(
+        repo,
+        id,
+        target_branch,
+        &default_branch,
+      ))
+    }
     TreqCommandRequest::SwitchRepoBranch { repo, bookmark } => {
       json(crate::core::repo::switch_repo_branch(repo, bookmark))
     }
@@ -546,62 +645,37 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       workspace,
       path,
       patch_base64,
-      idempotency_key,
-    } => with_idempotency_key(
+      ..
+    } => json(apply_remote_patch(
       repo,
-      "file.patch",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        json(apply_remote_patch(
-          repo,
-          workspace_id(workspace.as_ref())?,
-          path,
-          patch_base64,
-        ))
-      },
-    ),
+      workspace_id(workspace.as_ref())?,
+      path,
+      patch_base64,
+    )),
     TreqCommandRequest::StashWorkspaceChanges {
+      repo, workspace, ..
+    } => json(crate::core::stash::stash_workspace_changes(
       repo,
-      workspace,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "stash.workspace",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        json(crate::core::stash::stash_workspace_changes(
-          repo,
-          workspace_id(workspace.as_ref())?,
-        ))
-      },
-    ),
+      workspace_id(workspace.as_ref())?,
+    )),
     TreqCommandRequest::CreateCommit {
       repo,
       workspace,
       message,
-      idempotency_key,
       ..
-    } => with_idempotency_key(
-      repo,
-      "commit.create",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        if message.trim().is_empty() {
-          return Err("invalid_arguments: commit message must not be blank".to_string());
-        }
-        let id = workspace_id(workspace.as_ref())?;
-        let committed =
-          crate::core::workspaces::commit_workspace_changes_with_auto_push(repo, id, message)
-            .map_err(|e| match e.as_str() {
-              crate::core::NOTHING_TO_COMMIT => format!("invalid_arguments: {e}"),
-              _ => e,
-            });
-        json(committed)
-      },
-    ),
+    } => {
+      if message.trim().is_empty() {
+        return Err("invalid_arguments: commit message must not be blank".to_string());
+      }
+      let id = workspace_id(workspace.as_ref())?;
+      let committed =
+        crate::core::workspaces::commit_workspace_changes_with_auto_push(repo, id, message)
+          .map_err(|e| match e.as_str() {
+            crate::core::NOTHING_TO_COMMIT => format!("invalid_arguments: {e}"),
+            _ => e,
+          });
+      json(committed)
+    }
     TreqCommandRequest::DescribeCommit {
       repo,
       workspace,
@@ -623,44 +697,23 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       workspace,
       commit,
       files,
-      hunks,
       message,
-      idempotency_key,
+      ..
     } => {
-      // The underlying split works on whole files of the working copy.
-      // Hunk selections would silently become whole-file splits, so they are
-      // refused before the idempotency store records a claim.
-      if !hunks.is_empty() {
-        return Err(
-          "unsupported: SplitCommit does not support hunk selections yet; select whole files"
-            .to_string(),
-        );
+      let selected: Vec<String> = files
+        .iter()
+        .map(|f| f.trim().to_string())
+        .filter(|f| !f.is_empty())
+        .collect();
+      if selected.is_empty() {
+        return Err("invalid_arguments: SplitCommit requires selected files or hunks".to_string());
       }
-      with_idempotency_key(
-        repo,
-        "commit.split",
-        Some(idempotency_key.as_str()),
-        &request,
-        || {
-          let selected: Vec<String> = files
-            .iter()
-            .map(|f| f.trim().to_string())
-            .filter(|f| !f.is_empty())
-            .collect();
-          if selected.is_empty() {
-            return Err(
-              "invalid_arguments: SplitCommit requires selected files or hunks".to_string(),
-            );
-          }
-          let id =
-            workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
-          let workspace_path = resolve_workspace_path(repo, Some(id))?;
-          ensure_working_copy_revision(&workspace_path, commit)?;
-          json(
-            crate::jj::jj_split(&workspace_path, message, selected)
-              .map_err(|error| format!("jj_command_failed: {error}")),
-          )
-        },
+      let id = workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
+      let workspace_path = resolve_workspace_path(repo, Some(id))?;
+      ensure_working_copy_revision(&workspace_path, commit)?;
+      json(
+        crate::jj::jj_split(&workspace_path, message, selected)
+          .map_err(|error| format!("jj_command_failed: {error}")),
       )
     }
     TreqCommandRequest::MoveCommit {
@@ -668,22 +721,16 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       workspace,
       commit,
       target_workspace,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "commit.move",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        let source_id =
-          workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
-        let target_id = workspace_id(Some(target_workspace))?
-          .ok_or("invalid_arguments: target workspace is required")?;
-        json(crate::core::commits::move_commit_to_existing_workspace(
-          repo, source_id, commit, target_id,
-        ))
-      },
-    ),
+      ..
+    } => {
+      let source_id =
+        workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
+      let target_id = workspace_id(Some(target_workspace))?
+        .ok_or("invalid_arguments: target workspace is required")?;
+      json(crate::core::commits::move_commit_to_existing_workspace(
+        repo, source_id, commit, target_id,
+      ))
+    }
     TreqCommandRequest::UndoCommit {
       repo,
       workspace,
@@ -696,18 +743,11 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       repo,
       workspace,
       commit,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "commit.abandon",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        let id =
-          workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
-        json(crate::core::commits::abandon_commit(repo, Some(id), commit))
-      },
-    ),
+      ..
+    } => {
+      let id = workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
+      json(crate::core::commits::abandon_commit(repo, Some(id), commit))
+    }
     TreqCommandRequest::UndoOperation {
       repo,
       workspace,
@@ -721,41 +761,28 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       repo,
       workspace,
       commit,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "commit.revert",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        let id =
-          workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
-        json(crate::core::commits::revert_commit(repo, Some(id), commit))
-      },
-    ),
+      ..
+    } => {
+      let id = workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
+      json(crate::core::commits::revert_commit(repo, Some(id), commit))
+    }
     TreqCommandRequest::ResolveConflict {
       repo,
       revision,
       sides,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "conflict.resolve",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        let sides = crate::core::resolve::parse_resolve_sides(
-          &sides
-            .iter()
-            .filter(|&s| !s.is_empty())
-            .cloned()
-            .collect::<Vec<_>>(),
-        )?;
-        json(crate::core::resolve::resolve_commit(
-          repo, revision, &sides, None,
-        ))
-      },
-    ),
+      ..
+    } => {
+      let sides = crate::core::resolve::parse_resolve_sides(
+        &sides
+          .iter()
+          .filter(|&s| !s.is_empty())
+          .cloned()
+          .collect::<Vec<_>>(),
+      )?;
+      json(crate::core::resolve::resolve_commit(
+        repo, revision, &sides, None,
+      ))
+    }
     // The desktop conflict-marker setting lives in the client's app
     // database, which the VM does not have, so pulls use the default style.
     TreqCommandRequest::PullWorkspace { repo, workspace } => {
@@ -785,21 +812,11 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       )
     }
     TreqCommandRequest::GitPush {
+      repo, workspace, ..
+    } => json(crate::core::workspaces::push_workspace_to_remote(
       repo,
-      workspace,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "git.push",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        json(crate::core::workspaces::push_workspace_to_remote(
-          repo,
-          workspace_id(workspace.as_ref())?,
-        ))
-      },
-    ),
+      workspace_id(workspace.as_ref())?,
+    )),
     TreqCommandRequest::WorkspacePullRequest { repo, workspace } => json(workspace_pull_request(
       repo,
       workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?,
@@ -810,74 +827,41 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       title,
       body,
       draft,
-      idempotency_key,
-    } => with_idempotency_key(
+      ..
+    } => json(create_pull_request(
       repo,
-      "git.pr-create",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        json(create_pull_request(
-          repo,
-          workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?,
-          title,
-          body,
-          *draft,
-        ))
-      },
-    ),
+      workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?,
+      title,
+      body,
+      *draft,
+    )),
     TreqCommandRequest::GithubRead { repo, query } => github_read(repo, query.clone()),
-    TreqCommandRequest::GithubWrite {
-      repo,
-      action,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "git.github-write",
-      Some(idempotency_key.as_str()),
-      &request,
-      || github_write(repo, action.clone()),
-    ),
+    TreqCommandRequest::GithubWrite { repo, action, .. } => github_write(repo, action.clone()),
     TreqCommandRequest::AgentStart {
       repo,
       workspace,
       agent,
       prompt,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "agent.start",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        let id =
-          workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
-        let workspace_path = resolve_workspace_path(repo, Some(id))?;
-        json(crate::core::agent_supervisor::start_agent(
-          repo,
-          workspace,
-          &workspace_path,
-          agent,
-          prompt,
-        ))
-      },
-    ),
+      ..
+    } => {
+      let id = workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
+      let workspace_path = resolve_workspace_path(repo, Some(id))?;
+      json(crate::core::agent_supervisor::start_agent(
+        repo,
+        workspace,
+        &workspace_path,
+        agent,
+        prompt,
+      ))
+    }
     TreqCommandRequest::AgentInput {
       repo,
       workspace,
       input,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "agent.input",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        json(crate::core::agent_supervisor::send_agent_input(
-          repo, workspace, input,
-        ))
-      },
-    ),
+      ..
+    } => json(crate::core::agent_supervisor::send_agent_input(
+      repo, workspace, input,
+    )),
     TreqCommandRequest::AgentStatus { repo, workspace } => {
       json(crate::core::agent_supervisor::agent_status(repo, workspace))
     }
@@ -896,18 +880,10 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       launch,
       cols,
       rows,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "pty.start",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        json(crate::core::pty_remote_supervisor::start_session(
-          *backend, repo, remote_dir, workspace, label, launch, *cols, *rows,
-        ))
-      },
-    ),
+      ..
+    } => json(crate::core::pty_remote_supervisor::start_session(
+      *backend, repo, remote_dir, workspace, label, launch, *cols, *rows,
+    )),
     TreqCommandRequest::PtyList {
       backend,
       repo,
@@ -957,18 +933,10 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       label,
       text,
       submit,
-      idempotency_key,
-    } => with_idempotency_key(
-      repo,
-      "pty.paste",
-      Some(idempotency_key.as_str()),
-      &request,
-      || {
-        json(crate::core::pty_remote_supervisor::paste_text(
-          *backend, repo, workspace, label, text, *submit,
-        ))
-      },
-    ),
+      ..
+    } => json(crate::core::pty_remote_supervisor::paste_text(
+      *backend, repo, workspace, label, text, *submit,
+    )),
     TreqCommandRequest::ReviewLoad {
       repo,
       workspace,
