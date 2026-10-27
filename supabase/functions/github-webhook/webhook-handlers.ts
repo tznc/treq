@@ -84,8 +84,10 @@ export async function applyInstallationFacts(
 
   if (event === "installation_repositories") {
     await upsertRepos(supabase, installation.id, payload.repositories_added ?? []);
-    for (const r of payload.repositories_removed ?? []) {
-      await supabase.from("github_repositories").delete().eq("id", r.id);
+    const removed = (payload.repositories_removed ?? []).map((r) => r.id);
+    if (removed.length > 0) {
+      const { error } = await supabase.from("github_repositories").delete().in("id", removed);
+      if (error) throw new Error(`removing repositories: ${error.message}`);
     }
   }
 }
