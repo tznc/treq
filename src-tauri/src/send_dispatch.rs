@@ -728,7 +728,7 @@ mod tests {
 
   #[test]
   fn parses_agent_msg_payloads() {
-    let json = r#"{"kind":"agent_msg","request_id":"r1","repo":"/src/app","op":"inbox","pty":"pty-1","peek":true}"#;
+    let json = r#"{"kind":"agent_msg","request_id":"r1","cli_repo":"/src/app","op":"inbox","pty":"pty-1","peek":true}"#;
     match parse_ipc_payload(json).unwrap() {
       IpcDispatchMessage::AgentMsg(request) => {
         assert_eq!(request.request_id, "r1");

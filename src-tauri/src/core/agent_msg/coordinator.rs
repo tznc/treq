@@ -54,6 +54,9 @@ pub struct SendRequest {
   pub all: bool,
   #[serde(default)]
   pub repo: Option<String>,
+  /// On the wire as `message_kind`: an IPC request's `kind` names the
+  /// request itself.
+  #[serde(rename = "message_kind")]
   pub kind: Kind,
   pub body: String,
   #[serde(default)]

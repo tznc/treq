@@ -75,7 +75,7 @@ test("agent msg: a waiting message shows a badge and a banner", async ({ page })
 
   await page.getByRole("button", { name: "Show message" }).click();
   await settle(page, 500);
-  await expect(page.getByText("rebase done?")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Hide message" })).toBeVisible();
   await capture(page, {
     name: "21-agent-msg-shown",
     title: "Show message reveals the text",

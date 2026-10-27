@@ -14,7 +14,9 @@ pub const KIND: &str = "agent_msg";
 pub struct Request {
   pub kind: String,
   pub request_id: String,
-  /// The repository whose instance the CLI reached.
+  /// The repository whose instance the CLI reached. Named apart from the
+  /// ops' own `repo` filters, which share the flattened object.
+  #[serde(rename = "cli_repo")]
   pub repo: String,
   #[serde(flatten)]
   pub op: Op,
@@ -302,6 +304,48 @@ mod tests {
     assert_eq!(json["op"], "inbox");
     assert_eq!(json["pty"], "pty-claude");
     assert_eq!(serde_json::from_value::<Request>(json).unwrap(), request);
+  }
+
+  #[test]
+  fn a_list_request_keeps_its_repo_apart_from_the_clis() {
+    for repo in [None, Some("app".to_string())] {
+      let request = Request {
+        kind: KIND.into(),
+        request_id: "r-1".into(),
+        repo: "/src/app".into(),
+        op: Op::List {
+          repo: repo.clone(),
+          local_only: false,
+        },
+      };
+      let json = serde_json::to_string(&request).unwrap();
+      assert_eq!(serde_json::from_str::<Request>(&json).unwrap(), request, "{json}");
+    }
+  }
+
+  #[test]
+  fn a_send_request_keeps_its_kind_apart_from_the_ipc_kind() {
+    let request = Request {
+      kind: KIND.into(),
+      request_id: "r-1".into(),
+      repo: "/src/app".into(),
+      op: Op::Send(SendRequest {
+        from_pty: "pty-codex".into(),
+        to: Some("claude-2".into()),
+        all: false,
+        repo: Some("app".into()),
+        kind: Kind::Ask,
+        body: "hi".into(),
+        reply_to: None,
+        timeout_ms: 60_000,
+        id: None,
+      }),
+    };
+    let json = serde_json::to_string(&request).unwrap();
+    match crate::send_dispatch::parse_ipc_payload(&json).unwrap() {
+      crate::send_dispatch::IpcDispatchMessage::AgentMsg(parsed) => assert_eq!(parsed, request),
+      other => panic!("{other:?} from {json}"),
+    }
   }
 
   #[test]
