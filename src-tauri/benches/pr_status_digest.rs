@@ -1,7 +1,9 @@
 //! What the PR poller pays every 30 s per repo to tell whether a poll found
 //! anything new: a digest of every branch's PR and CI rollup.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 use treq_lib::{
   github::{PrCheckEntry, PrCiStatus, PrInfo},
   pr_status::{statuses_digest, RepoCiCache, RepoPrCache},
