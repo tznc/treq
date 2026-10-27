@@ -1274,7 +1274,7 @@ esac
   }
 
   #[test]
-  fn one_branchs_gh_error_keeps_the_others() {
+  fn a_gh_error_on_one_branch_keeps_the_others() {
     let dir = tempfile::TempDir::new().unwrap();
     let gh = fake_gh(dir.path());
     let branches = vec![
