@@ -706,14 +706,17 @@ fn bulk_fetch_via(
   for branch in branches {
     let entry = match listing.by_branch.remove(branch) {
       Some((pr, ci)) => (Some(pr), ci),
+      // Older than the page: one `gh pr list --head` brings PR and CI together.
       None if listing.truncated => {
-        let pr = crate::github::get_pr_info_via_gh_impl(gh, repo_path, branch, path)?;
-        let ci = if pr.is_some() {
-          crate::github::get_pr_checks_via_gh_impl(gh, repo_path, branch, path)?
-        } else {
-          None
-        };
-        (pr, ci)
+        match crate::github::list_pr_for_head_via_gh_impl(gh, repo_path, branch, path) {
+          Ok(Some((pr, ci))) => (Some(pr), ci),
+          Ok(None) => (None, None),
+          // Left out, so only this branch falls back and the rest stand.
+          Err(e) => {
+            log::warn!("pr-status: head lookup failed for {repo_path}#{branch}: {e}");
+            continue;
+          }
+        }
       }
       None => (None, None),
     };
@@ -1205,7 +1208,7 @@ last=""; for a in "$@"; do prev="$last"; last="$a"; done
 case "$*" in
   *bad*) echo "boom" >&2; exit 1 ;;
   "pr list --state all --limit 100 "*) echo '[{page}]' ;;
-  "pr list --head "*) echo "[{one}]" | sed "s|HEAD|$3|" ;;
+  "pr list --head="*) echo "[{one}]" | sed "s|HEAD|${{3#--head=}}|" ;;
   "pr view "*) echo "{one}" | sed "s|HEAD|$last|" ;;
   "pr checks "*) echo '[]' ;;
 esac
