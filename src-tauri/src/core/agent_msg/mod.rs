@@ -12,6 +12,7 @@ pub mod delivery;
 pub mod hub;
 pub mod idle;
 pub mod ipc;
+pub mod mailbox;
 pub mod model;
 pub mod network;
 pub mod protocol;

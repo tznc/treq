@@ -937,6 +937,33 @@ fn execute(request: &TreqCommandRequest) -> Result<serde_json::Value, String> {
     } => json(crate::core::pty_remote_supervisor::paste_text(
       *backend, repo, workspace, label, text, *submit,
     )),
+    TreqCommandRequest::PtyMsgDeliver {
+      repo,
+      workspace,
+      label,
+      envelope,
+    } => {
+      use crate::core::agent_msg::{hub::Envelope, mailbox};
+      let envelope: Envelope =
+        serde_json::from_str(envelope).map_err(|e| format!("invalid message: {e}"))?;
+      let session = crate::core::pty_remote_supervisor::session_name(repo, workspace, label);
+      json(mailbox::deliver(&mailbox::default_dir()?, &session, &envelope))
+    }
+    TreqCommandRequest::PtyMsgPoll {
+      repo,
+      workspace,
+      label,
+      since,
+    } => {
+      use crate::core::agent_msg::mailbox;
+      let session = crate::core::pty_remote_supervisor::session_name(repo, workspace, label);
+      json(mailbox::poll(
+        &mailbox::default_dir()?,
+        &session,
+        *since,
+        crate::agent_dispatch::now_millis(),
+      ))
+    }
     TreqCommandRequest::ReviewLoad {
       repo,
       workspace,

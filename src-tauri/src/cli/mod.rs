@@ -725,6 +725,20 @@ pub(crate) fn parse_remote_command_request(
       submit: get_arg_value(matches, "submit").as_deref() == Some("true"),
       idempotency_key: require_idempotency_key(idempotency_key)?,
     }),
+    ("pty-remote", "msg-deliver") => Ok(TreqCommandRequest::PtyMsgDeliver {
+      repo,
+      workspace: require_workspace()?,
+      label: require_target("session label")?,
+      envelope: require_value("message")?,
+    }),
+    ("pty-remote", "msg-poll") => Ok(TreqCommandRequest::PtyMsgPoll {
+      repo,
+      workspace: require_workspace()?,
+      label: require_target("session label")?,
+      since: require_value("event number")?
+        .parse()
+        .map_err(|_| "msg-poll needs a whole number of events".to_string())?,
+    }),
     ("pty-remote", "stop") => Ok(TreqCommandRequest::PtyStop {
       backend: pty_backend(matches)?,
       repo,

@@ -1195,6 +1195,18 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       idempotency_key: key(),
       backend: Default::default(),
     },
+    R::PtyMsgDeliver {
+      repo: repo(),
+      workspace: "1".into(),
+      label: "agent".into(),
+      envelope: "{\"id\":\"m-1\"}".into(),
+    },
+    R::PtyMsgPoll {
+      repo: repo(),
+      workspace: "1".into(),
+      label: "agent".into(),
+      since: 3,
+    },
     R::ReviewLoad {
       repo: repo(),
       workspace: "1".into(),

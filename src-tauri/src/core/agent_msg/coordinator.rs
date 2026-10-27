@@ -48,6 +48,10 @@ pub struct SendRequest {
   #[serde(default)]
   pub reply_to: Option<String>,
   pub timeout_ms: u64,
+  /// The id to give the message; a fresh one when `None`. A remote agent
+  /// picks its own on the host, so it can wait for the reply.
+  #[serde(default)]
+  pub id: Option<String>,
 }
 
 /// One target of a sent message.
@@ -123,7 +127,7 @@ impl Coordinator<'_> {
       request.repo.as_deref(),
     )?;
     let message = Envelope {
-      id: model::new_id(),
+      id: request.id.clone().unwrap_or_else(model::new_id),
       kind: request.kind,
       from: from.handle.clone(),
       to: String::new(),
@@ -234,6 +238,7 @@ impl Coordinator<'_> {
         body: body.to_string(),
         reply_to: Some(asked.id.clone()),
         timeout_ms: model::TIMEOUT.as_millis() as u64,
+        id: None,
       },
       now_ms,
     )
@@ -283,6 +288,7 @@ mod tests {
       body: "rebase done?".into(),
       reply_to: None,
       timeout_ms: 60_000,
+      id: None,
     }
   }
 
@@ -384,6 +390,15 @@ mod tests {
     request.from_pty = "pty-unknown".into();
     let error = coordinator.send(&request, 0).unwrap_err();
     assert!(error.contains("treq"), "{error}");
+  }
+
+  #[test]
+  fn a_given_id_is_kept() {
+    let (hub, ledger, network) = (hub(), FakeLedger::default(), network());
+    let coordinator = Coordinator { hub: &hub, ledger: &ledger, network: &network };
+    let mut request = ask(Some("claude-2"), false);
+    request.id = Some("m-host0001".into());
+    assert_eq!(coordinator.send(&request, 0).unwrap().id, "m-host0001");
   }
 
   #[test]

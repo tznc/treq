@@ -215,18 +215,28 @@ pub(super) fn handle(matches: &Matches) -> i32 {
     .get("json")
     .and_then(|arg| arg.value.as_bool())
     .unwrap_or(false);
+  let pty = crate::send_dispatch::pty_session_id_from_env();
   let result = super::detect_repo_path().and_then(|repo| {
-    let instance = super::repo_instance(&repo)?;
-    let client = IpcClient {
-      endpoint: instance.endpoint,
-      repo,
+    let client: Box<dyn Client> = match super::repo_instance(&repo) {
+      Ok(instance) => Box::new(IpcClient {
+        endpoint: instance.endpoint,
+        repo,
+      }),
+      // A remote host runs no treq app: its terminals read the mailbox the
+      // attached instance keeps for them.
+      Err(error) => match &pty {
+        Some(session) => Box::new(MailboxClient {
+          dir: crate::core::agent_msg::mailbox::default_dir()?,
+          session: session.clone(),
+        }),
+        None => return Err(error),
+      },
     };
-    let pty = crate::send_dispatch::pty_session_id_from_env();
     run(
       &command,
       pty.as_deref(),
       json,
-      &client,
+      client.as_ref(),
       &mut std::io::stdout(),
       &std::thread::sleep,
     )
@@ -255,6 +265,23 @@ impl Client for IpcClient {
       op,
     };
     crate::core::agent_msg::ipc::call(&self.endpoint, &request, Duration::from_secs(5))
+  }
+}
+
+/// A remote terminal's mailbox on this host.
+struct MailboxClient {
+  dir: std::path::PathBuf,
+  session: String,
+}
+
+impl Client for MailboxClient {
+  fn call(&self, op: Op) -> Result<Value, String> {
+    crate::core::agent_msg::mailbox::answer(
+      &self.dir,
+      &self.session,
+      &op,
+      crate::agent_dispatch::now_millis(),
+    )
   }
 }
 
@@ -317,6 +344,7 @@ pub fn run(
         body: body.clone(),
         reply_to: None,
         timeout_ms: timeout.as_millis() as u64,
+        id: None,
       }))?;
       let id = data["id"].as_str().unwrap_or_default().to_string();
       if !*ask {
@@ -807,6 +835,30 @@ mod tests {
     let mut out = Vec::new();
     let code = run(&Command::List { repo: None }, None, false, &client, &mut out, &|_| {});
     assert_eq!(code, Ok(0));
+  }
+
+  #[test]
+  fn a_mailbox_client_answers_from_the_hosts_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let client = MailboxClient {
+      dir: dir.path().to_path_buf(),
+      session: "treq-app-main-agent-1".into(),
+    };
+    let mut out = Vec::new();
+    let code = run(
+      &Command::Inbox {
+        peek: false,
+        wait: false,
+        kinds: Vec::new(),
+      },
+      Some("treq-app-main-agent-1"),
+      false,
+      &client,
+      &mut out,
+      &|_| {},
+    );
+    assert_eq!(code, Ok(0));
+    assert!(String::from_utf8(out).unwrap().contains("No messages"));
   }
 
   #[test]

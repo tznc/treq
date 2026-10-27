@@ -641,6 +641,24 @@ pub enum TreqCommandRequest {
     submit: bool,
     idempotency_key: String,
   },
+  /// `treq agent msg`: holds a message for an agent in a persistent
+  /// session, in the host's mailbox for it (`core::agent_msg::mailbox`).
+  /// Delivering the same message again replaces it.
+  PtyMsgDeliver {
+    repo: String,
+    workspace: String,
+    label: String,
+    /// The message (`agent_msg::hub::Envelope`) as JSON.
+    envelope: String,
+  },
+  /// What the agent in a persistent session did with its messages since
+  /// event `since`; the events up to `since` are dropped.
+  PtyMsgPoll {
+    repo: String,
+    workspace: String,
+    label: String,
+    since: u64,
+  },
   /// The review a workspace's page left unsent on the host (empty if none).
   ReviewLoad {
     repo: String,
@@ -745,6 +763,7 @@ impl TreqCommandRequest {
       | Self::PtyList { .. }
       | Self::PtyStatus
       | Self::PtyAttachCommand { .. }
+      | Self::PtyMsgPoll { .. }
       | Self::WorkspaceChangeMarker { .. }
       | Self::MachineUsage { .. }
       | Self::MachineTools { .. }
@@ -792,6 +811,7 @@ impl TreqCommandRequest {
       | Self::PtyRename { .. }
       | Self::PtyReset { .. }
       | Self::PtyPaste { .. }
+      | Self::PtyMsgDeliver { .. }
       | Self::ReviewSave { .. }
       | Self::ReviewClear { .. } => true,
     }
@@ -875,6 +895,8 @@ impl TreqCommandRequest {
       | Self::PtyRename { .. }
       | Self::PtyReset { .. }
       | Self::PtyAttachCommand { .. }
+      | Self::PtyMsgDeliver { .. }
+      | Self::PtyMsgPoll { .. }
       | Self::ReviewLoad { .. }
       | Self::ReviewSave { .. }
       | Self::ReviewClear { .. } => false,
@@ -955,6 +977,8 @@ impl TreqCommandRequest {
       Self::PtyStatus => "PtyStatus",
       Self::PtyAttachCommand { .. } => "PtyAttachCommand",
       Self::PtyPaste { .. } => "PtyPaste",
+      Self::PtyMsgDeliver { .. } => "PtyMsgDeliver",
+      Self::PtyMsgPoll { .. } => "PtyMsgPoll",
       Self::ReviewLoad { .. } => "ReviewLoad",
       Self::ReviewSave { .. } => "ReviewSave",
       Self::ReviewClear { .. } => "ReviewClear",
@@ -1027,6 +1051,8 @@ impl TreqCommandRequest {
     "PtyStatus",
     "PtyAttachCommand",
     "PtyPaste",
+    "PtyMsgDeliver",
+    "PtyMsgPoll",
     "ReviewLoad",
     "ReviewSave",
     "ReviewClear",
@@ -1712,6 +1738,28 @@ impl TreqCommandRequest {
           fields.extra.push(("submit", "true".into()));
         }
         ("pty-remote", "paste", repo)
+      }
+      Self::PtyMsgDeliver {
+        repo,
+        workspace,
+        label,
+        envelope,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(label);
+        fields.value = Some(envelope.clone());
+        ("pty-remote", "msg-deliver", repo)
+      }
+      Self::PtyMsgPoll {
+        repo,
+        workspace,
+        label,
+        since,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(label);
+        fields.value = Some(since.to_string());
+        ("pty-remote", "msg-poll", repo)
       }
       Self::ReviewLoad {
         repo,
@@ -3554,7 +3602,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 75);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 77);
   }
 
   #[test]

@@ -149,6 +149,7 @@ fn answer(coordinator: &Coordinator, rows: Rows, request: &Request, now_ms: u64)
           body: body.clone(),
           reply_to: None,
           timeout_ms: model::TIMEOUT.as_millis() as u64,
+          id: None,
         },
         now_ms,
       )?;
@@ -270,6 +271,7 @@ mod tests {
           body: body.into(),
           reply_to: None,
           timeout_ms: 60_000,
+          id: None,
         }),
         1_000,
       );
@@ -318,6 +320,7 @@ mod tests {
         body: "hi".into(),
         reply_to: None,
         timeout_ms: 60_000,
+        id: None,
       }),
       0,
     );

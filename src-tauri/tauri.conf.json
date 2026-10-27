@@ -854,7 +854,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Command action: start, list, stop, rename, attach-command, attach, paste, status, reset, daemon"
+              "description": "Command action: start, list, stop, rename, attach-command, attach, paste, msg-deliver, msg-poll, status, reset, daemon"
             },
             {
               "name": "backend",
