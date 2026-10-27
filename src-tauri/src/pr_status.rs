@@ -741,9 +741,8 @@ fn statuses_sorted<V>(map: &HashMap<String, V>) -> std::collections::BTreeMap<&S
 pub fn statuses_digest(statuses: &RepoPrCache, ci_statuses: &RepoCiCache) -> u64 {
   use std::hash::{Hash, Hasher};
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
-  serde_json::to_string(&(statuses_sorted(statuses), statuses_sorted(ci_statuses)))
-    .unwrap_or_default()
-    .hash(&mut hasher);
+  statuses_sorted(statuses).hash(&mut hasher);
+  statuses_sorted(ci_statuses).hash(&mut hasher);
   hasher.finish()
 }
 
