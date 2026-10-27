@@ -695,8 +695,9 @@ pub fn latest_workflow_run_sync(
   workspace_id: i64,
   filename: &str,
 ) -> Result<Option<(i64, String)>, String> {
+  // The run row alone: its job rows and their steps go unread.
   Ok(
-    list_workflow_runs_sync(repo_path, workspace_id, filename, 1)?
+    crate::local_db::list_workflow_runs(repo_path, workspace_id, filename, 1)?
       .into_iter()
       .next()
       .map(|run| (run.id, run.status)),
