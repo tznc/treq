@@ -136,6 +136,7 @@ fn view(model: &Model, data: &Data) -> Value {
         "selected": github.selected,
         "creating": github.creating,
         "runningChecks": [],
+        "reload": github.reload,
       }),
     },
     Page::Linear if data.flags.linear => json!({"kind": "linear", "repoPath": repo}),
@@ -497,7 +498,14 @@ mod tests {
     let View::Github(route) = screen(&model, &data()).unwrap().view else {
       panic!("not GitHub");
     };
-    assert_eq!(route.selected, Some(7));
+    assert_eq!((route.selected, route.reload), (Some(7), 0));
+    if let Page::Github(github) = &mut model.page {
+      github.reload = 2;
+    }
+    let View::Github(route) = screen(&model, &data()).unwrap().view else {
+      panic!("not GitHub");
+    };
+    assert_eq!(route.reload, 2);
     if let Page::Github(github) = &mut model.page {
       github.review = Some(7);
     }

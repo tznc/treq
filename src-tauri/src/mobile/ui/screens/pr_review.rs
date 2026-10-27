@@ -5,7 +5,7 @@
 //! [`super::pr_review_logic`].
 
 use crate::mobile::ui::widgets::TouchButton as _;
-use std::collections::HashSet;
+use std::{collections::HashSet, rc::Rc};
 
 use crate::{
   core::{
@@ -62,8 +62,11 @@ pub fn threads_request(repo: &str, number: u64) -> TreqCommandRequest {
   }
 }
 
+/// Runs once a review went through, before the review pops back to it.
+pub type OnSubmitted = Rc<dyn Fn(&mut App)>;
+
 /// Pushes the review of pull request `number` of the repository at `repo`.
-pub fn open(repo: String, number: u64, cx: &mut App) {
+pub fn open(repo: String, number: u64, on_submitted: OnSubmitted, cx: &mut App) {
   let location = Location {
     repo: Some(repo.clone()),
     workspace: None,
@@ -72,7 +75,7 @@ pub fn open(repo: String, number: u64, cx: &mut App) {
     format!("Review #{number}"),
     location,
     cx,
-    move |window, cx| cx.new(|cx| PrReviewScreen::new(repo, number, window, cx)),
+    move |window, cx| cx.new(|cx| PrReviewScreen::new(repo, number, on_submitted, window, cx)),
   );
 }
 
@@ -112,10 +115,17 @@ pub struct PrReviewScreen {
   /// The signed-in GitHub login and the PR's author, once read.
   login: Option<String>,
   author: Option<String>,
+  on_submitted: OnSubmitted,
 }
 
 impl PrReviewScreen {
-  fn new(repo: String, number: u64, window: &mut Window, cx: &mut Context<Self>) -> Self {
+  fn new(
+    repo: String,
+    number: u64,
+    on_submitted: OnSubmitted,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Self {
     on_epoch(cx, |this, cx| this.reload(cx));
     let files = remote::last::<String>(&diff_request(&repo, number))
       .map_or(Load::Idle, |d| Load::Ready(parse_diff(&d)));
@@ -144,6 +154,7 @@ impl PrReviewScreen {
       scroll: ScrollHandle::new(),
       login: None,
       author: None,
+      on_submitted,
     };
     this.fetch(true, cx);
     let context = TreqCommandRequest::GithubRead {
@@ -431,10 +442,12 @@ impl PrReviewScreen {
       "Review submitted.",
       window,
       cx,
-      |this, window, cx| {
+      move |this, window, cx| {
         this.pending.clear();
         this.summary.clear();
         this.cancel(window, cx);
+        (this.on_submitted)(cx);
+        nav::pop(cx);
       },
     );
   }

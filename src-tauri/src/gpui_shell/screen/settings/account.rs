@@ -750,10 +750,7 @@ impl SettingsView {
         move |host| host.fetch_image(&url)
       },
       move |view, bytes, _| {
-        let image = bytes.ok().and_then(|bytes| {
-          let format = image_format(&bytes)?;
-          Some(Arc::new(gpui::Image::from_bytes(format, bytes)))
-        });
+        let image = bytes.ok().and_then(treq_ui::image::decode);
         if let Some((current, slot)) = &mut view.account.avatar {
           if *current == url {
             *slot = image;
@@ -1034,18 +1031,6 @@ impl SettingsView {
 /// The typed confirmation names the account's email.
 fn email_matches(email: Option<&str>, typed: &str) -> bool {
   email.is_some_and(|email| !email.is_empty() && typed.trim().eq_ignore_ascii_case(email))
-}
-
-/// The image format `bytes` start with.
-fn image_format(bytes: &[u8]) -> Option<gpui::ImageFormat> {
-  use gpui::ImageFormat;
-  match bytes {
-    [0x89, b'P', b'N', b'G', ..] => Some(ImageFormat::Png),
-    [0xff, 0xd8, ..] => Some(ImageFormat::Jpeg),
-    [b'G', b'I', b'F', b'8', ..] => Some(ImageFormat::Gif),
-    [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some(ImageFormat::Webp),
-    _ => None,
-  }
 }
 
 /// `py-16` centered on the tab, with `gap`.

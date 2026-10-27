@@ -207,6 +207,8 @@ pub(super) struct Detail {
   /// The PR's checks and workspace are being read on a timer.
   polling: bool,
   generation: u64,
+  /// The PR's checks list every check, not just the failing and running.
+  pub(super) checks_open: bool,
 }
 
 /// The inline New Issue form (`CreateIssueForm`).
@@ -234,6 +236,8 @@ type FilterSelect = (&'static str, &'static str, String, Vec<(String, String)>);
 /// The GitHub view and what it read.
 pub struct GithubView {
   pub(super) host: Arc<dyn GithubHost>,
+  /// Reviewers' avatars by URL: `None` while loading or when it failed.
+  pub(super) avatars: HashMap<String, Option<Arc<gpui::Image>>>,
   /// React's handlers, for moving around.
   react: ActionSink,
   pub(super) controls: Controls,
@@ -314,6 +318,7 @@ impl GithubView {
       issue_rows: Rows::default(),
       pr_rows: Rows::default(),
       pr_rows_cache: None,
+      avatars: HashMap::new(),
       filters: PrFilters::default(),
       detail: Detail::default(),
       comment: String::new(),
@@ -340,6 +345,7 @@ impl GithubView {
     self.tips.dark = dark;
     if self.route != route {
       let checks_changed = self.route.running_checks != route.running_checks;
+      let reload = self.route.reload != route.reload;
       self.route = route;
       if self.route.repo_path != self.remote_for {
         self.remote_for = self.route.repo_path.clone();
@@ -348,6 +354,9 @@ impl GithubView {
         self.load_workspaces(cx);
       }
       self.sync(cx);
+      if reload {
+        self.load_detail(cx);
+      }
       if checks_changed {
         // A run that finished wrote its results.
         self.reload_checks(cx);
@@ -610,6 +619,29 @@ impl GithubView {
   }
 
   /// Reads the open detail again, keeping what shows meanwhile.
+  /// Loads the avatars of `pr`'s reviewers that the timeline shows, once
+  /// per URL.
+  fn load_avatars(&mut self, pr: &crate::github::GhPullRequest, cx: &mut Context<Self>) {
+    for review in pr.reviews.iter().filter(|r| r.verdict().is_some()) {
+      let url = crate::core::pr_view::avatar_url(&review.author);
+      if self.avatars.contains_key(&url) {
+        continue;
+      }
+      self.avatars.insert(url.clone(), None);
+      self.run(
+        cx,
+        {
+          let url = url.clone();
+          move |host| host.avatar(&url)
+        },
+        move |view, bytes, _| {
+          let image = bytes.ok().and_then(treq_ui::image::decode);
+          view.avatars.insert(url, image);
+        },
+      );
+    }
+  }
+
   pub(super) fn load_detail(&mut self, cx: &mut Context<Self>) {
     let Some(key) = self.detail.key.clone() else {
       return;
@@ -642,7 +674,10 @@ impl GithubView {
         view.detail.loading = false;
         match read {
           Ok(Ok(issue)) => view.detail.issue = Some(issue),
-          Ok(Err(pr)) => view.detail.pr = Some(pr),
+          Ok(Err(pr)) => {
+            view.load_avatars(&pr, cx);
+            view.detail.pr = Some(pr);
+          }
           Err(err) => view.detail.error = Some(err),
         }
         if let Some(checks) = checks {

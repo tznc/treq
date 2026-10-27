@@ -10,6 +10,7 @@ pub mod checkbox;
 pub mod dialog;
 pub mod empty_state;
 pub mod icon_button;
+pub mod image;
 pub mod kbd;
 pub mod menu;
 pub mod picker;

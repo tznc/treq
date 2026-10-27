@@ -90,6 +90,9 @@ pub struct Route {
   /// `<workspace id>:<file>[:<job>]`).
   #[serde(default)]
   pub running_checks: Vec<String>,
+  /// Bumped to read the selected issue or PR again (a review was submitted).
+  #[serde(default)]
+  pub reload: u64,
 }
 
 /// A change to one issue.
@@ -125,6 +128,13 @@ pub struct TreqChecks {
   pub setup: Option<SetupScriptStatus>,
 }
 
+impl TreqChecks {
+  /// Whether the repository declares any workflow or a setup script.
+  pub fn configured(&self) -> bool {
+    !self.workflows.is_empty() || self.setup.as_ref().is_some_and(|s| s.configured)
+  }
+}
+
 /// One line of a job's logs (`getRunLogs`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LogLine {
@@ -136,6 +146,8 @@ pub struct LogLine {
 /// `notify`, `open_url` and `refresh_pr_status` block, so they are called
 /// off the main thread.
 pub trait GithubHost: WorkspaceHost {
+  /// The image at `url`: a reviewer's avatar.
+  fn avatar(&self, url: &str) -> Result<Vec<u8>, String>;
   fn remote(&self, repo_path: &str) -> Result<Option<GitRemoteInfo>, String>;
   fn list_issues(
     &self,
@@ -199,6 +211,10 @@ pub trait GithubHost: WorkspaceHost {
 }
 
 impl GithubHost for Backend {
+  fn avatar(&self, url: &str) -> Result<Vec<u8>, String> {
+    super::settings_data::SettingsHost::fetch_image(self, url)
+  }
+
   fn remote(&self, repo_path: &str) -> Result<Option<GitRemoteInfo>, String> {
     core::github_cli::remote(repo_path)
   }
@@ -792,6 +808,9 @@ pub fn check_duration(secs: u64) -> String {
 
 pub use crate::core::running_checks::run_key;
 
+/// How tall the expanded checks list grows before it scrolls.
+pub const CHECKS_MAX_HEIGHT: f32 = 240.;
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -816,6 +835,9 @@ mod tests {
       updated_at: "2026-10-19T00:00:00Z".into(),
       comments: None,
       is_draft: false,
+      review_decision: None,
+      latest_reviews: vec![],
+      reviews: vec![],
     }
   }
 

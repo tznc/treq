@@ -41,6 +41,22 @@ pub fn state_chip(state: &str, draft: bool, p: &Palette) -> impl IntoElement {
   ui::Badge::new(label, p).tone(tone)
 }
 
+/// Where `pr`'s review stands, when it stands anywhere.
+pub fn review_chip(pr: &crate::github::GhPullRequest, p: &Palette) -> Option<impl IntoElement> {
+  use crate::github::ReviewState;
+  let state = crate::core::pr_view::review_state(pr)?;
+  let tone = match state {
+    ReviewState::Approved => Tone::Success,
+    ReviewState::ChangesRequested => Tone::Danger,
+    ReviewState::ReviewRequired => Tone::Warning,
+  };
+  Some(
+    div()
+      .debug_selector(|| "github-review-state".into())
+      .child(ui::Badge::new(state.label(), p).tone(tone)),
+  )
+}
+
 /// A label's `#rrggbb` (or bare `rrggbb`) color.
 fn hex(color: &str) -> Hsla {
   u32::from_str_radix(color.trim_start_matches('#'), 16)
@@ -284,6 +300,69 @@ pub fn comment(author: &str, date: &str, body: gpui::AnyElement, p: &Palette) ->
         .child(date.to_string()),
     )
     .child(body)
+}
+
+/// A reviewer's verdict in the timeline: their avatar (the initial until it
+/// loads), their login and what they did.
+pub fn review_event(
+  review: &crate::github::GhReview,
+  date: &str,
+  image: Option<std::sync::Arc<gpui::Image>>,
+  p: &Palette,
+) -> Div {
+  let login = review.author.login.clone();
+  let approved = review.state == "APPROVED";
+  let (icon, tone) = if approved {
+    (theme::ICON_CIRCLE_CHECK, Tone::Success)
+  } else {
+    (theme::ICON_CIRCLE_X, Tone::Danger)
+  };
+  let avatar: gpui::AnyElement = match image {
+    Some(image) => gpui::img(image)
+      .size(zpx(20.))
+      .flex_none()
+      .rounded_full()
+      .into_any_element(),
+    None => ui::text(div(), TextSize::Xs)
+      .size(zpx(20.))
+      .flex_none()
+      .rounded_full()
+      .bg(p.muted)
+      .flex()
+      .items_center()
+      .justify_center()
+      .font_weight(FontWeight::MEDIUM)
+      .text_color(p.muted_foreground)
+      .child(
+        review
+          .author
+          .login
+          .chars()
+          .next()
+          .map(|c| c.to_uppercase().to_string())
+          .unwrap_or_default(),
+      )
+      .into_any_element(),
+  };
+  ui::text(div(), TextSize::Sm)
+    .debug_selector(move || format!("github-review-event-{login}"))
+    .flex()
+    .items_center()
+    .gap_2()
+    .px_3()
+    .py_1()
+    .text_color(p.muted_foreground)
+    .child(ui::icon(icon, 14., tone.color(p)).flex_none())
+    .child(avatar)
+    .child(
+      div()
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(p.foreground)
+        .child(review.author.login.clone()),
+    )
+    .child(review.verdict().unwrap_or_default())
+    .child("·")
+    .child(date.to_string())
 }
 
 /// A dropdown menu's panel: `rounded-md border bg-popover p-1 shadow-md`.

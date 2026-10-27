@@ -350,6 +350,12 @@ impl PrReviewView {
               "Review submitted",
               format!("#{number}: {}", event.label()),
             );
+            view.send(
+              ScreenAction::Press {
+                id: "prReview.submitted".into(),
+              },
+              cx,
+            );
           }
           Err(err) => view.toast(ToastTone::Error, "Failed to submit review", err),
         }

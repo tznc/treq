@@ -122,6 +122,18 @@ pub fn state_tag(pr: &GhPullRequest) -> Tag {
   tag.small().child(state_label(pr))
 }
 
+/// Where `pr`'s review stands, when it stands anywhere.
+pub fn review_tag(pr: &GhPullRequest) -> Option<Tag> {
+  use crate::github::ReviewState;
+  let state = crate::core::pr_view::review_state(pr)?;
+  let tag = match state {
+    ReviewState::Approved => Tag::success(),
+    ReviewState::ChangesRequested => Tag::danger(),
+    ReviewState::ReviewRequired => Tag::warning(),
+  };
+  Some(tag.small().child(state.label()))
+}
+
 /// The row's second line: number, author and branches.
 pub fn detail_line(pr: &GhPullRequest) -> String {
   format!(
@@ -429,6 +441,9 @@ pub(crate) mod tests {
       updated_at: String::new(),
       comments: None,
       is_draft: draft,
+      review_decision: None,
+      latest_reviews: vec![],
+      reviews: vec![],
     }
   }
 

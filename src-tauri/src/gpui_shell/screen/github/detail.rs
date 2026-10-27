@@ -355,29 +355,49 @@ impl GithubView {
     )
   }
 
+  /// The comments and, on a pull request, its reviewers' verdicts.
   fn comments(
     &self,
     comments: &Option<Vec<GhIssueComment>>,
+    reviews: &[crate::github::GhReview],
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> Option<Div> {
-    let comments = comments.as_ref().filter(|c| !c.is_empty())?;
+    let comments = comments.as_deref().unwrap_or_default();
+    let items = crate::core::pr_view::timeline(comments, reviews);
+    if items.is_empty() {
+      return None;
+    }
     // `None` stands for the fold.
-    let shown =
-      crate::gpui_shell::screen::rows::thread(comments.len(), self.detail.comments_expanded);
+    let shown = crate::gpui_shell::screen::rows::thread(items.len(), self.detail.comments_expanded);
     Some(
       div()
         .flex()
         .flex_col()
         .gap_3()
         .child(parts::section_heading(
-          format!("Comments ({})", comments.len()),
+          if items.len() > comments.len() {
+            format!("Activity ({})", items.len())
+          } else {
+            format!("Comments ({})", comments.len())
+          },
           Some(theme::ICON_MESSAGE),
           p,
         ))
         .children(shown.iter().map(|&shown_ix| match shown_ix {
           Some(ix) => {
-            let c = &comments[ix];
+            let c = match &items[ix] {
+              crate::github::TimelineItem::Comment(c) => *c,
+              crate::github::TimelineItem::Review(r) => {
+                let image = self
+                  .avatars
+                  .get(&crate::core::pr_view::avatar_url(&r.author))
+                  .cloned()
+                  .flatten();
+                return parts::review_event(r, &time::date(&r.submitted_at), image, p)
+                  .into_any_element();
+              }
+            };
             parts::comment(
               &c.author.login,
               &time::date(&c.created_at),
@@ -402,7 +422,7 @@ impl GithubView {
           }
           None => parts::fold_row(
             "github-comments-show-earlier",
-            crate::gpui_shell::screen::rows::hidden(comments.len()),
+            crate::gpui_shell::screen::rows::hidden(items.len()),
             p,
             cx.listener(|view, _, _, cx| {
               view.detail.comments_expanded = true;
@@ -695,7 +715,7 @@ impl GithubView {
       .when(!editing, |d| {
         d.children(self.body("github-issue-body", &issue.body, p))
       })
-      .children(self.comments(&issue.comments, p, cx))
+      .children(self.comments(&issue.comments, &[], p, cx))
       .child(add)
   }
 
@@ -932,6 +952,7 @@ impl GithubView {
           .gap_2()
           .mt_1()
           .child(parts::state_chip(&pr.state, pr.is_draft, p))
+          .children(parts::review_chip(pr, p))
           .children(checks.as_ref().map(|c| self.ci_button(c, p, cx)))
           .child(
             ui::text(div(), TextSize::Sm)
@@ -952,47 +973,76 @@ impl GithubView {
           )),
       )
       .children(parts::labels(&pr.labels));
+    let open = self.detail.checks_open;
     let checks_list = checks.map(|c| {
+      let shown: Vec<_> = if open {
+        data::by_severity(&c.checks)
+          .into_iter()
+          .filter(|c| !crate::core::pr_view::is_inactive_check(c))
+          .collect()
+      } else {
+        crate::core::pr_view::collapsed_checks(&c.checks)
+      };
+      let toggle = Button::new("github-checks-toggle", p)
+        .variant(Variant::Ghost)
+        .size(Size::Sm)
+        .label(if open { "Collapse" } else { "Show all" })
+        .on_click(cx.listener(|view, _, _, cx| {
+          view.detail.checks_open = !view.detail.checks_open;
+          cx.notify();
+        }));
       div()
         .flex()
         .flex_col()
         .gap_2()
-        .child(parts::section_heading(
-          format!("Checks ({}/{})", c.passed, c.total),
-          Some(theme::ICON_LIST_CHECKS),
-          p,
-        ))
         .child(
           div()
-            .border_1()
-            .border_color(p.border)
-            .rounded(radius::MD)
-            .overflow_hidden()
-            .children(
-              data::by_severity(&c.checks)
-                .into_iter()
-                .enumerate()
-                .map(|(i, check)| {
-                  let link = check.link.clone();
-                  let copy_link = self.copy_link(link.clone());
-                  div()
-                    .when(i > 0, |d| d.border_t_1().border_color(p.border))
-                    .child(
-                      parts::check_row(
-                        format!("github-check-{i}"),
-                        check,
-                        p,
-                        Some(Box::new(
-                          cx.listener(move |view, _, _, _| view.open_url(&link)),
-                        )),
-                      )
-                      .when(!check.link.is_empty(), |row| {
-                        row.on_mouse_down(MouseButton::Right, copy_link)
-                      }),
-                    )
-                }),
-            ),
+            .flex()
+            .items_center()
+            .justify_between()
+            .child(parts::section_heading(
+              "Checks",
+              Some(theme::ICON_LIST_CHECKS),
+              p,
+            ))
+            .child(toggle),
         )
+        .child(
+          ui::text(named(div(), "github-checks-summary"), TextSize::Sm)
+            .text_color(p.muted_foreground)
+            .child(crate::core::pr_view::checks_summary(&c.checks)),
+        )
+        .when(!shown.is_empty(), |d| {
+          d.child(
+            div()
+              .id("github-checks-list")
+              .debug_selector(|| "github-checks-list".into())
+              .max_h(zpx(data::CHECKS_MAX_HEIGHT))
+              .overflow_y_scroll()
+              .border_1()
+              .border_color(p.border)
+              .rounded(radius::MD)
+              .children(shown.into_iter().enumerate().map(|(i, check)| {
+                let link = check.link.clone();
+                let copy_link = self.copy_link(link.clone());
+                div()
+                  .when(i > 0, |d| d.border_t_1().border_color(p.border))
+                  .child(
+                    parts::check_row(
+                      format!("github-check-{i}"),
+                      check,
+                      p,
+                      Some(Box::new(
+                        cx.listener(move |view, _, _, _| view.open_url(&link)),
+                      )),
+                    )
+                    .when(!check.link.is_empty(), |row| {
+                      row.on_mouse_down(MouseButton::Right, copy_link)
+                    }),
+                  )
+              })),
+          )
+        })
     });
     let treq = existing.map(|ws| self.treq_section(&ws, p, cx));
     let busy = |b| self.detail.busy.contains(&b);
@@ -1059,7 +1109,7 @@ impl GithubView {
       .children(checks_list)
       .children(treq)
       .children(self.body("github-pr-body", &pr.body, p))
-      .children(self.comments(&pr.comments, p, cx))
+      .children(self.comments(&pr.comments, &pr.reviews, p, cx))
       .child(add)
   }
 
@@ -1182,7 +1232,13 @@ impl GithubView {
   }
 
   /// `PrWorkspaceChecks`: the workflow checks of the PR's workspace.
-  fn treq_section(&self, ws: &Workspace, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+  fn treq_section(&self, ws: &Workspace, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+    if self.detail.treq.as_ref().is_some_and(|c| !c.configured()) {
+      return ui::text(named(div(), "github-treq-none"), TextSize::Sm)
+        .text_color(p.muted_foreground)
+        .child("No Treq checks configured for this repository.")
+        .into_any_element();
+    }
     let id = ws.id;
     let header = div()
       .flex()
@@ -1215,6 +1271,7 @@ impl GithubView {
           .overflow_hidden()
           .child(self.checks_panel(ws, p, cx)),
       )
+      .into_any_element()
   }
 
   fn run_check(&self, ws: &Workspace, filename: &str, job: Option<&str>, cx: &mut Context<Self>) {

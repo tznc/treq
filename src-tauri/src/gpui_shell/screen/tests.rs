@@ -93,6 +93,8 @@ struct FakeHost {
   pr_remote: Option<String>,
   pr_diff: Option<Result<String, String>>,
   pr_viewer: Option<String>,
+  /// Why submitting the review fails, when it does.
+  pr_submit_error: Option<String>,
   /// What the Logs tab reads.
   logs: Vec<crate::core::checks_logs::LogRecordView>,
   /// What the Logs tab's chart reads.

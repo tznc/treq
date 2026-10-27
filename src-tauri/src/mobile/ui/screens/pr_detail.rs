@@ -5,11 +5,11 @@
 //! [`PrAction`].
 
 use crate::mobile::ui::widgets::TouchButton as _;
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
   core::remote::{GithubAction, GithubQuery, TreqCommandRequest},
-  github::{GhIssueComment, GhPullRequest, GhReactionGroup, PrCiStatus},
+  github::{self as gh, GhIssueComment, GhPullRequest, GhReactionGroup, PrCiStatus},
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -20,15 +20,15 @@ use gpui_kit::{
     tag::Tag,
     v_flex, ActiveTheme, IconName, Sizable, StyledExt,
   },
-  div, px, App, AppContext, ClipboardItem, Context, Div, Entity, InteractiveElement, IntoElement,
-  ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
-  WeakEntity, Window,
+  div, img, px, AnyElement, App, AppContext, ClipboardItem, Context, Div, Entity, FontWeight,
+  Image, InteractiveElement, IntoElement, ParentElement, Render, ScrollHandle, SharedString,
+  StatefulInteractiveElement, Styled, WeakEntity, Window,
 };
 
 use super::{
   mutation_message, on_epoch,
-  pull_request::{check_icon, checks_summary, duration, open_url},
-  pull_requests::state_tag,
+  pull_request::{check_icon, duration, open_url},
+  pull_requests::{review_tag, state_tag},
 };
 use crate::mobile::{
   errors,
@@ -254,7 +254,14 @@ pub fn open(repo: String, number: u64, cx: &mut App) {
   );
 }
 
+/// How tall the expanded checks list grows before it scrolls.
+const CHECKS_MAX_HEIGHT: f32 = 320.;
+
 pub struct PrDetailScreen {
+  /// The checks list every check, not just the failing and running.
+  checks_open: bool,
+  /// Reviewers' avatars by URL: `None` while loading or when it failed.
+  avatars: HashMap<String, Option<Arc<Image>>>,
   repo: String,
   number: u64,
   pr: Load<GhPullRequest>,
@@ -287,12 +294,37 @@ impl PrDetailScreen {
       comment,
       busy: None,
       message: None,
+      checks_open: false,
+      avatars: HashMap::new(),
       keys: IdempotencyKeys::default(),
       picker: None,
       scroll: ScrollHandle::new(),
     };
     this.fetch(true, cx);
     this
+  }
+
+  /// Loads the avatars of the reviewers the timeline shows, once per URL.
+  fn load_avatars(&mut self, pr: &GhPullRequest, cx: &mut Context<Self>) {
+    for review in pr.reviews.iter().filter(|r| r.verdict().is_some()) {
+      let url = crate::core::pr_view::avatar_url(&review.author);
+      if self.avatars.contains_key(&url) {
+        continue;
+      }
+      self.avatars.insert(url.clone(), None);
+      let fetch = {
+        let url = url.clone();
+        async move {
+          let response = reqwest::get(&url).await.ok()?.error_for_status().ok()?;
+          Some(response.bytes().await.ok()?.to_vec())
+        }
+      };
+      load::run(cx, fetch, move |this, bytes, _| {
+        this
+          .avatars
+          .insert(url, bytes.and_then(treq_ui::image::decode));
+      });
+    }
   }
 
   pub fn reload(&mut self, cx: &mut Context<Self>) {
@@ -309,8 +341,11 @@ impl PrDetailScreen {
     load::run(
       cx,
       remote::read_cached::<GhPullRequest>(request(&self.repo, self.number), join),
-      |this, result, _| match result {
-        Ok(pr) => this.pr = Load::Ready(pr),
+      |this, result, cx| match result {
+        Ok(pr) => {
+          this.load_avatars(&pr, cx);
+          this.pr = Load::Ready(pr);
+        }
         Err(error) if this.pr.ready().is_some() => {
           this.message = Some((
             false,
@@ -548,9 +583,13 @@ impl PrDetailScreen {
 
   fn checks_section(&self, cx: &mut Context<Self>) -> Div {
     let title = match &self.checks {
-      Load::Ready(Some(checks)) => format!("Checks · {}", checks_summary(checks)),
+      Load::Ready(Some(checks)) => format!(
+        "Checks · {}",
+        crate::core::pr_view::checks_summary(&checks.checks)
+      ),
       _ => "Checks".into(),
     };
+    let open = self.checks_open;
     let card = widgets::card(cx);
     let card = match &self.checks {
       Load::Idle | Load::Loading => card.child(widgets::centered_message("Loading checks…", cx)),
@@ -562,28 +601,95 @@ impl PrDetailScreen {
         card.child(widgets::centered_message("No checks reported.", cx))
       }
       Load::Ready(Some(checks)) => {
-        card.children(checks.checks.iter().enumerate().map(|(i, check)| {
-          let link = check.link.clone();
-          widgets::row_full(
-            ("check", i),
-            Some(check_icon(check, cx)),
-            check.name.clone(),
-            check.duration_secs.map(|s| duration(s).into()),
-            None,
-            cx,
-          )
-          .when(!link.is_empty(), |row| {
-            row.on_click(cx.listener(move |this, _, _, cx| {
-              if let Err(error) = open_url(&link) {
-                this.message = Some((false, error));
-              }
+        let shown: Vec<_> = if open {
+          crate::core::pr_view::active_checks(&checks.checks).collect()
+        } else {
+          crate::core::pr_view::collapsed_checks(&checks.checks)
+        };
+        let rows = div()
+          .id("pr-checks-list")
+          .max_h(px(CHECKS_MAX_HEIGHT))
+          .overflow_y_scroll()
+          .children(shown.into_iter().enumerate().map(|(i, check)| {
+            let link = check.link.clone();
+            widgets::row_full(
+              ("check", i),
+              Some(check_icon(check, cx)),
+              check.name.clone(),
+              check.duration_secs.map(|s| duration(s).into()),
+              None,
+              cx,
+            )
+            .when(!link.is_empty(), |row| {
+              row.on_click(cx.listener(move |this, _, _, cx| {
+                if let Err(error) = open_url(&link) {
+                  this.message = Some((false, error));
+                }
+                cx.notify();
+              }))
+            })
+          }));
+        card.child(rows).child(
+          Button::new("pr-checks-toggle")
+            .ghost()
+            .w_full()
+            .label(if open { "Collapse" } else { "Show all checks" })
+            .on_click(cx.listener(|this, _, _, cx| {
+              this.checks_open = !this.checks_open;
               cx.notify();
-            }))
-          })
-        }))
+            })),
+        )
       }
     };
     widgets::section(title, cx).child(card)
+  }
+
+  /// A reviewer's verdict: their avatar (the initial until it loads), their
+  /// login and what they did.
+  fn review_event(&self, review: &gh::GhReview, cx: &mut Context<Self>) -> Div {
+    let theme = cx.theme();
+    let approved = review.state == "APPROVED";
+    let login = review.author.login.clone();
+    let image = self
+      .avatars
+      .get(&crate::core::pr_view::avatar_url(&review.author))
+      .cloned()
+      .flatten();
+    let avatar: AnyElement = match image {
+      Some(image) => img(image).size(px(24.)).rounded_full().into_any_element(),
+      None => div()
+        .size(px(24.))
+        .rounded_full()
+        .bg(theme.muted)
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_xs()
+        .text_color(theme.muted_foreground)
+        .child(
+          login
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_default(),
+        )
+        .into_any_element(),
+    };
+    let tag = if approved {
+      Tag::success()
+    } else {
+      Tag::danger()
+    };
+    h_flex()
+      .gap_2()
+      .px_1()
+      .py_1()
+      .items_center()
+      .flex_wrap()
+      .child(avatar)
+      .child(div().font_weight(FontWeight::MEDIUM).child(login))
+      .child(tag.small().child(review.verdict().unwrap_or_default()))
+      .child(widgets::muted(day(&review.submitted_at), cx))
   }
 
   fn comment_card(&self, i: usize, comment: &GhIssueComment, cx: &mut Context<Self>) -> Div {
@@ -711,6 +817,7 @@ impl Render for PrDetailScreen {
           .gap_2()
           .flex_wrap()
           .child(state_tag(&pr))
+          .children(review_tag(&pr))
           .child(widgets::muted(
             format!("#{} by {}", pr.number, pr.author.login),
             cx,
@@ -738,12 +845,25 @@ impl Render for PrDetailScreen {
         Some(body) => widgets::markdown("pr-body", &body, cx),
         None => widgets::muted("No description provided.", cx),
       }));
-    let comment_rows: Vec<Div> = comments
-      .iter()
-      .enumerate()
-      .map(|(i, c)| self.comment_card(i, c, cx))
+    let comment_rows: Vec<Div> = crate::core::pr_view::timeline(&comments, &pr.reviews)
+      .into_iter()
+      .map(|item| match item {
+        gh::TimelineItem::Comment(c) => {
+          let i = comments
+            .iter()
+            .position(|x| x.id == c.id)
+            .unwrap_or_default();
+          self.comment_card(i, c, cx)
+        }
+        gh::TimelineItem::Review(r) => self.review_event(r, cx),
+      })
       .collect();
-    let comments_section = widgets::section(format!("Comments · {}", comments.len()), cx)
+    let heading = if comment_rows.len() > comments.len() {
+      format!("Activity · {}", comment_rows.len())
+    } else {
+      format!("Comments · {}", comments.len())
+    };
+    let comments_section = widgets::section(heading, cx)
       .when(comment_rows.is_empty(), |s| {
         s.child(widgets::card(cx).child(widgets::centered_message("No comments yet.", cx)))
       })
@@ -801,7 +921,16 @@ impl Render for PrDetailScreen {
               .h(px(widgets::CTA_H))
               .label("Review changes")
               .on_click(cx.listener(|this, _, _, cx| {
-                super::pr_review::open(this.repo.clone(), this.number, cx)
+                let screen = cx.weak_entity();
+                let on_submitted = Rc::new(move |cx: &mut App| {
+                  screen
+                    .update(cx, |screen, cx| {
+                      screen.message = Some((true, "Review submitted.".into()));
+                      screen.reload(cx);
+                    })
+                    .ok();
+                });
+                super::pr_review::open(this.repo.clone(), this.number, on_submitted, cx)
               }))
               .touch(),
           ),

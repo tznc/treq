@@ -249,6 +249,70 @@ pub struct GhPullRequest {
   pub comments: Option<Vec<GhIssueComment>>,
   #[serde(default, alias = "is_draft")]
   pub is_draft: bool,
+  /// GitHub's `reviewDecision`; empty or missing without branch protection.
+  #[serde(default, alias = "review_decision")]
+  pub review_decision: Option<String>,
+  /// Each reviewer's latest review.
+  #[serde(default, alias = "latest_reviews")]
+  pub latest_reviews: Vec<GhLatestReview>,
+  /// Every submitted review, oldest first.
+  #[serde(default)]
+  pub reviews: Vec<GhReview>,
+}
+
+/// One submitted review (`reviews`).
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
+#[serde(rename_all(deserialize = "camelCase"))]
+pub struct GhReview {
+  pub author: GhAuthor,
+  /// APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED or PENDING.
+  pub state: String,
+  #[serde(default, alias = "submitted_at")]
+  pub submitted_at: String,
+}
+
+impl GhReview {
+  /// What the timeline says the reviewer did; `None` for reviews it leaves
+  /// out (plain comments, dismissed and pending ones).
+  pub fn verdict(&self) -> Option<&'static str> {
+    match self.state.as_str() {
+      "APPROVED" => Some("approved these changes"),
+      "CHANGES_REQUESTED" => Some("requested changes"),
+      _ => None,
+    }
+  }
+}
+
+/// One entry of a pull request's timeline.
+pub enum TimelineItem<'a> {
+  Comment(&'a GhIssueComment),
+  Review(&'a GhReview),
+}
+
+/// One reviewer's latest review (`latestReviews`).
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
+pub struct GhLatestReview {
+  pub author: GhAuthor,
+  /// APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED or PENDING.
+  pub state: String,
+}
+
+/// Where a pull request's review stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReviewState {
+  Approved,
+  ChangesRequested,
+  ReviewRequired,
+}
+
+impl ReviewState {
+  pub fn label(self) -> &'static str {
+    match self {
+      ReviewState::Approved => "Approved",
+      ReviewState::ChangesRequested => "Changes requested",
+      ReviewState::ReviewRequired => "Review required",
+    }
+  }
 }
 
 /// ETXTBSY: the target binary is momentarily open for writing elsewhere (e.g.
@@ -855,7 +919,7 @@ pub fn gh_view_pr_impl(
             "--repo",
             repo_full_name,
             "--json",
-            "number,title,state,url,body,author,labels,headRefName,baseRefName,mergeStateStatus,createdAt,updatedAt,comments,isDraft",
+            "number,title,state,url,body,author,labels,headRefName,baseRefName,mergeStateStatus,createdAt,updatedAt,comments,isDraft,reviewDecision,latestReviews,reviews",
         ],
         extended_path,
     )?;
@@ -2328,6 +2392,9 @@ mod tests {
         updated_at: "u".into(),
         comments: Some(vec![comment]),
         is_draft: true,
+        review_decision: None,
+        latest_reviews: vec![],
+        reviews: vec![],
       }],
       has_more: true,
       end_cursor: Some("x".into()),

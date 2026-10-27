@@ -85,6 +85,9 @@ pub(super) fn pr(number: u64, head: &str, base: &str) -> GhPullRequest {
     updated_at: "2026-10-18T10:00:00Z".into(),
     comments: None,
     is_draft: false,
+    review_decision: None,
+    latest_reviews: vec![],
+    reviews: vec![],
   }
 }
 
@@ -115,6 +118,11 @@ impl FakeHost {
 }
 
 impl GithubHost for FakeHost {
+  fn avatar(&self, url: &str) -> Result<Vec<u8>, String> {
+    self.record(format!("read avatar {url}"));
+    Err("offline".into())
+  }
+
   fn remote(&self, _: &str) -> Result<Option<GitRemoteInfo>, String> {
     Ok(self.github.remote.clone())
   }
@@ -461,6 +469,27 @@ fn github_reads_a_new_filter_from_the_route(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn github_rereads_the_pr_when_the_route_asks(cx: &mut TestAppContext) {
+  let (mut h, host) = harness(cx, prs(), route("prs", Some(1), false));
+  h.cx.run_until_parked();
+  let reads = |host: &FakeHost| {
+    let calls = host.calls();
+    (
+      calls.iter().filter(|c| *c == "read pr 1").count(),
+      calls.iter().filter(|c| *c == "read checks 1").count(),
+    )
+  };
+  let before = reads(&host);
+  h.update(|s| {
+    if let View::Github(route) = &mut s.view {
+      route.reload += 1;
+    }
+  });
+  h.cx.run_until_parked();
+  assert_eq!(reads(&host), (before.0 + 1, before.1 + 1));
+}
+
+#[gpui::test]
 fn github_shows_list_failures_and_retries(cx: &mut TestAppContext) {
   let (mut h, host) = harness(
     cx,
@@ -479,6 +508,24 @@ fn github_shows_list_failures_and_retries(cx: &mut TestAppContext) {
     .filter(|c| c.starts_with("read issues"))
     .count();
   assert_eq!(reads, 2);
+}
+
+#[gpui::test]
+fn github_pr_detail_shows_the_review_decision(cx: &mut TestAppContext) {
+  let mut approved = pr(1, "feat/a", "main");
+  approved.review_decision = Some("APPROVED".into());
+  let fake = Fake {
+    pr: Some(approved),
+    ..prs()
+  };
+  let (mut h, _) = harness(cx, fake, route("prs", Some(1), false));
+  assert!(h.drawn("github-review-state"));
+}
+
+#[gpui::test]
+fn github_pr_detail_hides_the_review_decision_without_reviews(cx: &mut TestAppContext) {
+  let (mut h, _) = harness(cx, prs(), route("prs", Some(1), false));
+  assert!(!h.drawn("github-review-state"));
 }
 
 #[gpui::test]
@@ -728,6 +775,53 @@ fn checks() -> PrCiStatus {
 }
 
 #[gpui::test]
+fn github_pr_detail_collapses_passing_checks(cx: &mut TestAppContext) {
+  let (mut h, _) = harness(
+    cx,
+    Fake {
+      checks: Some(checks()),
+      ..prs()
+    },
+    route("prs", Some(1), false),
+  );
+  assert!(h.drawn("github-checks-summary"));
+  assert!(h.drawn("github-check-0"), "the failing check stays listed");
+  assert!(!h.drawn("github-check-1"), "the passing one folds away");
+  h.click("github-checks-toggle");
+  assert!(h.drawn("github-check-1"));
+  h.click("github-checks-toggle");
+  assert!(!h.drawn("github-check-1"));
+}
+
+#[gpui::test]
+fn github_pr_detail_caps_the_expanded_checks(cx: &mut TestAppContext) {
+  let mut many = checks();
+  many.checks = (0..40)
+    .map(|i| PrCheckEntry {
+      name: format!("job {i}"),
+      bucket: "pass".into(),
+      link: String::new(),
+      duration_secs: None,
+    })
+    .collect();
+  let (mut h, _) = harness(
+    cx,
+    Fake {
+      checks: Some(many),
+      ..prs()
+    },
+    route("prs", Some(1), false),
+  );
+  h.click("github-checks-toggle");
+  h.cx.run_until_parked();
+  let list = h.cx.debug_bounds("github-checks-list").expect("list");
+  assert!(
+    list.size.height <= gpui::px(crate::gpui_shell::screen::github_data::CHECKS_MAX_HEIGHT),
+    "{list:?}"
+  );
+}
+
+#[gpui::test]
 fn github_pr_detail_changes_the_pr(cx: &mut TestAppContext) {
   let (mut h, host) = harness(
     cx,
@@ -870,6 +964,21 @@ fn github_pr_detail_shows_a_run_started_elsewhere_as_running(cx: &mut TestAppCon
   h.click("github-run-0");
   h.cx.run_until_parked();
   assert!(!host.calls().iter().any(|c| c.starts_with("run ")));
+}
+
+#[gpui::test]
+fn github_pr_detail_notes_when_no_treq_checks_are_configured(cx: &mut TestAppContext) {
+  let fake = Fake {
+    workspaces: vec![workspace(3, "feat/a", Some("main"))],
+    treq: TreqChecks {
+      trusted: true,
+      ..TreqChecks::default()
+    },
+    ..prs()
+  };
+  let (mut h, _) = harness(cx, fake, route("prs", Some(1), false));
+  assert!(!h.drawn("github-treq-checks"));
+  assert!(h.drawn("github-treq-none"));
 }
 
 #[gpui::test]
@@ -1085,6 +1194,37 @@ fn github_long_comment_thread_folds_the_middle_and_expands_in_place(cx: &mut Tes
   h.cx.run_until_parked();
   assert_eq!(shown(&mut h), (0..8).collect::<Vec<_>>());
   assert!(!h.drawn("github-comments-show-earlier"));
+}
+
+#[gpui::test]
+fn github_pr_timeline_shows_who_approved(cx: &mut TestAppContext) {
+  let mut approved = pr(1, "feat/a", "main");
+  approved.reviews = vec![
+    crate::github::GhReview {
+      author: author("alice"),
+      state: "APPROVED".into(),
+      submitted_at: "2026-08-02T10:00:00Z".into(),
+    },
+    crate::github::GhReview {
+      author: author("bob"),
+      state: "COMMENTED".into(),
+      submitted_at: "2026-08-02T11:00:00Z".into(),
+    },
+  ];
+  let fake = Fake {
+    pr: Some(approved),
+    ..prs()
+  };
+  let (mut h, host) = harness(cx, fake, route("prs", Some(1), false));
+  h.cx.run_until_parked();
+  assert!(h.drawn("github-review-event-alice"));
+  assert!(
+    !h.drawn("github-review-event-bob"),
+    "a plain comment review is not an event"
+  );
+  assert!(host
+    .calls()
+    .contains(&"read avatar https://github.com/alice.png?size=64".to_string()));
 }
 
 #[gpui::test]
