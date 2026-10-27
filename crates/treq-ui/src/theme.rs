@@ -490,6 +490,12 @@ impl Palette {
     self.primary.opacity(if self.dark { 0.22 } else { 0.12 })
   }
 
+  /// Hover on a segment of a muted track (segmented tabs), where
+  /// [`Palette::hover`] can equal the track's own fill.
+  pub fn segment_hover(&self) -> Hsla {
+    self.foreground.opacity(if self.dark { 0.1 } else { 0.07 })
+  }
+
   /// Hover on something already filled with [`Palette::selected`].
   pub fn selected_hover(&self) -> Hsla {
     self.primary.opacity(if self.dark { 0.32 } else { 0.2 })
@@ -673,6 +679,20 @@ mod tests {
       assert_eq!(
         theme.button(gpui_bootstrap::Variant::Primary).color,
         theme.colors.white
+      );
+    }
+  }
+
+  #[test]
+  fn the_segment_hover_shows_on_the_muted_strip_in_both_themes() {
+    for dark in [false, true] {
+      let p = palette(dark);
+      let on_strip = p.muted.blend(p.segment_hover());
+      assert!(
+        (on_strip.l - p.muted.l).abs() > 0.03,
+        "dark={dark}: {:?} on {:?}",
+        on_strip,
+        p.muted
       );
     }
   }

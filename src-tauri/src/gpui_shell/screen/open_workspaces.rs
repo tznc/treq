@@ -1241,55 +1241,37 @@ impl OpenWorkspacesDialog {
     cx: &mut Context<Self>,
   ) -> Div {
     let current = self.integration();
-    let tabs = div()
-      .flex()
-      .gap_1()
-      .p_1()
-      .rounded(radius::MD)
-      .bg(p.muted)
-      .children(self.integrations().into_iter().map(|tab| {
+    let integrations = self.integrations();
+    let selected = integrations
+      .iter()
+      .position(|tab| Some(*tab) == current)
+      .unwrap_or(0);
+    let tabs = ui::Tabs::segmented("open-workspaces-tabs", p)
+      .tabs(integrations.iter().map(|tab| {
         let (icon, label, picked) = match tab {
           Integration::Github => (theme::ICON_GITHUB, "GitHub", self.chosen.len()),
           Integration::Linear => (theme::ICON_LINEAR, "Linear", self.chosen_issues.len()),
         };
-        let active = Some(tab) == current;
-        let color = if active {
-          p.foreground
+        let tab = ui::Tab::new(format!("open-workspaces-tab-{label}"), label).icon(icon);
+        if picked > 0 {
+          tab.count(picked)
         } else {
-          p.muted_foreground
-        };
-        ui::text(div(), TextSize::Sm)
-          .id(SharedString::from(format!("open-workspaces-tab-{label}")))
-          .role(gpui::Role::Tab)
-          .aria_label(label)
-          .aria_selected(active)
-          .flex()
-          .flex_1()
-          .justify_center()
-          .items_center()
-          .gap_1p5()
-          .px_3()
-          .py_1()
-          .rounded(radius::MD)
-          .font_weight(FontWeight::MEDIUM)
-          .cursor_pointer()
-          .text_color(color)
-          .map(|this| {
-            if active {
-              this.bg(p.selected())
-            } else {
-              this.hover(|s| s.bg(p.hover()).text_color(p.foreground))
-            }
-          })
-          .child(ui::icon(icon, 14., color))
-          .child(label)
-          .when(picked > 0, |this| this.child(ui::Count::new(picked, p)))
-          .on_click(cx.listener(move |view, _, _, cx| {
-            view.picked = Some(tab);
-            cx.notify();
-          }))
-          .test_support()
-      }));
+          tab
+        }
+      }))
+      .selected(selected)
+      .on_select({
+        let view = cx.weak_entity();
+        move |ix, _, cx| {
+          let tab = integrations[ix];
+          view
+            .update(cx, |view, cx| {
+              view.picked = Some(tab);
+              cx.notify();
+            })
+            .ok();
+        }
+      });
     div()
       .flex()
       .flex_col()

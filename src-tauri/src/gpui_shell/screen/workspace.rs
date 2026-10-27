@@ -21,7 +21,6 @@ use std::{
   time::Duration,
 };
 
-use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, Animation, AnimationExt as _, App, Bounds, Context, Div, Entity,
@@ -1636,100 +1635,52 @@ impl WorkspaceView {
       .on_right_click(self.copy_link(self.pr_url().map(|url| format!("{url}/checks"))))
   }
 
-  fn workspace_tabs(&self, row: &TabRow, p: &Palette) -> Div {
+  /// The workspace's tab bar: the view tabs, then its busy and loc status.
+  fn tab_bar(&self, row: &TabRow, p: &Palette) -> Div {
     // Counts are neutral; a conflict shows once, as a danger dot.
-    let pill = |count: u32, tone: Tone, id: &'static str| {
-      div()
-        .debug_selector(move || id.into())
-        .flex()
-        .items_center()
-        .gap_1p5()
-        .child(ui::Count::new(count as usize, p))
-        .when(tone == Tone::Conflict, |el| {
-          el.child(ui::Dot::new(ui::Tone::Danger, p))
-        })
+    let commits = ui::Tab::new("workspace-tab-commits", "Commits").icon(theme::ICON_COMMIT);
+    let commits = match &row.commits {
+      Some(CommitsLabel::Count { count, tone }) => {
+        let tab = commits.count(*count as usize);
+        if *tone == Tone::Conflict {
+          tab.dot(ui::Tone::Danger)
+        } else {
+          tab
+        }
+      }
+      Some(CommitsLabel::HomeConflict) => commits.dot(ui::Tone::Danger),
+      None => commits,
     };
-    let mut tabs: Vec<(Tab, &'static str, &'static str, Option<Div>)> = vec![
-      (Tab::Overview, theme::ICON_CODE, "Code", None),
-      (
-        Tab::Commits,
-        theme::ICON_COMMIT,
-        "Commits",
-        row.commits.as_ref().map(|label| match label {
-          CommitsLabel::Count { count, tone } => pill(*count, *tone, "commits-tab-count"),
-          CommitsLabel::HomeConflict => div()
-            .debug_selector(|| "commits-tab-conflict-icon".into())
-            .child(ui::Dot::new(ui::Tone::Danger, p)),
-        }),
-      ),
-      (
-        Tab::Changes,
-        theme::ICON_FILE_DIFF,
-        "Changes",
-        row
-          .changes
-          .as_ref()
-          .map(|c| pill(c.count, c.tone, "review-change-count")),
-      ),
+    let changes = ui::Tab::new("workspace-tab-changes", "Changes").icon(theme::ICON_FILE_DIFF);
+    let changes = match &row.changes {
+      Some(c) if c.tone == Tone::Conflict => changes.count(c.count as usize).dot(ui::Tone::Danger),
+      Some(c) => changes.count(c.count as usize),
+      None => changes,
+    };
+    let mut values = vec![Tab::Overview, Tab::Commits, Tab::Changes];
+    let mut tabs = vec![
+      ui::Tab::new("workspace-tab-overview", "Code").icon(theme::ICON_CODE),
+      commits,
+      changes,
     ];
     if row.logs {
-      tabs.push((Tab::Logs, theme::ICON_DATABASE, "Logs", None));
+      values.push(Tab::Logs);
+      tabs.push(ui::Tab::new("workspace-tab-logs", "Logs").icon(theme::ICON_DATABASE));
     }
-    let list = div()
-      .flex()
-      // At a large zoom the tabs wrap inside their pill rather than run past
-      // the window's edge.
-      .flex_wrap()
-      .gap_1()
-      .p_1()
-      .rounded(radius::MD)
-      .bg(p.muted)
-      .children(tabs.into_iter().map(|(tab, icon, label, extra)| {
-        let active = tab == row.tab;
-        let id = SharedString::from(format!("workspace-tab-{}", tab.value()));
-        let selector = id.to_string();
-        let sink = self.sink.clone();
-        let color = if active {
-          p.foreground
-        } else {
-          p.muted_foreground
-        };
-        ui::text(div(), TextSize::Sm)
-          .id(id)
-          .debug_selector(move || selector)
-          .role(gpui::Role::Tab)
-          .aria_label(label)
-          .aria_selected(active)
-          .test_support()
-          .flex()
-          .items_center()
-          .gap_1p5()
-          .px_3()
-          .py_1()
-          .rounded(radius::MD)
-          .font_weight(FontWeight::MEDIUM)
-          .cursor_pointer()
-          .text_color(color)
-          .map(|this| {
-            if active {
-              this.bg(p.background).shadow_sm()
-            } else {
-              this.hover(|s| s.bg(p.hover()).text_color(p.foreground))
-            }
-          })
-          .child(ui::icon(icon, 16., color))
-          .child(label)
-          .children(extra)
-          .on_click(move |_, _, cx| {
-            sink(
-              ScreenAction::Field {
-                field: "workspace.tab".into(),
-                value: tab.value().into(),
-              },
-              cx,
-            )
-          })
-      }));
+    let selected = values.iter().position(|t| *t == row.tab).unwrap_or(0);
+    let sink = self.sink.clone();
+    let list = ui::Tabs::segmented("workspace-tabs", p)
+      .tabs(tabs)
+      .selected(selected)
+      .on_select(move |ix, _, cx| {
+        sink(
+          ScreenAction::Field {
+            field: "workspace.tab".into(),
+            value: values[ix].value().into(),
+          },
+          cx,
+        )
+      });
 
     let mut status = div().flex().flex_none().items_center().gap_3();
     if let Some(busy) = &row.busy {
@@ -2410,7 +2361,7 @@ impl Render for WorkspaceView {
     };
     let tab_row = snapshot
       .and_then(|snapshot| snapshot.tab_row)
-      .map(|row| self.workspace_tabs(&row, &p));
+      .map(|row| self.tab_bar(&row, &p));
     let code = self.tab_body(cx);
     let remote = self.route.remote_chrome.clone();
     let cut_off = remote.as_ref().is_some_and(|r| r.cut_off);

@@ -20,7 +20,7 @@ fn the_tab_row_shows_the_loc_marker_and_change_count(cx: &mut TestAppContext) {
   assert!(inside(&mut h, "loc-diff-marker", "workspace-tab-row"));
   assert!(inside(
     &mut h,
-    "review-change-count",
+    "workspace-tab-changes-count",
     "workspace-tab-changes"
   ));
 }
@@ -44,7 +44,7 @@ fn a_workspace_without_changes_shows_neither_badge(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, host, workspace_route());
   assert!(h.drawn("workspace-tab-changes"));
   assert!(!h.drawn("loc-diff-marker"));
-  assert!(!h.drawn("review-change-count"));
+  assert!(!h.drawn("workspace-tab-changes-count"));
 }
 
 /// `sumWorkspaceLocFromLog`: the workspace's commits and its tentative

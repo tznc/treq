@@ -527,6 +527,25 @@ fn navigation() -> Vec<Example> {
     })
     .component("Tabs")
     .title("Playground"),
+    example!("tabs/segmented", |_, _, cx| {
+      let p = p(cx);
+      Tabs::segmented("views", &p)
+        .tab(Tab::new("code", "Code").icon(theme::ICON_CODE))
+        .tab(
+          Tab::new("commits", "Commits")
+            .icon(theme::ICON_COMMIT)
+            .count(2),
+        )
+        .tab(
+          Tab::new("changes", "Changes")
+            .icon(theme::ICON_FILE_DIFF)
+            .count(3),
+        )
+        .tab(Tab::new("logs", "Logs").icon(theme::ICON_DATABASE))
+        .selected(1)
+    })
+    .component("Tabs")
+    .title("Segmented with icons"),
     example!("row/densities", |_, _, cx| {
       let p = p(cx);
       div()

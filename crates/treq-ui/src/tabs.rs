@@ -26,6 +26,7 @@ pub struct Tab {
   badge: Option<(SharedString, Tone)>,
   count: Option<usize>,
   dot: Option<Tone>,
+  icon: Option<&'static str>,
   disabled: bool,
 }
 
@@ -37,8 +38,15 @@ impl Tab {
       badge: None,
       count: None,
       dot: None,
+      icon: None,
       disabled: false,
     }
+  }
+
+  /// A leading icon in the tab's text colour.
+  pub fn icon(mut self, path: &'static str) -> Self {
+    self.icon = Some(path);
+    self
   }
 
   /// A label for what the tab is, such as a `PRO` plan chip.
@@ -92,6 +100,23 @@ impl Tabs {
       focus: None,
       on_select: None,
     }
+  }
+
+  /// A segmented strip: a muted track, the active segment filled with
+  /// [`Palette::selected`] and no shadow, hovers with
+  /// [`Palette::segment_hover`].
+  pub fn segmented(id: impl Into<SharedString>, palette: &Palette) -> Self {
+    Self::new(id, palette).style(TabsStyle::Segmented)
+  }
+
+  /// A segment's fill at rest.
+  pub fn segment_fill(&self, active: bool) -> Option<gpui::Hsla> {
+    active.then(|| self.palette.selected())
+  }
+
+  /// A segment's fill under the pointer.
+  pub fn segment_hover(&self) -> gpui::Hsla {
+    self.palette.segment_hover()
   }
 
   pub fn style(mut self, style: TabsStyle) -> Self {
@@ -150,6 +175,8 @@ impl RenderOnce for Tabs {
     let disabled: Vec<bool> = self.tabs.iter().map(|tab| tab.disabled).collect();
     let on_key = self.on_select.clone();
     let selector = self.id.to_string();
+    let selected_fill = self.segment_fill(true);
+    let segment_hover = self.segment_hover();
     div()
       .id(self.id)
       .debug_selector(move || selector)
@@ -183,6 +210,7 @@ impl RenderOnce for Tabs {
         let active = ix == selected;
         let on_select = self.on_select.clone().filter(|_| !tab.disabled);
         let selector = tab.id.to_string();
+        let id = tab.id.to_string();
         let fg = if tab.disabled {
           p.muted_foreground.opacity(0.6)
         } else if active {
@@ -207,7 +235,7 @@ impl RenderOnce for Tabs {
               el.h(zpx(24.))
                 .px_2()
                 .rounded(zpx(theme::RADIUS_MD - 2.))
-                .when(active, |el| el.bg(p.background).shadow_xs())
+                .when_some(selected_fill.filter(|_| active), |el, fill| el.bg(fill))
             } else {
               el.h(zpx(32.))
                 .border_b_2()
@@ -220,15 +248,32 @@ impl RenderOnce for Tabs {
             }
           })
           .when(!tab.disabled && !active, |el| {
-            el.cursor_pointer()
-              .hover(move |s| s.text_color(p.foreground))
+            el.cursor_pointer().hover(move |s| {
+              let s = s.text_color(p.foreground);
+              if segmented {
+                s.bg(segment_hover)
+              } else {
+                s
+              }
+            })
           })
+          .when_some(tab.icon, |el, path| el.child(crate::icon(path, 16., fg)))
           .child(tab.label)
           .when_some(tab.badge, |el, (label, tone)| {
             el.child(Badge::new(label, &p).tone(tone))
           })
-          .when_some(tab.count, |el, count| el.child(Count::new(count, &p)))
-          .when_some(tab.dot, |el, tone| el.child(Dot::new(tone, &p)))
+          .when_some(tab.count, |el, count| {
+            let id = format!("{id}-count");
+            el.child(
+              div()
+                .debug_selector(move || id)
+                .child(Count::new(count, &p)),
+            )
+          })
+          .when_some(tab.dot, |el, tone| {
+            let id = format!("{id}-dot");
+            el.child(div().debug_selector(move || id).child(Dot::new(tone, &p)))
+          })
           .when_some(on_select, move |el, f| {
             el.on_click(move |_, window, cx| f(ix, window, cx))
           })
@@ -257,6 +302,21 @@ mod tests {
     assert_eq!(tabs.tabs[4].badge, Some(("PRO".into(), Tone::Neutral)));
     assert_eq!(tabs.tabs[2].dot, Some(Tone::Danger));
     assert_eq!(tabs.selected, 1);
+  }
+
+  #[test]
+  fn segmented_tabs_fill_the_active_segment_with_the_selected_token() {
+    for dark in [false, true] {
+      let p = theme::palette(dark);
+      let tabs = Tabs::segmented("views", &p)
+        .tab(Tab::new("code", "Code").icon(theme::ICON_CODE))
+        .tab(Tab::new("commits", "Commits"));
+      assert_eq!(tabs.style, TabsStyle::Segmented);
+      assert_eq!(tabs.tabs[0].icon, Some(theme::ICON_CODE));
+      assert_eq!(tabs.segment_fill(true), Some(p.selected()));
+      assert_eq!(tabs.segment_fill(false), None);
+      assert_eq!(tabs.segment_hover(), p.segment_hover());
+    }
   }
 
   #[test]

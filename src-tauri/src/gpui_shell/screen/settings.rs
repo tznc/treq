@@ -10,7 +10,6 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{collections::HashSet, rc::Rc, sync::Arc, time::Duration};
 
-use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, AnyElement, Context, FontWeight, Role, SharedString, Window,
@@ -1883,33 +1882,16 @@ impl Render for SettingsView {
       .children(s.tabs.iter().map(|&tab| {
         let active = tab == s.tab;
         let id = SharedString::from(format!("settings-tab-{}", tab.value()));
-        let selector = id.to_string();
         let sink = self.sink.clone();
-        ui::text(div(), TextSize::Sm)
-          .id(id)
-          .debug_selector(move || selector)
+        ui::Row::new(id, &p)
           .role(Role::Tab)
-          .aria_label(tab.label())
-          .aria_selected(active)
-          .test_support()
-          .flex()
-          .items_center()
-          .gap_2()
+          .label(tab.label())
+          .density(ui::RowDensity::Default)
+          .selected(active)
           .px_4()
-          .py_2()
           .rounded(radius::MD)
           .font_weight(FontWeight::MEDIUM)
-          .cursor_pointer()
-          .map(|this| {
-            if active {
-              this.bg(p.accent).text_color(p.foreground)
-            } else {
-              this
-                .text_color(p.muted_foreground)
-                .hover(|style| style.bg(p.hover()).text_color(p.foreground))
-            }
-          })
-          .child(ui::icon(
+          .leading(ui::icon(
             tab.icon(),
             16.,
             if active {

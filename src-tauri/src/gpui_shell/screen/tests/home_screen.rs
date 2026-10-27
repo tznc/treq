@@ -160,8 +160,8 @@ fn workspace_header_reads_again_when_the_model_refreshes(cx: &mut TestAppContext
 #[gpui::test]
 fn workspace_tabs_switch_through_react(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
-  assert!(h.drawn("commits-tab-count"));
-  assert!(h.drawn("review-change-count"));
+  assert!(h.drawn("workspace-tab-commits-count"));
+  assert!(h.drawn("workspace-tab-changes-count"));
   assert!(h.drawn("loc-diff-marker"));
   assert!(!h.drawn("workspace-tab-logs"));
   h.click("workspace-tab-changes");
