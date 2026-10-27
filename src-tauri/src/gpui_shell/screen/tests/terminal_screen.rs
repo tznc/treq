@@ -1362,3 +1362,50 @@ fn terminal_reports_the_mouse_once_the_program_asks(cx: &mut TestAppContext) {
     "{writes:?}"
   );
 }
+
+#[gpui::test]
+fn agent_terminals_register_for_messages_by_harness_and_session(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  let calls = host.calls();
+  assert!(
+    calls.contains(&format!("msg register {pty} claude-3 /repo Some(\"feature/login\")")),
+    "{calls:?}"
+  );
+}
+
+#[gpui::test]
+fn typing_into_an_agent_terminal_notes_the_keystroke(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  h.click("terminal-body");
+  h.cx.simulate_input("l");
+  assert!(host.calls().contains(&format!("msg key {pty}")), "{:?}", host.calls());
+}
+
+#[gpui::test]
+fn waiting_messages_show_a_badge_and_a_banner(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  assert!(!h.drawn("terminal-msg-banner"));
+  host.msg_waiting.lock().unwrap().insert(
+    pty.clone(),
+    terminal_data::WaitingMessages {
+      count: 1,
+      from: "codex-1".into(),
+      body: "rebase done?".into(),
+    },
+  );
+  h.cx.executor().advance_clock(std::time::Duration::from_secs(2));
+  h.cx.run_until_parked();
+  assert!(h.drawn("terminal-msg-banner"));
+  assert!(h.drawn("terminal-msg-badge"));
+  assert!(!h.drawn("terminal-msg-body"), "the text shows only when asked");
+  h.click("terminal-msg-show");
+  assert!(h.drawn("terminal-msg-body"));
+  h.click("terminal-msg-deliver");
+  assert!(host.calls().contains(&format!("msg deliver {pty}")), "{:?}", host.calls());
+}

@@ -284,23 +284,28 @@ impl Hub {
     reports
   }
 
-  /// How many messages wait for `pty_id`: its badge.
+  /// How many unread messages wait for `pty_id`: its badge.
   pub fn waiting(&self, pty_id: &str, now_ms: u64) -> usize {
     self
       .waiting
       .lock_or_recover()
       .get(pty_id)
-      .map_or(0, |queue| queue.iter().filter(|known| known.live(now_ms)).count())
+      .map_or(0, |queue| {
+        queue
+          .iter()
+          .filter(|known| !known.read && known.live(now_ms))
+          .count()
+      })
   }
 
-  /// The newest waiting message for `pty_id`: what its banner names.
+  /// The newest unread message for `pty_id`: what its banner names.
   pub fn latest(&self, pty_id: &str, now_ms: u64) -> Option<Envelope> {
     self
       .waiting
       .lock_or_recover()
       .get(pty_id)?
       .iter()
-      .filter(|known| known.live(now_ms))
+      .filter(|known| !known.read && known.live(now_ms))
       .max_by_key(|known| known.envelope.sent_at_ms)
       .map(|known| known.envelope.clone())
   }
@@ -640,6 +645,15 @@ mod tests {
       hub.last_sender("pty-claude"),
       Some(("copilot-3".to_string(), "/other".to_string()))
     );
+  }
+
+  #[test]
+  fn reading_clears_the_badge() {
+    let hub = hub();
+    hub.enqueue(envelope("m-1", 0)).unwrap();
+    hub.inbox("pty-claude", false, 100);
+    assert_eq!(hub.waiting("pty-claude", 100), 0);
+    assert!(hub.latest("pty-claude", 100).is_none());
   }
 
   #[test]

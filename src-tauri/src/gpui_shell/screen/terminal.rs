@@ -335,6 +335,8 @@ pub enum Start {
     name: String,
     workspace_id: Option<i64>,
     working_dir: Option<String>,
+    /// The workspace's branch, which `treq agent msg --list` shows.
+    workspace_name: Option<String>,
   },
   /// A persistent session on a remote host (`RemoteTerminalPanel`).
   Remote {
@@ -437,6 +439,32 @@ pub struct TerminalView {
   /// Temporary files of this session (an agent's prompt, settings and
   /// skills, and images pasted in), deleted when the terminal closes.
   session_files: Vec<String>,
+  /// The banner shows the newest waiting message's text.
+  msg_shown: bool,
+  /// Redraws when `treq agent msg` changes what waits here.
+  _msg_watch: Option<Task<()>>,
+}
+
+/// How often a terminal looks for changes to its waiting messages.
+const MSG_WATCH: Duration = Duration::from_secs(1);
+
+/// Notifies `this` whenever `host`'s waiting messages change. A terminal
+/// with nothing changing wakes the executor but draws nothing.
+fn watch_messages<T: 'static>(host: Host, cx: &mut Context<T>) -> Task<()> {
+  cx.spawn(async move |this, cx| {
+    let mut seen = host.agent_msg_generation();
+    loop {
+      cx.background_executor().timer(MSG_WATCH).await;
+      let now = host.agent_msg_generation();
+      if now == seen {
+        continue;
+      }
+      seen = now;
+      if this.update(cx, |_, cx| cx.notify()).is_err() {
+        break;
+      }
+    }
+  })
 }
 
 /// Deletes a session's temporary files off the main thread.
@@ -511,6 +539,31 @@ impl TerminalView {
       _exit: None,
       _tasks: Vec::new(),
       session_files: Vec::new(),
+      msg_shown: false,
+      _msg_watch: None,
+    }
+  }
+
+  /// Lets `treq agent msg` reach this agent terminal, now `cols`×`rows`.
+  fn register_for_messages(&mut self, cols: usize, rows: usize, cx: &mut Context<Self>) {
+    let Start::Agent {
+      start,
+      workspace_name,
+      ..
+    } = &self.start
+    else {
+      return;
+    };
+    let session = crate::core::agent_msg::hub::SessionInfo {
+      pty_id: self.pty.clone(),
+      handle: crate::core::agent_msg::hub::handle(&start.agent, start.session_id),
+      harness: start.agent.clone(),
+      repo: start.repo_path.clone(),
+      workspace: workspace_name.clone(),
+    };
+    self.host.agent_msg_register(&session, cols as u16, rows as u16);
+    if self._msg_watch.is_none() {
+      self._msg_watch = Some(watch_messages(self.host.clone(), cx));
     }
   }
 
@@ -687,6 +740,9 @@ impl TerminalView {
             .host
             .resize_pty(&self.pty, rows as u16, cols as u16)
             .ignore_closed();
+          self
+            .host
+            .agent_msg_resize(&self.pty, cols as u16, rows as u16);
           self.pty_size = Some((cols, rows));
         }
       }
@@ -861,6 +917,7 @@ impl TerminalView {
           name,
           workspace_id,
           working_dir,
+          ..
         } => {
           if let Err(error) = host.register_chat(start, &pty, name) {
             log::warn!("register agent chat failed: {error}");
@@ -914,10 +971,109 @@ impl TerminalView {
             ),
             Err((false, error)) => Status::Failed(error),
           };
+          if view.status == Status::Ready {
+            view.register_for_messages(cols, rows, cx);
+          }
           cx.notify();
         })
         .ignore_closed();
     }));
+  }
+
+  /// `treq agent msg`'s banner: messages wait for this agent. treq types
+  /// the wake line itself once the agent is idle and the user stops typing;
+  /// "Deliver now" types it at once.
+  fn msg_banner(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Div> {
+    if self.status != Status::Ready || !self.is_agent() {
+      return None;
+    }
+    let waiting = self.host.agent_msg_waiting(&self.pty)?;
+    let tone = ui::Tone::Warning;
+    let summary = if waiting.count == 1 {
+      format!("1 message from {} is waiting.", waiting.from)
+    } else {
+      format!(
+        "{} messages are waiting, the newest from {}.",
+        waiting.count, waiting.from
+      )
+    };
+    let (deliver_host, deliver_pty) = (self.host.clone(), self.pty.clone());
+    let deliver = ui::text(
+      ui::Button::new("terminal-msg-deliver", p)
+        .variant(ui::Variant::Warning)
+        .size(ui::Size::Xs)
+        .h_6()
+        .px_2(),
+      TextSize::Xs,
+    )
+    .label("Deliver now")
+    .on_click(move |_, _, _| deliver_host.agent_msg_deliver_now(&deliver_pty));
+    let show = ui::text(
+      ui::Button::new("terminal-msg-show", p)
+        .variant(ui::Variant::Outline)
+        .size(ui::Size::Xs)
+        .h_6()
+        .px_2(),
+      TextSize::Xs,
+    )
+    .label(if self.msg_shown {
+      "Hide message"
+    } else {
+      "Show message"
+    })
+    .on_click(cx.listener(|view, _, _, cx| {
+      view.msg_shown = !view.msg_shown;
+      cx.notify();
+    }));
+    Some(
+      div()
+        .debug_selector(|| "terminal-msg-banner".into())
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .px_3()
+        .py_2()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .bg(p.background)
+        .child(
+          div()
+            .absolute()
+            .inset_0()
+            .bg(tone.tint(p))
+            .border_b_1()
+            .border_color(tone.border(p)),
+        )
+        .child(
+          div()
+            .relative()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+              ui::text(div(), TextSize::Sm)
+                .min_w_0()
+                .text_color(tone.text(p))
+                .child(format!(
+                  "{summary} treq delivers it once the agent is idle and you stop typing."
+                )),
+            )
+            .child(div().flex().items_center().gap_2().child(deliver).child(show)),
+        )
+        .when(self.msg_shown, |d| {
+          d.child(
+            ui::text(div(), TextSize::Sm)
+              .debug_selector(|| "terminal-msg-body".into())
+              .relative()
+              .text_color(p.foreground)
+              .child(waiting.body),
+          )
+        }),
+    )
   }
 
   /// "Try again": closes the PTY and starts over.
@@ -969,6 +1125,7 @@ impl TerminalView {
     if self.remote_target().is_some() && (self.status != Status::Ready || self.remote.closed) {
       return;
     }
+    self.host.agent_msg_key(&self.pty);
     if let Some(live) = &self.live {
       live.typed(data);
       if let Ok(mut emulator) = live.emulator.lock() {
@@ -1705,6 +1862,7 @@ impl Render for TerminalView {
       .child(self.grid(focused))
       .children(self.scrollbar(&p))
       .children(search)
+      .children(self.msg_banner(&p, cx))
       .children(self.overlay(&p, cx))
   }
 }
@@ -1823,6 +1981,8 @@ static NEXT_KEPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 static RELEASES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 pub struct TerminalPane {
+  /// Redraws the headers' message badges when they change.
+  _msg_watch: Option<Task<()>>,
   /// Names the pane in [`Kept`] columns.
   serial: u64,
   host: Host,
@@ -1967,6 +2127,7 @@ impl TerminalPane {
       _keys: None,
       opening: Default::default(),
       renaming: None,
+      _msg_watch: None,
     }
   }
 
@@ -3483,6 +3644,10 @@ impl TerminalPane {
         ..
       } => {
         let key = workspace_path.clone().unwrap_or_else(|| repo_path.clone());
+        let waiting = self
+          .host
+          .agent_msg_waiting(&column.view.read(cx).pty)
+          .filter(|waiting| waiting.count > 0);
         let label_name = self
           .place
           .workspace_label(&key)
@@ -3558,6 +3723,11 @@ impl TerminalPane {
               .flex()
               .items_center()
               .gap_1()
+              .children(waiting.map(|waiting| {
+                div()
+                  .debug_selector(|| "terminal-msg-badge".into())
+                  .child(ui::Count::new(waiting.count, &d))
+              }))
               .child(search)
               .child(close),
           )
@@ -4046,6 +4216,7 @@ fn agent_session(
     let workspace_path = pending
       .and_then(|p| p.workspace_path.clone())
       .or_else(|| workspace.as_ref().map(super::merge::full_path));
+    let workspace_name = workspace.map(|w| w.branch_name);
     let agent = pending
       .and_then(|p| p.agent.clone())
       .unwrap_or_else(|| default_agent(host, &repo));
@@ -4064,7 +4235,7 @@ fn agent_session(
       name: session.name.clone(),
       repo_path: repo,
       workspace_path,
-      workspace_name: workspace.map(|w| w.branch_name),
+      workspace_name: workspace_name.clone(),
       agent,
     };
     return Some((
@@ -4075,6 +4246,7 @@ fn agent_session(
         name: session.name,
         workspace_id: session.workspace_id,
         working_dir: pending.and_then(|p| p.workspace_path.clone()),
+        workspace_name,
       },
     ));
   }
@@ -4125,6 +4297,9 @@ fn agent_icon(agent: &str) -> &'static str {
 impl Render for TerminalPane {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.watch_keys(window, cx);
+    if self._msg_watch.is_none() && !self.columns.is_empty() {
+      self._msg_watch = Some(watch_messages(self.host.clone(), cx));
+    }
     self.adopt(cx);
     if let Some(route) = self.incoming.take() {
       self.apply_route(route, window, cx);
