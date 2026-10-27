@@ -202,18 +202,17 @@ const checks = {
     check("build", "pass", 2),
     check("test", "pass", 5),
     check("lint", "pass", 1),
-    // The WIP app's commit status: pending for as long as the title says WIP.
-    { name: "WIP", bucket: "pending", link: "https://github.com/apps/wip" },
+    // The WIP app's check run: in progress for as long as the title says
+    // WIP, with no details URL.
+    { name: "WIP", bucket: "pending", link: "" },
   ],
   "feat/alerting-logs": [check("build", "pass", 3), check("test", "pass", 8)],
 };
 
 // `gh pr list --json statusCheckRollup`, which the header reads its checks
-// from: check runs, and the WIP app's commit status as GitHub reports it.
+// from, as check runs.
 const CONCLUSION = { pass: "SUCCESS", fail: "FAILURE", skipping: "SKIPPED", cancel: "CANCELLED" };
 function rollupEntry(c) {
-  if (c.name === "WIP" && c.link === "https://github.com/apps/wip")
-    return { __typename: "StatusContext", context: "WIP", state: "PENDING", targetUrl: c.link };
   return {
     __typename: "CheckRun",
     name: c.name,

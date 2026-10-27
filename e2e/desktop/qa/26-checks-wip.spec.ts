@@ -1,4 +1,4 @@
-// The GitHub WIP app's status never completes. The Checks popover lists it
+// The GitHub WIP app's check run never completes. The Checks popover lists it
 // last, muted and labelled inactive; the chip's count and spinner leave it
 // out. feat/keyvalues-cache has three passing checks plus WIP.
 import { expect, test } from "@playwright/test";

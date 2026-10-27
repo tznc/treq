@@ -1452,16 +1452,22 @@ struct GhCheck {
 /// WIP app's status. It is listed but not counted, and never spins.
 pub const INACTIVE: &str = "inactive";
 
-/// The GitHub WIP app (github.com/apps/wip) posts a commit status named "WIP"
-/// that stays pending while the PR title says WIP; it never completes. Matched
-/// by its context and the app's link, so a real check named WIP still counts.
+/// The GitHub WIP app (github.com/wip/app) posts a check run named "WIP"
+/// that stays in progress while the PR title says WIP; it never completes.
+/// It sets no details URL, so GitHub reports the app's homepage or nothing.
+/// Matched by name and that link, so a real CI job named WIP, which links to
+/// its run, still counts.
 fn is_wip_app_status(check: &GhCheck) -> bool {
+  const APP_LINKS: [&str; 4] = [
+    "",
+    "https://github.com/apps/wip",
+    "https://github.com/marketplace/wip",
+    "https://github.com/wip/app",
+  ];
+  let link = check.link.trim_end_matches('/');
   check.name == "WIP"
     && check.bucket == "pending"
-    && check
-      .link
-      .trim_end_matches('/')
-      .eq_ignore_ascii_case("https://github.com/apps/wip")
+    && APP_LINKS.iter().any(|app| link.eq_ignore_ascii_case(app))
 }
 
 /// Rolls a `gh pr checks --json name,bucket,link,startedAt,completedAt` result
@@ -2117,6 +2123,28 @@ mod tests {
     // Still listed, as inactive.
     assert_eq!(ci.checks[0].bucket, "inactive");
     assert_eq!(ci.checks.len(), 2);
+  }
+
+  #[test]
+  fn the_wip_app_check_run_matches_by_whichever_app_link_github_reports() {
+    // The app sets no details URL, so GitHub reports the app's homepage, or
+    // nothing; a real CI job named WIP links to its run.
+    for link in [
+      "",
+      "https://github.com/apps/wip",
+      "https://github.com/marketplace/wip",
+      "https://github.com/wip/app/",
+    ] {
+      let ci = super::rollup_pr_checks(vec![gh_check("WIP", "pending", link)]).unwrap();
+      assert_eq!(ci.checks[0].bucket, "inactive", "{link:?}");
+    }
+    let ci = super::rollup_pr_checks(vec![gh_check(
+      "WIP",
+      "pending",
+      "https://github.com/tznc/treq/actions/runs/1",
+    )])
+    .unwrap();
+    assert_eq!(ci.checks[0].bucket, "pending");
   }
 
   #[test]
