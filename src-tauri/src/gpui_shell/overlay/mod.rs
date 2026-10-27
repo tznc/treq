@@ -899,9 +899,11 @@ impl Render for Overlay {
       self.focus.focus(window, cx);
     }
     let dialog = if shortcuts {
-      shortcuts::render(&p, viewport)
-        .test_support()
-        .into_any_element()
+      let this = cx.weak_entity();
+      shortcuts::render(&p, viewport, move |_, cx| {
+        this.update(cx, |this, cx| this.close(cx)).ok();
+      })
+      .into_any_element()
     } else {
       let input = self.input(window, cx);
       let palette = matches!(self.body, Body::Palette { .. });
@@ -940,20 +942,13 @@ impl Render for Overlay {
             .role(gpui::Role::Dialog)
             .test_support()
             .w(viewport.width * 0.4)
-            .rounded(radius::LG)
-            .border_1()
-            .border_color(if palette {
-              p.border
-            } else {
-              p.border.opacity(0.5)
-            })
+            .map(|el| ui::floating(el, &p))
             .bg(if palette { p.background } else { p.popover })
             .text_color(if palette {
               p.foreground
             } else {
               p.popover_foreground
             })
-            .shadow_2xl()
             .overflow_hidden()
             .child(
               ui::text(div(), TextSize::Sm)
@@ -1009,8 +1004,8 @@ impl Render for Overlay {
       .flex()
       .items_center()
       .justify_center()
-      .when(shortcuts, |this| this.p_4())
-      .bg(p.scrim())
+      // The shortcuts sheet is a `ui::Dialog`, which draws its own scrim.
+      .when(!shortcuts, |this| this.bg(p.scrim()))
       .font_family(theme::SANS_FONT)
       .text_color(p.foreground)
       .capture_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {

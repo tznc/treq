@@ -7,14 +7,11 @@
 //! through the backend; it hands back only what React still owns: closing
 //! the dialog, opening the workspace it made, and deleting a workspace.
 
-use crate::gpui_shell::ui::radius;
-use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
-use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, Context, Div, Entity, FontWeight, Pixels, SharedString, Stateful,
+  self, div, prelude::*, Context, Div, Entity, FontWeight, SharedString,
 };
 
 use super::{
@@ -27,10 +24,7 @@ use super::{
   workspace_dialog_data::{self, WorkspaceDialogHost},
   ActionSink, Host, ScreenAction,
 };
-use crate::gpui_shell::{
-  theme::{self, Palette},
-  ui::{self, TextSize},
-};
+use crate::gpui_shell::ui::{self, TextSize};
 
 /// The dialog React has open, tagged by `kind`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -162,72 +156,6 @@ impl OpenModal {
 /// Sends `Press { id }`.
 pub fn press(sink: &ActionSink, id: &str, cx: &mut gpui::App) {
   sink(ScreenAction::Press { id: id.into() }, cx);
-}
-
-/// `ui/dialog.tsx`'s backdrop (`bg-black/40`, `p-4`) over the whole window,
-/// and its `DialogContent` panel, `max_width` wide at most.
-pub fn dialog_panel(
-  id: &'static str,
-  max_width: f32,
-  viewport: gpui::Size<Pixels>,
-  p: &Palette,
-) -> (Stateful<Div>, Div) {
-  let backdrop = div()
-    .id(SharedString::from(format!("{id}-backdrop")))
-    .w(viewport.width)
-    .h(viewport.height)
-    .p_4()
-    .flex()
-    .items_center()
-    .justify_center()
-    .bg(p.scrim())
-    .occlude();
-  let panel = div()
-    .debug_selector(move || id.into())
-    .w_full()
-    .max_w(zpx(max_width))
-    .p_6()
-    .rounded(radius::LG)
-    .border_1()
-    .border_color(p.border.opacity(0.5))
-    .bg(p.popover)
-    .text_color(p.popover_foreground)
-    .font_family(theme::SANS_FONT)
-    .shadow_2xl();
-  (backdrop, panel)
-}
-
-/// `DialogTitle`: `text-lg font-semibold leading-none`.
-pub fn dialog_title(title: impl Into<SharedString>) -> Div {
-  ui::text(div(), TextSize::Lg)
-    .font_weight(FontWeight::SEMIBOLD)
-    .child(title.into())
-}
-
-/// `DialogDescription`: `text-sm text-muted-foreground`.
-pub fn dialog_description(text: impl Into<SharedString>, p: &Palette) -> Div {
-  ui::text(div(), TextSize::Sm)
-    .text_color(p.muted_foreground)
-    .child(text.into())
-}
-
-/// `DialogHeader`: `flex flex-col space-y-1.5`.
-pub fn dialog_header(title: impl Into<SharedString>, description: Div) -> Div {
-  let title: SharedString = title.into();
-  div()
-    .flex()
-    .flex_col()
-    .gap_1p5()
-    // `DialogTitle` is the dialog's heading.
-    .child(
-      div()
-        .id("dialog-title")
-        .role(gpui::Role::Heading)
-        .aria_label(title.clone())
-        .test_support()
-        .child(dialog_title(title)),
-    )
-    .child(description)
 }
 
 /// `<Label className="text-xs">`: `font-medium leading-none`.

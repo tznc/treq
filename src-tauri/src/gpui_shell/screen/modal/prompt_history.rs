@@ -12,7 +12,7 @@ use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, uniform_list, ClipboardItem, Context, FontWeight, SharedString, Window,
 };
 
-use super::{dialog, message, overlay, title, Env};
+use super::{message, Env};
 use crate::{
   gpui_shell::{
     native::ToastTone,
@@ -432,13 +432,6 @@ impl Render for PromptHistoryView {
       window.focus(&self.focus, cx);
     }
     let viewport = window.viewport_size();
-    let (backdrop, panel) = dialog(
-      "prompt-history-modal",
-      viewport.width * 0.65,
-      Some(viewport.height * 0.75),
-      viewport,
-      &p,
-    );
     let entries = self.entries.clone();
     let copy_all = entries.as_ref().filter(|all| !all.is_empty()).map(|_| {
       let copy = cx.listener(|view, _, _, cx| view.copy_all(cx));
@@ -460,15 +453,13 @@ impl Render for PromptHistoryView {
       .justify_between()
       .gap_2()
       .child(
-        title(
-          div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(ui::icon(theme::ICON_HISTORY, 16., p.popover_foreground))
-            .child("Prompt History"),
-        )
-        .text_color(p.popover_foreground),
+        ui::text(div(), TextSize::Lg)
+          .font_weight(FontWeight::SEMIBOLD)
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(ui::icon(theme::ICON_HISTORY, 16., p.popover_foreground))
+          .child("Prompt History"),
       )
       .children(copy_all);
     let body = match &entries {
@@ -490,24 +481,13 @@ impl Render for PromptHistoryView {
         .child(self.detail(entries, &p, cx))
         .into_any_element(),
     };
-    let keys = cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
-      if ui::is_escape(&e.keystroke) {
-        cx.stop_propagation();
-        view.close(cx);
-      }
-    });
-    overlay(
-      backdrop.on_mouse_down(
-        gpui::MouseButton::Left,
-        cx.listener(|view, _, _, cx| view.close(cx)),
-      ),
-      panel
-        .id("prompt-history-panel")
-        .track_focus(&self.focus)
-        .capture_key_down(keys)
-        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(header)
-        .child(body),
-    )
+    ui::Dialog::new("prompt-history-modal", &p)
+      .overlay(viewport)
+      .relative_size(0.65, Some(0.75))
+      .title("Prompt History")
+      .header(header)
+      .focus(&self.focus)
+      .on_close(ui::handler(cx, |view, _, cx| view.close(cx)))
+      .child(body)
   }
 }

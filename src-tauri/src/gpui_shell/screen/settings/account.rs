@@ -1368,62 +1368,25 @@ pub(in crate::gpui_shell::screen) fn cloud_delete_dialog_element(
   p: &Palette,
   press: PressFn,
 ) -> impl IntoElement {
-  div()
-    .id("cloud-delete-dialog-backdrop")
-    .absolute()
-    .inset_0()
-    .flex()
-    .items_center()
-    .justify_center()
-    .bg(p.scrim())
-    .occlude()
-    .child(
-      div()
-        .id("cloud-delete-dialog")
-        .debug_selector(|| "cloud-delete-dialog".into())
-        .w_full()
-        .max_w(zpx(512.))
-        .mx_4()
-        .flex()
-        .flex_col()
-        .gap_4()
-        .p_6()
-        .rounded(radius::MD)
-        .border_1()
-        .border_color(p.border)
-        .bg(p.background)
-        .shadow_lg()
-        .child(
-          div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(heading("Delete cloud workspace?"))
-            .child(
-              ui::text(div(), TextSize::Sm)
-                .text_color(p.muted_foreground)
-                .child("This permanently deletes the cloud machine and all data on it, including cloned repositories, uncommitted changes, and agent sessions. This cannot be undone."),
-            ),
-        )
-        .child(
-          div()
-            .flex()
-            .justify_end()
-            .gap_2()
-            .child(
-              Button::new("cloud-delete-cancel", p)
-                .variant(Variant::Outline)
-                .label("Cancel")
-                .on_click(press("cloud.delete.cancel")),
-            )
-            .child(
-              Button::new("cloud-delete-confirm", p)
-                .variant(Variant::Destructive)
-                .label("Delete")
-                .on_click(press("cloud.delete.confirm")),
-            ),
-        ),
+  div().absolute().inset_0().child(
+    ui::ConfirmDialog::new(
+      "cloud-delete-dialog",
+      "Delete cloud workspace?",
+      "Delete",
+      p,
     )
+    .message("This permanently deletes the cloud machine and all data on it, including cloned repositories, uncommitted changes, and agent sessions. This cannot be undone.")
+    .destructive()
+    .on_cancel(handler(press("cloud.delete.cancel")))
+    .on_confirm(handler(press("cloud.delete.confirm"))),
+  )
+}
+
+/// A button's press as a dialog handler, for Escape and Enter.
+pub(in crate::gpui_shell::screen) fn handler(
+  click: ClickFn,
+) -> impl Fn(&mut Window, &mut gpui::App) + 'static {
+  move |window, cx| click(&gpui::ClickEvent::default(), window, cx)
 }
 
 impl SettingsView {
@@ -1745,45 +1708,20 @@ impl SettingsView {
     let input = self
       .controls
       .input("account.delete.email", &dialog.typed, email, window, cx);
-    div()
-      .id("account-delete-dialog-backdrop")
-      .absolute()
-      .inset_0()
-      .flex()
-      .items_center()
-      .justify_center()
-      .bg(p.scrim())
-      .occlude()
-      .child(
-        div()
-          .id("account-delete-dialog")
-          .debug_selector(|| "account-delete-dialog".into())
-          .role(gpui::Role::Dialog)
-          .aria_label(SharedString::from("Delete your Treq account?"))
-          .test_support()
-          .w_full()
-          .max_w(zpx(512.))
-          .mx_4()
-          .flex()
-          .flex_col()
-          .gap_4()
-          .p_6()
-          .rounded(radius::MD)
-          .border_1()
-          .border_color(p.border)
-          .bg(p.background)
-          .shadow_lg()
+    let can_confirm = dialog.can_confirm;
+    div().absolute().inset_0().child(
+      ui::Dialog::new("account-delete-dialog", p)
+        .width(512.)
+        .title("Delete your Treq account?")
+        .description("This cannot be undone. Deleting your account:")
+        .on_close(handler(Box::new(self.press("account.delete.cancel"))))
+        .on_primary(handler(Box::new(self.press("account.delete.confirm"))))
+        .primary_disabled(!can_confirm || dialog.deleting)
           .child(
             div()
               .flex()
               .flex_col()
               .gap_2()
-              .child(heading("Delete your Treq account?"))
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .text_color(p.muted_foreground)
-                  .child("This cannot be undone. Deleting your account:"),
-              )
               .child(
                 div().flex().flex_col().gap_1().children(
                   [
@@ -1835,27 +1773,21 @@ impl SettingsView {
                 )
               }),
           )
-          .child(
-            div()
-              .flex()
-              .justify_end()
-              .gap_2()
-              .child(
-                Button::new("account-delete-cancel", p)
-                  .variant(Variant::Outline)
-                  .disabled(dialog.deleting)
-                  .label("Cancel")
-                  .on_click(self.press("account.delete.cancel")),
-              )
-              .child(
-                Button::new("account-delete-confirm", p)
-                  .variant(Variant::Destructive)
-                  .disabled(!dialog.can_confirm)
-                  .label(if dialog.deleting { "Deleting…" } else { "Delete Account" })
-                  .on_click(self.press("account.delete.confirm")),
-              ),
-          ),
-      )
+          .footer([
+            Button::new("account-delete-cancel", p)
+              .variant(Variant::Outline)
+              .disabled(dialog.deleting)
+              .label("Cancel")
+              .on_click(self.press("account.delete.cancel"))
+              .into_any_element(),
+            Button::new("account-delete-confirm", p)
+              .variant(Variant::Destructive)
+              .disabled(!can_confirm)
+              .label(if dialog.deleting { "Deleting…" } else { "Delete Account" })
+              .on_click(self.press("account.delete.confirm"))
+              .into_any_element(),
+          ]),
+    )
   }
 
   /// `CloudWorkspaceCard`.

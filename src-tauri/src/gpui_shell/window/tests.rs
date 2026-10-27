@@ -521,7 +521,7 @@ impl gpui::Render for ConfirmView {
   fn render(&mut self, window: &mut gpui::Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
     let controller = self.controller.clone();
     let p = crate::gpui_shell::theme::palette(false);
-    gpui::div().size_full().child(self.question.dialog(
+    gpui::div().size_full().child(self.question.confirm_dialog(
       &self.focus,
       window,
       &p,

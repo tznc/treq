@@ -7,6 +7,7 @@
 use gpui::{div, prelude::*, px, App};
 use gpui_styleguidist::{example, Example, Styleguide};
 use treq_ui::{
+  floating,
   theme::{self, Palette},
   Alert, Badge, Button, CheckState, Checkbox, ConfirmDialog, Count, Dialog, Dot, EmptyState,
   IconButton, IconButtonSize, Kbd, Loading, MenuItem, MenuLabel, MenuSeparator, Picker,
@@ -103,6 +104,11 @@ fn styleguide() -> Styleguide {
       "Dialog",
       "Radius 12 on the scrim. An action pair goes in the footer with no X; otherwise an X \
        closes it. Confirmations ask a question and answer with verbs, never Yes/No.",
+    )
+    .describe(
+      "Floating",
+      "A surface in the middle of the window that is not a dialog: the palette, a file \
+       finder. Radius 12, a border and the deepest shadow; the caller picks the fill.",
     )
     .describe(
       "EmptyState",
@@ -716,5 +722,48 @@ fn surfaces() -> Vec<Example> {
     .component("Dialog")
     .title("Information")
     .size(560., 260.),
+    example!("dialog/busy", |knobs, _, cx| {
+      let p = p(cx);
+      let busy = knobs.bool("busy", true);
+      Dialog::new("rename", &p)
+        .width(520.)
+        .title("Rename workspace")
+        .header(
+          div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_lg()
+            .child("Rename workspace")
+            .child(Badge::new("treq/login", &p)),
+        )
+        .primary_disabled(busy)
+        .on_close(|_, _| {})
+        .child("A custom header, and a verb that is busy: Enter waits for it.")
+        .footer([
+          Button::new("rename-cancel", &p)
+            .variant(Variant::Outline)
+            .label("Cancel")
+            .into_any_element(),
+          Button::new("rename-confirm", &p)
+            .disabled(busy)
+            .label(if busy { "Renaming…" } else { "Rename" })
+            .into_any_element(),
+        ])
+    })
+    .component("Dialog")
+    .title("Custom header, busy verb")
+    .size(600., 260.),
+    example!("floating", |_, _, cx| {
+      let p = p(cx);
+      floating(div(), &p)
+        .w(px(360.))
+        .bg(p.background)
+        .p_3()
+        .child("A surface that floats without being a dialog: the palette, a file finder.")
+    })
+    .component("Floating")
+    .title("Floating surface")
+    .size(480., 160.),
   ]
 }

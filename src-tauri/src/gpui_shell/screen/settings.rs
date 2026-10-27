@@ -2842,47 +2842,16 @@ impl SettingsView {
       };
       div().child(gpui::StyledText::new(text).with_highlights([(0..strong.len(), bold)]))
     };
-    div()
-      .id("skill-install-dialog-backdrop")
-      .absolute()
-      .inset_0()
-      .flex()
-      .items_center()
-      .justify_center()
-      .bg(p.scrim())
-      .occlude()
-      .child(
-        div()
-          .id("skill-install-dialog")
-          .debug_selector(|| "skill-install-dialog".into())
-          .w_full()
-          .max_w(zpx(576.))
-          .mx_4()
-          .flex()
-          .flex_col()
-          .gap_4()
-          .p_6()
-          .rounded(radius::MD)
-          .border_1()
-          .border_color(p.border)
-          .bg(p.background)
-          .shadow_lg()
-          .child(
-            div()
-              .flex()
-              .flex_col()
-              .gap_2()
-              .child(
-                ui::text(div(), TextSize::Lg)
-                  .font_weight(FontWeight::SEMIBOLD)
-                  .child(format!("Install {}", dialog.name)),
-              )
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .text_color(p.muted_foreground)
-                  .child("Choose whether this skill is stored for every repository on this machine, or only for the current repository."),
-              ),
-          )
+    let busy = dialog.busy;
+    let press = |id: &str| -> account::ClickFn { Box::new(self.press(id)) };
+    div().absolute().inset_0().child(
+      ui::Dialog::new("skill-install-dialog", p)
+        .width(576.)
+        .title(format!("Install {}", dialog.name))
+        .description("Choose whether this skill is stored for every repository on this machine, or only for the current repository.")
+        .on_close(account::handler(press("skills.dialog.cancel")))
+        .on_primary(account::handler(press("skills.dialog:repository")))
+        .primary_disabled(busy)
           .child(
             ui::text(div(), TextSize::Sm)
               .py_2()
@@ -2898,33 +2867,26 @@ impl SettingsView {
                 "writes the skill into Treq application data. Every repository on this machine can use it.",
               )),
           )
-          .child(
-            div()
-              .flex()
-              .justify_end()
-              .gap_2()
-              .child(
-                Button::new("skill-dialog-cancel", p)
-                  .variant(Variant::Outline)
-                  .disabled(dialog.busy)
-                  .label("Cancel")
-                  .on_click(self.press("skills.dialog.cancel")),
-              )
-              .child(
-                Button::new("skill-dialog-application", p)
-                  .variant(Variant::Outline)
-                  .disabled(dialog.busy)
-                  .label("Install for application")
-                  .on_click(self.press("skills.dialog:application")),
-              )
-              .child(
-                Button::new("skill-dialog-repository", p)
-                  .disabled(dialog.busy)
-                  .label("Install for repository")
-                  .on_click(self.press("skills.dialog:repository")),
-              ),
-          ),
-      )
+          .footer([
+            Button::new("skill-dialog-cancel", p)
+              .variant(Variant::Outline)
+              .disabled(busy)
+              .label("Cancel")
+              .on_click(self.press("skills.dialog.cancel"))
+              .into_any_element(),
+            Button::new("skill-dialog-application", p)
+              .variant(Variant::Outline)
+              .disabled(busy)
+              .label("Install for application")
+              .on_click(self.press("skills.dialog:application"))
+              .into_any_element(),
+            Button::new("skill-dialog-repository", p)
+              .disabled(busy)
+              .label("Install for repository")
+              .on_click(self.press("skills.dialog:repository"))
+              .into_any_element(),
+          ]),
+    )
   }
   /// A `treq://skill/install` link's confirmation: the catalog entry's
   /// description, metadata and checksum, and its registry page.
@@ -2950,47 +2912,17 @@ impl SettingsView {
       },
       |sum| div().font_family(theme::MONO_FONT).text_xs().child(sum),
     );
-    div()
-      .id("skill-confirm-dialog-backdrop")
-      .absolute()
-      .inset_0()
-      .flex()
-      .items_center()
-      .justify_center()
-      .bg(p.scrim())
-      .occlude()
-      .child(
-        div()
-          .id("skill-confirm-dialog")
-          .debug_selector(|| "skill-confirm-dialog".into())
-          .w_full()
-          .max_w(zpx(576.))
-          .mx_4()
-          .flex()
-          .flex_col()
-          .gap_4()
-          .p_6()
-          .rounded(radius::MD)
-          .border_1()
-          .border_color(p.border)
-          .bg(p.background)
-          .shadow_lg()
-          .child(
-            div()
-              .flex()
-              .flex_col()
-              .gap_2()
-              .child(
-                ui::text(div(), TextSize::Lg)
-                  .font_weight(FontWeight::SEMIBOLD)
-                  .child(confirm.title.clone()),
-              )
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .text_color(p.muted_foreground)
-                  .child("A link asked Treq to install this skill. Treq installs the copy from its skill catalog, never content from the link."),
-              ),
-          )
+    let press = |id: &str| -> account::ClickFn { Box::new(self.press(id)) };
+    div().absolute().inset_0().child(
+      ui::Dialog::new("skill-confirm-dialog", p)
+        .width(576.)
+        .title(confirm.title.clone())
+        .description("A link asked Treq to install this skill. Treq installs the copy from its skill catalog, never content from the link.")
+        .on_close(account::handler(press("skills.confirm.cancel")))
+        .when(confirm.can_install, |d| {
+          d.on_primary(account::handler(press("skills.confirm.install")))
+        })
+        .primary_disabled(confirm.busy)
           .when_some(confirm.description.clone(), |this, description| {
             this.child(ui::text(div(), TextSize::Sm).child(description))
           })
@@ -3028,38 +2960,39 @@ impl SettingsView {
           .when_some(confirm.notice.clone(), |this, notice| {
             this.child(ui::text(div(), TextSize::Sm).child(notice))
           })
-          .child(
-            div()
-              .w_full()
-              .flex()
-              .items_center()
-              .justify_between()
-              .gap_2()
-              .child(
+          // The registry link sits apart, left of the action pair.
+          .footer(
+            [
+              Some(
                 Button::new("skill-confirm-registry", p)
                   .variant(Variant::Ghost)
                   .size(Size::Sm)
                   .icon(theme::ICON_EXTERNAL_LINK, 14.)
                   .label("View in skill registry")
-                  .on_click(self.press("skills.confirm.registry")),
-              )
-              .child(div().flex().items_center().gap_2().child(
+                  .on_click(self.press("skills.confirm.registry"))
+                  .into_any_element(),
+              ),
+              Some(div().flex_1().into_any_element()),
+              Some(
                 Button::new("skill-confirm-cancel", p)
                   .variant(Variant::Outline)
                   .disabled(confirm.busy)
                   .label(if confirm.can_install { "Cancel" } else { "Close" })
-                  .on_click(self.press("skills.confirm.cancel")),
-              )
-              .when(confirm.can_install, |this| {
-                this.child(
-                  Button::new("skill-confirm-install", p)
-                    .disabled(confirm.busy)
-                    .label("Install")
-                    .on_click(self.press("skills.confirm.install")),
-                )
-              })),
+                  .on_click(self.press("skills.confirm.cancel"))
+                  .into_any_element(),
+              ),
+              confirm.can_install.then(|| {
+                Button::new("skill-confirm-install", p)
+                  .disabled(confirm.busy)
+                  .label("Install")
+                  .on_click(self.press("skills.confirm.install"))
+                  .into_any_element()
+              }),
+            ]
+            .into_iter()
+            .flatten(),
           ),
-      )
+    )
   }
 }
 

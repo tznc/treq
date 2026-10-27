@@ -9,14 +9,10 @@
 //! new workspace. Each dialog covers the whole window, sidebar included, as
 //! React's `Dialog` did.
 
-use crate::gpui_shell::ui::radius;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, App, Div, FontWeight, SharedString,
-  Stateful,
-};
+use tauri_plugin_gpui::gpui::{div, prelude::*, App, Div, SharedString, Stateful};
 
 use super::{code_data::CodeHost, ActionSink, ScreenAction};
 use crate::{
@@ -159,61 +155,6 @@ impl Env {
       repo_path: repo_path.into(),
     });
   }
-}
-
-/// `ui/dialog.tsx`: the backdrop over the whole window (`bg-black/40`) and
-/// the panel (`p-6 rounded-xl border-border/50`) `width` wide, `height` tall
-/// when given, its content `gap-y-4` apart.
-pub fn dialog(
-  id: &'static str,
-  width: impl Into<gpui::Length> + Clone,
-  height: Option<gpui::Pixels>,
-  viewport: gpui::Size<gpui::Pixels>,
-  p: &Palette,
-) -> (Stateful<Div>, Div) {
-  let backdrop = div()
-    .id(SharedString::from(format!("{id}-backdrop")))
-    .w(viewport.width)
-    .h(viewport.height)
-    .p_4()
-    .flex()
-    .items_center()
-    .justify_center()
-    .bg(p.scrim())
-    .occlude();
-  let panel = div()
-    .debug_selector(move || id.into())
-    .w(width)
-    .max_w_full()
-    .when_some(height, |this, height| this.h(height).max_h_full())
-    .p_6()
-    .flex()
-    .flex_col()
-    .gap_4()
-    .rounded(radius::LG)
-    .border_1()
-    .border_color(p.border.opacity(0.5))
-    .bg(p.popover)
-    .text_color(p.popover_foreground)
-    .shadow_2xl();
-  (backdrop, panel)
-}
-
-/// Puts `backdrop` over the whole window, with `panel` in it.
-pub fn overlay(backdrop: Stateful<Div>, panel: impl IntoElement) -> impl IntoElement {
-  deferred(
-    anchored()
-      .position(point(px(0.), px(0.)))
-      .child(backdrop.child(panel)),
-  )
-  .with_priority(2)
-}
-
-/// `DialogTitle`: `text-lg font-semibold leading-none`.
-pub fn title(text: impl IntoElement) -> Div {
-  ui::text(div(), TextSize::Lg)
-    .font_weight(FontWeight::SEMIBOLD)
-    .child(text)
 }
 
 /// `text-sm text-muted-foreground py-8 text-center`.

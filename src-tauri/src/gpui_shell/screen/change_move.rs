@@ -5,22 +5,18 @@ use crate::result_ext::ResultExt;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use tauri_plugin_gpui::gpui::{
-  anchored, deferred, div, point, prelude::*, px, Context, MouseButton, Window,
-};
+use tauri_plugin_gpui::gpui::{div, prelude::*, Context, Window};
 
 use super::{
-  workspace_data::WorkspaceHost,
-  workspace_dialog_data::WorkspaceDialogHost,
-  workspace_modal::{dialog_description, dialog_header, dialog_panel, press},
-  ActionSink,
+  workspace_data::WorkspaceHost, workspace_dialog_data::WorkspaceDialogHost,
+  workspace_modal::press, ActionSink,
 };
 use crate::{
   core::WorkspaceMoveRequest,
   gpui_shell::{
     native::{NativeEvent, ToastTone},
     theme,
-    ui::{Button, Variant},
+    ui::{self, Button, Variant},
   },
 };
 
@@ -169,48 +165,28 @@ impl Render for ChangeMoveDialog {
       return div().into_any_element();
     }
     let p = theme::palette(self.dark);
-    let (backdrop, panel) = dialog_panel("change-move-dialog", 512., window.viewport_size(), &p);
     let pending = self.pending;
-    let panel = panel
-      .child(dialog_header(
-        self.route.title(),
-        dialog_description(self.route.description(), &p),
-      ))
-      .child(
-        div()
-          .mt_4()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("change-move-cancel", &p)
-              .variant(Variant::Ghost)
-              .disabled(pending)
-              .label("Cancel")
-              .on_click(cx.listener(|view, _, _, cx| view.cancel(cx))),
-          )
-          .child(
-            Button::new("change-move-confirm", &p)
-              .disabled(pending)
-              .label("Move")
-              .on_click(cx.listener(|view, _, _, cx| view.confirm(cx))),
-          ),
-      );
-    deferred(
-      anchored().position(point(px(0.), px(0.))).child(
-        backdrop
-          .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|view, _, _, cx| view.cancel(cx)),
-          )
-          .child(
-            panel
-              .id("change-move-panel")
-              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
-          ),
-      ),
-    )
-    .with_priority(2)
-    .into_any_element()
+    ui::Dialog::new("change-move-dialog", &p)
+      .overlay(window.viewport_size())
+      .width(512.)
+      .title(self.route.title())
+      .description(self.route.description())
+      .on_close(ui::handler(cx, |view, _, cx| view.cancel(cx)))
+      .on_primary(ui::handler(cx, |view, _, cx| view.confirm(cx)))
+      .primary_disabled(pending)
+      .footer([
+        Button::new("change-move-cancel", &p)
+          .variant(Variant::Outline)
+          .disabled(pending)
+          .label("Cancel")
+          .on_click(cx.listener(|view, _, _, cx| view.cancel(cx)))
+          .into_any_element(),
+        Button::new("change-move-confirm", &p)
+          .disabled(pending)
+          .label("Move")
+          .on_click(cx.listener(|view, _, _, cx| view.confirm(cx)))
+          .into_any_element(),
+      ])
+      .into_any_element()
   }
 }

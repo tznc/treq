@@ -1,7 +1,5 @@
 //! `KeyboardShortcutsModal`: the "?" reference of the app's shortcuts.
 
-use crate::gpui_shell::ui::radius;
-use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, SharedString};
 
 use crate::gpui_shell::{
@@ -110,10 +108,14 @@ fn section(p: &Palette, title: &str, shortcuts: &[Shortcut]) -> gpui::Div {
     )
 }
 
-/// `DialogContent className="max-h-[85vh] max-w-2xl w-full overflow-y-auto"`
-/// with its header and the `sm:grid-cols-2` grid of sections.
-pub fn render(p: &Palette, viewport: gpui::Size<gpui::Pixels>) -> gpui::Stateful<gpui::Div> {
-  let mut grid = div().mt_4().flex().flex_col().gap_6();
+/// The sheet: a dialog with no action pair, so an X closes it, over the
+/// `sm:grid-cols-2` grid of sections, which scrolls past 85% of the window.
+pub fn render(
+  p: &Palette,
+  viewport: gpui::Size<gpui::Pixels>,
+  close: impl Fn(&mut gpui::Window, &mut gpui::App) + 'static,
+) -> ui::Dialog {
+  let mut grid = div().flex().flex_col().gap_6();
   for pair in SECTIONS.chunks(2) {
     let mut row = div().flex().gap_6();
     for (title, shortcuts) in pair {
@@ -124,27 +126,15 @@ pub fn render(p: &Palette, viewport: gpui::Size<gpui::Pixels>) -> gpui::Stateful
     }
     grid = grid.child(row);
   }
-  div()
-    .id("keyboard-shortcuts-modal")
-    .debug_selector(|| "keyboard-shortcuts-modal".into())
-    .role(gpui::Role::Dialog)
-    .aria_label("Keyboard shortcuts")
-    .w_full()
-    .max_w(zpx(672.))
-    .max_h(viewport.height * 0.85)
-    .overflow_y_scroll()
-    .p_6()
-    .rounded(radius::LG)
-    .border_1()
-    .border_color(p.border.opacity(0.5))
-    .bg(p.popover)
-    .text_color(p.popover_foreground)
-    .shadow_2xl()
-    .occlude()
+  ui::Dialog::new("keyboard-shortcuts-modal", p)
+    .width(672.)
+    .title("Keyboard shortcuts")
+    .on_close(close)
     .child(
-      ui::text(div(), TextSize::Lg)
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .child("Keyboard shortcuts"),
+      div()
+        .id("keyboard-shortcuts-grid")
+        .max_h(viewport.height * 0.75)
+        .overflow_y_scroll()
+        .child(grid),
     )
-    .child(grid)
 }

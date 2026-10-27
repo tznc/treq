@@ -21,7 +21,7 @@ use tauri_plugin_gpui::gpui::{
   Subscription, Task, Window,
 };
 
-use super::{dialog, fuzzy_matches, overlay, title, Env};
+use super::{fuzzy_matches, Env};
 use crate::core::agent_launch::{self as launch, IssueAttachment, TaskRequest};
 use crate::gpui_shell::{
   native::{NativeEvent, ToastTone},
@@ -1386,20 +1386,14 @@ impl Render for AgentPromptView {
       self.insert_text(&insertion, window, cx);
     }
     let viewport = window.viewport_size();
-    let (backdrop, panel) = dialog(
-      "agent-prompt-dialog",
-      viewport.width * 0.4,
-      None,
-      viewport,
-      &p,
-    );
     let card = self.task_card(&p, window, cx);
     let picker = self.workspace_picker(&p, cx);
-    let keys = cx.listener(|view, e: &gpui::KeyDownEvent, window, cx| {
-      if !ui::is_escape(&e.keystroke) || view.file_picker.is_some() {
+    // Escape closes the open menu, picker or mention list first; the file
+    // picker hears its own.
+    let close = ui::handler(cx, |view, window, cx| {
+      if view.file_picker.is_some() {
         return;
       }
-      cx.stop_propagation();
       if view.menu.take().is_some()
         || view.close_picker(window, cx)
         || view.mention.take().is_some()
@@ -1409,24 +1403,14 @@ impl Render for AgentPromptView {
         view.close(cx);
       }
     });
-    overlay(
-      backdrop
-        .on_mouse_down(
-          gpui::MouseButton::Left,
-          cx.listener(|view, _, _, cx| view.close(cx)),
-        )
-        .children(self.file_picker.clone()),
-      panel
-        .id("agent-prompt-panel")
-        .role(gpui::Role::Dialog)
-        .aria_label("Start a new agent session")
-        .test_support()
-        .track_focus(&self.focus)
-        .capture_key_down(keys)
-        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(title("Start a new agent session").text_color(p.popover_foreground))
-        .child(picker)
-        .child(card),
-    )
+    ui::Dialog::new("agent-prompt-dialog", &p)
+      .overlay(viewport)
+      .relative_size(0.4, None)
+      .title("Start a new agent session")
+      .focus(&self.focus)
+      .on_close(close)
+      .child(picker)
+      .child(card)
+      .children(self.file_picker.clone())
   }
 }

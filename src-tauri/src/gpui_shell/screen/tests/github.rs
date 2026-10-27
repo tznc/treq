@@ -1398,3 +1398,38 @@ fn github_rows_are_list_items_and_load_more_is_a_button(cx: &mut TestAppContext)
   h.cx.run_until_parked();
   assert!(h.drawn("github-issue-3"));
 }
+
+#[gpui::test]
+fn github_delete_dialog_cancels_on_escape_and_deletes_on_enter(cx: &mut TestAppContext) {
+  let (mut h, host) = harness(cx, issues(), route("issues", Some(1), false));
+  h.click("github-delete");
+  assert!(h.drawn("github-delete-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.drawn("github-delete-dialog"));
+  h.click("github-delete");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"issue acme/treq#1 Delete".to_string()));
+}
+
+#[gpui::test]
+fn github_new_pr_closes_on_escape_and_creates_on_enter(cx: &mut TestAppContext) {
+  let (mut h, host) = harness(cx, new_pr_fake(), route("prs", None, true));
+  h.click("github-new-pr-ws-4");
+  assert!(h.drawn("github-new-pr-create"));
+  // Cancel comes before the verb.
+  let cancel = h.cx.debug_bounds("github-new-pr-cancel").expect("cancel");
+  let create = h.cx.debug_bounds("github-new-pr-create").expect("create");
+  assert!(cancel.right() <= create.left(), "{cancel:?} {create:?}");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"push 4".to_string()));
+
+  let (mut h, _) = harness(cx, new_pr_fake(), route("prs", None, true));
+  assert!(h.drawn("github-new-pr-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), [press("github.close")]);
+}

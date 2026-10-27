@@ -18,9 +18,8 @@ use gpui_kit::component::{
   IndexPath,
 };
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, App, ClickEvent, Context, Div, Entity,
-  FocusHandle, FontWeight, Hsla, KeyDownEvent, MouseButton, SharedString, Stateful, Subscription,
-  Task, Window,
+  self, anchored, deferred, div, prelude::*, App, ClickEvent, Context, Div, Entity, FocusHandle,
+  FontWeight, Hsla, MouseButton, SharedString, Stateful, Subscription, Task, Window,
 };
 
 use super::{
@@ -29,7 +28,7 @@ use super::{
     self as data, branch_from_title, branch_name_error, new_workspace_chain, ChainEntry, Position,
     Route, Source, StashCommit, Submit, Submitted, Tab, WorkspaceDialogHost,
   },
-  workspace_modal::{dialog_description, dialog_header, dialog_panel, label_xs, press, Check},
+  workspace_modal::{label_xs, press, Check},
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -2075,28 +2074,23 @@ impl Render for WorkspaceDialog {
         .children(right)
     });
     let loading = self.loading;
-    let (backdrop, panel) = dialog_panel("workspace-dialog", 640., viewport, &p);
-    let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
-      let k = &e.keystroke;
-      if k.key == "enter"
-        && (crate::gpui_shell::keys::held(k.modifiers).platform
-          || crate::gpui_shell::keys::held(k.modifiers).control)
-      {
-        cx.stop_propagation();
-        view.submit(cx);
-      } else if ui::is_escape(k) && view.picker.is_none() {
-        cx.stop_propagation();
-        view.close_unless_creating(cx);
-      }
-    });
+    let can_submit = self.can_submit();
     // A fixed width, so opening Advanced or Move to workspace only makes the
     // dialog taller; the body scrolls once it reaches the window's height.
-    let panel = panel
-      .overflow_hidden()
-      .child(dialog_header(
-        "Stack a new Workspace",
-        dialog_description(description, &p),
-      ))
+    ui::Dialog::new("workspace-dialog", &p)
+      .overlay(viewport)
+      .width(640.)
+      .title("Stack a new Workspace")
+      .description(description)
+      .focus(&self.focus)
+      // Escape in the branch picker closes the picker only.
+      .on_close(ui::handler(cx, |view, _, cx| {
+        if view.picker.is_none() {
+          view.close_unless_creating(cx)
+        }
+      }))
+      .on_primary(ui::handler(cx, |view, _, cx| view.submit(cx)))
+      .primary_disabled(!can_submit)
       .child(
         div()
           .id("workspace-dialog-body")
@@ -2120,53 +2114,26 @@ impl Render for WorkspaceDialog {
             .child(self.error.clone()),
         )
       })
-      .child(
-        div()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .mt_4()
-          .pt_3()
-          .border_t_1()
-          .border_color(p.border)
-          .child(
-            Button::new("workspace-dialog-cancel", &p)
-              .variant(Variant::Outline)
-              .disabled(loading)
-              .label("Cancel")
-              .on_click(cx.listener(|view, _, _, cx| view.close_unless_creating(cx))),
-          )
-          .child(
-            Button::new("workspace-dialog-submit", &p)
-              .disabled(!self.can_submit())
-              .when(loading, |this| {
-                this.child(ui::spinner(
-                  "workspace-dialog-spin",
-                  14.,
-                  p.primary_foreground,
-                ))
-              })
-              .label(self.submit_label())
-              .on_click(cx.listener(|view, _, _, cx| view.submit(cx))),
-          ),
-      );
-    deferred(
-      anchored().position(point(px(0.), px(0.))).child(
-        backdrop
-          .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|view, _, _, cx| view.close_unless_creating(cx)),
-          )
-          .child(
-            panel
-              .id("workspace-dialog-panel")
-              .track_focus(&self.focus)
-              .capture_key_down(keys)
-              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
-          ),
-      ),
-    )
-    .with_priority(2)
-    .into_any_element()
+      .footer([
+        Button::new("workspace-dialog-cancel", &p)
+          .variant(Variant::Outline)
+          .disabled(loading)
+          .label("Cancel")
+          .on_click(cx.listener(|view, _, _, cx| view.close_unless_creating(cx)))
+          .into_any_element(),
+        Button::new("workspace-dialog-submit", &p)
+          .disabled(!can_submit)
+          .when(loading, |this| {
+            this.child(ui::spinner(
+              "workspace-dialog-spin",
+              14.,
+              p.primary_foreground,
+            ))
+          })
+          .label(self.submit_label())
+          .on_click(cx.listener(|view, _, _, cx| view.submit(cx)))
+          .into_any_element(),
+      ])
+      .into_any_element()
   }
 }

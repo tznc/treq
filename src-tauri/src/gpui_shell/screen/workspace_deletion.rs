@@ -304,12 +304,9 @@ impl Render for WorkspaceDeletion {
       .id("workspace-deletion")
       .debug_selector(|| "workspace-deletion".into())
       .w(viewport.width * 0.4)
-      .rounded(radius::LG)
-      .border_1()
-      .border_color(p.border)
+      .map(|el| ui::floating(el, &p))
       .bg(p.background)
       .text_color(p.foreground)
-      .shadow_2xl()
       .overflow_hidden()
       .occlude()
       .capture_action(cx.listener(|view, _: &MoveDown, _, cx| {

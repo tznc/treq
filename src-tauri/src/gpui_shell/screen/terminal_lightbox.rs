@@ -1446,9 +1446,9 @@ impl Lightbox {
       .flex()
       .flex_col()
       .overflow_hidden()
-      .rounded(radius::LG)
+      .map(|el| ui::floating(el, &d))
+      .border_0()
       .bg(d.background)
-      .shadow_2xl()
       .child(self.text_bar(&d, cx))
       .child(
         ui::text(div(), TextSize::Code)
@@ -1534,82 +1534,38 @@ impl Lightbox {
     )
   }
 
-  fn discard_dialog(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+  fn discard_dialog(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     if !self.discard {
       return None;
     }
-    let panel = div()
-      .id("treq-send-unsaved-dialog")
-      .debug_selector(|| "treq-send-unsaved-dialog".into())
-      .w_full()
-      .max_w(zpx(512.))
-      .p_6()
-      .rounded(radius::LG)
-      .border_1()
-      .border_color(p.border.opacity(0.5))
-      .bg(p.popover)
-      .text_color(p.popover_foreground)
-      .shadow_2xl()
-      .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-      .child(
-        div()
-          .flex()
-          .flex_col()
-          .gap_1p5()
-          .child(
-            ui::text(div(), TextSize::Lg)
-              .font_weight(gpui::FontWeight::SEMIBOLD)
-              .child("Discard unsent comments?"),
-          )
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child(
-                "You have review comments that have not been sent to the agent. Close anyway \
-                 and lose them?",
-              ),
-          ),
-      )
-      .child(
-        div()
-          .mt_4()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("treq-send-unsaved-keep", p)
-              .variant(Variant::Ghost)
-              .label("Keep reviewing")
-              .on_click(cx.listener(|view, _, _, cx| {
-                view.discard = false;
-                cx.notify();
-              })),
-          )
-          .child(
-            Button::new("treq-send-unsaved-discard", p)
-              .label("Discard comments")
-              .on_click(cx.listener(|_, _, _, cx| cx.emit(LightboxEvent::Close))),
-          ),
-      );
+    let keep = |view: &mut Self, cx: &mut Context<Self>| {
+      view.discard = false;
+      cx.notify();
+    };
     Some(
-      div()
-        .id("treq-send-unsaved-backdrop")
-        .absolute()
-        .inset_0()
-        .p_4()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(scrim(0.4))
-        .on_mouse_down(
-          MouseButton::Left,
-          cx.listener(|view, _, _, cx| {
-            cx.stop_propagation();
-            view.discard = false;
-            cx.notify();
-          }),
-        )
-        .child(panel),
+      div().absolute().inset_0().child(
+        ui::Dialog::new("treq-send-unsaved-dialog", p)
+          .width(512.)
+          .title("Discard unsent comments?")
+          .description(
+            "You have review comments that have not been sent to the agent. Close anyway and \
+             lose them?",
+          )
+          .on_close(ui::handler(cx, move |view, _, cx| keep(view, cx)))
+          .on_primary(ui::handler(cx, |_, _, cx| cx.emit(LightboxEvent::Close)))
+          .footer([
+            Button::new("treq-send-unsaved-keep", p)
+              .variant(Variant::Outline)
+              .label("Keep reviewing")
+              .on_click(cx.listener(move |view, _, _, cx| keep(view, cx)))
+              .into_any_element(),
+            Button::new("treq-send-unsaved-discard", p)
+              .variant(Variant::Destructive)
+              .label("Discard comments")
+              .on_click(cx.listener(|_, _, _, cx| cx.emit(LightboxEvent::Close)))
+              .into_any_element(),
+          ]),
+      ),
     )
   }
 }

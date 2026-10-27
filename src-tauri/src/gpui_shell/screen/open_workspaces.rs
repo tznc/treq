@@ -23,8 +23,8 @@ use gpui_kit::{
   },
 };
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, Context, Div, Entity, FocusHandle,
-  FontWeight, KeyDownEvent, MouseButton, SharedString, Subscription, Task, Window,
+  self, anchored, deferred, div, prelude::*, px, Context, Div, Entity, FocusHandle, FontWeight,
+  MouseButton, SharedString, Subscription, Task, Window,
 };
 
 use super::{
@@ -34,7 +34,7 @@ use super::{
   open_workspaces_data::{self as data, Checked, Line, OpenWorkspacesHost, Route, Target},
   workspace_data::WorkspaceHost,
   workspace_dialog_data::{self as dialog_data, WorkspaceDialogHost},
-  workspace_modal::{dialog_description, dialog_header, dialog_panel, label_xs, press},
+  workspace_modal::{label_xs, press},
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -992,7 +992,7 @@ impl OpenWorkspacesDialog {
     options: Div,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> Div {
+  ) -> (Div, [gpui::AnyElement; 3]) {
     let checks = self.lines();
     let targets = self.targets();
     let unchecked = checks.iter().filter(|(_, c)| c.is_none()).count();
@@ -1009,7 +1009,7 @@ impl OpenWorkspacesDialog {
     } else {
       summary_future(new, existing)
     };
-    div()
+    let column = div()
       .flex()
       .flex_col()
       .flex_1()
@@ -1056,34 +1056,35 @@ impl OpenWorkspacesDialog {
             })),
         )
       })
-      .child(
-        div()
-          .flex()
-          .items_center()
-          .gap_2()
-          .child(self.status(status, invalid, &checks, p, cx))
-          .child(
-            Button::new("open-workspaces-cancel", p)
-              .variant(Variant::Outline)
-              .disabled(self.pending)
-              .label("Cancel")
-              .on_click(cx.listener(|view, _, _, cx| view.close(cx))),
-          )
-          .child(
-            Button::new("open-workspaces-submit", p)
-              .disabled(!self.can_submit())
-              .label(if self.pending {
-                "Creating...".to_string()
-              } else {
-                match targets.len() {
-                  0 => "Create Workspaces".to_string(),
-                  1 => "Create 1 Workspace".to_string(),
-                  n => format!("Create {n} Workspaces"),
-                }
-              })
-              .on_click(cx.listener(|view, _, _, cx| view.submit(cx))),
-          ),
-      )
+;
+    // The summary sits left of the action pair in the dialog's footer.
+    let footer = [
+      div()
+        .flex_1()
+        .min_w_0()
+        .child(self.status(status, invalid, &checks, p, cx))
+        .into_any_element(),
+      Button::new("open-workspaces-cancel", p)
+        .variant(Variant::Outline)
+        .disabled(self.pending)
+        .label("Cancel")
+        .on_click(cx.listener(|view, _, _, cx| view.close(cx)))
+        .into_any_element(),
+      Button::new("open-workspaces-submit", p)
+        .disabled(!self.can_submit())
+        .label(if self.pending {
+          "Creating...".to_string()
+        } else {
+          match targets.len() {
+            0 => "Create Workspaces".to_string(),
+            1 => "Create 1 Workspace".to_string(),
+            n => format!("Create {n} Workspaces"),
+          }
+        })
+        .on_click(cx.listener(|view, _, _, cx| view.submit(cx)))
+        .into_any_element(),
+    ];
+    (column, footer)
   }
 
   /// What the lines and picks will open, beside the buttons; pressed, it
@@ -1841,71 +1842,40 @@ impl Render for OpenWorkspacesDialog {
     let options = self.create_options(select, &sparse, &symlinks, &p, cx);
     let split = self.integration().is_some();
     let viewport = window.viewport_size();
-    let (backdrop, panel) = dialog_panel(
-      "open-workspaces-dialog",
-      if split { 1040. } else { 560. },
-      viewport,
-      &p,
-    );
-    let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
-      let k = &e.keystroke;
-      let held = crate::gpui_shell::keys::held(k.modifiers);
-      if ui::is_escape(k) {
-        cx.stop_propagation();
-        if view.lines_open {
-          view.close_lines(cx);
-        } else {
-          view.close(cx);
-        }
-      } else if k.key == "enter" && (held.platform || held.control) {
-        cx.stop_propagation();
-        view.submit(cx);
-      }
-    });
+    let (column, footer) = self.lines_column(&lines, options, &p, cx);
     let body = div()
       .flex()
       .gap_4()
       .h(zpx(500.))
-      .max_h(viewport.height - px(160.))
-      .pt_4()
-      .child(self.lines_column(&lines, options, &p, cx))
+      .max_h(viewport.height - px(200.))
+      .child(column)
       .when(split, |this| {
         this.child(self.integrations_column((&search, &issue_search), &p, cx))
       });
-    let panel = panel
-      .child(dialog_header(
-        "New Workspaces",
-        dialog_description(
-          if split {
-            "Create a workspace for each line, and for each item you pick."
-          } else {
-            "Create a workspace for each line."
-          },
-          &p,
-        ),
-      ))
-      .child(body);
-    deferred(
-      anchored().position(point(px(0.), px(0.))).child(
-        backdrop
-          .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|view, _, _, cx| {
-              if !view.pending {
-                view.close(cx)
-              }
-            }),
-          )
-          .child(
-            panel
-              .id("open-workspaces-panel")
-              .track_focus(&self.focus)
-              .capture_key_down(keys)
-              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
-          ),
-      ),
-    )
-    .with_priority(2)
-    .into_any_element()
+    let can_submit = self.can_submit();
+    ui::Dialog::new("open-workspaces-dialog", &p)
+      .overlay(viewport)
+      .width(if split { 1040. } else { 560. })
+      .title("New Workspaces")
+      .description(if split {
+        "Create a workspace for each line, and for each item you pick."
+      } else {
+        "Create a workspace for each line."
+      })
+      .focus(&self.focus)
+      // Escape closes the lines popover first; a click outside waits
+      // while workspaces are created.
+      .on_close(ui::handler(cx, |view, _, cx| {
+        if view.lines_open {
+          view.close_lines(cx);
+        } else if !view.pending {
+          view.close(cx);
+        }
+      }))
+      .on_primary(ui::handler(cx, |view, _, cx| view.submit(cx)))
+      .primary_disabled(!can_submit)
+      .child(body)
+      .footer(footer)
+      .into_any_element()
   }
 }

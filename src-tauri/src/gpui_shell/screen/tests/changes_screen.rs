@@ -413,7 +413,7 @@ fn changes_tab_discards_everything_once_confirmed(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   h.click("discard-all-changes");
   assert!(h.drawn("discard-all-dialog"));
-  h.click("discard-all-confirm");
+  h.click("discard-all-dialog-confirm");
   h.cx.run_until_parked();
   let writes = host.writes();
   // Snapshotted first, so the toast can undo it.
@@ -1207,4 +1207,29 @@ fn changes_tab_sends_an_agent_comment_to_react(cx: &mut TestAppContext) {
   assert_eq!(sent.len(), 1);
   assert_eq!(sent[0]["id"], "ag");
   assert_eq!(sent[0]["comment_text"], "Use one line");
+}
+
+#[gpui::test]
+fn enter_confirms_the_discard_all_confirmation(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("discard-all-changes");
+  assert!(h.drawn("discard-all-dialog"));
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(host.writes().iter().any(|w| w.starts_with("discard")));
+  assert!(!h.drawn("discard-all-dialog"));
+}
+
+#[gpui::test]
+fn the_discard_review_confirmation_keeps_on_escape_and_discards_on_enter(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  h.click("discard-review");
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.drawn("discard-review-dialog"));
+  assert!(h.drawn("review-action-bar"));
+  h.click("discard-review");
+  h.cx.simulate_keystrokes("enter");
+  assert!(!h.drawn("discard-review-dialog"));
+  assert!(!h.drawn("review-action-bar"));
 }

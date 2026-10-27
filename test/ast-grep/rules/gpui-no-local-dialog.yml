@@ -1,0 +1,34 @@
+id: gpui-no-local-dialog
+language: rust
+severity: error
+message: >
+  Do not build dialog chrome in a screen. Use `ui::Dialog` or
+  `ui::ConfirmDialog` (scrim, panel, title, footer, Escape and Enter), and
+  `ui::floating` for a surface that floats over the window without being a
+  dialog, so every dialog shares one look and one behavior.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  any:
+    - kind: function_item
+      has:
+        field: name
+        kind: identifier
+        regex: ^(dialog|dialog_panel|dialog_title|dialog_header|dialog_description|dialog_footer|modal_shell|cancel_button)$
+    - kind: call_expression
+      has:
+        field: function
+        kind: field_expression
+        has:
+          field: field
+          regex: ^shadow_2xl$
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end

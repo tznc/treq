@@ -643,3 +643,11 @@ mod testing_library {
     assert!(screen.query_by_role(option("Go to Home")).is_none());
   }
 }
+
+#[gpui::test]
+fn keyboard_shortcuts_close_from_their_x(cx: &mut TestAppContext) {
+  let json = serde_json::json!({"kind": "keyboardShortcuts", "dark": false});
+  let mut h = Harness::new(cx, json, FakeHost::default());
+  h.click("keyboard-shortcuts-modal-close");
+  assert_eq!(h.sent(), vec![press("overlay.close")]);
+}

@@ -851,3 +851,46 @@ fn a_failed_move_keeps_the_confirmation_open(cx: &mut TestAppContext) {
   h.click("change-move-cancel");
   assert_eq!(h.sent(), vec![press("changeMove.cancel")]);
 }
+
+#[gpui::test]
+fn the_dialog_closes_on_escape_and_creates_on_enter(cx: &mut TestAppContext) {
+  let host = Arc::new(host());
+  let mut h = Harness::with_host(cx, dialog(serde_json::json!({})), host.clone());
+  h.click("workspace-dialog-title");
+  h.cx.simulate_input("Dark Mode");
+  pause(&mut h);
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![field("workspaceDialog.created", 100.into())]);
+
+  let mut h = Harness::with_host(cx, dialog(serde_json::json!({})), host);
+  assert!(h.drawn("workspace-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![press("workspaceDialog.close")]);
+}
+
+#[gpui::test]
+fn rename_closes_on_escape(cx: &mut TestAppContext) {
+  let mut h = Harness::with_host(cx, rename(), Arc::new(host()));
+  assert!(h.drawn("rename-workspace-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![press("renameWorkspace.close")]);
+}
+
+#[gpui::test]
+fn the_move_confirmation_cancels_on_escape_and_moves_on_enter(cx: &mut TestAppContext) {
+  let host = Arc::new(host());
+  let mut h = Harness::with_host(cx, change_move(), host.clone());
+  assert!(h.drawn("change-move-dialog"));
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![press("changeMove.done")]);
+
+  let mut h = Harness::with_host(cx, change_move(), host);
+  assert!(h.drawn("change-move-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![press("changeMove.cancel")]);
+}
