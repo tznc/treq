@@ -1207,6 +1207,11 @@ mod tests {
       "sh -c 'echo \"name=$TREQ_PTY_SESSION_ID.\"; exec cat'",
     );
     let mut reader = daemon.attach("treq-app-1-agent");
+    // Fails instead of waiting forever when the name never shows.
+    reader
+      .get_ref()
+      .set_read_timeout(Some(Duration::from_secs(10)))
+      .unwrap();
     read_until(&mut reader, "name=treq-app-1-agent.");
   }
 
