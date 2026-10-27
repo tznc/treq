@@ -4569,6 +4569,51 @@ pub use merge_commits::*;
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// A workspace path that does not exist, under a temp dir that does.
+  fn missing_workspace() -> (TempDir, String) {
+    let temp = TempDir::new().expect("tempdir");
+    let path = temp.path().join(".treq/workspaces/gone");
+    (temp, path.to_string_lossy().into_owned())
+  }
+
+  #[test]
+  fn update_stale_workspace_is_a_no_op_for_a_missing_path() {
+    let (_temp, path) = missing_workspace();
+    assert!(update_stale_workspace(&path).is_ok());
+    assert_eq!(jj_workspace_update_stale(&path).unwrap(), "");
+  }
+
+  #[test]
+  fn working_copy_of_a_missing_path_is_empty() {
+    let (_temp, path) = missing_workspace();
+    assert!(jj_is_working_copy_empty(&path).unwrap());
+  }
+
+  #[test]
+  fn push_from_a_missing_path_pushes_nothing() {
+    let (_temp, path) = missing_workspace();
+    assert_eq!(jj_push(&path).unwrap(), "");
+  }
+
+  #[test]
+  fn bookmark_in_a_missing_path_is_not_conflicted() {
+    let (_temp, path) = missing_workspace();
+    assert!(!jj_is_bookmark_conflicted(&path, "main"));
+  }
+
+  #[test]
+  fn deleting_a_stash_in_a_missing_path_is_a_no_op() {
+    let (_temp, path) = missing_workspace();
+    let name = format!("{STASH_BOOKMARK_PREFIX}x");
+    assert!(jj_delete_stash_bookmark(&path, &name).is_ok());
+  }
+
+  #[test]
+  fn branch_of_a_missing_path_is_empty() {
+    let (_temp, path) = missing_workspace();
+    assert_eq!(get_workspace_branch(&path).unwrap(), "");
+  }
   use crate::test_cli::git;
   use std::ffi::OsStr;
   use std::fs;

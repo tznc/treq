@@ -55,6 +55,9 @@ pub fn jj_rename_bookmark(
 /// Delete a jj bookmark
 /// Uses: jj bookmark delete <name>
 pub fn jj_delete_bookmark(workspace_path: &str, bookmark_name: &str) -> Result<(), JjError> {
+  if !Path::new(workspace_path).exists() {
+    return Ok(());
+  }
   let loaded = load_workspace_repo(workspace_path)?;
   let mut tx = loaded.repo.start_transaction();
   tx.repo_mut()

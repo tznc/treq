@@ -1421,6 +1421,9 @@ pub fn list_workspaces(repo_path: &str) -> Result<Vec<WorkspaceInfo>, JjError> {
 
 /// Get the current branch of a workspace
 pub fn get_workspace_branch(workspace_path: &str) -> Result<String, JjError> {
+  if !Path::new(workspace_path).exists() {
+    return Ok(String::new());
+  }
   if let Some(repo_path) = derive_repo_path_from_workspace(workspace_path) {
     let ws_name = Path::new(workspace_path)
       .file_name()
