@@ -20,11 +20,11 @@ The CLI does not need a display, so it works over SSH and in headless agent sand
 
 A window can link other local repositories to the repository it opened. Add one with **File > Add Repository…** or **Add Repository…** in the home repository row's context menu. Each linked repository gets its own home row and workspace group in the sidebar.
 
-Workspace commands act on the repository that contains the current directory. Pass `-r <repo>` to act on a linked repository instead. `<repo>` is its path, its directory name, or a trailing path such as `org/app`. `add`, `set`, `st`, `diff`, `agent`, and `commit` accept `-r`. `mv` accepts `--repo`, because `-r` is its range flag. A repository that is not linked to the current one is an error.
+Workspace commands act on the repository that contains the current directory. Pass `-r <repo>` to act on a linked repository instead. `<repo>` is its path, its directory name, or a trailing path such as `org/app`. `add`, `set`, `st`, `diff`, `agent start`, and `commit` accept `-r`. `mv` accepts `--repo`, because `-r` is its range flag. A repository that is not linked to the current one is an error.
 
 ```bash
 treq add -r api feat/new-endpoint
-treq agent -r api feat/new-endpoint "Add the endpoint"
+treq agent start -r api feat/new-endpoint "Add the endpoint"
 treq st -r api feat/new-endpoint
 ```
 
@@ -112,12 +112,12 @@ treq mv <source> <destination> -c <commit> [-c <commit> ...]
 - `-f`: file path to move.
 - `-c`: commit ID to move.
 
-### `treq agent`
+### `treq agent start`
 
 Start an agent session in a workspace.
 
 ```bash
-treq agent <branch> <prompt> [-r <repo>] [-m <edit|plan>]
+treq agent start <branch> <prompt> [-r <repo>] [-m <edit|plan>]
 ```
 
 - `branch`: workspace branch name. Agents always start in a workspace, so `.` (the home repository) is rejected.

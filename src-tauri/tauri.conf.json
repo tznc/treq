@@ -177,35 +177,40 @@
           ]
         },
         "agent": {
-          "description": "Start an agent session in a workspace",
-          "args": [
-            {
-              "name": "branch",
-              "index": 1,
-              "takesValue": true,
-              "required": true,
-              "description": "Workspace branch name"
-            },
-            {
-              "name": "prompt",
-              "index": 2,
-              "takesValue": true,
-              "required": true,
-              "description": "Prompt to send to the agent"
-            },
-            {
-              "name": "mode",
-              "short": "m",
-              "takesValue": true,
-              "description": "Permission mode: edit or plan"
-            },
-            {
-              "name": "repo",
-              "short": "r",
-              "takesValue": true,
-              "description": "Supporting repository (path or directory name) to act on"
+          "description": "Start and coordinate agent sessions",
+          "subcommands": {
+            "start": {
+              "description": "Start an agent session in a workspace",
+              "args": [
+                {
+                  "name": "branch",
+                  "index": 1,
+                  "takesValue": true,
+                  "required": true,
+                  "description": "Workspace branch name"
+                },
+                {
+                  "name": "prompt",
+                  "index": 2,
+                  "takesValue": true,
+                  "required": true,
+                  "description": "Prompt to send to the agent"
+                },
+                {
+                  "name": "mode",
+                  "short": "m",
+                  "takesValue": true,
+                  "description": "Permission mode: edit or plan"
+                },
+                {
+                  "name": "repo",
+                  "short": "r",
+                  "takesValue": true,
+                  "description": "Supporting repository (path or directory name) to act on"
+                }
+              ]
             }
-          ]
+          }
         },
         "commit": {
           "description": "Commit changes in a workspace",

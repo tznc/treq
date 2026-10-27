@@ -502,15 +502,26 @@ pub(super) fn handle_workspace_move(matches: &Matches) -> bool {
 }
 
 pub(super) fn handle_workspace_agent(matches: &Matches) -> bool {
+  match matches.subcommand.as_deref() {
+    Some(sub) if sub.name == "start" => handle_agent_start(&sub.matches),
+    _ => {
+      super::log_cli_error("Error: an agent subcommand is required");
+      eprintln!("Usage: treq agent start <branch> <prompt> [-m <edit|plan>]");
+      false
+    }
+  }
+}
+
+fn handle_agent_start(matches: &Matches) -> bool {
   let Some(branch) = get_arg_value(matches, "branch") else {
     super::log_cli_error("Error: branch is required");
-    eprintln!("Usage: treq agent <branch> <prompt> [-m <edit|plan>]");
+    eprintln!("Usage: treq agent start <branch> <prompt> [-m <edit|plan>]");
     return false;
   };
 
   let Some(prompt) = get_arg_value(matches, "prompt") else {
     super::log_cli_error("Error: prompt is required");
-    eprintln!("Usage: treq agent <branch> <prompt> [-m <edit|plan>]");
+    eprintln!("Usage: treq agent start <branch> <prompt> [-m <edit|plan>]");
     return false;
   };
 

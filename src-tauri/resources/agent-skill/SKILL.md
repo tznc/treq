@@ -94,17 +94,17 @@ workspace in that repository:
 
 ```bash
 treq add -r <repo> <branch_name> [-d <description>]
-treq agent -r <repo> <branch_name> "<prompt>"
+treq agent start -r <repo> <branch_name> "<prompt>"
 treq st -r <repo> [<workspace_name>]
 treq diff -r <repo> <workspace_name>
 ```
 
 - `<repo>` is the supporting repository's path or directory name.
-- `-r` works on `add`, `set`, `st`, `diff`, `agent`, and `commit`.
+- `-r` works on `add`, `set`, `st`, `diff`, `agent start`, and `commit`.
   `mv` takes `--repo` because `-r` is its range flag.
-- `treq agent` needs a workspace branch. It cannot start an agent in a home
+- `treq agent start` needs a workspace branch. It cannot start an agent in a home
   repository.
-- `treq agent` returns once the agent is started. Poll `treq st -r` to follow
+- `treq agent start` returns once the agent is started. Poll `treq st -r` to follow
   its progress.
 
 ## Send files to the user

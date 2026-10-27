@@ -59,7 +59,7 @@ pub fn system_prompt(paths: &AgentPaths<'_>) -> String {
     parts.extend(
       [
         "You may read files in supporting repositories but must not write to them directly.",
-        "To change a supporting repository, create a workspace in it with `treq add -r <repo> <branch>` and start a scoped agent there with `treq agent -r <repo> <branch> \"<prompt>\"`.",
+        "To change a supporting repository, create a workspace in it with `treq add -r <repo> <branch>` and start a scoped agent there with `treq agent start -r <repo> <branch> \"<prompt>\"`.",
         "Check its progress with `treq st -r <repo> <branch>`.",
       ]
       .map(String::from),
@@ -353,7 +353,7 @@ mod tests {
     assert!(prompt.contains("You are operating in the Treq home repository."));
     assert!(!prompt.contains("sibling workspaces"));
     assert!(prompt.contains("Supporting repositories: /repos/api, /repos/web."));
-    assert!(prompt.contains("treq agent -r <repo> <branch> \"<prompt>\""));
+    assert!(prompt.contains("treq agent start -r <repo> <branch> \"<prompt>\""));
   }
 
   #[test]
