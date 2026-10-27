@@ -106,6 +106,7 @@ fn report(envelope: &Envelope, state: State, mode: Option<&str>) -> Report {
 pub struct Hub {
   sessions: Mutex<Vec<SessionInfo>>,
   waiting: Mutex<HashMap<String, Vec<Waiting>>>,
+  last_sender: Mutex<HashMap<String, (String, String)>>,
 }
 
 impl Hub {
@@ -127,6 +128,7 @@ impl Hub {
       .lock_or_recover()
       .retain(|known| known.pty_id != pty_id);
     self.waiting.lock_or_recover().remove(pty_id);
+    self.last_sender.lock_or_recover().remove(pty_id);
   }
 
   pub fn sessions(&self) -> Vec<SessionInfo> {
@@ -147,6 +149,10 @@ impl Hub {
     if self.session(&envelope.to_pty).is_none() {
       return Err(format!("{} is not running", envelope.to));
     }
+    self.last_sender.lock_or_recover().insert(
+      envelope.to_pty.clone(),
+      (envelope.from.clone(), envelope.origin_repo.clone()),
+    );
     let mut waiting = self.waiting.lock_or_recover();
     let queue = waiting.entry(envelope.to_pty.clone()).or_default();
     queue.retain(|known| known.envelope.id != envelope.id);
@@ -297,6 +303,12 @@ impl Hub {
       .filter(|known| known.live(now_ms))
       .max_by_key(|known| known.envelope.sent_at_ms)
       .map(|known| known.envelope.clone())
+  }
+
+  /// Who last messaged `pty_id`, and from which repository: where a
+  /// `--status` with no target goes.
+  pub fn last_sender(&self, pty_id: &str) -> Option<(String, String)> {
+    self.last_sender.lock_or_recover().get(pty_id).cloned()
   }
 
   /// A reply to message `id` waiting for `pty_id`, for a blocking `--ask`.
@@ -612,6 +624,22 @@ mod tests {
     let (found, reports) = hub.take_reply("pty-claude", "m-1").unwrap();
     assert_eq!(found.id, "m-2");
     assert_eq!(states(&reports), vec![("m-2".into(), State::Read, None)]);
+  }
+
+  #[test]
+  fn last_sender_outlives_the_message() {
+    let hub = hub();
+    assert_eq!(hub.last_sender("pty-claude"), None);
+    hub.enqueue(envelope("m-1", 0)).unwrap();
+    let mut later = envelope("m-2", 10);
+    later.from = "copilot-3".into();
+    later.origin_repo = "/other".into();
+    hub.enqueue(later).unwrap();
+    hub.finish("pty-claude", &["m-1".into(), "m-2".into()], State::Acked);
+    assert_eq!(
+      hub.last_sender("pty-claude"),
+      Some(("copilot-3".to_string(), "/other".to_string()))
+    );
   }
 
   #[test]

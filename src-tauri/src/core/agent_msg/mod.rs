@@ -11,8 +11,15 @@ pub mod coordinator;
 pub mod delivery;
 pub mod hub;
 pub mod idle;
+pub mod ipc;
 pub mod model;
+pub mod network;
+pub mod protocol;
 pub mod route;
+pub mod service;
+pub mod terminals;
+#[cfg(test)]
+pub mod testing;
 
 /// The `log` target every state change is written under, so the system log
 /// keeps the delivery history after the db row is deleted.

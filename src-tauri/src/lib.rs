@@ -780,6 +780,9 @@ pub fn run() {
       // Rust owns the Supabase session; the windows draw the account.
       commands::cloud::start(app.handle());
       startup::mark("cloud");
+      crate::core::agent_msg::service::start(
+        app.state::<AppState>().dispatch_endpoint.clone(),
+      );
       start_agent_ipc_listener(app.handle().clone(), dispatch_listener);
       start_instance_registry_heartbeat(app.handle().clone());
       crate::core::app_setup_script::spawn_run_if_needed(

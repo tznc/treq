@@ -443,6 +443,11 @@ pub fn parse_ipc_payload(payload: &str) -> Result<IpcDispatchMessage, String> {
         serde_json::from_value(value).map_err(|e| format!("invalid send request json: {}", e))?;
       Ok(IpcDispatchMessage::Send(request))
     }
+    Some(crate::core::agent_msg::protocol::KIND) => {
+      let request = serde_json::from_value(value)
+        .map_err(|e| format!("invalid agent msg request json: {}", e))?;
+      Ok(IpcDispatchMessage::AgentMsg(request))
+    }
     Some(crate::notify_dispatch::NOTIFY_KIND) => {
       let request =
         serde_json::from_value(value).map_err(|e| format!("invalid notify request json: {}", e))?;
@@ -459,6 +464,7 @@ pub fn parse_ipc_payload(payload: &str) -> Result<IpcDispatchMessage, String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IpcDispatchMessage {
   Agent(agent_dispatch::AgentDispatchRequest),
+  AgentMsg(crate::core::agent_msg::protocol::Request),
   Send(SendDispatchRequest),
   Notify(crate::notify_dispatch::NotifyDispatchRequest),
 }
@@ -717,6 +723,24 @@ mod tests {
     match parse_ipc_payload(&agent_json).unwrap() {
       IpcDispatchMessage::Agent(req) => assert_eq!(req.request_id, "a1"),
       other => panic!("expected agent, got {:?}", other),
+    }
+  }
+
+  #[test]
+  fn parses_agent_msg_payloads() {
+    let json = r#"{"kind":"agent_msg","request_id":"r1","repo":"/src/app","op":"inbox","pty":"pty-1","peek":true}"#;
+    match parse_ipc_payload(json).unwrap() {
+      IpcDispatchMessage::AgentMsg(request) => {
+        assert_eq!(request.request_id, "r1");
+        assert_eq!(
+          request.op,
+          crate::core::agent_msg::protocol::Op::Inbox {
+            pty: "pty-1".into(),
+            peek: true
+          }
+        );
+      }
+      other => panic!("expected agent msg, got {:?}", other),
     }
   }
 }
