@@ -2,7 +2,9 @@
 //! What the Checks popover reads per workflow: the newest run's id and
 //! status, from a run with 10 or 50 jobs of 20 recorded steps each.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 use tempfile::TempDir;
 use treq_lib::{core::latest_workflow_run_sync, local_db};
 
