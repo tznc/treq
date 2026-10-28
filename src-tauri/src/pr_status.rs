@@ -736,6 +736,16 @@ fn statuses_sorted<V>(map: &HashMap<String, V>) -> std::collections::BTreeMap<&S
   map.iter().collect()
 }
 
+/// What a poll found, as a number equal for equal caches, so the emitter
+/// can tell whether anything changed since its last event.
+pub fn statuses_digest(statuses: &RepoPrCache, ci_statuses: &RepoCiCache) -> u64 {
+  use std::hash::{Hash, Hasher};
+  let mut hasher = std::collections::hash_map::DefaultHasher::new();
+  statuses_sorted(statuses).hash(&mut hasher);
+  statuses_sorted(ci_statuses).hash(&mut hasher);
+  hasher.finish()
+}
+
 /// The `pr-statuses-updated` payload. `stacks_moved` says a PR's base moved
 /// (`core::pr_stacks`); `synced` lists the workspaces whose title or
 /// description the PR just changed (`core::pr_sync`).
@@ -768,12 +778,7 @@ pub fn set_app_handle(app: tauri::AppHandle) {
       log::warn!("pr-status: syncing PR text into {repo_path}: {err}");
       Vec::new()
     });
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    serde_json::to_string(&(statuses_sorted(statuses), statuses_sorted(ci_statuses)))
-      .unwrap_or_default()
-      .hash(&mut hasher);
-    let digest = hasher.finish();
+    let digest = statuses_digest(statuses, ci_statuses);
     let unchanged = last_emitted
       .lock_or_recover()
       .insert(repo_path.to_string(), digest)
@@ -1172,6 +1177,25 @@ mod tests {
     let _ = mgr.list_cached("/tmp/repo");
     let _ = mgr.list_cached("/tmp/repo");
     assert_eq!(count.load(Ordering::SeqCst), 1);
+  }
+
+  #[test]
+  fn statuses_digest_ignores_order_and_sees_any_field_change() {
+    let mut a = RepoPrCache::new();
+    let mut b = RepoPrCache::new();
+    for branch in ["x", "y", "z"] {
+      a.insert(branch.into(), Some(sample_pr(1, branch)));
+    }
+    for branch in ["z", "y", "x"] {
+      b.insert(branch.into(), Some(sample_pr(1, branch)));
+    }
+    let ci = RepoCiCache::from([("x".to_string(), Some(sample_ci("success")))]);
+    assert_eq!(statuses_digest(&a, &ci), statuses_digest(&b, &ci));
+
+    b.get_mut("y").unwrap().as_mut().unwrap().is_draft = true;
+    assert_ne!(statuses_digest(&a, &ci), statuses_digest(&b, &ci));
+    let failing = RepoCiCache::from([("x".to_string(), Some(sample_ci("failure")))]);
+    assert_ne!(statuses_digest(&a, &ci), statuses_digest(&a, &failing));
   }
 
   #[test]
