@@ -271,7 +271,7 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
 
   // Every remote request cold-starts `treq` and lands here, so the common
   // case (schema already current) must cost one pragma read, not ~70 statements.
-  if migrations::version(&conn)? >= migrations::LATEST {
+  if migrations::is_current(&conn, migrations::MIGRATIONS)? {
     return Ok(db_path);
   }
 
@@ -2782,6 +2782,11 @@ mod tests {
       > 0
   }
 
+  fn all_migrations_applied(db_path: &PathBuf) -> bool {
+    let conn = Connection::open(db_path).expect("open database");
+    migrations::is_current(&conn, migrations::MIGRATIONS).expect("read migrations")
+  }
+
   fn user_version(db_path: &PathBuf) -> i64 {
     Connection::open(db_path)
       .expect("open database")
@@ -2827,7 +2832,7 @@ mod tests {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path().to_str().unwrap().to_string();
     let db_path = init_local_db(&repo_path).expect("fresh init");
-    assert_eq!(user_version(&db_path), migrations::LATEST);
+    assert!(all_migrations_applied(&db_path));
 
     // Drop a table the init would recreate: a skipped init leaves it missing.
     let conn = Connection::open(&db_path).expect("open database");
@@ -2862,7 +2867,7 @@ mod tests {
     assert!(conn
       .prepare("SELECT refreshed_at, archived FROM workspaces")
       .is_ok());
-    assert_eq!(user_version(&db_path), migrations::LATEST);
+    assert!(all_migrations_applied(&db_path));
   }
 
   #[test]
@@ -2940,16 +2945,16 @@ mod tests {
       init_local_db(&repo_path).unwrap();
     }
     println!("gated init avg: {:?}", started.elapsed() / n);
-    Connection::open(&db_path)
-      .unwrap()
-      .pragma_update(None, "user_version", 0)
-      .unwrap();
-    let started = std::time::Instant::now();
-    for _ in 0..n {
+    let forget_migrations = || {
       Connection::open(&db_path)
         .unwrap()
-        .pragma_update(None, "user_version", 0)
+        .execute_batch("DELETE FROM schema_migrations; PRAGMA user_version = 0;")
         .unwrap();
+    };
+    forget_migrations();
+    let started = std::time::Instant::now();
+    for _ in 0..n {
+      forget_migrations();
       init_local_db(&repo_path).unwrap();
     }
     println!("ungated init avg: {:?}", started.elapsed() / n);

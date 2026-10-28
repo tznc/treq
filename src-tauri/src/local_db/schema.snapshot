@@ -99,6 +99,9 @@ table review_history
   column workspace_id|INTEGER|0|NULL|0
   index idx_review_history_comment|0|comment_id
   index idx_review_history_created_at|0|created_at
+table schema_migrations
+  column applied_at|TEXT|1|CURRENT_TIMESTAMP|0
+  column version|INTEGER|0|NULL|1
 table sessions
   column created_at|TEXT|1|NULL|0
   column id|INTEGER|0|NULL|1

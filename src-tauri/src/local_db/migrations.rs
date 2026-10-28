@@ -1,13 +1,14 @@
 //! Versioned schema migrations for a repository's `.treq/local.db`.
 //!
-//! `PRAGMA user_version` records the last migration applied. Opening a db runs
-//! every migration above it, in order, and records each version as it lands,
-//! so a failure part way resumes from the step that failed on the next open.
+//! `schema_migrations` records each migration applied. Opening a db runs every
+//! migration not recorded there, oldest first, recording each as it lands, so
+//! a failure part way resumes from the step that failed on the next open.
 //!
 //! Each migration lives in `migrations/<unix seconds>_<name>.rs`, and that
 //! timestamp is its version, as in Rails, sqlx and Supabase: two branches
-//! adding migrations at once cannot claim the same number. `user_version` is
-//! a signed 32-bit integer, which holds unix seconds until 2038.
+//! adding migrations at once cannot claim the same number. Applied versions
+//! are rows in `schema_migrations`, so a migration merged after a newer one
+//! still runs.
 //!
 //! The first migration is the baseline: the schema as it stood when
 //! migrations were introduced. It checks the file's actual tables and columns rather than its
@@ -36,23 +37,75 @@ pub(super) const MIGRATIONS: &[Migration] = &[Migration {
   apply: baseline::apply,
 }];
 
-/// The version a fully migrated database is at.
-pub(super) const LATEST: i64 = MIGRATIONS[MIGRATIONS.len() - 1].version;
-
-pub(super) fn version(conn: &Connection) -> Result<i64, String> {
-  conn
+/// Versions recorded as applied: the rows of `schema_migrations`, plus, for
+/// files from releases that recorded only the last version in
+/// `user_version`, every known migration at or below it.
+pub(super) fn applied_versions(conn: &Connection) -> Result<Vec<i64>, String> {
+  let read = |e: rusqlite::Error| format!("Failed to read local db migrations: {}", e);
+  let legacy: i64 = conn
     .query_row("PRAGMA user_version", [], |row| row.get(0))
-    .map_err(|e| format!("Failed to read local db schema version: {}", e))
+    .map_err(read)?;
+  let mut versions: Vec<i64> = MIGRATIONS
+    .iter()
+    .map(|m| m.version)
+    .filter(|v| *v <= legacy)
+    .collect();
+  let has_table: bool = conn
+    .query_row(
+      "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
+      [],
+      |row| row.get(0),
+    )
+    .map_err(read)?;
+  if has_table {
+    let mut stmt = conn
+      .prepare("SELECT version FROM schema_migrations")
+      .map_err(read)?;
+    for version in stmt.query_map([], |row| row.get(0)).map_err(read)? {
+      versions.push(version.map_err(read)?);
+    }
+  }
+  versions.sort_unstable();
+  versions.dedup();
+  Ok(versions)
 }
 
-/// Applies every migration above the database's version, in order.
+/// Whether every one of `migrations` is applied. The common case on every
+/// open, so it costs two small reads.
+pub(super) fn is_current(conn: &Connection, migrations: &[Migration]) -> Result<bool, String> {
+  let applied = applied_versions(conn)?;
+  Ok(
+    migrations
+      .iter()
+      .all(|m| applied.binary_search(&m.version).is_ok()),
+  )
+}
+
+/// Applies, oldest first, every migration not yet recorded, including one
+/// older than migrations already applied (merged after them).
 pub(super) fn run(conn: &Connection, migrations: &[Migration]) -> Result<(), String> {
-  let current = version(conn)?;
-  for migration in migrations.iter().filter(|m| m.version > current) {
+  let applied = applied_versions(conn)?;
+  conn
+    .execute(
+      "CREATE TABLE IF NOT EXISTS schema_migrations (
+         version INTEGER PRIMARY KEY,
+         applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )",
+      [],
+    )
+    .map_err(|e| format!("Failed to create schema_migrations: {}", e))?;
+  for migration in migrations
+    .iter()
+    .filter(|m| applied.binary_search(&m.version).is_err())
+  {
     let record = |conn: &Connection| {
       conn
-        .pragma_update(None, "user_version", migration.version)
-        .map_err(|e| format!("Failed to record local db schema version: {}", e))
+        .execute(
+          "INSERT OR IGNORE INTO schema_migrations (version) VALUES (?1)",
+          [migration.version],
+        )
+        .map(|_| ())
+        .map_err(|e| format!("Failed to record migration {}: {}", migration.version, e))
     };
     if migration.transactional {
       let tx = conn
@@ -76,59 +129,50 @@ mod tests {
   use std::cell::RefCell;
 
   thread_local! {
-    static APPLIED: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
+    static RAN: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
   }
 
-  fn applied() -> Vec<i64> {
-    APPLIED.with(|a| a.borrow().clone())
+  fn ran() -> Vec<i64> {
+    RAN.with(|a| a.borrow().clone())
   }
 
-  fn log(version: i64) {
-    APPLIED.with(|a| a.borrow_mut().push(version));
-  }
-
-  fn step3(conn: &Connection) -> Result<(), String> {
-    log(3);
+  fn create(conn: &Connection, version: i64, table: &str) -> Result<(), String> {
+    RAN.with(|a| a.borrow_mut().push(version));
     conn
-      .execute("CREATE TABLE three (id INTEGER)", [])
+      .execute(&format!("CREATE TABLE {table} (id INTEGER)"), [])
       .map(|_| ())
       .map_err(|e| e.to_string())
   }
 
-  fn step4(conn: &Connection) -> Result<(), String> {
-    log(4);
-    conn
-      .execute("CREATE TABLE four (id INTEGER)", [])
-      .map(|_| ())
-      .map_err(|e| e.to_string())
+  // Versions past 2038, which no longer fit `PRAGMA user_version`.
+  const A: i64 = 2_200_000_000;
+  const B: i64 = 2_200_000_100;
+  const C: i64 = 2_200_000_200;
+
+  fn step_a(conn: &Connection) -> Result<(), String> {
+    create(conn, A, "a")
   }
 
-  fn failing_step5(conn: &Connection) -> Result<(), String> {
-    log(5);
-    conn
-      .execute("CREATE TABLE five (id INTEGER)", [])
-      .map_err(|e| e.to_string())?;
-    Err("step 5 broke".into())
+  fn step_b(conn: &Connection) -> Result<(), String> {
+    create(conn, B, "b")
   }
 
-  const STEPS: &[Migration] = &[
-    Migration {
-      version: 3,
-      transactional: true,
-      apply: step3,
-    },
-    Migration {
-      version: 4,
-      transactional: true,
-      apply: step4,
-    },
-  ];
+  fn failing_step_c(conn: &Connection) -> Result<(), String> {
+    create(conn, C, "c")?;
+    Err("step c broke".into())
+  }
 
-  fn db_at(version: i64) -> Connection {
-    APPLIED.with(|a| a.borrow_mut().clear());
-    let conn = Connection::open_in_memory().unwrap();
-    conn.pragma_update(None, "user_version", version).unwrap();
-    conn
+  fn migration(version: i64, apply: fn(&Connection) -> Result<(), String>) -> Migration {
+    Migration {
+      version,
+      transactional: true,
+      apply,
+    }
+  }
+
+  fn fresh_db() -> Connection {
+    RAN.with(|a| a.borrow_mut().clear());
+    Connection::open_in_memory().unwrap()
   }
 
   fn table_exists(conn: &Connection, name: &str) -> bool {
@@ -143,57 +187,77 @@ mod tests {
   }
 
   #[test]
-  fn applies_only_the_migrations_above_the_current_version_in_order() {
-    let conn = db_at(3);
-    run(&conn, STEPS).unwrap();
-    assert_eq!(applied(), [4]);
-    assert_eq!(version(&conn).unwrap(), 4);
-
-    let conn = db_at(0);
-    run(&conn, STEPS).unwrap();
-    assert_eq!(applied(), [3, 4]);
+  fn records_versions_past_2038() {
+    let conn = fresh_db();
+    let steps = [migration(A, step_a), migration(B, step_b)];
+    run(&conn, &steps).unwrap();
+    assert_eq!(ran(), [A, B]);
+    assert_eq!(applied_versions(&conn).unwrap(), [A, B]);
+    assert!(is_current(&conn, &steps).unwrap());
   }
 
   #[test]
   fn an_up_to_date_database_runs_nothing() {
-    let conn = db_at(4);
-    run(&conn, STEPS).unwrap();
-    assert!(applied().is_empty());
+    let conn = fresh_db();
+    let steps = [migration(A, step_a)];
+    run(&conn, &steps).unwrap();
+    RAN.with(|a| a.borrow_mut().clear());
+    run(&conn, &steps).unwrap();
+    assert!(ran().is_empty());
   }
 
   #[test]
-  fn a_database_from_a_newer_release_is_left_alone() {
-    let conn = db_at(9);
-    run(&conn, STEPS).unwrap();
-    assert!(applied().is_empty());
-    assert_eq!(version(&conn).unwrap(), 9);
+  fn a_migration_merged_after_a_newer_one_still_runs() {
+    // Branch one adds B, branch two adds A; B's branch merges and ships first.
+    let conn = fresh_db();
+    run(&conn, &[migration(B, step_b)]).unwrap();
+    let steps = [migration(A, step_a), migration(B, step_b)];
+    assert!(!is_current(&conn, &steps).unwrap());
+    run(&conn, &steps).unwrap();
+    assert_eq!(ran(), [B, A]);
+    assert_eq!(applied_versions(&conn).unwrap(), [A, B]);
   }
 
   #[test]
-  fn a_failed_migration_rolls_back_and_keeps_the_last_good_version() {
-    let steps = [
-      Migration {
-        version: 3,
-        transactional: true,
-        apply: step3,
-      },
-      Migration {
-        version: 5,
-        transactional: true,
-        apply: failing_step5,
-      },
-    ];
-    let conn = db_at(0);
+  fn a_database_from_a_newer_release_keeps_its_unknown_migrations() {
+    let conn = fresh_db();
+    run(&conn, &[migration(A, step_a), migration(B, step_b)]).unwrap();
+    // An older app only knows A: nothing runs and B's record stays.
+    let older = [migration(A, step_a)];
+    assert!(is_current(&conn, &older).unwrap());
+    run(&conn, &older).unwrap();
+    assert_eq!(applied_versions(&conn).unwrap(), [A, B]);
+  }
+
+  #[test]
+  fn a_failed_migration_rolls_back_and_is_not_recorded() {
+    let conn = fresh_db();
+    let steps = [migration(A, step_a), migration(C, failing_step_c)];
     let err = run(&conn, &steps).unwrap_err();
-    assert!(err.contains("step 5 broke"), "{err}");
-    assert_eq!(version(&conn).unwrap(), 3);
-    assert!(table_exists(&conn, "three"));
-    assert!(!table_exists(&conn, "five"));
+    assert!(err.contains("step c broke"), "{err}");
+    assert_eq!(applied_versions(&conn).unwrap(), [A]);
+    assert!(table_exists(&conn, "a"));
+    assert!(!table_exists(&conn, "c"));
 
     // The next open resumes at the failed step.
-    APPLIED.with(|a| a.borrow_mut().clear());
+    RAN.with(|a| a.borrow_mut().clear());
     run(&conn, &steps).unwrap_err();
-    assert_eq!(applied(), [5]);
+    assert_eq!(ran(), [C]);
+  }
+
+  #[test]
+  fn user_version_from_earlier_releases_counts_as_applied() {
+    // Releases before the table recorded the last migration in
+    // `user_version`: 2 for the pre-timestamp baseline, then the baseline's
+    // timestamp. Only migrations at or below it count as applied.
+    let baseline = MIGRATIONS[0].version;
+    for (user_version, applied) in [(0, vec![]), (2, vec![]), (baseline, vec![baseline])] {
+      let conn = fresh_db();
+      conn
+        .pragma_update(None, "user_version", user_version)
+        .unwrap();
+      assert_eq!(applied_versions(&conn).unwrap(), applied, "{user_version}");
+    }
   }
 
   #[test]
@@ -222,24 +286,15 @@ mod tests {
     let versions: Vec<i64> = MIGRATIONS.iter().map(|m| m.version).collect();
     assert_eq!(stamps, versions);
     for version in versions {
-      // After 2023, and within `PRAGMA user_version`'s signed 32 bits.
       assert!(
-        (1_700_000_000..=i64::from(i32::MAX)).contains(&version),
-        "{version}"
+        version >= 1_700_000_000,
+        "{version} is not a unix timestamp"
       );
     }
   }
 
   #[test]
-  fn a_database_at_the_old_baseline_version_upgrades() {
-    // Releases before timestamped versions recorded the baseline as 2.
-    let conn = db_at(2);
-    assert!(version(&conn).unwrap() < LATEST);
-  }
-
-  #[test]
   fn migrations_are_in_strictly_increasing_version_order() {
     assert!(MIGRATIONS.windows(2).all(|w| w[0].version < w[1].version));
-    assert_eq!(LATEST, MIGRATIONS.last().unwrap().version);
   }
 }
