@@ -45,6 +45,14 @@ fn styleguide() -> Styleguide {
        accessible name and the tooltip. A tone colours the icon for state, such as danger.",
     )
     .describe(
+      "Copy feedback",
+      "A copy button's icon turns into a green check for 2s after it copies, fading and \
+       scaling between the two. Wrap the control in copy_feedback::copyable, which keeps the \
+       state, and draw the icon with Button::copy_icon or IconButton::copied. A label that \
+       says \"Copy\" may read \"Copied\" while the check shows. Keep any toast the copy \
+       already shows.",
+    )
+    .describe(
       "SplitButton",
       "A command with a menu of related commands. One silhouette; the menu half has its own \
        accessible name. The pill variant is a state that is also a button (a PR's Open): \
@@ -201,6 +209,36 @@ fn buttons() -> Vec<Example> {
         )
     })
     .component("IconButton")
+    .title("States")
+    .size(232., 56.),
+    example!("copy-feedback/states", |knobs, _, cx| {
+      let p = p(cx);
+      let copied = knobs.bool("copied", true);
+      div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+          IconButton::new("icon", theme::ICON_COPY, "Copy file path", &p)
+            .size(IconButtonSize::Small)
+            .copied(copied),
+        )
+        .child(
+          IconButton::new("outline", theme::ICON_COPY, "Copy file contents", &p)
+            .size(IconButtonSize::Small)
+            .outline()
+            .copied(copied),
+        )
+        .child(
+          Button::new("labelled", &p)
+            .variant(Variant::Outline)
+            .size(treq_ui::Size::Sm)
+            .gap_2()
+            .copy_icon(copied, 12.)
+            .label(if copied { "Copied" } else { "Copy" }),
+        )
+    })
+    .component("Copy feedback")
     .title("States")
     .size(232., 56.),
     example!("split-button/playground", |knobs, _, cx| {

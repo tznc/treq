@@ -16,10 +16,29 @@ pub const SWAP_FOR: Duration = Duration::from_millis(180);
 /// How long the check shows after a copy.
 pub const COPIED_FOR: Duration = Duration::from_millis(2000);
 
+/// What a copy icon shows: the check while `copied`. `swapped` once it
+/// has changed, so the first draw doesn't fade in.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Copied {
+  pub copied: bool,
+  pub swapped: bool,
+}
+
+/// A still state, as in a snapshot: nothing animates.
+impl From<bool> for Copied {
+  fn from(copied: bool) -> Self {
+    Copied {
+      copied,
+      swapped: false,
+    }
+  }
+}
+
 /// Whether a copy button just copied. Keep one per button with [`state`].
 #[derive(Default)]
 pub struct CopyFeedback {
   copied: bool,
+  swapped: bool,
   /// A left press landed on a [`Copyable`]; its release copies.
   pressed: bool,
   reset: Option<Task<()>>,
@@ -30,9 +49,17 @@ impl CopyFeedback {
     self.copied
   }
 
+  pub fn copied(&self) -> Copied {
+    Copied {
+      copied: self.copied,
+      swapped: self.swapped,
+    }
+  }
+
   /// Shows the check, for [`COPIED_FOR`] from the latest copy.
   pub fn copy(&mut self, cx: &mut Context<Self>) {
     self.copied = true;
+    self.swapped = true;
     // Replacing the task drops the earlier timer, so the latest copy wins.
     self.reset = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(COPIED_FOR).await;
@@ -56,20 +83,24 @@ fn state(id: impl Into<ElementId>, window: &mut Window, cx: &mut App) -> Entity<
 /// copy buttons'.
 pub fn copy_icon(
   id: impl Into<ElementId>,
-  copied: bool,
+  copied: Copied,
   size_px: f32,
   idle: Hsla,
   success: Hsla,
 ) -> AnyElement {
-  let (path, color) = if copied {
+  let (path, color) = if copied.copied {
     (theme::ICON_CHECK, success)
   } else {
     (theme::ICON_COPY, idle)
   };
   // A new id per state restarts the animation on every swap.
-  let state = if copied { "check" } else { "copy" };
+  let icon = crate::icon(path, size_px, color);
+  if !copied.swapped {
+    return icon.into_any_element();
+  }
+  let state = if copied.copied { "check" } else { "copy" };
   let id = ElementId::NamedChild(std::sync::Arc::new(id.into()), state.into());
-  crate::icon(path, size_px, color)
+  icon
     .with_animation(
       id,
       Animation::new(SWAP_FOR).with_easing(ease_out_quint()),
@@ -84,12 +115,12 @@ pub fn copy_icon(
 }
 
 /// Wraps a copy control so a click on it shows the check: `render` draws
-/// it, told whether it just copied. The control keeps its own click handler
+/// it, told whether it just copied ([`Copied`]). The control keeps its own click handler
 /// to do the copy; the wrapper sees the click even when that handler stops
 /// propagation. `id` must be unique among its siblings.
 pub fn copyable(
   id: impl Into<ElementId>,
-  render: impl FnOnce(bool) -> AnyElement + 'static,
+  render: impl FnOnce(Copied) -> AnyElement + 'static,
 ) -> Copyable {
   Copyable {
     id: id.into(),
@@ -102,7 +133,7 @@ pub fn copyable(
 pub struct Copyable {
   id: ElementId,
   disabled: bool,
-  render: Box<dyn FnOnce(bool) -> AnyElement>,
+  render: Box<dyn FnOnce(Copied) -> AnyElement>,
 }
 
 impl Copyable {
@@ -116,7 +147,7 @@ impl Copyable {
 impl RenderOnce for Copyable {
   fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let feedback = state(self.id.clone(), window, cx);
-    let copied = feedback.read(cx).is_copied();
+    let copied = feedback.read(cx).copied();
     let (down, up) = (feedback.clone(), feedback);
     // Capture phase: the control's own handler may stop the click bubbling.
     div()
@@ -235,7 +266,7 @@ mod tests {
         let seen = self.seen.clone();
         div().size_full().child(
           copyable("c", move |copied| {
-            seen.borrow_mut().push(copied);
+            seen.borrow_mut().push(copied.copied);
             div()
               .id("inner")
               .w(px(40.))
@@ -282,6 +313,30 @@ mod tests {
       cx.run_until_parked();
       assert!(!seen.borrow().contains(&true));
     }
+  }
+
+  /// A button that never copied draws its icon at once; only a swap fades.
+  #[gpui::test]
+  fn only_a_swap_animates(cx: &mut TestAppContext) {
+    let feedback = cx.new(|_| CopyFeedback::default());
+    assert_eq!(feedback.read_with(cx, |f, _| f.copied()), Copied::default());
+    feedback.update(cx, |f, cx| f.copy(cx));
+    assert_eq!(
+      feedback.read_with(cx, |f, _| f.copied()),
+      Copied {
+        copied: true,
+        swapped: true
+      }
+    );
+    cx.executor().advance_clock(COPIED_FOR);
+    cx.run_until_parked();
+    assert_eq!(
+      feedback.read_with(cx, |f, _| f.copied()),
+      Copied {
+        copied: false,
+        swapped: true
+      }
+    );
   }
 
   #[gpui::test]

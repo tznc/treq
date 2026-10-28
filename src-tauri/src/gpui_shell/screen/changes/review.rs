@@ -2213,7 +2213,7 @@ impl ChangesView {
                       .gap_2()
                       .disabled(sending)
                       .copy_icon(copied, 12.)
-                      .label(if copied { "Copied" } else { "Copy" })
+                      .label(if copied.copied { "Copied" } else { "Copy" })
                       .on_click(copy)
                       .into_any_element()
                   }

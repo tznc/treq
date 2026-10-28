@@ -244,7 +244,7 @@ pub enum Size {
 enum ButtonChild {
   Element(gpui::AnyElement),
   Icon(&'static str, f32),
-  CopyIcon(bool, f32),
+  CopyIcon(copy_feedback::Copied, f32),
 }
 
 /// `ui/button.tsx`. Its id is also its debug selector, which tests find it
@@ -342,7 +342,8 @@ impl Button {
 
   /// The copy icon, or while `copied` the green check, swapping with a
   /// fade. Pair it with [`copy_feedback::copyable`] for `copied`.
-  pub fn copy_icon(mut self, copied: bool, size: f32) -> Self {
+  pub fn copy_icon(mut self, copied: impl Into<copy_feedback::Copied>, size: f32) -> Self {
+    let copied = copied.into();
     self.children.push(ButtonChild::CopyIcon(copied, size));
     self
   }
@@ -845,7 +846,10 @@ mod tests {
     let button = Button::new("copy", &p).copy_icon(true, 12.).label("Copied");
     assert!(matches!(
       button.children[..],
-      [ButtonChild::CopyIcon(true, 12.), ButtonChild::Element(_)]
+      [
+        ButtonChild::CopyIcon(copy_feedback::Copied { copied: true, .. }, 12.),
+        ButtonChild::Element(_)
+      ]
     ));
   }
 }

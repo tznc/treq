@@ -31,7 +31,7 @@ pub struct IconButton {
   icon: &'static str,
   size: IconButtonSize,
   selected: bool,
-  copied: Option<bool>,
+  copied: Option<crate::copy_feedback::Copied>,
   tone: Option<Tone>,
   palette: Palette,
 }
@@ -76,8 +76,8 @@ impl IconButton {
 
   /// A copy button: its copy icon turns into the green check while
   /// `copied`. Pair it with [`crate::copy_feedback::copyable`].
-  pub fn copied(mut self, copied: bool) -> Self {
-    self.copied = Some(copied);
+  pub fn copied(mut self, copied: impl Into<crate::copy_feedback::Copied>) -> Self {
+    self.copied = Some(copied.into());
     self
   }
 
