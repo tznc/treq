@@ -2405,6 +2405,20 @@ mod tests {
   }
 
   #[test]
+  fn archive_keeps_workspace_bookmark() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let first = super::create_workspace(&repo_path, "fix/keep", None, None, None, None, None)
+      .expect("create workspace");
+    assert!(crate::jj::jj_get_commit_id(&repo_path, "fix/keep").is_ok());
+
+    super::archive_workspace(&repo_path, &first.id).expect("archive workspace");
+
+    // Archive keeps the branch: restoring or reopening the workspace needs it.
+    crate::jj::jj_get_commit_id(&repo_path, "fix/keep").expect("bookmark survives archive");
+  }
+
+  #[test]
   fn archive_moves_directory_out_before_background_removal() {
     let temp = TempDir::new().expect("tempdir");
     let repo_path = init_workspace_creation_repo(&temp);
