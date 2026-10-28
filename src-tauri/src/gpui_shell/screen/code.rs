@@ -49,6 +49,7 @@ use super::{
 use crate::{
   core::{
     pr_sync::{self, SyncState},
+    rebase_guard::RebaseHold,
     running_checks::{CheckRun, ChecksTarget},
     WorkspaceEntry,
   },
@@ -146,6 +147,7 @@ struct Read {
   stack: Option<Vec<StackRow>>,
   settings: TaskSettings,
   pr_sync: PrSyncRead,
+  rebase_hold: Option<RebaseHold>,
 }
 
 /// The workspace's PR sync record, and when its read started: reads land out
@@ -177,6 +179,9 @@ impl Read {
       });
       let settings = task_settings(host, &parent.repo_path);
       let pr_sync = read_pr_sync(host, parent);
+      let rebase_hold = parent
+        .workspace_id()
+        .and_then(|id| host.rebase_hold(&parent.repo_path, id));
       let logs = host.logs_enabled();
       Read {
         overview: Overview::or_unavailable(super::joined(overview)),
@@ -186,6 +191,7 @@ impl Read {
         stack: super::joined(stack),
         settings,
         pr_sync,
+        rebase_hold,
       }
     })
   }
@@ -307,8 +313,11 @@ pub struct CodeView {
   saving_description: bool,
   /// The PR text last copied into the workspace, as the latest-started
   /// read found it; [`Self::pr_sync`] checks the shown workspace against it.
+  /// read found it; [`Self::pr_sync`] checks the shown workspace against it.
   pr_sync: PrSyncRead,
-  resyncing: bool,
+  /// Why the workspace's last rebase was held back (`core::rebase_guard`).
+  rebase_hold: Option<RebaseHold>,
+: bool,
   /// The card's tab while a local draft differs from the pull request, and
   /// the PR's title and body as the GitHub tab last read them.
   about_tab: AboutTab,
@@ -408,6 +417,7 @@ impl CodeView {
       description_draft: None,
       saving_description: false,
       pr_sync: (0, None),
+      rebase_hold: None,
       resyncing: false,
       about_tab: AboutTab::Draft,
       pr_text: None,
@@ -580,6 +590,7 @@ impl CodeView {
       && self.stack == read.stack
       && self.settings.as_ref() == Some(&settings)
       && self.pr_sync.1 == read.pr_sync.1
+      && self.rebase_hold == read.rebase_hold
       && self.setup == read.setup
       && self.logs_enabled == read.logs;
     self.overview = Some(read.overview);
@@ -590,6 +601,7 @@ impl CodeView {
     let environment = settings.environment.is_some();
     self.settings = Some(settings);
     self.take_pr_sync(read.pr_sync);
+    self.rebase_hold = read.rebase_hold;
     if !unchanged {
       cx.notify();
     }
@@ -1619,6 +1631,7 @@ impl Render for CodeView {
           .gap_4()
           .when(self.overview.is_none(), |this| this.child(skeleton(&p)))
           .children(self.conflicts(&p))
+          .children(self.rebase_alert(&p))
           .children(self.setup_alert(&p, cx))
           .child(self.task_card(&p, window, cx))
           .children(self.about(&p, window, cx))
@@ -1725,6 +1738,59 @@ impl CodeView {
           }),
       ),
     )
+  }
+
+  /// Why the last rebase skipped this workspace, or ran onto a target it
+  /// could not fetch. Clears once a rebase passes its checks.
+  fn rebase_alert(&self, p: &Palette) -> Option<impl IntoElement> {
+    let alert = match self.rebase_hold.as_ref()? {
+      RebaseHold::Dirty => {
+        let react = self.react.clone();
+        ui::Alert::new(
+          "code-rebase-held-dirty",
+          "Rebase skipped: uncommitted changes",
+          p,
+        )
+        .severity(ui::Severity::Warning)
+        .message("Commit or discard your changes; the next rebase picks this workspace up.")
+        .action(
+          Button::new("code-rebase-held-changes", p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .label("Open Changes")
+            .on_click(move |_, _, cx| {
+              let react = react.clone();
+              cx.defer(move |cx| {
+                react(
+                  ScreenAction::Field {
+                    field: "workspace.tab".into(),
+                    value: "changes".into(),
+                  },
+                  cx,
+                )
+              });
+            }),
+        )
+      }
+      RebaseHold::TargetDiverged { bookmark } => ui::Alert::new(
+        "code-rebase-held-diverged",
+        format!("Rebase skipped: {bookmark} diverged from origin"),
+        p,
+      )
+      .severity(ui::Severity::Warning)
+      .message(format!(
+        "Local {bookmark} and origin/{bookmark} each have commits the other lacks. \
+         Push {bookmark}, or reset it to origin/{bookmark}, then rebase."
+      )),
+      RebaseHold::StaleTarget { .. } => ui::Alert::new(
+        "code-rebase-stale-target",
+        "Rebased without fetching",
+        p,
+      )
+      .severity(ui::Severity::Info)
+      .message("Fetching origin failed, so the rebase used the last-fetched target."),
+    };
+    Some(alert)
   }
 
   /// The workspace setup script: its state, re-run, and a link to its
