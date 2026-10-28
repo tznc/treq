@@ -354,7 +354,6 @@ harness = false
 
 [[bench]]
 name = "pr_status_digest"
-
 harness = false
 
 [[bench]]
