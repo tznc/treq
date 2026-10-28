@@ -215,7 +215,7 @@ pub fn handle(request: &Request) -> Response {
   response
 }
 
-/// The banner's "Deliver now": types the wake line into `pty_id` now.
+/// The banner's "Deliver": types the wake line into `pty_id` now.
 pub fn deliver_now(pty_id: &str) {
   let pty_id = pty_id.to_string();
   std::thread::spawn(move || {

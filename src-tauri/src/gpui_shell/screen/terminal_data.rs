@@ -206,7 +206,7 @@ pub trait TerminalHost:
   fn agent_msg_waiting(&self, _pty: &str) -> Option<WaitingMessages> {
     None
   }
-  /// The banner's "Deliver now".
+  /// The banner's "Deliver".
   fn agent_msg_deliver_now(&self, _pty: &str) {}
   /// Moves whenever a terminal's waiting messages may have changed.
   fn agent_msg_generation(&self) -> u64 {

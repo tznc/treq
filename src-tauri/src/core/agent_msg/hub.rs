@@ -205,7 +205,7 @@ impl Hub {
   }
 
   /// Types the wake line now, whatever the screen shows: the banner's
-  /// "Deliver now". Nothing happens when nothing waits.
+  /// "Deliver". Nothing happens when nothing waits.
   pub fn deliver_now(&self, pty_id: &str, terminals: &dyn Terminals) -> Vec<Report> {
     self.wake(pty_id, terminals)
   }

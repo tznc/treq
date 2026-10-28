@@ -148,7 +148,7 @@ treq agent msg --list [-r <repo>]
 - `--status`: report your state to the agent that last messaged you, or to the agent you name.
 - `--json`: print JSON.
 
-Treq tells an agent that a message is waiting. When the agent is idle and nobody is typing in its terminal, Treq types one line into its prompt, such as `[treq] 1 message from codex-1 (m-7f3a0c11). Read it: treq agent msg --inbox`. It never types the message text. Treq types nothing while you type in that terminal, or while the agent works or asks for approval. Instead, the terminal header shows a count, and a banner offers **Deliver now**.
+Treq tells an agent that a message is waiting. When the agent is idle and nobody is typing in its terminal, Treq types one line into its prompt, such as `[treq] 1 message from codex-1 (m-7f3a0c11). Read it: treq agent msg --inbox`. It never types the message text. Treq types nothing while you type in that terminal, or while the agent works or asks for approval. Instead, the terminal header shows a count, and a banner offers **Deliver**.
 
 The Treq instance that sends a message records each step: queued, delivered, read, acknowledged, replied or timed out. The repository's `.treq/local.db` keeps the record for an hour. The system log keeps it as long as it keeps its other lines.
 

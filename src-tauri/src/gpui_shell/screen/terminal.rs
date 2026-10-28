@@ -996,7 +996,7 @@ impl TerminalView {
 
   /// `treq agent msg`'s banner: messages wait for this agent. treq types
   /// the wake line itself once the agent is idle and the user stops typing;
-  /// "Deliver now" types it at once.
+  /// "Deliver" types it at once.
   fn msg_banner(&self, p: &Palette) -> Option<Div> {
     if self.status != Status::Ready || self._msg_watch.is_none() {
       return None;
@@ -1020,7 +1020,7 @@ impl TerminalView {
         .px_2(),
       TextSize::Xs,
     )
-    .label("Deliver now")
+    .label("Deliver")
     .on_click(move |_, _, _| deliver_host.agent_msg_deliver_now(&deliver_pty));
     Some(
       div()
@@ -1047,19 +1047,18 @@ impl TerminalView {
           div()
             .relative()
             .flex()
-            .flex_wrap()
             .items_center()
-            .justify_between()
-            .gap_2()
+            .gap_3()
             .child(
               ui::text(div(), TextSize::Sm)
+                .flex_1()
                 .min_w_0()
                 .text_color(tone.text(p))
                 .child(format!(
                   "{summary} treq delivers it once the agent is idle and you stop typing."
                 )),
             )
-            .child(deliver),
+            .child(div().flex_shrink_0().child(deliver)),
         ),
     )
   }
