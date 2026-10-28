@@ -1054,9 +1054,7 @@ impl TerminalView {
                 .flex_1()
                 .min_w_0()
                 .text_color(tone.text(p))
-                .child(format!(
-                  "{summary} treq delivers it once the agent is idle and you stop typing."
-                )),
+                .child(summary),
             )
             .child(div().flex_shrink_0().child(deliver)),
         ),
