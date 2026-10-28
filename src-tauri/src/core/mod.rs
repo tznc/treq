@@ -3,6 +3,7 @@ pub mod agent_chat;
 pub mod agent_cli;
 pub mod agent_command;
 pub mod agent_launch;
+pub mod agent_msg;
 pub mod agent_review;
 pub mod agent_supervisor;
 pub mod app;

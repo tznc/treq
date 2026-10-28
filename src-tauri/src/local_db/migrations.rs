@@ -17,6 +17,8 @@
 
 use rusqlite::Connection;
 
+#[path = "migrations/1793217483_agent_messages.rs"]
+mod agent_messages;
 #[path = "migrations/1793162598_baseline.rs"]
 mod baseline;
 
@@ -31,11 +33,18 @@ pub(super) struct Migration {
 
 /// Every migration, oldest first. Add one as `migrations/<date +%s>_<name>.rs`
 /// with a `mod` above and an entry here; never edit a released one.
-pub(super) const MIGRATIONS: &[Migration] = &[Migration {
-  version: 1_793_162_598,
-  transactional: false,
-  apply: baseline::apply,
-}];
+pub(super) const MIGRATIONS: &[Migration] = &[
+  Migration {
+    version: 1_793_162_598,
+    transactional: false,
+    apply: baseline::apply,
+  },
+  Migration {
+    version: 1_793_217_483,
+    transactional: true,
+    apply: agent_messages::apply,
+  },
+];
 
 /// Versions recorded as applied: the rows of `schema_migrations`, plus, for
 /// files from releases that recorded only the last version in

@@ -177,35 +177,124 @@
           ]
         },
         "agent": {
-          "description": "Start an agent session in a workspace",
-          "args": [
-            {
-              "name": "branch",
-              "index": 1,
-              "takesValue": true,
-              "required": true,
-              "description": "Workspace branch name"
+          "description": "Start and coordinate agent sessions",
+          "subcommands": {
+            "start": {
+              "description": "Start an agent session in a workspace",
+              "args": [
+                {
+                  "name": "branch",
+                  "index": 1,
+                  "takesValue": true,
+                  "required": true,
+                  "description": "Workspace branch name"
+                },
+                {
+                  "name": "prompt",
+                  "index": 2,
+                  "takesValue": true,
+                  "required": true,
+                  "description": "Prompt to send to the agent"
+                },
+                {
+                  "name": "mode",
+                  "short": "m",
+                  "takesValue": true,
+                  "description": "Permission mode: edit or plan"
+                },
+                {
+                  "name": "repo",
+                  "short": "r",
+                  "takesValue": true,
+                  "description": "Supporting repository (path or directory name) to act on"
+                },
+                {
+                  "name": "agent",
+                  "short": "a",
+                  "takesValue": true,
+                  "description": "Agent to start: claude, codex, cursor or copilot (default: the repository's default agent)"
+                }
+              ]
             },
-            {
-              "name": "prompt",
-              "index": 2,
-              "takesValue": true,
-              "required": true,
-              "description": "Prompt to send to the agent"
-            },
-            {
-              "name": "mode",
-              "short": "m",
-              "takesValue": true,
-              "description": "Permission mode: edit or plan"
-            },
-            {
-              "name": "repo",
-              "short": "r",
-              "takesValue": true,
-              "description": "Supporting repository (path or directory name) to act on"
+            "msg": {
+              "description": "Message other agents treq launched, read your inbox, reply and report status",
+              "afterHelp": "Examples:\n  treq agent msg claude-2 \"rebase done?\" --ask\n  treq agent msg --all --repo app \"main moved, rebase before pushing\"\n  treq agent msg --inbox\n  treq agent msg --reply m-7f3a0c11 \"done, head 9c41e2a\"\n  treq agent msg --ack m-7f3a0c11\n  treq agent msg --status done --note \"rebased\"\n  treq agent msg --list",
+              "args": [
+                {
+                  "name": "args",
+                  "index": 1,
+                  "takesValue": true,
+                  "multiple": true,
+                  "description": "The agent to message and the text; with --all or --reply, only the text; with --status, optionally the agent to report to"
+                },
+                {
+                  "name": "all",
+                  "description": "Send to every other agent (narrow with --repo)"
+                },
+                {
+                  "name": "repo",
+                  "short": "r",
+                  "takesValue": true,
+                  "description": "Only agents in this repository (path or directory name)"
+                },
+                {
+                  "name": "ask",
+                  "description": "Wait for the reply and print it. Exits 3 when it times out"
+                },
+                {
+                  "name": "timeout",
+                  "takesValue": true,
+                  "description": "How long the message waits to be acked or replied to: 30s, 1m (default and most: 1m)"
+                },
+                {
+                  "name": "reply",
+                  "takesValue": true,
+                  "description": "Reply to this message id"
+                },
+                {
+                  "name": "inbox",
+                  "description": "List the messages waiting for you, oldest first, and mark them read"
+                },
+                {
+                  "name": "peek",
+                  "description": "With --inbox: do not mark them read"
+                },
+                {
+                  "name": "wait",
+                  "description": "With --inbox: wait up to a minute for a message"
+                },
+                {
+                  "name": "types",
+                  "takesValue": true,
+                  "description": "With --inbox: only these kinds, comma separated (message, ask, reply, status)"
+                },
+                {
+                  "name": "ack",
+                  "takesValue": true,
+                  "multiple": true,
+                  "description": "Acknowledge a message id; repeatable"
+                },
+                {
+                  "name": "status",
+                  "takesValue": true,
+                  "description": "Report your status: working, blocked or done"
+                },
+                {
+                  "name": "note",
+                  "takesValue": true,
+                  "description": "With --status: what you are doing"
+                },
+                {
+                  "name": "list",
+                  "description": "List the agents you can message"
+                },
+                {
+                  "name": "json",
+                  "description": "Print JSON"
+                }
+              ]
             }
-          ]
+          }
         },
         "commit": {
           "description": "Commit changes in a workspace",
@@ -771,7 +860,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Command action: start, list, stop, rename, attach-command, attach, paste, status, reset, daemon"
+              "description": "Command action: start, list, stop, rename, attach-command, attach, paste, msg-deliver, msg-poll, status, reset, daemon"
             },
             {
               "name": "backend",

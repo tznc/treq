@@ -502,15 +502,35 @@ pub(super) fn handle_workspace_move(matches: &Matches) -> bool {
 }
 
 pub(super) fn handle_workspace_agent(matches: &Matches) -> bool {
+  match matches.subcommand.as_deref() {
+    Some(sub) if sub.name == "start" => handle_agent_start(&sub.matches),
+    _ => {
+      super::log_cli_error("Error: an agent subcommand is required");
+      eprintln!("Usage: treq agent start <branch> <prompt> [-m <edit|plan>] [-a <agent>]");
+      false
+    }
+  }
+}
+
+/// `--agent`, or the repository's default agent.
+pub(super) fn start_agent_kind(matches: &Matches, repo_path: &str) -> Result<String, String> {
+  let Some(agent) = get_arg_value(matches, "agent") else {
+    return Ok(resolve_default_agent(repo_path));
+  };
+  crate::core::agent_launch::agent_kind(Some(agent.trim()))
+    .ok_or_else(|| format!("unknown agent '{agent}'. Use one of: claude, codex, cursor, copilot"))
+}
+
+fn handle_agent_start(matches: &Matches) -> bool {
   let Some(branch) = get_arg_value(matches, "branch") else {
     super::log_cli_error("Error: branch is required");
-    eprintln!("Usage: treq agent <branch> <prompt> [-m <edit|plan>]");
+    eprintln!("Usage: treq agent start <branch> <prompt> [-m <edit|plan>] [-a <agent>]");
     return false;
   };
 
   let Some(prompt) = get_arg_value(matches, "prompt") else {
     super::log_cli_error("Error: prompt is required");
-    eprintln!("Usage: treq agent <branch> <prompt> [-m <edit|plan>]");
+    eprintln!("Usage: treq agent start <branch> <prompt> [-m <edit|plan>] [-a <agent>]");
     return false;
   };
 
@@ -562,7 +582,13 @@ pub(super) fn handle_workspace_agent(matches: &Matches) -> bool {
     workspace.id,
     chrono::Utc::now().timestamp_millis()
   );
-  let agent = resolve_default_agent(&repo_path);
+  let agent = match start_agent_kind(matches, &repo_path) {
+    Ok(agent) => agent,
+    Err(error) => {
+      super::log_cli_error(&format!("Error: {error}"));
+      return false;
+    }
+  };
   if let Err(error) = dispatch_agent_request(
     &repo_path,
     &workspace.branch_name,

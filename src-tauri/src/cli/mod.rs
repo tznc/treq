@@ -725,6 +725,20 @@ pub(crate) fn parse_remote_command_request(
       submit: get_arg_value(matches, "submit").as_deref() == Some("true"),
       idempotency_key: require_idempotency_key(idempotency_key)?,
     }),
+    ("pty-remote", "msg-deliver") => Ok(TreqCommandRequest::PtyMsgDeliver {
+      repo,
+      workspace: require_workspace()?,
+      label: require_target("session label")?,
+      envelope: require_value("message")?,
+    }),
+    ("pty-remote", "msg-poll") => Ok(TreqCommandRequest::PtyMsgPoll {
+      repo,
+      workspace: require_workspace()?,
+      label: require_target("session label")?,
+      since: require_value("event number")?
+        .parse()
+        .map_err(|_| "msg-poll needs a whole number of events".to_string())?,
+    }),
     ("pty-remote", "stop") => Ok(TreqCommandRequest::PtyStop {
       backend: pty_backend(matches)?,
       repo,
@@ -827,6 +841,16 @@ fn handle_remote_review_command(
 /// Top-level CLI dispatch. Returns the process exit code if the subcommand was
 /// recognized, or `None` if it was not (caller should print usage and exit).
 pub fn handle_cli_command(subcommand: &SubcommandMatches) -> Option<i32> {
+  if subcommand.name == "agent" {
+    if let Some(msg) = subcommand
+      .matches
+      .subcommand
+      .as_deref()
+      .filter(|sub| sub.name == "msg")
+    {
+      return Some(agent_msg_handlers::handle(&msg.matches));
+    }
+  }
   let success = match subcommand.name.as_str() {
     "add" => workspace_handlers::handle_workspace_add(&subcommand.matches),
     "set" => workspace_handlers::handle_workspace_set(&subcommand.matches),
@@ -1015,21 +1039,27 @@ pub(super) fn dispatch_agent_request(
   ))
 }
 
+/// The running Treq instance that has `repo` open.
+pub(super) fn repo_instance(repo: &str) -> Result<agent_dispatch::RegisteredInstance, String> {
+  let now = agent_dispatch::now_millis();
+  local_db::prune_stale_instance_registry(repo, now, agent_dispatch::HEARTBEAT_TIMEOUT_MS)?;
+  let instances = local_db::list_instance_registry(repo)?;
+  agent_dispatch::resolve_target_instance(&instances, repo)
+    .cloned()
+    .ok_or_else(|| {
+      format!(
+        "No running Treq instance has repo '{}'. Open this repo in Treq first.",
+        repo
+      )
+    })
+}
+
 /// Sends a JSON IPC request to the Treq instance that has `repo` open.
 fn dispatch_to_repo_instance<T: serde::Serialize>(
   repo: &str,
   request: &T,
 ) -> Result<(String, agent_dispatch::AgentDispatchResponse), String> {
-  let now = agent_dispatch::now_millis();
-  local_db::prune_stale_instance_registry(repo, now, agent_dispatch::HEARTBEAT_TIMEOUT_MS)?;
-  let instances = local_db::list_instance_registry(repo)?;
-
-  let instance = agent_dispatch::resolve_target_instance(&instances, repo).ok_or_else(|| {
-    format!(
-      "No running Treq instance has repo '{}'. Open this repo in Treq first.",
-      repo
-    )
-  })?;
+  let instance = repo_instance(repo)?;
 
   let response = send_json_dispatch_request(
     &instance.endpoint,
@@ -1037,7 +1067,7 @@ fn dispatch_to_repo_instance<T: serde::Serialize>(
     Duration::from_millis(250),
     Duration::from_millis(600),
   )?;
-  Ok((instance.instance_id.clone(), response))
+  Ok((instance.instance_id, response))
 }
 
 pub(super) fn dispatch_send_request(
@@ -1118,6 +1148,7 @@ fn send_json_dispatch_request<T: serde::Serialize>(
 pub mod args;
 mod workspace_handlers;
 
+mod agent_msg_handlers;
 mod agent_review_handlers;
 mod status_output;
 

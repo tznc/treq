@@ -20,11 +20,11 @@ The CLI does not need a display, so it works over SSH and in headless agent sand
 
 A window can link other local repositories to the repository it opened. Add one with **File > Add Repository…** or **Add Repository…** in the home repository row's context menu. Each linked repository gets its own home row and workspace group in the sidebar.
 
-Workspace commands act on the repository that contains the current directory. Pass `-r <repo>` to act on a linked repository instead. `<repo>` is its path, its directory name, or a trailing path such as `org/app`. `add`, `set`, `st`, `diff`, `agent`, and `commit` accept `-r`. `mv` accepts `--repo`, because `-r` is its range flag. A repository that is not linked to the current one is an error.
+Workspace commands act on the repository that contains the current directory. Pass `-r <repo>` to act on a linked repository instead. `<repo>` is its path, its directory name, or a trailing path such as `org/app`. `add`, `set`, `st`, `diff`, `agent start`, and `commit` accept `-r`. `mv` accepts `--repo`, because `-r` is its range flag. A repository that is not linked to the current one is an error.
 
 ```bash
 treq add -r api feat/new-endpoint
-treq agent -r api feat/new-endpoint "Add the endpoint"
+treq agent start -r api feat/new-endpoint "Add the endpoint"
 treq st -r api feat/new-endpoint
 ```
 
@@ -112,18 +112,45 @@ treq mv <source> <destination> -c <commit> [-c <commit> ...]
 - `-f`: file path to move.
 - `-c`: commit ID to move.
 
-### `treq agent`
+### `treq agent start`
 
 Start an agent session in a workspace.
 
 ```bash
-treq agent <branch> <prompt> [-r <repo>] [-m <edit|plan>]
+treq agent start <branch> <prompt> [-r <repo>] [-m <edit|plan>]
 ```
 
 - `branch`: workspace branch name. Agents always start in a workspace, so `.` (the home repository) is rejected.
 - `prompt`: prompt to send to the agent.
 - `-r, --repo`: start the agent in a workspace of a [supporting repository](#supporting-repositories).
 - `-m, --mode`: [permission mode](/docs/concepts/agent-sessions). Use `edit` or `plan`.
+- `-a, --agent`: the agent to start: `claude`, `codex`, `cursor` or `copilot`. The default is the repository's default agent.
+
+### `treq agent msg`
+
+Send messages between agents that Treq started, and read the messages sent to you. Run it in an agent's terminal: Treq knows the sender from that terminal. The agents can run in the same window, in another Treq window on this computer, or on a remote machine.
+
+```bash
+treq agent msg <agent> <text> [--ask] [--timeout <time>] [-r <repo>]
+treq agent msg --all <text> [-r <repo>]
+treq agent msg --inbox [--peek] [--wait] [--types <kinds>]
+treq agent msg --ack <id> [--ack <id>...]
+treq agent msg --reply <id> <text>
+treq agent msg --status <working|blocked|done> [--note <text>] [<agent>]
+treq agent msg --list [-r <repo>]
+```
+
+- `<agent>`: the agent's handle, such as `claude-2`. `--list` shows each handle with its repository and workspace.
+- `--ask`: wait for the reply and print it. Exits with status 3 when no reply comes in time.
+- `--timeout`: how long a message waits to be acknowledged or answered, such as `30s`. The default and the limit are `1m`. After that, the message leaves the inbox.
+- `--all`: send to every other agent. `-r` keeps only agents in that repository.
+- `--inbox`: list the messages waiting for you, oldest first, and mark them read. `--peek` leaves them unread, `--wait` waits up to a minute for one, and `--types` keeps only some kinds (`message`, `ask`, `reply`, `status`).
+- `--status`: report your state to the agent that last messaged you, or to the agent you name.
+- `--json`: print JSON.
+
+Treq tells an agent that a message is waiting. When the agent is idle and nobody is typing in its terminal, Treq types one line into its prompt, such as `[treq] 1 message from codex-1 (m-7f3a0c11). Read it: treq agent msg --inbox`. It never types the message text. Treq types nothing while you type in that terminal, or while the agent works or asks for approval. Instead, the terminal header shows a count, and a banner offers **Deliver**.
+
+The Treq instance that sends a message records each step: queued, delivered, read, acknowledged, replied or timed out. The repository's `.treq/local.db` keeps the record for an hour. The system log keeps it as long as it keeps its other lines.
 
 ### `treq commit`
 

@@ -1,3 +1,17 @@
+table agent_messages
+  column body|TEXT|1|NULL|0
+  column from_handle|TEXT|1|NULL|0
+  column id|TEXT|1|NULL|1
+  column kind|TEXT|1|NULL|0
+  column mode|TEXT|0|NULL|0
+  column reply_to|TEXT|0|NULL|0
+  column sent_at|INTEGER|1|NULL|0
+  column state|TEXT|1|NULL|0
+  column target|TEXT|1|NULL|2
+  column timeout_ms|INTEGER|1|NULL|0
+  column updated_at|INTEGER|1|NULL|0
+  column via|TEXT|1|NULL|0
+  index idx_agent_messages_sent_at|0|sent_at
 table agent_review_comments
   column comment_text|TEXT|1|NULL|0
   column created_at|TEXT|1|NULL|0

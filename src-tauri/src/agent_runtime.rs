@@ -239,6 +239,17 @@ pub(crate) fn start_agent_ipc_listener(app: AppHandle, listener: std::net::TcpLi
       }
 
       let response = match crate::send_dispatch::parse_ipc_payload(payload.trim()) {
+        Ok(crate::send_dispatch::IpcDispatchMessage::AgentMsg(request)) => {
+          // Answered off this thread: a send may wait on other instances.
+          std::thread::spawn(move || {
+            let response = crate::core::agent_msg::service::handle(&request);
+            let json = serde_json::to_string(&response).unwrap_or_else(|_| {
+              "{\"status\":\"error\",\"reason\":\"failed to serialize response\"}".to_string()
+            });
+            stream.write_all(json.as_bytes()).best_effort();
+          });
+          continue;
+        }
         Ok(crate::send_dispatch::IpcDispatchMessage::Agent(request)) => {
           route_agent_dispatch_request(&app, &request)
         }

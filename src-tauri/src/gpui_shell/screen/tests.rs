@@ -120,6 +120,8 @@ struct FakeHost {
   remote_running: Mutex<Option<bool>>,
   /// The SSH host refuses attaches from now on.
   attach_down: Mutex<bool>,
+  /// What `treq agent msg` has waiting for each terminal.
+  msg_waiting: Mutex<HashMap<String, terminal_data::WaitingMessages>>,
   /// What the dialogs read: the prompt history, and the stashes and their diff.
   prompts: Vec<crate::local_db::PromptHistoryEntry>,
   stash_list: Mutex<Vec<crate::local_db::StashEntry>>,
@@ -1244,6 +1246,39 @@ impl terminal_data::TerminalHost for FakeHost {
 
   fn shell_command(&self) -> Option<String> {
     Some("export PATH=\"/bin:$PATH\"".into())
+  }
+
+  fn agent_msg_register(&self, session: &crate::core::agent_msg::hub::SessionInfo, _: u16, _: u16) {
+    self.record(format!(
+      "msg register {} {} {} {:?}",
+      session.pty_id, session.handle, session.repo, session.workspace
+    ));
+  }
+
+  fn agent_msg_register_remote(
+    &self,
+    pty: &str,
+    target: &terminal_data::RemoteTarget,
+    _: u16,
+    _: u16,
+  ) {
+    self.record(format!("msg register remote {pty} {}", target.label));
+  }
+
+  fn agent_msg_key(&self, pty: &str) {
+    self.record(format!("msg key {pty}"));
+  }
+
+  fn agent_msg_waiting(&self, pty: &str) -> Option<terminal_data::WaitingMessages> {
+    self.msg_waiting.lock().unwrap().get(pty).cloned()
+  }
+
+  fn agent_msg_deliver_now(&self, pty: &str) {
+    self.record(format!("msg deliver {pty}"));
+  }
+
+  fn agent_msg_generation(&self) -> u64 {
+    self.msg_waiting.lock().unwrap().len() as u64
   }
 
   fn prepare_agent(
