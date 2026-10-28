@@ -1743,34 +1743,15 @@ impl CodeView {
   /// could not fetch. Clears once a rebase passes its checks.
   fn rebase_alert(&self, p: &Palette) -> Option<impl IntoElement> {
     let alert = match self.rebase_hold.as_ref()? {
-      RebaseHold::Dirty => {
-        let react = self.react.clone();
-        ui::Alert::new(
-          "code-rebase-held-dirty",
-          "Rebase skipped: uncommitted changes",
-          p,
-        )
-        .severity(ui::Severity::Warning)
-        .message("Commit or discard your changes; the next rebase picks this workspace up.")
-        .action(
-          Button::new("code-rebase-held-changes", p)
-            .variant(Variant::Outline)
-            .size(Size::Sm)
-            .label("Open Changes")
-            .on_click(move |_, _, cx| {
-              let react = react.clone();
-              cx.defer(move |cx| {
-                react(
-                  ScreenAction::Field {
-                    field: "workspace.tab".into(),
-                    value: "changes".into(),
-                  },
-                  cx,
-                )
-              });
-            }),
-        )
-      }
+      RebaseHold::ParentDirty { branch } => ui::Alert::new(
+        "code-rebase-held-parent-dirty",
+        format!("Rebase skipped: {branch} has uncommitted changes"),
+        p,
+      )
+      .severity(ui::Severity::Warning)
+      .message(format!(
+        "Commit or discard the changes in {branch}; the next rebase picks this workspace up."
+      )),
       RebaseHold::TargetDiverged { bookmark } => ui::Alert::new(
         "code-rebase-held-diverged",
         format!("Rebase skipped: {bookmark} diverged from origin"),

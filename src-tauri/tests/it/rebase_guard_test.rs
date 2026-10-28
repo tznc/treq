@@ -60,9 +60,9 @@ fn rebase_fast_forwards_local_target_bookmark_to_remote() {
 }
 
 #[test]
-fn rebase_skips_dirty_workspace() {
+fn rebase_still_rebases_a_workspace_with_its_own_uncommitted_changes() {
   let repo = TestRepo::with_remote().unwrap();
-  let (ws, path) = workspace_on_default(&repo, "feat/dirty");
+  let (ws, path) = workspace_on_default(&repo, "feat/own-wip");
   TestRepo::write_workspace_file(&path, "wip.txt", "uncommitted").unwrap();
   repo
     .remote_commit_file("advance.txt", "new", "Advance main")
@@ -72,33 +72,68 @@ fn rebase_skips_dirty_workspace() {
     treq_lib::auto_rebase::rebase_single_workspace(&repo.repo_path, ws.id, "main", true, "diff")
       .unwrap();
 
+  assert!(result.is_some());
+  assert!(has_file(&path, "feat/own-wip", "advance.txt"));
+  assert_eq!(rebase_guard::hold(&repo.repo_path, ws.id), None);
+}
+
+/// A parent workspace with one commit, and a child stacked on it.
+fn stack(
+  repo: &TestRepo,
+  parent: &str,
+  child: &str,
+) -> (String, treq_lib::local_db::Workspace, String) {
+  let parent_ws = repo
+    .create_workspace_with_commit(parent, "parent.txt", "parent", None)
+    .unwrap();
+  let child_ws = repo
+    .create_workspace_with_commit(child, "child.txt", "child", Some(parent))
+    .unwrap();
+  treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, child_ws.id, parent).unwrap();
+  let child_path = repo.workspace_full_path(&child_ws);
+  (repo.workspace_full_path(&parent_ws), child_ws, child_path)
+}
+
+#[test]
+fn rebase_skips_workspace_whose_parent_is_dirty() {
+  let repo = TestRepo::with_remote().unwrap();
+  let (parent_path, child, _) = stack(&repo, "feat/parent", "feat/child");
+  TestRepo::write_workspace_file(&parent_path, "wip.txt", "uncommitted").unwrap();
+
+  let result =
+    treq_lib::auto_rebase::rebase_single_workspace(&repo.repo_path, child.id, "main", true, "diff")
+      .unwrap();
+
   assert!(result.is_none());
-  assert!(!has_file(&path, "feat/dirty", "advance.txt"));
   assert_eq!(
-    rebase_guard::hold(&repo.repo_path, ws.id),
-    Some(RebaseHold::Dirty)
+    rebase_guard::hold(&repo.repo_path, child.id),
+    Some(RebaseHold::ParentDirty {
+      branch: "feat/parent".into()
+    })
   );
 }
 
 #[test]
-fn batch_rebase_skips_dirty_workspace() {
+fn batch_rebase_skips_children_of_a_dirty_parent_only() {
   let repo = TestRepo::with_remote().unwrap();
-  let (dirty, dirty_path) = workspace_on_default(&repo, "feat/batch-dirty");
-  let (clean, clean_path) = workspace_on_default(&repo, "feat/batch-clean");
-  TestRepo::write_workspace_file(&dirty_path, "wip.txt", "uncommitted").unwrap();
+  let (parent_path, child, _) = stack(&repo, "feat/batch-parent", "feat/batch-child");
+  let (own_wip, own_wip_path) = workspace_on_default(&repo, "feat/batch-own-wip");
+  TestRepo::write_workspace_file(&parent_path, "wip.txt", "uncommitted").unwrap();
+  TestRepo::write_workspace_file(&own_wip_path, "wip.txt", "uncommitted").unwrap();
   repo
     .remote_commit_file("advance.txt", "new", "Advance main")
     .unwrap();
 
   treq_lib::auto_rebase::check_and_rebase_all(&repo.repo_path, "diff").unwrap();
 
-  assert!(!has_file(&dirty_path, "feat/batch-dirty", "advance.txt"));
-  assert!(has_file(&clean_path, "feat/batch-clean", "advance.txt"));
+  assert!(has_file(&own_wip_path, "feat/batch-own-wip", "advance.txt"));
+  assert_eq!(rebase_guard::hold(&repo.repo_path, own_wip.id), None);
   assert_eq!(
-    rebase_guard::hold(&repo.repo_path, dirty.id),
-    Some(RebaseHold::Dirty)
+    rebase_guard::hold(&repo.repo_path, child.id),
+    Some(RebaseHold::ParentDirty {
+      branch: "feat/batch-parent".into()
+    })
   );
-  assert_eq!(rebase_guard::hold(&repo.repo_path, clean.id), None);
 }
 
 #[test]
@@ -156,20 +191,17 @@ fn rebase_uses_last_fetched_target_and_warns_when_fetch_fails() {
 fn rebase_hold_is_stored_with_the_workspace() {
   // The CLI's post-commit rebase records holds the app must see.
   let repo = TestRepo::with_remote().unwrap();
-  let (ws, path) = workspace_on_default(&repo, "feat/stored-hold");
-  TestRepo::write_workspace_file(&path, "wip.txt", "uncommitted").unwrap();
-  repo
-    .remote_commit_file("advance.txt", "new", "Advance main")
+  let (parent_path, child, _) = stack(&repo, "feat/stored-parent", "feat/stored-child");
+  TestRepo::write_workspace_file(&parent_path, "wip.txt", "uncommitted").unwrap();
+
+  treq_lib::auto_rebase::rebase_single_workspace(&repo.repo_path, child.id, "main", true, "diff")
     .unwrap();
 
-  treq_lib::auto_rebase::rebase_single_workspace(&repo.repo_path, ws.id, "main", true, "diff")
-    .unwrap();
-
-  let stored = treq_lib::local_db::get_workspace_by_id(&repo.repo_path, ws.id)
+  let stored = treq_lib::local_db::get_workspace_by_id(&repo.repo_path, child.id)
     .unwrap()
     .unwrap();
   assert_eq!(
     treq_lib::local_db::rebase_hold_of(&stored),
-    Some(serde_json::json!("Dirty"))
+    Some(serde_json::json!({"ParentDirty": {"branch": "feat/stored-parent"}}))
   );
 }

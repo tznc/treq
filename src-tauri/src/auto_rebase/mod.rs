@@ -45,7 +45,7 @@ pub struct WorkspaceBookmarkConflict {
 /// Records what holds `workspace` back from rebasing onto `sync`'s target,
 /// and whether the rebase may run. A stale target only warns.
 pub(crate) fn passes_guard(repo_path: &str, workspace: &Workspace, sync: &TargetSync) -> bool {
-  let hold = sync.hold_for(&get_full_workspace_path(workspace));
+  let hold = sync.hold();
   let blocked = hold.as_ref().is_some_and(|h| h.blocks());
   if let Some(hold) = &hold {
     tracing::info!(

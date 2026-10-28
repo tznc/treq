@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 /// Why a workspace's last rebase was held back, or ran with a caveat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RebaseHold {
-  /// The working copy has changes that are not committed.
-  Dirty,
+  /// The parent workspace (the one on the target branch) has changes that
+  /// are not committed.
+  ParentDirty { branch: String },
   /// The local target bookmark and `<bookmark>@origin` each have commits the
   /// other lacks.
   TargetDiverged { bookmark: String },
@@ -26,10 +27,9 @@ impl RebaseHold {
   /// One line for a manual rebase's result.
   pub fn message(&self) -> String {
     match self {
-      RebaseHold::Dirty => {
-        "Rebase skipped: the workspace has uncommitted changes. Commit or discard them, then rebase."
-          .to_string()
-      }
+      RebaseHold::ParentDirty { branch } => format!(
+        "Rebase skipped: parent workspace '{branch}' has uncommitted changes. Commit or discard them there, then rebase."
+      ),
       RebaseHold::TargetDiverged { bookmark } => format!(
         "Rebase skipped: local '{bookmark}' and '{bookmark}@origin' have diverged. Push or reset '{bookmark}', then rebase."
       ),
@@ -43,15 +43,20 @@ impl RebaseHold {
 /// The target as fetched and synced: whether it diverged, or the fetch failed.
 #[derive(Debug, Clone, Default)]
 pub struct TargetSync {
+  /// The branch of the parent workspace, when it has uncommitted changes.
+  pub parent_dirty: Option<String>,
   pub diverged: Option<String>,
   pub fetch_error: Option<String>,
 }
 
 impl TargetSync {
-  /// What a workspace rebasing onto this target is held by, `dirty` first.
-  pub fn hold_for(&self, workspace_path: &str) -> Option<RebaseHold> {
-    if is_dirty(workspace_path) {
-      return Some(RebaseHold::Dirty);
+  /// What a workspace rebasing onto this target is held by, a dirty parent
+  /// first. The workspace's own uncommitted changes never hold it.
+  pub fn hold(&self) -> Option<RebaseHold> {
+    if let Some(branch) = &self.parent_dirty {
+      return Some(RebaseHold::ParentDirty {
+        branch: branch.clone(),
+      });
     }
     if let Some(bookmark) = &self.diverged {
       return Some(RebaseHold::TargetDiverged {
@@ -85,6 +90,7 @@ pub fn sync_target(repo_path: &str, target_branch: &str) -> TargetSync {
     TargetState::Synced => None,
   };
   TargetSync {
+    parent_dirty: parent_dirty(repo_path, bookmark),
     diverged,
     fetch_error,
   }
@@ -111,9 +117,14 @@ fn target_state(repo_path: &str, bookmark: &str) -> TargetState {
   }
 }
 
-/// Whether the working copy holds changes not yet committed.
-fn is_dirty(workspace_path: &str) -> bool {
-  jj::jj_is_working_copy_empty(workspace_path).is_ok_and(|empty| !empty)
+/// `branch`, when a workspace on it has changes not yet committed: its
+/// children would rebase onto a parent that is about to move.
+fn parent_dirty(repo_path: &str, branch: &str) -> Option<String> {
+  let parent = local_db::get_workspace_by_branch(repo_path, branch).ok()??;
+  let path = crate::auto_rebase::get_full_workspace_path(&parent);
+  jj::jj_is_working_copy_empty(&path)
+    .is_ok_and(|empty| !empty)
+    .then(|| branch.to_string())
 }
 
 /// Stores what held the workspace's latest rebase attempt with the workspace,
