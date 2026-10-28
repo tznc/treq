@@ -1904,6 +1904,40 @@ pub fn list_prs_with_checks_via_gh_impl(
   parse_pr_list(&output.stdout)
 }
 
+/// The PR whose head is `branch`, with its CI rollup, in one `gh pr list`:
+/// open over closed, then newest, as [`list_prs_with_checks_via_gh_impl`] picks.
+pub fn list_pr_for_head_via_gh_impl(
+  gh_path: &str,
+  repo_path: &str,
+  branch: &str,
+  extended_path: &str,
+) -> Result<Option<(PrInfo, Option<PrCiStatus>)>, String> {
+  let mut cmd = std::process::Command::new(gh_path);
+  cmd
+    // One argument, so a branch starting with `-` is not read as a flag.
+    .args([
+      "pr",
+      "list",
+      &format!("--head={branch}"),
+      "--state",
+      "all",
+      "--limit",
+      "10",
+      "--json",
+      PR_LIST_JSON_FIELDS,
+    ])
+    .current_dir(repo_path)
+    .env("PATH", extended_path);
+  let output = spawn_with_etxtbsy_retry(cmd)?;
+  if !output.status.success() {
+    return Err(format!(
+      "gh pr list --head failed: {}",
+      String::from_utf8_lossy(&output.stderr).trim()
+    ));
+  }
+  Ok(parse_pr_list(&output.stdout)?.by_branch.remove(branch))
+}
+
 // ── GitHub PR review comment threads (read-only) ────────────────────────────
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]

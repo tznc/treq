@@ -690,26 +690,39 @@ fn production_bulk_fetch() -> BulkFetchFn {
   Arc::new(|repo_path: &str, branches: &[String]| {
     let gh = crate::core::github_cli::gh_path()?;
     let path = crate::binary_paths::get_extended_path();
-    let mut listing = crate::github::list_prs_with_checks_via_gh_impl(&gh, repo_path, &path)?;
-    let mut result = BulkFetchResult::new();
-    for branch in branches {
-      let entry = match listing.by_branch.remove(branch) {
-        Some((pr, ci)) => (Some(pr), ci),
-        None if listing.truncated => {
-          let pr = crate::github::get_pr_info_via_gh_impl(&gh, repo_path, branch, &path)?;
-          let ci = if pr.is_some() {
-            crate::github::get_pr_checks_via_gh_impl(&gh, repo_path, branch, &path)?
-          } else {
-            None
-          };
-          (pr, ci)
-        }
-        None => (None, None),
-      };
-      result.insert(branch.clone(), entry);
-    }
-    Ok(result)
+    bulk_fetch_via(&gh, &path, repo_path, branches)
   })
+}
+
+/// [`production_bulk_fetch`] with the `gh` binary and PATH it runs.
+fn bulk_fetch_via(
+  gh: &str,
+  path: &str,
+  repo_path: &str,
+  branches: &[String],
+) -> Result<BulkFetchResult, String> {
+  let mut listing = crate::github::list_prs_with_checks_via_gh_impl(gh, repo_path, path)?;
+  let mut result = BulkFetchResult::new();
+  for branch in branches {
+    let entry = match listing.by_branch.remove(branch) {
+      Some((pr, ci)) => (Some(pr), ci),
+      // Older than the page: one `gh pr list --head` brings PR and CI together.
+      None if listing.truncated => {
+        match crate::github::list_pr_for_head_via_gh_impl(gh, repo_path, branch, path) {
+          Ok(Some((pr, ci))) => (Some(pr), ci),
+          Ok(None) => (None, None),
+          // Left out, so only this branch falls back and the rest stand.
+          Err(e) => {
+            log::warn!("pr-status: head lookup failed for {repo_path}#{branch}: {e}");
+            continue;
+          }
+        }
+      }
+      None => (None, None),
+    };
+    result.insert(branch.clone(), entry);
+  }
+  Ok(result)
 }
 
 fn production_list_branches() -> BranchListFn {
@@ -1177,6 +1190,110 @@ mod tests {
     let _ = mgr.list_cached("/tmp/repo");
     let _ = mgr.list_cached("/tmp/repo");
     assert_eq!(count.load(Ordering::SeqCst), 1);
+  }
+
+  /// A `gh` that logs each call to `calls.log` beside it: a full page of
+  /// other repos' PRs for the bulk list, and one PR for any branch asked
+  /// about by name. Asking about `bad` fails.
+  fn fake_gh(dir: &std::path::Path) -> String {
+    let script = dir.join("gh");
+    let log = dir.join("calls.log");
+    let pr = |head: &str| {
+      format!(
+        r#"{{"number":1,"title":"t","state":"OPEN","url":"u","headRefName":"{head}","baseRefName":"main","mergeStateStatus":"CLEAN","isDraft":false,"isCrossRepository":false,"statusCheckRollup":[],"body":""}}"#
+      )
+    };
+    let page: Vec<String> = (0..100).map(|i| pr(&format!("old/{i}"))).collect();
+    std::fs::write(
+      &script,
+      format!(
+        r#"#!/bin/sh
+echo "$*" >> '{log}'
+last=""; for a in "$@"; do prev="$last"; last="$a"; done
+case "$*" in
+  *bad*) echo "boom" >&2; exit 1 ;;
+  "pr list --state all --limit 100 "*) echo '[{page}]' ;;
+  "pr list --head="*) echo "[{one}]" | sed "s|HEAD|${{3#--head=}}|" ;;
+  "pr view "*) echo "{one}" | sed "s|HEAD|$last|" ;;
+  "pr checks "*) echo '[]' ;;
+esac
+"#,
+        log = log.display(),
+        page = page.join(","),
+        one = pr("HEAD").replace('"', "\\\""),
+      ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    script.to_string_lossy().to_string()
+  }
+
+  fn gh_calls(dir: &std::path::Path) -> usize {
+    std::fs::read_to_string(dir.join("calls.log"))
+      .unwrap_or_default()
+      .lines()
+      .count()
+  }
+
+  #[test]
+  fn a_truncated_page_costs_one_gh_call_per_missing_branch() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let gh = fake_gh(dir.path());
+    let branches: Vec<String> = (0..20).map(|i| format!("feat/{i}")).collect();
+    let path = std::env::var("PATH").unwrap();
+    let result = bulk_fetch_via(&gh, &path, dir.path().to_str().unwrap(), &branches).unwrap();
+    assert_eq!(result.len(), 20);
+    assert!(result.values().all(|(pr, _)| pr.is_some()));
+    assert_eq!(
+      gh_calls(dir.path()),
+      1 + 20,
+      "one list, then one call per branch"
+    );
+  }
+
+  /// `cargo test --lib bulk_fetch_wall_time -- --ignored --nocapture`
+  #[test]
+  #[ignore = "measurement"]
+  fn bulk_fetch_wall_time() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let gh = fake_gh(dir.path());
+    let path = std::env::var("PATH").unwrap();
+    for count in [10, 50] {
+      let branches: Vec<String> = (0..count).map(|i| format!("feat/{i}")).collect();
+      let _ = std::fs::remove_file(dir.path().join("calls.log"));
+      let mut times: Vec<_> = (0..5)
+        .map(|_| {
+          let start = std::time::Instant::now();
+          let _ = bulk_fetch_via(&gh, &path, dir.path().to_str().unwrap(), &branches);
+          start.elapsed()
+        })
+        .collect();
+      times.sort();
+      println!(
+        "{count} missing branches: {} gh calls/poll, median {:?}",
+        gh_calls(dir.path()) / 5,
+        times[2]
+      );
+    }
+  }
+
+  #[test]
+  fn a_gh_error_on_one_branch_keeps_the_others() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let gh = fake_gh(dir.path());
+    let branches = vec![
+      "feat/a".to_string(),
+      "bad".to_string(),
+      "feat/b".to_string(),
+    ];
+    let path = std::env::var("PATH").unwrap();
+    let result = bulk_fetch_via(&gh, &path, dir.path().to_str().unwrap(), &branches).unwrap();
+    assert!(result.contains_key("feat/a") && result.contains_key("feat/b"));
+    assert!(
+      !result.contains_key("bad"),
+      "left for the per-branch fallback"
+    );
   }
 
   #[test]
