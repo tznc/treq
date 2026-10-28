@@ -1,6 +1,6 @@
 use super::{
-  convert_to_jj_branch_format, get_full_workspace_path, passes_guard, resolve_bookmark_conflict_if_needed,
-  AutoRebaseResult, WorkspaceBookmarkConflict,
+  convert_to_jj_branch_format, get_full_workspace_path, passes_guard,
+  resolve_bookmark_conflict_if_needed, AutoRebaseResult, WorkspaceBookmarkConflict,
 };
 use crate::jj::{self, JjRebaseResult};
 use crate::local_db::{self, Workspace};

@@ -38,6 +38,7 @@ pub mod prerequisites;
 #[cfg(unix)]
 pub mod pty_daemon;
 pub mod pty_remote_supervisor;
+pub mod rebase_guard;
 pub mod remote;
 pub mod remote_control_plane;
 pub mod remote_device_key;
@@ -51,7 +52,6 @@ pub mod remote_ssh_config;
 pub mod remote_ssh_host_key_probe;
 pub mod remote_ssh_transport;
 pub mod remote_ssh_ws_stream;
-pub mod rebase_guard;
 pub mod repo;
 pub mod resolve;
 pub mod review;

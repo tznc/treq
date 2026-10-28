@@ -359,7 +359,7 @@ fn auto_rebase_preserves_only_unmerged_commits_across_multiple_squashed_levels()
 }
 
 #[test]
-fn test_force_rebase_rooted_subtree_handles_conflicted_local_main_target() {
+fn force_rebase_rooted_subtree_holds_children_of_conflicted_local_main() {
   let repo = TestRepo::with_remote().expect("Failed to create test repo with remote");
   let default_branch = repo.default_branch();
 
@@ -422,19 +422,20 @@ fn test_force_rebase_rooted_subtree_handles_conflicted_local_main_target() {
     default_branch,
     "diff",
   )
-  .expect("force rooted-subtree rebase should not fail when local main is conflicted");
+  .expect("force rooted-subtree rebase should not error when local main is conflicted")
+  .expect("force rooted-subtree should run");
 
-  assert!(result.is_some(), "force rooted-subtree should run");
-  let result = result.expect("result should be present");
+  // A diverged target holds its children back rather than rebasing onto it.
   assert!(
-    result.rebase_result.success,
-    "force rooted-subtree rebase should succeed: {}",
+    !result.rebase_result.success,
+    "{}",
     result.rebase_result.message
   );
-  let conflicted_name_msg = format!("Name '{default_branch}' is conflicted");
-  assert!(
-    !result.rebase_result.message.contains(&conflicted_name_msg),
-    "force rebase should not fail on conflicted local main resolution: {}",
-    result.rebase_result.message
+  assert!(result.workspaces_rebased.is_empty());
+  assert_eq!(
+    treq_lib::core::rebase_guard::hold(&repo.repo_path, child.id),
+    Some(treq_lib::core::rebase_guard::RebaseHold::TargetDiverged {
+      bookmark: default_branch.to_string()
+    })
   );
 }

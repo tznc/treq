@@ -798,7 +798,11 @@ impl code_data::CodeHost for FakeHost {
     self.pr_sync.clone()
   }
 
-  fn rebase_hold(&self, _: &str, workspace_id: i64) -> Option<crate::core::rebase_guard::RebaseHold> {
+  fn rebase_hold(
+    &self,
+    _: &str,
+    workspace_id: i64,
+  ) -> Option<crate::core::rebase_guard::RebaseHold> {
     self.record(format!("read rebase hold {workspace_id}"));
     self.rebase_hold.clone()
   }

@@ -644,7 +644,10 @@ fn code_tab_warns_when_rebase_held_for_uncommitted_changes(cx: &mut TestAppConte
   assert!(!h.drawn("code-rebase-held-diverged"));
   h.click("code-rebase-held-changes");
   h.cx.run_until_parked();
-  assert_eq!(fields(&h, "workspace.tab"), vec![serde_json::json!("changes")]);
+  assert_eq!(
+    fields(&h, "workspace.tab"),
+    vec![serde_json::json!("changes")]
+  );
 }
 
 #[gpui::test]

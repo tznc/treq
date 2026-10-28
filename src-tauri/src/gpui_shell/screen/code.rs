@@ -313,11 +313,10 @@ pub struct CodeView {
   saving_description: bool,
   /// The PR text last copied into the workspace, as the latest-started
   /// read found it; [`Self::pr_sync`] checks the shown workspace against it.
-  /// read found it; [`Self::pr_sync`] checks the shown workspace against it.
   pr_sync: PrSyncRead,
   /// Why the workspace's last rebase was held back (`core::rebase_guard`).
   rebase_hold: Option<RebaseHold>,
-: bool,
+  resyncing: bool,
   /// The card's tab while a local draft differs from the pull request, and
   /// the PR's title and body as the GitHub tab last read them.
   about_tab: AboutTab,
@@ -1782,13 +1781,11 @@ impl CodeView {
         "Local {bookmark} and origin/{bookmark} each have commits the other lacks. \
          Push {bookmark}, or reset it to origin/{bookmark}, then rebase."
       )),
-      RebaseHold::StaleTarget { .. } => ui::Alert::new(
-        "code-rebase-stale-target",
-        "Rebased without fetching",
-        p,
-      )
-      .severity(ui::Severity::Info)
-      .message("Fetching origin failed, so the rebase used the last-fetched target."),
+      RebaseHold::StaleTarget { .. } => {
+        ui::Alert::new("code-rebase-stale-target", "Rebased without fetching", p)
+          .severity(ui::Severity::Info)
+          .message("Fetching origin failed, so the rebase used the last-fetched target.")
+      }
     };
     Some(alert)
   }

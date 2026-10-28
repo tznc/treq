@@ -1,6 +1,6 @@
 use super::{
-  convert_to_jj_branch_format, get_full_workspace_path, passes_guard, resolve_bookmark_conflict_if_needed,
-  AutoRebaseResult, WorkspaceBookmarkConflict,
+  convert_to_jj_branch_format, get_full_workspace_path, passes_guard,
+  resolve_bookmark_conflict_if_needed, AutoRebaseResult, WorkspaceBookmarkConflict,
 };
 use crate::jj::{self, JjRebaseResult};
 use crate::local_db::{self, Workspace};
@@ -123,7 +123,11 @@ pub fn rebase_root_subtree_from_workspace_force(
     if !passes_guard(repo_path, workspace, &sync) {
       all_success = false;
       if let Some(hold) = crate::core::rebase_guard::hold(repo_path, workspace.id) {
-        combined_messages.push(format!("Workspace '{}': {}", workspace.workspace_name, hold.message()));
+        combined_messages.push(format!(
+          "Workspace '{}': {}",
+          workspace.workspace_name,
+          hold.message()
+        ));
       }
       continue;
     }

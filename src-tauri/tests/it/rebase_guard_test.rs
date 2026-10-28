@@ -5,7 +5,12 @@ use treq_lib::jj;
 /// A workspace targeting the default branch with one committed file.
 fn workspace_on_default(repo: &TestRepo, branch: &str) -> (treq_lib::local_db::Workspace, String) {
   let ws = repo
-    .create_workspace_with_commit(branch, &format!("{}.txt", branch.replace('/', "-")), "work", None)
+    .create_workspace_with_commit(
+      branch,
+      &format!("{}.txt", branch.replace('/', "-")),
+      "work",
+      None,
+    )
     .unwrap();
   let target = repo.default_branch().to_string();
   treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, &target).unwrap();
@@ -24,7 +29,9 @@ fn has_file(workspace_path: &str, revision: &str, file: &str) -> bool {
 fn rebase_fetches_target_before_rebasing() {
   let repo = TestRepo::with_remote().unwrap();
   let (ws, path) = workspace_on_default(&repo, "feat/fetch-first");
-  repo.remote_commit_file("advance.txt", "new", "Advance main").unwrap();
+  repo
+    .remote_commit_file("advance.txt", "new", "Advance main")
+    .unwrap();
 
   // No manual fetch: the rebase itself must fetch.
   treq_lib::auto_rebase::rebase_single_workspace(&repo.repo_path, ws.id, "main", true, "diff")
@@ -39,7 +46,9 @@ fn rebase_fast_forwards_local_target_bookmark_to_remote() {
   let repo = TestRepo::with_remote().unwrap();
   let default = repo.default_branch().to_string();
   let (ws, _) = workspace_on_default(&repo, "feat/ff");
-  repo.remote_commit_file("advance.txt", "new", "Advance main").unwrap();
+  repo
+    .remote_commit_file("advance.txt", "new", "Advance main")
+    .unwrap();
 
   treq_lib::auto_rebase::rebase_single_workspace(&repo.repo_path, ws.id, "main", true, "diff")
     .unwrap();
@@ -55,7 +64,9 @@ fn rebase_skips_dirty_workspace() {
   let repo = TestRepo::with_remote().unwrap();
   let (ws, path) = workspace_on_default(&repo, "feat/dirty");
   TestRepo::write_workspace_file(&path, "wip.txt", "uncommitted").unwrap();
-  repo.remote_commit_file("advance.txt", "new", "Advance main").unwrap();
+  repo
+    .remote_commit_file("advance.txt", "new", "Advance main")
+    .unwrap();
 
   let result =
     treq_lib::auto_rebase::rebase_single_workspace(&repo.repo_path, ws.id, "main", true, "diff")
@@ -63,7 +74,10 @@ fn rebase_skips_dirty_workspace() {
 
   assert!(result.is_none());
   assert!(!has_file(&path, "feat/dirty", "advance.txt"));
-  assert_eq!(rebase_guard::hold(&repo.repo_path, ws.id), Some(RebaseHold::Dirty));
+  assert_eq!(
+    rebase_guard::hold(&repo.repo_path, ws.id),
+    Some(RebaseHold::Dirty)
+  );
 }
 
 #[test]
@@ -72,13 +86,18 @@ fn batch_rebase_skips_dirty_workspace() {
   let (dirty, dirty_path) = workspace_on_default(&repo, "feat/batch-dirty");
   let (clean, clean_path) = workspace_on_default(&repo, "feat/batch-clean");
   TestRepo::write_workspace_file(&dirty_path, "wip.txt", "uncommitted").unwrap();
-  repo.remote_commit_file("advance.txt", "new", "Advance main").unwrap();
+  repo
+    .remote_commit_file("advance.txt", "new", "Advance main")
+    .unwrap();
 
   treq_lib::auto_rebase::check_and_rebase_all(&repo.repo_path, "diff").unwrap();
 
   assert!(!has_file(&dirty_path, "feat/batch-dirty", "advance.txt"));
   assert!(has_file(&clean_path, "feat/batch-clean", "advance.txt"));
-  assert_eq!(rebase_guard::hold(&repo.repo_path, dirty.id), Some(RebaseHold::Dirty));
+  assert_eq!(
+    rebase_guard::hold(&repo.repo_path, dirty.id),
+    Some(RebaseHold::Dirty)
+  );
   assert_eq!(rebase_guard::hold(&repo.repo_path, clean.id), None);
 }
 
@@ -93,7 +112,9 @@ fn rebase_skips_when_target_bookmark_diverged_from_remote() {
     .unwrap();
   let other_path = repo.workspace_full_path(&other);
   jj::jj_set_bookmark(&other_path, &default, "feat/local-only").unwrap();
-  repo.remote_commit_file("advance.txt", "new", "Advance main").unwrap();
+  repo
+    .remote_commit_file("advance.txt", "new", "Advance main")
+    .unwrap();
 
   let result =
     treq_lib::auto_rebase::rebase_single_workspace(&repo.repo_path, ws.id, "main", true, "diff")
@@ -111,7 +132,9 @@ fn rebase_skips_when_target_bookmark_diverged_from_remote() {
 fn rebase_uses_last_fetched_target_and_warns_when_fetch_fails() {
   let repo = TestRepo::with_remote().unwrap();
   let (ws, path) = workspace_on_default(&repo, "feat/offline");
-  repo.remote_commit_file("advance.txt", "new", "Advance main").unwrap();
+  repo
+    .remote_commit_file("advance.txt", "new", "Advance main")
+    .unwrap();
   jj::jj_git_fetch(&repo.repo_path).unwrap();
   let remote = repo.remote_path();
   let moved = remote.with_extension("gone");
@@ -127,4 +150,26 @@ fn rebase_uses_last_fetched_target_and_warns_when_fetch_fails() {
     rebase_guard::hold(&repo.repo_path, ws.id),
     Some(RebaseHold::StaleTarget { .. })
   ));
+}
+
+#[test]
+fn rebase_hold_is_stored_with_the_workspace() {
+  // The CLI's post-commit rebase records holds the app must see.
+  let repo = TestRepo::with_remote().unwrap();
+  let (ws, path) = workspace_on_default(&repo, "feat/stored-hold");
+  TestRepo::write_workspace_file(&path, "wip.txt", "uncommitted").unwrap();
+  repo
+    .remote_commit_file("advance.txt", "new", "Advance main")
+    .unwrap();
+
+  treq_lib::auto_rebase::rebase_single_workspace(&repo.repo_path, ws.id, "main", true, "diff")
+    .unwrap();
+
+  let stored = treq_lib::local_db::get_workspace_by_id(&repo.repo_path, ws.id)
+    .unwrap()
+    .unwrap();
+  assert_eq!(
+    treq_lib::local_db::rebase_hold_of(&stored),
+    Some(serde_json::json!("Dirty"))
+  );
 }

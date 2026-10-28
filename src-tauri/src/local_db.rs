@@ -1173,6 +1173,55 @@ pub fn last_rebased_commit_of(workspace: &Workspace) -> Option<String> {
     .map(|s| s.to_string())
 }
 
+/// Why the workspace's last rebase was held back (`core::rebase_guard`), as
+/// stored in its metadata.
+pub fn rebase_hold_of(workspace: &Workspace) -> Option<serde_json::Value> {
+  let json = serde_json::from_str::<serde_json::Value>(workspace.metadata.as_deref()?).ok()?;
+  json.get("rebase_hold").filter(|v| !v.is_null()).cloned()
+}
+
+/// Stores the workspace's rebase hold in its metadata; `None` clears it.
+pub fn set_workspace_rebase_hold(
+  repo_path: &str,
+  id: i64,
+  hold: Option<serde_json::Value>,
+) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  let current: Option<String> = conn
+    .query_row(
+      "SELECT metadata FROM workspaces WHERE id = ?1",
+      params![id],
+      |row| row.get(0),
+    )
+    .map_err(|e| format!("Failed to read metadata: {}", e))?;
+  let mut meta = current
+    .and_then(|m| serde_json::from_str::<serde_json::Value>(&m).ok())
+    .filter(|m| m.is_object())
+    .unwrap_or(serde_json::json!({}));
+  if meta.get("rebase_hold") == hold.as_ref()
+    || (hold.is_none() && meta.get("rebase_hold").is_none())
+  {
+    return Ok(());
+  }
+  match hold {
+    Some(hold) => meta["rebase_hold"] = hold,
+    None => {
+      if let Some(map) = meta.as_object_mut() {
+        map.remove("rebase_hold");
+      }
+    }
+  }
+  let new_metadata =
+    serde_json::to_string(&meta).map_err(|e| format!("Failed to serialize metadata: {}", e))?;
+  conn
+    .execute(
+      "UPDATE workspaces SET metadata = ?1 WHERE id = ?2",
+      params![new_metadata, id],
+    )
+    .map_err(|e| format!("Failed to update metadata: {}", e))?;
+  Ok(())
+}
+
 /// Get last rebased commit from workspace metadata
 pub fn get_workspace_last_rebased_commit(
   repo_path: &str,

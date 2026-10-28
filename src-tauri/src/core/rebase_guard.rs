@@ -2,10 +2,8 @@
 //! synced with origin, and a workspace with uncommitted changes or a target
 //! that diverged from origin is held back instead of rebased.
 
-use crate::jj;
+use crate::{jj, local_db};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 
 /// Why a workspace's last rebase was held back, or ran with a caveat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,26 +116,17 @@ fn is_dirty(workspace_path: &str) -> bool {
   jj::jj_is_working_copy_empty(workspace_path).is_ok_and(|empty| !empty)
 }
 
-static HOLDS: OnceLock<Mutex<HashMap<(String, i64), RebaseHold>>> = OnceLock::new();
-
-/// Records what held the workspace's latest rebase attempt; `None` clears it.
+/// Stores what held the workspace's latest rebase attempt with the workspace,
+/// so the app sees holds the CLI's rebases record; `None` clears it.
 pub fn record(repo_path: &str, workspace_id: i64, hold: Option<RebaseHold>) {
-  let Ok(mut holds) = HOLDS.get_or_init(Default::default).lock() else {
-    return;
-  };
-  let key = (repo_path.to_string(), workspace_id);
-  match hold {
-    Some(hold) => holds.insert(key, hold),
-    None => holds.remove(&key),
-  };
+  let value = hold.and_then(|h| serde_json::to_value(h).ok());
+  if let Err(e) = local_db::set_workspace_rebase_hold(repo_path, workspace_id, value) {
+    tracing::warn!("Failed to store rebase hold for workspace {workspace_id}: {e}");
+  }
 }
 
 /// The hold the workspace's last rebase attempt recorded.
 pub fn hold(repo_path: &str, workspace_id: i64) -> Option<RebaseHold> {
-  HOLDS
-    .get()?
-    .lock()
-    .ok()?
-    .get(&(repo_path.to_string(), workspace_id))
-    .cloned()
+  let workspace = local_db::get_workspace_by_id(repo_path, workspace_id).ok()??;
+  serde_json::from_value(local_db::rebase_hold_of(&workspace)?).ok()
 }
