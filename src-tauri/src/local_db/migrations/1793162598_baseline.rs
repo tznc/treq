@@ -1,9 +1,10 @@
-//! Migration 2, the baseline: brings a database from any earlier shape to
+//! The baseline migration: brings a database from any earlier shape to
 //! the schema as it stood when versioned migrations were introduced. Every
 //! step checks the file's actual tables and columns, so it is safe to run on
-//! any of them. Do not change it; add a new migration in `migrations.rs`.
+//! any of them. Do not change it; add a new migration beside it.
 
-use super::{Connection, ResultExt};
+use super::super::ResultExt;
+use rusqlite::Connection;
 
 pub(super) fn apply(conn: &Connection) -> Result<(), String> {
   conn

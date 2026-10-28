@@ -12,7 +12,6 @@ use std::sync::{Mutex, OnceLock};
 use crate::agent_dispatch::{InstanceWindowSnapshot, RegisteredInstance};
 use crate::jj::DiscoveredWorkspace;
 
-mod baseline;
 mod migrations;
 mod pool;
 use pool::{ConnectionPool, PooledConnection};

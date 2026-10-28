@@ -4,12 +4,20 @@
 //! every migration above it, in order, and records each version as it lands,
 //! so a failure part way resumes from the step that failed on the next open.
 //!
-//! Version 2 is the baseline: the schema as it stood when migrations were
-//! introduced. It checks the file's actual tables and columns rather than its
+//! Each migration lives in `migrations/<unix seconds>_<name>.rs`, and that
+//! timestamp is its version, as in Rails, sqlx and Supabase: two branches
+//! adding migrations at once cannot claim the same number. `user_version` is
+//! a signed 32-bit integer, which holds unix seconds until 2038.
+//!
+//! The first migration is the baseline: the schema as it stood when
+//! migrations were introduced. It checks the file's actual tables and columns rather than its
 //! version, because databases from before versioning sit at 0 in any of the
 //! shapes earlier releases left. Later migrations can assume the baseline.
 
 use rusqlite::Connection;
+
+#[path = "migrations/1793162598_baseline.rs"]
+mod baseline;
 
 pub(super) struct Migration {
   /// The `user_version` this migration brings a database to.
@@ -20,11 +28,12 @@ pub(super) struct Migration {
   pub apply: fn(&Connection) -> Result<(), String>,
 }
 
-/// Every migration, oldest first. Append new ones; never edit a released one.
+/// Every migration, oldest first. Add one as `migrations/<date +%s>_<name>.rs`
+/// with a `mod` above and an entry here; never edit a released one.
 pub(super) const MIGRATIONS: &[Migration] = &[Migration {
-  version: 2,
+  version: 1_793_162_598,
   transactional: false,
-  apply: super::baseline::apply,
+  apply: baseline::apply,
 }];
 
 /// The version a fully migrated database is at.
@@ -185,6 +194,47 @@ mod tests {
     APPLIED.with(|a| a.borrow_mut().clear());
     run(&conn, &steps).unwrap_err();
     assert_eq!(applied(), [5]);
+  }
+
+  #[test]
+  fn each_migration_file_is_named_by_its_unix_timestamp_version() {
+    // `migrations/<unix seconds>_<name>.rs`, as Rails, sqlx and Supabase name
+    // theirs: branches adding migrations in parallel cannot pick the same one.
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/local_db/migrations");
+    let mut stamps: Vec<i64> = std::fs::read_dir(&dir)
+      .expect("migrations dir")
+      .map(|entry| {
+        let name = entry
+          .expect("entry")
+          .file_name()
+          .to_string_lossy()
+          .into_owned();
+        let (stamp, rest) = name
+          .split_once('_')
+          .unwrap_or_else(|| panic!("{name}: no `_`"));
+        assert!(rest.ends_with(".rs"), "{name}: not a .rs file");
+        stamp
+          .parse()
+          .unwrap_or_else(|_| panic!("{name}: prefix is not a unix timestamp"))
+      })
+      .collect();
+    stamps.sort_unstable();
+    let versions: Vec<i64> = MIGRATIONS.iter().map(|m| m.version).collect();
+    assert_eq!(stamps, versions);
+    for version in versions {
+      // After 2023, and within `PRAGMA user_version`'s signed 32 bits.
+      assert!(
+        (1_700_000_000..=i64::from(i32::MAX)).contains(&version),
+        "{version}"
+      );
+    }
+  }
+
+  #[test]
+  fn a_database_at_the_old_baseline_version_upgrades() {
+    // Releases before timestamped versions recorded the baseline as 2.
+    let conn = db_at(2);
+    assert!(version(&conn).unwrap() < LATEST);
   }
 
   #[test]
