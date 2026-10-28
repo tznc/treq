@@ -1538,7 +1538,6 @@ impl FileBrowserView {
   ) -> gpui::AnyElement {
     let id = SharedString::from(format!("file-tree-{}", self.rel(&entry.path)));
     let selector = id.to_string();
-    let hover = p.muted.opacity(0.6);
     let mono = |text: &str, color: Hsla| {
       ui::text(div(), TextSize::Sm)
         .font_family(theme::MONO_FONT)
@@ -1560,7 +1559,7 @@ impl FileBrowserView {
       .pl(zpx(depth as f32 * 16. + 8.))
       .rounded(radius::MD)
       .cursor_pointer()
-      .hover(move |s| s.bg(hover))
+      .hover(move |s| s.bg(p.hover()))
       .on_mouse_down(
         MouseButton::Right,
         cx.listener(move |view, e: &MouseDownEvent, _, cx| {
@@ -1895,10 +1894,8 @@ impl FileBrowserView {
     let selected = self.selection.is_some_and(|(s, e)| n >= s && n <= e);
     let width = line_number_width(lines.len());
     let bg = line_fill(selected, has_comment, added, &p);
-    let hover = p.muted.opacity(0.3);
     let selecting = self.selecting;
     let accent = p.primary;
-    let accent_hover = p.primary.opacity(0.85);
     let line = ui::text(div(), TextSize::Code)
       .id(SharedString::from(format!("code-line-{n}")))
       .debug_selector(move || format!("code-line-{n}"))
@@ -1909,7 +1906,7 @@ impl FileBrowserView {
       .overflow_hidden()
       .min_h(zpx(18.))
       .when_some(bg, |this, bg| this.bg(bg))
-      .when(bg.is_none(), |this| this.hover(move |s| s.bg(hover)))
+      .when(bg.is_none(), |this| this.hover(move |s| s.bg(p.hover())))
       .on_mouse_move(cx.listener(move |view, _, _, cx| view.drag_line(n, cx)))
       .when(added, |this| {
         this.child(
@@ -1986,7 +1983,7 @@ impl FileBrowserView {
                       .cursor_pointer()
                       .opacity(0.)
                       .group_hover("code-line", |s| s.opacity(1.))
-                      .hover(move |s| s.bg(accent_hover))
+                      .hover(move |s| s.bg(p.primary_hover()))
                       .child(ui::icon(theme::ICON_PLUS, 16., p.primary_foreground))
                       .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                       .on_click(cx.listener(move |view, _, _, cx| {

@@ -147,13 +147,12 @@ pub fn check_row(
         .text_color(p.muted_foreground)
         .child(data::check_duration(secs))
     }));
-  let muted = p.muted;
   match on_open.filter(|_| !check.link.is_empty()) {
     Some(open) => named(div(), id)
       .w_full()
       .rounded(radius::SM)
       .cursor_pointer()
-      .hover(move |s| s.bg(muted.opacity(0.5)))
+      .hover(move |s| s.bg(p.hover()))
       .on_click(open)
       .child(row),
     None => named(div(), id).child(row),

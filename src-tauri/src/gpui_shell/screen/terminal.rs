@@ -1300,7 +1300,7 @@ impl TerminalView {
   fn search_bar(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     let input = self.search.input.clone().filter(|_| self.search.open)?;
     let blank = self.search.query.trim().is_empty();
-    let (muted, fg, accent) = (p.muted_foreground, p.foreground, p.accent);
+    let (muted, fg) = (p.muted_foreground, p.foreground);
     let bg = p.background;
     let button = |id: &'static str, icon: &'static str, disabled: bool| {
       div()
@@ -1316,7 +1316,7 @@ impl TerminalView {
         .when(disabled, |b| b.opacity(0.4))
         .when(!disabled, |b| {
           b.cursor_pointer()
-            .hover(move |s| s.bg(accent).text_color(fg))
+            .hover(move |s| s.bg(p.hover()).text_color(fg))
         })
         .child(ui::icon(icon, 16., muted))
     };
@@ -3077,8 +3077,9 @@ impl TerminalPane {
               .rounded_full()
               .border_1()
               .border_color(dark.muted_foreground)
-              .bg(dark.foreground.opacity(0.8))
-              .hover(|s| s.bg(dark.foreground))
+              .bg(dark.foreground)
+              .opacity(0.8)
+              .hover(|s| s.opacity(1.))
               .shadow_md()
               .cursor_pointer()
               .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -3171,7 +3172,7 @@ impl TerminalPane {
         .h(zpx(SCROLLBAR))
         .rounded(radius::SM)
         .bg(if dragging { hover } else { p.border })
-        .hover(move |s| s.bg(hover))
+        .hover(move |s| s.bg(p.handle_hover()))
         .occlude()
         .on_mouse_down(
           MouseButton::Left,
@@ -3247,7 +3248,6 @@ impl TerminalPane {
 
   fn controls(&mut self, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
     let fg = p.foreground;
-    let accent = p.accent;
     let button = |id: &'static str, icon: &'static str, name: &'static str| {
       div()
         .id(id)
@@ -3260,7 +3260,7 @@ impl TerminalPane {
         .justify_center()
         .rounded_sm()
         .cursor_pointer()
-        .hover(move |s| s.bg(accent))
+        .hover(move |s| s.bg(p.hover()))
         .child(ui::icon(icon, 12., fg))
     };
     let tip = |text: &'static str, keys: &'static str| {
@@ -3422,7 +3422,7 @@ impl TerminalPane {
         .truncate()
         .rounded_sm()
         .bg(if on_dark {
-          d.foreground.opacity(0.15)
+          d.foreground.opacity(0.08)
         } else {
           p.muted.opacity(0.6)
         })
@@ -3432,13 +3432,7 @@ impl TerminalPane {
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(title_fg)
         .cursor_pointer()
-        .hover(|s| {
-          s.bg(if on_dark {
-            d.foreground.opacity(0.25)
-          } else {
-            p.muted
-          })
-        })
+        .hover(|s| s.bg(p.hover()))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(move |_, _, cx| {
           react(
@@ -3498,7 +3492,7 @@ impl TerminalPane {
           .items_center()
           .rounded_md()
           .cursor_pointer()
-          .hover(|s| s.bg(p.muted.opacity(0.2)))
+          .hover(|s| s.bg(p.hover()))
           .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
           .on_click(cx.listener(move |_, _, _, cx| view.update(cx, |v, cx| v.open_search(cx))))
           .child(ui::icon(theme::ICON_SEARCH, 16., d.foreground));
@@ -3522,7 +3516,7 @@ impl TerminalPane {
             .h_6()
             .px_2()
             .rounded_md()
-            .hover(|s| s.bg(p.muted.opacity(0.2)))
+            .hover(|s| s.bg(p.hover()))
             .child(ui::icon(theme::ICON_X, 16., d.foreground)),
           cx,
         );
@@ -4179,7 +4173,7 @@ impl Render for TerminalPane {
                 p.border
               },
             )
-            .hover(|s| s.bg(p.primary.opacity(0.5)))
+            .hover(|s| s.bg(p.handle_hover()))
             .child(
               div()
                 .absolute()
@@ -4277,7 +4271,7 @@ impl Render for TerminalPane {
             } else {
               p.border
             })
-            .hover(|s| s.bg(p.primary.opacity(0.5)))
+            .hover(|s| s.bg(p.handle_hover()))
             .child(
               div()
                 .id("terminal-height-divider")

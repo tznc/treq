@@ -51,6 +51,17 @@ test("changes: conflict card and resolve popover", async ({ page }) => {
       "Commit box (Message, Commit split button) at the top of the list",
     ],
   });
+  await page.mouse.move(330, 315, { steps: 4 }); // Home.tsx under Conflicts
+  await settle(page, 500);
+  await capture(page, {
+    name: "05-changes-file-row-hover",
+    title: "Changes tab: a hovered file row",
+    rest: false,
+    expectations: [
+      "Hovered Home.tsx row fills with the same grey tint as a hovered sidebar row",
+      "No shadow or border appears around the hovered row",
+    ],
+  });
   await page.mouse.click(330, 283); // Home.tsx under Conflicts
   await settle(page, 1500);
   await capture(page, {

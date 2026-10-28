@@ -365,7 +365,7 @@ impl Lightbox {
       .px_8()
       .py_1p5()
       .cursor_pointer()
-      .hover(|s| s.bg(palette.muted.opacity(0.5)))
+      .hover(|s| s.bg(palette.hover()))
       .when(pending, |d| d.bg(ui::Tone::Danger.tint(palette)))
       .when(commented, |d| d.bg(ui::Tone::Warning.tint(palette)))
       .on_mouse_down(
@@ -895,7 +895,8 @@ fn tool(id: &'static str, icon: &'static str, disabled: bool) -> Stateful<Div> {
     .rounded(radius::MD)
     .when(disabled, |d| d.opacity(0.4))
     .when(!disabled, |d| {
-      d.cursor_pointer().hover(|s| s.bg(chrome(0.15)))
+      d.cursor_pointer()
+        .hover(|s| s.bg(theme::palette(true).hover_on_dark()))
     })
     .child(ui::icon(icon, 16., chrome(1.)))
 }
@@ -1093,7 +1094,7 @@ impl Lightbox {
                 .justify_center()
                 .rounded(radius::MD)
                 .cursor_pointer()
-                .hover(|s| s.bg(chrome(0.1)))
+                .hover(|s| s.bg(d.hover_on_dark()))
                 .on_click(cx.listener(move |view, _, _, cx| view.remove_highlight(id, cx)))
                 .child(ui::icon(theme::ICON_X, 14., d.foreground)),
             ),
@@ -1186,7 +1187,7 @@ impl Lightbox {
           .gap_3()
           .px_4()
           .py(zpx(LINE_PADDING_Y))
-          .hover(|s| s.bg(chrome(0.05)))
+          .hover(|s| s.bg(palette.hover()))
           .when(pending, |d| d.bg(ui::Tone::Danger.tint(&palette)))
           .when(commented, |d| d.bg(ui::Tone::Warning.tint(&palette)))
           .on_mouse_down(
@@ -1506,9 +1507,13 @@ impl Lightbox {
         .bg(scrim(0.4))
         .when(disabled, |d| d.opacity(0.5))
         .when(!disabled, |d| {
-          d.cursor_pointer().hover(|s| s.bg(scrim(0.6))).on_click(
-            cx.listener(move |view, _, window, cx| view.go(if next { 1 } else { -1 }, window, cx)),
-          )
+          d.cursor_pointer()
+            .hover(|s| s.border_color(chrome(0.6)))
+            .on_click(
+              cx.listener(move |view, _, window, cx| {
+                view.go(if next { 1 } else { -1 }, window, cx)
+              }),
+            )
         })
         .child(ui::icon(icon, 32., chrome(1.))),
     )

@@ -1766,10 +1766,7 @@ impl CommitsView {
     } else {
       p.muted_foreground
     };
-    let (yellow, yellow_hover) = (
-      ui::Tone::Warning.tint(p),
-      ui::Tone::Warning.color(p).opacity(0.25),
-    );
+    let yellow = ui::Tone::Warning.tint(p);
     let ts = commit.timestamp.clone();
     let time = self.tips.wrap(
       format!("commits-time-{}", commit.commit_id),
@@ -1821,7 +1818,6 @@ impl CommitsView {
           cx,
         )
       });
-    let hover = if tentative { yellow_hover } else { p.muted };
     // The working copy's commit moves as files change: never read ahead.
     let read_ahead = (!tentative && !commit.is_working_copy).then(|| {
       let id = commit.commit_id.clone();
@@ -1847,7 +1843,7 @@ impl CommitsView {
       .rounded(radius::MD)
       .cursor_pointer()
       .when(tentative, |this| this.bg(yellow))
-      .hover(move |s| s.bg(hover))
+      .hover(move |s| s.bg(p.hover()))
       .child(
         div().relative().flex_none().child(
           div()
@@ -2286,7 +2282,7 @@ impl CommitsView {
     let busy = state.deferred_loading.contains(&file.path);
     let (id, path) = (commit.commit_id.clone(), file.path.clone());
     let muted = p.muted_foreground;
-    let (fg, hover) = (p.foreground, p.muted);
+    let fg = p.foreground;
     div()
       .flex()
       .items_center()
@@ -2322,7 +2318,7 @@ impl CommitsView {
               .when(!busy, |this| {
                 this
                   .cursor_pointer()
-                  .hover(move |s| s.bg(hover).text_color(fg))
+                  .hover(move |s| s.bg(p.hover()).text_color(fg))
                   .on_click(cx.listener(move |view, _, _, cx| view.load_file_diff(&id, &path, cx)))
               })
               .child(if busy { "Loading..." } else { "Load diff" }),
@@ -2345,7 +2341,6 @@ impl CommitsView {
       "D" => (ui::Tone::GitClosed.text(p), ui::Tone::GitClosed.tint(p)),
       _ => (p.foreground, gpui::transparent_black()),
     };
-    let hover = p.muted.opacity(0.4);
     let (id, path) = (commit.commit_id.clone(), file.path.clone());
     div()
       .id(SharedString::from(format!(
@@ -2360,7 +2355,7 @@ impl CommitsView {
       .py_1p5()
       .w_full()
       .cursor_pointer()
-      .hover(move |s| s.bg(hover))
+      .hover(move |s| s.bg(p.hover()))
       .child(ui::icon(
         if open {
           theme::ICON_CHEVRON_DOWN

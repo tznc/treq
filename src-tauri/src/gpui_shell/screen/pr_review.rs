@@ -633,7 +633,7 @@ impl PrReviewView {
           .px_3()
           .py_1()
           .cursor_pointer()
-          .hover(move |s| s.bg(accent))
+          .hover(move |s| s.bg(p.hover()))
           .when(active, |this| this.bg(accent))
           .child(ui::icon(theme::ICON_FILE_TEXT, 12., p.muted_foreground).flex_none())
           .child(div().truncate().flex_1().child(name))

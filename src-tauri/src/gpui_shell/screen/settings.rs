@@ -1906,7 +1906,7 @@ impl Render for SettingsView {
             } else {
               this
                 .text_color(p.muted_foreground)
-                .hover(|style| style.bg(p.accent.opacity(0.5)).text_color(p.foreground))
+                .hover(|style| style.bg(p.hover()).text_color(p.foreground))
             }
           })
           .child(ui::icon(

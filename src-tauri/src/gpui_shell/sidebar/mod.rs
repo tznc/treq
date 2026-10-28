@@ -688,7 +688,7 @@ impl Render for Sidebar {
           .border_color(palette.border)
           .bg(palette.muted.opacity(0.5))
           .cursor_pointer()
-          .hover(|style| style.bg(palette.muted))
+          .hover(|style| style.bg(palette.hover()))
           .text_color(palette.muted_foreground)
           .child(icon(theme::ICON_SEARCH, 16., palette.muted_foreground))
           .child(
@@ -867,7 +867,7 @@ impl Sidebar {
       .rounded_md()
       .text_color(palette.sidebar_foreground.opacity(0.7))
       .cursor_pointer()
-      .hover(|style| style.bg(palette.accent))
+      .hover(|style| style.bg(palette.hover()))
       .child(icon(
         theme::ICON_BRANCH_PLUS,
         12.,
@@ -955,7 +955,7 @@ impl Sidebar {
       .when(!disabled, |this| {
         this
           .cursor_pointer()
-          .hover(|style| style.bg(palette.accent))
+          .hover(|style| style.bg(palette.hover()))
       })
       .when(disabled, |this| this.opacity(0.4))
       .child(icon(icon_path, 16., palette.foreground))
@@ -1103,7 +1103,7 @@ impl Sidebar {
       .when(repo.home_selected, |this| this.bg(palette.selected()))
       .cursor_pointer()
       .when(!repo.home_selected, |this| {
-        this.hover(|style| style.bg(palette.accent))
+        this.hover(|style| style.bg(palette.hover()))
       })
       .when(repo.missing, |this| this.opacity(0.5))
       .child(icon(theme::ICON_HOUSE, 16., palette.sidebar_foreground))
@@ -1166,7 +1166,9 @@ impl Sidebar {
       .rounded_md()
       .cursor_pointer()
       .when(active, |this| this.bg(palette.selected()))
-      .when(!active, |this| this.hover(|style| style.bg(palette.accent)))
+      .when(!active, |this| {
+        this.hover(|style| style.bg(palette.hover()))
+      })
       .child(icon(icon_path, 16., palette.sidebar_foreground))
       .child(div().flex_1().min_w_0().truncate().child(text))
       .on_click(self.on_action(action))
@@ -1189,7 +1191,7 @@ impl Sidebar {
       .w(zpx(4.))
       .cursor_ew_resize()
       .when(dragging, |this| this.bg(primary))
-      .hover(move |style| style.bg(primary.opacity(0.5)))
+      .hover(move |style| style.bg(palette.handle_hover()))
       .on_drag(ResizeDrag, |drag, _, _, cx| cx.new(|_| *drag))
       .on_click(move |event: &ClickEvent, _, cx| {
         cx.stop_propagation();
@@ -1266,7 +1268,7 @@ impl Sidebar {
       .rounded_md()
       .text_color(palette.sidebar_foreground.opacity(0.7))
       .cursor_pointer()
-      .hover(|style| style.bg(palette.accent))
+      .hover(|style| style.bg(palette.hover()))
       .child(icon(chevron, 16., palette.sidebar_foreground.opacity(0.7)))
       .child(div().min_w_0().truncate().child(name.to_uppercase()))
       .on_click(self.on_action(SidebarAction::ToggleRepo {

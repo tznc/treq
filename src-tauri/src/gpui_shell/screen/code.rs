@@ -1912,9 +1912,7 @@ impl CodeView {
           .gap_2()
           .cursor_pointer()
           .when(selected, |this| this.bg(accent.opacity(0.5)))
-          .when(!selected, |this| {
-            this.hover(move |s| s.bg(accent.opacity(0.3)))
-          })
+          .when(!selected, |this| this.hover(move |s| s.bg(p.hover())))
           .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
           .child(
             ui::text(div(), TextSize::Xs)
@@ -2620,7 +2618,6 @@ impl CodeView {
     );
     let (ins, del) = row.stats;
     let workspace = row.workspace.clone();
-    let muted = p.muted;
     div()
       .id(id)
       .debug_selector(move || selector)
@@ -2642,7 +2639,7 @@ impl CodeView {
           .border_color(p.primary.opacity(0.4))
           .shadow_sm()
       })
-      .when(!row.current, |this| this.hover(move |s| s.bg(muted)))
+      .when(!row.current, |this| this.hover(move |s| s.bg(p.hover())))
       .child(stack_dot(row.current, p))
       .child(
         div()
@@ -2676,7 +2673,6 @@ impl CodeView {
 
   fn go_to_file(&self, p: &Palette) -> impl IntoElement {
     let react = self.react.clone();
-    let hover = p.muted.opacity(0.3);
     div().flex().justify_end().child(
       div()
         .id("code-go-to-file")
@@ -2690,7 +2686,7 @@ impl CodeView {
         .border_color(p.border)
         .rounded(radius::LG)
         .bg(p.background)
-        .hover(move |s| s.bg(hover))
+        .hover(move |s| s.bg(p.hover()))
         .cursor_pointer()
         .w_full()
         .max_w(zpx(320.))
@@ -2770,7 +2766,6 @@ impl CodeView {
     }
     let font = self.settings.as_ref().map_or(14., |s| s.font_size);
     let home = self.parent.workspace.is_none();
-    let hover = p.muted.opacity(0.6);
     let muted_fg = p.muted_foreground;
     let mut list = section(p).flex().flex_col();
     let loaded = self.overview.is_some();
@@ -2838,7 +2833,7 @@ impl CodeView {
             )
             .flex()
             .items_center()
-            .hover(move |s| s.bg(hover))
+            .hover(move |s| s.bg(p.hover()))
             .child(
               ui::text(div(), TextSize::Sm)
                 .id(id)
@@ -2956,7 +2951,7 @@ impl CodeView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let show = self.show_untouched;
-    let (hover, muted_fg) = (p.muted.opacity(0.6), p.muted_foreground);
+    let muted_fg = p.muted_foreground;
     let label = if show {
       "Hide unchanged files".to_string()
     } else if count == 1 {
@@ -2979,7 +2974,7 @@ impl CodeView {
       .py_1p5()
       .text_color(muted_fg)
       .cursor_pointer()
-      .hover(move |s| s.bg(hover))
+      .hover(move |s| s.bg(p.hover()))
       .child(ui::icon(
         if show {
           theme::ICON_CHEVRON_DOWN
@@ -3301,7 +3296,7 @@ impl CodeView {
     let target = matches!(kind, Kind::Target);
     let title = headline(commit, tentative);
     let warning = ui::Tone::Warning;
-    let (yellow_bg, yellow_hover) = (warning.tint(p), warning.tint(p).opacity(1.5));
+    let yellow_bg = warning.tint(p);
     let yellow_border = warning.border(p);
     let dot = if tentative {
       warning.color(p)
@@ -3327,11 +3322,6 @@ impl CodeView {
     let id = SharedString::from(format!("commit-item-{}", commit.commit_id));
     let selector = id.to_string();
     let column = p.background.blend(p.muted.opacity(0.2));
-    // The row's hover fill, and the card's `hover:bg-muted/40` over it. GPUI
-    // paints a shadow under the whole box, so a translucent card shows the
-    // shadow through: blend both down to opaque.
-    let row_hover = if tentative { yellow_hover } else { p.muted };
-    let card_hover = column.blend(row_hover).blend(p.muted.opacity(0.4));
     let body = div()
       .id(id)
       .debug_selector(move || selector)
@@ -3354,7 +3344,7 @@ impl CodeView {
         this.bg(column.blend(yellow_bg)).p_2().m_neg_2().shadow_sm()
       })
       .when(target, |this| this.bg(p.muted.opacity(0.3)).p_2().m_neg_2())
-      .hover(move |s| s.bg(card_hover))
+      .hover(move |s| s.bg(p.hover()))
       .child(ui::text(div(), TextSize::Sm).truncate().child(title))
       .when_some(
         match &kind {
@@ -3425,7 +3415,7 @@ impl CodeView {
       .px_2()
       .mx_neg_2()
       .rounded(radius::MD)
-      .hover(move |s| s.bg(row_hover))
+      .hover(move |s| s.bg(p.hover()))
       .when(tentative, |this| {
         this.bg(yellow_bg).border_1().border_color(yellow_border)
       })

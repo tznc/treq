@@ -2351,7 +2351,6 @@ impl LinearView {
           )
         })
     });
-    let hover = p.hover();
     let selector = format!("linear-kanban-card-{id}");
     ui::text(div(), TextSize::Sm)
       .id(SharedString::from(selector.clone()))
@@ -2365,7 +2364,7 @@ impl LinearView {
       .rounded(radius::MD)
       .p_2p5()
       .cursor_pointer()
-      .hover(move |s| s.bg(hover))
+      .hover(move |s| s.bg(p.hover()))
       .on_click({
         let id = id.clone();
         cx.listener(move |view, _: &ClickEvent, _, cx| view.open_issue(&id, cx))
@@ -2467,7 +2466,6 @@ impl LinearView {
       p,
       cx,
     ));
-    let hover = p.muted.opacity(0.5);
     let list = div()
       .id("linear-projects-scroll")
       .flex_1()
@@ -2532,7 +2530,7 @@ impl LinearView {
               .py_3()
               .cursor_pointer()
               .when(i > 0, |this| this.border_t_1().border_color(p.border))
-              .hover(move |s| s.bg(hover))
+              .hover(move |s| s.bg(p.hover()))
               .when(on, |this| this.bg(p.muted))
               .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
                 view.selected_project = Some(id.clone());
@@ -2666,7 +2664,6 @@ impl LinearView {
           .gap_2()
           .children(docs.data.iter().flatten().map(|doc| {
             let selector = format!("linear-document-item-{}", doc.id);
-            let hover = p.muted.opacity(0.7);
             let doc = doc.clone();
             ui::text(div(), TextSize::Sm)
               .id(SharedString::from(selector.clone()))
@@ -2675,7 +2672,7 @@ impl LinearView {
               .py_1()
               .rounded_full()
               .bg(p.muted)
-              .hover(move |s| s.bg(hover))
+              .hover(move |s| s.bg(p.hover()))
               .text_color(p.foreground)
               .cursor_pointer()
               .child(doc.title.clone())

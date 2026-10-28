@@ -245,7 +245,6 @@ fn caption(text: &'static str) -> impl IntoElement {
 /// The directory browser: home and the path's breadcrumbs, Show hidden,
 /// and the folders in it; a folder opens on click.
 fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
-  let hover = p.hover();
   let crumbs = crumbs(&form.path);
   let last = crumbs.len().saturating_sub(1);
   let crumb_row = div()
@@ -282,7 +281,7 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
             .when(!current, |d| {
               d.cursor_pointer()
                 .text_color(p.muted_foreground)
-                .hover(move |s| s.bg(hover))
+                .hover(move |s| s.bg(p.hover()))
                 .on_click(field(react, "remoteRepo.browse", path.clone().into()))
             })
             .child(name)

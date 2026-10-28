@@ -1751,7 +1751,7 @@ fn header_button(
   id: impl Into<SharedString>,
   icon: &'static str,
   fg: Hsla,
-  hover: Hsla,
+  p: &Palette,
 ) -> Stateful<Div> {
   let id: SharedString = id.into();
   let selector = id.to_string();
@@ -1762,7 +1762,7 @@ fn header_button(
     .rounded(radius::SM)
     .cursor_pointer()
     .text_color(fg)
-    .hover(move |s| s.bg(hover))
+    .hover(move |s| s.bg(p.hover()))
     .child(ui::icon(icon, 12., fg))
 }
 
@@ -2108,7 +2108,7 @@ impl ChangesView {
       } else {
         p.muted_foreground
       },
-      p.foreground.opacity(0.1),
+      p,
     )
     .relative()
     .when(filtering, |b| b.bg(primary.opacity(0.1)))
@@ -2339,7 +2339,6 @@ impl ChangesView {
     };
     let active = self.active.as_deref() == Some(path.as_str());
     let (name, dir) = split_path(path);
-    let hover = p.accent.opacity(0.3);
     let file = path.clone();
     let row = div()
       .id(SharedString::from(format!("conflict-row-{path}")))
@@ -2353,7 +2352,7 @@ impl ChangesView {
       .gap_1()
       .cursor_pointer()
       .when(active, |this| this.bg(p.selected()))
-      .when(!active, |this| this.hover(move |s| s.bg(hover)))
+      .when(!active, |this| this.hover(move |s| s.bg(p.hover())))
       .child(
         div()
           .ml_1()
@@ -2419,12 +2418,11 @@ impl ChangesView {
       },
     );
     let muted = p.muted_foreground;
-    let hover = p.foreground.opacity(0.1);
     let mut buttons = div().flex().items_center().gap_1();
     if count > 0 {
       // `onStashAll` is left out for a remote repository.
       if !staged && !self.parent.remote {
-        let stash = header_button("stash-all-changes", theme::ICON_ARCHIVE, muted, hover).on_click(
+        let stash = header_button("stash-all-changes", theme::ICON_ARCHIVE, muted, p).on_click(
           cx.listener(|view, _, _, cx| {
             cx.stop_propagation();
             view.stash_all(cx);
@@ -2446,7 +2444,7 @@ impl ChangesView {
         },
         theme::ICON_UNDO,
         muted,
-        hover,
+        p,
       )
       .on_click(cx.listener(|view, _, _, cx| {
         cx.stop_propagation();
@@ -2466,7 +2464,7 @@ impl ChangesView {
       ));
       if !staged {
         let label = select_all_label(selected_len, count);
-        let select = header_button("select-all-changes", theme::ICON_PLUS, muted, hover).on_click(
+        let select = header_button("select-all-changes", theme::ICON_PLUS, muted, p).on_click(
           cx.listener(|view, _, _, cx| {
             cx.stop_propagation();
             let files = view.listed();
@@ -2494,8 +2492,8 @@ impl ChangesView {
           .p_1()
           .rounded(radius::SM)
           .cursor_pointer()
-          .bg(primary.opacity(0.1))
-          .hover(move |s| s.bg(primary.opacity(0.2)))
+          .bg(p.selected())
+          .hover(move |s| s.bg(p.selected_hover()))
           .child(ui::icon(theme::ICON_ARROW_RIGHT, 12., primary))
           .on_click(cx.listener(|view, _, _, cx| {
             cx.stop_propagation();
@@ -2516,12 +2514,13 @@ impl ChangesView {
         ));
       }
       if staged {
-        let minus = header_button("unselect-all-changes", theme::ICON_MINUS, muted, p.muted)
-          .on_click(cx.listener(|view, _, _, cx| {
+        let minus = header_button("unselect-all-changes", theme::ICON_MINUS, muted, p).on_click(
+          cx.listener(|view, _, _, cx| {
             cx.stop_propagation();
             view.staging.unstage_all();
             cx.notify();
-          }));
+          }),
+        );
         buttons = buttons.child(self.tips.wrap(
           "unselect-all-tip",
           Side::Bottom,
@@ -2613,7 +2612,6 @@ impl ChangesView {
     let (name, dir) = split_path(&file.path);
     let active = self.active.as_deref() == Some(file.path.as_str());
     let dimmed = self.viewed.contains_key(&file.path);
-    let hover = p.accent.opacity(0.2);
     let path = file.path.clone();
     let menu = file.path.clone();
     let row = div()
@@ -2625,7 +2623,7 @@ impl ChangesView {
       .cursor_pointer()
       .border_l_2()
       .border_color(gpui::transparent_black())
-      .hover(move |s| s.bg(hover))
+      .hover(move |s| s.bg(p.hover()))
       .child(
         div()
           .ml_1()
@@ -2695,11 +2693,10 @@ impl ChangesView {
     let dimmed = self.viewed.contains_key(&file.path) && !selected;
     let (name, dir) = split_path(&file.path);
     let tint = p.selected();
-    let hover = p.accent.opacity(0.2);
     let path = file.path.clone();
     let name_color = p.foreground;
     let dir_color = p.muted_foreground.opacity(0.6);
-    let small = |id: String, icon: &'static str, fg: Hsla, hover_bg: Hsla, hidden: bool| {
+    let small = |id: String, icon: &'static str, fg: Hsla, hidden: bool| {
       let selector = id.clone();
       div()
         .id(SharedString::from(id))
@@ -2710,7 +2707,7 @@ impl ChangesView {
         .when(hidden, |this| {
           this.opacity(0.).group_hover("file-row", |s| s.opacity(1.))
         })
-        .hover(move |s| s.bg(hover_bg))
+        .hover(move |s| s.bg(p.hover()))
         .child(ui::icon(icon, 12., fg))
     };
     let red = Tone::Danger.text(p);
@@ -2728,7 +2725,6 @@ impl ChangesView {
         format!("discard-{}", file.path),
         theme::ICON_UNDO,
         red,
-        Tone::Danger.tint(p),
         false,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
@@ -2742,7 +2738,6 @@ impl ChangesView {
         format!("stage-{}", file.path),
         theme::ICON_PLUS,
         name_color,
-        p.accent,
         false,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
@@ -2758,7 +2753,6 @@ impl ChangesView {
         format!("unstage-{}", file.path),
         theme::ICON_MINUS,
         name_color,
-        p.accent,
         !selected,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
@@ -2791,7 +2785,7 @@ impl ChangesView {
       .when(selected || active, |this| this.bg(tint))
       .when(selected, |this| this.font_weight(FontWeight::SEMIBOLD))
       .when(!selected && !active, |this| {
-        this.hover(move |s| s.bg(hover))
+        this.hover(move |s| s.bg(p.hover()))
       })
       .child(
         div()
@@ -3208,7 +3202,6 @@ impl ChangesView {
             )
           }),
       );
-    let accent = p.accent;
     let mut right = div().flex().items_center().gap_2();
     if !committed && !self.read_only() {
       right = right.child(
@@ -3221,7 +3214,7 @@ impl ChangesView {
             .p_1()
             .rounded(radius::SM)
             .cursor_pointer()
-            .hover(move |s| s.bg(accent))
+            .hover(move |s| s.bg(p.hover()))
             .child(ui::icon(theme::ICON_MESSAGE_PLUS, 14., muted))
             .on_click({
               let path = path.to_string();
@@ -3254,7 +3247,7 @@ impl ChangesView {
           .rounded(radius::SM)
           .cursor_pointer()
           .text_color(muted)
-          .hover(move |s| s.bg(accent))
+          .hover(move |s| s.bg(p.hover()))
           .child(ui::Checkbox::new(format!("viewed-box-{path}"), p).checked(viewed))
           .child("Viewed")
           .on_click(cx.listener(move |view, _, _, cx| {
@@ -3307,7 +3300,7 @@ impl ChangesView {
           .p_1()
           .rounded(radius::SM)
           .cursor_pointer()
-          .hover(move |s| s.bg(accent))
+          .hover(move |s| s.bg(p.hover()))
           .child(ui::icon(theme::ICON_MORE, 12., fg))
           .child(self.anchor(key))
           .on_click(cx.listener(move |view, _, _, cx| {

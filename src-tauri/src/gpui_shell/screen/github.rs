@@ -1868,7 +1868,6 @@ impl GithubView {
     cx: &mut Context<Self>,
     on_click: impl Fn(&mut Self, &mut Context<Self>) + 'static,
   ) -> gpui::Stateful<Div> {
-    let muted = p.muted;
     named(div(), id)
       .w_full()
       .px_3()
@@ -1880,7 +1879,7 @@ impl GithubView {
       .gap_2()
       .cursor_pointer()
       .when(selected, |d| d.bg(p.selected()))
-      .when(!selected, |d| d.hover(move |s| s.bg(muted.opacity(0.5))))
+      .when(!selected, |d| d.hover(move |s| s.bg(p.hover())))
       .on_click(cx.listener(move |view, _, _, cx| on_click(view, cx)))
   }
 

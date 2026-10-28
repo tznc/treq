@@ -427,7 +427,7 @@ impl StashView {
 
 impl StashView {
   fn list(&self, entries: &[StashEntry], p: &Palette, cx: &mut Context<Self>) -> gpui::Div {
-    let (selected_bg, hover_bg, muted) = (p.selected(), p.hover(), p.muted_foreground);
+    let (selected_bg, muted) = (p.selected(), p.muted_foreground);
     div()
       .debug_selector(|| "stash-list".into())
       .w(zpx(288.))
@@ -458,7 +458,7 @@ impl StashView {
               .rounded(radius::MD)
               .cursor_pointer()
               .when(selected, |this| this.bg(selected_bg))
-              .when(!selected, |this| this.hover(move |s| s.bg(hover_bg)))
+              .when(!selected, |this| this.hover(move |s| s.bg(p.hover())))
               .child(
                 div()
                   .font_family(theme::MONO_FONT)

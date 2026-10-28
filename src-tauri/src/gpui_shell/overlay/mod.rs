@@ -756,9 +756,7 @@ impl Overlay {
           .mx_2()
           .rounded(radius::MD)
           .text_color(p.foreground)
-          .when(!selected, |this| {
-            this.hover(|s| s.bg(p.menu_accent.opacity(0.3)))
-          })
+          .when(!selected, |this| this.hover(|s| s.bg(p.hover())))
           .child(ui::icon(command.icon, 16., p.muted_foreground))
           .child(two_lines(
             &command.label,
@@ -774,9 +772,7 @@ impl Overlay {
           .mx_2()
           .rounded(radius::MD)
           .when(selected, |this| this.text_color(p.foreground))
-          .when(!selected, |this| {
-            this.hover(|s| s.bg(p.menu_accent.opacity(0.5)))
-          })
+          .when(!selected, |this| this.hover(|s| s.bg(p.hover())))
           .child(ui::icon(theme::ICON_BRANCH, 16., p.muted_foreground))
           .child(two_lines(&row.branch_name, Some(&description), true))
       }

@@ -1136,7 +1136,7 @@ impl OpenWorkspacesDialog {
           .when(rows > 0, |this| {
             this
               .cursor_pointer()
-              .hover(move |s| s.bg(muted))
+              .hover(move |s| s.bg(p.hover()))
               .when(self.lines_open, |this| this.bg(muted))
               .child(ui::icon(
                 if self.lines_open {
@@ -1278,7 +1278,7 @@ impl OpenWorkspacesDialog {
             if active {
               this.bg(p.selected())
             } else {
-              this.hover(|s| s.bg(p.background.opacity(0.5)).text_color(p.foreground))
+              this.hover(|s| s.bg(p.hover()).text_color(p.foreground))
             }
           })
           .child(ui::icon(icon, 14., color))
@@ -1580,7 +1580,6 @@ fn pick_row(
   item: Div,
   p: &Palette,
 ) -> gpui::Stateful<Div> {
-  let hover = p.hover();
   div()
     .id(SharedString::from(format!("{id}-row")))
     .role(gpui::Role::CheckBox)
@@ -1600,7 +1599,7 @@ fn pick_row(
     .gap_2()
     .cursor_pointer()
     .when(checked, |d| d.bg(p.selected()))
-    .when(!checked, |d| d.hover(move |s| s.bg(hover)))
+    .when(!checked, |d| d.hover(move |s| s.bg(p.hover())))
     .child(
       div().mt_1().child(
         ui::Checkbox::new(SharedString::from(format!("{id}-check")), p)

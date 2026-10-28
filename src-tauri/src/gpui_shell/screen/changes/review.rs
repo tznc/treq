@@ -1170,7 +1170,6 @@ impl ChangesView {
       .as_ref()
       .is_some_and(|s| s.lines.len() > 1);
     let border = p.border.opacity(0.4);
-    let gutter_hover = p.hover();
     let dragging = self.review.selection.as_ref().is_some_and(|s| s.dragging);
     let text = line.get(1..).filter(|t| !t.is_empty()).unwrap_or(" ");
     let at = (h, l);
@@ -1221,7 +1220,7 @@ impl ChangesView {
           .text_color(p.muted_foreground)
           .cursor_pointer()
           .when(gutter_hovers(selected, dragging), |this| {
-            this.hover(move |s| s.bg(gutter_hover))
+            this.hover(move |s| s.bg(p.hover()))
           })
           .when(!conflicted, |this| {
             this.on_mouse_down(
@@ -1432,7 +1431,6 @@ impl ChangesView {
     }
     let (edit, delete, body) = (id.to_string(), id.to_string(), text.to_string());
     let muted = p.muted_foreground;
-    let accent = p.accent;
     let card = box_()
       .id(SharedString::from(format!("comment-{id}")))
       .debug_selector(move || selector.into())
@@ -1440,7 +1438,7 @@ impl ChangesView {
       .aria_label("Edit comment")
       .test_support()
       .cursor_pointer()
-      .hover(|s| s.shadow_md())
+      .hover(|s| s.bg(p.hover()))
       .on_click(cx.listener(move |view, _, _, cx| view.start_edit(&edit, &body, cx)))
       .child(
         div()
@@ -1459,7 +1457,7 @@ impl ChangesView {
                 .p_1()
                 .rounded(radius::SM)
                 .cursor_pointer()
-                .hover(move |s| s.bg(accent))
+                .hover(move |s| s.bg(p.hover()))
                 .child(ui::icon(theme::ICON_X, 12., muted))
                 .on_click(cx.listener(move |view, _, _, cx| {
                   cx.stop_propagation();
@@ -1760,7 +1758,6 @@ impl ChangesView {
       .flex()
       .flex_col()
       .gap_3();
-    let accent = p.accent;
     for c in outdated {
       let id = c.id.clone();
       section = section.child(
@@ -1804,7 +1801,7 @@ impl ChangesView {
                   .p_1()
                   .rounded(radius::SM)
                   .cursor_pointer()
-                  .hover(move |s| s.bg(accent))
+                  .hover(move |s| s.bg(p.hover()))
                   .child(ui::icon(theme::ICON_X, 12., p.muted_foreground))
                   .on_click(cx.listener(move |view, _, _, cx| view.delete_comment(&id, cx))),
               ),

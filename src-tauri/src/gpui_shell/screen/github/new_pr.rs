@@ -387,59 +387,56 @@ impl GithubView {
       Some(list) if list.is_empty() => {
         muted_line("Every workspace already has an open pull request.", p).into_any_element()
       }
-      Some(list) => {
-        let muted = p.muted;
-        div()
-          .id("github-new-pr-workspaces")
-          .max_h(zpx(240.))
-          .overflow_y_scroll()
-          .rounded(radius::MD)
-          .border_1()
-          .border_color(p.border)
-          .children(list.iter().enumerate().map(|(i, ws)| {
-            let id = ws.id;
-            let picked = selected == Some(id);
-            named(div(), format!("github-new-pr-ws-{id}"))
-              .w_full()
-              .px_3()
-              .py_2()
-              .when(i + 1 < list.len(), |d| {
-                d.border_b_1().border_color(p.border)
-              })
-              .cursor_pointer()
-              .when(picked, |d| d.bg(p.selected()))
-              .when(!picked, |d| d.hover(move |s| s.bg(muted.opacity(0.5))))
-              .on_click(cx.listener(move |view, _, _, cx| view.pick_workspace(id, cx)))
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .font_weight(FontWeight::MEDIUM)
-                  .truncate()
-                  .child(if ws.title.is_empty() {
-                    ws.branch_name.clone()
-                  } else {
-                    ws.title.clone()
-                  }),
-              )
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .flex()
-                  .items_center()
-                  .gap_1()
-                  .min_w_0()
-                  .text_color(p.muted_foreground)
-                  .font_family(theme::MONO_FONT)
-                  .child(ui::icon(theme::ICON_BRANCH_BOLD, 12., p.muted_foreground))
-                  .child(div().truncate().child(ws.branch_name.clone()))
-                  .child(div().flex_none().child("→"))
-                  .child(
-                    div()
-                      .truncate()
-                      .child(ws.target_branch.clone().unwrap_or_else(|| default.clone())),
-                  ),
-              )
-          }))
-          .into_any_element()
-      }
+      Some(list) => div()
+        .id("github-new-pr-workspaces")
+        .max_h(zpx(240.))
+        .overflow_y_scroll()
+        .rounded(radius::MD)
+        .border_1()
+        .border_color(p.border)
+        .children(list.iter().enumerate().map(|(i, ws)| {
+          let id = ws.id;
+          let picked = selected == Some(id);
+          named(div(), format!("github-new-pr-ws-{id}"))
+            .w_full()
+            .px_3()
+            .py_2()
+            .when(i + 1 < list.len(), |d| {
+              d.border_b_1().border_color(p.border)
+            })
+            .cursor_pointer()
+            .when(picked, |d| d.bg(p.selected()))
+            .when(!picked, |d| d.hover(move |s| s.bg(p.hover())))
+            .on_click(cx.listener(move |view, _, _, cx| view.pick_workspace(id, cx)))
+            .child(
+              ui::text(div(), TextSize::Sm)
+                .font_weight(FontWeight::MEDIUM)
+                .truncate()
+                .child(if ws.title.is_empty() {
+                  ws.branch_name.clone()
+                } else {
+                  ws.title.clone()
+                }),
+            )
+            .child(
+              ui::text(div(), TextSize::Sm)
+                .flex()
+                .items_center()
+                .gap_1()
+                .min_w_0()
+                .text_color(p.muted_foreground)
+                .font_family(theme::MONO_FONT)
+                .child(ui::icon(theme::ICON_BRANCH_BOLD, 12., p.muted_foreground))
+                .child(div().truncate().child(ws.branch_name.clone()))
+                .child(div().flex_none().child("→"))
+                .child(
+                  div()
+                    .truncate()
+                    .child(ws.target_branch.clone().unwrap_or_else(|| default.clone())),
+                ),
+            )
+        }))
+        .into_any_element(),
     };
     let fields = new_pr.picked().is_some().then(|| {
       let f = new_pr.fields.clone();
@@ -612,7 +609,6 @@ impl GithubView {
       .disabled(pending)
       .icon(theme::ICON_CHEVRON_DOWN, 16.)
       .on_click(cx.listener(|view, _, _, cx| view.toggle_popover(Popover::PrType, cx)));
-    let accent = p.menu_accent;
     let menu = (self.popover == Some(Popover::PrType) && !pending).then(|| {
       deferred(
         parts::menu_panel("github-new-pr-type-menu", p)
@@ -644,7 +640,7 @@ impl GithubView {
             .pr_2()
             .rounded(radius::SM)
             .cursor_pointer()
-            .hover(move |s| s.bg(accent))
+            .hover(move |s| s.bg(p.hover()))
             .child(
               div()
                 .absolute()
