@@ -142,15 +142,13 @@ impl RenderOnce for Copyable {
   }
 }
 
-/// An icon-only copy button: copies `text` and shows the check. `on_copy`
-/// runs after, for a toast or a note to the host.
+/// An icon-only copy button: copies `text` and shows the check.
 #[derive(IntoElement)]
 pub struct CopyButton {
   id: ElementId,
   text: SharedString,
   size: f32,
   palette: Palette,
-  on_copy: Option<Box<dyn Fn(&mut Window, &mut App) + 'static>>,
 }
 
 impl CopyButton {
@@ -160,7 +158,6 @@ impl CopyButton {
       text: text.into(),
       size: 16.,
       palette: *palette,
-      on_copy: None,
     }
   }
 
@@ -168,17 +165,12 @@ impl CopyButton {
     self.size = size;
     self
   }
-
-  pub fn on_copy(mut self, f: impl Fn(&mut Window, &mut App) + 'static) -> Self {
-    self.on_copy = Some(Box::new(f));
-    self
-  }
 }
 
 impl RenderOnce for CopyButton {
   fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
     let (id, p, size) = (self.id, self.palette, self.size);
-    let (text, on_copy) = (self.text, self.on_copy);
+    let text = self.text;
     copyable(id.clone(), move |copied| {
       div()
         .id("copy")
@@ -194,11 +186,8 @@ impl RenderOnce for CopyButton {
           p.muted_foreground.opacity(0.7),
           p.success,
         ))
-        .on_click(move |_, window, cx| {
+        .on_click(move |_, _, cx| {
           cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
-          if let Some(f) = &on_copy {
-            f(window, cx);
-          }
         })
         .into_any_element()
     })
