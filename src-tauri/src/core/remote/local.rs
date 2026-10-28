@@ -947,7 +947,11 @@ fn execute(request: &TreqCommandRequest) -> Result<serde_json::Value, String> {
       let envelope: Envelope =
         serde_json::from_str(envelope).map_err(|e| format!("invalid message: {e}"))?;
       let session = crate::core::pty_remote_supervisor::session_name(repo, workspace, label);
-      json(mailbox::deliver(&mailbox::default_dir()?, &session, &envelope))
+      json(mailbox::deliver(
+        &mailbox::default_dir()?,
+        &session,
+        &envelope,
+      ))
     }
     TreqCommandRequest::PtyMsgPoll {
       repo,

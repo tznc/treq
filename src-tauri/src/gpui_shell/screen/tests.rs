@@ -1255,7 +1255,13 @@ impl terminal_data::TerminalHost for FakeHost {
     ));
   }
 
-  fn agent_msg_register_remote(&self, pty: &str, target: &terminal_data::RemoteTarget, _: u16, _: u16) {
+  fn agent_msg_register_remote(
+    &self,
+    pty: &str,
+    target: &terminal_data::RemoteTarget,
+    _: u16,
+    _: u16,
+  ) {
     self.record(format!("msg register remote {pty} {}", target.label));
   }
 

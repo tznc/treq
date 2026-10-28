@@ -1370,7 +1370,9 @@ fn agent_terminals_register_for_messages_by_harness_and_session(cx: &mut TestApp
   let pty = agent_pty();
   let calls = host.calls();
   assert!(
-    calls.contains(&format!("msg register {pty} claude-3 /repo Some(\"feature/login\")")),
+    calls.contains(&format!(
+      "msg register {pty} claude-3 /repo Some(\"feature/login\")"
+    )),
     "{calls:?}"
   );
 }
@@ -1382,7 +1384,11 @@ fn typing_into_an_agent_terminal_notes_the_keystroke(cx: &mut TestAppContext) {
   let pty = agent_pty();
   h.click("terminal-body");
   h.cx.simulate_input("l");
-  assert!(host.calls().contains(&format!("msg key {pty}")), "{:?}", host.calls());
+  assert!(
+    host.calls().contains(&format!("msg key {pty}")),
+    "{:?}",
+    host.calls()
+  );
 }
 
 #[gpui::test]
@@ -1396,29 +1402,43 @@ fn waiting_messages_show_a_badge_and_a_banner(cx: &mut TestAppContext) {
     terminal_data::WaitingMessages {
       count: 1,
       from: "codex-1".into(),
-      body: "rebase done?".into(),
     },
   );
-  h.cx.executor().advance_clock(std::time::Duration::from_secs(2));
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(2));
   h.cx.run_until_parked();
   assert!(h.drawn("terminal-msg-banner"));
   assert!(h.drawn("terminal-msg-badge"));
-  assert!(!h.drawn("terminal-msg-body"), "the text shows only when asked");
-  h.click("terminal-msg-show");
-  assert!(h.drawn("terminal-msg-body"));
+  assert!(
+    !h.drawn("terminal-msg-show"),
+    "the banner has no Show message toggle"
+  );
+  assert!(
+    !h.drawn("terminal-msg-body"),
+    "the banner never shows the text"
+  );
   h.click("terminal-msg-deliver");
-  assert!(host.calls().contains(&format!("msg deliver {pty}")), "{:?}", host.calls());
+  assert!(
+    host.calls().contains(&format!("msg deliver {pty}")),
+    "{:?}",
+    host.calls()
+  );
 }
 
 #[gpui::test]
 fn a_remote_agent_session_registers_for_messages_and_a_shell_does_not(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, open_remote_command(1));
-  assert!(!host.calls().iter().any(|c| c.starts_with("msg register remote")));
+  assert!(!host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("msg register remote")));
 
   let mut agent = open_remote_command(2);
   agent["commands"][0]["remote"]["label"] = "agent-k2".into();
-  agent["commands"][0]["remote"]["launch"] = serde_json::json!({ "type": "agent", "agent": "codex", "args": [] });
+  agent["commands"][0]["remote"]["launch"] =
+    serde_json::json!({ "type": "agent", "agent": "codex", "args": [] });
   set_terminal(&mut h, agent);
   let registered: Vec<String> = host
     .calls()

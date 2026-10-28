@@ -17,10 +17,10 @@
 
 use rusqlite::Connection;
 
-#[path = "migrations/1793162598_baseline.rs"]
-mod baseline;
 #[path = "migrations/1793217483_agent_messages.rs"]
 mod agent_messages;
+#[path = "migrations/1793162598_baseline.rs"]
+mod baseline;
 
 pub(super) struct Migration {
   /// The `user_version` this migration brings a database to.

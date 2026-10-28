@@ -12,8 +12,8 @@ use std::sync::{Mutex, OnceLock};
 use crate::agent_dispatch::{InstanceWindowSnapshot, RegisteredInstance};
 use crate::jj::DiscoveredWorkspace;
 
-mod migrations;
 mod agent_messages;
+mod migrations;
 mod pool;
 pub use agent_messages::*;
 use pool::{ConnectionPool, PooledConnection};
