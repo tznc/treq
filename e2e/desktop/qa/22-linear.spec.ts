@@ -254,6 +254,36 @@ test("linear: new workspace from an issue", async ({ page }) => {
   });
 });
 
+test("linear: a sub-issue nests under its parent's workspace", async ({ page }) => {
+  linearKey("lin_api_qa");
+  await home(page);
+  await page.getByRole("button", { name: "New workspaces" }).click();
+  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeVisible();
+  await page.getByRole("tab", { name: "Linear" }).click();
+  await expect(page.getByRole("heading", { name: "Your issues" })).toBeVisible({ timeout: 20_000 });
+  // The sub-issue first: its parent still opens before it.
+  await page.getByRole("checkbox", { name: "ENG-143 Back off on 429 responses" }).click();
+  await page.getByRole("checkbox", { name: "ENG-142 Retry webhook deliveries" }).click();
+  await settle(page, 600);
+  await page.getByRole("button", { name: /^Create 2 Workspaces/ }).click();
+  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeHidden({ timeout: 60_000 });
+  await expect(
+    page.getByRole("button", { name: "Retry webhook deliveries" }).first(),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(
+    page.getByRole("button", { name: "Back off on 429 responses" }).first(),
+  ).toBeVisible({ timeout: 30_000 });
+  await settle(page, 2500);
+  await capture(page, {
+    name: "22-linear-16-sub-issue-nested",
+    title: "Workspaces created from ENG-142 and its sub-issue ENG-143",
+    expectations: [
+      "The sidebar lists 'Retry webhook deliveries' (ENG-142) with 'Back off on 429 responses' (ENG-143) nested and indented under it",
+      "ENG-143 is not a sibling of ENG-142 beside the default branch's other workspaces",
+    ],
+  });
+});
+
 test("linear: a rejected key", async ({ page }) => {
   linearKey("lin_api_bad");
   await linear(page);

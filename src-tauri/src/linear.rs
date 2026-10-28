@@ -14,6 +14,10 @@ pub struct LinearIssue {
   pub labels: Vec<String>,
   pub branch_name: String,
   pub parent_id: Option<String>,
+  /// The parent's `ENG-12`-style key, which a workspace records as its
+  /// linked issue.
+  #[serde(default)]
+  pub parent_identifier: Option<String>,
   pub sub_issue_ids: Vec<String>,
   pub url: String,
   pub assignee: Option<LinearUser>,
@@ -431,6 +435,8 @@ struct LinearLabelNode {
 #[derive(Deserialize)]
 struct LinearParent {
   id: String,
+  #[serde(default)]
+  identifier: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -501,7 +507,7 @@ const ISSUE_FIELDS: &str = r#"
   state { name type }
   labels(first: 50) { nodes { name } }
   branchName
-  parent { id }
+  parent { id identifier }
   children(first: 50) { nodes { id } }
   url
   assignee { id name }
@@ -649,6 +655,7 @@ fn map_issue_node(node: LinearIssueNode) -> LinearIssue {
     },
     labels: node.labels.nodes.into_iter().map(|l| l.name).collect(),
     branch_name: node.branch_name,
+    parent_identifier: node.parent_id.as_ref().and_then(|p| p.identifier.clone()),
     parent_id: node.parent_id.map(|p| p.id),
     sub_issue_ids: node.sub_issues.nodes.into_iter().map(|s| s.id).collect(),
     url: node.url,
@@ -1204,6 +1211,26 @@ mod tests {
 
     let node: LinearIssueNode = serde_json::from_value(json).unwrap();
     assert_eq!(node.parent_id.unwrap().id, "ENG-1");
+  }
+
+  #[test]
+  fn map_issue_node_keeps_the_parents_identifier() {
+    let node: LinearIssueNode = serde_json::from_value(serde_json::json!({
+      "id": "issue-2",
+      "identifier": "ENG-2",
+      "title": "Child Issue",
+      "description": null,
+      "state": { "name": "Todo", "type": "backlog" },
+      "labels": { "nodes": [] },
+      "branchName": "eng-2",
+      "parent": { "id": "issue-1", "identifier": "ENG-1" },
+      "children": { "nodes": [] },
+      "url": "https://linear.app/issue/ENG-2"
+    }))
+    .unwrap();
+    let issue = map_issue_node(node);
+    assert_eq!(issue.parent_id.as_deref(), Some("issue-1"));
+    assert_eq!(issue.parent_identifier.as_deref(), Some("ENG-1"));
   }
 
   // Spliced into query text, this would close the string literal and inject syntax.

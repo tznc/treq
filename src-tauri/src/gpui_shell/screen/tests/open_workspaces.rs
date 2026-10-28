@@ -510,6 +510,64 @@ fn linear_shows_without_github(cx: &mut TestAppContext) {
   expect(screen.get_by_role(by::role(Role::CheckBox).name("ENG-1 Issue 1"))).to_be_visible();
 }
 
+/// The Linear host with ENG-4 a sub-issue of ENG-1.
+fn sub_issue_host() -> FakeHost {
+  let mut host = linear_host();
+  let mut child = issue("4", ("Todo", "unstarted"), host.linear.viewer.clone());
+  child.parent_id = Some("1".into());
+  child.parent_identifier = Some("ENG-1".into());
+  host.linear.issues.push(child);
+  host
+}
+
+fn pick_issue(h: &mut Harness, name: &str) {
+  let screen = screen(h);
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::CheckBox).name(name)));
+}
+
+#[gpui::test]
+fn a_sub_issue_picked_with_its_parent_stacks_on_it(cx: &mut TestAppContext) {
+  let (mut h, host) = dialog_with(sub_issue_host(), true, cx);
+  // The sub-issue first: the parent still opens before it.
+  pick_issue(&mut h, "ENG-4 Issue 4");
+  pick_issue(&mut h, "ENG-1 Issue 1");
+
+  let screen = show_lines(&mut h);
+  expect(screen.get_by_role(by::role(Role::ListItem).name("eng-4: on eng-1 · new")))
+    .to_be_visible();
+  expect(screen.get_by_role(by::role(Role::ListItem).name("eng-1: new"))).to_be_visible();
+
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 Workspaces")));
+  h.cx.run_until_parked();
+  let opened: Vec<_> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("open issue"))
+    .collect();
+  assert_eq!(
+    opened,
+    vec!["open issue /repo ENG-1", "open issue /repo ENG-4"]
+  );
+}
+
+#[gpui::test]
+fn a_sub_issue_stacks_on_its_parents_open_workspace(cx: &mut TestAppContext) {
+  let mut host = sub_issue_host();
+  let mut parent = workspace(7, "octocat/eng-1-parent", Some("main"));
+  parent.metadata = Some(r#"{"linear_issue_key":"ENG-1"}"#.into());
+  host.github.workspaces = vec![parent];
+  let (mut h, _) = dialog_with(host, true, cx);
+  pick_issue(&mut h, "ENG-4 Issue 4");
+
+  let screen = show_lines(&mut h);
+  expect(screen.get_by_role(by::role(Role::ListItem).name("eng-4: on octocat/eng-1-parent · new")))
+    .to_be_visible();
+}
+
 #[gpui::test]
 fn titles_and_new_branches_stack_on_the_picked_branch(cx: &mut TestAppContext) {
   let mut host = with_branches(FakeHost::default());
