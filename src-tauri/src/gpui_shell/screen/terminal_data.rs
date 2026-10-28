@@ -220,9 +220,8 @@ pub type Host = Arc<dyn TerminalHost>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WaitingMessages {
   pub count: usize,
-  /// Who sent the newest one, and its text.
+  /// Who sent the newest one.
   pub from: String,
-  pub body: String,
 }
 
 /// Receives a PTY's output, as the bytes read.
@@ -423,7 +422,6 @@ impl TerminalHost for Backend {
     (count > 0).then_some(WaitingMessages {
       count,
       from: latest.from,
-      body: latest.body,
     })
   }
 

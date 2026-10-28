@@ -439,8 +439,6 @@ pub struct TerminalView {
   /// Temporary files of this session (an agent's prompt, settings and
   /// skills, and images pasted in), deleted when the terminal closes.
   session_files: Vec<String>,
-  /// The banner shows the newest waiting message's text.
-  msg_shown: bool,
   /// Redraws when `treq agent msg` changes what waits here.
   _msg_watch: Option<Task<()>>,
 }
@@ -539,7 +537,6 @@ impl TerminalView {
       _exit: None,
       _tasks: Vec::new(),
       session_files: Vec::new(),
-      msg_shown: false,
       _msg_watch: None,
     }
   }
@@ -1000,7 +997,7 @@ impl TerminalView {
   /// `treq agent msg`'s banner: messages wait for this agent. treq types
   /// the wake line itself once the agent is idle and the user stops typing;
   /// "Deliver now" types it at once.
-  fn msg_banner(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Div> {
+  fn msg_banner(&self, p: &Palette) -> Option<Div> {
     if self.status != Status::Ready || self._msg_watch.is_none() {
       return None;
     }
@@ -1025,23 +1022,6 @@ impl TerminalView {
     )
     .label("Deliver now")
     .on_click(move |_, _, _| deliver_host.agent_msg_deliver_now(&deliver_pty));
-    let show = ui::text(
-      ui::Button::new("terminal-msg-show", p)
-        .variant(ui::Variant::Outline)
-        .size(ui::Size::Xs)
-        .h_6()
-        .px_2(),
-      TextSize::Xs,
-    )
-    .label(if self.msg_shown {
-      "Hide message"
-    } else {
-      "Show message"
-    })
-    .on_click(cx.listener(|view, _, _, cx| {
-      view.msg_shown = !view.msg_shown;
-      cx.notify();
-    }));
     Some(
       div()
         .debug_selector(|| "terminal-msg-banner".into())
@@ -1079,24 +1059,8 @@ impl TerminalView {
                   "{summary} treq delivers it once the agent is idle and you stop typing."
                 )),
             )
-            .child(
-              div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(deliver)
-                .child(show),
-            ),
-        )
-        .when(self.msg_shown, |d| {
-          d.child(
-            ui::text(div(), TextSize::Sm)
-              .debug_selector(|| "terminal-msg-body".into())
-              .relative()
-              .text_color(p.foreground)
-              .child(waiting.body),
-          )
-        }),
+            .child(deliver),
+        ),
     )
   }
 
@@ -1886,7 +1850,7 @@ impl Render for TerminalView {
       .child(self.grid(focused))
       .children(self.scrollbar(&p))
       .children(search)
-      .children(self.msg_banner(&p, cx))
+      .children(self.msg_banner(&p))
       .children(self.overlay(&p, cx))
   }
 }
