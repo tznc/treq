@@ -45,6 +45,12 @@ fn bench(c: &mut Criterion) {
     group.bench_function(format!("read_and_compare/{count}"), |b| {
       b.iter(|| black_box(mgr.list_cached(REPO) == held))
     });
+    // The sidebar's per-poll check after a refresh that found no change.
+    let before = mgr.list_cached(REPO);
+    mgr.refresh_repo_now(REPO);
+    group.bench_function(format!("compare_after_unchanged_refresh/{count}"), |b| {
+      b.iter(|| black_box(mgr.list_cached(REPO) == before))
+    });
   }
   group.finish();
 }
