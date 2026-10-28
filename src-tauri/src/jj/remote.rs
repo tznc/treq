@@ -34,6 +34,9 @@ pub fn get_default_branch(repo_path: &str) -> Result<String, JjError> {
 
 /// Push changes to remote using jj git push
 pub fn jj_push(workspace_path: &str) -> Result<String, JjError> {
+  if !Path::new(workspace_path).exists() {
+    return Ok(String::new());
+  }
   // Get current branch name to check/ensure tracking
   let branch_name = get_workspace_branch(workspace_path)?;
   if branch_name.is_empty() || branch_name == "HEAD" {
