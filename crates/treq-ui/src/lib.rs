@@ -7,6 +7,7 @@
 pub mod alert;
 pub mod badge;
 pub mod checkbox;
+pub mod copy_feedback;
 pub mod dialog;
 pub mod empty_state;
 pub mod icon_button;
