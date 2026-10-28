@@ -1,0 +1,35 @@
+id: gpui-button-no-restyle
+valid:
+  - |
+    fn f(p: &Palette) {
+      Button::new("delete", p).variant(ui::Variant::Destructive).label("Delete");
+    }
+  - |
+    fn f(p: &Palette) {
+      div().bg(p.destructive.opacity(0.1)).child("Error");
+    }
+  - |
+    fn f(p: &Palette) {
+      div().hover(move |s| s.bg(p.destructive));
+    }
+  - |
+    fn f(p: &Palette) {
+      Button::new("x", p).variant(Variant::Ghost).bg(p.muted);
+    }
+invalid:
+  - |
+    fn f(p: &Palette) {
+      Button::new("delete", p).bg(p.destructive).label("Delete");
+    }
+  - |
+    fn f(p: &Palette) {
+      ui::Button::new("delete", p).gap_1().bg(p.destructive.opacity(0.9));
+    }
+  - |
+    fn f(p: &Palette) {
+      Button::new("delete", p).hover_bg(p.destructive.opacity(0.9));
+    }
+  - |
+    fn f(b: Button, c: Hsla) -> Button {
+      b.hover_bg(c)
+    }

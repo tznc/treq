@@ -96,7 +96,8 @@ test("linear-issue-crud: create, edit and delete an issue", async ({ page }) => 
     title: "Linear: delete confirmation",
     expectations: [
       "A dialog 'Delete ENG-144?' says Linear moves it to its trash for 30 days",
-      "Cancel and a red Delete button",
+      "Delete is the filled red destructive variant, with a light label",
+      "Only one filled button in the dialog: Cancel is a ghost button",
     ],
   });
   await page.getByRole("button", { name: "Delete", exact: true }).click();

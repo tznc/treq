@@ -523,7 +523,6 @@ impl GithubView {
         .edit_form(&title, &body, p, window, cx)
         .into_any_element(),
       None => {
-        let destructive = p.destructive;
         let (number, url, title) = (issue.number, issue.url.clone(), issue.title.clone());
         let open = url.clone();
         let copy_link = self.copy_link(url.clone());
@@ -553,12 +552,10 @@ impl GithubView {
           .child(
             Button::new("github-delete", p)
               .aria_label("Delete issue")
-              .variant(Variant::Ghost)
+              .variant(Variant::DestructiveGhost)
               .size(Size::Icon)
               .w(zpx(32.))
               .h(zpx(32.))
-              .text_color(p.muted_foreground)
-              .hover_bg(destructive.opacity(0.1))
               .child(ui::icon(theme::ICON_TRASH, 16., p.muted_foreground))
               .on_click(cx.listener(|view, _, _, cx| {
                 view.detail.confirm_delete = true;
@@ -826,9 +823,7 @@ impl GithubView {
           .child(
             parts::busy_spinner(
               Button::new("github-delete-confirm", p)
-                .bg(p.destructive)
-                .hover_bg(p.destructive.opacity(0.9))
-                .text_color(p.destructive_foreground)
+                .variant(Variant::Destructive)
                 .gap_1()
                 .disabled(pending),
               "github-delete-confirm",
@@ -1122,7 +1117,7 @@ impl GithubView {
       CiState::Pending => Tone::Warning,
       CiState::Inactive => Tone::Neutral,
     };
-    let (border, text, hover) = (tone.color(p), tone.text(p), tone.tint(p));
+    let (border, text) = (tone.color(p), tone.text(p));
     let summary = format!(
       "{}: {}/{} checks passed",
       state.label(),
@@ -1160,7 +1155,6 @@ impl GithubView {
       .px_2()
       .border_color(border)
       .text_color(text)
-      .hover_bg(hover)
       .child(if state == CiState::Pending {
         ui::spin("github-ci-spin", icon).into_any_element()
       } else {

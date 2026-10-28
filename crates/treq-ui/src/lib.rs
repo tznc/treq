@@ -220,6 +220,15 @@ pub enum Variant {
   /// Filled amber: an action that brings back something that drifted
   /// (Resync after a local edit). Not for errors; those are `Destructive`.
   Warning,
+  /// Filled green: the action that lands finished work (Merge).
+  Success,
+  /// Filled in GitHub's brand color: an action that runs on GitHub.
+  Github,
+  /// A red-bordered outline: a destructive action beside neutral ones.
+  DestructiveOutline,
+  /// A muted icon that tints red on hover: a destructive action that asks
+  /// for confirmation next.
+  DestructiveGhost,
 }
 
 /// `ui/button.tsx` sizes.
@@ -289,7 +298,7 @@ impl Button {
   }
 
   /// The background on hover, in place of the variant's (`hover:bg-…`).
-  pub fn hover_bg(mut self, color: Hsla) -> Self {
+  pub(crate) fn hover_bg(mut self, color: Hsla) -> Self {
     self.hover_bg = Some(color);
     self
   }
@@ -379,7 +388,11 @@ impl Button {
   fn filled(&self) -> bool {
     matches!(
       self.variant,
-      Variant::Default | Variant::Destructive | Variant::Warning
+      Variant::Default
+        | Variant::Destructive
+        | Variant::Warning
+        | Variant::Success
+        | Variant::Github
     )
   }
 
@@ -392,6 +405,9 @@ impl Button {
       Variant::Link => p.primary,
       Variant::Secondary => p.secondary_foreground,
       Variant::Warning => p.warning_foreground,
+      Variant::Success | Variant::Github => p.primary_foreground,
+      Variant::DestructiveOutline => p.destructive,
+      Variant::DestructiveGhost => p.muted_foreground,
     }
   }
 }
@@ -427,6 +443,17 @@ impl Button {
       Variant::Outline => (p.background, p.input, p.accent),
       Variant::Secondary => (p.secondary, p.secondary, p.secondary.opacity(0.7)),
       Variant::Warning => (p.warning, p.warning, p.warning.opacity(0.85)),
+      Variant::Success => {
+        let green = Tone::Success.color(p);
+        (green, green, green.opacity(0.85))
+      }
+      Variant::Github => (p.github(), p.github(), p.github().opacity(0.85)),
+      Variant::DestructiveOutline => (
+        p.background,
+        p.destructive.opacity(0.3),
+        p.destructive.opacity(0.1),
+      ),
+      Variant::DestructiveGhost => (clear, clear, p.destructive.opacity(0.1)),
     };
     let hover_bg = self.hover_bg.unwrap_or(hover_bg);
     let (bg, hover_bg) = if self.selected && !self.filled() {
@@ -792,6 +819,28 @@ mod tests {
     assert_eq!(on.colors().bg, p.selected());
     // A plain button is no toggle.
     assert_eq!(Button::new("plain", &p).pressed, None);
+  }
+
+  #[test]
+  fn state_variants_carry_their_own_fill_and_hover() {
+    let p = theme::palette(false);
+    let green = Tone::Success.color(&p);
+    let success = Button::new("s", &p).variant(Variant::Success);
+    assert!(success.filled());
+    assert_eq!(success.colors().bg, green);
+    assert_eq!(success.colors().hover_bg, green.opacity(0.85));
+    let github = Button::new("g", &p).variant(Variant::Github);
+    assert!(github.filled());
+    assert_eq!(github.colors().bg, p.github());
+    assert_eq!(github.foreground(), p.primary_foreground);
+    let outline = Button::new("o", &p).variant(Variant::DestructiveOutline);
+    assert!(!outline.filled());
+    assert_eq!(outline.colors().border, p.destructive.opacity(0.3));
+    assert_eq!(outline.colors().hover_bg, p.destructive.opacity(0.1));
+    assert_eq!(outline.foreground(), p.destructive);
+    let ghost = Button::new("d", &p).variant(Variant::DestructiveGhost);
+    assert_eq!(ghost.colors().hover_bg, p.destructive.opacity(0.1));
+    assert_eq!(ghost.foreground(), p.muted_foreground);
   }
 
   #[test]

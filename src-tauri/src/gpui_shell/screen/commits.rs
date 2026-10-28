@@ -1967,11 +1967,8 @@ impl CommitsView {
         .aria_label(name)
     };
     let destructive_outline = |id: String, name: &'static str| {
-      let red = p.destructive;
       outline(id, theme::ICON_TRASH, "Delete", name)
-        .border_color(red.opacity(0.3))
-        .text_color(red)
-        .hover_bg(red.opacity(0.1))
+        .variant(Variant::DestructiveOutline)
         .disabled(removing)
     };
     let short = &commit.change_id;
