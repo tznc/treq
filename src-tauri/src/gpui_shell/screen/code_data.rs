@@ -160,6 +160,13 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
   /// The pull request text last copied into the workspace, or `None` when
   /// it wasn't opened from one (`core::pr_sync`).
   fn pr_sync(&self, repo_path: &str, workspace_id: i64) -> Option<crate::local_db::PrSyncRecord>;
+  /// Why the workspace's last rebase was held back, or ran onto a stale
+  /// target (`core::rebase_guard`).
+  fn rebase_hold(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+  ) -> Option<crate::core::rebase_guard::RebaseHold>;
   /// Copies the pull request's title and body over local edits.
   fn resync_from_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
   /// Sends the workspace's local title and description edits to its pull
@@ -291,6 +298,17 @@ impl CodeHost for Backend {
       MaybeEmptyParam::Omitted,
     )
     .map(|_| ())
+  }
+
+  fn rebase_hold(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+  ) -> Option<crate::core::rebase_guard::RebaseHold> {
+    if self.remote_containing(repo_path).is_some() {
+      return None;
+    }
+    core::rebase_guard::hold(repo_path, workspace_id)
   }
 
   fn pr_sync(&self, repo_path: &str, workspace_id: i64) -> Option<crate::local_db::PrSyncRecord> {

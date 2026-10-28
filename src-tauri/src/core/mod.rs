@@ -51,6 +51,7 @@ pub mod remote_ssh_config;
 pub mod remote_ssh_host_key_probe;
 pub mod remote_ssh_transport;
 pub mod remote_ssh_ws_stream;
+pub mod rebase_guard;
 pub mod repo;
 pub mod resolve;
 pub mod review;
