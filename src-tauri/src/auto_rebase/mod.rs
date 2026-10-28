@@ -1,6 +1,7 @@
 mod batch;
 mod subtree;
 
+use crate::core::rebase_guard::{self, TargetSync};
 use crate::jj::{self, BookmarkConflictCommit, JjRebaseResult};
 use crate::local_db::{self, Workspace};
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,22 @@ pub struct WorkspaceBookmarkConflict {
   pub branch_name: String,
   pub bookmark: String,
   pub commits: Vec<BookmarkConflictCommit>,
+}
+
+/// Records what holds `workspace` back from rebasing onto `sync`'s target,
+/// and whether the rebase may run. A stale target only warns.
+pub(crate) fn passes_guard(repo_path: &str, workspace: &Workspace, sync: &TargetSync) -> bool {
+  let hold = sync.hold_for(&get_full_workspace_path(workspace));
+  let blocked = hold.as_ref().is_some_and(|h| h.blocks());
+  if let Some(hold) = &hold {
+    tracing::info!(
+      "Rebase of workspace '{}': {}",
+      workspace.workspace_name,
+      hold.message()
+    );
+  }
+  rebase_guard::record(repo_path, workspace.id, hold);
+  !blocked
 }
 
 /// Convert git remote branch format to jj format using centralized logic
@@ -99,6 +116,8 @@ pub fn rebase_workspaces_for_target(
   if workspaces.is_empty() {
     return Ok(None);
   }
+
+  let sync = rebase_guard::sync_target(repo_path, target_branch);
 
   // Convert target branch to jj format (origin/main -> main@origin)
   let jj_target_branch = convert_to_jj_branch_format(target_branch, repo_path);
@@ -168,6 +187,14 @@ pub fn rebase_workspaces_for_target(
       combined_messages.push(format!(
         "Workspace '{}': synced with '{}'",
         workspace.workspace_name, target_branch
+      ));
+      continue;
+    }
+
+    if !passes_guard(repo_path, workspace, &sync) {
+      combined_messages.push(format!(
+        "Workspace '{}': skipped, see its Code tab",
+        workspace.workspace_name
       ));
       continue;
     }
@@ -279,6 +306,8 @@ pub fn rebase_single_workspace(
   }
 
   let full_path = get_full_workspace_path(&workspace);
+  // Fetch first so the needs-rebase check sees the target as origin has it.
+  let sync = rebase_guard::sync_target(repo_path, &target_branch);
   // Skip the needs-rebase check only when force=true.
   if !force {
     let is_descendant = match jj::jj_workspace_parent_descends_from_target(
@@ -296,8 +325,12 @@ pub fn rebase_single_workspace(
       Err(e) => return Err(format!("Failed to check workspace ancestry: {}", e)),
     };
     if is_descendant {
+      rebase_guard::record(repo_path, workspace.id, None);
       return Ok(None);
     }
+  }
+  if !passes_guard(repo_path, &workspace, &sync) {
+    return Ok(None);
   }
 
   // Convert target branch to jj format

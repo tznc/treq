@@ -1,5 +1,5 @@
 use super::{
-  convert_to_jj_branch_format, get_full_workspace_path, resolve_bookmark_conflict_if_needed,
+  convert_to_jj_branch_format, get_full_workspace_path, passes_guard, resolve_bookmark_conflict_if_needed,
   AutoRebaseResult, WorkspaceBookmarkConflict,
 };
 use crate::jj::{self, JjRebaseResult};
@@ -37,6 +37,8 @@ pub fn check_and_rebase_all(
       continue;
     }
 
+    let sync = crate::core::rebase_guard::sync_target(repo_path, &target_branch);
+
     // Convert target branch to jj format (origin/main -> main@origin)
     let jj_target_branch = convert_to_jj_branch_format(&target_branch, repo_path);
 
@@ -70,6 +72,13 @@ pub fn check_and_rebase_all(
 
     for workspace in &workspaces_needing_rebase {
       let full_path = get_full_workspace_path(workspace);
+      if !passes_guard(repo_path, workspace, &sync) {
+        combined_messages.push(format!(
+          "Workspace '{}': skipped, see its Code tab",
+          workspace.workspace_name
+        ));
+        continue;
+      }
 
       // Resolve bookmark conflicts before building revsets like roots(target..branch_name).
       if let Err(e) = resolve_bookmark_conflict_if_needed(

@@ -1,5 +1,5 @@
 use super::{
-  convert_to_jj_branch_format, get_full_workspace_path, resolve_bookmark_conflict_if_needed,
+  convert_to_jj_branch_format, get_full_workspace_path, passes_guard, resolve_bookmark_conflict_if_needed,
   AutoRebaseResult, WorkspaceBookmarkConflict,
 };
 use crate::jj::{self, JjRebaseResult};
@@ -119,6 +119,14 @@ pub fn rebase_root_subtree_from_workspace_force(
     }
 
     let full_path = get_full_workspace_path(workspace);
+    let sync = crate::core::rebase_guard::sync_target(repo_path, &target_branch);
+    if !passes_guard(repo_path, workspace, &sync) {
+      all_success = false;
+      if let Some(hold) = crate::core::rebase_guard::hold(repo_path, workspace.id) {
+        combined_messages.push(format!("Workspace '{}': {}", workspace.workspace_name, hold.message()));
+      }
+      continue;
+    }
     if let Err(e) =
       resolve_bookmark_conflict_if_needed(&full_path, &workspace.branch_name, conflict_marker_style)
     {

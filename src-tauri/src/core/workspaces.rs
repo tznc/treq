@@ -4980,12 +4980,15 @@ pub fn check_and_rebase_workspaces(
           bookmark_conflicts: auto_result.bookmark_conflicts,
         })
       }
-      None => Ok(SingleRebaseResult {
-        rebased: false,
-        success: true,
-        message: "No rebase needed".to_string(),
-        bookmark_conflicts: Vec::new(),
-      }),
+      None => {
+        let held = crate::core::rebase_guard::hold(repo_path, id).filter(|h| h.blocks());
+        Ok(SingleRebaseResult {
+          rebased: false,
+          success: held.is_none(),
+          message: held.map_or_else(|| "No rebase needed".to_string(), |h| h.message()),
+          bookmark_conflicts: Vec::new(),
+        })
+      }
     }
   } else {
     let results = auto_rebase::check_and_rebase_all(repo_path, conflict_style)?;

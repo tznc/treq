@@ -2,12 +2,12 @@ use crate::common::TestRepo;
 use treq_lib::core::rebase_guard::{self, RebaseHold};
 use treq_lib::jj;
 
-/// A workspace targeting `origin/<default>` with one committed file.
-fn workspace_on_origin_default(repo: &TestRepo, branch: &str) -> (treq_lib::local_db::Workspace, String) {
+/// A workspace targeting the default branch with one committed file.
+fn workspace_on_default(repo: &TestRepo, branch: &str) -> (treq_lib::local_db::Workspace, String) {
   let ws = repo
     .create_workspace_with_commit(branch, &format!("{}.txt", branch.replace('/', "-")), "work", None)
     .unwrap();
-  let target = format!("origin/{}", repo.default_branch());
+  let target = repo.default_branch().to_string();
   treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, &target).unwrap();
   let path = repo.workspace_full_path(&ws);
   (ws, path)
@@ -23,7 +23,7 @@ fn has_file(workspace_path: &str, revision: &str, file: &str) -> bool {
 #[test]
 fn rebase_fetches_target_before_rebasing() {
   let repo = TestRepo::with_remote().unwrap();
-  let (ws, path) = workspace_on_origin_default(&repo, "feat/fetch-first");
+  let (ws, path) = workspace_on_default(&repo, "feat/fetch-first");
   repo.remote_commit_file("advance.txt", "new", "Advance main").unwrap();
 
   // No manual fetch: the rebase itself must fetch.
@@ -38,12 +38,13 @@ fn rebase_fetches_target_before_rebasing() {
 fn rebase_fast_forwards_local_target_bookmark_to_remote() {
   let repo = TestRepo::with_remote().unwrap();
   let default = repo.default_branch().to_string();
-  let (ws, _) = workspace_on_origin_default(&repo, "feat/ff");
+  let (ws, _) = workspace_on_default(&repo, "feat/ff");
   repo.remote_commit_file("advance.txt", "new", "Advance main").unwrap();
 
   treq_lib::auto_rebase::rebase_single_workspace(&repo.repo_path, ws.id, "main", true, "diff")
     .unwrap();
 
+  assert!(has_file(&repo.repo_path, &default, "advance.txt"));
   let local = jj::jj_get_commit_id(&repo.repo_path, &default).unwrap();
   let remote = jj::jj_get_commit_id(&repo.repo_path, &format!("{default}@origin")).unwrap();
   assert_eq!(local, remote);
@@ -52,7 +53,7 @@ fn rebase_fast_forwards_local_target_bookmark_to_remote() {
 #[test]
 fn rebase_skips_dirty_workspace() {
   let repo = TestRepo::with_remote().unwrap();
-  let (ws, path) = workspace_on_origin_default(&repo, "feat/dirty");
+  let (ws, path) = workspace_on_default(&repo, "feat/dirty");
   TestRepo::write_workspace_file(&path, "wip.txt", "uncommitted").unwrap();
   repo.remote_commit_file("advance.txt", "new", "Advance main").unwrap();
 
@@ -68,8 +69,8 @@ fn rebase_skips_dirty_workspace() {
 #[test]
 fn batch_rebase_skips_dirty_workspace() {
   let repo = TestRepo::with_remote().unwrap();
-  let (dirty, dirty_path) = workspace_on_origin_default(&repo, "feat/batch-dirty");
-  let (clean, clean_path) = workspace_on_origin_default(&repo, "feat/batch-clean");
+  let (dirty, dirty_path) = workspace_on_default(&repo, "feat/batch-dirty");
+  let (clean, clean_path) = workspace_on_default(&repo, "feat/batch-clean");
   TestRepo::write_workspace_file(&dirty_path, "wip.txt", "uncommitted").unwrap();
   repo.remote_commit_file("advance.txt", "new", "Advance main").unwrap();
 
@@ -85,7 +86,7 @@ fn batch_rebase_skips_dirty_workspace() {
 fn rebase_skips_when_target_bookmark_diverged_from_remote() {
   let repo = TestRepo::with_remote().unwrap();
   let default = repo.default_branch().to_string();
-  let (ws, path) = workspace_on_origin_default(&repo, "feat/diverged");
+  let (ws, path) = workspace_on_default(&repo, "feat/diverged");
   // Local main gains a commit origin lacks; origin gains one local lacks.
   let other = repo
     .create_workspace_with_commit("feat/local-only", "local-only.txt", "x", None)
@@ -109,7 +110,7 @@ fn rebase_skips_when_target_bookmark_diverged_from_remote() {
 #[test]
 fn rebase_uses_last_fetched_target_and_warns_when_fetch_fails() {
   let repo = TestRepo::with_remote().unwrap();
-  let (ws, path) = workspace_on_origin_default(&repo, "feat/offline");
+  let (ws, path) = workspace_on_default(&repo, "feat/offline");
   repo.remote_commit_file("advance.txt", "new", "Advance main").unwrap();
   jj::jj_git_fetch(&repo.repo_path).unwrap();
   let remote = repo.remote_path();
