@@ -1883,3 +1883,32 @@ fn agent_rejects_home_repo_branch() {
     &sub.matches
   ));
 }
+
+#[test]
+fn the_round_trip_samples_cover_every_typed_remote_request() {
+  // A variant missing from `every_typed_remote_request` is never checked for
+  // round-tripping, so its `cli_args` and parser arms can drift apart.
+  let source = include_str!("../core/remote.rs");
+  let start = source.find("pub enum TreqCommandRequest {").expect("enum");
+  let body = &source[start..];
+  let body = &body[..body.find("\n}\n").expect("enum end")];
+  let variants: std::collections::BTreeSet<&str> = body
+    .lines()
+    .filter_map(|line| {
+      let name = line.strip_prefix("  ")?;
+      let name = name.split([' ', '{', ',', '(']).next()?;
+      name
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_uppercase())
+        .then_some(name)
+    })
+    .collect();
+  let sampled: std::collections::BTreeSet<&str> = every_typed_remote_request()
+    .iter()
+    .map(|r| r.kind_name())
+    .collect();
+  assert!(variants.len() > 40, "parsed {} variants", variants.len());
+  let missing: Vec<_> = variants.difference(&sampled).collect();
+  assert!(missing.is_empty(), "not sampled: {missing:?}");
+}

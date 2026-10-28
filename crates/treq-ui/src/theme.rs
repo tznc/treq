@@ -58,6 +58,7 @@ icons! {
   ICON_EXTERNAL_LINK => "external-link",
   ICON_FILE => "file",
   ICON_FILE_DIFF => "file-diff",
+  ICON_FILE_MARKDOWN => "file-markdown",
   ICON_FILE_TEXT => "file-text",
   ICON_FLASK => "flask-conical",
   ICON_FILTER => "funnel",

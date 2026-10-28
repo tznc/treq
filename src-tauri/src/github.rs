@@ -10,7 +10,7 @@ pub struct GitRemoteInfo {
   pub full_name: String,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PrInfo {
   pub number: u64,
   pub title: String,
@@ -1480,7 +1480,7 @@ fn check_duration_secs(started_at: Option<&str>, completed_at: Option<&str>) -> 
   Some(end.signed_duration_since(started).num_seconds().max(0) as u64)
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PrCheckEntry {
   pub name: String,
   /// "pass" | "fail" | "pending" | "skipping" | "cancel" | [`INACTIVE`]
@@ -1490,7 +1490,7 @@ pub struct PrCheckEntry {
   pub duration_secs: Option<u64>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PrCiStatus {
   /// "success" | "failure" | "pending"
   pub state: String,
@@ -1902,6 +1902,40 @@ pub fn list_prs_with_checks_via_gh_impl(
     ));
   }
   parse_pr_list(&output.stdout)
+}
+
+/// The PR whose head is `branch`, with its CI rollup, in one `gh pr list`:
+/// open over closed, then newest, as [`list_prs_with_checks_via_gh_impl`] picks.
+pub fn list_pr_for_head_via_gh_impl(
+  gh_path: &str,
+  repo_path: &str,
+  branch: &str,
+  extended_path: &str,
+) -> Result<Option<(PrInfo, Option<PrCiStatus>)>, String> {
+  let mut cmd = std::process::Command::new(gh_path);
+  cmd
+    // One argument, so a branch starting with `-` is not read as a flag.
+    .args([
+      "pr",
+      "list",
+      &format!("--head={branch}"),
+      "--state",
+      "all",
+      "--limit",
+      "10",
+      "--json",
+      PR_LIST_JSON_FIELDS,
+    ])
+    .current_dir(repo_path)
+    .env("PATH", extended_path);
+  let output = spawn_with_etxtbsy_retry(cmd)?;
+  if !output.status.success() {
+    return Err(format!(
+      "gh pr list --head failed: {}",
+      String::from_utf8_lossy(&output.stderr).trim()
+    ));
+  }
+  Ok(parse_pr_list(&output.stdout)?.by_branch.remove(branch))
 }
 
 // ── GitHub PR review comment threads (read-only) ────────────────────────────

@@ -1782,6 +1782,9 @@ impl Render for ChangesView {
     self.place_threads();
     self.index_matches();
     self.reveal_match(window, cx);
+    // Drawn lines record their layouts afresh each frame; a scrolled-off
+    // line must not be found under the pointer.
+    self.review.layouts.borrow_mut().clear();
     self.reveal_line(window, cx);
     self.scroll_to_file(window, cx);
     if std::mem::take(&mut self.review.refocus) {
@@ -1835,7 +1838,27 @@ impl Render for ChangesView {
       .on_mouse_up_out(
         MouseButton::Left,
         cx.listener(|view, _, _, cx| view.end_drag(cx)),
-      );
+      )
+      .when(self.dragging(), |this| {
+        // A drag follows the pointer anywhere in the window, off the rows.
+        let view = cx.entity().downgrade();
+        this.child(
+          gpui::canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+              window.on_mouse_event(move |e: &gpui::MouseMoveEvent, phase, _, cx| {
+                if phase == gpui::DispatchPhase::Bubble {
+                  view
+                    .update(cx, |view, cx| view.drag_pointer(e.position, cx))
+                    .ignore_closed();
+                }
+              });
+            },
+          )
+          .absolute()
+          .size_0(),
+        )
+      });
     let sidebar = (!self.read_only()).then(|| self.sidebar(&p, cx));
     let main = div()
       .flex_1()
