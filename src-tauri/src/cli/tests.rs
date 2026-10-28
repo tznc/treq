@@ -1912,3 +1912,15 @@ fn the_round_trip_samples_cover_every_typed_remote_request() {
   let missing: Vec<_> = variants.difference(&sampled).collect();
   assert!(missing.is_empty(), "not sampled: {missing:?}");
 }
+
+#[test]
+fn every_keyed_remote_request_is_claimed_in_the_idempotency_store() {
+  // A request carrying an idempotency key that `idempotency` misses would
+  // run again on every retry instead of replaying its first result.
+  for request in every_typed_remote_request() {
+    let wire = serde_json::to_value(&request).unwrap();
+    let key = wire.get("idempotency_key").and_then(|k| k.as_str());
+    let claimed = crate::core::remote::idempotency(&request).and_then(|(_, _, key)| key);
+    assert_eq!(claimed, key, "{}", request.kind_name());
+  }
+}
