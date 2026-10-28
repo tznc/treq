@@ -1,0 +1,170 @@
+id: gpui-no-local-row
+snapshots:
+  ? |
+    fn file_row(&self, p: &Palette) -> ui::Row {
+      ui::Row::new("file", p).child(div().id("x").hover(move |s| s.bg(p.hover())))
+    }
+  : labels:
+    - source: |-
+        fn file_row(&self, p: &Palette) -> ui::Row {
+          ui::Row::new("file", p).child(div().id("x").hover(move |s| s.bg(p.hover())))
+        }
+      style: primary
+      start: 0
+      end: 125
+    - source: file_row
+      style: secondary
+      start: 3
+      end: 11
+    - source: hover
+      style: secondary
+      start: 91
+      end: 96
+    - source: div().id("x").hover
+      style: secondary
+      start: 77
+      end: 96
+  ? |
+    fn file_row(&self, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+      div()
+        .id("file")
+        .hover(move |s| s.bg(p.hover()))
+        .on_click(cx.listener(|view, _, _, cx| view.open(cx)))
+    }
+  : labels:
+    - source: |-
+        fn file_row(&self, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+          div()
+            .id("file")
+            .hover(move |s| s.bg(p.hover()))
+            .on_click(cx.listener(|view, _, _, cx| view.open(cx)))
+        }
+      style: primary
+      start: 0
+      end: 196
+    - source: file_row
+      style: secondary
+      start: 3
+      end: 11
+    - source: hover
+      style: secondary
+      start: 104
+      end: 109
+    - source: |-
+        div()
+            .id("file")
+            .hover
+      style: secondary
+      start: 77
+      end: 109
+  ? |
+    fn load_more_row(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
+      div()
+        .id("more")
+        .cursor_pointer()
+        .on_click(cx.listener(|view, _, _, cx| view.more(cx)))
+        .child("Load more")
+    }
+  : labels:
+    - source: |-
+        fn load_more_row(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
+          div()
+            .id("more")
+            .cursor_pointer()
+            .on_click(cx.listener(|view, _, _, cx| view.more(cx)))
+            .child("Load more")
+        }
+      style: primary
+      start: 0
+      end: 200
+    - source: load_more_row
+      style: secondary
+      start: 3
+      end: 16
+    - source: on_click
+      style: secondary
+      start: 121
+      end: 129
+    - source: |-
+        div()
+            .id("more")
+            .cursor_pointer()
+            .on_click
+      style: secondary
+      start: 72
+      end: 129
+    - source: cursor_pointer
+      style: secondary
+      start: 99
+      end: 113
+    - source: |-
+        div()
+            .id("more")
+            .cursor_pointer
+      style: secondary
+      start: 72
+      end: 113
+  ? |
+    fn row(id: SharedString, name: String, p: &Palette) -> Stateful<Div> {
+      div().id(id).role(gpui::Role::ListItem).aria_label(name)
+    }
+  : labels:
+    - source: |-
+        fn row(id: SharedString, name: String, p: &Palette) -> Stateful<Div> {
+          div().id(id).role(gpui::Role::ListItem).aria_label(name)
+        }
+      style: primary
+      start: 0
+      end: 131
+    - source: row
+      style: secondary
+      start: 3
+      end: 6
+    - source: gpui::Role::ListItem
+      style: secondary
+      start: 91
+      end: 111
+  ? |
+    pub fn load_more(id: &'static str, p: &Palette, on_click: OnClick) -> Div {
+      div().child(Button::new(id, p).label("Load more").on_click(on_click))
+    }
+  : labels:
+    - source: |-
+        pub fn load_more(id: &'static str, p: &Palette, on_click: OnClick) -> Div {
+          div().child(Button::new(id, p).label("Load more").on_click(on_click))
+        }
+      style: primary
+      start: 0
+      end: 149
+    - source: load_more
+      style: secondary
+      start: 7
+      end: 16
+    - source: '"Load more"'
+      style: secondary
+      start: 115
+      end: 126
+  ? |
+    pub fn menu_row(id: SharedString, p: &Palette) -> Stateful<Div> {
+      div().id(id).hover(move |s| s.bg(p.hover()))
+    }
+  : labels:
+    - source: |-
+        pub fn menu_row(id: SharedString, p: &Palette) -> Stateful<Div> {
+          div().id(id).hover(move |s| s.bg(p.hover()))
+        }
+      style: primary
+      start: 0
+      end: 114
+    - source: menu_row
+      style: secondary
+      start: 7
+      end: 15
+    - source: hover
+      style: secondary
+      start: 81
+      end: 86
+    - source: div().id(id).hover
+      style: secondary
+      start: 68
+      end: 86
