@@ -688,6 +688,22 @@ pub fn list_workflow_runs_sync(
   Ok(summaries)
 }
 
+/// The newest run of a workflow in a workspace, as `(id, status)`: what the
+/// Checks popover draws.
+pub fn latest_workflow_run_sync(
+  repo_path: &str,
+  workspace_id: i64,
+  filename: &str,
+) -> Result<Option<(i64, String)>, String> {
+  // The run row alone: its job rows and their steps go unread.
+  Ok(
+    crate::local_db::list_workflow_runs(repo_path, workspace_id, filename, 1)?
+      .into_iter()
+      .next()
+      .map(|run| (run.id, run.status)),
+  )
+}
+
 /// Confirm a job actually recorded logs before querying the telemetry
 /// database for them — records are looked up by `run_id`/`job_id`, not by a
 /// filesystem path, so there is nothing left to canonicalize.
@@ -744,6 +760,24 @@ mod tests {
     crate::local_db::init_local_db(&repo).unwrap();
     crate::local_db::trust_repo(&repo).unwrap();
     repo
+  }
+
+  #[test]
+  fn latest_workflow_run_is_the_newest_runs_id_and_status() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_string_lossy().to_string();
+    crate::local_db::init_local_db(&repo).unwrap();
+    assert_eq!(latest_workflow_run_sync(&repo, 1, "ci.yaml").unwrap(), None);
+    let old = crate::local_db::create_workflow_run(&repo, 1, "ci.yaml").unwrap();
+    crate::local_db::finish_workflow_run(&repo, old, "failure").unwrap();
+    let new = crate::local_db::create_workflow_run(&repo, 1, "ci.yaml").unwrap();
+    crate::local_db::add_workflow_job_result(&repo, new, "a", 0, "success", "t0", "t1", "[]", None)
+      .unwrap();
+    crate::local_db::finish_workflow_run(&repo, new, "success").unwrap();
+    assert_eq!(
+      latest_workflow_run_sync(&repo, 1, "ci.yaml").unwrap(),
+      Some((new, "success".to_string()))
+    );
   }
 
   #[test]

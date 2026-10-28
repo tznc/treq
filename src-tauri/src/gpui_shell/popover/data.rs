@@ -122,10 +122,9 @@ pub fn read_checks(repo_path: &str, workspace_id: i64) -> ChecksData {
     .unwrap_or_default()
     .into_iter()
     .map(|w| {
-      let latest = core::list_workflow_runs_sync(repo_path, workspace_id, &w.filename, 1)
+      let latest = core::latest_workflow_run_sync(repo_path, workspace_id, &w.filename)
         .ok()
-        .and_then(|runs| runs.into_iter().next())
-        .map(|run| (run.id, run.status));
+        .flatten();
       Workflow {
         filename: w.filename,
         name: w.name,
