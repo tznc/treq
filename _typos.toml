@@ -9,6 +9,7 @@ extend-exclude = [
   "web/static/skills/catalog.json",
   "crates/treq-ui/styleguide/manifest.json",
   "src-tauri/tests/fixtures/",
+  "src-tauri/src/local_db/upgrade_fixtures/",
   "supabase/migrations/",
 ]
 
