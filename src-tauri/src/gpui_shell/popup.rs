@@ -1229,27 +1229,11 @@ impl PopupView {
         )
         .when(toast.kind == ToastKind::Error, |this| {
           // Copies the error so it can be pasted into a report or a search.
-          let text = toast_clipboard_text(toast);
-          this.child(
-            div()
-              .id("copy")
-              .group("copy")
-              .flex_none()
-              .p_1()
-              .rounded_md()
-              .hover(|style| style.bg(palette.hover()))
-              .cursor_pointer()
-              .child(
-                svg()
-                  .path(theme::ICON_COPY)
-                  .size(zpx(16.))
-                  .text_color(palette.muted_foreground.opacity(0.7))
-                  .group_hover("copy", |style| style.text_color(palette.foreground)),
-              )
-              .on_click(move |_, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))
-              }),
-          )
+          this.child(ui::copy_feedback::CopyButton::new(
+            SharedString::from(format!("toast-copy-{}", toast.id)),
+            toast_clipboard_text(toast),
+            &palette,
+          ))
         })
         .when(!compact, |this| {
           this.child(

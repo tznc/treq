@@ -23,8 +23,6 @@ use gpui::{MouseDownEvent, MouseMoveEvent, Point, Task, TextLayout};
 
 /// How long edits wait before the review is written (`useDebounce(…, 500)`).
 const SAVE_DELAY: Duration = Duration::from_millis(500);
-/// How long "Copied" shows on the review popover's Copy button.
-const COPIED_FOR: Duration = Duration::from_millis(2000);
 
 /// A diff line as drawn: its file, place and bounds.
 pub(in crate::gpui_shell::screen) type DrawnLine = (String, LineRef, Bounds<Pixels>);
@@ -109,7 +107,6 @@ pub(in crate::gpui_shell::screen) struct Review {
   pub finish_open: bool,
   pub use_idle: bool,
   pub sending: bool,
-  pub copied: bool,
   pub discard_dialog: bool,
   /// `hasUserAddedComments`.
   pub user_added: bool,
@@ -122,7 +119,6 @@ pub(in crate::gpui_shell::screen) struct Review {
   /// The workspace whose kept review was read.
   hydrated: Option<(String, i64)>,
   save: Option<Task<()>>,
-  copied_reset: Option<Task<()>>,
 }
 
 impl Review {
@@ -736,17 +732,6 @@ impl ChangesView {
 
   fn copy_review(&mut self, cx: &mut Context<Self>) {
     cx.write_to_clipboard(ClipboardItem::new_string(self.markdown()));
-    self.review.copied = true;
-    self.review.copied_reset = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(COPIED_FOR).await;
-      this
-        .update(cx, |view, cx| {
-          view.review.copied = false;
-          cx.notify();
-        })
-        .ignore_closed();
-    }));
-    cx.notify();
   }
 
   /// Plan or Edit: React starts the agent with the review.
@@ -2079,14 +2064,21 @@ impl ChangesView {
             .items_center()
             .gap_2()
             .when(outdated > 0, |this| {
-              this.child(
-                button(
-                  "copy-outdated",
-                  theme::ICON_COPY,
-                  format!("Copy Outdated ({outdated})"),
-                )
-                .on_click(cx.listener(|view, _, _, cx| view.copy_outdated(cx))),
-              )
+              this.child(ui::copy_feedback::copyable("copy-outdated-feedback", {
+                let (p, copy) = (*p, cx.listener(|view, _, _, cx| view.copy_outdated(cx)));
+                move |copied| {
+                  Button::new("copy-outdated", &p)
+                    .variant(Variant::Outline)
+                    .size(Size::Sm)
+                    .gap_1p5()
+                    .border_color(tone.border(&p))
+                    .text_color(fg)
+                    .copy_icon(copied, 12.)
+                    .label(format!("Copy Outdated ({outdated})"))
+                    .on_click(copy)
+                    .into_any_element()
+                }
+              }))
             })
             .child(
               button("reload-stale", theme::ICON_REFRESH, "Reload".into())
@@ -2212,21 +2204,21 @@ impl ChangesView {
               .justify_between()
               .gap_2()
               .child(
-                Button::new("copy-review", p)
-                  .variant(Variant::Outline)
-                  .size(Size::Sm)
-                  .gap_2()
-                  .disabled(sending)
-                  .icon(
-                    if self.review.copied {
-                      theme::ICON_CHECK
-                    } else {
-                      theme::ICON_COPY
-                    },
-                    12.,
-                  )
-                  .label(if self.review.copied { "Copied" } else { "Copy" })
-                  .on_click(cx.listener(|view, _, _, cx| view.copy_review(cx))),
+                ui::copy_feedback::copyable("copy-review-feedback", {
+                  let (p, copy) = (*p, cx.listener(|view, _, _, cx| view.copy_review(cx)));
+                  move |copied| {
+                    Button::new("copy-review", &p)
+                      .variant(Variant::Outline)
+                      .size(Size::Sm)
+                      .gap_2()
+                      .disabled(sending)
+                      .copy_icon(copied, 12.)
+                      .label(if copied.copied { "Copied" } else { "Copy" })
+                      .on_click(copy)
+                      .into_any_element()
+                  }
+                })
+                .disabled(sending),
               )
               .child(
                 div()

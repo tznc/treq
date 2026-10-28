@@ -3178,22 +3178,33 @@ impl ChangesView {
               .text_color(muted)
               .child(shown_path),
           )
-          .child(
-            self.tip(
-              format!("copy-path-tip-{path}"),
-              "Copy file path",
-              div()
-                .id(SharedString::from(format!("copy-path-{path}")))
-                .flex_none()
-                .cursor_pointer()
-                .child(ui::icon(theme::ICON_COPY, 16., muted))
-                .on_click(cx.listener(move |view, _, _, cx| {
+          .child(self.tip(
+            format!("copy-path-tip-{path}"),
+            "Copy file path",
+            ui::copy_feedback::copyable(
+              SharedString::from(format!("copy-path-feedback-{path}")),
+              {
+                let id = SharedString::from(format!("copy-path-{path}"));
+                let success = p.success;
+                let copy = cx.listener(move |view, _, _, cx| {
                   cx.stop_propagation();
                   view.copy(copy_path.clone(), "File path copied".into(), cx);
-                })),
-              cx,
+                });
+                move |copied| {
+                  div()
+                    .id(id.clone())
+                    .flex_none()
+                    .cursor_pointer()
+                    .child(ui::copy_feedback::copy_icon(
+                      id, copied, 16., muted, success,
+                    ))
+                    .on_click(copy)
+                    .into_any_element()
+                }
+              },
             ),
-          )
+            cx,
+          ))
           .when(committed, |this| {
             this.child(
               div()

@@ -150,18 +150,22 @@ impl Popover {
       );
 
     let copy = prompt.is_some().then(|| {
-      ui::text(
-        Button::new("details-copy", &p)
-          .variant(Variant::Ghost)
-          .size(Size::Sm)
-          .h(zpx(24.))
-          .px_2()
-          .gap_1()
-          .icon(theme::ICON_COPY, 12.)
-          .label("Copy"),
-        TextSize::Xs,
-      )
-      .on_click(cx.listener(|this, _, _, cx| this.copy_prompt(cx)))
+      let copy = cx.listener(|this, _, _, cx| this.copy_prompt(cx));
+      ui::copy_feedback::copyable("details-copy-feedback", move |copied| {
+        ui::text(
+          Button::new("details-copy", &p)
+            .variant(Variant::Ghost)
+            .size(Size::Sm)
+            .h(zpx(24.))
+            .px_2()
+            .gap_1()
+            .copy_icon(copied, 12.)
+            .label("Copy"),
+          TextSize::Xs,
+        )
+        .on_click(copy)
+        .into_any_element()
+      })
     });
     let body = match &prompt {
       Some(prompt) => div()

@@ -422,22 +422,19 @@ impl FileBrowserView {
               .flex()
               .justify_between()
               .gap_2()
-              .child(
-                Button::new("copy-review", p)
-                  .variant(Variant::Outline)
-                  .size(Size::Sm)
-                  .gap_2()
-                  .icon(
-                    if self.copied_review {
-                      theme::ICON_CHECK
-                    } else {
-                      theme::ICON_COPY
-                    },
-                    12.,
-                  )
-                  .label(if self.copied_review { "Copied" } else { "Copy" })
-                  .on_click(cx.listener(|view, _, _, cx| view.copy_review(cx))),
-              )
+              .child(ui::copy_feedback::copyable("copy-review-feedback", {
+                let (p, copy) = (*p, cx.listener(|view, _, _, cx| view.copy_review(cx)));
+                move |copied| {
+                  Button::new("copy-review", &p)
+                    .variant(Variant::Outline)
+                    .size(Size::Sm)
+                    .gap_2()
+                    .copy_icon(copied, 12.)
+                    .label(if copied.copied { "Copied" } else { "Copy" })
+                    .on_click(copy)
+                    .into_any_element()
+                }
+              }))
               .child(
                 div()
                   .flex()

@@ -508,6 +508,85 @@
       ]
     },
     {
+      "id": "copy-feedback/states",
+      "title": "States",
+      "component": "Copy feedback",
+      "code": [
+        {
+          "text": "let p = p(cx);\nlet copied = "
+        },
+        {
+          "knob": "copied"
+        },
+        {
+          "text": ";\ndiv()\n  .flex()\n  .items_center()\n  .gap_2()\n  .child(\n    IconButton::new(\"icon\", theme::ICON_COPY, \"Copy file path\", &p)\n      .size(IconButtonSize::Small)\n      .copied(copied),\n  )\n  .child(\n    IconButton::new(\"outline\", theme::ICON_COPY, \"Copy file contents\", &p)\n      .size(IconButtonSize::Small)\n      .outline()\n      .copied(copied),\n  )\n  .child(\n    Button::new(\"labelled\", &p)\n      .variant(Variant::Outline)\n      .size(treq_ui::Size::Sm)\n      .gap_2()\n      .copy_icon(copied, 12.)\n      .label(if copied { \"Copied\" } else { \"Copy\" }),\n  )"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "copied",
+          "type": "bool",
+          "default": true
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "copied=true",
+          "values": {
+            "copied": true
+          },
+          "is_default": true,
+          "file": "snapshots/copy-feedback/states/light/default.png",
+          "width": 264,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "dfac1e5303a9dd16"
+        },
+        {
+          "theme": "light",
+          "key": "copied=false",
+          "values": {
+            "copied": false
+          },
+          "file": "snapshots/copy-feedback/states/light/copied=false.png",
+          "width": 264,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "f1731a2045fd789e"
+        },
+        {
+          "theme": "dark",
+          "key": "copied=true",
+          "values": {
+            "copied": true
+          },
+          "is_default": true,
+          "file": "snapshots/copy-feedback/states/dark/default.png",
+          "width": 264,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "6d6979d9b13c8655"
+        },
+        {
+          "theme": "dark",
+          "key": "copied=false",
+          "values": {
+            "copied": false
+          },
+          "file": "snapshots/copy-feedback/states/dark/copied=false.png",
+          "width": 264,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "fd11abea0b36f6a9"
+        }
+      ]
+    },
+    {
       "id": "split-button/playground",
       "title": "Playground",
       "component": "SplitButton",
@@ -1362,7 +1441,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "f558e971d90172ce"
+          "hash": "a79572fb0e37505c"
         },
         {
           "theme": "dark",
@@ -1372,7 +1451,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "7dc60fa84bb32888"
+          "hash": "d4a92c4b44427ca7"
         }
       ]
     },

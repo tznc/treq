@@ -374,19 +374,27 @@ impl PromptHistoryView {
               .child(agent)
           })),
       )
-      .child(
-        Button::new("prompt-history-copy", p)
-          .aria_label("Copy")
-          .variant(Variant::Ghost)
-          .size(Size::Sm)
-          .h(zpx(24.))
-          .px_2()
-          .child(ui::icon(theme::ICON_COPY, 12., p.foreground).mr_1())
-          .child(ui::text(div(), TextSize::Xs).child("Copy"))
-          .on_click(
-            cx.listener(move |view, _, _, cx| view.copy(text.clone(), "Prompt copied", cx)),
-          ),
-      );
+      .child(ui::copy_feedback::copyable(
+        "prompt-history-copy-feedback",
+        {
+          let p = *p;
+          let copy =
+            cx.listener(move |view, _, _, cx| view.copy(text.clone(), "Prompt copied", cx));
+          move |copied| {
+            Button::new("prompt-history-copy", &p)
+              .aria_label("Copy")
+              .variant(Variant::Ghost)
+              .size(Size::Sm)
+              .h(zpx(24.))
+              .px_2()
+              .gap_1()
+              .copy_icon(copied, 12.)
+              .child(ui::text(div(), TextSize::Xs).child("Copy"))
+              .on_click(copy)
+              .into_any_element()
+          }
+        },
+      ));
     let entry = entry.clone();
     pane.child(
       div()
@@ -432,12 +440,17 @@ impl Render for PromptHistoryView {
     );
     let entries = self.entries.clone();
     let copy_all = entries.as_ref().filter(|all| !all.is_empty()).map(|_| {
-      Button::new("prompt-history-copy-all", &p)
-        .variant(Variant::Outline)
-        .size(Size::Sm)
-        .child(ui::icon(theme::ICON_COPY, 16., p.foreground).mr_1p5())
-        .label("Copy all")
-        .on_click(cx.listener(|view, _, _, cx| view.copy_all(cx)))
+      let copy = cx.listener(|view, _, _, cx| view.copy_all(cx));
+      ui::copy_feedback::copyable("prompt-history-copy-all-feedback", move |copied| {
+        Button::new("prompt-history-copy-all", &p)
+          .variant(Variant::Outline)
+          .size(Size::Sm)
+          .gap_1p5()
+          .copy_icon(copied, 16.)
+          .label("Copy all")
+          .on_click(copy)
+          .into_any_element()
+      })
     });
     let header = div()
       .flex_none()
