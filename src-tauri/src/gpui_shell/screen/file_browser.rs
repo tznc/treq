@@ -60,8 +60,6 @@ use crate::{
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(150);
 /// How long edits wait before the review is written (`useDebounce(…, 500)`).
 const SAVE_DELAY: Duration = Duration::from_millis(500);
-/// How long "Copied" shows.
-const COPIED_FOR: Duration = Duration::from_millis(2000);
 /// `TextSize::Code`'s size and line height.
 const CODE_FONT: f32 = 12.;
 const LINE_HEIGHT: f32 = 18.;
@@ -127,14 +125,6 @@ struct TextInput {
   _changes: Subscription,
 }
 
-/// What a copy button copied.
-#[derive(Debug, Clone, Copy)]
-enum Copied {
-  Contents,
-  Path,
-  Review,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Field {
   Draft,
@@ -184,8 +174,6 @@ pub struct FileBrowserView {
   marks_read: u64,
   /// Bumped per file read, so a slower earlier read is dropped.
   reads: u64,
-  copied: bool,
-  copied_path: bool,
   /// The Markdown file whose preview shows.
   preview: Option<String>,
   list: ListState,
@@ -210,13 +198,11 @@ pub struct FileBrowserView {
   summary_input: Option<TextInput>,
   pub(super) finish_open: bool,
   use_idle: bool,
-  copied_review: bool,
   pub(super) discard_dialog: bool,
   hydrated: Option<(String, i64)>,
   pub(super) search: Search,
   anchors: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
   _save: Option<Task<()>>,
-  _copied_reset: Option<Task<()>>,
   _find_key: Option<Subscription>,
   /// The files' revision when the browser was hidden, while another tab
   /// or workspace shows.
@@ -268,8 +254,6 @@ impl FileBrowserView {
       marks: LineMarks::default(),
       marks_read: 0,
       reads: 0,
-      copied: false,
-      copied_path: false,
       preview: None,
       list: ListState::new(0, ListAlignment::Top, px(400.)),
       rows_key: Vec::new(),
@@ -289,13 +273,11 @@ impl FileBrowserView {
       summary_input: None,
       finish_open: false,
       use_idle: false,
-      copied_review: false,
       discard_dialog: false,
       hydrated: None,
       search: Search::default(),
       anchors: Rc::default(),
       _save: None,
-      _copied_reset: None,
       _find_key: None,
       hidden_at: None,
       hovered: prefetch::Intent::default(),
@@ -764,33 +746,11 @@ impl FileBrowserView {
     cx.notify();
   }
 
-  /// Shows "Copied" on `what` for a while.
-  fn copy_flag(&mut self, what: Copied, cx: &mut Context<Self>) {
-    match what {
-      Copied::Contents => self.copied = true,
-      Copied::Path => self.copied_path = true,
-      Copied::Review => self.copied_review = true,
-    }
-    self._copied_reset = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(COPIED_FOR).await;
-      this
-        .update(cx, |view, cx| {
-          view.copied = false;
-          view.copied_path = false;
-          view.copied_review = false;
-          cx.notify();
-        })
-        .ignore_closed();
-    }));
-    cx.notify();
-  }
-
   fn copy_contents(&mut self, cx: &mut Context<Self>) {
     let Some(opened) = self.opened.as_ref() else {
       return;
     };
     cx.write_to_clipboard(ClipboardItem::new_string(opened.content.to_string()));
-    self.copy_flag(Copied::Contents, cx);
   }
 
   fn copy_path(&mut self, cx: &mut Context<Self>) {
@@ -798,7 +758,6 @@ impl FileBrowserView {
       return;
     };
     cx.write_to_clipboard(ClipboardItem::new_string(self.rel(&path)));
-    self.copy_flag(Copied::Path, cx);
   }
 
   // Line selection and comments.
@@ -1003,7 +962,6 @@ impl FileBrowserView {
 
   fn copy_review(&mut self, cx: &mut Context<Self>) {
     cx.write_to_clipboard(ClipboardItem::new_string(self.markdown()));
-    self.copy_flag(Copied::Review, cx);
   }
 
   /// Plan or Edit: React starts the agent with the review.
@@ -1764,22 +1722,19 @@ impl FileBrowserView {
           .text_color(muted)
           .child(rel),
       )
-      .child(
-        self.tip(
+      .child(self.tip(
+        "copy-file-path",
+        "Copy file path",
+        Side::Top,
+        copy_button(
           "copy-file-path",
           "Copy file path",
-          Side::Top,
-          copy_button(
-            "copy-file-path",
-            "Copy file path",
-            self.copied_path,
-            false,
-            p,
-          )
-          .on_click(cx.listener(|view, _, _, cx| view.copy_path(cx))),
-          cx,
+          false,
+          p,
+          cx.listener(|view, _, _, cx| view.copy_path(cx)),
         ),
-      );
+        cx,
+      ));
     let mut right = div().flex().flex_none().items_center().gap_2();
     if let Some(modified) = &self.modified_at {
       right = right.child(
@@ -1845,22 +1800,19 @@ impl FileBrowserView {
           ),
       );
     }
-    right = right.child(
-      self.tip(
+    right = right.child(self.tip(
+      "copy-file-contents",
+      "Copy file contents",
+      Side::Top,
+      copy_button(
         "copy-file-contents",
         "Copy file contents",
-        Side::Top,
-        copy_button(
-          "copy-file-contents",
-          "Copy file contents",
-          self.copied,
-          true,
-          p,
-        )
-        .on_click(cx.listener(|view, _, _, cx| view.copy_contents(cx))),
-        cx,
+        true,
+        p,
+        cx.listener(|view, _, _, cx| view.copy_contents(cx)),
       ),
-    );
+      cx,
+    ));
     div()
       .flex_none()
       .flex()
@@ -2055,21 +2007,25 @@ fn status_dot(status: &str) -> Option<ui::Tone> {
 fn copy_button(
   id: &'static str,
   label: &'static str,
-  copied: bool,
   bordered: bool,
   p: &Palette,
-) -> ui::IconButton {
-  let icon = if copied {
-    theme::ICON_CHECK
-  } else {
-    theme::ICON_COPY
-  };
-  let button = ui::IconButton::new(id, icon, label, p).size(ui::IconButtonSize::Small);
-  if bordered {
-    button.outline()
-  } else {
-    button
-  }
+  on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+) -> ui::copy_feedback::Copyable {
+  let p = *p;
+  ui::copy_feedback::copyable(
+    SharedString::from(format!("{id}-feedback")),
+    move |copied| {
+      let button = ui::IconButton::new(id, theme::ICON_COPY, label, &p)
+        .size(ui::IconButtonSize::Small)
+        .copied(copied)
+        .on_click(on_click);
+      if bordered {
+        button.outline().into_any_element()
+      } else {
+        button.into_any_element()
+      }
+    },
+  )
 }
 
 /// A source line's fill: the selection, then a comment's amber (marking its

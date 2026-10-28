@@ -160,6 +160,21 @@ test("code: file view, Markdown preview and a TSX file", async ({ page }) => {
       "Tree expanded to packages/web/src/pages with Home.tsx selected",
     ],
   });
+
+  // A copy button turns into a green check, then back.
+  await page.getByRole("button", { name: "Copy file path" }).click();
+  await settle(page, 400);
+  await capture(page, {
+    name: "03-code-file-view-path-copied",
+    title: "File view: file path copied",
+    expectations: ["The Copy file path button beside the path shows a green check"],
+  });
+  await settle(page, 2500);
+  await capture(page, {
+    name: "03-code-file-view-path-copy-reverted",
+    title: "File view: copy button reverted",
+    expectations: ["The Copy file path button shows the copy icon again"],
+  });
 });
 
 test("code: zoom 120%", async ({ page }) => {

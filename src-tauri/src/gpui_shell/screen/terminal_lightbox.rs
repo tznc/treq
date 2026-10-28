@@ -885,6 +885,14 @@ fn content<E: InteractiveElement>(el: E) -> E {
 /// `Button variant="ghost" size="icon-xs" className="h-8 w-8 text-white
 /// hover:bg-white/15"`.
 fn tool(id: &'static str, icon: &'static str, disabled: bool) -> Stateful<Div> {
+  tool_with(
+    id,
+    ui::icon(icon, 16., chrome(1.)).into_any_element(),
+    disabled,
+  )
+}
+
+fn tool_with(id: &'static str, icon: gpui::AnyElement, disabled: bool) -> Stateful<Div> {
   div()
     .id(id)
     .debug_selector(move || id.into())
@@ -898,7 +906,7 @@ fn tool(id: &'static str, icon: &'static str, disabled: bool) -> Stateful<Div> {
       d.cursor_pointer()
         .hover(|s| s.bg(theme::palette(true).hover_on_dark()))
     })
-    .child(ui::icon(icon, 16., chrome(1.)))
+    .child(icon)
 }
 
 impl Lightbox {
@@ -943,10 +951,17 @@ impl Lightbox {
     }
     let pill = content(
       pill
-        .child(
-          tool("treq-send-copy", theme::ICON_COPY, false)
-            .on_click(cx.listener(|view, _, _, cx| view.copy(cx))),
-        )
+        .child(ui::copy_feedback::copyable("treq-send-copy-feedback", {
+          let copy = cx.listener(|view, _, _, cx| view.copy(cx));
+          move |copied| {
+            let success = theme::palette(true).success;
+            let icon =
+              ui::copy_feedback::copy_icon("treq-send-copy", copied, 16., chrome(1.), success);
+            tool_with("treq-send-copy", icon, false)
+              .on_click(copy)
+              .into_any_element()
+          }
+        }))
         .child(
           tool("treq-send-reveal", theme::ICON_FOLDER_OPEN, false)
             .on_click(cx.listener(|view, _, _, _| view.reveal())),

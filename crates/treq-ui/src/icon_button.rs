@@ -31,6 +31,7 @@ pub struct IconButton {
   icon: &'static str,
   size: IconButtonSize,
   selected: bool,
+  copied: Option<bool>,
   tone: Option<Tone>,
   palette: Palette,
 }
@@ -50,6 +51,7 @@ impl IconButton {
       icon,
       size: IconButtonSize::default(),
       selected: false,
+      copied: None,
       tone: None,
       palette: *palette,
     }
@@ -69,6 +71,13 @@ impl IconButton {
   /// A toggle that is on, such as the panel it shows being open.
   pub fn selected(mut self, selected: bool) -> Self {
     self.selected = selected;
+    self
+  }
+
+  /// A copy button: its copy icon turns into the green check while
+  /// `copied`. Pair it with [`crate::copy_feedback::copyable`].
+  pub fn copied(mut self, copied: bool) -> Self {
+    self.copied = Some(copied);
     self
   }
 
@@ -111,7 +120,10 @@ impl RenderOnce for IconButton {
     self
       .button
       .selected(self.selected)
-      .icon(self.icon, icon)
+      .map(|b| match self.copied {
+        Some(copied) => b.copy_icon(copied, icon),
+        None => b.icon(self.icon, icon),
+      })
       .w(zpx(side))
       .h(zpx(side))
       .when_some(self.tone, |b, tone| b.text_color(tone.color(&p)))

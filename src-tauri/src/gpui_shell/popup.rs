@@ -519,8 +519,6 @@ struct PopupView {
   owner: String,
   /// The popup's box on screen, for placing a submenu beside an item.
   frame: Bounds<Pixels>,
-  /// Each error toast's Copy button, by toast id.
-  copied: HashMap<String, ui::copy_feedback::CopyFeedback>,
 }
 
 /// The width of `text` in `family` at `text-sm`, without kerning.
@@ -1231,26 +1229,11 @@ impl PopupView {
         )
         .when(toast.kind == ToastKind::Error, |this| {
           // Copies the error so it can be pasted into a report or a search.
-          let text = toast_clipboard_text(toast);
-          let copy_id = toast.id.clone();
-          this.child(
-            div()
-              .id("copy")
-              .group("copy")
-              .flex_none()
-              .p_1()
-              .rounded_md()
-              .hover(|style| style.bg(palette.hover()))
-              .cursor_pointer()
-              .child(ui::copy_feedback::copy_icon(
-                SharedString::from(format!("toast-copy-{}", toast.id)),
-                self.is_copied(&toast.id),
-                16.,
-                palette.muted_foreground.opacity(0.7),
-                palette.toast_success,
-              ))
-              .on_click(cx.listener(move |this, _, _, cx| this.copy_toast(&copy_id, &text, cx))),
-          )
+          this.child(ui::copy_feedback::CopyButton::new(
+            SharedString::from(format!("toast-copy-{}", toast.id)),
+            toast_clipboard_text(toast),
+            &palette,
+          ))
         })
         .when(!compact, |this| {
           this.child(
@@ -1277,31 +1260,6 @@ impl PopupView {
       stack = stack.child(item);
     }
     stack.into_any_element()
-  }
-
-  fn is_copied(&self, id: &str) -> bool {
-    self
-      .copied
-      .get(id)
-      .is_some_and(|feedback| feedback.is_copied(std::time::Instant::now()))
-  }
-
-  /// Copies an error toast and shows the check until it times out.
-  fn copy_toast(&mut self, id: &str, text: &str, cx: &mut Context<Self>) {
-    cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
-    self
-      .copied
-      .entry(id.to_string())
-      .or_default()
-      .copy(std::time::Instant::now());
-    cx.notify();
-    cx.spawn(async move |this, cx| {
-      cx.background_executor()
-        .timer(ui::copy_feedback::COPIED_FOR)
-        .await;
-      this.update(cx, |_, cx| cx.notify()).ignore_closed();
-    })
-    .detach();
   }
 
   /// Runs a toast click: its action or close button.
@@ -1543,7 +1501,6 @@ fn popup_window(
         palette: theme::palette(false),
         owner: String::new(),
         frame: Bounds::default(),
-        copied: HashMap::new(),
       });
       *built.borrow_mut() = Some(entity.downgrade());
       entity

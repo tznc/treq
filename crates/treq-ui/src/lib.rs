@@ -244,6 +244,7 @@ pub enum Size {
 enum ButtonChild {
   Element(gpui::AnyElement),
   Icon(&'static str, f32),
+  CopyIcon(bool, f32),
 }
 
 /// `ui/button.tsx`. Its id is also its debug selector, which tests find it
@@ -336,6 +337,13 @@ impl Button {
   /// first text (React's `aria-label`).
   pub fn aria_label(mut self, name: impl Into<SharedString>) -> Self {
     self.name = Some(name.into());
+    self
+  }
+
+  /// The copy icon, or while `copied` the green check, swapping with a
+  /// fade. Pair it with [`copy_feedback::copyable`] for `copied`.
+  pub fn copy_icon(mut self, copied: bool, size: f32) -> Self {
+    self.children.push(ButtonChild::CopyIcon(copied, size));
     self
   }
 
@@ -496,6 +504,7 @@ impl RenderOnce for Button {
     // Icons follow the label, including a `text_color` override.
     let icon_color = style.text.color.unwrap_or(fg);
     let selector = self.id.to_string();
+    let (id, palette) = (self.id.clone(), self.palette);
     let mut el = gpui_bootstrap::button::Button::new(self.id)
       .colors(colors)
       .disabled(disabled)
@@ -543,6 +552,9 @@ impl RenderOnce for Button {
       .children(self.children.into_iter().map(|child| match child {
         ButtonChild::Element(el) => el,
         ButtonChild::Icon(path, size) => icon(path, size, icon_color).into_any_element(),
+        ButtonChild::CopyIcon(copied, size) => {
+          copy_feedback::copy_icon(id.clone(), copied, size, icon_color, palette.success)
+        }
       }));
     el.style().refine(&style);
     el
@@ -825,5 +837,15 @@ mod tests {
       .icon(theme::ICON_COMPARE, 16.)
       .disabled(true);
     assert!(matches!(icon_first.children[..], [ButtonChild::Icon(..)]));
+  }
+
+  #[test]
+  fn a_copy_button_keeps_its_icon_slot_for_the_check() {
+    let p = theme::palette(false);
+    let button = Button::new("copy", &p).copy_icon(true, 12.).label("Copied");
+    assert!(matches!(
+      button.children[..],
+      [ButtonChild::CopyIcon(true, 12.), ButtonChild::Element(_)]
+    ));
   }
 }
