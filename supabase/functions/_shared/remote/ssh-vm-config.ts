@@ -12,7 +12,7 @@ const SSHD_CONFIG_DROPIN = "/etc/ssh/sshd_config.d/60-treq-ca.conf";
 // Idempotent: writes the CA public key line to a fixed path and points
 // `TrustedUserCAKeys` at it via an sshd config drop-in, then reloads sshd.
 // Safe to re-run (e.g. on every reprovision) since it only overwrites its own
-// two files. Sprite exec may run as a non-root user with passwordless sudo,
+// two files. Provider exec may run as a non-root user with passwordless sudo,
 // so writes under /etc go through `$SUDO`.
 export function installCaTrustCommand(caPublicKeyLine: string): string[] {
   const script = `#!/bin/sh
@@ -38,9 +38,9 @@ echo "treq: CA trust installed"
   return ["/bin/sh", "-c", script];
 }
 
-// sshd on a Sprite. Sprites have no raw TCP ingress (the public URL is
-// HTTP-only), so sshd listens on loopback only and is reached through the
-// Sprites TCP proxy by the `remote-ssh-relay` Edge Function. Port 2222
+// sshd on a managed machine. Machines have no raw TCP ingress, so sshd
+// listens on loopback only and is reached through treq-gateway by the
+// `remote-ssh-relay` Edge Function. Port 2222
 // avoids clashing with any sshd the base image might already run.
 export const MANAGED_SSHD_HOST = "localhost";
 export const MANAGED_SSHD_PORT = 2222;
@@ -48,9 +48,9 @@ export const MANAGED_SSHD_SERVICE_NAME = "treq-sshd";
 export const MANAGED_SSHD_LAUNCHER = "/usr/local/bin/treq-sshd";
 const MANAGED_SSH_USER = "treq";
 
-// Idempotent sshd install for a Sprite: installs openssh-server when absent,
-// creates the login user, generates any missing host keys, and writes the
-// launcher script the Sprites service runs. The launcher passes every
+// Idempotent sshd install for a managed machine: installs openssh-server
+// when absent, creates the login user, generates any missing host keys, and
+// writes the launcher script the provider's service runs. The launcher passes every
 // security-relevant option on the command line so a base-image
 // sshd_config cannot widen access: loopback only, no passwords, and user
 // certificates signed by the Treq CA (written by `installCaTrustCommand`).
@@ -93,6 +93,46 @@ $SUDO chmod 755 "${MANAGED_SSHD_LAUNCHER}"
 echo "treq: sshd installed"
 `;
   return ["/bin/sh", "-c", script];
+}
+
+// The gateway (`treq gateway`, from crates/treq-gateway): the relay reaches
+// sshd through this WebSocket gateway, which the provider's ingress exposes
+// privately (docs/design/sandbox-provider-adapter.md, D4). It runs from the
+// `treq` binary the boot manifest installs, so nothing else is downloaded.
+export const GATEWAY_SERVICE_NAME = "treq-gateway";
+export const TREQ_BINARY = "/usr/local/bin/treq";
+export const GATEWAY_SECRET_FILE = "/etc/treq/gateway.secret";
+export const GATEWAY_LISTEN = "127.0.0.1:8022";
+
+export const GATEWAY_SECRET_ENV = "TREQ_GATEWAY_SECRET";
+
+// Writes the placement's secret, readable only by the user that runs the
+// gateway. The secret arrives in the exec environment as
+// $TREQ_GATEWAY_SECRET and is written by the shell's builtin printf through
+// a pipe, so it is never in this script or any argv on the machine. Residual:
+// Fly and Boat pass exec env as a leading `env NAME=value`, so the secret is
+// in that short-lived `env` process's argv until it execs the shell.
+export function installGatewaySecretCommand(): string[] {
+  const script = `#!/bin/sh
+set -eu
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then SUDO="sudo -n"; fi
+$SUDO mkdir -p /etc/treq
+$SUDO install -m 600 -o "$(id -u)" -g "$(id -g)" /dev/null ${GATEWAY_SECRET_FILE}
+printf "%s\\n" "$${GATEWAY_SECRET_ENV}" | $SUDO tee ${GATEWAY_SECRET_FILE} >/dev/null
+$SUDO chmod 600 ${GATEWAY_SECRET_FILE}
+echo "treq: gateway secret installed"
+`;
+  return ["/bin/sh", "-c", script];
+}
+
+// `listen` is set per provider: loopback when the provider's ingress reaches
+// the machine's loopback, 0.0.0.0:8022 when it connects to a private address.
+export function gatewayServiceSpec(placementId: string, listen = GATEWAY_LISTEN): { cmd: string; args: string[] } {
+  return {
+    cmd: TREQ_BINARY,
+    args: ["gateway", "--placement-id", placementId, "--secret-file", GATEWAY_SECRET_FILE, "--listen", listen],
+  };
 }
 
 // Prints the sshd host public keys. Read over the provider's authenticated

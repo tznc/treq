@@ -30,7 +30,7 @@ const FREE_FEATURES: PlanFeature[] = [
 const PRO_FEATURES: PlanFeature[] = [
   {key: 'free', text: 'Everything in Free'},
   {key: 'github-app', text: 'Treq GitHub App'},
-  {key: 'cloud', text: 'Managed cloud workspace'},
+  {key: 'cloud', text: 'Cloud workspaces, pay-as-you-go at provider cost plus 20%'},
   {key: 'linear-oauth', text: 'Linear OAuth'},
 ];
 
@@ -68,7 +68,7 @@ const COMPARISON_ROWS: ComparisonRow[] = [
   {
     feature: 'Managed cloud workspace',
     free: {included: false},
-    pro: {included: true, detail: 'One per user'},
+    pro: {included: true, detail: 'Pay-as-you-go, provider cost plus 20%, billed by the second'},
     team: {included: true, detail: 'One for each member'},
   },
   {

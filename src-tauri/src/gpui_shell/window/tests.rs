@@ -1569,6 +1569,20 @@ fn runs_the_cloud_workspace_buttons_in_rust(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn raise_cap_on_the_cloud_card_opens_account_settings(cx: &mut TestAppContext) {
+  let window = Window::open(cx, Arc::new(FakeHost::default()), None);
+  assert!(window.press(cx, "remote.cloud.spendCap.edit"));
+  assert_eq!(
+    window
+      .controller
+      .read_with(cx, |c, _| c.model().page.clone()),
+    super::model::Page::Settings {
+      tab: "account".into()
+    }
+  );
+}
+
+#[gpui::test]
 fn an_unverified_change_shows_its_notice_until_dismissed(cx: &mut TestAppContext) {
   let window = remote_window(cx, Arc::new(FakeHost::default()));
   window.controller.update(cx, |c, cx| {

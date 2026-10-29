@@ -244,6 +244,7 @@ tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["registry", "env-filter"] }
 
 async-trait = "0.1.92"
+base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "http2"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "io-util", "net", "sync"] }
 russh = "0.63.1"
@@ -252,6 +253,8 @@ russh = "0.63.1"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
+# `treq gateway`: the WSS-to-sshd gateway a cloud machine runs.
+treq-gateway = { path = "../crates/treq-gateway" }
 bytes = "1"
 getrandom = "0.4"
 tauri-plugin-keystore = { version = "2.1.0-alpha.1", optional = true }

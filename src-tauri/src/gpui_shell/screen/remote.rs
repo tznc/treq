@@ -671,6 +671,11 @@ impl RemoteView {
       "account.signIn" => self
         .host
         .open_url(&format!("{}/sign-in?source=desktop", native::web_url())),
+      id if account_data::cloud_press(id).is_some() => {
+        if let Some(action) = account_data::cloud_press(id) {
+          self.host.cloud_action(action);
+        }
+      }
       "cloud.provision" => self.host.cloud_action(CloudAction::Provision),
       "cloud.wake" => self.host.cloud_action(CloudAction::Wake),
       "cloud.repair" => self.host.cloud_action(CloudAction::Repair),

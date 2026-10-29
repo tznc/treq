@@ -50,39 +50,49 @@ export type RemoteAuditEventType =
   | "instance_lapse_stopped"
   | "instance_lapse_deleted"
   | "instance_lapse_cleared"
-  | "instance_lapse_sweep_failed";
+  | "instance_lapse_sweep_failed"
+  // Provider switches and operator controls
+  // (docs/design/sandbox-provider-adapter.md §6, §9).
+  | "migration_requested"
+  | "migration_completed"
+  | "migration_rolled_back"
+  | "migration_failed"
+  | "placement_orphan_destroyed"
+  | "migration_acknowledged"
+  | "placement_destroyed"
+  | "placement_destroy_failed"
+  | "admin_defaults_recomputed"
+  | "admin_provider_drained"
+  | "admin_provider_retired"
+  | "admin_price_set"
+  | "admin_cutover_reversed"
+  | "admin_migration_forced"
+  | "provider_retire_completed";
 
 export type RemoteAuditSeverity = "info" | "warning" | "error";
 
-// Event types whose name alone marks them as a failure, so callers do not
-// need to remember to pass severity: "error" for every one of these -
-// forgetting it would silently drop the row out of `remote_recent_failures`.
-const FAILURE_EVENT_SUFFIXES = ["_failed"];
-
-function inferSeverity(eventType: RemoteAuditEventType): RemoteAuditSeverity {
-  return FAILURE_EVENT_SUFFIXES.some((suffix) => eventType.endsWith(suffix)) ? "error" : "info";
+export interface AuditEvent {
+  /** Null only for operator actions that touch no one user's instance. */
+  ownerUserId: string | null;
+  instanceId?: string | null;
+  endpointId?: string | null;
+  eventType: RemoteAuditEventType;
+  detail?: Record<string, unknown>;
+  /** Threads the desktop request / Edge Function operation / provider call
+   * together. See `_shared/remote/correlation.ts`. Optional only for call
+   * sites (background reconciliation, admin actions with their own
+   * identifier scheme) that do not have an inbound HTTP request. */
+  correlationId?: string | null;
+  providerRequestId?: string | null;
+  idempotencyKey?: string | null;
+  durationMs?: number | null;
+  severity?: RemoteAuditSeverity;
 }
 
-export async function recordAuditEvent(
-  supabase: SupabaseClient,
-  params: {
-    ownerUserId: string;
-    instanceId?: string | null;
-    endpointId?: string | null;
-    eventType: RemoteAuditEventType;
-    detail?: Record<string, unknown>;
-    /** Threads the desktop request / Edge Function operation / provider call
-     * together. See `_shared/remote/correlation.ts`. Optional only for call
-     * sites (background reconciliation, admin actions with their own
-     * identifier scheme) that do not have an inbound HTTP request. */
-    correlationId?: string | null;
-    providerRequestId?: string | null;
-    idempotencyKey?: string | null;
-    durationMs?: number | null;
-    severity?: RemoteAuditSeverity;
-  },
-): Promise<void> {
-  const severity = params.severity ?? inferSeverity(params.eventType);
+export async function recordAuditEvent(supabase: SupabaseClient, params: AuditEvent): Promise<void> {
+  // A `_failed` event is an error without the caller saying so; forgetting
+  // would drop the row out of `remote_recent_failures`.
+  const severity = params.severity ?? (params.eventType.endsWith("_failed") ? "error" : "info");
   const { error } = await supabase.from("remote_audit_events").insert({
     owner_user_id: params.ownerUserId,
     instance_id: params.instanceId ?? null,
@@ -104,9 +114,15 @@ export async function recordAuditEvent(
   }
 }
 
-/** Small timing helper so call sites recording an operation's duration don't
- * each hand-roll `Date.now()` bookkeeping (PRD: "idempotency key and
- * operation duration"). */
+/** Binds the fields every event of one request shares. */
+export function auditFor(
+  supabase: SupabaseClient,
+  base: Omit<AuditEvent, "eventType">,
+): (eventType: RemoteAuditEventType, more?: Partial<AuditEvent>) => Promise<void> {
+  return (eventType, more) => recordAuditEvent(supabase, { ...base, eventType, ...more });
+}
+
+/** Milliseconds since the call, for an event's `durationMs`. */
 export function startTimer(): () => number {
   const start = Date.now();
   return () => Date.now() - start;

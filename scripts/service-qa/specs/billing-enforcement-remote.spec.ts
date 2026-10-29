@@ -6,7 +6,7 @@
  * Runs `remote-instance/lib.ts` and `_shared/remote/lapse-sweep.ts` in this
  * process with the service-role client, so has_pro, remote_instances and the
  * lapse functions in 027_billing_enforcement.sql are the real ones. The
- * provider is the in-memory Sprites stub, as with TREQ_REMOTE_SPRITES_STUB=1.
+ * provider is the in-memory LocalProvider, as with TREQ_REMOTE_PROVIDER_STUB=1.
  * Pro comes from the billing write functions (../billing.ts).
  */
 import { randomUUID } from "node:crypto";
@@ -19,7 +19,7 @@ import {
   supabaseLapseSweepStore,
   sweepLapsedInstances,
 } from "../../../supabase/functions/_shared/remote/lapse-sweep";
-import { StubSpritesProvider } from "../../../supabase/functions/_shared/remote/stub-sprites-adapter";
+import { LocalProvider } from "../../../supabase/functions/_shared/remote/local-provider";
 import { handleRemoteInstanceAction } from "../../../supabase/functions/remote-instance/lib";
 import { clearBilling, endPro, grantPro } from "../billing";
 import { getServiceClient } from "../clients";
@@ -37,7 +37,7 @@ async function call(userId: string, action: string, body: Record<string, unknown
       correlationId: `sqa-${randomUUID()}`,
       hasPro: () => userHasPro(admin, userId),
       stub: true,
-      provider: () => new StubSpritesProvider(),
+      provider: (kind) => new LocalProvider(kind),
     },
   );
   return {
@@ -49,7 +49,7 @@ async function call(userId: string, action: string, body: Record<string, unknown
 function sweep() {
   return sweepLapsedInstances({
     store: supabaseLapseSweepStore(admin, `sqa-sweep-${randomUUID()}`),
-    provider: new StubSpritesProvider(),
+    providers: (kind) => new LocalProvider(kind),
     now: () => new Date(),
     log: () => {},
   });

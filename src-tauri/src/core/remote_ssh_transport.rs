@@ -1662,7 +1662,7 @@ mod tests {
       id: "endpoint-1".to_string(),
       instance_id: Some("instance-1".to_string()),
       source: SshEndpointSource::Managed {
-        provider: "fly_sprites".to_string(),
+        provider: "boat".to_string(),
         generation,
       },
       hostname: hostname.to_string(),
@@ -3368,7 +3368,7 @@ mod tests {
     let managed = SshEndpoint {
       id: "managed-endpoint".to_string(),
       source: SshEndpointSource::Managed {
-        provider: "fly_sprites".to_string(),
+        provider: "boat".to_string(),
         generation: 1,
       },
       ..user_endpoint.clone()

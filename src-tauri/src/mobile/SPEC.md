@@ -405,7 +405,7 @@ After a connect, a repo change or a screen change, the snapshot is saved, but on
 - **`remote-ssh-trust`** (server: remote-ssh-trust/index.ts):
   - `register_client_key {public_key, comment, idempotency_key}` (lines 182-230) → `{operation_id, status, key}`. An idempotent replay returns `{..., keys:[...]}`; the client then picks the key whose `comment` matches, else the first (`remote-control-plane.ts:147-161`).
   - `ClientKey` = `{id, algorithm, fingerprint_sha256, comment, created_at, revoked_at}`.
-  - `issue_certificate {instance_id, key_id, renewal?: true}` (lines 305-429) → `{certificate, serial, expires_at (ISO), endpoint: SshEndpoint}`. The endpoint has `source {type:"managed", provider:"fly_sprites", generation}`, `authentication {type:"certificate", key_reference: <key id>}` (replaced locally) and `transport {type:"relay", url: <relay url with endpoint_id & key_id>}`.
+  - `issue_certificate {instance_id, key_id, renewal?: true}` (lines 305-429) → `{certificate, serial, expires_at (ISO), endpoint: SshEndpoint}`. The endpoint has `source {type:"managed", provider: <instance provider_kind, e.g. "boat">, generation}`, `authentication {type:"certificate", key_reference: <key id>}` (replaced locally) and `transport {type:"relay", url: <relay url with endpoint_id & key_id>}`.
   - Certificates last 20 minutes (line 67), ed25519 only.
   - Errors: 404 "Instance/Key/Endpoint does not belong to this user", 409 "Instance is not ready (status: X)" / "Key has been revoked" / "Instance has no endpoint recorded yet".
   - `report_cutoff {instance_id, endpoint_id, reason}` → `{status}`. Best-effort audit.

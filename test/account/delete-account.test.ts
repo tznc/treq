@@ -4,7 +4,7 @@ import {
   StripeApiError,
   type StripeClient,
 } from "../../supabase/functions/_shared/billing/stripe-api.ts";
-import type { ManagedComputeProvider } from "../../supabase/functions/_shared/remote/sprites-adapter.ts";
+import type { ManagedComputeProvider } from "../../supabase/functions/_shared/remote/provider.ts";
 import {
   type DeleteAccountDeps,
   type DeleteAccountStore,
@@ -14,7 +14,11 @@ import {
 const ME = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
 
-type Instance = { id: string; provider_resource_id: string | null };
+type Instance = {
+  id: string;
+  provider_kind: string;
+  provider_resource_id: string | null;
+};
 
 function fakeStore(
   seed: {
@@ -22,6 +26,7 @@ function fakeStore(
     instances?: Instance[];
     linearToken?: string | null;
     lastOwnerOf?: { id: string; name: string }[];
+    placements?: Record<string, { id: string; provider_kind: "boat"; provider_resource_id: string | null }[]>;
   } = {},
 ) {
   const log: string[] = [];
@@ -35,6 +40,9 @@ function fakeStore(
     },
     async liveInstances() {
       return instances.filter((i) => !log.includes(`instance-deleted:${i.id}`));
+    },
+    async livePlacements(instanceId) {
+      return seed.placements?.[instanceId] ?? [];
     },
     async markInstanceDeleted(id) {
       log.push(`instance-deleted:${id}`);
@@ -102,6 +110,25 @@ function deps(
   };
 }
 
+describe("deleteAccount mid-migration", () => {
+  it("deletes the candidate machine of an open migration, not only the active one", async () => {
+    const { store, log } = fakeStore({
+      instances: [{ id: "inst-1", provider_kind: "boat", provider_resource_id: "m-active" }],
+      placements: {
+        "inst-1": [
+          { id: "pl-a", provider_kind: "boat", provider_resource_id: "m-active" },
+          { id: "pl-b", provider_kind: "boat", provider_resource_id: "m-candidate" },
+        ],
+      },
+    });
+    const { provider, deleted } = fakeProvider();
+    const result = await deleteAccount(deps({ store, provider: () => provider }));
+    expect(result.status).toBe(200);
+    expect(deleted.sort()).toEqual(["m-active", "m-candidate"]);
+    expect(log).toContain("instance-deleted:inst-1");
+  });
+});
+
 describe("deleteAccount authorization", () => {
   it("rejects a request without a bearer token", async () => {
     const { store, log } = fakeStore();
@@ -149,7 +176,13 @@ describe("deleteAccount organization ownership", () => {
   it("refuses while the user is the last owner of any organization", async () => {
     const { store, log } = fakeStore({
       subscriptions: ["sub_a"],
-      instances: [{ id: "inst-1", provider_resource_id: "dev-treq-1" }],
+      instances: [
+        {
+          id: "inst-1",
+          provider_kind: "boat",
+          provider_resource_id: "dev-treq-1",
+        },
+      ],
       linearToken: "lin_oauth_abc",
       lastOwnerOf: [
         { id: "org-1", name: "Acme" },
@@ -249,8 +282,12 @@ describe("deleteAccount cleanup", () => {
   it("destroys cloud workspace machines and marks them deleted", async () => {
     const { store, log } = fakeStore({
       instances: [
-        { id: "inst-1", provider_resource_id: "dev-treq-1" },
-        { id: "inst-2", provider_resource_id: null },
+        {
+          id: "inst-1",
+          provider_kind: "boat",
+          provider_resource_id: "dev-treq-1",
+        },
+        { id: "inst-2", provider_kind: "boat", provider_resource_id: null },
       ],
     });
     const { provider, deleted } = fakeProvider();
@@ -267,9 +304,42 @@ describe("deleteAccount cleanup", () => {
     ]);
   });
 
+  it("destroys each machine through its own provider", async () => {
+    const { store } = fakeStore({
+      instances: [
+        { id: "inst-1", provider_kind: "boat", provider_resource_id: "boat-1" },
+        {
+          id: "inst-2",
+          provider_kind: "daytona",
+          provider_resource_id: "daytona-1",
+        },
+      ],
+    });
+    const { provider, deleted } = fakeProvider();
+    const kinds: string[] = [];
+    const result = await deleteAccount(
+      deps({
+        store,
+        provider: (kind) => {
+          kinds.push(kind);
+          return provider;
+        },
+      }),
+    );
+    expect(result.status).toBe(200);
+    expect(kinds).toEqual(["boat", "daytona"]);
+    expect(deleted).toEqual(["boat-1", "daytona-1"]);
+  });
+
   it("keeps the account when a machine cannot be destroyed", async () => {
     const { store, log } = fakeStore({
-      instances: [{ id: "inst-1", provider_resource_id: "dev-treq-1" }],
+      instances: [
+        {
+          id: "inst-1",
+          provider_kind: "boat",
+          provider_resource_id: "dev-treq-1",
+        },
+      ],
     });
     const { provider } = fakeProvider(true);
     const result = await deleteAccount(

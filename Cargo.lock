@@ -12632,6 +12632,7 @@ dependencies = [
  "android_logger",
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "clap",
@@ -12688,6 +12689,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "treq-gateway",
  "treq-ui",
  "two-face",
  "url",
@@ -12696,6 +12698,21 @@ dependencies = [
  "vt100",
  "webpki-roots 1.0.11",
  "wiremock",
+]
+
+[[package]]
+name = "treq-gateway"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "hex",
+ "hmac 0.12.1",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]

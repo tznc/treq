@@ -626,7 +626,7 @@ fn setup_dialog_runs_the_cloud_workspace_flows_in_rust(cx: &mut TestAppContext) 
   h.click("cloud-create");
 
   let failed = serde_json::json!({
-    "instance": { "status": "failed", "providerResourceId": "sprite-1", "diskQuotaGb": 10 },
+    "instance": { "status": "failed", "providerResourceId": "machine-1", "diskQuotaGb": 10 },
     "endpoint": { "username": "treq", "hostname": "vm.example", "port": 22 },
   });
   h.set_account(account_state(
@@ -643,7 +643,7 @@ fn setup_dialog_runs_the_cloud_workspace_flows_in_rust(cx: &mut TestAppContext) 
   assert!(!h.drawn("cloud-delete-dialog"));
 
   let ready = serde_json::json!({
-    "instance": { "status": "ready", "providerResourceId": "sprite-1", "diskQuotaGb": 10 },
+    "instance": { "status": "ready", "providerResourceId": "machine-1", "diskQuotaGb": 10 },
     "endpoint": { "username": "treq", "hostname": "vm.example", "port": 22 },
   });
   h.set_account(account_state(

@@ -65,6 +65,8 @@ pub(crate) fn cloud_route(cloud: &CloudWorkspace) -> CloudRoute {
         status: i.status.clone(),
         provider_resource_id: i.provider_resource_id.clone(),
         disk_quota_gb: i.disk_quota_gb,
+        tier_id: i.tier_id.clone(),
+        region: i.region.clone(),
       }),
     endpoint: status
       .and_then(|s| s.endpoint_summary())
@@ -82,6 +84,68 @@ pub(crate) fn cloud_route(cloud: &CloudWorkspace) -> CloudRoute {
     }),
     usage_error: cloud.usage_error.clone(),
     submitting: cloud.submitting,
+    tiers: cloud.catalog.clone().unwrap_or_default(),
+    selected_tier: cloud.selected_tier.clone(),
+    billing: cloud.billing,
+    resize_preflight: cloud.resize_preflight.clone(),
+    activity: cloud.activity.clone(),
+    spend: cloud.spend.clone(),
+    spend_cap_error: cloud.spend_cap_error.clone(),
+    notifications: cloud.notifications.clone(),
+    provider_keys: cloud.provider_keys.clone(),
+    provider_key_saving: cloud.provider_key_saving,
+    provider_key_error: cloud.provider_key_error.clone(),
+    byos_catalog: cloud.byos_catalog.clone(),
+    selected_provider: cloud.selected_provider.clone(),
+  }
+}
+
+/// The cloud card's size and resize buttons, which every view that draws
+/// the card forwards to Rust alike.
+pub fn cloud_press(id: &str) -> Option<CloudAction> {
+  match id {
+    "cloud.resize" => Some(CloudAction::Resize {
+      acknowledged_data_loss: false,
+    }),
+    "cloud.resize.confirm" => Some(CloudAction::Resize {
+      acknowledged_data_loss: true,
+    }),
+    "cloud.resize.cancel" => Some(CloudAction::CancelResize),
+    "cloud.placement.managed" => Some(CloudAction::SelectProvider { kind: None }),
+    _ if id.starts_with("cloud.placement.") => Some(CloudAction::SelectProvider {
+      kind: Some(
+        id.strip_prefix("cloud.placement.")
+          .unwrap_or_default()
+          .to_string(),
+      ),
+    }),
+    _ if id.starts_with("cloud.process.") => process_press(id),
+    _ if id.starts_with("cloud.notification.dismiss.") => Some(CloudAction::DismissNotification {
+      id: id
+        .strip_prefix("cloud.notification.dismiss.")
+        .unwrap_or_default()
+        .to_string(),
+    }),
+    _ => id
+      .strip_prefix("cloud.tier.")
+      .map(|tier_id| CloudAction::SelectTier {
+        tier_id: tier_id.to_string(),
+      }),
+  }
+}
+
+/// `cloud.process.kill.<pid>`, `cloud.process.pin.<pid>` and
+/// `cloud.process.unpin.<pin id>`.
+fn process_press(id: &str) -> Option<CloudAction> {
+  let rest = id.strip_prefix("cloud.process.")?;
+  let (verb, arg) = rest.split_once('.')?;
+  match verb {
+    "kill" => arg.parse().ok().map(|pid| CloudAction::KillProcess { pid }),
+    "pin" => arg.parse().ok().map(|pid| CloudAction::PinProcess { pid }),
+    "unpin" => Some(CloudAction::UnpinProcess {
+      pin_id: arg.to_string(),
+    }),
+    _ => None,
   }
 }
 

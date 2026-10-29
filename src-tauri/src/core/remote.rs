@@ -18,12 +18,8 @@ pub struct RemoteReadinessCheck {
   pub available: bool,
   pub detail: String,
   /// Distinct structured error code for this check, when it failed for a
-  /// reason more specific than "unavailable" (PRD "Resource quotas": quota
-  /// failures "must be a distinct, structured readiness or mutation error
-  /// so the UI can explain the quota rather than surfacing a generic
-  /// filesystem or provider failure"). `None` for ordinary binary-presence
-  /// checks; `Some("disk_quota_exceeded")` when the base disk quota check
-  /// fails.
+  /// reason more specific than "unavailable". `None` for ordinary
+  /// binary-presence checks.
   #[serde(skip_serializing_if = "Option::is_none", default)]
   pub code: Option<String>,
 }
@@ -239,8 +235,7 @@ pub enum TreqCommandRequest {
     workspace: Option<String>,
   },
   /// Totals for every repository under `root` on the machine: repository
-  /// and workspace counts plus the bytes they occupy (the same figure the
-  /// disk quota is enforced against). See [`MachineUsageReport`].
+  /// and workspace counts plus the bytes they occupy. See [`MachineUsageReport`].
   MachineUsage {
     root: String,
   },
@@ -2375,36 +2370,6 @@ mod tests {
   }
 
   #[test]
-  fn enforce_disk_quota_passes_under_the_limit() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("a.txt"), vec![0u8; 10]).unwrap();
-    assert!(enforce_disk_quota_against(dir.path(), 100).is_ok());
-  }
-
-  #[test]
-  fn enforce_disk_quota_returns_distinct_structured_error_over_the_limit() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("a.txt"), vec![0u8; 10]).unwrap();
-    let error = enforce_disk_quota_against(dir.path(), 5).unwrap_err();
-    assert!(
-      error.starts_with("disk_quota_exceeded: "),
-      "expected a distinct disk_quota_exceeded error, got: {error}"
-    );
-  }
-
-  #[test]
-  fn enforce_disk_quota_falls_back_to_parent_for_a_not_yet_created_path() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("existing.bin"), vec![0u8; 10]).unwrap();
-    let not_yet_created = dir.path().join("new-repo");
-    // The target path doesn't exist yet (this is `init_repo_path`'s case),
-    // so usage is measured from its parent instead of failing the walk.
-    let error = enforce_disk_quota_against(&not_yet_created, 5).unwrap_err();
-    assert!(error.starts_with("disk_quota_exceeded: "));
-    assert!(enforce_disk_quota_against(&not_yet_created, 100).is_ok());
-  }
-
-  #[test]
   fn quotes_remote_paths_with_single_quotes() {
     assert_eq!(shell_quote("/tmp/a b/it's"), "'/tmp/a b/it'\\''s'");
   }
@@ -3468,7 +3433,7 @@ mod tests {
   #[test]
   fn machine_usage_is_a_read_only_repo_cli_command() {
     let request = TreqCommandRequest::MachineUsage {
-      root: "/home/sprite/repos".into(),
+      root: "/home/treq/repos".into(),
     };
 
     assert!(!request.is_mutation());
@@ -3478,7 +3443,7 @@ mod tests {
         "repo",
         "usage",
         "--repo",
-        "/home/sprite/repos",
+        "/home/treq/repos",
         "--format",
         "json"
       ]
