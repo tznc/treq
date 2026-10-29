@@ -1,6 +1,6 @@
 use super::{
-  convert_to_jj_branch_format, get_full_workspace_path, passes_guard,
-  resolve_bookmark_conflict_if_needed, AutoRebaseResult, WorkspaceBookmarkConflict,
+  convert_to_jj_branch_format, fast_forward_branch_without_commits, get_full_workspace_path,
+  passes_guard, resolve_bookmark_conflict_if_needed, AutoRebaseResult, WorkspaceBookmarkConflict,
 };
 use crate::jj::{self, JjRebaseResult};
 use crate::local_db::{self, Workspace};
@@ -140,6 +140,29 @@ pub fn rebase_root_subtree_from_workspace_force(
         workspace.workspace_name, e
       ));
       continue;
+    }
+
+    let jj_target = convert_to_jj_branch_format(&target_branch, repo_path);
+    match fast_forward_branch_without_commits(
+      &full_path,
+      &workspace.branch_name,
+      &jj_target,
+      conflict_marker_style,
+    ) {
+      Ok(false) => {}
+      Ok(true) => {
+        workspace_branches.push(workspace.branch_name.clone());
+        combined_messages.push(format!(
+          "Workspace '{}': moved up to '{}'",
+          workspace.workspace_name, target_branch
+        ));
+        continue;
+      }
+      Err(e) => {
+        all_success = false;
+        combined_messages.push(format!("Workspace '{}': {}", workspace.workspace_name, e));
+        continue;
+      }
     }
 
     match jj::jj_rebase_workspace_bookmark_onto_deferred_checkout(

@@ -3085,6 +3085,29 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
       commits_to_move.insert(0, wc_commit.id().clone());
     }
   }
+  // Everything stacked on the branch tip moves with it: child workspaces sit
+  // on this branch's bookmark, and a commit set move would otherwise
+  // reparent them onto the lineage's old base. Children first, as
+  // `compute_move_commits` expects.
+  // A branch with no commits of its own has its tip on the shared base, so
+  // nothing above it is its own stack.
+  let stacked = if branch_only_commits.is_empty() {
+    Vec::new()
+  } else {
+    evaluate_revset(
+      &loaded,
+      &format!("{0}:: ~ {0}", workspace_tip_commit.id().hex()),
+    )?
+    .iter()
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| JjError::IoError(format!("Failed to find stacked commits: {}", e)))?
+  };
+  let mut with_stacked: Vec<_> = stacked
+    .into_iter()
+    .filter(|id| !commits_to_move.contains(id))
+    .collect();
+  with_stacked.append(&mut commits_to_move);
+  commits_to_move = with_stacked;
   // Other working copies sitting on moved commits move with them: the home
   // repo on the branch this workspace is stacked on, and stacked workspaces
   // with no commits yet, which chain on each other's working copies. Left
@@ -3148,6 +3171,14 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
       e
     ))
   })?;
+  // A branch with no commits of its own moves up to the target: its
+  // bookmark stays below the working copy, which just moved there.
+  if branch_only_commits.is_empty() {
+    tx.repo_mut().set_local_bookmark_target(
+      RefName::new(workspace_branch),
+      RefTarget::normal(target_commit.id().clone()),
+    );
+  }
 
   git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
@@ -3749,8 +3780,11 @@ pub fn jj_resolve_bookmark_conflict_losslessly(
       .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {e}")))?;
   } else {
     let workspace_name = loaded.workspace.workspace_name().to_owned();
-    block_on(tx.repo_mut().edit(workspace_name, &target))
+    // Above the target, never on it: edits there would move the bookmark.
+    block_on(tx.repo_mut().check_out(workspace_name, &target))
       .map_err(|e| JjError::IoError(format!("Failed to move working copy to target: {e}")))?;
+    block_on(tx.repo_mut().rebase_descendants())
+      .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {e}")))?;
   }
 
   let workspace_name = loaded.workspace.workspace_name().to_owned();
@@ -5534,6 +5568,7 @@ mod tests {
       "fix/concurrent",
       &workspace_name,
       &expected,
+      &expected,
     )
     .expect("registered target should resolve conflict");
 
@@ -5596,6 +5631,7 @@ mod tests {
       &base.workspace,
       "fix/ambiguous",
       &workspace_name,
+      &expected,
       &expected,
     )
     .expect_err("unrelated conflict must not be guessed");

@@ -1,10 +1,11 @@
 use super::{
-  convert_to_jj_branch_format, get_full_workspace_path, passes_guard,
-  resolve_bookmark_conflict_if_needed, AutoRebaseResult, WorkspaceBookmarkConflict,
+  convert_to_jj_branch_format, fast_forward_branch_without_commits, get_full_workspace_path,
+  passes_guard, resolve_bookmark_conflict_if_needed, AutoRebaseResult, WorkspaceBookmarkConflict,
   OTHER_WORKING_COPIES,
 };
 use crate::jj::{self, JjRebaseResult};
 use crate::local_db::{self, Workspace};
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 
 /// Check and rebase all workspaces in the repo, grouped by target branch
@@ -98,6 +99,34 @@ pub fn check_and_rebase_all(
           workspace.workspace_name, e
         ));
         continue;
+      }
+
+      match fast_forward_branch_without_commits(
+        &full_path,
+        &workspace.branch_name,
+        &jj_target_branch,
+        conflict_marker_style,
+      ) {
+        Ok(false) => {}
+        Ok(true) => {
+          workspace_branches.push(workspace.branch_name.clone());
+          combined_messages.push(format!(
+            "Workspace '{}': moved up to '{}'",
+            workspace.workspace_name, target_branch
+          ));
+          local_db::update_workspace_last_rebased_commit(
+            repo_path,
+            workspace.id,
+            &current_target_commit,
+          )
+          .warn_on_err("update workspace last rebased commit");
+          continue;
+        }
+        Err(e) => {
+          all_success = false;
+          combined_messages.push(format!("Workspace '{}': {}", workspace.workspace_name, e));
+          continue;
+        }
       }
 
       // Rebase using roots() from workspace dir and only committed bookmark history.

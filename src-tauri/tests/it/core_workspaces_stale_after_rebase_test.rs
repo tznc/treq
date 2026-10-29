@@ -512,13 +512,12 @@ fn test_auto_rebase_does_not_leave_stale_working_copy_on_stacked_workspaces() {
   }
 }
 
-// ─── test 7: commits stacked on a carried working copy ──────────────────────
+// ─── test 7: commits stacked on a moved bookmark ────────────────────────────
 
-/// A rebase carries another workspace's working copy along when it sits on the
-/// moved lineage. When commits sit on top of that working copy, moving it alone
-/// would split them off it, so the stack stays together.
+/// A rebase carries everything stacked on the moved branch: C sits on B's
+/// bookmark, which sits on A's tip, so the whole stack moves together.
 #[test]
-fn lineage_rebase_keeps_commits_on_their_stacked_working_copy() {
+fn lineage_rebase_keeps_stacked_commits_on_their_parent_bookmark() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let default_branch = repo.default_branch().to_string();
   let ws_a = repo
@@ -560,8 +559,8 @@ fn lineage_rebase_keeps_commits_on_their_stacked_working_copy() {
   );
   assert_eq!(
     jj::jj_get_commit_id(&c_path, "@--").expect("C base"),
-    workspace_wc_commit(&b_path),
-    "C's commit should stay on B's working copy"
+    jj::jj_get_commit_id(&b_path, &ws_b.branch_name).expect("B bookmark"),
+    "C's commit should stay on B's bookmark"
   );
 }
 
