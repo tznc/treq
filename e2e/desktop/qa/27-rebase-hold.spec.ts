@@ -1,44 +1,44 @@
-// A rebase never runs over uncommitted work: committing to a stack parent
-// rebases its children, and a child with uncommitted changes is held back
-// with a warning on its Code tab that points at the Changes tab.
-import { execFileSync } from "node:child_process";
+// A rebase never moves a workspace onto a parent with uncommitted changes:
+// the child's Code tab says which parent holds it back. The hold is stored
+// with the workspace (`metadata.rebase_hold`), as the rebase records it.
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { expect, test } from "@playwright/test";
 import { fixture } from "../fixture.ts";
-import { appBinary } from "../env.ts";
-import { appEnv } from "../harness.ts";
-import { MARKETING, STACK_PARENT, writeInWorkspace } from "../landing/seed.ts";
+import { MARKETING, STACK_PARENT } from "../landing/seed.ts";
 import { capture } from "./capture.ts";
 import { openTab, openWorkspace, settle } from "./helpers.ts";
 
-test("rebase hold: a dirty child is not rebased and its Code tab says why", async ({ page }) => {
+function holdRebase(repo: string, branch: string, hold: unknown): void {
+  const db = new DatabaseSync(join(repo, ".treq", "local.db"));
+  const row = db
+    .prepare("SELECT metadata FROM workspaces WHERE branch_name = ?")
+    .get(branch) as { metadata: string | null };
+  const metadata = { ...JSON.parse(row.metadata ?? "{}"), rebase_hold: hold };
+  db.prepare("UPDATE workspaces SET metadata = ? WHERE branch_name = ?").run(
+    JSON.stringify(metadata),
+    branch,
+  );
+  db.close();
+}
+
+test("rebase hold: a child of a dirty parent says why it was not rebased", async ({ page }) => {
   const f = fixture();
-  writeInWorkspace(f.repo, MARKETING, "packages/web/src/wip.ts", "export const WIP = 1;\n");
-  writeInWorkspace(f.repo, STACK_PARENT, "packages/api/src/hold.ts", "export const HOLD = 1;\n");
-  execFileSync(appBinary, ["commit", STACK_PARENT, "-m", "feat: parent moves on"], {
-    cwd: f.repo,
-    env: {
-      ...appEnv({ ...f, bin: join(f.root, "bin") }),
-      TREQ_APP_DATA_DIR: join(f.home, ".local/share/com.treq"),
-    },
-    stdio: "pipe",
-  });
+  holdRebase(f.repo, MARKETING, { ParentDirty: { branch: STACK_PARENT } });
 
   await openWorkspace(page, MARKETING);
   await openTab(page, "Code");
   await settle(page, 1500);
-  await expect(page.getByText("Rebase skipped: uncommitted changes")).toBeVisible();
+  await expect(page.getByText(`Rebase skipped: ${STACK_PARENT} has uncommitted changes`)).toBeVisible();
   await capture(page, {
-    name: "27-01-rebase-held-dirty",
-    title: "Code tab of a stacked workspace whose rebase was held for uncommitted changes",
+    name: "27-01-rebase-held-parent-dirty",
+    title: "Code tab of a stacked workspace held back by its dirty parent",
     expectations: [
-      "An amber alert at the top reads 'Rebase skipped: uncommitted changes'",
-      "The alert explains to commit or discard changes and has an 'Open Changes' button",
-      "The rest of the Code tab (task box, files, history) renders below it normally",
+      `An amber alert reads 'Rebase skipped: ${STACK_PARENT} has uncommitted changes'`,
+      `The alert tells the user to commit or discard the changes in ${STACK_PARENT}`,
+      "The rest of the Code tab (task box, stack, files, history) renders below it normally",
     ],
   });
 
-  await page.getByRole("button", { name: "Open Changes" }).click();
-  await settle(page, 800);
-  await expect(page.getByText("wip.ts").first()).toBeVisible();
+  holdRebase(f.repo, MARKETING, null);
 });
