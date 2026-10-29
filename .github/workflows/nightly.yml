@@ -267,10 +267,16 @@ jobs:
             cp "$aab" "$GITHUB_WORKSPACE/treq-nightly-android.aab"
             curl -fsSL -o "$RUNNER_TEMP/bundletool.jar" \
               https://github.com/google/bundletool/releases/download/1.18.1/bundletool-all-1.18.1.jar
+            # bundletool takes only `pass:` or `file:` passwords; a file keeps
+            # the secret out of the process arguments.
+            ks_pass=$RUNNER_TEMP/ks-pass
+            (umask 077; printf '%s' "$ANDROID_KEYSTORE_PASSWORD" > "$ks_pass")
+            trap 'rm -f "$ks_pass"' EXIT
             java -jar "$RUNNER_TEMP/bundletool.jar" build-apks --mode=universal \
               --bundle="$aab" --output="$RUNNER_TEMP/treq.apks" \
               --ks=src-tauri/gen/android/upload.jks --ks-key-alias="$ANDROID_KEY_ALIAS" \
-              --ks-pass=env:ANDROID_KEYSTORE_PASSWORD --key-pass=env:ANDROID_KEYSTORE_PASSWORD
+              --ks-pass="file:$ks_pass" --key-pass="file:$ks_pass"
+            rm -f "$ks_pass"
             unzip -o -q "$RUNNER_TEMP/treq.apks" universal.apk -d "$RUNNER_TEMP"
             apk=$RUNNER_TEMP/universal.apk
           else
