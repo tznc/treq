@@ -2340,19 +2340,12 @@ impl ChangesView {
     let active = self.active.as_deref() == Some(path.as_str());
     let (name, dir) = split_path(path);
     let file = path.clone();
-    let row = div()
-      .id(SharedString::from(format!("conflict-row-{path}")))
-      .debug_selector({
-        let id = format!("conflict-row-{path}");
-        move || id
-      })
-      .py_1()
-      .flex()
-      .items_center()
+    let row = ui::Row::new(SharedString::from(format!("conflict-row-{path}")), p)
+      .label(path.clone())
+      .selected(active)
       .gap_1()
-      .cursor_pointer()
-      .when(active, |this| this.bg(p.selected()))
-      .when(!active, |this| this.hover(move |s| s.bg(p.hover())))
+      .px_0()
+      .rounded_none()
       .child(
         div()
           .ml_1()
@@ -2377,7 +2370,7 @@ impl ChangesView {
             )
           }),
       )
-      .child(div().mr_1().child(ui::Dot::new(Tone::Danger, p)))
+      .trailing(div().mr_1().child(ui::Dot::new(Tone::Danger, p)))
       .on_click(cx.listener(move |view, _, _, cx| view.show_file(&file, cx)));
     div().when(i == 0, |this| this.pt_2()).child(row)
   }
@@ -2614,50 +2607,50 @@ impl ChangesView {
     let dimmed = self.viewed.contains_key(&file.path);
     let path = file.path.clone();
     let menu = file.path.clone();
-    let row = div()
-      .id(SharedString::from(format!("committed-row-{}", file.path)))
-      .py_1()
-      .flex()
-      .items_center()
-      .gap_1()
-      .cursor_pointer()
-      .border_l_2()
-      .border_color(gpui::transparent_black())
-      .hover(move |s| s.bg(p.hover()))
-      .child(
-        div()
-          .ml_1()
-          .flex_1()
-          .flex()
-          .items_center()
-          .gap_2()
-          .min_w_0()
-          .child(
-            div()
-              .font_weight(FontWeight::MEDIUM)
+    let row = ui::Row::new(
+      SharedString::from(format!("committed-row-{}", file.path)),
+      p,
+    )
+    .label(file.path.clone())
+    .selected(active)
+    .gap_1()
+    .px_0()
+    .rounded_none()
+    .border_l_2()
+    .border_color(gpui::transparent_black())
+    .child(
+      div()
+        .ml_1()
+        .flex_1()
+        .flex()
+        .items_center()
+        .gap_2()
+        .min_w_0()
+        .child(
+          div()
+            .font_weight(FontWeight::MEDIUM)
+            .truncate()
+            .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
+            .child(name),
+        )
+        .when_some(dir, |this, dir| {
+          this.child(
+            ui::text(div(), TextSize::Xs)
+              .flex_1()
               .truncate()
-              .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
-              .when(active, |this| this.text_color(p.primary))
-              .child(name),
+              .text_color(p.muted_foreground.opacity(0.6))
+              .child(dir),
           )
-          .when_some(dir, |this, dir| {
-            this.child(
-              ui::text(div(), TextSize::Xs)
-                .flex_1()
-                .truncate()
-                .text_color(p.muted_foreground.opacity(0.6))
-                .child(dir),
-            )
-          }),
-      )
-      .child(div().text_color(muted).child(file.status))
-      .on_mouse_down(
-        MouseButton::Right,
-        cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
-          view.file_menu(&menu, false, e.position, cx);
         }),
-      )
-      .on_click(cx.listener(move |view, _, _, cx| view.show_file(&path, cx)));
+    )
+    .trailing(div().text_color(muted).child(file.status))
+    .on_mouse_down(
+      MouseButton::Right,
+      cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
+        view.file_menu(&menu, false, e.position, cx);
+      }),
+    )
+    .on_click(cx.listener(move |view, _, _, cx| view.show_file(&path, cx)));
     div().when(i == 0, |this| this.pt_2()).child(row)
   }
 
@@ -2692,24 +2685,11 @@ impl ChangesView {
     // Viewed files fade back, like GitHub's file tree.
     let dimmed = self.viewed.contains_key(&file.path) && !selected;
     let (name, dir) = split_path(&file.path);
-    let tint = p.selected();
     let path = file.path.clone();
     let name_color = p.foreground;
     let dir_color = p.muted_foreground.opacity(0.6);
-    let small = |id: String, icon: &'static str, fg: Hsla, hidden: bool| {
-      let selector = id.clone();
-      div()
-        .id(SharedString::from(id))
-        .debug_selector(move || selector)
-        .p_0p5()
-        .rounded(radius::SM)
-        .cursor_pointer()
-        .when(hidden, |this| {
-          this.opacity(0.).group_hover("file-row", |s| s.opacity(1.))
-        })
-        .hover(move |s| s.bg(p.hover()))
-        .child(ui::icon(icon, 12., fg))
-    };
+    let small =
+      |id: String, icon: &'static str, fg: Hsla, hidden: bool| file_action(id, icon, fg, hidden, p);
     let red = Tone::Danger.text(p);
     let status_color = p.muted_foreground;
     let mut actions = div().flex().items_center().gap_1().flex_none().child(
@@ -2762,70 +2742,67 @@ impl ChangesView {
       actions = actions.child(self.tip(tip_key, "Unstage file", el, cx));
     }
     let (click, menu) = (path.clone(), path);
-    div()
-      .id(SharedString::from(format!(
+    ui::Row::new(
+      SharedString::from(format!(
         "{}-row-{}",
         if staged { "selected" } else { "changes" },
         file.path
-      )))
-      .debug_selector({
-        let id = format!("file-row-{}", file.path);
-        move || id
-      })
-      .group("file-row")
-      .relative()
-      .min_w_0()
-      .py_1()
-      .flex()
-      .items_center()
-      .gap_1()
-      .cursor_pointer()
-      .border_l_2()
-      .border_color(gpui::transparent_black())
-      .when(selected || active, |this| this.bg(tint))
-      .when(selected, |this| this.font_weight(FontWeight::SEMIBOLD))
-      .when(!selected && !active, |this| {
-        this.hover(move |s| s.bg(p.hover()))
-      })
-      .child(
-        div()
-          .ml_1()
-          .flex_1()
-          .flex()
-          .items_center()
-          .gap_2()
-          .min_w_0()
-          .child(
-            div()
+      )),
+      p,
+    )
+    .debug_selector({
+      let id = format!("file-row-{}", file.path);
+      move || id
+    })
+    .label(file.path.clone())
+    .selected(selected || active)
+    .group("file-row")
+    .relative()
+    .min_w_0()
+    .gap_1()
+    .px_0()
+    .rounded_none()
+    .border_l_2()
+    .border_color(gpui::transparent_black())
+    .child(
+      div()
+        .ml_1()
+        .flex_1()
+        .flex()
+        .items_center()
+        .gap_2()
+        .min_w_0()
+        .child(
+          div()
+            .min_w_0()
+            .truncate()
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(name_color)
+            .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
+            .child(name),
+        )
+        .when_some(dir, |this, dir| {
+          this.child(
+            ui::text(div(), TextSize::Xs)
               .min_w_0()
+              .flex_1()
               .truncate()
-              .font_weight(FontWeight::MEDIUM)
-              .text_color(name_color)
-              .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
-              .child(name),
+              .text_color(dir_color)
+              .child(dir),
           )
-          .when_some(dir, |this, dir| {
-            this.child(
-              ui::text(div(), TextSize::Xs)
-                .min_w_0()
-                .flex_1()
-                .truncate()
-                .text_color(dir_color)
-                .child(dir),
-            )
-          }),
-      )
-      .child(actions)
-      .on_mouse_down(
-        MouseButton::Right,
-        cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
-          view.file_menu(&menu, !staged, e.position, cx);
         }),
-      )
-      .on_click(cx.listener(move |view, e: &gpui::ClickEvent, _, cx| {
-        let m = e.modifiers();
-        view.click_file(list, &click, m.shift, m.platform || m.control, cx);
-      }))
+    )
+    .trailing(actions)
+    .on_mouse_down(
+      MouseButton::Right,
+      cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
+        view.file_menu(&menu, !staged, e.position, cx);
+      }),
+    )
+    .on_click(cx.listener(move |view, e: &gpui::ClickEvent, _, cx| {
+      let m = e.modifiers();
+      view.click_file(list, &click, m.shift, m.platform || m.control, cx);
+    }))
   }
 
   /// `ReviewActionBar`: for now, "Start Review" on workspaces.
@@ -3608,6 +3585,29 @@ impl ChangesView {
 /// `Skeleton`: `animate-pulse rounded-md bg-primary/10`.
 fn skeleton(p: &Palette) -> Div {
   div().rounded(radius::MD).bg(p.primary.opacity(0.1))
+}
+
+/// A file row's small stage, unstage or discard button, shown on the row's
+/// hover when `hidden`.
+fn file_action(
+  id: String,
+  icon: &'static str,
+  fg: Hsla,
+  hidden: bool,
+  p: &Palette,
+) -> Stateful<Div> {
+  let selector = id.clone();
+  div()
+    .id(SharedString::from(id))
+    .debug_selector(move || selector)
+    .p_0p5()
+    .rounded(radius::SM)
+    .cursor_pointer()
+    .when(hidden, |this| {
+      this.opacity(0.).group_hover("file-row", |s| s.opacity(1.))
+    })
+    .hover(move |s| s.bg(p.hover()))
+    .child(ui::icon(icon, 12., fg))
 }
 
 /// `HunkContextLineRow`: a line read by "Show more lines".

@@ -552,7 +552,7 @@ impl CommitsView {
       Row::File(e, f) => self.file_row_at(e, f, p, cx),
       _ => div()
         .bg(p.muted.opacity(0.2))
-        .child(self.body_row(row, p, cx))
+        .child(self.body_line(row, p, cx))
         .into_any_element(),
     };
     div()
@@ -588,7 +588,7 @@ impl CommitsView {
 
   /// A row under a file's row: a hunk's header, a line, the comment box,
   /// "Load diff" or "No diff content available."
-  fn body_row(&mut self, row: Row, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+  fn body_line(&mut self, row: Row, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
     let (Row::HunkHeader(e, f, _)
     | Row::Line(e, f, ..)
     | Row::CommentBox(e, f)

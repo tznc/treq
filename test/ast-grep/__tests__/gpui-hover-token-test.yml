@@ -1,6 +1,10 @@
 id: gpui-hover-token
 valid:
   - |
+    fn f(p: &Palette) -> Div {
+      div().hover(move |s| s.bg(p.segment_hover()))
+    }
+  - |
     fn row(p: &Palette) -> Div {
       div().hover(|s| s.bg(p.hover()))
     }

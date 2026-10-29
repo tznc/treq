@@ -334,6 +334,11 @@ pub const CONTROL_SM: f32 = 24.;
 pub const CONTROL_MD: f32 = 28.;
 pub const CONTROL_LG: f32 = 32.;
 
+/// List row heights ([`crate::RowDensity`]): compact for the sidebar, file
+/// trees and menus; the default for lists in screens, dialogs and settings.
+pub const ROW_HEIGHT_COMPACT: f32 = 28.;
+pub const ROW_HEIGHT: f32 = 32.;
+
 /// gpui-bootstrap's theme in treq's tokens, at `zoom` (1.0 at 100%).
 ///
 /// Every gpui-bootstrap component the `ui` facade builds on reads it: its
@@ -483,6 +488,12 @@ impl Palette {
   /// The one selected fill: rows, toggles and open triggers.
   pub fn selected(&self) -> Hsla {
     self.primary.opacity(if self.dark { 0.22 } else { 0.12 })
+  }
+
+  /// Hover on a segment of a muted track (segmented tabs), where
+  /// [`Palette::hover`] can equal the track's own fill.
+  pub fn segment_hover(&self) -> Hsla {
+    self.foreground.opacity(if self.dark { 0.1 } else { 0.07 })
   }
 
   /// Hover on something already filled with [`Palette::selected`].
@@ -668,6 +679,20 @@ mod tests {
       assert_eq!(
         theme.button(gpui_bootstrap::Variant::Primary).color,
         theme.colors.white
+      );
+    }
+  }
+
+  #[test]
+  fn the_segment_hover_shows_on_the_muted_strip_in_both_themes() {
+    for dark in [false, true] {
+      let p = palette(dark);
+      let on_strip = p.muted.blend(p.segment_hover());
+      assert!(
+        (on_strip.l - p.muted.l).abs() > 0.03,
+        "dark={dark}: {:?} on {:?}",
+        on_strip,
+        p.muted
       );
     }
   }

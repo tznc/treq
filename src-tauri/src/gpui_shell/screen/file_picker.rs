@@ -7,10 +7,7 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{sync::Arc, time::Duration};
 
-use gpui_kit::{
-  base::TestSupportExt as _,
-  component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp},
-};
+use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, Context, Entity, EventEmitter,
   SharedString, Subscription, Task, Window,
@@ -165,24 +162,16 @@ impl Render for FilePicker {
       div()
         .children(self.results.iter().enumerate().map(|(i, path)| {
           let id = SharedString::from(format!("file-picker-item-{i}"));
-          let selector = id.to_string();
-          div()
-            .id(id)
-            .debug_selector(move || selector)
+          ui::Row::new(id, &p)
             .role(gpui::Role::ListBoxOption)
-            .aria_label(path.clone())
-            .aria_selected(i == selected)
+            .label(path.clone())
+            .selected(i == selected)
+            .density(ui::RowDensity::Default)
             .px_3()
-            .py_1p5()
             .mx_2()
             .rounded(radius::MD)
-            .flex()
-            .items_center()
             .gap_3()
-            .cursor_pointer()
-            .when(i == selected, |this| this.bg(p.accent.opacity(0.5)))
-            .when(i != selected, |this| this.hover(move |s| s.bg(p.hover())))
-            .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
+            .leading(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
             .child(
               ui::text(div(), TextSize::Sm)
                 .font_family(theme::MONO_FONT)
@@ -191,7 +180,6 @@ impl Render for FilePicker {
                 .child(path.clone()),
             )
             .on_click(cx.listener(move |picker, _, _, cx| picker.choose(i, cx)))
-            .test_support()
         }))
         .into_any_element()
     };

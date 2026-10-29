@@ -5,7 +5,7 @@ message: >
   A hover (or group_hover, active) style fills with a Palette hover token:
   `p.hover()`, or `p.selected_hover()` on a selected fill,
   `p.primary_hover()` on a solid primary control, `p.handle_hover()` on a
-  drag handle and `p.hover_on_dark()` on dark terminal and lightbox chrome.
+  drag handle, `p.segment_hover()` on a segment of a muted track and `p.hover_on_dark()` on dark terminal and lightbox chrome.
   Not a raw color, an opacity tint, a local alias or a shadow.
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"
@@ -44,6 +44,8 @@ rule:
                 pattern: $S.bg($P.primary_hover())
             - not:
                 pattern: $S.bg($P.handle_hover())
+            - not:
+                pattern: $S.bg($P.segment_hover())
         - has:
             field: function
             kind: field_expression

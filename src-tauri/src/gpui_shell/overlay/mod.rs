@@ -680,15 +680,8 @@ fn message(p: &Palette, text: &'static str) -> gpui::Div {
 
 impl Overlay {
   /// One row's content and its look, by dialog.
-  fn row(
-    &self,
-    p: &Palette,
-    index: usize,
-    selected: bool,
-    cx: &mut Context<Self>,
-  ) -> gpui::Stateful<gpui::Div> {
+  fn row(&self, p: &Palette, index: usize, selected: bool, cx: &mut Context<Self>) -> ui::Row {
     let id = SharedString::from(format!("overlay-item-{index}"));
-    let selector = id.to_string();
     // cmdk's `[cmdk-item]` is an option named by its label.
     let description = match &self.body {
       Body::Palette { commands, .. } => commands[index].description.clone(),
@@ -703,19 +696,13 @@ impl Overlay {
       } => Some(list[index].0.name.clone().into()),
       _ => None,
     };
-    let base = div()
-      .id(id)
-      .debug_selector(move || selector)
+    let base = ui::Row::new(id, p)
       .role(gpui::Role::ListBoxOption)
-      .aria_selected(selected)
-      .when_some(name, |this, name| this.aria_label(name))
+      .selected(selected)
+      .when_some(name, |this, name| this.label(name))
       .when_some(description, |this, d| this.aria_description(d))
-      .flex()
-      .items_center()
       .gap_3()
       .px_3()
-      .cursor_pointer()
-      .when(selected, |this| this.bg(p.menu_accent.opacity(0.5)))
       .on_mouse_move(cx.listener(move |this, _, _, cx| {
         // Disabled items take no pointer events.
         let disabled = matches!(
@@ -755,9 +742,7 @@ impl Overlay {
           .py_1p5()
           .mx_2()
           .rounded(radius::MD)
-          .text_color(p.foreground)
-          .when(!selected, |this| this.hover(|s| s.bg(p.hover())))
-          .child(ui::icon(command.icon, 16., p.muted_foreground))
+          .leading(ui::icon(command.icon, 16., p.muted_foreground))
           .child(two_lines(
             &command.label,
             command.description.as_deref(),
@@ -771,9 +756,7 @@ impl Overlay {
           .py_2()
           .mx_2()
           .rounded(radius::MD)
-          .when(selected, |this| this.text_color(p.foreground))
-          .when(!selected, |this| this.hover(|s| s.bg(p.hover())))
-          .child(ui::icon(theme::ICON_BRANCH, 16., p.muted_foreground))
+          .leading(ui::icon(theme::ICON_BRANCH, 16., p.muted_foreground))
           .child(two_lines(&row.branch_name, Some(&description), true))
       }
       Body::Branches {
@@ -789,9 +772,10 @@ impl Overlay {
         };
         base
           .py_2()
-          .when(selected, |this| this.text_color(p.foreground))
+          .rounded_none()
+          .interactive(!*switching)
           .when(*switching, |this| this.opacity(0.5))
-          .child(ui::icon(icon, 16., color))
+          .leading(ui::icon(icon, 16., color))
           .child(two_lines(&branch.name, None, *group == 0))
           .children(tag.map(|tag| {
             ui::text(div(), TextSize::Sm)
@@ -889,10 +873,7 @@ impl Overlay {
         .into_any_element(),
       Some(Item::Entry(index)) => {
         let selected = self.selected == Some(index);
-        self
-          .row(&p, index, selected, cx)
-          .test_support()
-          .into_any_element()
+        self.row(&p, index, selected, cx).into_any_element()
       }
       None => div().into_any_element(),
     }

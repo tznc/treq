@@ -248,21 +248,15 @@ impl Popover {
           let selected = state.selected == Some(index);
           let checked = state.spec.current.as_deref() == Some(name.as_str());
           let id = SharedString::from(format!("branch-option-{index}"));
-          let selector = id.to_string();
           state.rows.push((index, children.len()));
           children.push(
-            ui::text(div(), TextSize::Sm)
-              .id(id)
-              .debug_selector(move || selector)
+            ui::Row::new(id, &p)
+              .role(gpui::Role::ListBoxOption)
+              .label(name.clone())
+              .selected(selected)
               .px_3()
-              .py_1p5()
-              .flex()
-              .items_center()
-              .gap_2()
-              .cursor_pointer()
+              .rounded_none()
               .font_family(theme::MONO_FONT)
-              .text_color(p.foreground)
-              .when(selected, |this| this.bg(p.menu_accent.opacity(0.5)))
               .on_mouse_move(cx.listener(move |this, _, _, cx| {
                 if let super::Content::Target(state) = &mut this.content {
                   if state.selected != Some(index) {
@@ -274,7 +268,7 @@ impl Popover {
               .on_click(cx.listener(move |this, _, _, cx| this.pick_target(index, cx)))
               .child(div().flex_1().min_w_0().truncate().child(name))
               .when(checked, |this| {
-                this.child(ui::icon(theme::ICON_CHECK, 16., p.foreground))
+                this.trailing(ui::icon(theme::ICON_CHECK, 16., p.foreground))
               })
               .into_any_element(),
           );

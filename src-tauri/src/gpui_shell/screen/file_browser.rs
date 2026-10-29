@@ -1495,7 +1495,6 @@ impl FileBrowserView {
     cx: &mut Context<Self>,
   ) -> gpui::AnyElement {
     let id = SharedString::from(format!("file-tree-{}", self.rel(&entry.path)));
-    let selector = id.to_string();
     let mono = |text: &str, color: Hsla| {
       ui::text(div(), TextSize::Sm)
         .font_family(theme::MONO_FONT)
@@ -1505,19 +1504,11 @@ impl FileBrowserView {
         .child(text.to_string())
     };
     let menu_path = entry.path.clone();
-    let row = div()
-      .id(id)
-      .debug_selector(move || selector)
+    let row = ui::Row::new(id, p)
+      .label(entry.name.clone())
       .w_full()
-      .flex()
-      .items_center()
-      .gap_2()
-      .px_2()
-      .py_1()
       .pl(zpx(depth as f32 * 16. + 8.))
       .rounded(radius::MD)
-      .cursor_pointer()
-      .hover(move |s| s.bg(p.hover()))
       .on_mouse_down(
         MouseButton::Right,
         cx.listener(move |view, e: &MouseDownEvent, _, cx| {
@@ -1531,7 +1522,7 @@ impl FileBrowserView {
       let status = dir_status(&self.changed, &rel);
       let color = status.map_or(p.foreground, |s| status_tone(s).text(p));
       return row
-        .child(ui::icon(
+        .leading(ui::icon(
           if open {
             theme::ICON_FOLDER_OPEN
           } else {
@@ -1565,8 +1556,8 @@ impl FileBrowserView {
     let selected = self.selected.as_deref() == Some(entry.path.as_str());
     let primary = p.primary;
     row
-      .when(selected, |this| this.bg(primary.opacity(0.1)))
-      .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
+      .selected(selected)
+      .leading(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
       .child(mono(&entry.name, color))
       .when(count > 0, |this| {
         this.child(
@@ -1680,7 +1671,7 @@ impl FileBrowserView {
             .child(
               list(
                 self.list.clone(),
-                cx.processor(|view, ix: usize, _, cx| view.code_row(ix, cx)),
+                cx.processor(|view, ix: usize, _, cx| view.code_line(ix, cx)),
               )
               .size_full(),
             ),
@@ -1709,7 +1700,6 @@ impl FileBrowserView {
   ) -> impl IntoElement {
     let rel = self.rel(path);
     let muted = p.muted_foreground;
-    let fg = p.foreground;
     let left = div()
       .flex()
       .items_center()
@@ -1752,52 +1742,22 @@ impl FileBrowserView {
       );
     }
     if markdown {
-      let tab = |id: &'static str, icon: &'static str, label: &'static str, active: bool| {
-        let color = if active { fg } else { muted };
-        ui::text(div(), TextSize::Xs)
-          .id(id)
-          .debug_selector(move || id.into())
-          .flex()
-          .items_center()
-          .gap_1()
-          .px_2()
-          .py_0p5()
-          .rounded(radius::MD)
-          .font_weight(FontWeight::MEDIUM)
-          .cursor_pointer()
-          .text_color(color)
-          .when(active, |this| this.bg(p.background).shadow_sm())
-          .child(ui::icon(icon, 14., color))
-          .child(label)
-      };
       let file = path.to_string();
+      let view = cx.entity().downgrade();
       right = right.child(
-        div()
-          .flex()
-          .gap_0p5()
-          .p_0p5()
-          .rounded(radius::MD)
-          .bg(p.muted)
-          .child(
-            tab("markdown-code", theme::ICON_CODE, "Code", !previewing).on_click(cx.listener(
-              |view, _, _, cx| {
-                view.preview = None;
+        ui::Tabs::new("markdown-view", p)
+          .tab(ui::Tab::new("markdown-code", "Code"))
+          .tab(ui::Tab::new("markdown-preview-tab", "Preview"))
+          .selected(usize::from(previewing))
+          .on_select(move |ix, _, cx| {
+            let preview = (ix == 1).then(|| file.clone());
+            view
+              .update(cx, |view, cx| {
+                view.preview = preview;
                 cx.notify();
-              },
-            )),
-          )
-          .child(
-            tab(
-              "markdown-preview-tab",
-              theme::ICON_EYE,
-              "Preview",
-              previewing,
-            )
-            .on_click(cx.listener(move |view, _, _, cx| {
-              view.preview = Some(file.clone());
-              cx.notify();
-            })),
-          ),
+              })
+              .ok();
+          }),
       );
     }
     right = right.child(self.tip(
@@ -1828,7 +1788,7 @@ impl FileBrowserView {
   }
 
   /// A source line, and the comments under it (`FileBrowserListRow`).
-  fn code_row(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
+  fn code_line(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
     let p = theme::palette(self.dark);
     let Some(lines) = self.opened.as_ref().map(|o| o.lines.clone()) else {
       return div().into_any_element();

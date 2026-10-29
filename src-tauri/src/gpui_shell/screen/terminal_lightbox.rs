@@ -338,7 +338,7 @@ impl Lightbox {
 
   /// A rendered Markdown block, its relative links and images pointed at
   /// the file's folder. A click comments on its source lines.
-  fn block_row(&self, b: usize, palette: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+  fn text_block(&self, b: usize, palette: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
     let (Some(asset), Some(&(start, end))) = (self.current(), self.blocks.get(b)) else {
       return div().into_any_element();
     };
@@ -1176,13 +1176,13 @@ impl Lightbox {
     self.text_rows.sync(window, rows, |a, b| a == b);
   }
 
-  fn text_row(&self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
+  fn text_line(&self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
     let Some(&(_, row)) = self.text_rows.get(ix) else {
       return div().into_any_element();
     };
     let palette = theme::palette(text_panel_dark(self.rendered(), self.dark));
     match row {
-      TextRow::Block(b) => self.block_row(b, &palette, cx),
+      TextRow::Block(b) => self.text_block(b, &palette, cx),
       TextRow::Line(n) => {
         let line = self
           .current()
@@ -1473,14 +1473,14 @@ impl Lightbox {
               this.flex_1().child(
                 gpui::list(
                   self.text_rows.list.clone(),
-                  cx.processor(|view, ix, _, cx| view.text_row(ix, cx)),
+                  cx.processor(|view, ix, _, cx| view.text_line(ix, cx)),
                 )
                 .size_full(),
               )
             } else {
               this
                 .overflow_y_scroll()
-                .children((0..count).map(|ix| self.text_row(ix, cx)))
+                .children((0..count).map(|ix| self.text_line(ix, cx)))
             }
           }),
       );

@@ -1376,3 +1376,25 @@ fn github_pr_detail_leaves_the_setup_script_to_the_code_tab(cx: &mut TestAppCont
   assert!(!h.drawn("setup-script-status"));
   assert!(!h.drawn("github-rerun-setup"));
 }
+
+/// The issue and pull request rows are `ui::Row`s: list items named by
+/// their title, the open one marked selected, and the next page a "Load
+/// more" button.
+#[gpui::test]
+fn github_rows_are_list_items_and_load_more_is_a_button(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = harness(cx, issues(), route("issues", Some(2), false));
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(Role::ListItem).name("Slow sync"))).to_be_selected();
+  expect(screen.get_by_role(by::role(Role::ListItem).name("Crash on start")))
+    .not()
+    .to_be_selected();
+  let more = screen.get_by_role(by::role(Role::Button).name("Load more"));
+  screen.user().click(&more);
+  h.cx.run_until_parked();
+  assert!(h.drawn("github-issue-3"));
+}

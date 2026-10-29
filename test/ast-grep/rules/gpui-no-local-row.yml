@@ -1,0 +1,83 @@
+id: gpui-no-local-row
+language: rust
+severity: error
+message: >
+  Do not hand-roll a selectable list row. A local `*_row`, `row` or
+  `load_more*` function that wires its own `.on_click` and `.hover` is a
+  second row primitive: build it with `ui::Row` (or `ui::Row::load_more`) so
+  every list shares one height, one hover and one selected fill.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+utils:
+  method:
+    kind: field_expression
+  body-calls-hover:
+    has:
+      field: body
+      stopBy: end
+      kind: field_expression
+      has:
+        field: field
+        regex: ^hover$
+  body-calls-on-click:
+    has:
+      field: body
+      stopBy: end
+      kind: field_expression
+      has:
+        field: field
+        regex: ^on_click$
+  body-calls-cursor-pointer:
+    has:
+      field: body
+      stopBy: end
+      kind: field_expression
+      has:
+        field: field
+        regex: ^cursor_pointer$
+  body-sets-row-role:
+    has:
+      field: body
+      stopBy: end
+      kind: scoped_identifier
+      regex: Role::(ListItem|ListBoxOption|MenuItem|MenuItemCheckBox|TreeItem|Option)$
+  body-says-load-more:
+    has:
+      field: body
+      stopBy: end
+      kind: string_literal
+      regex: ^"Load more
+  builds-ui-row:
+    has:
+      field: body
+      stopBy: end
+      kind: scoped_identifier
+      regex: (^|::)Row::(new|load_more)$
+rule:
+  kind: function_item
+  all:
+    - has:
+        field: name
+        regex: ^(.*_row|row|load_more.*)$
+    - any:
+        # A raw hover fill is a hand-rolled row even beside a `ui::Row`.
+        - matches: body-calls-hover
+        - all:
+            - not:
+                matches: builds-ui-row
+            - any:
+                - matches: body-sets-row-role
+                - all:
+                    - matches: body-calls-on-click
+                    - matches: body-calls-cursor-pointer
+                - matches: body-says-load-more
+    - not:
+        inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end

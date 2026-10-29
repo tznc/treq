@@ -1,0 +1,61 @@
+id: gpui-no-adhoc-tabs
+language: rust
+severity: error
+message: >
+  Do not draw a tab strip by hand. Use `ui::Tabs` (`ui::Tabs::segmented`
+  for a strip on a muted track) so every strip shares the selected fill, the
+  segment hover and keyboard handling. A vertical nav item is a `ui::Row`
+  with `.role(Role::Tab)`.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  all:
+    - any:
+        # A local strip builder that returns a raw Div.
+        - kind: function_item
+          all:
+            - has:
+                field: name
+                regex: ^(tab_row|tab_strip|view_tabs|about_tabs|[a-z_]*_tabs)$
+            - has:
+                field: return_type
+                regex: (^|[^A-Za-z])Div>?$
+        # A hand-made tab: only ui::Tabs and ui::Row give an element the Tab role.
+        - kind: call_expression
+          all:
+            - has:
+                field: function
+                kind: field_expression
+                has:
+                  field: field
+                  regex: ^role$
+            - has:
+                field: arguments
+                has:
+                  kind: scoped_identifier
+                  regex: Role::Tab$
+            - not:
+                has:
+                  field: function
+                  stopBy: end
+                  kind: scoped_identifier
+                  regex: Row::new$
+        - kind: let_declaration
+          all:
+            - has:
+                field: pattern
+                kind: identifier
+                regex: ^(tab|tab_trigger)$
+            - has:
+                field: value
+                kind: closure_expression
+    - not:
+        inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end

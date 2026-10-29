@@ -486,7 +486,7 @@ impl ChangesView {
       Row::Head(..) => self.card_head(c, &p, cx),
       _ => ui::text(div(), TextSize::Code)
         .font_family(theme::MONO_FONT)
-        .child(self.body_row(row, &p, cx))
+        .child(self.body_line(row, &p, cx))
         .into_any_element(),
     };
     div()
@@ -511,7 +511,7 @@ impl ChangesView {
   }
 
   /// A row below a card's head.
-  fn body_row(&self, row: Row, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+  fn body_line(&self, row: Row, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
     let (c, h) = match row {
       Row::HunkHeader(c, h, _) | Row::Context(c, h, ..) | Row::Line(c, h, _) | Row::Below(c, h) => {
         (c, h)

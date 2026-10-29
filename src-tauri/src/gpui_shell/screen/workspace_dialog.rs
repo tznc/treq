@@ -1358,25 +1358,19 @@ impl WorkspaceDialog {
         div()
           .children(branches.into_iter().enumerate().map(|(i, name)| {
             let id = SharedString::from(format!("branch-option-{i}"));
-            let selector = id.to_string();
             let active = selected.as_deref() == Some(name.as_str());
             let checked = target.as_deref() == Some(name.as_str());
             let pick = name.clone();
-            ui::text(div(), TextSize::Sm)
-              .id(id)
-              .debug_selector(move || selector)
+            ui::Row::new(id, &p)
+              .role(gpui::Role::ListBoxOption)
+              .label(name.clone())
+              .selected(active)
               .px_3()
-              .py_1p5()
-              .flex()
-              .items_center()
-              .gap_2()
-              .cursor_pointer()
+              .rounded_none()
               .font_family(theme::MONO_FONT)
-              .when(active, |this| this.bg(p.menu_accent))
-              .when(!active, |this| this.hover(move |s| s.bg(p.hover())))
               .child(div().flex_1().min_w_0().truncate().child(name))
               .when(checked, |this| {
-                this.child(ui::icon(theme::ICON_CHECK, 16., p.popover_foreground))
+                this.trailing(ui::icon(theme::ICON_CHECK, 16., p.popover_foreground))
               })
               .on_click(cx.listener(move |view, _, _, cx| view.pick_branch(pick.clone(), cx)))
           }))
@@ -1648,69 +1642,30 @@ impl WorkspaceDialog {
         .filter(|c| locked.as_ref().is_none_or(|s| s.hash != c.hash))
         .cloned(),
     );
-    let tab_trigger =
-      |id: &'static str, label: &'static str, count: usize, active: bool, disabled: bool| {
-        let fg = p.foreground;
-        ui::text(div(), TextSize::Xs)
-          .id(id)
-          .debug_selector(move || id.into())
-          .flex()
-          .items_center()
-          .gap_1p5()
-          .px_3()
-          .py_1()
-          .rounded(radius::MD)
-          .font_weight(FontWeight::MEDIUM)
-          .when(active, |this| {
-            this.bg(p.selected()).text_color(p.foreground)
-          })
-          .when(!active, |this| this.text_color(p.muted_foreground))
-          .when(!active && !disabled, |this| {
-            this
-              .cursor_pointer()
-              .hover(move |s| s.bg(p.hover()).text_color(fg))
-          })
-          .when(disabled, |this| this.opacity(0.5))
-          .aria_label(format!("{label} ({count})"))
-          .child(label)
-          .child(ui::Count::new(count, &p))
-      };
-    let tabs = div()
-      .flex()
-      .gap_1()
-      .bg(p.muted)
-      .p_1()
-      .rounded(radius::MD)
-      .mb_2()
-      .child(
-        tab_trigger(
-          "workspace-dialog-tab-commits",
-          "Commits",
-          commits.len(),
-          self.tab == Tab::Commits,
-          false,
+    // Moving a stash takes its commit only, so Changes is off.
+    let disabled = locked.is_some();
+    let tabs = div().mb_2().child(
+      ui::Tabs::segmented("workspace-dialog-tabs", &p)
+        .tab(ui::Tab::new("workspace-dialog-tab-commits", "Commits").count(commits.len()))
+        .tab(
+          ui::Tab::new("workspace-dialog-tab-changes", "Changes")
+            .count(self.changed_files.len())
+            .disabled(disabled),
         )
-        .on_click(cx.listener(|view, _, _, cx| {
-          view.tab = Tab::Commits;
-          cx.notify();
-        })),
-      )
-      .child({
-        let disabled = locked.is_some();
-        tab_trigger(
-          "workspace-dialog-tab-changes",
-          "Changes",
-          self.changed_files.len(),
-          self.tab == Tab::Changes,
-          disabled,
-        )
-        .when(!disabled, |this| {
-          this.on_click(cx.listener(|view, _, _, cx| {
-            view.tab = Tab::Changes;
-            cx.notify();
-          }))
-        })
-      });
+        .selected(usize::from(self.tab == Tab::Changes))
+        .on_select({
+          let view = cx.weak_entity();
+          move |ix, _, cx| {
+            let tab = [Tab::Commits, Tab::Changes][ix];
+            view
+              .update(cx, |view, cx| {
+                view.tab = tab;
+                cx.notify();
+              })
+              .ok();
+          }
+        }),
+    );
     let body = match self.tab {
       Tab::Commits => self.commits_tab(commits, locked.as_ref(), &p, cx),
       Tab::Changes => self.changes_tab(&p, cx),
