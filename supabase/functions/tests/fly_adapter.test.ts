@@ -84,7 +84,8 @@ Deno.test("create makes a volume, then a machine mounting it with the gateway se
   const svc = m.config.services![0] as any;
   assertEquals(svc.internal_port, 8022);
   assertEquals(svc.autostart, false);
-  assertEquals(svc.autostop, "stop");
+  // Fly Proxy closes WebSockets to autostop, so our idle controller stops it.
+  assertEquals(svc.autostop, "off");
   assertEquals(svc.ports, [{ port: 443, handlers: ["tls", "http"] }]);
   assertEquals(m.config.metadata?.treq_placement, "pl-1");
 });
@@ -212,4 +213,12 @@ Deno.test("getInstance reports the machine's updated_at as stateChangedAt", asyn
     updated_at: "2026-10-28T10:01:00Z",
   } as unknown as Parameters<typeof fake.machines.set>[1]);
   assertEquals((await provider.getInstance("m_t")).stateChangedAt, "2026-10-28T10:01:00Z");
+});
+
+Deno.test("ensureService detaches the service's stdio so exec returns", async () => {
+  const { fake, provider } = setup();
+  const inst = await provider.createInstance(PARAMS);
+  await provider.ensureService(inst.providerResourceId, "sshd", { cmd: "/usr/sbin/sshd", args: ["-D"] });
+  const script = (fake.requests.at(-1)!.body as { command: string[] }).command.at(-1)!;
+  assert(script.includes(">/var/run/treq/sshd.log 2>&1 </dev/null &"), script);
 });

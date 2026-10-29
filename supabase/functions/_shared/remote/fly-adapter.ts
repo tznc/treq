@@ -235,12 +235,12 @@ export class FlyMachinesProvider implements SandboxProvider {
             // Fly Proxy terminates TLS on 443 and forwards HTTP (with the
             // WebSocket upgrade) to treq-gateway. autostart is off because
             // the ingress is public; Treq wakes through the API. autostop
-            // "stop" is the backstop once no connections remain.
-            // UNVERIFIED: that a long-lived WebSocket holds autostop off.
+            // is off: Fly Proxy closes open WebSockets to stop a machine, so
+            // it would cut live sessions. The idle controller stops it.
             services: [{
               protocol: "tcp",
               internal_port: GATEWAY_PORT,
-              autostop: "stop",
+              autostop: "off",
               autostart: false,
               ports: [{ port: 443, handlers: ["tls", "http"] }],
             }],
@@ -281,7 +281,7 @@ export class FlyMachinesProvider implements SandboxProvider {
     await expectOk(await this.request(this.machineUrl(providerId, "/stop"), { method: "POST" }, 60_000), flyError, [404]);
   }
 
-  // Fly's autostop counts open proxy connections; nothing to push out.
+  // No provider timer to push out: autostop is off.
   async keepAlive(_providerId: string): Promise<void> {}
 
   async replaceInstance(params: ReplaceInstanceParams): Promise<ProviderInstance> {

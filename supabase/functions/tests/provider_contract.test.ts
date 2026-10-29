@@ -15,11 +15,13 @@ import { DaytonaProvider } from "../_shared/remote/daytona-adapter.ts";
 import { FlyMachinesProvider } from "../_shared/remote/fly-adapter.ts";
 import { LocalProvider } from "../_shared/remote/local-provider.ts";
 import {
+  DEFAULT_PROVIDER_AUTOSTOP_MIN,
   type CreateInstanceParams,
   type ManagedInstanceState,
   ProviderError,
   type SandboxProvider,
 } from "../_shared/remote/provider.ts";
+import { DEFAULT_IDLE_TIMEOUT_MIN } from "../_shared/remote/idle-controller.ts";
 import { FakeBoat } from "./fake_boat.ts";
 import { FakeDaytona } from "./fake_daytona.ts";
 import { FakeFly } from "./fake_fly.ts";
@@ -240,4 +242,62 @@ for (const c of httpContenders) {
       assertEquals(err.kind, kind);
     });
   }
+}
+
+// Auto-stop backstop: a provider timer, when there is one, must outlast the
+// idle controller so it only fires when the controller has failed, and
+// keepAlive must push it out. Fly has none: Fly Proxy's autostop would cut
+// open WebSockets, so the idle controller alone stops Fly machines.
+const backstops: { name: string; create(): Promise<{ provider: SandboxProvider; seconds: number | null }> }[] = [
+  {
+    name: "Boat",
+    async create() {
+      const fake = new FakeBoat();
+      const provider = new BoatProvider({ baseUrl: "https://boat.example.invalid/api/v1", apiToken: "t" }, { fetch: fake.fetch });
+      await provider.createInstance(params());
+      const body = fake.requests.find((r) => r.method === "POST" && r.path === "/sandboxes")!.body as { ttlSeconds: number };
+      return { provider, seconds: body.ttlSeconds };
+    },
+  },
+  {
+    name: "Daytona",
+    async create() {
+      const fake = new FakeDaytona();
+      const provider = new DaytonaProvider({ baseUrl: "https://daytona.example.invalid/api", apiKey: "k" }, { fetch: fake.fetch });
+      await provider.createInstance(params("s"));
+      const body = fake.requests.find((r) => r.method === "POST" && r.path === "/api/sandbox")!.body as { autoStopInterval: number };
+      return { provider, seconds: body.autoStopInterval * 60 };
+    },
+  },
+  {
+    name: "E2B",
+    async create() {
+      const fake = new FakeE2B();
+      const provider = new E2BProvider({ ...E2B_CONFIG, autoStopMinutes: undefined }, { fetch: fake.fetch });
+      await provider.createInstance(params("s"));
+      const body = fake.requests.find((r) => r.method === "POST" && r.path.endsWith("/sandboxes"))!.body as { timeout: number };
+      return { provider, seconds: body.timeout };
+    },
+  },
+  {
+    name: "Fly Machines",
+    async create() {
+      const fake = new FakeFly();
+      const provider = new FlyMachinesProvider(FLY_CONFIG, { fetch: fake.fetch });
+      const { providerResourceId: id } = await provider.createInstance(params("shared-cpu-2x:4096"));
+      const services = fake.machines.get(id)!.config.services as { autostop: string }[];
+      assert(services.every((s) => s.autostop === "off"), "Fly autostop is off");
+      return { provider, seconds: null };
+    },
+  },
+];
+
+for (const b of backstops) {
+  Deno.test(`${b.name}: the auto-stop backstop outlasts the idle controller`, async () => {
+    const { provider, seconds } = await b.create();
+    if (seconds === null) return;
+    assertEquals(seconds, DEFAULT_PROVIDER_AUTOSTOP_MIN * 60);
+    assert(seconds > DEFAULT_IDLE_TIMEOUT_MIN * 60);
+    assertEquals(typeof provider.keepAlive, "function", "keepAlive pushes the timer out");
+  });
 }

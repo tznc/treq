@@ -30,6 +30,8 @@ export class FakeE2B {
   readonly idempotency = new Map<string, string>();
   forcedStatus: number | null = null;
   commandResult = { exitCode: 0, stdout: "", stderr: "" };
+  // When set, pause answers 409 without pausing (resumed or mid-transition).
+  pauseConflict = false;
   private seq = 0;
 
   fetch: typeof fetch = async (input, init = {}) => {
@@ -95,7 +97,7 @@ export class FakeE2B {
       return new Response(null, { status: 204 });
     }
     if (action === "/pause" && method === "POST") {
-      if (sandbox.state === "paused") return errorResponse(409, "already paused");
+      if (this.pauseConflict || sandbox.state === "paused") return errorResponse(409, "conflict");
       sandbox.state = "paused";
       return new Response(null, { status: 204 });
     }

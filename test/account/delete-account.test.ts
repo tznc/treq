@@ -26,6 +26,7 @@ function fakeStore(
     instances?: Instance[];
     linearToken?: string | null;
     lastOwnerOf?: { id: string; name: string }[];
+    placements?: Record<string, { id: string; provider_kind: "boat"; provider_resource_id: string | null }[]>;
   } = {},
 ) {
   const log: string[] = [];
@@ -39,6 +40,9 @@ function fakeStore(
     },
     async liveInstances() {
       return instances.filter((i) => !log.includes(`instance-deleted:${i.id}`));
+    },
+    async livePlacements(instanceId) {
+      return seed.placements?.[instanceId] ?? [];
     },
     async markInstanceDeleted(id) {
       log.push(`instance-deleted:${id}`);
@@ -105,6 +109,25 @@ function deps(
     ...overrides,
   };
 }
+
+describe("deleteAccount mid-migration", () => {
+  it("deletes the candidate machine of an open migration, not only the active one", async () => {
+    const { store, log } = fakeStore({
+      instances: [{ id: "inst-1", provider_kind: "boat", provider_resource_id: "m-active" }],
+      placements: {
+        "inst-1": [
+          { id: "pl-a", provider_kind: "boat", provider_resource_id: "m-active" },
+          { id: "pl-b", provider_kind: "boat", provider_resource_id: "m-candidate" },
+        ],
+      },
+    });
+    const { provider, deleted } = fakeProvider();
+    const result = await deleteAccount(deps({ store, provider: () => provider }));
+    expect(result.status).toBe(200);
+    expect(deleted.sort()).toEqual(["m-active", "m-candidate"]);
+    expect(log).toContain("instance-deleted:inst-1");
+  });
+});
 
 describe("deleteAccount authorization", () => {
   it("rejects a request without a bearer token", async () => {

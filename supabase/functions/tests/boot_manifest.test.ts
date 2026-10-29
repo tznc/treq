@@ -3,7 +3,7 @@
 //
 // Run with: `deno test supabase/functions/tests/boot_manifest.test.ts`
 
-import { assert, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { bootstrapScript, CURRENT_MANIFEST_VERSION, manifestForVersion } from "../_shared/remote/boot-manifest.ts";
 import { TREQ_BINARY } from "../_shared/remote/ssh-vm-config.ts";
 
@@ -73,7 +73,8 @@ Deno.test("bootstrap really installs jj from the static musl release", () => {
     script,
     "https://github.com/jj-vcs/jj/releases/download/v$JJ_VERSION/jj-v$JJ_VERSION-$ARCH-unknown-linux-musl.tar.gz",
   );
-  assertStringIncludes(script, '"$(/usr/local/bin/jj --version 2>/dev/null)" = "jj $JJ_VERSION"');
+  // `jj --version` prints `jj 0.40.0-<commit>`: match the version prefix.
+  assertStringIncludes(script, `case "$(/usr/local/bin/jj --version 2>/dev/null)" in "jj $JJ_VERSION"|"jj $JJ_VERSION-"*)`);
   assertStringIncludes(script, "-C /usr/local/bin ./jj");
 });
 
@@ -93,4 +94,16 @@ Deno.test("bootstrap records the manifest only after the real installs, not echo
 
 Deno.test("the manifest version moves past the one that recorded phantom installs", () => {
   assert(CURRENT_MANIFEST_VERSION >= 4);
+});
+
+Deno.test("bootstrap checks jj against its pinned digest before extracting", () => {
+  const m = manifestForVersion(CURRENT_MANIFEST_VERSION)!;
+  assertEquals(m.jj_sha256, {
+    x86_64: "5c8979f46873e052f59bdd9535636dca6e6f9f70571b73f6d63c3b92acfaa037",
+    aarch64: "b26f24ff7a34838fbafe8788e6a94a9cdcf51601ef8c9af8fab4fa22c06ddbee",
+  });
+  assertStringIncludes(script, `JJ_SHA256_X86_64="${m.jj_sha256.x86_64}"`);
+  const check = script.indexOf(`sha256sum -c`, script.indexOf("install_jj() {"));
+  const extract = script.indexOf(`"$tmp/jj.tar.gz" -C /usr/local/bin`);
+  assert(check > 0 && check < extract, "jj's checksum is verified before extraction");
 });

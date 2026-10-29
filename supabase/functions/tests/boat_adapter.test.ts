@@ -202,7 +202,7 @@ Deno.test("ensureService surfaces a failed supervisor start", async () => {
   assertEquals(err.kind, "other");
 });
 
-Deno.test("gatewayEndpoint hosts the gateway port privately and returns its wss URL with _token", async () => {
+Deno.test("gatewayEndpoint sends the port token as a _port_auth cookie, not a redirecting query", async () => {
   const { fake, provider } = setup();
   const { providerResourceId: id } = await provider.createInstance(PARAMS);
   const endpoint = await provider.gatewayEndpoint(id);
@@ -210,8 +210,8 @@ Deno.test("gatewayEndpoint hosts the gateway port privately and returns its wss 
   assertEquals(host.method, "POST");
   assertEquals(host.body, { port: 8022, public: false, localhost: true });
   assertEquals(endpoint, {
-    url: `wss://${id}-8022.boat.example.invalid/?_token=host_tok`,
-    headers: {},
+    url: `wss://${id}-8022.boat.example.invalid/`,
+    headers: { Cookie: "_port_auth=host_tok" },
   });
 });
 
@@ -223,6 +223,35 @@ Deno.test("gatewayEndpoint resumes a stopped sandbox, then re-hosts", async () =
   const paths = fake.requests.map((r) => r.path);
   assert(paths.indexOf(`/sandboxes/${id}/resume`) < paths.indexOf(`/sandboxes/${id}/host`));
   assert(paths.includes(`/sandboxes/${id}/resume`));
+});
+
+for (const code of ["resume_failed", "snapshot_data_expired"]) {
+  Deno.test(`wake surfaces a ${code} 409 instead of treating it as awake`, async () => {
+    const { fake, provider } = setup();
+    const { providerResourceId: id } = await provider.createInstance(PARAMS);
+    fake.resumeErrorCode = code;
+    const err = await assertRejects(() => provider.wakeInstance(id), ProviderError);
+    assertEquals(err.kind, "other");
+  });
+}
+
+Deno.test("wake retries later while the sandbox is still stopping", async () => {
+  const { fake, provider } = setup();
+  const { providerResourceId: id } = await provider.createInstance(PARAMS);
+  fake.resumeErrorCode = "sandbox_stopping";
+  const err = await assertRejects(() => provider.wakeInstance(id), ProviderError);
+  assertEquals(err.kind, "unavailable");
+});
+
+Deno.test("state changes are timed by stoppedAt, falling back to updatedAt", async () => {
+  const { fake, provider } = setup();
+  const { providerResourceId: id } = await provider.createInstance(PARAMS);
+  const sandbox = fake.sandboxes.get(id)!;
+  sandbox.updatedAt = "2026-01-01T00:00:00Z";
+  assertEquals((await provider.getInstance(id)).stateChangedAt, "2026-01-01T00:00:00Z");
+  sandbox.stoppedAt = "2026-01-01T00:05:00Z";
+  sandbox.updatedAt = "2026-01-01T00:09:00Z";
+  assertEquals((await provider.getInstance(id)).stateChangedAt, "2026-01-01T00:05:00Z");
 });
 
 Deno.test("shellQuote wraps every argument in single quotes", () => {

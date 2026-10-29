@@ -23,11 +23,18 @@ export interface BootManifest {
   treq_version: string;
   treq_sha256: TreqSha256;
   jj_version: string;
+  jj_sha256: TreqSha256;
   git_version: string;
   agents: BootManifestAgent[];
 }
 
 export const CURRENT_MANIFEST_VERSION = 4;
+
+// sha256 of jj-v0.40.0-<arch>-unknown-linux-musl.tar.gz.
+const JJ_0_40_SHA256: TreqSha256 = {
+  x86_64: "5c8979f46873e052f59bdd9535636dca6e6f9f70571b73f6d63c3b92acfaa037",
+  aarch64: "b26f24ff7a34838fbafe8788e6a94a9cdcf51601ef8c9af8fab4fa22c06ddbee",
+};
 
 const MANIFESTS: Record<number, BootManifest> = {
   1: {
@@ -35,6 +42,7 @@ const MANIFESTS: Record<number, BootManifest> = {
     treq_version: "0.3.0",
     treq_sha256: { x86_64: "PLACEHOLDER-treq-0.3.0-x86_64", aarch64: "PLACEHOLDER-treq-0.3.0-aarch64" },
     jj_version: "0.24.0",
+    jj_sha256: { x86_64: "PLACEHOLDER-jj-0.24.0-x86_64", aarch64: "PLACEHOLDER-jj-0.24.0-aarch64" },
     git_version: "2.45",
     agents: [
       { name: "claude", version: "1.0.0" },
@@ -48,6 +56,7 @@ const MANIFESTS: Record<number, BootManifest> = {
     treq_version: "0.3.0",
     treq_sha256: { x86_64: "PLACEHOLDER-treq-0.3.0-x86_64", aarch64: "PLACEHOLDER-treq-0.3.0-aarch64" },
     jj_version: "0.40.0",
+    jj_sha256: JJ_0_40_SHA256,
     git_version: "2.45",
     agents: [
       { name: "claude", version: "1.0.0" },
@@ -62,6 +71,7 @@ const MANIFESTS: Record<number, BootManifest> = {
     // TODO(ops): pin `sha256sum treq-cli-0.4.0-linux-<arch>.tar.gz` for each arch.
     treq_sha256: { x86_64: "PLACEHOLDER-treq-0.4.0-x86_64", aarch64: "PLACEHOLDER-treq-0.4.0-aarch64" },
     jj_version: "0.40.0",
+    jj_sha256: JJ_0_40_SHA256,
     git_version: "2.45",
     agents: [
       { name: "claude", version: "1.0.0" },
@@ -76,6 +86,7 @@ const MANIFESTS: Record<number, BootManifest> = {
     // TODO(ops): the same pinned digests as manifest 3 (treq 0.4.0).
     treq_sha256: { x86_64: "PLACEHOLDER-treq-0.4.0-x86_64", aarch64: "PLACEHOLDER-treq-0.4.0-aarch64" },
     jj_version: "0.40.0",
+    jj_sha256: JJ_0_40_SHA256,
     git_version: "2.45",
     agents: [
       { name: "claude", version: "1.0.0" },
@@ -115,6 +126,8 @@ TREQ_VERSION="${manifest.treq_version}"
 TREQ_SHA256_X86_64="${manifest.treq_sha256.x86_64}"
 TREQ_SHA256_AARCH64="${manifest.treq_sha256.aarch64}"
 JJ_VERSION="${manifest.jj_version}"
+JJ_SHA256_X86_64="${manifest.jj_sha256.x86_64}"
+JJ_SHA256_AARCH64="${manifest.jj_sha256.aarch64}"
 GIT_VERSION="${manifest.git_version}"
 STATE_FILE="/var/lib/treq/bootstrap-version"
 
@@ -175,14 +188,20 @@ install_treq() {
 }
 
 install_jj() {
-  if [ "$(/usr/local/bin/jj --version 2>/dev/null)" = "jj $JJ_VERSION" ]; then
+  # \`jj --version\` prints \`jj <version>-<commit>\`.
+  case "$(/usr/local/bin/jj --version 2>/dev/null)" in "jj $JJ_VERSION"|"jj $JJ_VERSION-"*)
     echo "treq bootstrap: jj $JJ_VERSION already installed"
-    return 0
-  fi
+    return 0 ;;
+  esac
   ARCH="$(machine_arch)"
+  if [ "$ARCH" = x86_64 ]; then expected="$JJ_SHA256_X86_64"; else expected="$JJ_SHA256_AARCH64"; fi
+  case "$expected" in
+    PLACEHOLDER*) echo "treq bootstrap: no pinned sha256 for jj $JJ_VERSION $ARCH" >&2; exit 1 ;;
+  esac
   url="https://github.com/jj-vcs/jj/releases/download/v$JJ_VERSION/jj-v$JJ_VERSION-$ARCH-unknown-linux-musl.tar.gz"
   tmp="$(mktemp -d)"
   curl -fsSL --retry 3 -o "$tmp/jj.tar.gz" "$url"
+  echo "$expected  $tmp/jj.tar.gz" | sha256sum -c -
   $SUDO tar -xzf "$tmp/jj.tar.gz" -C /usr/local/bin ./jj
   rm -rf "$tmp"
   echo "treq bootstrap: installed jj $JJ_VERSION"

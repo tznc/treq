@@ -49,13 +49,35 @@ export const DAYTONA_CAPABILITIES: Readonly<ProviderCapabilities> = Object.freez
 
 // Treq machine types (`provider_machine_types.vendor_type`) to Daytona
 // resources. Matches size_tiers; disk equals the tier's min_disk_gb.
-// UNVERIFIED: default org limits are below l/xl; those need a raised limit.
+// Daytona's default per-sandbox limit is 4 vCPU / 8 GiB / 10 GiB, so l/xl
+// (unselectable in the catalog) need treq's account limits raised.
 const DAYTONA_TYPES: Record<string, { cpu: number; memory: number; disk: number }> = {
   s: { cpu: 2, memory: 4, disk: 10 },
   m: { cpu: 4, memory: 8, disk: 40 },
   l: { cpu: 8, memory: 16, disk: 100 },
   xl: { cpu: 16, memory: 32, disk: 200 },
 };
+
+// Vendor states a placement lookup may return: alive and not failed.
+const LIVE_STATES = [
+  "creating",
+  "pending_build",
+  "building_snapshot",
+  "pulling_snapshot",
+  "started",
+  "starting",
+  "restoring",
+  "resuming",
+  "stopping",
+  "stopped",
+  "archiving",
+  "archived",
+  "pausing",
+  "paused",
+];
+
+// Daytona targets are `us` and `eu`; there is no Asia-Pacific target.
+const DAYTONA_TARGETS: Partial<Record<string, string>> = { us_east: "us", us_west: "us", eu_west: "eu" };
 
 export function normalizeDaytonaState(vendorState: string): ManagedInstanceState {
   switch (vendorState) {
@@ -94,7 +116,6 @@ interface DaytonaSandbox {
   id: string;
   state: string;
   toolboxProxyUrl?: string | null;
-  // UNVERIFIED: whether a stop by autoStopInterval bumps `updatedAt`.
   updatedAt?: string | null;
 }
 
@@ -167,22 +188,28 @@ export class DaytonaProvider implements SandboxProvider {
   // once during a resize or migration, and the target must never be handed
   // the source. Failed sandboxes are skipped so a retry creates a fresh one.
   private async findByPlacement(owner: string, placement: string): Promise<DaytonaSandbox | null> {
-    const url = new URL(this.url("/sandbox"));
-    url.searchParams.set("labels", JSON.stringify({ treq_owner: owner, treq_placement: placement }));
-    const response = await this.request(url.toString());
-    if (!response.ok) throw await daytonaError(response);
-    // `{ items, nextCursor }`; older API versions returned a bare array.
-    const body = await response.json() as { items?: DaytonaSandbox[] } | DaytonaSandbox[];
-    const items = Array.isArray(body) ? body : body.items ?? [];
-    return items.find((s) =>
-      !["destroyed", "destroying"].includes(s.state) && normalizeDaytonaState(s.state) !== "failed"
-    ) ?? null;
+    let cursor: string | null = null;
+    do {
+      const url = new URL(this.url("/sandbox"));
+      url.searchParams.set("labels", JSON.stringify({ treq_owner: owner, treq_placement: placement }));
+      url.searchParams.set("states", LIVE_STATES.join(","));
+      if (cursor) url.searchParams.set("cursor", cursor);
+      const response = await this.request(url.toString());
+      if (!response.ok) throw await daytonaError(response);
+      const body = await response.json() as { items?: DaytonaSandbox[]; nextCursor?: string | null };
+      const found = body.items?.find((s) => LIVE_STATES.includes(s.state));
+      if (found) return found;
+      cursor = body.nextCursor ?? null;
+    } while (cursor);
+    return null;
   }
 
   async createInstance(params: CreateInstanceParams): Promise<ProviderInstance> {
     const type = params.machineType ?? "s";
     const resources = DAYTONA_TYPES[type];
     if (!resources) throw new ProviderError("invalid_request", `unknown Daytona machine type: ${type}`);
+    const target = DAYTONA_TARGETS[params.region];
+    if (!target) throw new ProviderError("invalid_request", `Daytona has no target for ${params.region}`);
     const owner = labelValue(params.ownerUserId);
     const placement = labelValue(params.placementId ?? params.idempotencyKey);
     // No Idempotency-Key header; the placement label lookup makes a retried
@@ -194,9 +221,9 @@ export class DaytonaProvider implements SandboxProvider {
       method: "POST",
       body: JSON.stringify({
         ...resources,
+        target,
         // Auto-stop is the backstop. 0 means the maximum auto-archive
         // interval; a negative auto-delete interval disables it.
-        // UNVERIFIED: whether SSH over the preview proxy counts as activity.
         autoStopInterval: this.config.autoStopMinutes ?? DEFAULT_PROVIDER_AUTOSTOP_MIN,
         autoArchiveInterval: 0,
         autoDeleteInterval: -1,

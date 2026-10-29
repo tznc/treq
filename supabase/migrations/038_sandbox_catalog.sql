@@ -101,21 +101,24 @@ insert into public.size_tiers (id, label, vcpu, ram_gib, min_disk_gb, sort) valu
 
 -- vendor_type: Boat's size name; the tier id for Daytona and E2B (E2B starts
 -- template `<TREQ_E2B_TEMPLATE>-<tier>`); the Fly guest for Fly Machines.
+-- Boat runs only in the EU (DE/FI/FR). Daytona targets `us` or `eu`, and its
+-- default per-sandbox limit is 4 vCPU / 8 GiB / 10 GiB, so l/xl stay
+-- unselectable until treq's account limits are raised.
 -- Fly is not selectable: all customers would share one Fly app and its
 -- private network until it uses an app per owner.
 insert into public.provider_machine_types
   (id, provider_kind, vendor_type, tier_id, vcpu, ram_gib, disk_gb, regions, selectable)
 values
-  ('boat:small', 'boat', 'small', 's', 2, 4, 12, array['us_east', 'us_west', 'eu_west', 'ap_southeast'], true),
-  ('boat:default', 'boat', 'default', 'm', 4, 8, 50, array['us_east', 'us_west', 'eu_west', 'ap_southeast'], true),
-  ('boat:large', 'boat', 'large', 'l', 8, 16, 125, array['us_east', 'us_west', 'eu_west', 'ap_southeast'], true),
-  ('boat:xlarge', 'boat', 'xlarge', 'xl', 16, 32, 251, array['us_east', 'us_west', 'eu_west', 'ap_southeast'], true),
+  ('boat:small', 'boat', 'small', 's', 2, 4, 12, array['eu_west'], true),
+  ('boat:default', 'boat', 'default', 'm', 4, 8, 50, array['eu_west'], true),
+  ('boat:large', 'boat', 'large', 'l', 8, 16, 125, array['eu_west'], true),
+  ('boat:xlarge', 'boat', 'xlarge', 'xl', 16, 32, 251, array['eu_west'], true),
   ('local:s', 'local', 'local', 's', 2, 4, 10, array['us_east', 'us_west', 'eu_west', 'ap_southeast'], false),
   ('local:m', 'local', 'local', 'm', 4, 8, 40, array['us_east', 'us_west', 'eu_west', 'ap_southeast'], false),
-  ('daytona:s', 'daytona', 's', 's', 2, 4, 10, array['us_east', 'us_west', 'eu_west', 'ap_southeast'], true),
-  ('daytona:m', 'daytona', 'm', 'm', 4, 8, 40, array['us_east', 'us_west', 'eu_west', 'ap_southeast'], true),
-  ('daytona:l', 'daytona', 'l', 'l', 8, 16, 100, array['us_east', 'us_west', 'eu_west', 'ap_southeast'], true),
-  ('daytona:xl', 'daytona', 'xl', 'xl', 16, 32, 200, array['us_east', 'us_west', 'eu_west', 'ap_southeast'], true),
+  ('daytona:s', 'daytona', 's', 's', 2, 4, 10, array['us_east', 'us_west', 'eu_west'], true),
+  ('daytona:m', 'daytona', 'm', 'm', 4, 8, 40, array['us_east', 'us_west', 'eu_west'], true),
+  ('daytona:l', 'daytona', 'l', 'l', 8, 16, 100, array['us_east', 'us_west', 'eu_west'], false),
+  ('daytona:xl', 'daytona', 'xl', 'xl', 16, 32, 200, array['us_east', 'us_west', 'eu_west'], false),
   ('fly_machines:s', 'fly_machines', 'shared-cpu-2x:4096', 's', 2, 4, 10, array['us_east', 'us_west', 'eu_west', 'ap_southeast'], false),
   ('fly_machines:m', 'fly_machines', 'performance-4x:8192', 'm', 4, 8, 40, array['us_east', 'us_west', 'eu_west', 'ap_southeast'], false),
   ('fly_machines:l', 'fly_machines', 'performance-8x:16384', 'l', 8, 16, 100, array['us_east', 'us_west', 'eu_west', 'ap_southeast'], false),

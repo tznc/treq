@@ -19,9 +19,9 @@ select ok(public.recompute_pro_defaults() > 0, 'recompute_pro_defaults writes de
 reset role;
 
 select is(
-  (select machine_type_id from public.pro_provider_defaults where tier_id = 's' and region = 'us_east'),
+  (select machine_type_id from public.pro_provider_defaults where tier_id = 's' and region = 'eu_west'),
   'boat:small',
-  'Boat is the cheapest admitted provider for tier s');
+  'Boat is the cheapest admitted provider for tier s in eu_west');
 
 update public.sandbox_providers set status = 'draining' where kind = 'boat';
 set local role service_role;
@@ -41,15 +41,15 @@ set local role authenticated;
 select set_config('request.jwt.claims',
   '{"sub":"00000000-0000-0000-0000-0000000000d1","role":"authenticated"}', true);
 select is(
-  (select (t->'regions'->0->>'machine_type_id')
-     from jsonb_array_elements(public.get_machine_catalog()) t
-    where t->>'id' = 's'),
+  (select (r->>'machine_type_id')
+     from jsonb_array_elements(public.get_machine_catalog()) t, jsonb_array_elements(t->'regions') r
+    where t->>'id' = 's' and r->>'region' = 'eu_west'),
   'boat:small',
   'the catalog offers the default machine type per tier');
 select is(
-  (select (t->'regions'->0->>'hourly_usd')::numeric
-     from jsonb_array_elements(public.get_machine_catalog()) t
-    where t->>'id' = 's'),
+  (select (r->>'hourly_usd')::numeric
+     from jsonb_array_elements(public.get_machine_catalog()) t, jsonb_array_elements(t->'regions') r
+    where t->>'id' = 's' and r->>'region' = 'eu_west'),
   0.0216,
   'the catalog price is provider cost x 1.2 ($0.018/h -> $0.0216/h)');
 select ok(

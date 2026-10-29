@@ -19,13 +19,13 @@ Machines are disposable. Only the repo list (`remote_repositories`, with `remote
 
 | Kind | Selectable | Gateway path | Notes |
 |---|---|---|---|
-| `boat` | yes | `POST /sandboxes/{id}/host` private URL + `_token`; gateway on `127.0.0.1:8022` | cheapest in every tier, so the Pro default |
-| `daytona` | yes | preview URL for port 8022 + `x-daytona-preview-token` | bills stopped storage |
+| `boat` | yes | `POST /sandboxes/{id}/host` private URL + `Cookie: _port_auth`; gateway on `127.0.0.1:8022` | EU only (`eu_west`); cheapest there, so the Pro default |
+| `daytona` | s/m | preview URL for port 8022 + `x-daytona-preview-token` | targets `us`/`eu` (no `ap_southeast`); l/xl hidden until account limits are raised; bills stopped storage |
 | `e2b` | yes | `POST /v2/sandboxes/{id}/connect` → `wss://8022-<id>.<domain>/` + `e2b-traffic-access-token` | one template per tier (`<TREQ_E2B_TEMPLATE>-<tier>`); `autoPause` |
-| `fly_machines` | **no** | `wss://<app>.fly.dev/` + `fly-force-instance-id`; gateway on `0.0.0.0:8022` | one shared Fly app, so tenants share a 6PN network; hidden until it uses an app per owner |
+| `fly_machines` | **no** | `wss://<app>.fly.dev/` + `fly-force-instance-id`; gateway on `0.0.0.0:8022` | autostop off (Fly Proxy closes WebSockets to stop), so only the idle controller stops it; one shared Fly app, so tenants share a 6PN network; hidden until it uses an app per owner |
 | `local` | dev only | none | in-process fake (`TREQ_REMOTE_PROVIDER_STUB`) |
 
-Admission requires per-second billing and an authenticated path to the machine's gateway. Prices are seeded in 036 from each vendor's published list price (2026-10-27/28) in nano-USD per second. Daytona and E2B tie in every tier; the tie breaks by machine type id, so `daytona:*` is the fallback when Boat drains.
+Admission requires per-second billing and an authenticated path to the machine's gateway. Prices are seeded in 038 from each vendor's published list price (2026-10-27/28) in nano-USD per second. Daytona and E2B tie in every tier; the tie breaks by machine type id, so `daytona:*` is the default outside the EU and the fallback when Boat drains.
 
 **Gateway transport.** Every provider speaks one protocol to the relay (`gateway-proxy.ts`): a text frame `{"host","port"}`, a reply `{"status":"connected"}` or an error, then raw binary frames. Inside the machine, `treq gateway` (a mode of the `treq` CLI from `crates/treq-gateway`, installed by the boot manifest) accepts only `127.0.0.1|localhost:2222`, treq's sshd. Each connection carries `x-treq-gateway-token`: `v1.<placement_id>.<expiry>.<hex HMAC-SHA256>` at most 120 s ahead, keyed by a per-placement secret kept in Vault (043) and written to `/etc/treq/gateway.secret`. sshd stays loopback-only and checks Treq CA certificates. `openTcp()` (`provider-tcp.ts`) resolves the active placement per connection, and on failure wakes the machine (re-running the pidfile-supervised sshd and gateway) and retries once.
 
@@ -52,7 +52,7 @@ Every Pro user has a cap: US$50 by default, minimum US$5, maximum `treq.spend_ca
 
 ### Idle controller
 
-`enforce_idle` probes each running workspace through `exec` (`activity-probe.ts`) and stops it after `TREQ_IDLE_TIMEOUT_MIN` (15) without human or agent activity: an sshd session, an agent turn whose log moved, a terminal with recent I/O, or a pinned process. Background processes never count unless pinned (`remote_process_pins`, by pid + command or substring, billed). A failed probe is not activity, but stopping on failures needs 3 in a row. A migration that builds or cuts over to a target exempts the workspace. Provider auto-stop (`TREQ_PROVIDER_AUTOSTOP_MIN`, 60) is the backstop and is extended on activity. `get_workspace_activity()` gives the app the processes, pins and `stops_at`.
+`enforce_idle` probes each running workspace through `exec` (`activity-probe.ts`) and stops it after `TREQ_IDLE_TIMEOUT_MIN` (15) without human or agent activity: an sshd session, an agent turn whose log moved, a terminal with recent I/O, or a pinned process. Background processes never count unless pinned (`remote_process_pins`, by pid + command or substring, billed). A failed probe is not activity, but stopping on failures needs 3 in a row. A migration that builds or cuts over to a target exempts the workspace. Provider auto-stop (`TREQ_PROVIDER_AUTOSTOP_MIN`, 60) is the backstop and is extended on activity; Fly has none. `get_workspace_activity()` gives the app the processes, pins and `stops_at`.
 
 ### Bring your own sandbox (BYOS)
 

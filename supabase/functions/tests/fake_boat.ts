@@ -10,6 +10,8 @@ export interface FakeBoatSandbox {
   labels: Record<string, string>;
   ip: string | null;
   sshEndpoint: string | null;
+  updatedAt?: string;
+  stoppedAt?: string;
 }
 
 export interface RecordedRequest {
@@ -32,6 +34,8 @@ export class FakeBoat {
     stdout: "",
     stderr: "",
   };
+  // When set, resume answers 409 with this code.
+  resumeErrorCode: string | null = null;
   private seq = 0;
 
   fetch: typeof fetch = (input, init = {}) => {
@@ -106,6 +110,7 @@ export class FakeBoat {
       return json(202, { ok: true, type: "sandbox.stopping", sandbox });
     }
     if (action === "resume" && method === "POST") {
+      if (this.resumeErrorCode) return errorResponse(409, this.resumeErrorCode);
       if (sandbox.state !== "archived") return errorResponse(409, "sandbox_running");
       sandbox.state = "ready";
       return json(202, { ok: true, type: "sandbox.resuming", sandbox });
@@ -123,14 +128,13 @@ export class FakeBoat {
     }
     if (action === "host" && method === "POST") {
       if (sandbox.state === "archived") return errorResponse(409, "sandbox_not_ready");
-      // UNVERIFIED shape: Boat's hosted-URL response. The adapter reads
-      // `url` and `token`.
+      // Boat's hosted URL carries the port token as `?_token=`, which a
+      // browser trades for a `_port_auth` cookie through a redirect.
       const req = body as { port: number };
       return json(200, {
         ok: true,
         type: "sandbox.host",
-        url: `https://${sandbox.id}-${req.port}.boat.example.invalid/`,
-        token: "host_tok",
+        url: `https://${sandbox.id}-${req.port}.boat.example.invalid/?_token=host_tok`,
       });
     }
     return errorResponse(404, "not_found");

@@ -95,6 +95,7 @@ Deno.test("create looks up by labels, then POSTs the tier's resources with the a
     cpu: 4,
     memory: 8,
     disk: 40,
+    target: "us",
     autoStopInterval: 60,
     autoArchiveInterval: 0,
     autoDeleteInterval: -1,
@@ -223,4 +224,34 @@ Deno.test("getInstance reports the provider's updatedAt as stateChangedAt", asyn
     updatedAt: "2026-10-28T10:01:00Z",
   } as unknown as Parameters<typeof fake.sandboxes.set>[1]);
   assertEquals((await provider.getInstance("dt_t")).stateChangedAt, "2026-10-28T10:01:00Z");
+});
+
+Deno.test("create maps treq regions to Daytona targets", async () => {
+  for (const [region, target] of [["us_east", "us"], ["us_west", "us"], ["eu_west", "eu"]] as const) {
+    const { fake, provider } = setup();
+    const { providerResourceId: id } = await provider.createInstance({ ...PARAMS, region });
+    assertEquals(fake.sandboxes.get(id)!.target, target);
+  }
+});
+
+Deno.test("create rejects a region Daytona has no target for", async () => {
+  const { provider } = setup();
+  const err = await assertRejects(() => provider.createInstance({ ...PARAMS, region: "ap_southeast" }), ProviderError);
+  assertEquals(err.kind, "invalid_request");
+});
+
+Deno.test("the placement lookup filters states on the server and follows nextCursor", async () => {
+  const { fake, provider } = setup();
+  const first = await provider.createInstance({ ...PARAMS, placementId: "PL-1" });
+  fake.pageSize = 1;
+  // A destroyed sandbox with the same labels fills the first page.
+  const destroyed = { ...fake.sandboxes.get(first.providerResourceId)!, id: "dt_old", state: "destroyed" };
+  fake.sandboxes.delete(first.providerResourceId);
+  fake.sandboxes.set("dt_old", destroyed);
+  fake.sandboxes.set(first.providerResourceId, { ...destroyed, id: first.providerResourceId, state: "started" });
+  const again = await provider.createInstance({ ...PARAMS, placementId: "PL-1", idempotencyKey: "other" });
+  assertEquals(again.providerResourceId, first.providerResourceId);
+  const list = fake.requests.find((r) => r.method === "GET" && r.path === "/api/sandbox")!;
+  assert(list.search.get("states")!.split(",").includes("started"));
+  assert(!list.search.get("states")!.split(",").includes("destroyed"));
 });

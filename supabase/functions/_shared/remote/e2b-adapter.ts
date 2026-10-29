@@ -198,7 +198,7 @@ export class E2BProvider implements SandboxProvider {
       body: JSON.stringify({
         templateID: `${this.config.template}-${type}`,
         // At the timeout the sandbox pauses instead of being killed.
-        // UNVERIFIED: the team's max sandbox length (1 h Hobby, 24 h Pro) caps the timeout.
+        // The team's max sandbox length (1 h Hobby, 24 h Pro) caps the timeout.
         timeout: this.timeoutSec,
         autoPause: true,
         metadata: { ...lookup, treq_manifest: String(params.manifestVersion) },
@@ -236,8 +236,13 @@ export class E2BProvider implements SandboxProvider {
 
   async stopInstance(providerId: string): Promise<void> {
     const response = await this.api(this.sandboxUrl(providerId, "/pause"), { method: "POST" }, 60_000);
-    // UNVERIFIED: pause's bare 409 is taken to mean already paused.
-    await expectOk(response, e2bError, [404, 409]);
+    if (response.status !== 409) return await expectOk(response, e2bError, [404]);
+    // 409 means already paused, resumed mid-pause, or in transition: only
+    // the first is done.
+    await response.body?.cancel();
+    if ((await this.getInstance(providerId)).state !== "suspended") {
+      throw new ProviderError("unavailable", "E2B sandbox did not pause; retry");
+    }
   }
 
   // `POST /sandboxes/{id}/timeout` restarts the TTL from now.

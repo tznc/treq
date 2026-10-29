@@ -10,6 +10,7 @@ export interface FakeDaytonaSandbox {
   name: string;
   state: string;
   labels: Record<string, string>;
+  target?: string;
   cpu: number;
   memory: number;
   disk: number;
@@ -35,6 +36,8 @@ export class FakeDaytona {
   forcedStatus: number | null = null;
   // Scripted `/process/execute` result; the default is exit 0, no output.
   executeResult: { exitCode: number; result: string } = { exitCode: 0, result: "" };
+  // Sandboxes per list page; later pages follow `nextCursor`.
+  pageSize = 100;
   private seq = 0;
 
   fetch: typeof fetch = (input, init = {}) => {
@@ -64,10 +67,13 @@ export class FakeDaytona {
     if (parts[0] !== "sandbox") return errorResponse(404, "not found");
     if (parts.length === 1 && method === "GET") {
       const want = JSON.parse(search.get("labels") ?? "{}") as Record<string, string>;
-      const items = [...this.sandboxes.values()].filter((s) =>
-        Object.entries(want).every(([k, v]) => s.labels[k] === v)
+      const states = search.get("states")?.split(",");
+      const all = [...this.sandboxes.values()].filter((s) =>
+        Object.entries(want).every(([k, v]) => s.labels[k] === v) && (!states || states.includes(s.state))
       );
-      return json(200, { items, nextCursor: null });
+      const start = Number(search.get("cursor") ?? 0);
+      const end = start + this.pageSize;
+      return json(200, { items: all.slice(start, end), nextCursor: end < all.length ? String(end) : null });
     }
     if (parts.length === 1 && method === "POST") {
       const req = body as Partial<FakeDaytonaSandbox>;
@@ -77,6 +83,7 @@ export class FakeDaytona {
         name: req.name ?? id,
         state: "creating",
         labels: req.labels ?? {},
+        target: req.target,
         cpu: req.cpu ?? 1,
         memory: req.memory ?? 1,
         disk: req.disk ?? 3,

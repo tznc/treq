@@ -152,6 +152,14 @@ Deno.test("stop pauses; pausing twice and stopping a missing sandbox succeed", a
   assertEquals((await provider.getInstance(id)).state, "suspended");
 });
 
+Deno.test("a pause 409 on a sandbox that is still running is retried, not taken as paused", async () => {
+  const { fake, provider } = setup();
+  const { providerResourceId: id } = await provider.createInstance(PARAMS);
+  fake.pauseConflict = true;
+  const err = await assertRejects(() => provider.stopInstance(id), ProviderError);
+  assertEquals(err.kind, "unavailable");
+});
+
 Deno.test("wake connects with the backstop timeout", async () => {
   const { fake, provider } = setup();
   const { providerResourceId: id } = await provider.createInstance(PARAMS);

@@ -80,7 +80,7 @@ interface BoatSandbox {
   state: string;
   ip?: string | null;
   sshEndpoint?: string | null;
-  // UNVERIFIED: the field name; billing falls back to the last probe without it.
+  stoppedAt?: string | null;
   updatedAt?: string | null;
 }
 
@@ -88,13 +88,21 @@ function normalizeInstance(sandbox: BoatSandbox): ProviderInstance {
   return providerInstance(
     sandbox.id,
     normalizeBoatState(sandbox.state),
-    sandbox.updatedAt ?? null,
+    sandbox.stoppedAt ?? sandbox.updatedAt ?? null,
     sandbox.sshEndpoint ?? sandbox.ip ?? null,
   );
 }
 
 // 409 codes meaning "not ready yet": retryable, not a conflict.
-const NOT_READY_CODES = ["sandbox_starting", "boat_starting", "sandbox_not_ready", "idempotency_in_progress"];
+const NOT_READY_CODES = [
+  "sandbox_starting",
+  "boat_starting",
+  "sandbox_not_ready",
+  "sandbox_stopping",
+  "idempotency_in_progress",
+];
+// 409 codes for a resume that failed outright.
+const FAILED_CODES = ["resume_failed", "snapshot_data_expired"];
 
 function boatError(response: Response): Promise<ProviderError> {
   return providerErrorFrom(response, (status, text, detail) => {
@@ -105,6 +113,7 @@ function boatError(response: Response): Promise<ProviderError> {
       // Not the JSON error envelope.
     }
     if (status === 409 && NOT_READY_CODES.includes(code)) return new ProviderError("unavailable", detail);
+    if (status === 409 && FAILED_CODES.includes(code)) return new ProviderError("other", detail);
     // 403 machine_class_plan_required and the like are plan limits; any
     // other 403 is the key itself.
     if (status === 403 && (code.endsWith("_plan_required") || code === "billing_required")) {
@@ -256,7 +265,7 @@ export class BoatProvider implements SandboxProvider {
       body: JSON.stringify({ ttlSeconds: this.ttlSeconds() }),
     }, 30_000);
     if (response.ok) return await expectOk(response, boatError);
-    // UNVERIFIED: the code for resuming a running sandbox; any other 409 means already awake.
+    // Any 409 boatError leaves as a conflict means already awake.
     const err = await boatError(response);
     if (err.kind !== "already_exists") throw err;
   }
@@ -309,7 +318,6 @@ export class BoatProvider implements SandboxProvider {
     return { exitCode: body.exitCode ?? -1, stdout: body.stdout ?? "", stderr: body.stderr ?? "" };
   }
 
-  // UNVERIFIED: that the sandbox user can sudo and setsid/nohup exist on Boat's image.
   async ensureService(providerId: string, name: string, spec: ServiceSpec): Promise<void> {
     await ensurePidfileService(
       (command, timeout) => this.execOnMachine(providerId, command, timeout),
@@ -322,7 +330,6 @@ export class BoatProvider implements SandboxProvider {
   // Hosts treq-gateway's loopback port as a private URL and returns it as a
   // WebSocket endpoint. Re-requested on every call: a resumed sandbox may
   // have lost its earlier host.
-  // UNVERIFIED: binary WebSocket frames through hosted URLs; the `/host` response shape.
   async gatewayEndpoint(providerId: string): Promise<GatewayEndpoint> {
     const sandbox = await this.getSandbox(providerId);
     if (normalizeBoatState(sandbox.state) === "suspended") await this.wakeInstance(providerId);
@@ -331,11 +338,14 @@ export class BoatProvider implements SandboxProvider {
       body: JSON.stringify({ port: GATEWAY_PORT, public: false, localhost: true }),
     });
     if (!response.ok) throw await boatError(response);
-    const hosted = await response.json() as { url?: string; token?: string };
+    const hosted = await response.json() as { url?: string };
     if (!hosted.url) throw new ProviderError("other", "Boat returned no hosted URL");
     const url = new URL(hosted.url);
     url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
-    if (hosted.token && !url.searchParams.has("_token")) url.searchParams.set("_token", hosted.token);
-    return { url: url.toString(), headers: {} };
+    // `?_token=` answers with a redirect that sets `_port_auth`; a WebSocket
+    // client won't follow it, so send the cookie directly.
+    const token = url.searchParams.get("_token");
+    url.searchParams.delete("_token");
+    return { url: url.toString(), headers: token ? { Cookie: `_port_auth=${token}` } : {} };
   }
 }

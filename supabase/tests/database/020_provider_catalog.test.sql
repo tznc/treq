@@ -1,6 +1,24 @@
 -- Provider catalog rows, admitted kinds and statuses (038_sandbox_catalog.sql).
 begin;
-select plan(25);
+select plan(28);
+
+select is(
+  (select array_agg(distinct r) from public.provider_machine_types, unnest(regions) r
+    where provider_kind = 'boat'),
+  array['eu_west'],
+  'Boat runs only in the EU');
+
+select is(
+  (select array_agg(distinct r order by r) from public.provider_machine_types, unnest(regions) r
+    where provider_kind = 'daytona'),
+  array['eu_west', 'us_east', 'us_west'],
+  'Daytona has no ap_southeast target');
+
+select is(
+  (select array_agg(id order by id) from public.provider_machine_types
+    where provider_kind = 'daytona' and selectable),
+  array['daytona:m', 'daytona:s'],
+  'Daytona l/xl stay hidden until the account limits are raised');
 
 select is(
   (select array_agg(billing_granularity_sec order by kind) from public.sandbox_providers
@@ -46,9 +64,9 @@ select is(
     where t.provider_kind = 'daytona'
       and t.vcpu = st.vcpu and t.ram_gib = st.ram_gib and t.disk_gb = st.min_disk_gb
       and t.vendor_type = st.id
-      and t.regions @> array['us_east', 'us_west', 'eu_west', 'ap_southeast']),
+      and t.regions = array['us_east', 'us_west', 'eu_west']),
   4,
-  'daytona machine types match the size tiers in all four regions');
+  'daytona machine types match the size tiers in its us and eu targets');
 select is(
   (select array_agg(p.running_nanousd_per_sec order by st.sort)
      from public.provider_machine_types t
@@ -68,8 +86,8 @@ select ok(
   not exists (
     select 1 from public.pro_provider_defaults d
      join public.provider_machine_types t on t.id = d.machine_type_id
-    where t.provider_kind = 'daytona'),
-  'Boat stays the cheapest default; daytona is never picked');
+    where t.provider_kind = 'daytona' and d.region = 'eu_west'),
+  'Boat stays the cheapest default in eu_west; daytona is never picked there');
 
 -- ── Fly Machines ────────────────────────────────────────────────────────
 
@@ -147,8 +165,8 @@ select ok(
   not exists (
     select 1 from public.pro_provider_defaults d
      join public.provider_machine_types t on t.id = d.machine_type_id
-    where t.provider_kind = 'e2b'),
-  'Boat stays the cheapest default; e2b is never picked');
+    where t.provider_kind = 'e2b' and d.region = 'eu_west'),
+  'Boat stays the cheapest default in eu_west; e2b is never picked there');
 
 -- E2B and Daytona cost the same in every tier; the tie breaks by id.
 update public.sandbox_providers set status = 'draining' where kind = 'boat';
