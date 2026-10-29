@@ -11,6 +11,17 @@ use crate::{theme, theme::Palette, zpx};
 /// put it in a `relative()` trigger's parent. Close it on Escape and a
 /// click outside with [`crate::DismissExt::dismiss_with`], which works on
 /// it directly. No popover opens another.
+/// The surface of a panel that floats in the middle of the window without
+/// being a dialog, such as the command palette or a file finder: large
+/// radius, border and the deepest shadow. The caller picks its fill. A
+/// dialog uses [`crate::Dialog`], which draws its own.
+pub fn floating<E: Styled>(el: E, p: &Palette) -> E {
+  el.rounded(zpx(theme::RADIUS_LG))
+    .border_1()
+    .border_color(p.border)
+    .shadow_2xl()
+}
+
 #[derive(IntoElement)]
 pub struct Popover {
   base: Stateful<Div>,
@@ -86,5 +97,15 @@ mod tests {
     let p = theme::palette(false);
     let popover = Popover::new("target-menu", &p).w(zpx(240.)).child("Body");
     assert_eq!(popover.children.len(), 1);
+  }
+
+  #[test]
+  fn test_floating_surface_has_a_border_radius_and_shadow() {
+    let p = theme::palette(true);
+    let mut surface = floating(div(), &p);
+    let style = surface.style();
+    assert!(style.box_shadow.as_ref().is_some_and(|s| !s.is_empty()));
+    assert_eq!(style.border_color, Some(p.border));
+    assert!(style.corner_radii.top_left.is_some());
   }
 }

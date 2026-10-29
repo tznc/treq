@@ -38,7 +38,6 @@ use super::{
     self as data, agent_count_label, comment_file, Anchor, Commented, FilterOption, IssueFilters,
     IssueView, LinearHost, ProjectFilters, ProjectView, Route,
   },
-  modal::{dialog, overlay, title},
   rows::Rows,
   ActionSink, ScreenAction,
 };
@@ -2147,74 +2146,37 @@ impl LinearView {
       window.focus(&self.focus, cx);
     }
     let pending = self.deleting;
-    let viewport = window.viewport_size();
-    let (backdrop, panel) = dialog(
-      "linear-delete-dialog",
-      crate::gpui_shell::ui::zoomed(512., window),
-      None,
-      viewport,
-      p,
-    );
-    let keys = cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
-      if ui::is_escape(&e.keystroke) {
-        cx.stop_propagation();
-        view.cancel_delete(cx);
-      }
-    });
     Some(
-      overlay(
-        backdrop.on_mouse_down(
-          gpui::MouseButton::Left,
-          cx.listener(|view, _, _, cx| view.cancel_delete(cx)),
-        ),
-        panel
-          .id("linear-delete-panel")
-          .track_focus(&self.focus)
-          .capture_key_down(keys)
-          .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-          .child(
-            div()
-              .flex()
-              .flex_col()
-              .gap_2()
-              .child(title(format!("Delete {identifier}?")))
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .text_color(p.muted_foreground)
-                  .whitespace_normal()
-                  .child(
-                    "Linear moves the issue to its trash, where it can be restored for 30 days.",
-                  ),
-              ),
+      ui::Dialog::new("linear-delete-dialog", p)
+        .overlay(window.viewport_size())
+        .width(512.)
+        .title(format!("Delete {identifier}?"))
+        .description("Linear moves the issue to its trash, where it can be restored for 30 days.")
+        .focus(&self.focus)
+        .on_close(ui::handler(cx, |view, _, cx| view.cancel_delete(cx)))
+        .on_primary(ui::handler(cx, |view, _, cx| view.delete_issue(cx)))
+        .primary_disabled(pending)
+        .footer([
+          Button::new("linear-delete-cancel", p)
+            .variant(Variant::Outline)
+            .disabled(pending)
+            .label("Cancel")
+            .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.cancel_delete(cx)))
+            .into_any_element(),
+          busy_spinner(
+            Button::new("linear-delete-confirm", p)
+              .variant(Variant::Destructive)
+              .gap_1()
+              .disabled(pending),
+            "linear-delete-confirm",
+            pending,
+            p.destructive_foreground,
           )
-          .child(
-            div()
-              .flex()
-              .justify_end()
-              .gap_2()
-              .child(
-                Button::new("linear-delete-cancel", p)
-                  .variant(Variant::Ghost)
-                  .disabled(pending)
-                  .label("Cancel")
-                  .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.cancel_delete(cx))),
-              )
-              .child(
-                busy_spinner(
-                  Button::new("linear-delete-confirm", p)
-                    .variant(Variant::Destructive)
-                    .gap_1()
-                    .disabled(pending),
-                  "linear-delete-confirm",
-                  pending,
-                  p.destructive_foreground,
-                )
-                .label("Delete")
-                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.delete_issue(cx))),
-              ),
-          ),
-      )
-      .into_any_element(),
+          .label("Delete")
+          .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.delete_issue(cx)))
+          .into_any_element(),
+        ])
+        .into_any_element(),
     )
   }
 
@@ -2748,13 +2710,6 @@ impl LinearView {
       window.focus(&self.focus, cx);
     }
     let viewport = window.viewport_size();
-    let (backdrop, panel) = dialog(
-      "linear-document-dialog",
-      crate::gpui_shell::ui::zoomed(896., window),
-      None,
-      viewport,
-      p,
-    );
     let target = Target {
       of: Commented::Document(doc.id.clone()),
       title: doc.title.clone(),
@@ -2766,30 +2721,21 @@ impl LinearView {
         .filter(|c| !c.is_empty())
         .unwrap_or_else(|| "No content".into()),
     };
-    let keys = cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
-      if ui::is_escape(&e.keystroke) {
-        cx.stop_propagation();
-        view.close_document(cx);
-      }
-    });
     Some(
-      overlay(
-        backdrop.on_mouse_down(
-          gpui::MouseButton::Left,
-          cx.listener(|view, _, _, cx| view.close_document(cx)),
-        ),
-        panel
-          .id("linear-document-panel")
-          .max_h(viewport.height * 0.8)
-          .overflow_y_scroll()
-          .gap_0()
-          .track_focus(&self.focus)
-          .capture_key_down(keys)
-          .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-          .child(div().flex().flex_col().child(title(doc.title)))
-          .child(self.commented(target, CommentPlacement::Inline, p, cx)),
-      )
-      .into_any_element(),
+      ui::Dialog::new("linear-document-dialog", p)
+        .overlay(viewport)
+        .width(896.)
+        .title(doc.title)
+        .focus(&self.focus)
+        .on_close(ui::handler(cx, |view, _, cx| view.close_document(cx)))
+        .child(
+          div()
+            .id("linear-document-panel")
+            .max_h(viewport.height * 0.7)
+            .overflow_y_scroll()
+            .child(self.commented(target, CommentPlacement::Inline, p, cx)),
+        )
+        .into_any_element(),
     )
   }
 }

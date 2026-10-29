@@ -787,3 +787,32 @@ mod dlg_scale {
     drop(screen);
   }
 }
+
+#[gpui::test]
+fn the_dialog_closes_on_escape(cx: &mut TestAppContext) {
+  let (mut h, _) = dialog(FakeHost::default(), cx);
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Heading).name("New Workspaces"))).to_be_visible();
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![press("openWorkspaces.close")]);
+}
+
+#[gpui::test]
+fn secondary_enter_in_the_lines_creates_the_workspaces(cx: &mut TestAppContext) {
+  let (mut h, host) = dialog(with_branches(FakeHost::default()), cx);
+  let screen = screen(&mut h);
+  screen
+    .user()
+    .type_text(&screen.get_by_label_text("Workspaces"), "feat/a");
+  let _ = self::screen(&mut h);
+  h.cx.simulate_keystrokes("secondary-enter");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .calls()
+      .contains(&"open workspaces /repo feat/a@main".to_string()),
+    "{:?}",
+    host.calls()
+  );
+}

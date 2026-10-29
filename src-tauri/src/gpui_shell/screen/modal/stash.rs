@@ -11,7 +11,7 @@ use tauri_plugin_gpui::gpui::{
   Subscription, Window,
 };
 
-use super::{dialog, message, overlay, title, Env};
+use super::{message, Env};
 use crate::{
   gpui_shell::{
     native::ToastTone,
@@ -944,28 +944,13 @@ impl Render for StashView {
       .entries
       .as_ref()
       .is_some_and(|entries| entries.is_empty());
-    let (backdrop, panel) = if empty {
-      dialog("stash-modal", zpx(512.), None, viewport, &p)
-    } else {
-      dialog(
-        "stash-modal",
-        viewport.width * 0.75,
-        Some(viewport.height * 0.80),
-        viewport,
-        &p,
-      )
-    };
-    let header = div().flex_none().child(
-      title(
-        div()
-          .flex()
-          .items_center()
-          .gap_2()
-          .child(ui::icon(theme::ICON_ARCHIVE, 16., p.popover_foreground))
-          .child("Stashed Changes"),
-      )
-      .text_color(p.popover_foreground),
-    );
+    let header = ui::text(div(), TextSize::Lg)
+      .font_weight(FontWeight::SEMIBOLD)
+      .flex()
+      .items_center()
+      .gap_2()
+      .child(ui::icon(theme::ICON_ARCHIVE, 16., p.popover_foreground))
+      .child("Stashed Changes");
     let entries = self.entries.clone();
     let body = match &entries {
       None => ui::delayed(
@@ -989,29 +974,28 @@ impl Render for StashView {
         .child(self.detail(&p, cx))
         .into_any_element(),
     };
-    let keys = cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
-      if ui::is_escape(&e.keystroke) {
-        cx.stop_propagation();
-        if view.apply.is_some() || view.more_open {
-          view.close_menus(cx);
-        } else {
-          view.close(cx);
-        }
+    // Escape closes an open menu first.
+    let close = ui::handler(cx, |view, _, cx| {
+      if view.apply.is_some() || view.more_open {
+        view.close_menus(cx);
+      } else {
+        view.close(cx);
       }
     });
-    overlay(
-      backdrop.on_mouse_down(
-        gpui::MouseButton::Left,
-        cx.listener(|view, _, _, cx| view.close(cx)),
-      ),
-      panel
-        .id("stash-panel")
-        .track_focus(&self.focus)
-        .capture_key_down(keys)
-        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(header)
-        .child(body),
-    )
+    ui::Dialog::new("stash-modal", &p)
+      .overlay(viewport)
+      .map(|d| {
+        if empty {
+          d.width(512.)
+        } else {
+          d.relative_size(0.75, Some(0.8))
+        }
+      })
+      .title("Stashed Changes")
+      .header(header)
+      .focus(&self.focus)
+      .on_close(close)
+      .child(body)
   }
 }
 

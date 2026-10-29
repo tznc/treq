@@ -1362,3 +1362,21 @@ fn terminal_reports_the_mouse_once_the_program_asks(cx: &mut TestAppContext) {
     "{writes:?}"
   );
 }
+
+#[gpui::test]
+fn lightbox_unsent_comments_dialog_keeps_on_escape_and_discards_on_enter(cx: &mut TestAppContext) {
+  let (mut h, _) = send_harness(cx);
+  h.click("terminal-send-preview-t1");
+  h.click("treq-send-review-input");
+  h.cx.simulate_input("hmm");
+  h.click("treq-send-close");
+  assert!(h.drawn("treq-send-unsaved-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.drawn("treq-send-unsaved-dialog"));
+  assert!(h.drawn("treq-send-preview-lightbox"));
+  h.click("treq-send-close");
+  assert!(h.drawn("treq-send-unsaved-dialog"));
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("treq-send-preview-lightbox"));
+}

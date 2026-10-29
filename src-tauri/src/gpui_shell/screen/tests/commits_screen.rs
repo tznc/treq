@@ -330,3 +330,53 @@ fn a_cut_off_remote_repository_dims_the_window(cx: &mut TestAppContext) {
   h.click("remote-refresh-link");
   assert!(h.sent().is_empty(), "{:?}", h.sent());
 }
+
+#[gpui::test]
+fn commits_tab_description_dialog_saves_on_secondary_enter_and_closes_on_escape(
+  cx: &mut TestAppContext,
+) {
+  let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
+  h.click("commit-row-a");
+  h.click("edit-description-a");
+  h.cx.simulate_input("!");
+  h.cx.simulate_keystrokes("secondary-enter");
+  h.cx.run_until_parked();
+  assert!(host.writes().iter().any(|w| w.starts_with("describe a ")));
+  assert!(!h.drawn("edit-description-dialog"));
+
+  h.click("edit-description-a");
+  assert!(h.drawn("edit-description-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.drawn("edit-description-dialog"));
+}
+
+#[gpui::test]
+fn commits_tab_timestamp_dialog_closes_on_escape(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, commits_host(), commits_route());
+  h.click("commit-row-a");
+  h.click("edit-timestamp-a");
+  assert!(h.drawn("edit-timestamp-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.drawn("edit-timestamp-dialog"));
+}
+
+#[gpui::test]
+fn commits_tab_resolve_dialog_submits_on_secondary_enter_and_closes_on_escape(
+  cx: &mut TestAppContext,
+) {
+  let mut host = commits_host();
+  if let Some(log) = host.history.as_mut() {
+    log.commits[0].has_conflicts = true;
+  }
+  let (mut h, host) = workspace_harness(cx, host, commits_route());
+  h.click("resolve-conflicts-button");
+  type_into(&mut h, "resolve-conflicts-prompt", "keep both sides");
+  h.cx.simulate_keystrokes("secondary-enter");
+  h.cx.run_until_parked();
+  assert_eq!(host.started_sessions().len(), 1);
+
+  h.click("resolve-conflicts-button");
+  assert!(h.drawn("resolve-conflicts-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.drawn("resolve-conflicts-dialog"));
+}

@@ -187,12 +187,9 @@ impl Render for FilePicker {
       .id("file-picker")
       .debug_selector(|| "file-picker".into())
       .w(width)
-      .rounded(radius::LG)
-      .border_1()
-      .border_color(p.border)
+      .map(|el| ui::floating(el, &p))
       .bg(p.background)
       .text_color(p.foreground)
-      .shadow_2xl()
       .overflow_hidden()
       .occlude()
       .capture_action(cx.listener(|picker, _: &MoveDown, _, cx| {

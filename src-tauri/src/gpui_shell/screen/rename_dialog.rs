@@ -8,15 +8,12 @@ use std::{sync::Arc, time::Duration};
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  anchored, deferred, div, point, prelude::*, px, Context, Entity, FocusHandle, FontWeight,
-  KeyDownEvent, MouseButton, Subscription, Task, Window,
+  div, prelude::*, Context, Entity, FocusHandle, FontWeight, Subscription, Task, Window,
 };
 
 use super::{
-  workspace_data::WorkspaceHost,
-  workspace_dialog_data::WorkspaceDialogHost,
-  workspace_modal::{dialog_description, dialog_header, dialog_panel, press},
-  ActionSink,
+  workspace_data::WorkspaceHost, workspace_dialog_data::WorkspaceDialogHost,
+  workspace_modal::press, ActionSink,
 };
 use crate::gpui_shell::{
   native::{NativeEvent, ToastTone},
@@ -284,26 +281,16 @@ impl Render for RenameDialog {
       })
     };
     let invalid = validation.filter(|v| !checking && !v.success);
-    let (backdrop, panel) =
-      dialog_panel("rename-workspace-dialog", 500., window.viewport_size(), &p);
-    let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
-      let k = &e.keystroke;
-      if ui::is_escape(k) {
-        cx.stop_propagation();
-        view.close(cx);
-      } else if k.key == "enter"
-        && (crate::gpui_shell::keys::held(k.modifiers).platform
-          || crate::gpui_shell::keys::held(k.modifiers).control)
-      {
-        cx.stop_propagation();
-        view.submit(cx);
-      }
-    });
-    let panel = panel
-      .child(dialog_header(
-        "Rename Workspace",
-        dialog_description("Rename the branch for this workspace", &p),
-      ))
+    let can_submit = self.can_submit();
+    ui::Dialog::new("rename-workspace-dialog", &p)
+      .overlay(window.viewport_size())
+      .width(500.)
+      .title("Rename Workspace")
+      .description("Rename the branch for this workspace")
+      .focus(&self.focus)
+      .on_close(ui::handler(cx, |view, _, cx| view.close(cx)))
+      .on_primary(ui::handler(cx, |view, _, cx| view.submit(cx)))
+      .primary_disabled(!can_submit)
       .child(
         div()
           .flex()
@@ -352,42 +339,19 @@ impl Render for RenameDialog {
             )
           }),
       )
-      .child(
-        div()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("rename-cancel", &p)
-              .variant(Variant::Outline)
-              .disabled(pending)
-              .label("Cancel")
-              .on_click(cx.listener(|view, _, _, cx| view.close(cx))),
-          )
-          .child(
-            Button::new("rename-submit", &p)
-              .disabled(!self.can_submit())
-              .label(if pending { "Renaming..." } else { "Rename" })
-              .on_click(cx.listener(|view, _, _, cx| view.submit(cx))),
-          ),
-      );
-    deferred(
-      anchored().position(point(px(0.), px(0.))).child(
-        backdrop
-          .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|view, _, _, cx| view.close(cx)),
-          )
-          .child(
-            panel
-              .id("rename-workspace-panel")
-              .track_focus(&self.focus)
-              .capture_key_down(keys)
-              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
-          ),
-      ),
-    )
-    .with_priority(2)
-    .into_any_element()
+      .footer([
+        Button::new("rename-cancel", &p)
+          .variant(Variant::Outline)
+          .disabled(pending)
+          .label("Cancel")
+          .on_click(cx.listener(|view, _, _, cx| view.close(cx)))
+          .into_any_element(),
+        Button::new("rename-submit", &p)
+          .disabled(!can_submit)
+          .label(if pending { "Renaming..." } else { "Rename" })
+          .on_click(cx.listener(|view, _, _, cx| view.submit(cx)))
+          .into_any_element(),
+      ])
+      .into_any_element()
   }
 }

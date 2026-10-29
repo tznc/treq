@@ -845,3 +845,30 @@ mod lin_scale {
     }
   }
 }
+
+#[gpui::test]
+fn linear_delete_dialog_cancels_on_escape_and_deletes_on_enter(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, linear_host());
+  h.click("linear-issue-1");
+  h.click("linear-issue-delete");
+  assert!(h.drawn("linear-delete-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.drawn("linear-delete-dialog"));
+  h.click("linear-issue-delete");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"delete linear issue 1".to_string()));
+}
+
+#[gpui::test]
+fn linear_document_dialog_closes_on_escape_and_from_its_x(cx: &mut TestAppContext) {
+  let (mut h, _) = linear_harness(cx, linear_host());
+  h.click("linear-section-projects");
+  h.click("linear-document-item-d1");
+  assert!(h.drawn("linear-document-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.drawn("linear-document-dialog"));
+  h.click("linear-document-item-d1");
+  h.click("linear-document-dialog-close");
+  assert!(!h.drawn("linear-document-dialog"));
+}

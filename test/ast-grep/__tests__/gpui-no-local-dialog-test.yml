@@ -1,0 +1,55 @@
+id: gpui-no-local-dialog
+valid:
+  - |
+    fn delete_dialog(p: &Palette) -> ui::ConfirmDialog {
+      ui::ConfirmDialog::new("delete", "Delete it?", "Delete", p)
+    }
+  - |
+    fn render_dialog(window: &Window, p: &Palette) -> ui::Dialog {
+      ui::Dialog::new("settings", p).overlay(window.viewport_size()).title("Settings")
+    }
+  - |
+    fn panel(p: &Palette) -> Div {
+      div().shadow_lg()
+    }
+  - |
+    fn surface(p: &Palette) -> Div {
+      ui::floating(div(), p)
+    }
+invalid:
+  - |
+    pub fn dialog(id: &'static str, p: &Palette) -> (Stateful<Div>, Div) {
+      (div().id(id), div())
+    }
+  - |
+    pub(super) fn dialog_panel(id: &'static str, p: &Palette) -> (Stateful<Div>, Div) {
+      (div().id(id), div())
+    }
+  - |
+    pub fn dialog_title(title: impl Into<SharedString>) -> Div {
+      div()
+    }
+  - |
+    pub fn dialog_header(title: &str, description: Div) -> Div {
+      div()
+    }
+  - |
+    fn dialog_description(text: &str) -> Div {
+      div()
+    }
+  - |
+    fn dialog_footer() -> Div {
+      div()
+    }
+  - |
+    fn modal_shell() -> Div {
+      div()
+    }
+  - |
+    fn cancel_button(&self, p: &Palette) -> Button {
+      Button::new("cancel", p)
+    }
+  - |
+    fn panel(p: &Palette) -> Div {
+      div().bg(p.popover).shadow_2xl()
+    }

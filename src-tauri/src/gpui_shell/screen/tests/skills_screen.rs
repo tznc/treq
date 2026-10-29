@@ -471,3 +471,40 @@ fn customized_skill_shows_a_badge_and_edits_without_copying(cx: &mut TestAppCont
     [ScreenAction::Field { field, .. }] if field == "skills.startAgent"
   ));
 }
+
+#[gpui::test]
+fn skills_dialog_cancels_on_escape_and_installs_for_the_repository_on_enter(
+  cx: &mut TestAppContext,
+) {
+  let (mut h, host) = skills_harness(cx);
+  h.click("skill-install-docx");
+  assert!(h.drawn("skill-install-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("skill-install-dialog"));
+  assert!(host.writes().is_empty());
+  h.click("skill-install-docx");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert_eq!(host.writes()[0], "install docx Repository Some(\"/repo\")");
+}
+
+#[gpui::test]
+fn skill_link_confirmation_cancels_on_escape_and_installs_on_enter(cx: &mut TestAppContext) {
+  let (mut h, host) = skills_link_harness(cx, "docx");
+  assert!(h.drawn("skill-confirm-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert!(host.writes().is_empty());
+  assert_eq!(h.sent(), vec![press("skills.installRequest.close")]);
+
+  let (mut h, host) = skills_link_harness(cx, "docx");
+  assert!(h.drawn("skill-confirm-dialog"));
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(
+    host.writes()[0].starts_with("install docx"),
+    "{:?}",
+    host.writes()
+  );
+}

@@ -28,7 +28,6 @@ use tauri_plugin_gpui::gpui::{
 
 use super::{
   account_data::{self, CloudAction},
-  commits::{dialog_description, dialog_panel, dialog_title},
   remote_data::{default_key, RemoteHost},
   settings::account::{cloud_card, cloud_card_element, cloud_delete_dialog_element, ClickFn},
   ActionSink, ScreenAction,
@@ -44,7 +43,7 @@ use crate::{
     popup::PopupSink,
     theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
-    ui::{self, Button, IconButton, Size, TextSize, Variant},
+    ui::{self, Button, Size, TextSize, Variant},
   },
 };
 
@@ -162,17 +161,6 @@ impl HasTooltips for RemoteView {
   }
 }
 
-/// A dialog's place in the window.
-struct Frame {
-  id: &'static str,
-  /// `max-w-*`, in pixels.
-  max_width: f32,
-  /// Later dialogs paint over earlier ones.
-  priority: usize,
-  /// The press its backdrop sends React.
-  dismiss: &'static str,
-}
-
 /// The text of a `<label>`'s caption: `text-sm font-medium`.
 fn caption(text: &'static str) -> Div {
   ui::text(div(), TextSize::Sm)
@@ -187,16 +175,6 @@ fn hint(text: impl Into<SharedString>, p: &Palette) -> Div {
   ui::text(div(), TextSize::Xs)
     .text_color(p.muted_foreground)
     .child(text.into())
-}
-
-/// `DialogHeader`: a title over its description.
-fn header(title: impl IntoElement, description: impl Into<SharedString>, p: &Palette) -> Div {
-  div()
-    .flex()
-    .flex_col()
-    .gap_1p5()
-    .child(dialog_title(title))
-    .child(dialog_description(description, p))
 }
 
 /// A plain `<input>`: `rounded-md border border-border/60 bg-background
@@ -694,41 +672,24 @@ impl RemoteView {
     }
   }
 
-  /// `ui/dialog.tsx`: the backdrop over the whole window, which closes the
-  /// dialog when clicked, and the panel.
-  fn dialog(
-    &self,
-    frame: Frame,
+  /// A remote dialog over the window: later ones stack above earlier
+  /// ones, and closing one sends React `dismiss`.
+  fn layer(
+    id: &'static str,
+    width: f32,
+    priority: usize,
+    dismiss: &'static str,
     window: &Window,
-    content: impl IntoElement,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> AnyElement {
-    let Frame {
-      id,
-      max_width,
-      priority,
-      dismiss,
-    } = frame;
-    let (backdrop, panel) = dialog_panel(id, max_width, window.viewport_size(), p);
-    deferred(
-      anchored().position(point(px(0.), px(0.))).child(
-        backdrop
-          .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |view, _, _, cx| view.press_react(dismiss, cx)),
-          )
-          .child(
-            ui::text(panel, TextSize::Sm)
-              .id(id)
-              .font_family(theme::SANS_FONT)
-              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-              .child(content),
-          ),
-      ),
-    )
-    .with_priority(priority)
-    .into_any_element()
+  ) -> ui::Dialog {
+    ui::Dialog::new(id, p)
+      .overlay(window.viewport_size())
+      .width(width)
+      .priority(priority)
+      .on_close(ui::handler(cx, move |view, _, cx| {
+        view.press_react(dismiss, cx)
+      }))
   }
 
   fn setup_dialog(
@@ -748,30 +709,51 @@ impl RemoteView {
     }
     let setup = self.setup.as_ref()?;
     let (mode, confirming) = (setup.mode, setup.confirming_delete);
-    let content = match mode {
-      Mode::Choice => self.choice(window, p, cx).into_any_element(),
-      Mode::Managed => self.managed(&route, p, cx).into_any_element(),
-      Mode::UserManaged => self.user_managed(window, p, cx).into_any_element(),
+    let (title, description, content, footer, can_continue) = match mode {
+      Mode::Choice => (
+        "Connect a remote repository",
+        "Choose how the remote machine is managed.",
+        self.choice(window, p, cx).into_any_element(),
+        Vec::new(),
+        None,
+      ),
+      Mode::Managed => (
+        "Treq-managed cloud workspace",
+        "Treq manages the machine lifecycle. Commands run over managed SSH with short-lived certificates.",
+        self.managed(&route, p, cx).into_any_element(),
+        Vec::new(),
+        None,
+      ),
+      Mode::UserManaged => {
+        let (content, footer, can_continue) = self.user_managed(window, p, cx);
+        (
+          "Your own VM",
+          "Enter the connection details exactly - Treq never infers trust from your local SSH configuration.",
+          content.into_any_element(),
+          footer,
+          Some(can_continue),
+        )
+      }
     };
     // The own-VM form ends in an action pair, so it has no X.
-    let content = div()
-      .relative()
-      .child(content)
-      .when(mode != Mode::UserManaged, |d| {
-        d.child(
-          div().absolute().top(zpx(-8.)).right(zpx(-8.)).child(
-            IconButton::new("remote-setup-close", theme::ICON_X, "Close", p)
-              .on_click(cx.listener(|view, _, _, cx| view.press_react("remote.setup.close", cx))),
-          ),
-        )
-      });
-    let frame = Frame {
-      id: "remote-setup-dialog",
-      max_width: 576.,
-      priority: 3,
-      dismiss: "remote.setup.close",
-    };
-    let dialog = self.dialog(frame, window, content, p, cx);
+    let dialog = Self::layer(
+      "remote-setup-dialog",
+      576.,
+      3,
+      "remote.setup.close",
+      window,
+      p,
+      cx,
+    )
+    .title(title)
+    .description(description)
+    .when_some(can_continue, |d, can| {
+      d.on_primary(ui::handler(cx, |view, _, cx| view.probe_host_key(cx)))
+        .primary_disabled(!can)
+    })
+    .child(content)
+    .footer(footer)
+    .into_any_element();
     let confirm = (mode == Mode::Managed && confirming).then(|| {
       let press = Self::cloud_press(cx);
       let layer = div()
@@ -818,15 +800,8 @@ impl RemoteView {
         .on_click(cx.listener(move |view, _, window, cx| view.set_mode(mode, window, cx)))
     };
     let wide = window.viewport_size().width >= crate::gpui_shell::ui::zoomed(640., window);
-    div()
-      .child(header(
-        "Connect a remote repository",
-        "Choose how the remote machine is managed.",
-        p,
-      ))
-      .child(
-        div()
-          .mt_4()
+    div().child(
+      div()
           .flex()
           .gap_3()
           .when(!wide, |this| this.flex_col())
@@ -844,7 +819,7 @@ impl RemoteView {
             Mode::UserManaged,
             cx,
           )),
-      )
+    )
   }
 
   fn managed(
@@ -864,12 +839,7 @@ impl RemoteView {
       Self::sign_in(&account, &press, p).into_any_element()
     };
     div()
-      .child(header(
-        "Treq-managed cloud workspace",
-        "Treq manages the machine lifecycle. Commands run over managed SSH with short-lived certificates.",
-        p,
-      ))
-      .child(div().mt_4().child(card))
+      .child(card)
       // Opened on this screen from the Overview, there is no choice to go
       // back to.
       .when(route.allow_user_managed && route.screen.is_none(), |this| {
@@ -1009,7 +979,7 @@ impl RemoteView {
     window: &mut Window,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> impl IntoElement {
+  ) -> (Div, Vec<AnyElement>, bool) {
     let two_columns = window.viewport_size().width >= crate::gpui_shell::ui::zoomed(640., window);
     // Opened on this form from the Overview: Cancel closes it.
     let direct = self
@@ -1018,7 +988,7 @@ impl RemoteView {
       .as_ref()
       .is_some_and(|r| r.screen.is_some());
     let Some(form) = self.setup.as_ref().and_then(|s| s.form.as_ref()) else {
-      return div();
+      return (div(), Vec::new(), false);
     };
     let value = |input: &Entity<InputState>| input.read(cx).value().to_string();
     let (hostname, username, port) = (
@@ -1212,53 +1182,46 @@ impl RemoteView {
     let show_continue = form.trust.is_none();
     let probing = form.probing;
     let probe_error = form.probe_error.clone();
-    div()
-      .child(header(
-        "Your own VM",
-        "Enter the connection details exactly - Treq never infers trust from your local SSH configuration.",
-        p,
-      ))
-      .child(div().mt_4().child(grid(cells, two_columns)))
-      .children(trust)
-      .when(!probe_error.is_empty(), |this| {
-        this.child(
-          div().mt_4().child(
-            ui::Alert::new("remote-probe-error", "Couldn't reach the host", p)
-              .severity(ui::Severity::Danger)
-              .message(probe_error),
-          ),
-        )
-      })
-      .child(
-        div()
-          .mt_6()
-          .flex()
-          .justify_between()
-          .child(if direct {
-            Button::new("remote-setup-cancel", p)
-              .variant(Variant::Ghost)
-              .label("Cancel")
-              .on_click(cx.listener(|view, _, _, cx| view.press_react("remote.setup.close", cx)))
+    let back = if direct {
+      Button::new("remote-setup-cancel", p)
+        .variant(Variant::Outline)
+        .label("Cancel")
+        .on_click(cx.listener(|view, _, _, cx| view.press_react("remote.setup.close", cx)))
+    } else {
+      Button::new("remote-setup-back", p)
+        .variant(Variant::Outline)
+        .disabled(busy)
+        .label("Back")
+        .on_click(cx.listener(|view, _, window, cx| view.set_mode(Mode::Choice, window, cx)))
+    };
+    let can_continue = show_continue && valid && !busy && !probing;
+    let footer = std::iter::once(back.into_any_element())
+      .chain(show_continue.then(|| {
+        Button::new("remote-continue", p)
+          .disabled(!valid || busy || probing)
+          .label(if probing {
+            "Checking host key…"
           } else {
-            Button::new("remote-setup-back", p)
-              .variant(Variant::Ghost)
-              .disabled(busy)
-              .label("Back")
-              .on_click(cx.listener(|view, _, window, cx| view.set_mode(Mode::Choice, window, cx)))
+            "Continue"
           })
-          .when(show_continue, |this| {
-            this.child(
-              Button::new("remote-continue", p)
-                .disabled(!valid || busy || probing)
-                .label(if probing {
-                  "Checking host key…"
-                } else {
-                  "Continue"
-                })
-                .on_click(cx.listener(|view, _, _, cx| view.probe_host_key(cx))),
-            )
-          }),
-      )
+          .on_click(cx.listener(|view, _, _, cx| view.probe_host_key(cx)))
+          .into_any_element()
+      }))
+      .collect();
+    let content =
+      div()
+        .child(grid(cells, two_columns))
+        .children(trust)
+        .when(!probe_error.is_empty(), |this| {
+          this.child(
+            div().mt_4().child(
+              ui::Alert::new("remote-probe-error", "Couldn't reach the host", p)
+                .severity(ui::Severity::Danger)
+                .message(probe_error),
+            ),
+          )
+        });
+    (content, footer, can_continue)
   }
 
   fn terminal_dialog(
@@ -1332,83 +1295,86 @@ impl RemoteView {
         }))
     });
 
-    let content = div()
-      .child(
-        div()
-          .flex()
-          .flex_col()
-          .gap_1p5()
-          .child(dialog_title(
+    let header = ui::text(div(), TextSize::Lg)
+      .font_weight(FontWeight::SEMIBOLD)
+      .flex()
+      .items_center()
+      .gap_2()
+      .child(ui::icon(
+        theme::ICON_TERMINAL_SQUARE,
+        16.,
+        p.popover_foreground,
+      ))
+      .child("Remote terminal");
+    let description = format!(
+      "Open an interactive shell on {}.",
+      terminal.endpoint.hostname
+    );
+    let content = div().child(
+      div()
+        .mt_2()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .when(loading, |this| {
+          this.child(
             div()
+              .py_4()
               .flex()
               .items_center()
               .gap_2()
-              .child(ui::icon(
-                theme::ICON_TERMINAL_SQUARE,
+              .text_color(p.muted_foreground)
+              .child(ui::spinner(
+                "remote-terminal-loading",
                 16.,
-                p.popover_foreground,
+                p.muted_foreground,
               ))
-              .child("Remote terminal"),
-          ))
-          .child(dialog_description(
-            format!(
-              "Open an interactive shell on {}.",
-              terminal.endpoint.hostname
-            ),
-            p,
-          )),
+              .child("Checking for running sessions…"),
+          )
+        })
+        .when_some(self.sessions.error.clone(), |this, error| {
+          this.child(
+            div()
+              .debug_selector(|| "remote-terminal-error".into())
+              .text_color(red)
+              .child(error),
+          )
+        })
+        .children(rows)
+        .when(list.is_some(), |this| {
+          this.child(
+            Button::new("remote-start-new", p)
+              .variant(if sessions.is_empty() {
+                Variant::Default
+              } else {
+                Variant::Outline
+              })
+              .label("Start new session")
+              .on_click(cx.listener(|view, _, _, cx| view.open_session(None, None, false, cx))),
+          )
+        }),
+    );
+    Some(
+      Self::layer(
+        "remote-terminal-dialog",
+        512.,
+        5,
+        "remote.terminal.close",
+        window,
+        p,
+        cx,
       )
-      .child(
-        div()
-          .mt_2()
-          .flex()
-          .flex_col()
-          .gap_3()
-          .when(loading, |this| {
-            this.child(
-              div()
-                .py_4()
-                .flex()
-                .items_center()
-                .gap_2()
-                .text_color(p.muted_foreground)
-                .child(ui::spinner(
-                  "remote-terminal-loading",
-                  16.,
-                  p.muted_foreground,
-                ))
-                .child("Checking for running sessions…"),
-            )
-          })
-          .when_some(self.sessions.error.clone(), |this, error| {
-            this.child(
-              div()
-                .debug_selector(|| "remote-terminal-error".into())
-                .text_color(red)
-                .child(error),
-            )
-          })
-          .children(rows)
-          .when(list.is_some(), |this| {
-            this.child(
-              Button::new("remote-start-new", p)
-                .variant(if sessions.is_empty() {
-                  Variant::Default
-                } else {
-                  Variant::Outline
-                })
-                .label("Start new session")
-                .on_click(cx.listener(|view, _, _, cx| view.open_session(None, None, false, cx))),
-            )
-          }),
-      );
-    let frame = Frame {
-      id: "remote-terminal-dialog",
-      max_width: 512.,
-      priority: 5,
-      dismiss: "remote.terminal.close",
-    };
-    Some(self.dialog(frame, window, content, p, cx))
+      .title("Remote terminal")
+      .header(
+        div().flex().flex_col().gap_1().child(header).child(
+          ui::text(div(), TextSize::Sm)
+            .text_color(p.muted_foreground)
+            .child(description),
+        ),
+      )
+      .child(content)
+      .into_any_element(),
+    )
   }
 
   /// Hands React the session to open in the terminal pane. A new session
@@ -1434,47 +1400,43 @@ impl RemoteView {
     cx: &mut Context<Self>,
   ) -> Option<AnyElement> {
     let reason = self.route.reason()?.to_string();
-    // `DialogContent` is a plain block: the reason and the buttons follow
-    // the header with no gap.
-    let content = div()
-      .child(header(
-        "Remote change could not be verified",
-        "A network interruption happened while a mutation was in flight. Treq did not retry automatically because the remote state is ambiguous. Refresh to check whether the change landed before trying again.",
+    Some(
+      Self::layer(
+        "remote-ambiguous-dialog",
+        512.,
+        4,
+        "remote.ambiguous.dismiss",
+        window,
         p,
-      ))
+        cx,
+      )
+      .title("Remote change could not be verified")
+      .description("A network interruption happened while a mutation was in flight. Treq did not retry automatically because the remote state is ambiguous. Refresh to check whether the change landed before trying again.")
+      .on_primary(ui::handler(cx, |view, _, cx| {
+        view.press_react("remote.ambiguous.refresh", cx)
+      }))
       .child(
         div()
           .debug_selector(|| "remote-ambiguous-reason".into())
           .child(reason),
       )
-      .child(
-        div()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("remote-ambiguous-dismiss", p)
-              .variant(Variant::Outline)
-              .label("Dismiss")
-              .on_click(cx.listener(|view, _, _, cx| {
-                view.press_react("remote.ambiguous.dismiss", cx)
-              })),
-          )
-          .child(
-            Button::new("remote-ambiguous-refresh", p)
-              .label("Refresh")
-              .on_click(cx.listener(|view, _, _, cx| {
-                view.press_react("remote.ambiguous.refresh", cx)
-              })),
-          ),
-      );
-    let frame = Frame {
-      id: "remote-ambiguous-dialog",
-      max_width: 512.,
-      priority: 4,
-      dismiss: "remote.ambiguous.dismiss",
-    };
-    Some(self.dialog(frame, window, content, p, cx))
+      .footer([
+        Button::new("remote-ambiguous-dismiss", p)
+          .variant(Variant::Outline)
+          .label("Dismiss")
+          .on_click(cx.listener(|view, _, _, cx| {
+            view.press_react("remote.ambiguous.dismiss", cx)
+          }))
+          .into_any_element(),
+        Button::new("remote-ambiguous-refresh", p)
+          .label("Refresh")
+          .on_click(cx.listener(|view, _, _, cx| {
+            view.press_react("remote.ambiguous.refresh", cx)
+          }))
+          .into_any_element(),
+      ])
+      .into_any_element(),
+    )
   }
 }
 

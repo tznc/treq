@@ -636,10 +636,10 @@ fn setup_dialog_runs_the_cloud_workspace_flows_in_rust(cx: &mut TestAppContext) 
   // Deleting asks first, in a confirmation of its own.
   h.click("cloud-delete");
   assert!(h.drawn("cloud-delete-dialog"));
-  h.click("cloud-delete-cancel");
+  h.click("cloud-delete-dialog-cancel");
   assert!(!h.drawn("cloud-delete-dialog"));
   h.click("cloud-delete");
-  h.click("cloud-delete-confirm");
+  h.click("cloud-delete-dialog-confirm");
   assert!(!h.drawn("cloud-delete-dialog"));
 
   let ready = serde_json::json!({
@@ -980,4 +980,79 @@ fn opening_a_repository_remembers_it_and_reports_it_open() {
     ]
   );
   assert_eq!(shown, [path]);
+}
+
+// -- ui::Dialog behaviour: Escape closes, Enter runs the verb, and a dialog
+// with no action pair closes from its X.
+
+#[gpui::test]
+fn prompt_history_closes_from_its_x(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, history_host(), history_modal());
+  h.click("prompt-history-modal-close");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![press("promptHistory.close")]);
+}
+
+#[gpui::test]
+fn stash_modal_closes_on_escape_and_from_its_x(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, stash_host(), stash_modal());
+  assert!(h.drawn("stash-modal"));
+  h.cx.simulate_keystrokes("escape");
+  h.click("stash-modal-close");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![press("stash.close"), press("stash.close")]);
+}
+
+#[gpui::test]
+fn agent_prompt_closes_on_escape_and_from_its_x(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  h.cx.simulate_keystrokes("escape");
+  h.click("agent-prompt-dialog-close");
+  h.cx.run_until_parked();
+  assert_eq!(
+    h.sent(),
+    vec![press("agentPrompt.close"), press("agentPrompt.close")]
+  );
+}
+
+#[gpui::test]
+fn setup_dialog_closes_on_escape(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(
+    cx,
+    FakeHost::default(),
+    setup_route(true, serde_json::json!({})),
+  );
+  assert!(h.drawn("remote-setup-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![press("remote.setup.close")]);
+}
+
+#[gpui::test]
+fn terminal_dialog_closes_on_escape(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(cx, FakeHost::default(), terminal_remote_route());
+  assert!(h.drawn("remote-start-new"));
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![press("remote.terminal.close")]);
+}
+
+#[gpui::test]
+fn ambiguous_dialog_dismisses_on_escape_and_refreshes_on_enter(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(
+    cx,
+    FakeHost::default(),
+    serde_json::json!({ "ambiguous": "Connection reset while pushing" }),
+  );
+  assert!(h.drawn("remote-ambiguous-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert_eq!(
+    h.sent(),
+    vec![
+      press("remote.ambiguous.dismiss"),
+      press("remote.ambiguous.refresh")
+    ]
+  );
 }
