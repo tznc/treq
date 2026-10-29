@@ -205,3 +205,85 @@ fn rebase_hold_is_stored_with_the_workspace() {
     Some(serde_json::json!({"ParentDirty": {"branch": "feat/stored-parent"}}))
   );
 }
+
+/// Snapshots the parent's working copy, as any read of that workspace does.
+fn parent_wip_reaches_child(parent_path: &str, child_path: &str, child: &str) -> bool {
+  TestRepo::write_workspace_file(parent_path, "wip.txt", "uncommitted").unwrap();
+  jj::jj_is_working_copy_empty(parent_path).unwrap();
+  has_file(child_path, child, "wip.txt")
+}
+
+#[test]
+fn stacked_workspace_is_created_on_the_parent_bookmark_not_its_working_copy() {
+  let repo = TestRepo::with_remote().unwrap();
+  let (parent_path, _, child_path) = stack(&repo, "feat/new-parent", "feat/new-child");
+
+  assert!(!parent_wip_reaches_child(
+    &parent_path,
+    &child_path,
+    "feat/new-child"
+  ));
+}
+
+/// A stack made before children were created on the parent's bookmark: the
+/// child sits on the parent's working copy.
+fn old_stack(repo: &TestRepo) -> (String, treq_lib::local_db::Workspace, String) {
+  let (parent_path, child, child_path) = stack(repo, "feat/old-parent", "feat/old-child");
+  // A stack made before children were created on the parent's bookmark.
+  jj::jj_set_bookmark(&parent_path, "old-parent-wc", "@").unwrap();
+  jj::jj_rebase_with_revset(
+    &child_path,
+    "roots(feat/old-parent..feat/old-child)",
+    "old-parent-wc",
+    "feat/old-child",
+    "diff",
+  )
+  .unwrap();
+  jj::jj_delete_bookmark(&parent_path, "old-parent-wc").unwrap();
+  let parent_wc = jj::jj_get_commit_id(&parent_path, "@").unwrap();
+  assert_eq!(
+    jj::jj_log_revset_commit_ids(&child_path, &format!("{parent_wc} & ::feat/old-child"))
+      .unwrap()
+      .len(),
+    1,
+    "setup: the child sits on the parent's working copy"
+  );
+  (parent_path, child, child_path)
+}
+
+#[test]
+fn rebase_moves_a_child_off_its_parent_working_copy() {
+  let repo = TestRepo::with_remote().unwrap();
+  let (parent_path, child, child_path) = old_stack(&repo);
+
+  treq_lib::auto_rebase::rebase_single_workspace(&repo.repo_path, child.id, "main", true, "diff")
+    .unwrap();
+
+  assert!(!parent_wip_reaches_child(
+    &parent_path,
+    &child_path,
+    "feat/old-child"
+  ));
+  assert!(has_file(&child_path, "feat/old-child", "child.txt"));
+}
+
+#[test]
+fn force_rebase_moves_a_child_off_its_parent_working_copy() {
+  let repo = TestRepo::with_remote().unwrap();
+  let (parent_path, child, child_path) = old_stack(&repo);
+
+  treq_lib::auto_rebase::rebase_root_subtree_from_workspace_force(
+    &repo.repo_path,
+    child.id,
+    "main",
+    "diff",
+  )
+  .unwrap();
+
+  assert!(!parent_wip_reaches_child(
+    &parent_path,
+    &child_path,
+    "feat/old-child"
+  ));
+  assert!(has_file(&child_path, "feat/old-child", "child.txt"));
+}

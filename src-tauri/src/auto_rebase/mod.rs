@@ -58,6 +58,12 @@ pub(crate) fn passes_guard(repo_path: &str, workspace: &Workspace, sync: &Target
   !blocked
 }
 
+/// Other workspaces' working-copy commits. A rebase leaves them out of the
+/// commits it moves, so a child stacked on its parent's working copy (as
+/// older stacks were) moves onto the parent's bookmark instead and stops
+/// picking up the parent's uncommitted changes.
+pub(crate) const OTHER_WORKING_COPIES: &str = "(working_copies() ~ @)";
+
 /// Convert git remote branch format to jj format using centralized logic
 pub(crate) fn convert_to_jj_branch_format(branch: &str, repo_path: &str) -> String {
   jj::convert_git_branch_to_jj_format_public(branch, repo_path)
@@ -219,7 +225,10 @@ pub fn rebase_workspaces_for_target(
     // Use roots() from the workspace directory and rebase committed bookmark history only.
     let rebase_base = jj::jj_resolve_workspace_rebase_base(&full_path, &jj_target_branch)
       .unwrap_or_else(|_| jj_target_branch.clone());
-    let revset = format!("roots({}..{})", rebase_base, workspace.branch_name);
+    let revset = format!(
+      "roots(({}..{}) ~ {})",
+      rebase_base, workspace.branch_name, OTHER_WORKING_COPIES
+    );
 
     let rebase_result = jj::jj_rebase_with_revset(
       &full_path, // Run from workspace directory
@@ -347,8 +356,8 @@ pub fn rebase_single_workspace(
   let rebase_base = jj::jj_resolve_workspace_rebase_base(&full_path, &jj_target_branch)
     .unwrap_or_else(|_| jj_target_branch.clone());
   let revset = format!(
-    "roots(mutable() & ({}..{}) ~ @)",
-    rebase_base, workspace.branch_name
+    "roots(mutable() & ({}..{}) ~ @ ~ {})",
+    rebase_base, workspace.branch_name, OTHER_WORKING_COPIES
   );
   let rebase_result = jj::jj_rebase_with_revset(
     &full_path, // Run from workspace directory

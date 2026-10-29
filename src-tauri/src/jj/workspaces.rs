@@ -403,33 +403,16 @@ pub fn create_workspace(
             JjError::GitWorkspaceError(format!("Remote bookmark '{}' not found", jj_ref))
           })?
       } else {
-        // Prefer the WC commit whose parent is the bookmark so stacked workspaces stay linear (main → bookmark → wc → child).
-        let bookmark_id = parent_repo
+        // On the bookmark, not the parent workspace's working copy: a child
+        // there would pick up the parent's uncommitted changes on every
+        // snapshot of the parent.
+        parent_repo
           .view()
           .get_local_bookmark(RefName::new(&jj_ref))
           .added_ids()
           .next()
           .cloned()
-          .ok_or_else(|| JjError::GitWorkspaceError(format!("Bookmark '{}' not found", jj_ref)))?;
-        let wc_override = parent_repo
-          .view()
-          .wc_commit_ids()
-          .iter()
-          // The home repo's working copy holds the user's uncommitted changes; never base a new workspace on it.
-          .filter(|(name, _)| name.as_str() != "default")
-          .map(|(_, wc_id)| wc_id)
-          .find(|wc_id| {
-            if *wc_id == &bookmark_id {
-              return false;
-            }
-            parent_repo
-              .store()
-              .get_commit(wc_id)
-              .map(|wc| wc.parent_ids() == [bookmark_id.clone()])
-              .unwrap_or(false)
-          })
-          .cloned();
-        wc_override.unwrap_or(bookmark_id)
+          .ok_or_else(|| JjError::GitWorkspaceError(format!("Bookmark '{}' not found", jj_ref)))?
       }
     } else {
       // Parent on target branch bookmark tip (post import_colocated_git_state); fall back to git HEAD if absent.

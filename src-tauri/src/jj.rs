@@ -3045,7 +3045,13 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
   // sibling bookmarks from becoming part of the move target.
   let branch_only_commits = evaluate_revset(
     &loaded,
-    &format!("{}..{}", lineage_base, workspace_tip_commit.id().hex()),
+    // Other workspaces' working copies stay put: a child stacked on its
+    // parent's working copy moves onto the parent's bookmark instead.
+    &format!(
+      "({}..{}) ~ (working_copies() ~ @)",
+      lineage_base,
+      workspace_tip_commit.id().hex()
+    ),
   )?
   .iter()
   .commits(loaded.repo.store())
