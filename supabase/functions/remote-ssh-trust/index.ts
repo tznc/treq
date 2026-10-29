@@ -12,7 +12,7 @@
 //   "keyscan_endpoint"       - re-run the host-key scan against the caller's managed endpoint
 //
 // `install_authorized_key` and `keyscan_endpoint` run a command on the
-// managed Sprite, which wakes it, so they require Pro like remote-instance's
+// managed machine, which wakes it, so they require Pro like remote-instance's
 // `wake` (402 `pro_required`). The other actions only touch the database and
 // stay open, so a user whose Pro ended can still revoke keys.
 //
@@ -56,26 +56,23 @@ import { installAuthorizedKeyCommand, removeAuthorizedKeyCommand } from "../_sha
 import {
   ProviderError,
   providerClientMessage,
-  SpritesProvider,
-  spritesConfigFromEnv,
   type ManagedComputeProvider,
-} from "../_shared/remote/sprites-adapter.ts";
-import { isSpritesStubEnabled, StubSpritesProvider } from "../_shared/remote/stub-sprites-adapter.ts";
+  type ProviderKind,
+} from "../_shared/remote/provider.ts";
+import { placementProviders } from "../_shared/remote/byos.ts";
 import { KeyscanError } from "../_shared/remote/ssh-keyscan.ts";
 import { readManagedHostKeys } from "../_shared/remote/managed-sshd.ts";
 import { relayUrlForEndpoint } from "../_shared/remote/ssh-relay.ts";
 import { recordEndpointHostKey } from "../_shared/remote/instance-store.ts";
+import { must } from "../_shared/remote/db.ts";
+import { corsHeaders, json } from "../_shared/http/json.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
 
 // Certificates are deliberately short-lived (PRD "Certificate lifetime
 // should be short enough to bound loss exposure while allowing normal
 // reconnects") while still tolerating a slow client clock or a long-running
 // interactive session started just before expiry.
-// Actions that exec on the managed Sprite and so wake it.
+// Actions that exec on the managed machine and so wake it.
 const PRO_GATED_TRUST_ACTIONS: ReadonlySet<string> = new Set([
   "install_authorized_key",
   "keyscan_endpoint",
@@ -84,26 +81,17 @@ const PRO_GATED_TRUST_ACTIONS: ReadonlySet<string> = new Set([
 const CERTIFICATE_VALIDITY_MINUTES = 20;
 const CERTIFICATE_CLOCK_SKEW_MINUTES = 2;
 
-function json(body: unknown, status = 200, correlationId?: string): Response {
-  return new Response(JSON.stringify(correlationId ? { ...(body as object), correlation_id: correlationId } : body), {
-    status,
-    headers: {
-      ...corsHeaders,
-      "Content-Type": "application/json",
-      ...(correlationId ? { "x-correlation-id": correlationId } : {}),
-    },
-  });
-}
-
 class ValidationError extends Error {
   constructor(message: string, public readonly status = 400) {
     super(message);
   }
 }
 
-function getProvider(): ManagedComputeProvider {
-  if (isSpritesStubEnabled()) return new StubSpritesProvider();
-  return new SpritesProvider(spritesConfigFromEnv());
+function getProvider(
+  supabase: SupabaseClient,
+  instance: { provider_kind: string; active_placement_id?: string | null },
+): ManagedComputeProvider {
+  return placementProviders(supabase)(instance.provider_kind as ProviderKind, instance.active_placement_id ?? null);
 }
 
 function requireIdempotencyKey(body: Record<string, unknown>): string {
@@ -354,16 +342,15 @@ async function handleIssueCertificate(
     );
   }
 
-  const { data: endpointRow, error: endpointError } = await supabase
+  const endpointRow = must(await supabase
     .from("remote_endpoints")
     .select("id, hostname, port, username, source, instance_id")
     .eq("id", instance.endpoint_id)
     .eq("owner_user_id", ownerUserId)
-    .maybeSingle();
-  if (endpointError) throw new Error(`failed to read endpoint: ${endpointError.message}`);
+    .maybeSingle(), "read endpoint");
   if (!endpointRow) throw new ValidationError("Endpoint does not belong to this user", 404);
 
-  const { data: hostKeyRows, error: hostKeyError } = await supabase
+  const hostKeyRows = must(await supabase
     .from("remote_endpoint_host_keys")
     .select("algorithm, fingerprint_sha256, comment")
     .eq("endpoint_id", endpointRow.id)
@@ -372,8 +359,7 @@ async function handleIssueCertificate(
     // user's endpoint, even if such a row were written by mistake.
     .eq("owner_user_id", ownerUserId)
     .is("revoked_at", null)
-    .order("generation", { ascending: false });
-  if (hostKeyError) throw new Error(`failed to read host keys: ${hostKeyError.message}`);
+    .order("generation", { ascending: false }), "read host keys");
 
   const parsedUserKey = await parseOpenSshPublicKey(key.public_key);
   const rawUserKey = extractEd25519RawKey(parsedUserKey);
@@ -431,7 +417,7 @@ async function handleIssueCertificate(
     endpoint: {
       id: endpointRow.id,
       instance_id: endpointRow.instance_id,
-      source: { type: "managed", provider: "fly_sprites", generation: instance.generation },
+      source: { type: "managed", provider: instance.provider_kind, generation: instance.generation },
       hostname: endpointRow.hostname,
       port: endpointRow.port,
       username: endpointRow.username,
@@ -441,9 +427,9 @@ async function handleIssueCertificate(
         comment: row.comment,
       })),
       authentication: { type: "certificate", key_reference: key.id },
-      // Sprites expose no raw TCP ingress, so managed endpoints are reached
+      // Managed machines expose no raw TCP ingress, so endpoints are reached
       // through the `remote-ssh-relay` Edge Function. `hostname`/`port`
-      // above name sshd as seen from inside the Sprite, not a dialable
+      // above name sshd as seen from inside the machine, not a dialable
       // address. The URL carries only ids; the client sends its session JWT
       // in a header on each connection.
       transport: { type: "relay", url: relayUrlForEndpoint(endpointRow.id, key.id) },
@@ -484,7 +470,7 @@ async function handleAuthorizedKeyChange(
   });
 
   try {
-    const provider = getProvider();
+    const provider = getProvider(supabase, instance);
     const command =
       mode === "install"
         ? installAuthorizedKeyCommand(key.public_key, key.fingerprint_sha256)
@@ -525,7 +511,7 @@ async function handleAuthorizedKeyChange(
 // records old/new fingerprint, generation, and provider resource id as a
 // rotation record (PRD "Reprovisioning may rotate the host key"). The key is
 // read on the machine rather than scanned over the network because sshd
-// only listens on the Sprite's loopback interface.
+// only listens on the machine's loopback interface.
 async function handleKeyscanEndpoint(
   supabase: SupabaseClient,
   ownerUserId: string,
@@ -538,17 +524,16 @@ async function handleKeyscanEndpoint(
   if (!instance.endpoint_id) throw new ValidationError("Instance has no endpoint recorded yet", 409);
   if (!instance.provider_resource_id) throw new ValidationError("Instance has no provider resource yet", 409);
 
-  const { data: endpointRow, error: endpointError } = await supabase
+  const endpointRow = must(await supabase
     .from("remote_endpoints")
     .select("id")
     .eq("id", instance.endpoint_id)
     .eq("owner_user_id", ownerUserId)
-    .maybeSingle();
-  if (endpointError) throw new Error(`failed to read endpoint: ${endpointError.message}`);
+    .maybeSingle(), "read endpoint");
   if (!endpointRow) throw new ValidationError("Endpoint does not belong to this user", 404);
 
   try {
-    const hostKeys = await readManagedHostKeys(getProvider(), instance.provider_resource_id);
+    const hostKeys = await readManagedHostKeys(getProvider(supabase, instance), instance.provider_resource_id);
     const scanned = hostKeys[0];
     if (!scanned) throw new KeyscanError("sshd host key file held no ed25519 key", "unsupported_host_key_algorithm");
     await recordEndpointHostKey(supabase, {

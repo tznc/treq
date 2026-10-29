@@ -844,6 +844,13 @@ pub fn handle_cli_command(subcommand: &SubcommandMatches) -> Option<i32> {
     "agent-review" => run_structured(&subcommand.matches, |format| {
       agent_review_handlers::handle_agent_review_command(&subcommand.matches, format)
     }),
+    "gateway" => match run_gateway(&subcommand.matches) {
+      Ok(()) => true,
+      Err(error) => {
+        eprintln!("treq gateway: {error}");
+        false
+      }
+    },
     "pty-remote" if interactive_pty_action(&subcommand.matches).is_some() => {
       let action = interactive_pty_action(&subcommand.matches).unwrap_or_default();
       handle_interactive_pty(&action, &subcommand.matches)
@@ -855,6 +862,75 @@ pub fn handle_cli_command(subcommand: &SubcommandMatches) -> Option<i32> {
     _ => return None,
   };
   Some(if success { 0 } else { 1 })
+}
+
+/// `treq gateway` flags.
+#[derive(Debug)]
+pub(super) struct GatewayArgs {
+  pub placement_id: String,
+  pub secret_file: String,
+  pub listen: String,
+  pub allow: Vec<(String, u16)>,
+}
+
+pub(super) fn parse_gateway_args(matches: &Matches) -> Result<GatewayArgs, String> {
+  let placement_id = get_arg_value(matches, "placement-id")
+    .ok_or_else(|| "invalid_arguments: --placement-id is required".to_string())?;
+  let allow = matches
+    .args
+    .get("allow")
+    .and_then(|arg| arg.value.as_array())
+    .into_iter()
+    .flatten()
+    .filter_map(|v| v.as_str())
+    .map(|v| {
+      let (host, port) = v
+        .rsplit_once(':')
+        .ok_or_else(|| format!("invalid_arguments: --allow {v} is not host:port"))?;
+      let port = port
+        .parse()
+        .map_err(|_| format!("invalid_arguments: --allow {v} has a bad port"))?;
+      Ok((host.to_string(), port))
+    })
+    .collect::<Result<_, String>>()?;
+  Ok(GatewayArgs {
+    placement_id,
+    secret_file: get_arg_value(matches, "secret-file")
+      .unwrap_or_else(|| "/etc/treq/gateway.secret".to_string()),
+    listen: get_arg_value(matches, "listen")
+      .unwrap_or_else(|| format!("127.0.0.1:{}", treq_gateway::DEFAULT_LISTEN_PORT)),
+    allow,
+  })
+}
+
+/// `treq gateway`: serves until killed.
+fn run_gateway(matches: &Matches) -> Result<(), String> {
+  let args = parse_gateway_args(matches)?;
+  let secret = std::fs::read_to_string(&args.secret_file)
+    .map_err(|e| format!("cannot read {}: {e}", args.secret_file))?
+    .trim_end()
+    .as_bytes()
+    .to_vec();
+  if secret.is_empty() {
+    return Err(format!("{} is empty", args.secret_file));
+  }
+  let mut config = treq_gateway::Config::new(args.placement_id, secret);
+  if !args.allow.is_empty() {
+    config.allow = args.allow;
+  }
+  let runtime = tokio::runtime::Builder::new_multi_thread()
+    .enable_all()
+    .build()
+    .map_err(|e| e.to_string())?;
+  runtime.block_on(async move {
+    let listener = tokio::net::TcpListener::bind(&args.listen)
+      .await
+      .map_err(|e| format!("cannot listen on {}: {e}", args.listen))?;
+    eprintln!("treq gateway: listening on {}", args.listen);
+    treq_gateway::serve(listener, std::sync::Arc::new(config))
+      .await
+      .map_err(|e| e.to_string())
+  })
 }
 
 /// How long a command waits for piped stdin it did not explicitly ask for.
@@ -906,6 +982,7 @@ pub(super) fn is_supported_cli_command(name: &str) -> bool {
   matches!(
     name,
     "add"
+      | "gateway"
       | "set"
       | "st"
       | "diff"

@@ -35,9 +35,14 @@ import {
   type StripeClient,
 } from "../_shared/billing/stripe-api.ts";
 import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
-import type { ManagedComputeProvider } from "../_shared/remote/sprites-adapter.ts";
+import type { ManagedComputeProvider, ProviderKind } from "../_shared/remote/provider.ts";
 
-export type LiveInstance = { id: string; provider_resource_id: string | null };
+export type LiveInstance = {
+  id: string;
+  provider_kind: string;
+  provider_resource_id: string | null;
+  active_placement_id?: string | null;
+};
 
 export type OrganizationRef = { id: string; name: string };
 
@@ -65,7 +70,8 @@ export type DeleteAccountDeps = {
   storeFor(userId: string): DeleteAccountStore;
   /** Null when STRIPE_SECRET_KEY is not configured. */
   stripe: StripeClient | null;
-  provider(): ManagedComputeProvider;
+  /** The adapter for a placement (`placementProviders` in production). */
+  provider(kind: ProviderKind, placementId?: string | null): ManagedComputeProvider;
   revokeLinearToken(accessToken: string): Promise<void>;
 };
 
@@ -148,28 +154,26 @@ export async function deleteAccount(
     }
   }
 
-  const instances = await store.liveInstances();
-  if (instances.length > 0) {
-    const provider = deps.provider();
-    for (const instance of instances) {
-      try {
-        if (instance.provider_resource_id) {
-          await provider.deleteInstance(instance.provider_resource_id);
-        }
-        await store.markInstanceDeleted(instance.id);
-      } catch (err) {
-        console.error(
-          `[delete-account] delete instance ${instance.id} failed:`,
-          err instanceof Error ? err.message : String(err),
-        );
-        return {
-          status: 502,
-          body: {
-            error:
-              "Your cloud workspace could not be deleted. Your account was not deleted. Try again.",
-          },
-        };
+  for (const instance of await store.liveInstances()) {
+    try {
+      if (instance.provider_resource_id) {
+        await deps
+          .provider(instance.provider_kind as ProviderKind, instance.active_placement_id ?? null)
+          .deleteInstance(instance.provider_resource_id, { placementId: instance.active_placement_id });
       }
+      await store.markInstanceDeleted(instance.id);
+    } catch (err) {
+      console.error(
+        `[delete-account] delete instance ${instance.id} failed:`,
+        err instanceof Error ? err.message : String(err),
+      );
+      return {
+        status: 502,
+        body: {
+          error:
+            "Your cloud workspace could not be deleted. Your account was not deleted. Try again.",
+        },
+      };
     }
   }
 
@@ -321,7 +325,7 @@ export function deleteAccountStoreFor(
       return check(
         await client
           .from("remote_instances")
-          .select("id, provider_resource_id")
+          .select("id, provider_kind, provider_resource_id, active_placement_id")
           .eq("owner_user_id", userId)
           .neq("status", "deleted"),
         "remote instance lookup",

@@ -8,13 +8,16 @@
 // than invoking the provider again.
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
-import { BASE_ALLOCATION, type RegionCode, type SizePreset } from "./catalog.ts";
+import type { RegionCode, SizePreset } from "./catalog.ts";
+import type { ProviderKind } from "./provider.ts";
+import { must } from "./db.ts";
 
 export type OperationType =
   | "provision"
   | "wake"
   | "reprovision"
   | "delete"
+  | "resize"
   | "register_client_key"
   | "revoke_client_key"
   | "issue_certificate"
@@ -53,6 +56,14 @@ export interface InstanceRow {
   disk_quota_gb: number;
   vcpu_quota: number;
   ram_quota_gb: number;
+  // Placement model (038_sandbox_catalog.sql). The instance mirrors its
+  // active placement; `fence` increases on every cutover.
+  tier_id: string | null;
+  machine_type_id: string | null;
+  active_placement_id: string | null;
+  /** "byos" when the active placement runs on the owner's own provider account (039_provider_credentials.sql). */
+  credential_source?: "managed" | "byos";
+  fence: number;
 }
 
 // Looks up an existing operation for this idempotency key. When found, the
@@ -63,14 +74,12 @@ export async function findExistingOperation(
   ownerUserId: string,
   idempotencyKey: string,
 ): Promise<OperationRow | null> {
-  const { data, error } = await supabase
+  return must(await supabase
     .from("remote_instance_operations")
     .select("*")
     .eq("owner_user_id", ownerUserId)
     .eq("idempotency_key", idempotencyKey)
-    .maybeSingle();
-  if (error) throw new Error(`failed to look up operation: ${error.message}`);
-  return data as OperationRow | null;
+    .maybeSingle(), "look up operation") as OperationRow | null;
 }
 
 // Records the operation before the provider call, per the PRD's "The server
@@ -86,7 +95,7 @@ export async function beginOperation(
     idempotencyKey: string;
   },
 ): Promise<OperationRow> {
-  const { data, error } = await supabase
+  return must(await supabase
     .from("remote_instance_operations")
     .insert({
       owner_user_id: params.ownerUserId,
@@ -96,9 +105,7 @@ export async function beginOperation(
       status: "in_progress",
     })
     .select()
-    .single();
-  if (error) throw new Error(`failed to begin operation: ${error.message}`);
-  return data as OperationRow;
+    .single(), "begin operation") as OperationRow;
 }
 
 export async function completeOperation(
@@ -106,7 +113,7 @@ export async function completeOperation(
   operationId: string,
   outcome: { status: "succeeded" | "failed"; providerRequestId?: string | null; errorMessage?: string | null },
 ): Promise<void> {
-  const { error } = await supabase
+  must(await supabase
     .from("remote_instance_operations")
     .update({
       status: outcome.status,
@@ -114,8 +121,7 @@ export async function completeOperation(
       error_message: outcome.errorMessage ?? null,
       finished_at: new Date().toISOString(),
     })
-    .eq("id", operationId);
-  if (error) throw new Error(`failed to complete operation: ${error.message}`);
+    .eq("id", operationId), "complete operation");
 }
 
 // The owner's one live instance. Deleted rows are kept for history (a user
@@ -125,14 +131,12 @@ export async function getInstanceForOwner(
   supabase: SupabaseClient,
   ownerUserId: string,
 ): Promise<InstanceRow | null> {
-  const { data, error } = await supabase
+  return must(await supabase
     .from("remote_instances")
     .select("*")
     .eq("owner_user_id", ownerUserId)
     .neq("status", "deleted")
-    .maybeSingle();
-  if (error) throw new Error(`failed to read instance: ${error.message}`);
-  return data as InstanceRow | null;
+    .maybeSingle(), "read instance") as InstanceRow | null;
 }
 
 export async function getInstanceById(
@@ -140,40 +144,43 @@ export async function getInstanceById(
   ownerUserId: string,
   instanceId: string,
 ): Promise<InstanceRow | null> {
-  const { data, error } = await supabase
+  return must(await supabase
     .from("remote_instances")
     .select("*")
     .eq("owner_user_id", ownerUserId)
     .eq("id", instanceId)
-    .maybeSingle();
-  if (error) throw new Error(`failed to read instance: ${error.message}`);
-  return data as InstanceRow | null;
+    .maybeSingle(), "read instance") as InstanceRow | null;
 }
 
 export async function createProvisioningInstance(
   supabase: SupabaseClient,
-  params: { ownerUserId: string; region: RegionCode; sizePreset: SizePreset; manifestVersion: number },
+  params: {
+    ownerUserId: string;
+    region: RegionCode;
+    sizePreset: SizePreset;
+    manifestVersion: number;
+    providerKind: ProviderKind;
+    tierId?: string;
+    machineTypeId?: string;
+  },
 ): Promise<InstanceRow> {
-  const { data, error } = await supabase
+  return must(await supabase
     .from("remote_instances")
     .insert({
       owner_user_id: params.ownerUserId,
-      provider_kind: "fly_sprites",
+      provider_kind: params.providerKind,
+      tier_id: params.tierId ?? null,
+      machine_type_id: params.machineTypeId ?? null,
       region: params.region,
       size_preset: params.sizePreset,
       status: "provisioning",
       generation: 0,
       image_manifest_version: params.manifestVersion,
-      // Every instance is created at the fixed base allocation (PRD
-      // "Resource quotas"); there is no add-on path yet to request more.
-      disk_quota_gb: BASE_ALLOCATION.diskGb,
-      vcpu_quota: BASE_ALLOCATION.vcpu,
-      ram_quota_gb: BASE_ALLOCATION.ramGb,
+      // disk_quota_gb is set from the machine type's disk_gb by a trigger
+      // (040_placements_and_usage.sql); there is no free base allocation.
     })
     .select()
-    .single();
-  if (error) throw new Error(`failed to create instance record: ${error.message}`);
-  return data as InstanceRow;
+    .single(), "create instance record") as InstanceRow;
 }
 
 export async function updateInstance(
@@ -181,11 +188,10 @@ export async function updateInstance(
   instanceId: string,
   fields: Record<string, unknown>,
 ): Promise<void> {
-  const { error } = await supabase
+  must(await supabase
     .from("remote_instances")
     .update({ ...fields, updated_at: new Date().toISOString() })
-    .eq("id", instanceId);
-  if (error) throw new Error(`failed to update instance: ${error.message}`);
+    .eq("id", instanceId), "update instance");
 }
 
 // Upserts the managed endpoint for an instance and records its host key
@@ -206,7 +212,7 @@ export async function recordManagedEndpoint(
   },
 ): Promise<string> {
   if (params.existingEndpointId) {
-    const { error } = await supabase
+    must(await supabase
       .from("remote_endpoints")
       .update({
         hostname: params.hostname,
@@ -214,12 +220,11 @@ export async function recordManagedEndpoint(
         username: params.username,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", params.existingEndpointId);
-    if (error) throw new Error(`failed to update endpoint: ${error.message}`);
+      .eq("id", params.existingEndpointId), "update endpoint");
     return params.existingEndpointId;
   }
 
-  const { data, error } = await supabase
+  const data = must(await supabase
     .from("remote_endpoints")
     .insert({
       owner_user_id: params.ownerUserId,
@@ -231,9 +236,8 @@ export async function recordManagedEndpoint(
       username: params.username,
     })
     .select("id")
-    .single();
-  if (error) throw new Error(`failed to create endpoint: ${error.message}`);
-  return data.id as string;
+    .single(), "create endpoint");
+  return (data as { id: string }).id;
 }
 
 // Records a host key fingerprint for an endpoint at a given generation.
@@ -251,7 +255,7 @@ export async function recordEndpointHostKey(
     generation: number;
   },
 ): Promise<void> {
-  const { error } = await supabase.from("remote_endpoint_host_keys").upsert(
+  must(await supabase.from("remote_endpoint_host_keys").upsert(
     {
       owner_user_id: params.ownerUserId,
       endpoint_id: params.endpointId,
@@ -260,22 +264,20 @@ export async function recordEndpointHostKey(
       generation: params.generation,
     },
     { onConflict: "endpoint_id,fingerprint_sha256" },
-  );
-  if (error) throw new Error(`failed to record host key: ${error.message}`);
+  ), "record host key");
 }
 
 export async function previousHostKeyFingerprint(
   supabase: SupabaseClient,
   endpointId: string,
 ): Promise<string | null> {
-  const { data, error } = await supabase
+  const data = must(await supabase
     .from("remote_endpoint_host_keys")
     .select("fingerprint_sha256")
     .eq("endpoint_id", endpointId)
     .is("revoked_at", null)
     .order("generation", { ascending: false })
     .limit(1)
-    .maybeSingle();
-  if (error) throw new Error(`failed to read previous host key: ${error.message}`);
+    .maybeSingle(), "read previous host key");
   return data?.fingerprint_sha256 ?? null;
 }

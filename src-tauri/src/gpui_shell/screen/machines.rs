@@ -27,7 +27,7 @@ pub enum Place {
   Ssh {
     endpoint_id: String,
   },
-  /// The account's Treq Cloud workspace (a managed Sprite); its endpoint
+  /// The account's Treq Cloud workspace (a managed VM); its endpoint
   /// is known while it runs. `status` is the instance's, or
   /// [`CLOUD_NOT_CREATED`] before there is one.
   Cloud {

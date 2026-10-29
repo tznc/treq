@@ -2,37 +2,18 @@
 // desktop app with the user's Supabase JWT; the account deleted is always
 // the one that JWT names. The logic and its ordering live in lib.ts.
 // Env: STRIPE_SECRET_KEY (required only when the user has a subscription to
-// cancel), TREQ_SPRITES_API_URL / TREQ_SPRITES_API_TOKEN or
-// TREQ_REMOTE_SPRITES_STUB for cloud workspace teardown.
+// cancel), and the provider secrets (provider-registry.ts) or
+// TREQ_REMOTE_PROVIDER_STUB for cloud workspace teardown.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import { createStripeClient } from "../_shared/billing/stripe-api.ts";
-import {
-  SpritesProvider,
-  spritesConfigFromEnv,
-} from "../_shared/remote/sprites-adapter.ts";
-import {
-  isSpritesStubEnabled,
-  StubSpritesProvider,
-} from "../_shared/remote/stub-sprites-adapter.ts";
+import { placementProviders } from "../_shared/remote/byos.ts";
 import {
   deleteAccount,
   deleteAccountStoreFor,
   revokeLinearToken,
 } from "./lib.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
+import { corsHeaders, json } from "../_shared/http/json.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -61,10 +42,7 @@ Deno.serve(async (req) => {
       },
       storeFor: (userId) => deleteAccountStoreFor(service, userId),
       stripe: stripeKey ? createStripeClient(stripeKey) : null,
-      provider: () =>
-        isSpritesStubEnabled()
-          ? new StubSpritesProvider()
-          : new SpritesProvider(spritesConfigFromEnv()),
+      provider: placementProviders(service),
       revokeLinearToken: (token) => revokeLinearToken(token),
     });
     return json(result.body, result.status);

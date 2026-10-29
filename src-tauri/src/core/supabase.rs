@@ -92,6 +92,9 @@ impl std::error::Error for ApiError {}
 /// The PostgREST code an RPC raises without Pro.
 const POSTGREST_PRO_REQUIRED: &str = "PT402";
 
+/// The code remote-instance refuses `ensure`/`wake`/`resize` with over the spend cap.
+pub const SPEND_CAP_REACHED: &str = "spend_cap_reached";
+
 impl ApiError {
   pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
     Self {
@@ -108,7 +111,13 @@ impl ApiError {
 
   /// `isProRequiredError`: the server refused for want of Pro.
   pub fn is_pro_required(&self) -> bool {
-    self.status == 402 || self.code == "pro_required" || self.code == POSTGREST_PRO_REQUIRED
+    !self.is_spend_cap_reached()
+      && (self.status == 402 || self.code == "pro_required" || self.code == POSTGREST_PRO_REQUIRED)
+  }
+
+  /// The monthly spend cap stopped a cloud workspace action (also HTTP 402).
+  pub fn is_spend_cap_reached(&self) -> bool {
+    self.code == SPEND_CAP_REACHED
   }
 }
 
@@ -160,6 +169,15 @@ fn api_error(status: u16, header_id: Option<String>, body: ErrorBody) -> ApiErro
       .unwrap_or_else(|| "Request failed".into()),
     correlation_id: body.correlation_id.or(header_id),
   }
+}
+
+/// The [`ApiError`] of a refusal whose body was already read.
+pub(crate) fn api_error_from(status: u16, body: Value) -> ApiError {
+  api_error(
+    status,
+    None,
+    serde_json::from_value(body).unwrap_or_default(),
+  )
 }
 
 /// Reads a response: its JSON on success, an [`ApiError`] otherwise.
@@ -270,6 +288,25 @@ impl Supabase {
     self.send(self.http.post(url).json(args)).await
   }
 
+  /// `functions.invoke(name, { body })`, answering any HTTP status with
+  /// its JSON body, for callers that read a refusal's details. Only a
+  /// transport failure is an error.
+  pub async fn invoke_raw(&self, name: &str, body: &Value) -> Result<(u16, Value), ApiError> {
+    let url = format!("{}/functions/v1/{name}", self.url);
+    let response = self
+      .http
+      .post(url)
+      .json(body)
+      .bearer_auth(self.bearer().await)
+      .header("apikey", &self.anon_key)
+      .send()
+      .await
+      .map_err(ApiError::transport)?;
+    let status = response.status().as_u16();
+    let text = response.text().await.map_err(ApiError::transport)?;
+    Ok((status, serde_json::from_str(&text).unwrap_or(Value::Null)))
+  }
+
   /// `functions.invoke(name, { body })`.
   pub async fn invoke<T: DeserializeOwned>(&self, name: &str, body: &Value) -> Result<T, ApiError> {
     let url = format!("{}/functions/v1/{name}", self.url);
@@ -336,14 +373,14 @@ mod tests {
       Some("cid".into()),
       ErrorBody {
         error: Some(json!("Key has been revoked")),
-        provider_error: Some("sprites".into()),
+        provider_error: Some("boat".into()),
         ..Default::default()
       },
     );
-    assert_eq!(error.code, "sprites");
+    assert_eq!(error.code, "boat");
     assert_eq!(
       error.to_string(),
-      "[sprites] Key has been revoked\nHTTP 409 · Correlation ID: cid"
+      "[boat] Key has been revoked\nHTTP 409 · Correlation ID: cid"
     );
     assert_eq!(api_error(500, None, ErrorBody::default()).code, "http_500");
   }
@@ -358,6 +395,17 @@ mod tests {
     assert!(rpc.is_pro_required());
     assert_eq!(rpc.message, "Pro");
     assert!(!ApiError::new("network", "down").is_pro_required());
+  }
+
+  #[test]
+  fn a_spend_cap_refusal_is_not_a_pro_refusal() {
+    let capped = api_error(
+      402,
+      None,
+      serde_json::from_value(json!({"code": "spend_cap_reached", "error": "Cap"})).unwrap(),
+    );
+    assert!(!capped.is_pro_required());
+    assert!(capped.is_spend_cap_reached());
   }
 
   #[tokio::test]

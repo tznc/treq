@@ -13,6 +13,7 @@ import {
 } from "../_shared/billing/checkout.ts";
 import {
   type BillingPlan,
+  DEFAULT_USAGE_PRICE_LOOKUP_KEY,
   LOOKUP_KEY_BY_PLAN,
 } from "../_shared/billing/plans.ts";
 import type {
@@ -34,6 +35,8 @@ export type CheckoutDeps = {
   organizations?: OrganizationBilling;
   stripe: StripeClient;
   webUrl: string;
+  /** Lookup key of the metered usage price Pro carries. */
+  usagePriceLookupKey?: string;
 };
 
 export type CheckoutResult = { status: number; body: Record<string, unknown> };
@@ -84,16 +87,31 @@ async function openSession(
   try {
     const customer = await customerFor(owner, deps);
 
-    const prices = await deps.stripe.request<{ data: { id: string }[] }>(
-      "GET",
-      "/v1/prices",
-      {
-        "lookup_keys[0]": LOOKUP_KEY_BY_PLAN[plan],
-        active: true,
-        limit: 1,
-      },
-    );
-    const priceId = prices.data[0]?.id;
+    // Pro also carries the metered usage price for cloud workspaces.
+    const usageKey =
+      plan === "pro"
+        ? (deps.usagePriceLookupKey ?? DEFAULT_USAGE_PRICE_LOOKUP_KEY)
+        : null;
+    const query: StripeParams = { "lookup_keys[0]": LOOKUP_KEY_BY_PLAN[plan] };
+    if (usageKey) query["lookup_keys[1]"] = usageKey;
+    query.active = true;
+    query.limit = usageKey ? 2 : 1;
+    const prices = await deps.stripe.request<{
+      data: { id: string; lookup_key?: string | null }[];
+    }>("GET", "/v1/prices", query);
+    const priceId = usageKey
+      ? prices.data.find((p) => p.lookup_key === LOOKUP_KEY_BY_PLAN[plan])?.id
+      : prices.data[0]?.id;
+    const usagePriceId = usageKey
+      ? prices.data.find((p) => p.lookup_key === usageKey)?.id
+      : undefined;
+    if (usageKey && !usagePriceId) {
+      // Checkout still works. scripts/stripe/setup-usage-meter.ts adds the
+      // price to subscriptions that lack it once the price exists.
+      console.warn(
+        `[billing-checkout] usage price '${usageKey}' is not configured`,
+      );
+    }
     if (!priceId) {
       return {
         status: 500,
@@ -112,6 +130,7 @@ async function openSession(
         trialEligible: plan === "pro" && customer.trial_used_at === null,
         webUrl: deps.webUrl,
         quantity: owner.quantity,
+        usagePriceId,
       }),
     );
     return { status: 200, body: { client_secret: session.client_secret } };

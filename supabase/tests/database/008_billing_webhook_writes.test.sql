@@ -13,13 +13,13 @@ insert into auth.users (id, email) values
 
 -- ── Grants ────────────────────────────────────────────────────────────────
 select function_privs_are('public', 'billing_record_subscription_event',
-  array['text', 'text', 'timestamptz', 'text', 'text', 'text', 'text', 'timestamptz', 'boolean', 'timestamptz'],
+  array['text', 'text', 'timestamptz', 'text', 'text', 'text', 'text', 'timestamptz', 'boolean', 'timestamptz', 'timestamptz'],
   'anon', array[]::text[], 'anon cannot execute billing_record_subscription_event');
 select function_privs_are('public', 'billing_record_subscription_event',
-  array['text', 'text', 'timestamptz', 'text', 'text', 'text', 'text', 'timestamptz', 'boolean', 'timestamptz'],
+  array['text', 'text', 'timestamptz', 'text', 'text', 'text', 'text', 'timestamptz', 'boolean', 'timestamptz', 'timestamptz'],
   'authenticated', array[]::text[], 'authenticated cannot execute billing_record_subscription_event');
 select function_privs_are('public', 'billing_record_subscription_event',
-  array['text', 'text', 'timestamptz', 'text', 'text', 'text', 'text', 'timestamptz', 'boolean', 'timestamptz'],
+  array['text', 'text', 'timestamptz', 'text', 'text', 'text', 'text', 'timestamptz', 'boolean', 'timestamptz', 'timestamptz'],
   'service_role', array['EXECUTE'], 'service_role can execute billing_record_subscription_event');
 select function_privs_are('public', 'billing_record_checkout_completed',
   array['text', 'text', 'text', 'uuid'],

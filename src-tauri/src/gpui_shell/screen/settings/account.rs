@@ -10,6 +10,7 @@
 //! [`account_data`]: crate::gpui_shell::screen::account_data
 //! [`Account`]: crate::gpui_shell::screen::account_data::Account
 
+use crate::core::cloud_catalog::{Notification, SpendState};
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
@@ -97,6 +98,29 @@ pub struct CloudRoute {
   pub usage_error: Option<String>,
   /// One of the card's actions is running.
   pub submitting: bool,
+  /// The priced size tiers.
+  pub tiers: Vec<crate::core::cloud_catalog::Tier>,
+  pub selected_tier: Option<String>,
+  /// This month's billed usage.
+  pub billing: Option<crate::core::cloud_catalog::UsageTotals>,
+  /// A resize waiting for the user to accept losing this work.
+  pub resize_preflight: Option<(String, crate::core::control_plane::Preflight)>,
+  /// The idle controller's last probe.
+  pub activity: Option<crate::core::workspace_activity::WorkspaceActivity>,
+  /// The monthly spend cap and this month's spend.
+  pub spend: Option<crate::core::cloud_catalog::SpendStatus>,
+  /// Why the last cap change was refused.
+  pub spend_cap_error: Option<String>,
+  /// Stored notices, until dismissed.
+  pub notifications: Vec<crate::core::cloud_catalog::Notification>,
+  /// Bring your own sandbox: the saved provider keys (never the keys).
+  pub provider_keys: Vec<crate::core::cloud_catalog::ProviderKey>,
+  pub provider_key_saving: bool,
+  pub provider_key_error: Option<String>,
+  /// Tier prices on the providers the user has a key for.
+  pub byos_catalog: Vec<crate::core::cloud_catalog::ByosMachineType>,
+  /// The provider Create runs on with the user's key; `None` is treq managed.
+  pub selected_provider: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -106,6 +130,10 @@ pub struct CloudInstance {
   pub status: String,
   pub provider_resource_id: Option<String>,
   pub disk_quota_gb: f64,
+  #[serde(default)]
+  pub tier_id: Option<String>,
+  #[serde(default)]
+  pub region: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -179,6 +207,10 @@ pub struct SignedIn {
   pub period: Option<(String, String)>,
   pub manage_label: String,
   pub cloud: Option<CloudCard>,
+  /// The spend cap row, once the spend status is read.
+  pub spend_cap: Option<SpendCapEditor>,
+  /// "Provider keys", with the `byos` preview on and Pro.
+  pub provider_keys: Option<ProviderKeysSection>,
   /// The delete-account confirmation, while it is open.
   pub delete_account: Option<DeleteAccountDialog>,
 }
@@ -214,6 +246,102 @@ pub struct CloudCard {
   pub error: Option<String>,
   pub submitting: bool,
   pub confirming_delete: bool,
+  /// The size picker, one option per tier.
+  pub sizes: Vec<SizeOption>,
+  /// "Resize" shows: a tier other than the instance's is picked.
+  pub resize: bool,
+  /// This month's billed total and hours.
+  pub billing: Option<String>,
+  /// What a resize would lose, while it waits for confirmation.
+  pub resize_confirm: Option<Vec<String>>,
+  /// Where this month's spend stands against the cap.
+  pub spend_state: Option<SpendState>,
+  /// What the warning or capped state means.
+  pub spend_note: Option<String>,
+  /// The server's sentence when it refused ensure/wake/resize over the cap.
+  pub spend_cap_reached: Option<String>,
+  /// Stored notices, until dismissed.
+  pub notifications: Vec<Notification>,
+  /// The background processes of a running workspace.
+  pub processes: Vec<ProcessRow>,
+  /// "Stops in N min if idle", while it runs.
+  pub idle_stop: Option<String>,
+  /// Where Create runs: treq managed, or the user's own provider account
+  /// for each saved key. Empty without BYOS.
+  pub placements: Vec<PlacementOption>,
+  /// Who bills what when the user's own account is picked.
+  pub byos_note: Option<String>,
+  /// The provider refused the saved BYOS key.
+  pub credential_invalid: Option<String>,
+}
+
+/// One "run it on" choice when creating a cloud workspace.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacementOption {
+  /// The provider kind; `None` is treq managed.
+  pub kind: Option<String>,
+  pub label: String,
+  pub selected: bool,
+}
+
+/// The "Provider keys" section (bring your own sandbox).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderKeysSection {
+  pub rows: Vec<ProviderKeyRow>,
+  /// Providers without a key yet: kind and name.
+  pub addable: Vec<(String, String)>,
+  /// The provider whose key field is open.
+  pub editing: Option<String>,
+  pub draft: String,
+  pub saving: bool,
+  pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderKeyRow {
+  pub kind: String,
+  pub name: String,
+  pub status: String,
+  pub invalid: bool,
+}
+
+/// One background process on the cloud workspace.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProcessRow {
+  pub pid: u32,
+  pub command: String,
+  /// `Agent · 3.0% CPU · :3000`.
+  pub detail: String,
+  /// Kept alive by a pin, which `pin_id` removes.
+  pub pinned: bool,
+  pub pin_id: Option<String>,
+  /// Managed services (sshd) cannot be killed or pinned.
+  pub killable: bool,
+}
+
+/// The monthly spend cap row in Account settings.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpendCapEditor {
+  /// "Monthly spend cap: $50.00".
+  pub label: String,
+  pub editing: bool,
+  pub draft: String,
+  /// The local validation error, or the server's refusal.
+  pub error: Option<String>,
+}
+
+/// One size tier in the picker.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SizeOption {
+  pub id: String,
+  pub label: String,
+  /// `2 vCPU · 4 GiB RAM · 10 GB disk`.
+  pub spec: String,
+  /// The hourly price in the instance's region.
+  pub price: Option<String>,
+  pub selected: bool,
+  /// The tier the instance runs as.
+  pub current: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -297,8 +425,17 @@ pub(super) struct State {
   /// "No token found in URL", from the last Go.
   callback_error: Option<String>,
   confirming_delete: bool,
+  /// The spend cap field is open, with its draft and local error.
+  spend_cap_editing: bool,
+  spend_cap_focus: bool,
+  spend_cap_draft: String,
+  spend_cap_invalid: Option<String>,
   /// The open delete-account confirmation (`can_confirm` is derived).
   delete_account: Option<DeleteAccountDialog>,
+  /// The provider whose key field is open, its draft, and focus on next draw.
+  byos_key_editing: Option<String>,
+  byos_key_draft: String,
+  byos_key_focus: bool,
   /// The account was deleted here; the signed-out tab says goodbye.
   farewell: bool,
   /// The avatar URL, and its image once loaded.
@@ -407,6 +544,8 @@ fn stage_label(status: &str) -> String {
 
 /// How `remoteFunctionError` stores a refusal for want of Pro.
 const PRO_REQUIRED_PREFIX: &str = "[pro_required] ";
+/// How a spend cap refusal reads in `provisioning_error`.
+const SPEND_CAP_PREFIX: &str = "[spend_cap_reached] ";
 
 const GIB: f64 = 1024. * 1024. * 1024.;
 const MIB: f64 = 1024. * 1024.;
@@ -436,6 +575,58 @@ fn first_line(text: &str) -> String {
   text.split('\n').next().unwrap_or_default().to_string()
 }
 
+fn origin_label(origin: &str) -> &'static str {
+  match origin {
+    "agent" => "Agent",
+    "terminal" => "Terminal",
+    "service" => "Service",
+    _ => "Background",
+  }
+}
+
+/// The background processes and the stop ETA of a running workspace.
+fn process_rows(cloud: &CloudRoute, running: bool) -> (Vec<ProcessRow>, Option<String>) {
+  let Some(activity) = cloud.activity.as_ref().filter(|_| running) else {
+    return (Vec::new(), None);
+  };
+  let rows = activity
+    .processes
+    .iter()
+    .map(|process| {
+      let pin = activity.pin_for(process);
+      let mut detail = format!(
+        "{} · {:.1}% CPU",
+        origin_label(&process.origin),
+        process.cpu
+      );
+      for port in &process.ports {
+        detail.push_str(&format!(" · :{port}"));
+      }
+      ProcessRow {
+        pid: process.pid,
+        command: process.command.clone(),
+        detail,
+        pinned: process.pinned || pin.is_some(),
+        pin_id: pin.map(|p| p.id.clone()),
+        killable: process.origin != "service",
+      }
+    })
+    .collect();
+  let idle_stop = activity
+    .stops_at
+    .as_deref()
+    .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+    .map(|at| {
+      let minutes = (at.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_minutes();
+      if minutes < 1 {
+        "Stops soon if idle".to_string()
+      } else {
+        format!("Stops in {minutes} min if idle")
+      }
+    });
+  (rows, idle_stop)
+}
+
 pub(in crate::gpui_shell::screen) fn cloud_card(
   cloud: &CloudRoute,
   confirming_delete: bool,
@@ -448,9 +639,133 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
     record.is_some_and(|i| i.status == "failed" && i.provider_resource_id.is_none());
   let error = cloud.provisioning_error.as_deref();
   let pro_required = error.and_then(|e| e.strip_prefix(PRO_REQUIRED_PREFIX));
+  let spend_cap_reached = error.and_then(|e| e.strip_prefix(SPEND_CAP_PREFIX));
+  let spend = cloud.spend.as_ref();
+
   let creating = cloud.submitting && instance.is_none();
   let stage = cloud.provisioning_stage.clone().filter(|s| !s.is_empty());
+  let current_tier = instance.and_then(|i| i.tier_id.clone());
+  let region = instance.and_then(|i| i.region.as_deref());
+  let selected = cloud
+    .selected_tier
+    .clone()
+    .or_else(|| current_tier.clone())
+    .or_else(|| cloud.tiers.first().map(|t| t.id.clone()));
+  // Bring your own sandbox: the provider picked for Create, if it has a key.
+  let byos_kind = cloud
+    .selected_provider
+    .as_deref()
+    .filter(|k| {
+      cloud
+        .provider_keys
+        .iter()
+        .any(|key| key.provider_kind == *k)
+    })
+    .filter(|_| instance.is_none());
+  let byos_price = |tier_id: &str| {
+    cloud
+      .byos_catalog
+      .iter()
+      .find(|t| Some(t.provider_kind.as_str()) == byos_kind && t.tier_id == tier_id)
+  };
+  let placements: Vec<PlacementOption> = if instance.is_none() && !cloud.provider_keys.is_empty() {
+    std::iter::once(PlacementOption {
+      kind: None,
+      label: "treq managed".into(),
+      selected: byos_kind.is_none(),
+    })
+    .chain(cloud.provider_keys.iter().map(|key| PlacementOption {
+      kind: Some(key.provider_kind.clone()),
+      label: format!(
+        "Your {} account",
+        crate::core::cloud_catalog::provider_name(&key.provider_kind)
+      ),
+      selected: byos_kind == Some(key.provider_kind.as_str()),
+    }))
+    .collect()
+  } else {
+    Vec::new()
+  };
+  let byos_note = byos_kind.map(|kind| {
+    let name = crate::core::cloud_catalog::provider_name(kind);
+    let tier = selected
+      .as_deref()
+      .and_then(|id| cloud.tiers.iter().find(|t| t.id == id));
+    let price = tier.and_then(|t| byos_price(&t.id).map(|b| (t, b)));
+    match price {
+      Some((t, b)) => format!(
+        "{name} bills you directly for the machine ({} for {}). treq charges 5% of {name}'s price.",
+        crate::core::cloud_catalog::format_hourly(b.provider_hourly_usd),
+        t.label
+      ),
+      None => {
+        format!("{name} bills you directly for the machine. treq charges 5% of {name}'s price.")
+      }
+    }
+  });
+  let credential_invalid = error
+    .filter(|e| e.starts_with("[provider_credential_invalid]"))
+    .map(|_| {
+      "Your provider rejected the saved API key. Replace it under Provider keys.".to_string()
+    });
+  let sizes = cloud
+    .tiers
+    .iter()
+    .map(|tier| SizeOption {
+      id: tier.id.clone(),
+      label: tier.label.clone(),
+      spec: format!(
+        "{} vCPU · {} GiB RAM · {} GB disk",
+        tier.vcpu,
+        js_number(tier.ram_gib),
+        tier.disk_gb
+      ),
+      price: match byos_kind {
+        Some(_) => byos_price(&tier.id).map(|b| b.hourly_usd),
+        None => tier.hourly_usd(region),
+      }
+      .map(crate::core::cloud_catalog::format_hourly),
+      selected: selected.as_deref() == Some(tier.id.as_str()),
+      current: current_tier.as_deref() == Some(tier.id.as_str()),
+    })
+    .collect();
+  let (processes, idle_stop) = process_rows(cloud, instance.is_some_and(|i| i.status == "ready"));
   CloudCard {
+    placements,
+    byos_note,
+    processes,
+    idle_stop,
+    sizes,
+    resize: instance.is_some()
+      && cloud.selected_tier.is_some()
+      && cloud.selected_tier != current_tier,
+    billing: match spend {
+      Some(s) => Some(format!("This month: ${:.2} of ${:.2}", s.spent_usd, s.cap_usd)),
+      None => cloud
+        .billing
+        .map(|b| format!("This month: ${:.2} for {:.1} hours", b.billed_usd, b.hours)),
+    },
+    spend_state: spend.map(|s| s.state),
+    spend_note: spend.and_then(|s| match s.state {
+      SpendState::Ok => None,
+      SpendState::Warning => Some(format!(
+        "You've used {}% of your monthly cap. Workspaces stop when you reach it.",
+        (s.spent_usd / s.cap_usd * 100.).floor()
+      )),
+      SpendState::Capped => Some(
+        "You reached your monthly cap. Your cloud workspaces are stopped until you raise the cap or the month ends (UTC).".into(),
+      ),
+    }),
+    spend_cap_reached: spend_cap_reached.map(first_line),
+    notifications: cloud.notifications.clone(),
+    resize_confirm: cloud.resize_preflight.as_ref().map(|(_, preflight)| {
+      let lines = preflight.summary_lines();
+      if lines.is_empty() {
+        vec!["Unpushed work on the cloud workspace".to_string()]
+      } else {
+        lines
+      }
+    }),
     instance: instance.map(|instance| {
       let ready = instance.status == "ready";
       let endpoint = cloud.endpoint.as_ref();
@@ -493,7 +808,10 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
       stage,
     }),
     pro_required: pro_required.map(first_line),
-    error: error.filter(|_| pro_required.is_none()).map(first_line),
+    error: error
+      .filter(|_| pro_required.is_none() && spend_cap_reached.is_none() && credential_invalid.is_none())
+      .map(first_line),
+    credential_invalid,
     submitting: cloud.submitting,
     confirming_delete,
   }
@@ -542,7 +860,51 @@ impl SettingsView {
     };
     let subscription = account.subscription.as_ref();
     let pro = is_pro(subscription);
+    // Bring your own sandbox shows only with its preview on, for Pro.
+    let byos = pro && self.preview_on(crate::core::feature_preview::PreviewFeature::Byos);
+    let mut cloud_route = account.cloud.clone();
+    if !byos {
+      if let Some(cloud) = cloud_route.as_mut() {
+        cloud.provider_keys.clear();
+        cloud.byos_catalog.clear();
+        cloud.selected_provider = None;
+        cloud.provider_key_error = None;
+      }
+    }
+    let provider_keys = cloud_route.as_ref().filter(|_| byos).map(|cloud| {
+      let rows: Vec<ProviderKeyRow> = cloud
+        .provider_keys
+        .iter()
+        .map(|key| {
+          let name = crate::core::cloud_catalog::provider_name(&key.provider_kind);
+          let invalid = key.invalid_at.is_some();
+          ProviderKeyRow {
+            kind: key.provider_kind.clone(),
+            status: if invalid {
+              format!("Rejected by {name}. Replace the key.")
+            } else {
+              "Key saved".into()
+            },
+            name,
+            invalid,
+          }
+        })
+        .collect();
+      ProviderKeysSection {
+        addable: crate::core::cloud_catalog::BYOS_PROVIDERS
+          .iter()
+          .filter(|(kind, _)| !rows.iter().any(|r| r.kind == *kind))
+          .map(|(kind, name)| (kind.to_string(), name.to_string()))
+          .collect(),
+        rows,
+        editing: state.byos_key_editing.clone(),
+        draft: state.byos_key_draft.clone(),
+        saving: cloud.provider_key_saving,
+        error: cloud.provider_key_error.clone(),
+      }
+    });
     AccountTab::SignedIn(Box::new(SignedIn {
+      provider_keys,
       name: user.name.clone(),
       email: user.email.clone(),
       pro,
@@ -564,10 +926,22 @@ impl SettingsView {
         "Upgrade to Pro"
       }
       .into(),
-      cloud: account
-        .cloud
+      cloud: cloud_route
         .as_ref()
         .map(|cloud| cloud_card(cloud, state.confirming_delete)),
+      spend_cap: account
+        .cloud
+        .as_ref()
+        .and_then(|cloud| cloud.spend.as_ref().map(|s| (cloud, s)))
+        .map(|(cloud, s)| SpendCapEditor {
+          label: format!("Monthly spend cap: ${:.2}", s.cap_usd),
+          editing: state.spend_cap_editing,
+          draft: state.spend_cap_draft.clone(),
+          error: state
+            .spend_cap_invalid
+            .clone()
+            .or_else(|| cloud.spend_cap_error.clone()),
+        }),
       delete_account: state.delete_account.as_ref().map(|d| DeleteAccountDialog {
         can_confirm: !d.deleting && email_matches(user.email.as_deref(), &d.typed),
         ..d.clone()
@@ -942,6 +1316,10 @@ impl SettingsView {
   /// The account and integrations buttons GPUI handles; false for the rest.
   pub(super) fn press_account(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
     let web = native::web_url();
+    if let Some(action) = account_data::cloud_press(id) {
+      self.host.cloud_action(action);
+      return true;
+    }
     match id {
       "account.signIn" => self.host.open_url(&format!("{web}/sign-in?source=desktop")),
       "account.manage" | "cloud.upgrade" => self.host.open_url(&format!("{web}/dashboard")),
@@ -1002,6 +1380,63 @@ impl SettingsView {
         }
       }
       "linear.apiKey.save" => self.save_linear_key(cx),
+      "byos.key.cancel" => {
+        self.account.byos_key_editing = None;
+        self.account.byos_key_draft.clear();
+      }
+      "byos.key.save" => {
+        let draft = std::mem::take(&mut self.account.byos_key_draft);
+        if let (Some(kind), false) = (
+          self.account.byos_key_editing.take(),
+          draft.trim().is_empty(),
+        ) {
+          self.host.cloud_action(CloudAction::SaveProviderKey {
+            kind,
+            key: crate::commands::cloud::ApiKey(draft.trim().to_string()),
+          });
+        }
+      }
+      _ if id.starts_with("byos.key.add.") => {
+        self.account.byos_key_editing = Some(
+          id.strip_prefix("byos.key.add.")
+            .unwrap_or_default()
+            .to_string(),
+        );
+        self.account.byos_key_draft.clear();
+        self.account.byos_key_focus = true;
+      }
+      _ if id.starts_with("byos.key.remove.") => {
+        self.host.cloud_action(CloudAction::RemoveProviderKey {
+          kind: id
+            .strip_prefix("byos.key.remove.")
+            .unwrap_or_default()
+            .to_string(),
+        });
+      }
+      "cloud.spendCap.edit" => {
+        let cap = self
+          .account_route()
+          .and_then(|a| a.cloud)
+          .and_then(|c| c.spend)
+          .map(|s| js_number(s.cap_usd))
+          .unwrap_or_default();
+        self.account.spend_cap_editing = true;
+        self.account.spend_cap_focus = true;
+        self.account.spend_cap_draft = cap;
+        self.account.spend_cap_invalid = None;
+      }
+      "cloud.spendCap.cancel" => {
+        self.account.spend_cap_editing = false;
+        self.account.spend_cap_invalid = None;
+      }
+      "cloud.spendCap.save" => match parse_spend_cap(&self.account.spend_cap_draft) {
+        Ok(cap_usd) => {
+          self.account.spend_cap_editing = false;
+          self.account.spend_cap_invalid = None;
+          self.host.cloud_action(CloudAction::SetSpendCap { cap_usd });
+        }
+        Err(error) => self.account.spend_cap_invalid = Some(error),
+      },
       _ => return false,
     }
     true
@@ -1022,9 +1457,20 @@ impl SettingsView {
           linear.draft = text;
         }
       }
+      "cloud.spendCap" => self.account.spend_cap_draft = text,
+      "byos.key" => self.account.byos_key_draft = text,
       _ => return false,
     }
     true
+  }
+}
+
+/// A typed cap in dollars ("80", "$80.50"). The server checks the maximum.
+fn parse_spend_cap(typed: &str) -> Result<f64, String> {
+  let typed = typed.trim().trim_start_matches('$').replace(',', "");
+  match typed.parse::<f64>() {
+    Ok(cap) if cap.is_finite() && cap >= 5. => Ok(cap),
+    _ => Err("Enter an amount of at least $5.".into()),
   }
 }
 
@@ -1120,6 +1566,10 @@ fn red(p: &Palette) -> gpui::Hsla {
   Tone::Danger.text(p)
 }
 
+fn small_button(id: impl Into<SharedString>, variant: Variant, p: &Palette) -> Button {
+  Button::new(id, p).variant(variant).size(Size::Sm)
+}
+
 /// A click handler that presses the button `id` of a view.
 pub(in crate::gpui_shell::screen) type ClickFn =
   Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App)>;
@@ -1184,6 +1634,211 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       .gap_1()
       .children(repair)
       .child(delete)
+  });
+
+  let sizes = (!c.sizes.is_empty()).then(|| {
+    div()
+      .debug_selector(|| "cloud-size-picker".into())
+      .flex()
+      .flex_col()
+      .gap_1()
+      .children(c.sizes.iter().map(|size| {
+        small_button(format!("cloud-tier-{}", size.id), Variant::Outline, p)
+          .w_full()
+          .justify_between()
+          .selected(size.selected)
+          .disabled(c.submitting)
+          .child(
+            div()
+              .flex()
+              .gap_2()
+              .child(
+                div()
+                  .font_weight(FontWeight::MEDIUM)
+                  .child(if size.current {
+                    format!("{} (current)", size.label)
+                  } else {
+                    size.label.clone()
+                  }),
+              )
+              .child(
+                div()
+                  .text_color(p.muted_foreground)
+                  .child(size.spec.clone()),
+              ),
+          )
+          .children(size.price.clone().map(|price| div().child(price)))
+          .on_click(press(&format!("cloud.tier.{}", size.id)))
+      }))
+  });
+  let placements = (!c.placements.is_empty()).then(|| {
+    div()
+      .debug_selector(|| "cloud-placement-picker".into())
+      .flex()
+      .flex_col()
+      .gap_1()
+      .children(c.placements.iter().map(|option| {
+        let key = option.kind.clone().unwrap_or_else(|| "managed".into());
+        small_button(format!("cloud-placement-{key}"), Variant::Outline, p)
+          .w_full()
+          .selected(option.selected)
+          .disabled(c.submitting)
+          .label(option.label.clone())
+          .on_click(press(&format!("cloud.placement.{key}")))
+      }))
+  });
+  let processes = (!c.processes.is_empty() || c.idle_stop.is_some()).then(|| {
+    div()
+      .debug_selector(|| "cloud-processes".into())
+      .flex()
+      .flex_col()
+      .gap_1()
+      .when_some(c.idle_stop.clone(), |this, eta| {
+        this.child(
+          ui::text(div(), TextSize::Xs)
+            .debug_selector(|| "cloud-idle-stop".into())
+            .text_color(p.muted_foreground)
+            .child(eta),
+        )
+      })
+      .children(c.processes.iter().map(|row| {
+        let kill = row.killable.then(|| {
+          small_button(format!("cloud-process-kill-{}", row.pid), Variant::Ghost, p)
+            .disabled(c.submitting)
+            .label("Kill")
+            .on_click(press(&format!("cloud.process.kill.{}", row.pid)))
+        });
+        let keep = match (&row.pin_id, row.killable) {
+          (Some(pin_id), _) => Some(
+            small_button(
+              format!("cloud-process-unpin-{}", row.pid),
+              Variant::Outline,
+              p,
+            )
+            .selected(true)
+            .label("Kept alive")
+            .on_click(press(&format!("cloud.process.unpin.{pin_id}"))),
+          ),
+          (None, true) => Some(
+            small_button(
+              format!("cloud-process-pin-{}", row.pid),
+              Variant::Outline,
+              p,
+            )
+            .label("Keep alive (billed)")
+            .on_click(press(&format!("cloud.process.pin.{}", row.pid))),
+          ),
+          (None, false) => None,
+        };
+        ui::text(div(), TextSize::Xs)
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .child(div().truncate().child(row.command.clone()))
+              .child(
+                div()
+                  .truncate()
+                  .text_color(p.muted_foreground)
+                  .child(row.detail.clone()),
+              ),
+          )
+          .children(keep)
+          .children(kill)
+      }))
+  });
+  let billing = c.billing.clone().map(|billing| {
+    let color = match c.spend_state {
+      Some(SpendState::Capped) => p.destructive,
+      Some(SpendState::Warning) => Tone::Warning.text(p),
+      _ => p.muted_foreground,
+    };
+    ui::text(div(), TextSize::Sm)
+      .debug_selector(|| "cloud-billing".into())
+      .flex()
+      .flex_col()
+      .gap_1()
+      .child(div().text_color(color).child(billing))
+      .when_some(
+        c.spend_note
+          .clone()
+          .filter(|_| c.spend_state == Some(SpendState::Warning)),
+        |this, note| this.child(div().text_color(p.muted_foreground).child(note)),
+      )
+  });
+  // The cap was reached: say why workspaces are stopped and offer to raise it.
+  let capped =
+    (c.spend_state == Some(SpendState::Capped) || c.spend_cap_reached.is_some()).then(|| {
+      let message = c
+        .spend_cap_reached
+        .clone()
+        .or_else(|| c.spend_note.clone())
+        .unwrap_or_default();
+      div()
+        .debug_selector(|| "cloud-spend-capped".into())
+        .mt_3()
+        .child(
+          ui::Alert::new("cloud-spend-capped-alert", "Monthly spend cap reached", p)
+            .severity(ui::Severity::Danger)
+            .message(message)
+            .action(
+              small_button("cloud-spend-cap-raise", Variant::Outline, p)
+                .label("Raise cap")
+                .on_click(press("cloud.spendCap.edit")),
+            ),
+        )
+    });
+  let notices = c.notifications.iter().map(|n| {
+    let dismiss = format!("cloud.notification.dismiss.{}", n.id);
+    div().mt_3().child(
+      ui::Alert::new(
+        SharedString::from(format!("cloud-notification-{}", n.id)),
+        n.title.clone(),
+        p,
+      )
+      .severity(ui::Severity::Warning)
+      .message(n.body.clone())
+      .action(
+        Button::new(
+          SharedString::from(format!("cloud-notification-dismiss-{}", n.id)),
+          p,
+        )
+        .variant(Variant::Ghost)
+        .size(Size::Sm)
+        .label("Dismiss")
+        .on_click(press(&dismiss)),
+      ),
+    )
+  });
+  let resize = (c.resize && c.resize_confirm.is_none()).then(|| {
+    small_button("cloud-resize", Variant::Outline, p)
+      .disabled(c.submitting)
+      .label("Resize")
+      .on_click(press("cloud.resize"))
+  });
+  let resize_confirm = c.resize_confirm.clone().map(|lines| {
+    div().debug_selector(|| "cloud-resize-confirm-alert".into()).child(
+      ui::Alert::new("cloud-resize-unpushed", "Resizing loses unpushed work", p)
+        .severity(ui::Severity::Warning)
+        .message(format!(
+          "The workspace moves to a new machine and repositories are cloned again from their remotes. This is lost: {}. Push first, or resize anyway.",
+          lines.join("; ")
+        ))
+        .action(
+          small_button("cloud-resize-cancel", Variant::Ghost, p)
+            .label("Cancel")
+            .on_click(press("cloud.resize.cancel")),
+        )
+        .action(
+          small_button("cloud-resize-confirm", Variant::Outline, p)
+            .disabled(c.submitting)
+            .label("Resize anyway")
+            .on_click(press("cloud.resize.confirm")),
+        ),
+    )
   });
 
   let body: AnyElement = match (&c.instance, &c.create) {
@@ -1273,6 +1928,10 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
             }),
         )
         .children(usage)
+        .children(processes)
+        .children(sizes)
+        .children(resize)
+        .children(resize_confirm)
         .children(buttons)
         .into_any_element()
     }
@@ -1284,8 +1943,18 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       .child(
         ui::text(div(), TextSize::Sm)
           .text_color(p.muted_foreground)
-          .child("Treq creates one persistent cloud workspace for your account, with Treq, JJ, Git, and agents installed. Location, CPU, memory, and storage are managed for you."),
+          .child("Treq creates one persistent cloud workspace for your account, with Treq, JJ, Git, and agents installed. Pick a size: usage is billed by the second at its hourly price."),
       )
+      .children(placements)
+      .when_some(c.byos_note.clone(), |this, note| {
+        this.child(
+          ui::text(div(), TextSize::Sm)
+            .debug_selector(|| "cloud-byos-note".into())
+            .text_color(p.muted_foreground)
+            .child(note),
+        )
+      })
+      .children(sizes)
       .child(
         Button::new("cloud-create", p)
           .size(Size::Sm)
@@ -1328,6 +1997,11 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
         .children(actions),
     )
     .child(body)
+    .when_some(billing, |this, billing| {
+      this.child(div().mt_3().child(billing))
+    })
+    .children(capped)
+    .children(notices)
     .when_some(c.pro_required.clone(), |this, message| {
       this.child(
         ui::text(div(), TextSize::Sm)
@@ -1350,6 +2024,14 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
               .label("Upgrade to Pro")
               .on_click(press("cloud.upgrade")),
           ),
+      )
+    })
+    .when_some(c.credential_invalid.clone(), |this, message| {
+      this.child(
+        ui::text(div().mt_3(), TextSize::Sm)
+          .debug_selector(|| "cloud-credential-invalid".into())
+          .text_color(red)
+          .child(message),
       )
     })
     .when_some(c.error.clone(), |this, error| {
@@ -1508,7 +2190,9 @@ impl SettingsView {
           .children(dev)
           .into_any_element()
       }
-      AccountTab::SignedIn(signed_in) => self.signed_in(signed_in, p, cx).into_any_element(),
+      AccountTab::SignedIn(signed_in) => {
+        self.signed_in(signed_in, p, window, cx).into_any_element()
+      }
     }
   }
 
@@ -1572,7 +2256,172 @@ impl SettingsView {
       })
   }
 
-  fn signed_in(&mut self, s: &SignedIn, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+  /// A field `width` wide with Cancel and Save (`{id}-cancel`, `{id}-save`),
+  /// pressing `{action}.cancel` and `{action}.save`.
+  fn field_with_save(
+    &self,
+    (id, action): (&str, &str),
+    field: impl IntoElement,
+    width: f32,
+    can_save: bool,
+    p: &Palette,
+  ) -> gpui::Div {
+    div()
+      .flex()
+      .flex_none()
+      .gap_2()
+      .child(div().w(zpx(width)).child(field))
+      .child(
+        small_button(format!("{id}-cancel"), Variant::Ghost, p)
+          .label("Cancel")
+          .on_click(self.press(&format!("{action}.cancel"))),
+      )
+      .child(
+        small_button(format!("{id}-save"), Variant::Default, p)
+          .disabled(!can_save)
+          .label("Save")
+          .on_click(self.press(&format!("{action}.save"))),
+      )
+  }
+
+  /// "Provider keys": bring your own sandbox. Keys go to the server, which
+  /// checks them with the provider; they are never shown again.
+  fn provider_keys(
+    &mut self,
+    keys: &ProviderKeysSection,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> AnyElement {
+    let editor = keys.editing.as_ref().map(|kind| {
+      let input = self
+        .controls
+        .password("byos.key", &keys.draft, "API key", window, cx);
+      if self.account.byos_key_focus {
+        self.account.byos_key_focus = false;
+        input.read(cx).focus_handle(cx).focus(window, cx);
+      }
+      let name = crate::core::cloud_catalog::provider_name(kind);
+      setting_row(
+        &format!("{name} API key"),
+        "Checked with the provider before it is saved.",
+        self.field_with_save(
+          ("byos-key", "byos.key"),
+          form::input_field("byos-key-input", &input, false, keys.saving),
+          256.,
+          !keys.saving && !keys.draft.trim().is_empty(),
+          p,
+        ),
+        p,
+      )
+    });
+    let rows = keys.rows.iter().map(|row| {
+      setting_row(
+        &row.name,
+        &row.status,
+        small_button(format!("byos-key-remove-{}", row.kind), Variant::Outline, p)
+          .disabled(keys.saving)
+          .label("Remove")
+          .on_click(self.press(&format!("byos.key.remove.{}", row.kind))),
+        p,
+      )
+      .when(row.invalid, |this| this.text_color(red(p)))
+    });
+    let add = div()
+      .flex()
+      .flex_wrap()
+      .gap_2()
+      .children(keys.addable.iter().map(|(kind, name)| {
+        small_button(format!("byos-key-add-{kind}"), Variant::Outline, p)
+          .disabled(keys.saving)
+          .label(format!("Add {name} key"))
+          .on_click(self.press(&format!("byos.key.add.{kind}")))
+      }));
+    div()
+      .id("byos-provider-keys")
+      .debug_selector(|| "byos-provider-keys".into())
+      .flex()
+      .flex_col()
+      .gap_2()
+      .child(section_header(
+        theme::ICON_CLOUD,
+        "Provider keys",
+        "Bring your own sandbox",
+        p,
+      ))
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child("Run your cloud workspace on your own provider account. The provider bills you for the machine; treq charges 5% of the provider's price."),
+      )
+      .children(rows)
+      .children(editor)
+      .child(add)
+      .when_some(keys.error.clone(), |this, error| {
+        this.child(ui::text(div(), TextSize::Sm).text_color(red(p)).child(error))
+      })
+      .into_any_element()
+  }
+
+  /// "Monthly spend cap: $50.00" with Change, or the amount field.
+  fn spend_cap_row(
+    &mut self,
+    editor: &SpendCapEditor,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> AnyElement {
+    let control: AnyElement = if editor.editing {
+      let input = self
+        .controls
+        .input("cloud.spendCap", &editor.draft, "50", window, cx);
+      if self.account.spend_cap_focus {
+        self.account.spend_cap_focus = false;
+        input.read(cx).focus_handle(cx).focus(window, cx);
+      }
+      self
+        .field_with_save(
+          ("cloud-spend-cap", "cloud.spendCap"),
+          form::input_field("cloud-spend-cap-input", &input, false, false),
+          120.,
+          true,
+          p,
+        )
+        .into_any_element()
+    } else {
+      small_button("cloud-spend-cap-edit", Variant::Outline, p)
+        .label("Change")
+        .on_click(self.press("cloud.spendCap.edit"))
+        .into_any_element()
+    };
+    div()
+      .debug_selector(|| "cloud-spend-cap".into())
+      .flex()
+      .flex_col()
+      .gap_1()
+      .child(setting_row(
+        &editor.label,
+        "Cloud workspaces stop when this month's spend reaches the cap. Minimum $5.",
+        control,
+        p,
+      ))
+      .when_some(editor.error.clone(), |this, error| {
+        this.child(
+          ui::text(div(), TextSize::Xs)
+            .text_color(p.destructive)
+            .child(error),
+        )
+      })
+      .into_any_element()
+  }
+
+  fn signed_in(
+    &mut self,
+    s: &SignedIn,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
     let avatar = self
       .account
       .avatar
@@ -1685,6 +2534,14 @@ impl SettingsView {
         ),
       );
     let cloud = s.cloud.as_ref().map(|c| self.cloud_card(c, p, cx));
+    let spend_cap = s
+      .spend_cap
+      .as_ref()
+      .map(|editor| self.spend_cap_row(editor, p, window, cx));
+    let provider_keys = s
+      .provider_keys
+      .as_ref()
+      .map(|keys| self.provider_keys(keys, p, window, cx));
     div()
       .flex()
       .flex_col()
@@ -1692,6 +2549,8 @@ impl SettingsView {
       .child(user)
       .child(subscription)
       .children(cloud)
+      .children(spend_cap)
+      .children(provider_keys)
       .child(
         div().flex().child(
           Button::new("account-sign-out", p)

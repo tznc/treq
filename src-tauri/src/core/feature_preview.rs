@@ -12,6 +12,9 @@ pub enum PreviewFeature {
   LinearIntegration,
   Logs,
   Devcontainers,
+  /// Bring your own sandbox: cloud workspaces on the user's own provider
+  /// account.
+  Byos,
 }
 
 impl PreviewFeature {
@@ -22,6 +25,7 @@ impl PreviewFeature {
       Self::LinearIntegration => "linearIntegration",
       Self::Logs => "logs",
       Self::Devcontainers => "devcontainers",
+      Self::Byos => "byos",
     }
   }
 
@@ -117,6 +121,7 @@ mod tests {
     assert!(!package_json_default(PreviewFeature::SkillsInstallation));
     assert!(!package_json_default(PreviewFeature::RemoteSsh));
     assert!(!package_json_default(PreviewFeature::LinearIntegration));
+    assert!(!package_json_default(PreviewFeature::Byos));
   }
 
   #[test]
@@ -156,7 +161,7 @@ mod tests {
     db.set_setting(&PreviewFeature::RemoteSsh.setting_key(), "false")
       .expect("set");
     let managed = SshEndpointSource::Managed {
-      provider: "sprites".into(),
+      provider: "boat".into(),
       generation: 1,
     };
     assert!(require_remote_for_source(&db, &managed).is_ok());

@@ -40,6 +40,8 @@ export type SubscriptionEventArgs = {
   p_current_period_end: string | null;
   p_cancel_at_period_end: boolean;
   p_trial_end: string | null;
+  // The spend cap's window (040_placements_and_usage.sql).
+  p_current_period_start: string | null;
 };
 
 export type BillingOwnerType = "user" | "organization";
@@ -134,6 +136,18 @@ function periodEndOf(
   return ends.length > 0 ? Math.max(...ends) : null;
 }
 
+// Same as periodEndOf: the earliest item start when the period is on items.
+function periodStartOf(
+  sub: Record<string, unknown>,
+  items: Record<string, unknown>[],
+): number | null {
+  if (typeof sub.current_period_start === "number") return sub.current_period_start;
+  const starts = items
+    .map((item) => item.current_period_start)
+    .filter((start): start is number => typeof start === "number");
+  return starts.length > 0 ? Math.min(...starts) : null;
+}
+
 function subscriptionAction(event: StripeEvent): EventAction {
   const sub = event.data.object;
   const subscriptionId = idOf(sub.id);
@@ -180,6 +194,7 @@ function subscriptionAction(event: StripeEvent): EventAction {
       p_current_period_end: unixToIso(periodEnd),
       p_cancel_at_period_end: canceling,
       p_trial_end: unixToIso(sub.trial_end),
+      p_current_period_start: unixToIso(periodStartOf(sub, items)),
     },
   };
 }

@@ -33,7 +33,7 @@ function relayRequest(): Request {
   );
 }
 
-// A paused Sprite wakes when the relay connects to it, so the relay is where
+// A stopped machine wakes when the relay connects to it, so the relay is where
 // a lapsed owner's cloud workspace stays stopped.
 describe("authorizeRelayRequest and Pro", () => {
   it("refuses an owner without Pro with 402 pro_required", async () => {
@@ -57,7 +57,7 @@ describe("authorizeRelayRequest and Pro", () => {
     expect(target).toMatchObject({
       ownerUserId: OWNER,
       instanceId: "inst-1",
-      spriteName: "dev-treq-user-1",
+      providerResourceId: "dev-treq-user-1",
     });
   });
 });
