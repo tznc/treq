@@ -81,12 +81,12 @@ Each check calls `has_pro` on the server. The desktop and web gates stay for dis
 | --- | --- | --- |
 | GitHub App install | `create-github-install-intent` and `complete-github-installation`. The App requests user authorization during installation, and the function confirms the installation appears in GitHub's `/user/installations` for that user before linking. | Existing installations stay linked. |
 | Linear OAuth | `create-linear-oauth-intent` and `linear-proxy` | The proxy returns 402 and the app falls back to the personal API key. |
-| Managed cloud workspace | `remote-instance` actions `ensure`, `wake`, and `reprovision`, plus the SSH relay and key install that would wake it | The instance stops. Its disk is kept for 7 days, then deleted. `status` and `delete` always work. |
+| Managed cloud workspace | `remote-instance` actions `ensure`, `wake`, and `reprovision`, plus the SSH relay and key install that would wake it | The instance stops. Its disk is kept for 30 days, then deleted. `status` and `delete` always work. |
 | Mobile access | The same checks as cloud workspaces, since mobile reaches them through Remote Development | As above. |
 
 For an organization's installation, `installation_has_pro` checks the organization's Team subscription. For a personal installation, it checks the linking user.
 
-Sprites have no stop call. A Sprite pauses on its own about 30 seconds after its last activity, so the service stops it by refusing every action that would wake it. Its disk is still billed by the provider for those 7 days. An hourly scheduled job runs the lapse sweep, because the project has no in-database scheduler.
+Sprites have no stop call. A Sprite pauses on its own about 30 seconds after its last activity, so the service stops it by refusing every action that would wake it. Its disk is still billed by the provider for those 30 days. An hourly scheduled job runs the lapse sweep, because the project has no in-database scheduler.
 
 ## Organizations and seats
 
@@ -141,7 +141,7 @@ Stripe currently has no paying subscribers, because checkout never shipped. No b
 | ID | Decision | Default in this document |
 | --- | --- | --- |
 | B01 | Does Team get a trial? | No. Only Pro has a trial. |
-| B02 | How long is a lapsed cloud workspace kept? | 7 days, stopped, then deleted (decided 2026-10-14). Remote audit events are kept 7 days for Team members and 1 day for everyone else. |
+| B02 | How long is a lapsed cloud workspace kept? | 30 days, stopped, then deleted (decided 2026-10-14 as 7 days, extended to 30 on 2026-10-31). Remote audit events are kept 7 days for Team members and 1 day for everyone else. |
 | B03 | Should a member who leaves a Team keep `pro` until the period ends? | No. Entitlement ends at once. |
 | B04 | Should deleting an account or organization cancel its Stripe subscription? | No. The subscription keeps billing until canceled in the portal. |
 | B05 | Can an owner delete an organization whose Team is set to cancel at the period end? | No. Deletion waits until the period ends. |

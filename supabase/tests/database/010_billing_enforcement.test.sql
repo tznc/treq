@@ -103,7 +103,7 @@ reset role;
 insert into public.remote_instances (id, owner_user_id, provider_kind, region, size_preset, status, lapsed_at) values
   ('00000000-0000-0000-0000-00000000e001', '00000000-0000-0000-0000-0000000000d1', 'fly_sprites', 'us_east', 'small', 'ready', null),
   ('00000000-0000-0000-0000-00000000e002', '00000000-0000-0000-0000-0000000000d2', 'fly_sprites', 'us_east', 'small', 'ready', null),
-  ('00000000-0000-0000-0000-00000000e003', '00000000-0000-0000-0000-0000000000d3', 'fly_sprites', 'us_east', 'small', 'suspended', now() - interval '8 days'),
+  ('00000000-0000-0000-0000-00000000e003', '00000000-0000-0000-0000-0000000000d3', 'fly_sprites', 'us_east', 'small', 'suspended', now() - interval '31 days'),
   ('00000000-0000-0000-0000-00000000e004', '00000000-0000-0000-0000-0000000000d4', 'fly_sprites', 'us_east', 'small', 'suspended', now() - interval '40 days'),
   ('00000000-0000-0000-0000-00000000e005', '00000000-0000-0000-0000-0000000000d5', 'fly_sprites', 'us_east', 'small', 'suspended', now() - interval '6 days');
 
@@ -143,7 +143,7 @@ select is(public.remote_claim_lapsed_deletion('00000000-0000-0000-0000-00000000e
 select is(public.remote_claim_lapsed_deletion('00000000-0000-0000-0000-00000000e004'), false,
   'an instance whose owner subscribed again is kept');
 select is(public.remote_claim_lapsed_deletion('00000000-0000-0000-0000-00000000e003'), true,
-  'an instance lapsed for 8 days is claimed for deletion');
+  'an instance lapsed for 31 days is claimed for deletion');
 select is((select status from public.remote_instances where id = '00000000-0000-0000-0000-00000000e003'), 'deleting',
   'the claimed instance moves to deleting');
 

@@ -59,7 +59,7 @@ function fakeStore(
         ? db.claimAllowed(row)
         : !hasPro(row.owner_user_id) &&
           row.lapsed_at !== null &&
-          NOW.getTime() - Date.parse(row.lapsed_at) >= 7 * DAY;
+          NOW.getTime() - Date.parse(row.lapsed_at) >= 30 * DAY;
       if (allowed) row.status = "deleting";
       return allowed;
     }),
@@ -111,7 +111,7 @@ describe("sweepLapsedInstances", () => {
     ]);
   });
 
-  it("keeps a stopped instance during the 7 days", async () => {
+  it("keeps a stopped instance during the 30 days", async () => {
     const rows = [candidate({ status: "suspended", lapsed_at: daysAgo(3) })];
     const { store } = fakeStore(rows);
     const { provider, run } = sweep(store);
@@ -124,7 +124,7 @@ describe("sweepLapsedInstances", () => {
     expect(provider.deleteInstance).not.toHaveBeenCalled();
   });
 
-  it("stops an instance again if something woke it during the 7 days", async () => {
+  it("stops an instance again if something woke it during the 30 days", async () => {
     const rows = [candidate({ status: "ready", lapsed_at: daysAgo(3) })];
     const { store } = fakeStore(rows);
     const { provider, run } = sweep(store);
@@ -136,8 +136,8 @@ describe("sweepLapsedInstances", () => {
     expect(rows[0].lapsed_at).toBe(daysAgo(3));
   });
 
-  it("deletes the instance after 7 days without Pro", async () => {
-    const rows = [candidate({ status: "suspended", lapsed_at: daysAgo(8) })];
+  it("deletes the instance after 30 days without Pro", async () => {
+    const rows = [candidate({ status: "suspended", lapsed_at: daysAgo(31) })];
     const { store, audits } = fakeStore(rows);
     const { provider, run } = sweep(store);
 
@@ -166,8 +166,8 @@ describe("sweepLapsedInstances", () => {
     expect(store.markDeleted).not.toHaveBeenCalled();
   });
 
-  it("does not ask to delete before 7 days by this clock, even if the database would allow it", async () => {
-    const rows = [candidate({ status: "suspended", lapsed_at: daysAgo(6) })];
+  it("does not ask to delete before 30 days by this clock, even if the database would allow it", async () => {
+    const rows = [candidate({ status: "suspended", lapsed_at: daysAgo(29) })];
     const { store } = fakeStore(rows, { claimAllowed: () => true });
     const { provider, run } = sweep(store);
 
@@ -217,7 +217,7 @@ describe("sweepLapsedInstances", () => {
       candidate({
         status: "failed",
         provider_resource_id: null,
-        lapsed_at: daysAgo(8),
+        lapsed_at: daysAgo(31),
       }),
     ];
     const { store } = fakeStore(rows);
@@ -261,7 +261,7 @@ describe("sweepLapsedInstances", () => {
   });
 
   it("retries the provider delete of an instance a failed sweep left in deleting", async () => {
-    const rows = [candidate({ status: "deleting", lapsed_at: daysAgo(9) })];
+    const rows = [candidate({ status: "deleting", lapsed_at: daysAgo(32) })];
     const { store } = fakeStore(rows);
     const { provider, run } = sweep(store);
 
