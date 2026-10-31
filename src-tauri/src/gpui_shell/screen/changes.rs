@@ -242,6 +242,7 @@ impl ChangesView {
   ) -> Self {
     let mut this = Self::blank(parent, options, host, react, popups, dark, cx);
     this.hydrate_review(cx);
+    this.hydrate_viewed(cx);
     this.load(cx);
     this.watch_threads(cx);
     this.load_pr(cx);
@@ -361,6 +362,7 @@ impl ChangesView {
       self.close_search(cx);
       self.watch_threads(cx);
       self.hydrate_review(cx);
+      self.hydrate_viewed(cx);
       self.load_pr(cx);
     }
     if reread {
@@ -929,6 +931,32 @@ impl ChangesView {
   /// The diff a file card shows: the working copy's, else the branch's.
   fn file_hunks(&self, path: &str) -> Option<FileHunks> {
     self.shown_hunks(path).cloned()
+  }
+
+  /// The files kept as viewed, folded as when they were marked; the stale
+  /// ones go once the diff is read.
+  fn hydrate_viewed(&mut self, cx: &mut Context<Self>) {
+    if self.read_only() {
+      return;
+    }
+    let workspace = self.parent.working_directory();
+    self.run(
+      move |host, _| host.viewed_files(&workspace),
+      |view, result, cx| match result {
+        Ok(files) => {
+          for (path, hash) in files {
+            view.collapsed_files.insert(path.clone());
+            view.viewed.entry(path).or_insert(hash);
+          }
+          if view.snapshot.is_some() {
+            view.unmark_stale(None, cx);
+          }
+          cx.notify();
+        }
+        Err(err) => log::warn!("Failed to load viewed files: {err}"),
+      },
+      cx,
+    );
   }
 
   /// Viewed files whose diff changed since are viewed no longer. `read`

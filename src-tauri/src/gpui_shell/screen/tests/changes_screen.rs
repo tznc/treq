@@ -251,7 +251,7 @@ fn reopening_the_tab_restores_viewed_files(cx: &mut TestAppContext) {
     b.path = "b.rs".into();
     diff.hunks_by_file.push(b);
   }
-  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  let (h, host) = workspace_harness(cx, host, changes_route());
   h.cx.run_until_parked();
   let viewed = h.screen.read_with(&h.cx, |screen, cx| {
     let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
