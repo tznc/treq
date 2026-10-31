@@ -2006,6 +2006,34 @@ pub fn ensure_commit_rewritable(
   Ok(())
 }
 
+/// Checks that `revision` in the home repository is not already on
+/// `branch@origin`. The home log marks those commits immutable; rewriting one
+/// would diverge the local branch from published history.
+pub fn ensure_home_commit_rewritable(
+  repo_path: &str,
+  revision: &str,
+  branch: &str,
+) -> Result<(), JjError> {
+  let loaded = load_workspace_repo(repo_path)?;
+  let commit = resolve_commit_by_revision(&loaded, revision)?;
+  reject_root_commit(&loaded, &commit)?;
+  let remote = loaded.repo.view().get_remote_bookmark(RemoteRefSymbol {
+    name: RefName::new(branch),
+    remote: RemoteName::new("origin"),
+  });
+  if remote.target.is_absent() {
+    return Ok(());
+  }
+  let symbol = format!("{branch}@origin");
+  let pushed = evaluate_revset(&loaded, &format!("::{}", format_revset_symbol(&symbol)))?;
+  if pushed.containing_fn()(commit.id()).unwrap_or(false) {
+    return Err(JjError::IoError(format!(
+      "Revision '{revision}' is already pushed to '{symbol}' and cannot be rewritten"
+    )));
+  }
+  Ok(())
+}
+
 /// Rewrite author timestamps for a mutable commit and descendants on the
 /// current workspace first-parent lineage toward `@`.
 pub fn jj_shift_commit_timestamps(
