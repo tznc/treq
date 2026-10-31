@@ -283,6 +283,51 @@ const ALERT_RESULTS: ReadonlySet<unknown> = new Set([
   "unknown_owner",
 ]);
 
+export type SubscriptionSnapshotArgs = {
+  p_subscription_id: string;
+  p_customer_id: string;
+  p_plan: BillingPlan;
+  p_status: SubscriptionStatus;
+  p_current_period_end: string | null;
+  p_cancel_at_period_end: boolean;
+  p_trial_end: string | null;
+  p_fetched_at: string;
+};
+
+/**
+ * The billing_record_subscription_snapshot arguments for a subscription
+ * read from Stripe at `fetchedAtSeconds`, or null if it is not a Treq
+ * subscription.
+ */
+export function subscriptionSnapshotArgs(
+  subscription: Record<string, unknown>,
+  fetchedAtSeconds: number,
+): SubscriptionSnapshotArgs | null {
+  const action = subscriptionAction({
+    id: "snapshot",
+    type: "customer.subscription.updated",
+    created: fetchedAtSeconds,
+    data: { object: subscription },
+  });
+  if (
+    action.action === "ignore" ||
+    action.fn !== "billing_record_subscription_event"
+  ) {
+    return null;
+  }
+  const a = action.args;
+  return {
+    p_subscription_id: a.p_subscription_id,
+    p_customer_id: a.p_customer_id,
+    p_plan: a.p_plan,
+    p_status: a.p_status,
+    p_current_period_end: a.p_current_period_end,
+    p_cancel_at_period_end: a.p_cancel_at_period_end,
+    p_trial_end: a.p_trial_end,
+    p_fetched_at: new Date(fetchedAtSeconds * 1000).toISOString(),
+  };
+}
+
 // Two events from one second disagree, so the stored row cannot tell which
 // came last. Stripe's current copy of the subscription settles it. Any
 // failure answers 500: the tie was not recorded, so Stripe's retry asks again.
@@ -314,37 +359,13 @@ async function resolveTie(
     return fail(err instanceof Error ? err.message : String(err));
   }
 
-  const snapshot = subscriptionAction({
-    ...event,
-    type: "customer.subscription.updated",
-    data: { object: current },
-  });
-  if (
-    snapshot.action === "ignore" ||
-    snapshot.fn !== "billing_record_subscription_event"
-  ) {
-    return json(
-      {
-        received: true,
-        ignored:
-          snapshot.action === "ignore" ? snapshot.reason : "not a subscription",
-      },
-      200,
-    );
+  const args = subscriptionSnapshotArgs(current, nowSeconds);
+  if (!args) {
+    return json({ received: true, ignored: "not a Treq subscription" }, 200);
   }
-  const a = snapshot.args;
   const { data, error } = await deps.rpc(
     "billing_record_subscription_snapshot",
-    {
-      p_subscription_id: a.p_subscription_id,
-      p_customer_id: a.p_customer_id,
-      p_plan: a.p_plan,
-      p_status: a.p_status,
-      p_current_period_end: a.p_current_period_end,
-      p_cancel_at_period_end: a.p_cancel_at_period_end,
-      p_trial_end: a.p_trial_end,
-      p_fetched_at: new Date(nowSeconds * 1000).toISOString(),
-    },
+    args,
   );
   if (error) return fail(error.message);
   log({
