@@ -1,10 +1,11 @@
 //! Model-based property test of the workspace lifecycle: random sequences of
-//! create, delete, archive and open ("switch to") against a real jj repo,
-//! checked after every step against a plain set of the live branches.
+//! create, delete, archive, open ("switch to"), rename and restack against a
+//! real jj repo, checked after every step against a plain set of the live
+//! branches and the stack (target branch) relations.
 
 use crate::common::{proptest_config, JjVerifier, TestRepo};
 use proptest::prelude::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use treq_lib::local_db::Workspace;
 
 #[derive(Debug, Clone)]
@@ -15,6 +16,11 @@ enum Op {
   Archive(usize),
   /// Open a live workspace the way switching to it does: read its `@`.
   Switch(usize),
+  /// Rename a live workspace's branch to `feat/r{slot}`.
+  Rename(usize, u8),
+  /// Stack a live workspace on another live one, or (index past the end) on
+  /// the default branch.
+  Retarget(usize, usize),
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -23,6 +29,8 @@ fn op() -> impl Strategy<Value = Op> {
     2 => any::<usize>().prop_map(Op::Delete),
     1 => any::<usize>().prop_map(Op::Archive),
     1 => any::<usize>().prop_map(Op::Switch),
+    1 => (any::<usize>(), 0u8..2).prop_map(|(i, s)| Op::Rename(i, s)),
+    2 => (any::<usize>(), any::<usize>()).prop_map(|(i, j)| Op::Retarget(i, j)),
   ]
 }
 
@@ -62,6 +70,26 @@ fn check(
       "{} has no directory",
       w.workspace_path
     );
+  }
+  // The stack is a forest: following targets through live workspaces never
+  // revisits a branch.
+  let targets: BTreeMap<&str, &str> = rows
+    .iter()
+    .filter(|w| !w.archived)
+    .filter_map(|w| Some((w.branch_name.as_str(), w.target_branch.as_deref()?)))
+    .collect();
+  for start in targets.keys() {
+    let mut seen = BTreeSet::new();
+    let mut cur = *start;
+    while let Some(next) = targets.get(cur) {
+      prop_assert!(
+        seen.insert(cur),
+        "stack cycle through {} in {:?}",
+        cur,
+        targets
+      );
+      cur = next;
+    }
   }
   for w in gone {
     let reused = live.values().any(|l| l.workspace_name == w.workspace_name);
@@ -111,6 +139,45 @@ proptest! {
           let path = path.to_string_lossy();
           prop_assert!(treq_lib::jj::is_jj_workspace(&path));
           prop_assert!(treq_lib::jj::jj_working_copy_commit_hex(&path).is_some());
+        },
+        Op::Rename(i, slot) => if let Some(w) = pick(&live, i) {
+          let to = format!("feat/r{slot}");
+          let res = treq_lib::core::workspaces::rename_workspace(&repo.repo_path, w.id, &to, false)
+            .map_err(TestCaseError::fail)?;
+          if res.success {
+            prop_assert!(!live.contains_key(&to), "renamed onto live branch {}", to);
+            live.remove(&w.branch_name);
+            let renamed = res.workspace.expect("renamed workspace");
+            prop_assert_eq!(&renamed.branch_name, &to);
+            live.insert(to, renamed);
+          } else {
+            // Refused only when the name is taken: live, or left by a gone workspace.
+            prop_assert!(
+              live.contains_key(&to) || gone.iter().any(|g| g.branch_name == to),
+              "rename to {} refused: {}",
+              to,
+              res.message
+            );
+          }
+        },
+        Op::Retarget(i, j) => if let Some(w) = pick(&live, i) {
+          let onto = live
+            .keys()
+            .nth(j % (live.len() + 1))
+            .cloned()
+            .unwrap_or_else(|| repo.default_branch().to_string());
+          if onto == w.branch_name {
+            continue;
+          }
+          let updated = treq_lib::core::workspaces::retarget_workspace(
+            &repo.repo_path,
+            w.id,
+            &onto,
+            repo.default_branch(),
+          )
+          .map_err(TestCaseError::fail)?;
+          prop_assert_eq!(updated.target_branch.as_deref(), Some(onto.as_str()));
+          live.insert(updated.branch_name.clone(), updated);
         },
       }
       check(&repo, &live, &gone)?;
