@@ -280,6 +280,7 @@ function defaultLog(entry: Record<string, unknown>): void {
 // so the webhook still answers 200.
 const ALERT_RESULTS: ReadonlySet<unknown> = new Set([
   "owner_conflict",
+  "owner_plan_mismatch",
   "unknown_owner",
 ]);
 
