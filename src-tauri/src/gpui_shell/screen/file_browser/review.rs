@@ -213,7 +213,7 @@ impl FileBrowserView {
           .child(
             Button::new("comment-submit", p)
               .disabled(empty)
-              .label("Add Comment")
+              .label("Add comment")
               .on_click(cx.listener(|view, _, _, cx| view.submit_draft(cx))),
           ),
       )

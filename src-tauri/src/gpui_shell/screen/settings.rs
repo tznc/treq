@@ -78,7 +78,7 @@ impl Tab {
       Tab::Account => "Account",
       Tab::Integrations => "Integrations",
       Tab::Skills => "Skills",
-      Tab::Preview => "Feature Preview",
+      Tab::Preview => "Feature preview",
     }
   }
 
@@ -1481,14 +1481,14 @@ impl SettingsView {
     tabs.push(Tab::Preview);
     let save = match tab {
       Tab::Application => Some(SaveButton {
-        label: "Save Settings".into(),
+        label: "Save settings".into(),
         disabled: false,
       }),
       Tab::Repository => self.repo.as_ref().map(|repo| SaveButton {
         label: if repo.saving {
-          "Saving..."
+          "Saving…"
         } else {
-          "Save Settings"
+          "Save settings"
         }
         .into(),
         disabled: repo.saving,
@@ -1560,9 +1560,9 @@ impl SettingsView {
           loading: repo.loaded.is_none() || repo.config_loading,
           fields: repo.fields(),
           managed: config.map(data::managed_fields).unwrap_or_default(),
-          model_options: model_options("Use Application Default"),
-          agent_options: agent_options("Use Application Default"),
-          review_agent_options: agent_options("Use Default Agent"),
+          model_options: model_options("Use application default"),
+          agent_options: agent_options("Use application default"),
+          review_agent_options: agent_options("Use default agent"),
           trigger_options: options(&[
             ("off", "Off"),
             ("on-commit", "On commit"),
@@ -2105,11 +2105,11 @@ impl SettingsView {
       )
       .child(
         div()
-          .child(label("Font Size"))
+          .child(label("Font size"))
           .child(
             div()
               .mt_2()
-              .child(form::select_field("settings-font-size", "Font Size", &font, false)),
+              .child(form::select_field("settings-font-size", "Font size", &font, false)),
           )
           .child(help(
             "Font size for terminal, code diff display, and overview files",
@@ -2124,15 +2124,15 @@ impl SettingsView {
         p,
       ))
       .child(field_block(
-        "Default Agent",
-        form::select_field("settings-default-agent", "Default Agent", &agent, false),
+        "Default agent",
+        form::select_field("settings-default-agent", "Default agent", &agent, false),
         Some("Default agent for new sessions"),
         p,
       ))
       .child(checklist::render(&app.checklist, &ctx))
       .child(field_block(
-        "Conflict Marker Style",
-        form::select_field("settings-conflict-marker-style", "Conflict Marker Style", &conflict, false),
+        "Conflict marker style",
+        form::select_field("settings-conflict-marker-style", "Conflict marker style", &conflict, false),
         Some("Style of conflict markers written to files during rebase. Git Diff3 is compatible with most editors."),
         p,
       ))
@@ -2162,7 +2162,7 @@ impl SettingsView {
       )
       .child(
         div()
-          .child(label("Application Setup Script"))
+          .child(label("Application setup script"))
           .child(
             div()
               .mt_2()
@@ -2238,7 +2238,7 @@ impl SettingsView {
         .size(Size::Sm)
         .disabled(card.loading)
         .label(if card.loading {
-          "Reloading..."
+          "Reloading…"
         } else {
           "Reload"
         })
@@ -2279,7 +2279,7 @@ impl SettingsView {
         .child(
           ui::text(div(), TextSize::Sm)
             .text_color(p.muted_foreground)
-            .child("Current Branch"),
+            .child("Current branch"),
         )
         .child(
           ui::text(div(), TextSize::Sm)
@@ -2304,7 +2304,7 @@ impl SettingsView {
           .py_8()
           .text_center()
           .text_color(p.muted_foreground)
-          .child("Loading settings..."),
+          .child("Loading settings…"),
       )
       .into_any_element()
     } else {
@@ -2364,7 +2364,7 @@ impl SettingsView {
         .flex_col()
         .gap_6()
         .child(field_block(
-          "Branch Name Pattern",
+          "Branch name pattern",
           form::input_field("settings-branch-pattern", &pattern, true, managed("branchNamePattern")),
           Some(&branch_preview(&f.branch_name_pattern)),
           p,
@@ -2382,8 +2382,8 @@ impl SettingsView {
           p,
         ))
         .child(field_block(
-          "Default Agent",
-          form::select_field("settings-repo-default-agent", "Default Agent", &agent, managed("defaultAgent")),
+          "Default agent",
+          form::select_field("settings-repo-default-agent", "Default agent", &agent, managed("defaultAgent")),
           Some("Default agent for new sessions in this repository (overrides application default)"),
           p,
         ))
@@ -2413,7 +2413,7 @@ impl SettingsView {
                 .child(
                   ui::text(div(), TextSize::Sm)
                     .font_weight(FontWeight::MEDIUM)
-                    .child("Code Review"),
+                    .child("Code review"),
                 )
                 .child(help(
                   "Settings for the AI review agent. Its comments stay local to this machine and are never pushed to GitHub.",
@@ -2422,7 +2422,7 @@ impl SettingsView {
                 )),
             )
             .child(field_block(
-              "Custom Review Prompt",
+              "Custom review prompt",
               form::textarea_field(&review_prompt, true, managed("reviewPrompt")),
               Some("Overrides the built-in prompt. {target_type}, {target_id} and {diff_summary} are substituted before the prompt is sent."),
               p,
@@ -2449,14 +2449,14 @@ impl SettingsView {
               this.child(self.prompt_edits(&edits, &edits_busy, p))
             })
             .child(field_block(
-              "Review Agent",
-              form::select_field("settings-review-agent", "Review Agent", &review_agent, managed("reviewAgent")),
+              "Review agent",
+              form::select_field("settings-review-agent", "Review agent", &review_agent, managed("reviewAgent")),
               Some("Agent launched by Start Review (overrides the default agent)"),
               p,
             ))
             .child(field_block(
-              "Automatic Review",
-              form::select_field("settings-auto-review-trigger", "Automatic Review", &trigger, managed("autoReviewTrigger")),
+              "Automatic review",
+              form::select_field("settings-auto-review-trigger", "Automatic review", &trigger, managed("autoReviewTrigger")),
               Some("Opens a review terminal on its own after the chosen operation finishes in a workspace of this repository."),
               p,
             )),
@@ -2490,7 +2490,7 @@ impl SettingsView {
           .child(
             ui::text(div(), TextSize::Sm)
               .font_weight(FontWeight::SEMIBOLD)
-              .child("Feature Preview"),
+              .child("Feature preview"),
           )
           .child(help(
             "Turn on experimental features. Off hides them in the UI and blocks the matching backend commands. Dev builds start with every preview flag on. Release builds use the shipped default until you change a switch.",

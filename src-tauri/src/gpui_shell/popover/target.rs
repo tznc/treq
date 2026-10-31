@@ -195,7 +195,7 @@ impl Popover {
   ) -> AnyElement {
     let p = *p;
     if matches!(&self.content, super::Content::Target(s) if s.field.is_none()) {
-      let field = SearchField::new("Search branches...", window, cx, |this, search, cx| {
+      let field = SearchField::new("Search branches…", window, cx, |this, search, cx| {
         this.set_search(search, cx)
       });
       if let super::Content::Target(state) = &mut self.content {
@@ -221,7 +221,7 @@ impl Popover {
       None => children.push(
         ui::delayed(
           "target-loading",
-          message("Loading branches...")
+          message("Loading branches…")
             .id("target-loading")
             .debug_selector(|| "target-loading".into())
             .flex()
@@ -232,7 +232,7 @@ impl Popover {
                 .mb_1()
                 .child(ui::spinner("target-spin", 16., p.muted_foreground)),
             )
-            .child("Loading branches..."),
+            .child("Loading branches…"),
         )
         .into_any_element(),
       ),

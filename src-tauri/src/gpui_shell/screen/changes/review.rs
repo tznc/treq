@@ -990,7 +990,7 @@ impl ChangesView {
       Field::Draft if self.review.draft.is_some() => (
         &self.review.draft_input,
         self.review.draft_text.clone(),
-        "Add a comment...",
+        "Add a comment…",
         3,
       ),
       Field::Edit if self.review.editing.is_some() => (
@@ -1002,13 +1002,13 @@ impl ChangesView {
       Field::Note if self.review.note_open.is_some() => (
         &self.review.note_input,
         self.review.note_text.clone(),
-        "Add a comment...",
+        "Add a comment…",
         3,
       ),
       Field::Summary if self.review.finish_open => (
         &self.review.summary_input,
         self.review.summary.clone(),
-        "Add a summary comment (optional)...",
+        "Add a summary comment (optional)…",
         3,
       ),
       _ => return None,
@@ -1662,7 +1662,7 @@ impl ChangesView {
           .child(
             Button::new("comment-submit", p)
               .disabled(empty)
-              .label("Add Comment")
+              .label("Add comment")
               .on_click(cx.listener(|view, _, _, cx| view.submit_draft(cx))),
           ),
       )
@@ -1900,7 +1900,7 @@ impl ChangesView {
                 Button::new("conflict-comment-save", p)
                   .size(Size::Sm)
                   .disabled(empty)
-                  .label("Add Comment")
+                  .label("Add comment")
                   .on_click(cx.listener(move |view, _, _, cx| view.save_note(&save, cx))),
               ),
           )
@@ -1969,7 +1969,7 @@ impl ChangesView {
                   .bg(send_bg)
                   .icon(theme::ICON_SEND, 12.)
                   .label(if conflicts {
-                    "Resolve conflicts..."
+                    "Resolve conflicts…"
                   } else {
                     "Finish review"
                   })
@@ -1990,7 +1990,7 @@ impl ChangesView {
       .gap_2()
       .disabled(self.starting_review)
       .icon(theme::ICON_BOT, 12.)
-      .label("Start Review")
+      .label("Start review")
       .on_click(cx.listener(|view, _, _, cx| view.start_review(cx)))
   }
 

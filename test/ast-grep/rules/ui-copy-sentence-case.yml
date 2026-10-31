@@ -1,0 +1,40 @@
+id: ui-copy-sentence-case
+language: rust
+severity: error
+message: >
+  Write UI labels in sentence case: "Merge preview", "Add comment", "Open
+  repository…". Capitalize only the first word and proper nouns (GitHub,
+  Linear, Claude, Treq Cloud). Sidebar group labels, drawn in capitals, are
+  exempt.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  kind: string_literal
+  # Two or more words, every one capitalized: "Merge Commit Message".
+  regex: ^"[A-Z][a-z]+( (a|an|the|in|of|on|to|for|with|from|and|or|[A-Z][a-z]+))* [A-Z][a-z]+(…|\.\.\.)?"$
+  not:
+    any:
+      # Proper nouns keep their capitals.
+      - regex: \b(GitHub|Github|Linear|Claude|Treq|Cursor|Codex|Opus|Sonnet|Haiku|Jujutsu|Docker|Git|Zed|Pro)\b
+      # Sidebar group labels, drawn in capitals.
+      - inside:
+          kind: function_item
+          has:
+            field: name
+            regex: ^section$
+          stopBy: end
+      - inside:
+          kind: const_item
+          has:
+            field: name
+            regex: _GROUPS$
+          stopBy: end
+      - inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end

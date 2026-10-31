@@ -13,7 +13,7 @@ test("palette-overlays: command palette", async ({ page, context }) => {
   await openWorkspace(page, "feat/empty-event-message");
   await page.keyboard.press(`${mod}+k`);
   const palette = await overlay(page, context);
-  await expect(palette.getByRole("option", { name: "Go to Home" })).toBeVisible();
+  await expect(palette.getByRole("option", { name: "Go to home" })).toBeVisible();
   await settle(page, 800);
   await capture(page, {
     name: "08-palette-open",
@@ -48,7 +48,7 @@ test("palette-overlays: command palette", async ({ page, context }) => {
     rest: false,
     expectations: ["Highlight moved down two rows; list scrolls if needed"],
   });
-  await palette.getByRole("textbox", { name: "Type a command or search..." }).fill("term");
+  await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("term");
   await settle(page, 600);
   await capture(page, {
     name: "08-palette-filtered",
@@ -57,7 +57,7 @@ test("palette-overlays: command palette", async ({ page, context }) => {
     rest: false,
     expectations: ["Only terminal commands remain; matched letters emphasised"],
   });
-  await palette.getByRole("textbox", { name: "Type a command or search..." }).fill("zzzz-nothing");
+  await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("zzzz-nothing");
   await settle(page, 600);
   await capture(page, {
     name: "08-palette-no-results",
@@ -73,7 +73,7 @@ test("palette-overlays: command palette", async ({ page, context }) => {
 test("palette-overlays: file picker", async ({ page }) => {
   await openWorkspace(page, "feat/empty-event-message");
   await page.keyboard.press(`${mod}+p`);
-  const search = page.getByRole("textbox", { name: "Search files..." });
+  const search = page.getByRole("textbox", { name: "Search files…" });
   await expect(search).toBeVisible();
   await settle(page, 800);
   await capture(page, {
@@ -141,19 +141,19 @@ test("palette-overlays: shortcuts, go to workspace, prompt history, branch switc
       ["Workspaces of every repo listed with branch icons; filter field focused"],
     ],
     [
-      "View Prompt History",
+      "View prompt history",
       "08-prompt-history",
       "Prompt history",
       ["Prompts listed by workspace, or an empty state on a fresh install"],
     ],
     [
-      "Switch Branch",
+      "Switch branch",
       "08-switch-branch",
       "Switch Branch dialog (home checkout)",
       ["Branches listed with the current one marked; search field on top"],
     ],
     [
-      "View Stashed Changes",
+      "View stashed changes",
       "08-stash-dialog",
       "Stash dialog (no stashes yet)",
       ["Empty state explains stashes; dialog sized to its content"],
@@ -161,7 +161,7 @@ test("palette-overlays: shortcuts, go to workspace, prompt history, branch switc
   ] as const) {
     await page.keyboard.press(`${mod}+k`);
     const palette = await overlay(page, context);
-    await palette.getByRole("textbox", { name: "Type a command or search..." }).fill(command);
+    await palette.getByRole("textbox", { name: "Type a command or search…" }).fill(command);
     await settle(page, 400);
     const option = palette.getByRole("option", { name: command });
     if ((await option.count()) === 0) {

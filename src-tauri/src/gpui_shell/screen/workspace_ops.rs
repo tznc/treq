@@ -120,7 +120,7 @@ pub fn delete(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
     }
     Err(err) => {
       restored(host, &workspace.repo_path, vec![workspace.id]);
-      toast(host, ToastTone::Error, "Delete Failed", &err);
+      toast(host, ToastTone::Error, "Delete failed", &err);
       false
     }
   }
@@ -137,7 +137,7 @@ pub fn archive(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
     }
     Err(err) => {
       restored(host, &workspace.repo_path, vec![workspace.id]);
-      toast(host, ToastTone::Error, "Archive Failed", &err);
+      toast(host, ToastTone::Error, "Archive failed", &err);
       false
     }
   }
@@ -188,7 +188,7 @@ pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> V
     toast(
       host,
       ToastTone::Error,
-      "Archive Failed",
+      "Archive failed",
       &failures.join("\n"),
     );
   }

@@ -1082,7 +1082,7 @@ impl GithubView {
     self.host.refresh_pr_status(&self.route.repo_path, branch);
   }
 
-  /// `useCreateWorkspacePr`'s success toast, with its "Open in Web" button.
+  /// `useCreateWorkspacePr`'s success toast, with its "Open in web" button.
   pub(super) fn pr_created_toast(&self, repo: &str, number: u64, draft: bool) {
     let url = format!("https://github.com/{repo}/pull/{number}");
     let host = self.host.clone();
@@ -1097,7 +1097,7 @@ impl GithubView {
       description: format!("#{number}"),
       tone: ToastTone::Success,
       action: Some(ToastAction {
-        label: "Open in Web".into(),
+        label: "Open in web".into(),
         id,
       }),
     });
@@ -1318,7 +1318,7 @@ impl GithubView {
     };
     let tabs = vec![
       ui::Tab::new("github-tab-issues", "Issues"),
-      ui::Tab::new("github-tab-prs", "Pull Requests"),
+      ui::Tab::new("github-tab-prs", "Pull requests"),
     ];
     div().flex().items_center().gap_2().child(
       ui::Tabs::new("github-tabs", p)
@@ -1912,7 +1912,7 @@ impl GithubView {
       .child(
         ui::text(div(), TextSize::Sm)
           .font_weight(FontWeight::SEMIBOLD)
-          .child("New Issue"),
+          .child("New issue"),
       )
       .child(ui::text(
         div().child(form::input_field(
@@ -1941,7 +1941,7 @@ impl GithubView {
               pending,
               p.primary_foreground,
             )
-            .label("Submit Issue")
+            .label("Submit issue")
             .on_click(cx.listener(|view, _, _, cx| view.create_issue(cx))),
           )
           .child(

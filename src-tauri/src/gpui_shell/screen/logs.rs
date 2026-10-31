@@ -885,7 +885,7 @@ impl LogsView {
                   Variant::Secondary
                 })
                 .icon(theme::ICON_DATABASE, 12.)
-                .label("Logs Explorer")
+                .label("Logs explorer")
                 .on_click(cx.listener(|view, _, _, cx| {
                   view.explorer_open = true;
                   view.find.open = false;
@@ -1792,7 +1792,7 @@ impl LogsView {
         list = list.child(
           check_row(
             "log-level-option-all".into(),
-            "All Levels".into(),
+            "All levels".into(),
             self.levels.is_empty(),
             p,
           )

@@ -48,7 +48,7 @@ test("the home task field takes paste, select all, cut and undo", async ({
 }) => {
   await goHome(page);
   await editsWithShortcuts(
-    page.getByRole("textbox", { name: "Describe a task..." }),
+    page.getByRole("textbox", { name: "Describe a task…" }),
   );
 });
 
@@ -59,12 +59,12 @@ test("the file search takes paste, select all, cut and undo", async ({
   await goHome(page);
   await page.getByRole("button", { name: "Command palette" }).click();
   const palette = await dialogPage(context);
-  await palette.getByRole("option", { name: "Search Files" }).click();
+  await palette.getByRole("option", { name: "Search files" }).click();
   // The picker draws in the repo window, which keeps X's input focus;
   // xdotool can't move focus to the palette's own window without a window
   // manager.
   await editsWithShortcuts(
-    page.getByRole("textbox", { name: "Search files..." }),
+    page.getByRole("textbox", { name: "Search files…" }),
   );
   await page.keyboard.press("Escape");
 });

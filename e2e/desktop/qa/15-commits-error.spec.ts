@@ -1,6 +1,6 @@
 // A workspace whose checkout was deleted behind the app: the Code tab's
 // commit read fails, and the Commits panel says so instead of showing
-// "Loading commits..." forever, and "Show error" opens the error in a
+// "Loading commits…" forever, and "Show error" opens the error in a
 // popover to copy from. The checkout is moved back afterwards so
 // later specs see the seed unchanged.
 import { renameSync } from "node:fs";
@@ -24,7 +24,7 @@ test("commits-error: a failed commit read is reported, not left loading", async 
       title: "Code tab of a workspace whose checkout was deleted",
       expectations: [
         "The Commits panel says 'Couldn't load commits' with a 'Show error' button under it",
-        "No 'Loading commits...' text is left on screen",
+        "No 'Loading commits…' text is left on screen",
       ],
     });
     await expect(page.getByRole("status", { name: "Couldn't load commits" })).toBeVisible();

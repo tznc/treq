@@ -120,7 +120,7 @@ impl FilePicker {
     if let Some(input) = &self.input {
       return input.clone();
     }
-    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search files..."));
+    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search files…"));
     input.update(cx, |input, cx| input.focus(window, cx));
     self._subscription =
       Some(cx.subscribe(
@@ -153,7 +153,7 @@ impl Render for FilePicker {
         .text_center()
         .text_color(p.muted_foreground)
         .child(if self.query.trim().is_empty() {
-          "Type to search files..."
+          "Type to search files…"
         } else {
           "No files found"
         })

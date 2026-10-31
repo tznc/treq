@@ -31,6 +31,8 @@ const RULES = [
   "gpui-no-adhoc-tabs",
   "gpui-no-local-dialog",
   "ui-copy-no-yes-no",
+  "ui-copy-sentence-case",
+  "ui-copy-ellipsis",
 ];
 const NOT_MIGRATED = /^\s*#\s*Not migrated yet/;
 const SCREENS = "src-tauri/src/gpui_shell";

@@ -264,7 +264,7 @@ impl Popover {
             .border_color(amber_border)
             .text_color(amber)
             .child(ui::icon(theme::ICON_SHIELD_CHECK, 12., amber))
-            .label("Trust Repository")
+            .label("Trust repository")
             .on_click(cx.listener(|this, _, _, cx| this.trust_repo(cx))),
         );
       }

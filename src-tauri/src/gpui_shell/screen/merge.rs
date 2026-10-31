@@ -825,7 +825,7 @@ impl Render for MergeView {
           .child(
             ui::text(div(), TextSize::Lg)
               .font_weight(FontWeight::SEMIBOLD)
-              .child("Merge Preview"),
+              .child("Merge preview"),
           )
           .child(
             ui::text(div(), TextSize::Sm)
@@ -876,7 +876,7 @@ impl MergeView {
       if self.on_github {
         "Leave empty to use GitHub's default message"
       } else {
-        "Enter merge commit message..."
+        "Enter merge commit message…"
       },
       3,
       window,
@@ -884,7 +884,7 @@ impl MergeView {
     );
     let disabled = !self.can_merge() || self.merging;
     let label = if self.merging {
-      "Merging...".to_string()
+      "Merging…".to_string()
     } else {
       let base = match self.strategy {
         Strategy::Squash => "Squash and merge",
@@ -969,7 +969,7 @@ impl MergeView {
             } else if self.on_github {
               "Merge Commit Message (optional)"
             } else {
-              "Merge Commit Message"
+              "Merge commit message"
             }))
             .child(
               ui::text(

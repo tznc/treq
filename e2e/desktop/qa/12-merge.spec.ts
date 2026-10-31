@@ -128,7 +128,7 @@ test("merge: popovers close with Escape and let the next click through", async (
 
 test("merge: merge preview and strategies", async ({ page }) => {
   await openWorkspace(page, BRANCH);
-  await page.getByRole("button", { name: "Merge..." }).click();
+  await page.getByRole("button", { name: "Merge…" }).click();
   const back = page.getByRole("button", { name: "Back" });
   await expect(back).toBeVisible();
   await settle(page, 2500);
@@ -170,5 +170,5 @@ test("merge: merge preview and strategies", async ({ page }) => {
     expectations: ["File diffs render under the strategy card; no overlap"],
   });
   await back.click();
-  await expect(page.getByRole("button", { name: "Merge..." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Merge…" })).toBeVisible();
 });

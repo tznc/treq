@@ -72,9 +72,9 @@ test("sidebar-workspace-title: a titled row shows its title", async ({ page, con
   await home(page);
   await page.keyboard.press(`${mod}+k`);
   const palette = await overlay(page, context);
-  await palette.getByRole("textbox", { name: "Type a command or search..." }).fill("Delete Workspace");
-  await palette.getByRole("option", { name: "Delete Workspace" }).click();
-  const search = (p: Page) => p.getByRole("textbox", { name: "Search workspaces to delete..." });
+  await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("Delete workspace");
+  await palette.getByRole("option", { name: "Delete workspace" }).click();
+  const search = (p: Page) => p.getByRole("textbox", { name: "Search workspaces to delete…" });
   const picker = await dialogIn(page, context, search);
   await search(picker).fill("fail-readiness");
   await settle(page, 800);

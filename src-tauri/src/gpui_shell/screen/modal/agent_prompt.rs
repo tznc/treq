@@ -407,7 +407,7 @@ impl AgentPromptView {
     if self.close_picker(window, cx) {
       return;
     }
-    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces..."));
+    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces…"));
     input.update(cx, |input, cx| input.focus(window, cx));
     let subscription = cx.subscribe_in(
       &input,
@@ -480,7 +480,7 @@ impl AgentPromptView {
     let text = self.task_text.clone();
     let task = cx.new(|cx| {
       TextareaState::new(window, cx)
-        .placeholder("Describe a task...")
+        .placeholder("Describe a task…")
         .auto_grow(1, 9)
         .default_value(text)
     });

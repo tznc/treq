@@ -96,7 +96,7 @@ async function pickFolder(folder: string): Promise<void> {
   let dialog = "";
   while (!dialog) {
     try {
-      dialog = execFileSync("xdotool", ["search", "--onlyvisible", "--name", "Select Folder"])
+      dialog = execFileSync("xdotool", ["search", "--onlyvisible", "--name", "Select folder"])
         .toString()
         .trim()
         .split("\n")[0];
@@ -180,9 +180,9 @@ test("terminal-reattach: a closed window's terminals open again", async ({ page,
   const first = repoWindows()[0];
   await page.keyboard.press(`${mod}+k`);
   const palette = await overlay(page, context);
-  await palette.getByRole("textbox", { name: "Type a command or search..." }).fill("new window");
+  await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("new window");
   await settle(page, 600);
-  await palette.getByRole("option", { name: "Open Repository in New Window" }).click();
+  await palette.getByRole("option", { name: "Open repository in new window" }).click();
   await pickFolder(repoDir());
   await expect.poll(() => repoWindows().length, { timeout: 30_000 }).toBe(2);
   const second = await dialogPage(context);

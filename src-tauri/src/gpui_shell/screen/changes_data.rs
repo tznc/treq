@@ -381,7 +381,7 @@ impl ChangesHost for Backend {
       log::warn!("failed to reveal {path}: {err}");
       self.toast(
         crate::gpui_shell::native::ToastTone::Error,
-        "Open Failed",
+        "Open failed",
         err.to_string(),
       );
     }

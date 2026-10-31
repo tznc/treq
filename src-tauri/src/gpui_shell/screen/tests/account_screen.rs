@@ -109,7 +109,7 @@ fn account_shows_the_plan_and_signs_out(cx: &mut TestAppContext) {
     signed_in.period,
     Some(("Renews on".into(), "11/1/2026".into()))
   );
-  assert_eq!(signed_in.manage_label, "Manage Subscription");
+  assert_eq!(signed_in.manage_label, "Manage subscription");
 
   h.click("account-manage-subscription");
   h.click("account-sign-out");
@@ -350,7 +350,7 @@ fn cloud_workspace_creates_through_rust(cx: &mut TestAppContext) {
     "cloud": cloud(serde_json::json!({ "provisioningStage": "Requesting provisioning..." })),
   })));
   let create = cloud_card(&mut h).create.expect("create");
-  assert_eq!(create.label, "Creating...");
+  assert_eq!(create.label, "Creating…");
   assert!(create.disabled && create.spinning);
   assert_eq!(create.stage.as_deref(), Some("Requesting provisioning..."));
 }

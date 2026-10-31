@@ -105,7 +105,7 @@ test("rows: palette", async ({ page, context }) => {
   await openWorkspace(page, "feat/empty-event-message");
   await page.keyboard.press(`${mod}+k`);
   const palette = await overlay(page, context);
-  await expect(palette.getByRole("option", { name: "Go to Home" })).toBeVisible();
+  await expect(palette.getByRole("option", { name: "Go to home" })).toBeVisible();
   await palette.keyboard.press("ArrowDown");
   await settle(page, 800);
   await capture(page, {

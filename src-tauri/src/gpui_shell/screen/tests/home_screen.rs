@@ -190,3 +190,37 @@ fn home_workspace_opens_the_branch_switcher(cx: &mut TestAppContext) {
     vec![press("workspace.branchSwitcher"), press("workspace.stack")]
   );
 }
+
+#[gpui::test]
+fn a_disabled_merge_button_says_why_first(cx: &mut TestAppContext) {
+  use crate::gpui_shell::popup::{PopupRequest, TooltipContent};
+  let mut host = feature_host();
+  if let Some(status) = host.loaded.status.as_mut() {
+    status.conflicted_files = vec!["src/a.rs".into(), "src/b.rs".into()];
+  }
+  let (mut h, _) = workspace_harness(cx, host, workspace_route());
+  h.cx.run_until_parked();
+  let at = h
+    .cx
+    .debug_bounds("workspace-merge")
+    .expect("merge")
+    .center();
+  h.cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  h.cx.run_until_parked();
+  let popups = h.popups.borrow();
+  let text = popups
+    .iter()
+    .rev()
+    .find_map(|p| match p {
+      PopupRequest::ShowTooltip {
+        content: TooltipContent::Text(text),
+        ..
+      } => Some(text.to_string()),
+      _ => None,
+    })
+    .expect("a tooltip on the disabled Merge… button");
+  assert!(text.starts_with("Resolve conflicts to merge"), "{text}");
+}

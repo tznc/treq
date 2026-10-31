@@ -2088,7 +2088,7 @@ mod tests {
       r#"[
         {"kind":"item","id":1,"text":"Copy branch name","icon":"git-branch"},
         {"kind":"separator"},
-        {"kind":"submenu","text":"Open in...","icon":"folder-open","items":[
+        {"kind":"submenu","text":"Open in…","icon":"folder-open","items":[
           {"kind":"item","id":2,"text":"Open in Zed"}
         ]},
         {"kind":"item","id":3,"text":"Archive Workspace","icon":"archive","destructive":true}
@@ -2098,7 +2098,7 @@ mod tests {
     assert_eq!(
       entries[2],
       MenuEntry::Submenu {
-        text: "Open in...".into(),
+        text: "Open in…".into(),
         icon: Some(MenuIcon::FolderOpen),
         detail: None,
         items: vec![MenuEntry::Item {

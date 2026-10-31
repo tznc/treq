@@ -1566,7 +1566,7 @@ impl TerminalView {
             16.,
             p.muted_foreground,
           ))
-          .child(ui::text(div(), TextSize::Sm).child("Preparing terminal...")),
+          .child(ui::text(div(), TextSize::Sm).child("Preparing terminal…")),
       ),
       Status::AgentFailed(error) => Some(
         div()

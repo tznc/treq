@@ -1337,7 +1337,7 @@ impl LinearView {
         .iter()
         .find(|t| &t.key == key)
         .map_or_else(|| key.clone(), |t| t.name.clone()),
-      None => "All Teams".to_string(),
+      None => "All teams".to_string(),
     };
     let (anchors, dark, current) = (self.anchors.clone(), self.dark, self.team.clone());
     let view = cx.entity().downgrade();
@@ -1366,7 +1366,7 @@ impl LinearView {
             let mut items = vec![
               NativeMenuItem::Label("Teams".into()),
               NativeMenuItem::Separator,
-              NativeMenuItem::item("All Teams", pick(None)).radio(current.is_none()),
+              NativeMenuItem::item("All teams", pick(None)).radio(current.is_none()),
             ];
             items.extend(teams.iter().map(|t| {
               NativeMenuItem::item(t.name.clone(), pick(Some(t.key.clone())))
@@ -1429,7 +1429,7 @@ impl LinearView {
             Button::new("linear-open-settings", p)
               .variant(Variant::Outline)
               .size(Size::Sm)
-              .label("Open Settings")
+              .label("Open settings")
               .on_click(cx.listener(|view, _, _, cx| view.open_settings(cx))),
           ),
       )

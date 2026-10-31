@@ -955,7 +955,7 @@ impl OpenWorkspacesDialog {
                 None => this.child(
                   ui::text(div(), TextSize::Sm)
                     .text_color(p.muted_foreground)
-                    .child("Loading branches..."),
+                    .child("Loading branches…"),
                 ),
               }),
           )
@@ -1006,7 +1006,7 @@ impl OpenWorkspacesDialog {
       .filter(|(_, c)| matches!(c, Some(Err(_))))
       .count();
     let status = if unchecked > 0 {
-      format!("Checking {}...", plural(unchecked, "1 line", "lines"))
+      format!("Checking {}…", plural(unchecked, "1 line", "lines"))
     } else {
       data::preview(&targets)
     };
@@ -1074,7 +1074,7 @@ impl OpenWorkspacesDialog {
       Button::new("open-workspaces-submit", p)
         .disabled(!self.can_submit())
         .label(if self.pending {
-          "Creating...".to_string()
+          "Creating…".to_string()
         } else {
           match targets.len() {
             0 | 1 => "Create workspace".to_string(),

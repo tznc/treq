@@ -680,7 +680,7 @@ fn declining_to_initialize_a_folder_leaves_it_alone(cx: &mut TestAppContext) {
   window.click_in_confirm(cx, "Cancel");
   assert_eq!(host.count("init /plain"), 0);
   assert_eq!(host.count("open /plain"), 0);
-  assert_eq!(host.count("toast Not a Git Repository"), 1);
+  assert_eq!(host.count("toast Not a Git repository"), 1);
   assert_eq!(window.asked(), None);
 }
 
