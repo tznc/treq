@@ -5085,3 +5085,142 @@ pub fn trust_repo(repo_path: &str) -> Result<(), String> {
     .map_err(|e| format!("Failed to trust repo: {}", e))?;
   Ok(())
 }
+
+#[cfg(test)]
+mod proptests {
+  use super::*;
+  use crate::test_repo::proptest_config;
+  use proptest::prelude::*;
+  use std::collections::BTreeMap;
+  use tempfile::TempDir;
+
+  /// What the workspaces table should hold, by id.
+  #[derive(Debug, Clone, PartialEq)]
+  struct Row {
+    name: String,
+    path: String,
+    branch: String,
+    title: Option<String>,
+    description: Option<String>,
+    moved_files: Option<Vec<String>>,
+    sparse_patterns: Option<Vec<String>>,
+    archived: bool,
+  }
+
+  #[derive(Debug, Clone)]
+  enum Op {
+    Add {
+      slot: u8,
+      description: Option<String>,
+      moved_files: Option<Vec<String>>,
+      sparse_patterns: Option<Vec<String>>,
+    },
+    Delete(usize),
+    Archive(usize),
+    SetTitle(usize, String),
+    ClearTitle(usize),
+    SetDescription(usize, String),
+  }
+
+  fn text() -> impl Strategy<Value = String> {
+    "\\PC{0,12}"
+  }
+
+  fn op() -> impl Strategy<Value = Op> {
+    let list = || proptest::option::of(prop::collection::vec(text(), 0..3));
+    prop_oneof![
+      3 => (0u8..4, proptest::option::of(text()), list(), list()).prop_map(
+        |(slot, description, moved_files, sparse_patterns)| Op::Add { slot, description, moved_files, sparse_patterns }
+      ),
+      1 => any::<usize>().prop_map(Op::Delete),
+      1 => any::<usize>().prop_map(Op::Archive),
+      1 => (any::<usize>(), text()).prop_map(|(i, t)| Op::SetTitle(i, t)),
+      1 => any::<usize>().prop_map(Op::ClearTitle),
+      1 => (any::<usize>(), text()).prop_map(|(i, t)| Op::SetDescription(i, t)),
+    ]
+  }
+
+  fn pick(model: &BTreeMap<i64, Row>, i: usize) -> Option<i64> {
+    (!model.is_empty()).then(|| *model.keys().nth(i % model.len()).expect("in range"))
+  }
+
+  proptest! {
+    #![proptest_config(proptest_config(32))]
+
+    /// Any sequence of workspace writes leaves the table equal to a simple
+    /// in-memory model: every field reads back as written.
+    #[test]
+    fn workspace_rows_follow_the_model(ops in prop::collection::vec(op(), 1..20)) {
+      let dir = TempDir::new().map_err(|e| TestCaseError::fail(e.to_string()))?;
+      let repo = dir.path().to_string_lossy().to_string();
+      let mut model: BTreeMap<i64, Row> = BTreeMap::new();
+      for op in ops {
+        match op {
+          Op::Add { slot, description, moved_files, sparse_patterns } => {
+            let path = format!("ws-{slot}");
+            // A live row already holds this path: the UNIQUE path refuses it.
+            let taken = model.values().any(|r| r.path == path && !r.archived);
+            let result = add_workspace(
+              &repo, format!("name-{slot}"), path.clone(), format!("b/{slot}"),
+              description.clone(), moved_files.clone(), sparse_patterns.clone(),
+            );
+            if taken {
+              prop_assert!(result.is_err());
+              continue;
+            }
+            let id = result.map_err(TestCaseError::fail)?;
+            for (old_id, r) in &mut model {
+              if r.archived && r.path == path {
+                r.path = format!("{path}#archived-{old_id}");
+              }
+            }
+            let non_empty = |v: Option<Vec<String>>| v.filter(|v| !v.is_empty());
+            model.insert(id, Row {
+              name: format!("name-{slot}"), path, branch: format!("b/{slot}"), title: None,
+              description, moved_files: non_empty(moved_files), sparse_patterns: non_empty(sparse_patterns),
+              archived: false,
+            });
+          }
+          Op::Delete(i) => if let Some(id) = pick(&model, i) {
+            delete_workspace(&repo, id).map_err(TestCaseError::fail)?;
+            model.remove(&id);
+          },
+          Op::Archive(i) => if let Some(id) = pick(&model, i) {
+            archive_workspace(&repo, id).map_err(TestCaseError::fail)?;
+            model.get_mut(&id).expect("picked").archived = true;
+          },
+          Op::SetTitle(i, title) => if let Some(id) = pick(&model, i) {
+            update_workspace_title(&repo, id, &title).map_err(TestCaseError::fail)?;
+            model.get_mut(&id).expect("picked").title = Some(title);
+          },
+          Op::ClearTitle(i) => if let Some(id) = pick(&model, i) {
+            clear_workspace_title(&repo, id).map_err(TestCaseError::fail)?;
+            model.get_mut(&id).expect("picked").title = None;
+          },
+          Op::SetDescription(i, d) => if let Some(id) = pick(&model, i) {
+            update_workspace_description(&repo, id, &d).map_err(TestCaseError::fail)?;
+            model.get_mut(&id).expect("picked").description = Some(d);
+          },
+        }
+      }
+      let mut actual = BTreeMap::new();
+      for id in model.keys() {
+        let w = get_workspace_by_id(&repo, *id).map_err(TestCaseError::fail)?
+          .ok_or_else(|| TestCaseError::fail(format!("row {id} missing")))?;
+        actual.insert(*id, Row {
+          name: w.workspace_name, path: w.workspace_path, branch: w.branch_name.clone(),
+          title: Some(w.title),
+          description: w.description, moved_files: w.moved_files, sparse_patterns: w.sparse_patterns,
+          archived: w.archived,
+        });
+      }
+      release_connections_under(dir.path());
+      // An unset title reads back as the branch name.
+      let expected: BTreeMap<i64, Row> = model.into_iter().map(|(id, mut r)| {
+        r.title = r.title.or_else(|| Some(r.branch.clone()));
+        (id, r)
+      }).collect();
+      prop_assert_eq!(actual, expected);
+    }
+  }
+}

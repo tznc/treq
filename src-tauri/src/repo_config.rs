@@ -271,3 +271,69 @@ mod tests {
     );
   }
 }
+
+#[cfg(test)]
+mod proptests {
+  use super::*;
+  use crate::test_repo::proptest_config;
+  use proptest::prelude::*;
+
+  fn value() -> impl Strategy<Value = Option<String>> {
+    // YAML-hostile text: colons, quotes, `#`, leading dashes, `null`, `yes`.
+    proptest::option::of(prop_oneof![
+      "[ -~]{0,20}",
+      Just("null".to_string()),
+      Just("~".to_string()),
+      Just("yes".to_string()),
+      Just("0x1F".to_string()),
+      "\\PC{0,8}",
+      "[a-z]{0,4}\n[a-z]{0,4}",
+    ])
+  }
+
+  fn config() -> impl Strategy<Value = RepoConfig> {
+    (
+      (value(), value(), value(), value()),
+      proptest::option::of(prop::collection::vec("[ -~]{0,10}", 0..4)),
+      (value(), value(), value(), value()),
+    )
+      .prop_map(|((a, b, c, d), files, (e, f, g, h))| RepoConfig {
+        branch_name_pattern: a,
+        default_model: b,
+        default_agent: c,
+        target_branch: d,
+        included_copy_files: files,
+        setup_script: e,
+        review_prompt: f,
+        review_agent: g,
+        auto_review_trigger: h,
+      })
+  }
+
+  proptest! {
+    #![proptest_config(proptest_config(64))]
+
+    /// Any config written as YAML to `.treq/config.yaml` reads back equal.
+    #[test]
+    fn config_round_trips_through_the_yaml_file(config in config()) {
+      let dir = tempfile::TempDir::new().map_err(|e| TestCaseError::fail(e.to_string()))?;
+      let repo = dir.path().to_string_lossy().to_string();
+      let path = config_path(&repo);
+      std::fs::create_dir_all(path.parent().expect("has parent")).map_err(|e| TestCaseError::fail(e.to_string()))?;
+      std::fs::write(&path, serde_yaml::to_string(&config).map_err(|e| TestCaseError::fail(e.to_string()))?)
+        .map_err(|e| TestCaseError::fail(e.to_string()))?;
+      prop_assert_eq!(parse_config(&repo), Ok(config));
+    }
+
+    /// Arbitrary file contents give `Ok` or `Err`, never a panic.
+    #[test]
+    fn parse_config_never_panics(content in "\\PC{0,60}") {
+      let dir = tempfile::TempDir::new().map_err(|e| TestCaseError::fail(e.to_string()))?;
+      let repo = dir.path().to_string_lossy().to_string();
+      let path = config_path(&repo);
+      std::fs::create_dir_all(path.parent().expect("has parent")).map_err(|e| TestCaseError::fail(e.to_string()))?;
+      std::fs::write(&path, content).map_err(|e| TestCaseError::fail(e.to_string()))?;
+      let _ = parse_config(&repo);
+    }
+  }
+}
