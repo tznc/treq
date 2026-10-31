@@ -3,7 +3,7 @@
 -- the webhook writes a fresh Stripe read through
 -- billing_record_subscription_snapshot (042_same_second_events.sql).
 begin;
-select plan(9);
+select plan(10);
 
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000007a1', 'tie@example.com');
@@ -37,6 +37,11 @@ select is((select cancel_at_period_end from public.billing_subscriptions where s
 select is(public.billing_record_subscription_snapshot('sub_tie', 'cus_tie', 'pro', 'active',
   now() + interval '30 days', false, null, current_setting('test.t')::timestamptz - interval '1 minute'),
   'stale', 'an older read does not overwrite a newer write');
+
+select is(public.billing_record_subscription_event('evt_tie_del', 'customer.subscription.deleted',
+  (select stripe_event_created from public.billing_subscriptions where stripe_subscription_id = 'sub_tie'),
+  'sub_tie', 'cus_tie', 'pro', 'canceled', now(), false, null),
+  'applied', 'a deletion from the same second is never a tie: an ended subscription stays ended');
 
 reset role;
 select function_privs_are('public', 'billing_record_subscription_snapshot',

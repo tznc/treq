@@ -40,7 +40,8 @@ begin
   -- Stripe's event `created` has one-second resolution. Two events from the
   -- same second that disagree cannot be ordered, so neither is trusted: the
   -- event is not recorded and the webhook writes a fresh read from Stripe.
-  if exists (
+  -- A deletion is final whatever its order, so it is never a tie.
+  if p_event_type <> 'customer.subscription.deleted' and exists (
     select 1
     from public.billing_subscriptions s
     where s.stripe_subscription_id = p_subscription_id
