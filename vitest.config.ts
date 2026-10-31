@@ -17,6 +17,7 @@ export default defineConfig({
       "test/github/**/*.test.ts",
       "test/edge-http/**/*.test.ts",
       "test/remote-ssh-traceability.test.ts",
+      "test/web/**/*.test.ts",
     ],
     testTimeout: 15000,
   },
