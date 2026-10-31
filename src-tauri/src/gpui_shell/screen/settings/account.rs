@@ -328,12 +328,17 @@ fn is_pro(subscription: Option<&Subscription>) -> bool {
   })
 }
 
+/// A renewal payment failed and Stripe is retrying it.
+fn past_due(subscription: Option<&Subscription>) -> bool {
+  subscription.is_some_and(|s| s.status == "past_due")
+}
+
 /// `subscriptionStatusLabel`.
 fn status_label(status: &str) -> String {
   match status {
     "trialing" => "Trial",
     "active" => "Active",
-    "past_due" => "Past due",
+    "past_due" => "Payment failed",
     "canceled" => "Canceling",
     "inactive" => "Inactive",
     other => other,
@@ -345,7 +350,8 @@ fn status_label(status: &str) -> String {
 fn period_label(status: &str) -> &'static str {
   match status {
     "trialing" => "Trial ends",
-    "active" | "past_due" => "Renews on",
+    "active" => "Renews on",
+    "past_due" => "Billing period ends",
     "canceled" => "Pro until",
     _ => "Period ends",
   }
@@ -577,7 +583,9 @@ impl SettingsView {
         let end = s.current_period_end.as_ref()?;
         Some((period_label(&s.status).to_string(), local_date(end)))
       }),
-      manage_label: if pro {
+      manage_label: if past_due(subscription) {
+        "Update Payment Method"
+      } else if pro {
         "Manage Subscription"
       } else {
         "Upgrade to Pro"
@@ -963,6 +971,20 @@ impl SettingsView {
     let web = native::web_url();
     match id {
       "account.signIn" => self.host.open_url(&format!("{web}/sign-in?source=desktop")),
+      // A failed payment goes straight to the subscription tab, where the
+      // billing portal updates the card.
+      "account.manage"
+        if past_due(
+          self
+            .account_route()
+            .and_then(|a| a.subscription.clone())
+            .as_ref(),
+        ) =>
+      {
+        self
+          .host
+          .open_url(&format!("{web}/dashboard?tab=subscription"))
+      }
       "account.manage" | "cloud.upgrade" => self.host.open_url(&format!("{web}/dashboard")),
       "github.manage" => self
         .host

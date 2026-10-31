@@ -126,6 +126,36 @@ fn account_shows_the_plan_and_signs_out(cx: &mut TestAppContext) {
   assert!(h.sent().is_empty());
 }
 
+#[gpui::test]
+fn account_flags_a_failed_payment_and_offers_to_update_it(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, account_route("account"), host.clone());
+  h.set_account(account_state(serde_json::json!({
+    "user": ada(),
+    "subscription": { "plan": "pro", "status": "past_due", "currentPeriodEnd": "2026-11-01T12:00:00Z" },
+  })));
+  let account = drawn_settings(&mut h).account.expect("account tab");
+  let settings::AccountTab::SignedIn(signed_in) = account else {
+    panic!("signed in: {account:?}");
+  };
+  assert!(signed_in.pro);
+  assert_eq!(
+    signed_in.status,
+    Some(("Payment failed".into(), settings::StatusTone::Warn))
+  );
+  assert_eq!(
+    signed_in.period,
+    Some(("Billing period ends".into(), "11/1/2026".into()))
+  );
+  assert_eq!(signed_in.manage_label, "Update Payment Method");
+
+  h.click("account-manage-subscription");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"open http://localhost:3001/dashboard?tab=subscription".to_string()));
+}
+
 fn delete_dialog(h: &mut Harness) -> Option<settings::DeleteAccountDialog> {
   match drawn_settings(h).account {
     Some(settings::AccountTab::SignedIn(signed_in)) => signed_in.delete_account,
