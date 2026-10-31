@@ -42,6 +42,7 @@ mod core_workspaces_commit_workspace_test;
 mod core_workspaces_default_branch_sync_test;
 mod core_workspaces_delete_workspace_test;
 mod core_workspaces_files_test;
+mod core_workspaces_lifecycle_proptest;
 mod core_workspaces_list_workspace_statuses_test;
 mod core_workspaces_merge_workspaces_test;
 mod core_workspaces_move_workspace_changes_test;

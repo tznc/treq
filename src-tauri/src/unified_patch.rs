@@ -406,3 +406,137 @@ mod tests {
     assert!(parse("--- a/f\n+++ b/f\n@@ -1,2 +1 @@\n-a\n").is_err());
   }
 }
+
+#[cfg(test)]
+mod proptests {
+  use super::*;
+  use crate::test_repo::proptest_config;
+  use proptest::prelude::*;
+
+  /// A text file as lines plus whether it ends with a newline. No lines means
+  /// the empty file, whatever the flag says.
+  #[derive(Debug, Clone)]
+  struct Text {
+    lines: Vec<String>,
+    trailing_newline: bool,
+  }
+
+  impl Text {
+    fn render(&self) -> String {
+      let mut out = self.lines.join("\n");
+      if self.trailing_newline && !self.lines.is_empty() {
+        out.push('\n');
+      }
+      out
+    }
+  }
+
+  fn text() -> impl Strategy<Value = Text> {
+    // Few distinct lines, so old and new share context often. Lines may be
+    // empty or start with diff-ish characters.
+    let line = prop_oneof![Just(String::new()), "[ab+\\- ]{1,3}", "[a-zé\\\\@ ]{0,6}",];
+    (prop::collection::vec(line, 0..8), any::<bool>()).prop_map(
+      |(mut lines, mut trailing_newline)| {
+        // `["a", ""]` without a newline is the text "a\n": say it that way.
+        if !trailing_newline && lines.last().is_some_and(String::is_empty) {
+          lines.pop();
+          trailing_newline = true;
+        }
+        Text {
+          lines,
+          trailing_newline,
+        }
+      },
+    )
+  }
+
+  /// A one-hunk unified diff from `old` to `new`, the way `diff -u` writes
+  /// it: shared leading and trailing lines as context, the middle as
+  /// removals then additions, `\ No newline` after a side's last line.
+  fn diff(old: &Text, new: &Text) -> String {
+    let (o, n) = (&old.lines, &new.lines);
+    let old_nl = old.trailing_newline || o.is_empty();
+    let new_nl = new.trailing_newline || n.is_empty();
+    let mut prefix = o.iter().zip(n).take_while(|(a, b)| a == b).count();
+    let mut suffix = o[prefix..]
+      .iter()
+      .rev()
+      .zip(n[prefix..].iter().rev())
+      .take_while(|(a, b)| a == b)
+      .count();
+    // A side's last line without a newline is context only when paired with
+    // the other side's last line, and both lack the newline.
+    if old_nl != new_nl {
+      suffix = 0;
+    }
+    while suffix == 0
+      && prefix > 0
+      && ((prefix == o.len() && !old_nl) || (prefix == n.len() && !new_nl))
+    {
+      prefix -= 1;
+    }
+    let mut body = String::new();
+    let mut emit = |sign: char, line: &str, last_old: bool, last_new: bool, missing: bool| {
+      body.push(sign);
+      body.push_str(line);
+      body.push('\n');
+      if missing && (last_old || last_new) {
+        body.push_str("\\ No newline at end of file\n");
+      }
+    };
+    for (i, line) in o[..prefix].iter().enumerate() {
+      let last = i + 1 == o.len();
+      emit(' ', line, last, last, last && !old_nl);
+    }
+    for (i, line) in o[prefix..o.len() - suffix].iter().enumerate() {
+      let last = prefix + i + 1 == o.len();
+      emit('-', line, last, false, !old_nl);
+    }
+    for (i, line) in n[prefix..n.len() - suffix].iter().enumerate() {
+      let last = prefix + i + 1 == n.len();
+      emit('+', line, false, last, !new_nl);
+    }
+    for (i, line) in o[o.len() - suffix..].iter().enumerate() {
+      let last = o.len() - suffix + i + 1 == o.len();
+      emit(' ', line, last, last, last && !old_nl);
+    }
+    let range = |len: usize| {
+      if len == 0 {
+        "0,0".to_string()
+      } else {
+        format!("1,{len}")
+      }
+    };
+    format!(
+      "--- a/f.txt\n+++ b/f.txt\n@@ -{} +{} @@\n{body}",
+      range(o.len()),
+      range(n.len())
+    )
+  }
+
+  proptest! {
+    #![proptest_config(proptest_config(64))]
+
+    #[test]
+    fn parse_and_apply_never_panic(patch in "(--- |\\+\\+\\+ |@@ -?[0-9,]{0,4} \\+?[0-9,]{0,4} @@|[ +\\-\\\\]|[a-z]{0,3}|\n){0,40}", original in proptest::option::of("[a-z\n ]{0,20}")) {
+      if let Ok(patches) = parse(&patch) {
+        for file_patch in &patches {
+          let _ = apply(original.as_deref(), file_patch);
+        }
+      }
+    }
+
+    #[test]
+    fn applying_a_generated_diff_reproduces_the_new_text(old in text(), new in text()) {
+      let (before, after) = (old.render(), new.render());
+      if before == after {
+        return Ok(());
+      }
+      let patch = diff(&old, &new);
+      let patches = parse(&patch).map_err(|e| TestCaseError::fail(format!("{e}\n{patch}")))?;
+      prop_assert_eq!(patches.len(), 1);
+      let applied = apply(Some(&before), &patches[0]);
+      prop_assert_eq!(applied, Ok(Some(after)), "patch:\n{}", patch);
+    }
+  }
+}

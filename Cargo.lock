@@ -12657,6 +12657,7 @@ dependencies = [
  "notify",
  "notify-debouncer-full",
  "portable-pty",
+ "proptest",
  "prost",
  "rand_core 0.10.1",
  "regex",

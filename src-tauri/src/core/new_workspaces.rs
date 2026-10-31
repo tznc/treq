@@ -588,3 +588,57 @@ mod tests {
     assert_eq!(summary(&rows), vec![(0, Some("feat/x"), Some("release"))]);
   }
 }
+
+#[cfg(test)]
+mod proptests {
+  use super::*;
+  use crate::test_repo::proptest_config;
+  use proptest::prelude::*;
+
+  proptest! {
+    #![proptest_config(proptest_config(64))]
+
+    /// A title always gives a usable branch name: not empty, only branch-safe
+    /// characters, and no separator at the end.
+    #[test]
+    fn branch_from_title_is_never_empty_or_dangling(title in "\\PC{0,70}") {
+      let branch = apply_branch_name_pattern(DEFAULT_BRANCH_PATTERN, &title);
+      prop_assert!(!branch.is_empty());
+      prop_assert!(branch.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '/'), "{}", branch);
+      prop_assert!(!branch.ends_with(['/', '.', '-']), "{}", branch);
+      prop_assert!(!branch.contains("--"), "{}", branch);
+    }
+
+    /// Parsed lines are trimmed, non-empty and distinct, in first-seen order.
+    #[test]
+    fn parse_lines_yields_distinct_trimmed_lines(text in "([ \t]{0,2}[a-z/:.]{0,6}[ \t]{0,2}\n){0,10}") {
+      let parsed = parse_lines(&text);
+      let mut seen = HashSet::new();
+      for (line, _) in &parsed {
+        prop_assert!(!line.is_empty());
+        prop_assert_eq!(line.trim(), line.as_str());
+        prop_assert!(seen.insert(line.clone()), "repeat {}", line);
+      }
+      let stacked = stack_parents(&text);
+      for (child, parent) in &stacked {
+        prop_assert!(seen.contains(child) && seen.contains(parent));
+      }
+    }
+
+    /// A pull request link names that repository and number however it is written.
+    #[test]
+    fn pr_links_parse_to_repo_and_number(
+      owner in "[a-zA-Z0-9][a-zA-Z0-9-]{0,8}",
+      name in "[a-zA-Z0-9_.-]{0,8}[a-zA-Z0-9]",
+      number in any::<u64>(),
+      scheme in prop::sample::select(vec!["", "http://", "https://", "https://www."]),
+      tail in prop::sample::select(vec!["", "/", "/files", "?w=1", "#top"]),
+    ) {
+      let link = format!("{scheme}github.com/{owner}/{name}/pull/{number}{tail}");
+      prop_assert_eq!(
+        parse_line(&link),
+        Line::Pr { repo: format!("{owner}/{}", name.trim_end_matches(".git")), number }
+      );
+    }
+  }
+}

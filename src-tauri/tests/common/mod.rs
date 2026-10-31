@@ -1263,3 +1263,23 @@ impl JjVerifier {
     Path::new(workspace_path).join(file_path).exists()
   }
 }
+
+/// Property-test config shared by the proptests: a fixed seed and `cases`
+/// cases, so CI runs the same inputs every time. Set `PROPTEST_CASES` for a
+/// longer run, and `PROPTEST_SEED` to explore other inputs.
+#[expect(
+  clippy::allow_attributes,
+  reason = "dead in only some of the binaries that share this file"
+)]
+#[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
+pub fn proptest_config(cases: u32) -> proptest::test_runner::Config {
+  let env_u64 = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<u64>().ok());
+  proptest::test_runner::Config {
+    cases: env_u64("PROPTEST_CASES").map_or(cases, |n| n as u32),
+    rng_seed: proptest::test_runner::RngSeed::Fixed(
+      env_u64("PROPTEST_SEED").unwrap_or(0x7265_7121),
+    ),
+    failure_persistence: None,
+    ..proptest::test_runner::Config::default()
+  }
+}

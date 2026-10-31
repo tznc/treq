@@ -160,7 +160,8 @@ pub fn parse_conflict_markers(content: &str, file_path: &str) -> Vec<ConflictReg
     let (conflict_number, total_conflicts) =
       extract_conflict_info(line).unwrap_or((regions.len() + 1, 0));
 
-    let mut end_line = start_line;
+    // With no end marker the block runs to the end of the file.
+    let mut end_line = lines.len();
     let mut block_lines: Vec<&str> = vec![line];
     let mut j = i + 1;
     while j < lines.len() {
@@ -171,6 +172,9 @@ pub fn parse_conflict_markers(content: &str, file_path: &str) -> Vec<ConflictReg
         break;
       }
       j += 1;
+    }
+    if j == lines.len() {
+      i = j - 1;
     }
 
     let block_content = block_lines.join("\n");
@@ -266,6 +270,17 @@ mod tests {
 >>>>>>> Side #2 (Conflict 1 of 1)\n\
 line after\n";
 
+  /// A start marker with no end marker used to report `end_line ==
+  /// start_line` while holding every line to the end of the file, and a
+  /// second start marker inside it became a second, overlapping region.
+  #[test]
+  fn unterminated_conflict_ends_at_the_last_line_without_overlap() {
+    let regions = parse_conflict_markers("<<<<<<< a\nours\n<<<<<<< b\nmore", "f.txt");
+    assert_eq!(regions.len(), 1);
+    assert_eq!((regions[0].start_line, regions[0].end_line), (1, 4));
+    assert_eq!(regions[0].lines.len(), 4);
+  }
+
   /// Serializing as camelCase leaves the frontend's snake_case `start_line`/`end_line` undefined, which silently hides the inline conflict card.
   #[test]
   fn conflict_region_serializes_snake_case_field_names() {
@@ -359,5 +374,82 @@ line after\n";
     assert_eq!(region.comparison.left_line_indexes, vec![1]);
     assert_eq!(region.comparison.base_line_indexes, vec![3]);
     assert_eq!(region.comparison.right_line_indexes, vec![5]);
+  }
+}
+
+#[cfg(test)]
+mod proptests {
+  use super::*;
+  use crate::test_repo::proptest_config;
+  use proptest::prelude::*;
+
+  /// Lines that may be conflict markers, ordinary text, or marker look-alikes.
+  fn line() -> impl Strategy<Value = String> {
+    prop_oneof![
+      "[a-z ]{0,6}",
+      Just("<<<<<<< Conflict 1 of 2".to_string()),
+      Just("<<<<<<< Side #1".to_string()),
+      Just("||||||| Base".to_string()),
+      Just("%%%%%%% Changes".to_string()),
+      Just("+++++++ Contents".to_string()),
+      Just("------- Base".to_string()),
+      Just("=======".to_string()),
+      Just(">>>>>>> Conflict 1 of 2 ends".to_string()),
+      "  ?(<{7}|>{7}|={7}) Conflict [0-9]{1,25} of [0-9]{0,25}",
+    ]
+  }
+
+  proptest! {
+    #![proptest_config(proptest_config(64))]
+
+    /// Every region covers its own file lines: in order, not overlapping,
+    /// and each line view is the file's line at that number.
+    #[test]
+    fn regions_are_ordered_disjoint_and_match_the_file(lines in prop::collection::vec(line(), 0..30)) {
+      let content = lines.join("\n");
+      let file_lines: Vec<&str> = content.split('\n').collect();
+      let regions = parse_conflict_markers(&content, "f.txt");
+      let mut previous_end = 0;
+      for region in &regions {
+        prop_assert!(region.start_line > previous_end, "regions overlap: {:?}", regions);
+        prop_assert!(region.end_line >= region.start_line);
+        prop_assert_eq!(region.lines.len(), region.end_line - region.start_line + 1);
+        prop_assert_eq!(region.total_conflicts >= 1, true);
+        for view in &region.lines {
+          prop_assert_eq!(view.raw.as_str(), file_lines[view.file_line - 1]);
+        }
+        previous_end = region.end_line;
+      }
+    }
+
+    /// Well-formed git conflicts between plain lines parse back exactly.
+    #[test]
+    fn parses_generated_git_conflicts_back(
+      blocks in prop::collection::vec(
+        (prop::collection::vec("[a-z ]{0,5}", 0..3),
+         prop::collection::vec("[a-z ]{0,5}", 0..3),
+         prop::collection::vec("[a-z ]{0,5}", 0..3)),
+        0..4,
+      )
+    ) {
+      let mut lines = Vec::new();
+      for (before, ours, theirs) in &blocks {
+        lines.extend(before.iter().cloned());
+        lines.push("<<<<<<< ours".to_string());
+        lines.extend(ours.iter().cloned());
+        lines.push("=======".to_string());
+        lines.extend(theirs.iter().cloned());
+        lines.push(">>>>>>> theirs".to_string());
+      }
+      let regions = parse_conflict_markers(&lines.join("\n"), "f.txt");
+      prop_assert_eq!(regions.len(), blocks.len());
+      for (region, (_, ours, theirs)) in regions.iter().zip(&blocks) {
+        prop_assert_eq!(region.marker_style, ConflictStyle::GitMerge);
+        prop_assert_eq!(region.total_conflicts, blocks.len());
+        let side = |indexes: &[usize]| indexes.iter().map(|&i| region.lines[i].raw.clone()).collect::<Vec<_>>();
+        prop_assert_eq!(&side(&region.comparison.left_line_indexes), ours);
+        prop_assert_eq!(&side(&region.comparison.right_line_indexes), theirs);
+      }
+    }
   }
 }
