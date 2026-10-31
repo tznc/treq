@@ -413,4 +413,65 @@ describe("handleStripeWebhook", () => {
       }),
     );
   });
+
+  describe("events created in the same second as the stored row", () => {
+    const sub = subscriptionUpdated.data.object;
+    const live = {
+      ...sub,
+      status: "active",
+      cancel_at_period_end: false,
+      cancel_at: null,
+    };
+
+    function tieRpc(snapshotResult = "applied") {
+      return vi.fn(async (fn: string) =>
+        fn === "billing_record_subscription_snapshot"
+          ? { data: snapshotResult, error: null }
+          : { data: "tie", error: null },
+      );
+    }
+
+    it("re-reads the subscription from Stripe and writes what Stripe holds now", async () => {
+      const rpc = tieRpc();
+      const request = vi.fn(async () => live);
+      const result = await handleStripeWebhook(
+        await signed(subscriptionUpdated),
+        deps({ rpc, stripe: { request } as never }),
+      );
+      expect(result.status).toBe(200);
+      expect(JSON.parse(result.body)).toMatchObject({ result: "applied" });
+      expect(request).toHaveBeenCalledWith(
+        "GET",
+        `/v1/subscriptions/${sub.id}`,
+      );
+      expect(rpc).toHaveBeenLastCalledWith(
+        "billing_record_subscription_snapshot",
+        expect.objectContaining({
+          p_subscription_id: sub.id,
+          p_status: "active",
+          p_cancel_at_period_end: false,
+          p_fetched_at: new Date(now * 1000).toISOString(),
+        }),
+      );
+    });
+
+    it("answers 500 so Stripe retries when the re-read fails", async () => {
+      const request = vi.fn(async () => {
+        throw new Error("stripe down");
+      });
+      const result = await handleStripeWebhook(
+        await signed(subscriptionUpdated),
+        deps({ rpc: tieRpc(), stripe: { request } as never }),
+      );
+      expect(result.status).toBe(500);
+    });
+
+    it("answers 500 when no Stripe client is configured", async () => {
+      const result = await handleStripeWebhook(
+        await signed(subscriptionUpdated),
+        deps({ rpc: tieRpc() }),
+      );
+      expect(result.status).toBe(500);
+    });
+  });
 });

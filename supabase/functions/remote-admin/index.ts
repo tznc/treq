@@ -35,6 +35,11 @@
 //                             B02; see `_shared/remote/lapse-sweep.ts`).
 //                             Schedule it hourly from the same scheduler
 //                             that runs `prune_audit_events`.
+//   "reconcile_stale_subscriptions" - re-reads from Stripe every
+//                             subscription that still entitles although its
+//                             period ended, and writes Stripe's copy (see
+//                             `_shared/billing/reconcile.ts`). Schedule it
+//                             hourly next to `sweep_lapsed_instances`.
 //
 // Every admin action writes its own audit trail entry (event types
 // `admin_client_key_revoked` / `admin_instance_recovered`) distinct from a
@@ -42,6 +47,8 @@
 // attributing it to the affected user.
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
+import { reconcileStaleSubscriptions, reconcileStoreFor } from "../_shared/billing/reconcile.ts";
+import { createStripeClient } from "../_shared/billing/stripe-api.ts";
 import { recordAuditEvent } from "../_shared/remote/audit.ts";
 import { correlationIdFromRequest, logWithCorrelation } from "../_shared/remote/correlation.ts";
 import { supabaseLapseSweepStore, sweepLapsedInstances } from "../_shared/remote/lapse-sweep.ts";
@@ -128,6 +135,8 @@ Deno.serve(async (req) => {
         return await handlePruneAuditEvents(supabase);
       case "sweep_lapsed_instances":
         return await handleSweepLapsedInstances(supabase, correlationId);
+      case "reconcile_stale_subscriptions":
+        return await handleReconcileStaleSubscriptions(supabase, correlationId);
       default:
         return json({ error: `Unknown action '${action}'` }, 400);
     }
@@ -262,6 +271,21 @@ async function handlePruneAuditEvents(supabase: SupabaseClient): Promise<Respons
   const { data, error } = await supabase.rpc("prune_remote_audit_events");
   if (error) throw new Error(`failed to prune audit events: ${error.message}`);
   return json({ deleted_count: data });
+}
+
+async function handleReconcileStaleSubscriptions(
+  supabase: SupabaseClient,
+  correlationId: string,
+): Promise<Response> {
+  const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
+  if (!stripeKey) return json({ error: "STRIPE_SECRET_KEY is not configured" }, 500);
+  const result = await reconcileStaleSubscriptions({
+    store: reconcileStoreFor(supabase),
+    stripe: createStripeClient(stripeKey),
+  });
+  const alert = result.missing.length > 0 || result.failed.length > 0;
+  logWithCorrelation(correlationId, alert ? "error" : "log", JSON.stringify({ action: "reconcile_stale_subscriptions", ...result }));
+  return json(result);
 }
 
 async function handleSweepLapsedInstances(supabase: SupabaseClient, correlationId: string): Promise<Response> {
