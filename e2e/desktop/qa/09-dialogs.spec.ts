@@ -6,9 +6,10 @@
 //
 // The create test makes a scratch workspace and the delete test removes
 // it again, so the sidebar is back to the seed for later areas.
-import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
 import {
+  dialogIn,
   focusMain,
   home,
   mod,
@@ -24,25 +25,6 @@ import {
 test.describe.configure({ mode: "serial" });
 
 const SCRATCH_TITLE = "QA scratch space";
-
-/**
- * The page a dialog renders in: the repo window when it draws the dialog
- * itself, else the shared dialog window.
- */
-async function dialogIn(
-  page: Page,
-  context: BrowserContext,
-  find: (p: Page) => Locator,
-): Promise<Page> {
-  try {
-    await expect(find(page)).toBeVisible({ timeout: 4000 });
-    return page;
-  } catch {
-    const other = await overlay(page, context);
-    await expect(find(other)).toBeVisible();
-    return other;
-  }
-}
 
 const heading = (p: Page) => p.getByRole("heading", { name: "New workspace" });
 
@@ -274,7 +256,7 @@ test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page, context })
     expectations: [
       "Prompt field focused; workspace and agent pickers in the footer",
       "The workspace picker shows feat/keyvalues-cache, the open workspace",
-      "Submit split button and its shortcut hint readable",
+      "A Send icon button ends the footer; no Edit/Plan split menu",
     ],
   });
   await dialog.getByRole("textbox", { name: "Describe a task…" }).last().fill(
@@ -286,9 +268,9 @@ test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page, context })
     title: "Agent prompt with a task typed",
     screen: true,
     rest: false,
-    expectations: ["Text wraps in the field; submit enabled"],
+    expectations: ["Text wraps in the field; the Send button is enabled"],
   });
-  // The agent select (Claude) beside Edit, at its place in the dialog.
+  // The agent select (Claude) beside Send, at its place in the dialog.
   {
     await page.mouse.click(829, 526);
     await settle(page, 900);

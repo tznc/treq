@@ -169,6 +169,9 @@ fn input_latency_composer(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
   report("code tab: idle frame", idle(&mut h, 10));
   report("code tab: full refresh", full(&mut h, 10));
+  let mut modal = agent_modal();
+  modal["initialPrompt"] = "".into();
+  h.set_modal(Some(modal));
   h.click("task-input");
   report("composer: keystroke", typing(&mut h, 30));
   assert!(focused_value(&mut h).starts_with("abcdef"));

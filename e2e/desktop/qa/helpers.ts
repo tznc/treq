@@ -1,7 +1,7 @@
 // Navigation the QA specs share. Every spec starts from `ready`, so one
 // area can run alone (`--grep`).
 import { execFileSync } from "node:child_process";
-import { expect, type BrowserContext, type Page } from "@playwright/test";
+import { expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { dialogPage, mod } from "../fixture.ts";
 
 export { mod };
@@ -153,4 +153,23 @@ export async function dismissPopover(page: Page): Promise<void> {
     await xPointer(page, 760, 40, 1);
   }
   await page.waitForTimeout(500);
+}
+
+/**
+ * The page a dialog renders in: the repo window when it draws the dialog
+ * itself, else the shared dialog window.
+ */
+export async function dialogIn(
+  page: Page,
+  context: BrowserContext,
+  find: (p: Page) => Locator,
+): Promise<Page> {
+  try {
+    await expect(find(page)).toBeVisible({ timeout: 4000 });
+    return page;
+  } catch {
+    const other = await overlay(page, context);
+    await expect(find(other)).toBeVisible();
+    return other;
+  }
 }

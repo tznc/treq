@@ -125,7 +125,6 @@ pub struct Route {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Menu {
   Add,
-  Plan,
   Agent,
   Environment,
 }
@@ -749,7 +748,7 @@ impl AgentPromptView {
 
   /// `submitTask`: the backend starts the session, and the dialog closes
   /// once it has.
-  pub(in crate::gpui_shell::screen) fn submit(&mut self, plan: bool, cx: &mut Context<Self>) {
+  pub(in crate::gpui_shell::screen) fn submit(&mut self, cx: &mut Context<Self>) {
     if self.submitting() || (self.task_text.trim().is_empty() && self.issue.is_none()) {
       return;
     }
@@ -763,7 +762,7 @@ impl AgentPromptView {
       text: self.task_text.clone(),
       issue: self.issue.as_ref().map(Issue::attachment),
       agent: agent.id().into(),
-      mode: if plan { "plan" } else { "acceptEdits" }.into(),
+      mode: "acceptEdits".into(),
       save_as_repo_default: self.save_default && agent != configured,
     };
     read!(
@@ -1027,7 +1026,7 @@ impl AgentPromptView {
               view.select_mention(index, window, cx);
               cx.stop_propagation();
             } else if action.secondary && !action.shift {
-              view.submit(false, cx);
+              view.submit(cx);
               cx.stop_propagation();
             }
           }))
@@ -1121,7 +1120,6 @@ impl AgentPromptView {
   fn toolbar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let (configured, agent) = self.agents();
     let empty = self.task_text.trim().is_empty() && self.issue.is_none();
-    let plan = agent.has_plan_mode();
     let small = |b: Button| b.size(Size::Sm).h(zpx(28.));
     let submitting = self.submitting();
 
@@ -1215,50 +1213,19 @@ impl AgentPromptView {
     );
 
     let disabled = empty || submitting;
-    let label = if submitting {
-      "Starting…"
-    } else if agent == Agent::Claude {
-      "Edit"
-    } else {
-      "Run"
-    };
-    let submit = small(Button::new("task-submit", p))
-      .px_3()
+    let send = ui::IconButton::new("task-submit", theme::ICON_SEND, "Send", p)
+      .primary()
       .disabled(disabled)
-      .when(plan, |b| b.rounded_r_none())
-      .when(submitting, |b| {
-        b.child(ui::spinner("task-starting", 14., p.primary_foreground))
-      })
-      .aria_label(label)
-      .child(ui::text(div(), TextSize::Xs).child(label))
-      .on_click(cx.listener(|view, _, _, cx| view.submit(false, cx)));
-    let submit = self.tips.wrap(
+      .on_click(cx.listener(|view, _, _, cx| view.submit(cx)));
+    let buttons = self.tips.wrap(
       "task-submit",
       Side::Top,
       Some(TooltipContent::Text(
         crate::gpui_shell::keys::hint("⌘ + Enter").into(),
       )),
-      submit,
+      send,
       cx,
     );
-    let mut buttons = div().relative().flex().items_center().child(submit);
-    if plan {
-      buttons = buttons
-        .child(
-          small(Button::new("task-submit-menu", p))
-            .aria_label("More submit options")
-            .disabled(disabled)
-            .rounded_l_none()
-            .border_l_1()
-            .border_color(p.primary_foreground.opacity(0.2))
-            .px_1p5()
-            .icon(theme::ICON_CHEVRON_DOWN, 14.)
-            .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Plan, cx))),
-        )
-        .when(self.menu == Some(Menu::Plan) && !disabled, |this| {
-          this.child(self.plan_menu(p, cx))
-        });
-    }
     right = right.child(buttons);
 
     div()
@@ -1301,19 +1268,6 @@ impl AgentPromptView {
         ui::MenuItem::new("task-add-attach", "Attach", p)
           .icon(theme::ICON_PAPERCLIP)
           .on_click(cx.listener(|view, _, _, cx| view.attach(cx))),
-      );
-    deferred(self.close_menu_on_outside(panel, cx)).with_priority(3)
-  }
-
-  fn plan_menu(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let panel = menu_panel("task-plan-menu", p)
-      .top(zpx(32.))
-      .right_0()
-      .w(zpx(224.))
-      .child(
-        ui::MenuItem::new("task-plan", "Plan", p)
-          .description("Plan the change first, without editing files")
-          .on_click(cx.listener(|view, _, _, cx| view.submit(true, cx))),
       );
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(3)
   }
