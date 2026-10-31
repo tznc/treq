@@ -14,6 +14,7 @@ import {
   type SubscriptionStatus,
 } from "../_shared/billing/plans.ts";
 import { verifyStripeSignature } from "../_shared/billing/stripe-signature.ts";
+import type { StripeClient } from "../_shared/billing/stripe-api.ts";
 
 type SubscriptionEventType =
   | "customer.subscription.created"
@@ -111,10 +112,7 @@ function planOf(items: Record<string, unknown>[]): BillingPlan | null {
   for (const item of items) {
     const price = isRecord(item.price) ? item.price : null;
     const key = price?.lookup_key;
-    if (
-      typeof key === "string" &&
-      Object.hasOwn(PLAN_BY_LOOKUP_KEY, key)
-    ) {
+    if (typeof key === "string" && Object.hasOwn(PLAN_BY_LOOKUP_KEY, key)) {
       return PLAN_BY_LOOKUP_KEY[key];
     }
   }
@@ -255,6 +253,8 @@ export interface WebhookDeps {
   secret: string | undefined;
   rpc: (fn: string, args: Record<string, unknown>) => Promise<RpcResult>;
   nowSeconds?: () => number;
+  /** Re-reads a subscription when two events from one second disagree. */
+  stripe?: StripeClient;
   log?: (entry: Record<string, unknown>) => void;
 }
 
@@ -282,6 +282,79 @@ const ALERT_RESULTS: ReadonlySet<unknown> = new Set([
   "owner_conflict",
   "unknown_owner",
 ]);
+
+// Two events from one second disagree, so the stored row cannot tell which
+// came last. Stripe's current copy of the subscription settles it. Any
+// failure answers 500: the tie was not recorded, so Stripe's retry asks again.
+async function resolveTie(
+  event: StripeEvent,
+  subscriptionId: string,
+  deps: WebhookDeps,
+  log: (entry: Record<string, unknown>) => void,
+): Promise<WebhookResult> {
+  const fail = (reason: string) => {
+    log({
+      level: "error",
+      message: "could not resolve a same-second event",
+      stripe_event_id: event.id,
+      reason,
+    });
+    return json({ error: "Write failed" }, 500);
+  };
+  if (!deps.stripe) return fail("STRIPE_SECRET_KEY is not configured");
+
+  const nowSeconds = deps.nowSeconds?.() ?? Math.floor(Date.now() / 1000);
+  let current: Record<string, unknown>;
+  try {
+    current = await deps.stripe.request<Record<string, unknown>>(
+      "GET",
+      `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    );
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err));
+  }
+
+  const snapshot = subscriptionAction({
+    ...event,
+    type: "customer.subscription.updated",
+    data: { object: current },
+  });
+  if (
+    snapshot.action === "ignore" ||
+    snapshot.fn !== "billing_record_subscription_event"
+  ) {
+    return json(
+      {
+        received: true,
+        ignored:
+          snapshot.action === "ignore" ? snapshot.reason : "not a subscription",
+      },
+      200,
+    );
+  }
+  const a = snapshot.args;
+  const { data, error } = await deps.rpc(
+    "billing_record_subscription_snapshot",
+    {
+      p_subscription_id: a.p_subscription_id,
+      p_customer_id: a.p_customer_id,
+      p_plan: a.p_plan,
+      p_status: a.p_status,
+      p_current_period_end: a.p_current_period_end,
+      p_cancel_at_period_end: a.p_cancel_at_period_end,
+      p_trial_end: a.p_trial_end,
+      p_fetched_at: new Date(nowSeconds * 1000).toISOString(),
+    },
+  );
+  if (error) return fail(error.message);
+  log({
+    level: "info",
+    message: "resolved a same-second event from Stripe",
+    stripe_event_id: event.id,
+    result: data,
+  });
+  return json({ received: true, result: data }, 200);
+}
 
 export async function handleStripeWebhook(
   request: WebhookRequest,
@@ -347,6 +420,10 @@ export async function handleStripeWebhook(
     // 500 makes Stripe retry. The event id was not recorded, because the
     // write and the id commit together.
     return json({ error: "Write failed" }, 500);
+  }
+
+  if (data === "tie" && action.fn === "billing_record_subscription_event") {
+    return await resolveTie(event, action.args.p_subscription_id, deps, log);
   }
 
   log({
