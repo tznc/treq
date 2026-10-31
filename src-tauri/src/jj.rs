@@ -4670,6 +4670,27 @@ mod tests {
   use tempfile::TempDir;
 
   #[test]
+  fn text_hunks_show_a_dropped_final_newline() {
+    let hunks = build_text_hunks("a\n", "a");
+    assert_eq!(hunks.len(), 1);
+    assert_eq!(hunks[0].header, "@@ -1,1 +1,1 @@");
+    assert_eq!(hunks[0].lines, ["-a", "+a", "\\ No newline at end of file"]);
+  }
+
+  #[test]
+  fn text_hunks_show_an_added_final_newline() {
+    let hunks = build_text_hunks("x\na", "y\na\n");
+    let lines: Vec<&str> = hunks
+      .iter()
+      .flat_map(|h| h.lines.iter().map(String::as_str))
+      .collect();
+    let at = lines.iter().position(|l| *l == "-a").unwrap();
+    assert_eq!(lines[at + 1], "\\ No newline at end of file");
+    assert!(lines.contains(&"+a"), "{lines:?}");
+    assert_eq!(hunks[0].header, "@@ -1,2 +1,2 @@");
+  }
+
+  #[test]
   fn text_hunks_keep_lines_that_look_like_file_headers() {
     let hunks = build_text_hunks("-- users\nkeep\n---\n", "++ accounts\nkeep\n");
     let lines: Vec<&str> = hunks
