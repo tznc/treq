@@ -53,6 +53,7 @@ impl WorkspaceView {
         "workspace.createPrMenu" => self.create_pr_menu(cx),
         "workspace.viewPr" => self.open_pr_view(),
         "workspace.more" => self.more_menu(cx),
+        "workspace.archive" => self.archive_workspace(cx),
         _ => return false,
       },
       ScreenAction::Field { field, value } => match (field.as_str(), value.as_str()) {
@@ -260,6 +261,26 @@ impl WorkspaceView {
       let path = workspace.path.clone();
       let gone = cx
         .background_spawn(async move { workspace_ops::delete(&*host, &workspace) })
+        .await;
+      if gone {
+        this
+          .update(cx, |view, cx| view.close_terminals(path, cx))
+          .ignore_closed();
+      }
+    })
+    .detach();
+  }
+
+  /// Archives the shown workspace, as the sidebar's Archive Workspace does.
+  fn archive_workspace(&mut self, cx: &mut Context<Self>) {
+    let Some(workspace) = self.loaded.as_ref().and_then(|l| l.workspace.as_ref()) else {
+      return;
+    };
+    let (workspace, host) = (Removed::of(workspace), self.actions.clone());
+    cx.spawn(async move |this, cx| {
+      let path = workspace.path.clone();
+      let gone = cx
+        .background_spawn(async move { workspace_ops::archive(&*host, &workspace) })
         .await;
       if gone {
         this

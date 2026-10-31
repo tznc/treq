@@ -2424,7 +2424,10 @@ mod tests {
     let repo_path = init_workspace_creation_repo(&temp);
     let ws = super::create_workspace(&repo_path, "fix/wc", None, None, None, None, None)
       .expect("create workspace");
-    let ws_dir = temp.path().join(".treq/workspaces").join(&ws.workspace_path);
+    let ws_dir = temp
+      .path()
+      .join(".treq/workspaces")
+      .join(&ws.workspace_path);
     let ws_dir = ws_dir.to_str().expect("utf-8");
     // Workspaces made before d4a24ff, or advanced after a rebase, carry the
     // bookmark on their (empty) working-copy commit.
@@ -2433,6 +2436,19 @@ mod tests {
     super::archive_workspace(&repo_path, &ws.id).expect("archive workspace");
 
     crate::jj::jj_get_commit_id(&repo_path, "fix/wc").expect("bookmark survives archive");
+  }
+
+  #[test]
+  fn workspace_branch_deleted_once_its_bookmark_is_gone() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let ws = super::create_workspace(&repo_path, "fix/merged", None, None, None, None, None)
+      .expect("create workspace");
+    assert!(!super::workspace_branch_deleted(&repo_path, ws.id));
+
+    crate::jj::jj_delete_bookmark(&repo_path, "fix/merged").expect("delete bookmark");
+
+    assert!(super::workspace_branch_deleted(&repo_path, ws.id));
   }
 
   #[test]
@@ -4864,6 +4880,28 @@ fn workspace_diff_with_conflict_style(
   Ok(diff)
 }
 
+/// The workspace's branch no longer exists locally, as after a fetch
+/// dropped a branch deleted on the remote.
+pub fn workspace_branch_deleted(repo_path: &str, workspace_id: i64) -> bool {
+  let Ok(Some(workspace)) = local_db::get_workspace_by_id(repo_path, workspace_id) else {
+    return false;
+  };
+  let workspace_dir = Path::new(repo_path)
+    .join(".treq")
+    .join("workspaces")
+    .join(&workspace.workspace_path);
+  let Some(workspace_dir) = workspace_dir.to_str().filter(|_| workspace_dir.exists()) else {
+    return false;
+  };
+  jj::WorkspaceRepo::load(workspace_dir)
+    .is_ok_and(|repo| !branch_exists(&repo, &workspace.branch_name))
+}
+
+/// A conflicted bookmark still exists, though it lists in neither side.
+fn branch_exists(repo: &jj::WorkspaceRepo, branch_name: &str) -> bool {
+  repo.bookmark_presence(branch_name, "origin").0 || repo.is_bookmark_conflicted(branch_name)
+}
+
 fn resolve_workspace_diff_base_revision(
   repo_path: &str,
   workspace: &local_db::Workspace,
@@ -4881,7 +4919,8 @@ fn resolve_workspace_diff_base_revision(
     last_rebased_target_commit,
     target_branch,
   );
-  if base_revision != target_branch {
+  // A deleted branch has no tip to compare; the diff runs to `@`.
+  if base_revision != target_branch && branch_exists(repo, &workspace.branch_name) {
     let workspace_revision = resolve_workspace_diff_workspace_revision(
       &workspace.branch_name,
       repo.is_bookmark_conflicted(&workspace.branch_name),
@@ -4910,6 +4949,9 @@ fn resolve_workspace_diff_tip_revision(
   repo: &jj::WorkspaceRepo,
 ) -> Result<String, String> {
   let target_branch = workspace.target_branch.as_deref().unwrap_or("main");
+  if !branch_exists(repo, &workspace.branch_name) {
+    return Ok("@".to_string());
+  }
   let committed_ahead = repo
     .commits_ahead(&workspace.branch_name)
     .map_err(|e| format!("Failed to get workspace commits ahead: {}", e))?;
