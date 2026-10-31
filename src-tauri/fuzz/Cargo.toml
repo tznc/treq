@@ -32,3 +32,7 @@ path = "fuzz_targets/conflict_markers.rs"
 test = false
 doc = false
 bench = false
+
+# serde is used by the parser sources pulled in with #[path].
+[package.metadata.cargo-machete]
+ignored = ["serde"]
