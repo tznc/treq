@@ -3716,9 +3716,18 @@ pub fn jj_rebase_with_revset(
     CheckoutMode::Immediate,
   )?;
 
+  let conflicted = stats
+    .rebased_commits
+    .values()
+    .filter(|c| matches!(c, rewrite::RebasedCommit::Rewritten(c) if c.has_conflict()))
+    .count();
+  let mut message = summarize_rebase_stats(&stats);
+  if conflicted > 0 {
+    message.push_str(&format!("\n{conflicted} rebased commit(s) have conflicts"));
+  }
   Ok(JjRebaseResult {
-    success: true,
-    message: summarize_rebase_stats(&stats),
+    success: conflicted == 0,
+    message,
   })
 }
 
