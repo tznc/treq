@@ -124,7 +124,7 @@ fn test_check_and_rebase_workspaces_force_bypasses_up_to_date() {
 }
 
 #[test]
-fn test_force_rebase_workspace_uses_rooted_subtree_scope_excluding_root() {
+fn test_force_rebase_workspace_rebases_root_then_subtree() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let default_branch = repo.default_branch();
   let ws_a = setup_workspace_with_target(&repo, "feat/root-a", default_branch);
@@ -143,8 +143,8 @@ fn test_force_rebase_workspace_uses_rooted_subtree_scope_excluding_root() {
 
   assert!(result.success, "forced rooted-subtree should succeed");
   assert!(
-    result.message.contains("Skipped root workspace"),
-    "root workspace should be skipped: {}",
+    result.message.contains("feat-root-a"),
+    "root workspace should be rebased too: {}",
     result.message
   );
   let b_path = repo.workspace_full_path(&ws_b);
@@ -180,7 +180,7 @@ fn test_force_rebase_workspace_uses_rooted_subtree_scope_excluding_root() {
     .flatten()
     .unwrap_or_default();
 
-  assert!(a_last.is_empty(), "root should not be rebased");
+  assert!(a_last.is_empty(), "root was already on its target, so nothing to record");
   assert!(!b_last.is_empty(), "child should be rebased");
   assert!(!c_last.is_empty(), "grandchild should be rebased");
   assert!(!d_last.is_empty(), "sibling should be rebased");
