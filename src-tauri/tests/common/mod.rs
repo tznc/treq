@@ -804,7 +804,7 @@ impl TestRepo {
   /// filesystem, so writing straight into their object database and refs via gix
   /// is equivalent to — and far cheaper than — cloning, checking out, editing,
   /// and pushing through real git subprocesses.
-  fn gix_commit_file_on_ref(
+  pub fn gix_commit_file_on_ref(
     repo_path: &str,
     branch: &str,
     relative_path: &str,

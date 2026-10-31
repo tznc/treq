@@ -62,6 +62,27 @@ pub(super) fn select_equivalent_remote_tip<T: PartialEq>(
     .then(|| remote_id.clone())
 }
 
+/// In a fork clone, `<branch>@upstream` when it has moved ahead of the local
+/// bookmark: the fork's own copy of the default branch goes stale, and work
+/// must land on the original repository's tip.
+fn upstream_tip_ahead_of(
+  loaded: &LoadedWorkspaceRepo,
+  workspace_path: &str,
+  target_branch: &str,
+  local: &jj_lib::backend::CommitId,
+) -> Option<String> {
+  if jj_base_remote(&workspace_repo_path(workspace_path)) != "upstream" {
+    return None;
+  }
+  let symbol = RemoteRefSymbol {
+    name: RefName::new(target_branch),
+    remote: RemoteName::new("upstream"),
+  };
+  let remote = loaded.repo.view().get_remote_bookmark(symbol).target.as_normal()?.clone();
+  let ahead = remote != *local && loaded.repo.index().is_ancestor(local, &remote).unwrap_or(false);
+  ahead.then(|| remote.hex())
+}
+
 /// Resolves the revset for a local target-branch bookmark.
 /// When the bookmark is conflicted, prefers the commit matching the git local branch tip;
 /// otherwise picks the newest non-immutable tip (author timestamp, then commit id).
@@ -82,6 +103,9 @@ pub(super) fn resolve_local_target_branch_revision(
     )));
   }
   if ids.len() == 1 {
+    if let Some(ahead) = upstream_tip_ahead_of(loaded, workspace_path, target_branch, &ids[0]) {
+      return Ok(ahead);
+    }
     return Ok(format_revset_symbol(target_branch));
   }
 

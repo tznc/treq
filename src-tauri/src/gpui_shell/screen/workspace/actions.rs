@@ -313,6 +313,7 @@ impl WorkspaceView {
       repo: remote.repo.clone(),
       full_name: remote.full_name.clone(),
       branch: workspace.branch_name.clone(),
+      head: crate::github::pr_head_ref_impl(&self.route.repo_path, &workspace.branch_name),
       base: workspace
         .target_branch
         .clone()
@@ -347,7 +348,7 @@ impl WorkspaceView {
             &request.title,
             &latest_body(&*host, &request),
             &request.base,
-            &request.branch,
+            &request.head,
             draft,
           )?;
           // Stays pending until the PR is cached, or a second click re-creates it.
@@ -418,7 +419,7 @@ impl WorkspaceView {
             &request.owner,
             &request.repo,
             &request.base,
-            &request.branch,
+            &request.head,
             &request.title,
             &latest_body(&*host, &request),
           ))
@@ -522,6 +523,8 @@ struct PrRequest {
   repo: String,
   full_name: String,
   branch: String,
+  /// `owner:branch` when pushing to a fork of `full_name`, else `branch`.
+  head: String,
   base: String,
   title: String,
   body: String,

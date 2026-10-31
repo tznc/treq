@@ -222,7 +222,8 @@ impl GithubView {
       move |host| {
         // gh needs the branch on the remote; an in-sync push does nothing.
         host.push_workspace(&repo_path, ws.id)?;
-        let number = host.create_pr(&repo, &title, &body, &base, &branch, draft)?;
+        let head = crate::github::pr_head_ref_impl(&repo_path, &branch);
+        let number = host.create_pr(&repo, &title, &body, &base, &head, draft)?;
         // Pending until the PR is cached, or a second click makes another.
         host.refresh_pr_status(&repo_path, &branch);
         Ok((repo, number))

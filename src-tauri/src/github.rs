@@ -68,9 +68,44 @@ fn valid_repo_path(path: &str) -> Option<(&str, &str)> {
   Some((owner, repo))
 }
 
-/// Read the GitHub remote URL from .git/config and parse owner/repo.
-/// Returns None if no GitHub remote is found or the directory is not a git repo.
+/// The repository PRs, issues and checks live on: `upstream` when a fork
+/// clone has one, else `origin`. None without a GitHub remote.
 pub fn get_git_remote_url_impl(repo_path: &str) -> Result<Option<GitRemoteInfo>, String> {
+  match remote_info_impl(repo_path, "upstream")? {
+    Some(info) => Ok(Some(info)),
+    None => remote_info_impl(repo_path, "origin"),
+  }
+}
+
+/// The repository branches are pushed to: always `origin`.
+pub fn get_push_remote_info_impl(repo_path: &str) -> Result<Option<GitRemoteInfo>, String> {
+  remote_info_impl(repo_path, "origin")
+}
+
+/// The `--head` for a PR from `branch`: `owner:branch` when pushing to a fork
+/// of the base repository, so GitHub opens it across repositories.
+pub fn pr_head_ref_impl(repo_path: &str, branch: &str) -> String {
+  let base = get_git_remote_url_impl(repo_path).ok().flatten();
+  let push = get_push_remote_info_impl(repo_path).ok().flatten();
+  match (base, push) {
+    (Some(base), Some(push)) if base.full_name != push.full_name => {
+      format!("{}:{branch}", push.owner)
+    }
+    _ => branch.to_string(),
+  }
+}
+
+/// The owner of the fork branches are pushed to, when it differs from the
+/// base repository; fork PRs from that owner belong to this checkout.
+pub fn fork_owner_impl(repo_path: &str) -> Option<String> {
+  let base = get_git_remote_url_impl(repo_path).ok().flatten()?;
+  let push = get_push_remote_info_impl(repo_path).ok().flatten()?;
+  (base.full_name != push.full_name).then_some(push.owner)
+}
+
+/// Parse `remote_name`'s GitHub URL from .git/config.
+fn remote_info_impl(repo_path: &str, remote_name: &str) -> Result<Option<GitRemoteInfo>, String> {
+  let section = format!(r#"[remote "{remote_name}"]"#);
   let dot_git = Path::new(repo_path).join(".git");
   let git_dir = if dot_git.is_dir() {
     dot_git
@@ -112,12 +147,12 @@ pub fn get_git_remote_url_impl(repo_path: &str) -> Result<Option<GitRemoteInfo>,
 
   let contents = std::fs::read_to_string(&git_config_path).map_err(|e| e.to_string())?;
 
-  // Parse INI-style .git/config: find [remote "origin"] section and its url
+  // Parse INI-style .git/config: find the remote's section and its url
   let mut in_origin_remote = false;
   for line in contents.lines() {
     let trimmed = line.trim();
     if trimmed.starts_with('[') {
-      in_origin_remote = trimmed == r#"[remote "origin"]"#;
+      in_origin_remote = trimmed == section;
       continue;
     }
     if in_origin_remote {
@@ -1742,7 +1777,7 @@ pub fn get_pr_info_via_gh_impl(
 /// may have a branch's PR beyond the page; see [`PrListing::truncated`].
 const PR_LIST_LIMIT: usize = 100;
 
-const PR_LIST_JSON_FIELDS: &str = "number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,isCrossRepository,statusCheckRollup,body";
+const PR_LIST_JSON_FIELDS: &str = "number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,isCrossRepository,headRepositoryOwner,statusCheckRollup,body";
 
 /// One `statusCheckRollup` entry: a check run or a commit status.
 #[derive(serde::Deserialize)]
@@ -1814,6 +1849,8 @@ struct GhListedPr {
   #[serde(default)]
   is_cross_repository: bool,
   #[serde(default)]
+  head_repository_owner: Option<GhLogin>,
+  #[serde(default)]
   status_check_rollup: Option<Vec<GhRollupEntry>>,
   #[serde(default)]
   body: String,
@@ -1830,11 +1867,29 @@ pub struct PrListing {
 /// PR `gh pr view <branch>` would: an open one, else the newest. Fork PRs are
 /// skipped because `gh pr view` only matches the repository's own branches.
 fn parse_pr_list(stdout: &[u8]) -> Result<PrListing, String> {
+  parse_pr_list_for(stdout, None)
+}
+
+#[derive(serde::Deserialize)]
+struct GhLogin {
+  login: String,
+}
+
+/// [`parse_pr_list`], also keeping fork PRs whose head is `fork_owner`'s: in a
+/// fork clone those are this checkout's own branches.
+fn parse_pr_list_for(stdout: &[u8], fork_owner: Option<&str>) -> Result<PrListing, String> {
   let raw: Vec<GhListedPr> =
     serde_json::from_slice(stdout).map_err(|e| format!("Failed to parse gh output: {e}"))?;
   let truncated = raw.len() >= PR_LIST_LIMIT;
   let mut by_branch: HashMap<String, GhListedPr> = HashMap::new();
-  for pr in raw.into_iter().filter(|pr| !pr.is_cross_repository) {
+  let ours = |pr: &GhListedPr| {
+    !pr.is_cross_repository
+      || pr
+        .head_repository_owner
+        .as_ref()
+        .is_some_and(|o| Some(o.login.as_str()) == fork_owner)
+  };
+  for pr in raw.into_iter().filter(ours) {
     let rank = |pr: &GhListedPr| (pr.state == "OPEN", pr.number);
     match by_branch.get(&pr.head_ref_name) {
       Some(current) if rank(current) >= rank(&pr) => {}
@@ -1901,7 +1956,7 @@ pub fn list_prs_with_checks_via_gh_impl(
       String::from_utf8_lossy(&output.stderr).trim()
     ));
   }
-  parse_pr_list(&output.stdout)
+  parse_pr_list_for(&output.stdout, fork_owner_impl(repo_path).as_deref())
 }
 
 /// The PR whose head is `branch`, with its CI rollup, in one `gh pr list`:
@@ -1935,7 +1990,7 @@ pub fn list_pr_for_head_via_gh_impl(
       String::from_utf8_lossy(&output.stderr).trim()
     ));
   }
-  Ok(parse_pr_list(&output.stdout)?.by_branch.remove(branch))
+  Ok(parse_pr_list_for(&output.stdout, fork_owner_impl(repo_path).as_deref())?.by_branch.remove(branch))
 }
 
 // ── GitHub PR review comment threads (read-only) ────────────────────────────
@@ -2293,6 +2348,18 @@ mod tests {
   }
 
   #[test]
+  fn pr_list_keeps_fork_prs_from_our_own_fork() {
+    let mine = listed_pr(11, "feat/d", "OPEN", true, "[]")
+      .replace("\"isCrossRepository\"", "\"headRepositoryOwner\":{\"login\":\"me\"},\"isCrossRepository\"");
+    let theirs = listed_pr(12, "feat/e", "OPEN", true, "[]")
+      .replace("\"isCrossRepository\"", "\"headRepositoryOwner\":{\"login\":\"other\"},\"isCrossRepository\"");
+    let json = format!("[{mine},{theirs}]");
+    let listing = super::parse_pr_list_for(json.as_bytes(), Some("me")).unwrap();
+    assert_eq!(listing.by_branch["feat/d"].0.number, 11);
+    assert!(!listing.by_branch.contains_key("feat/e"));
+  }
+
+  #[test]
   fn pr_list_rolls_up_check_runs_and_statuses_like_gh_pr_checks() {
     let rollup = r#"[
       {"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://x/1","startedAt":"2026-01-01T00:00:00Z","completedAt":"2026-01-01T00:01:00Z"},
@@ -2572,16 +2639,48 @@ mod tests {
   }
 
   #[test]
-  fn test_get_git_remote_url_ignores_non_origin_remotes() {
+  fn test_get_git_remote_url_ignores_other_remotes() {
     let dir = TempDir::new().unwrap();
     write_git_config(
       &dir,
-      r#"[remote "upstream"]
+      r#"[remote "mirror"]
     url = git@github.com:owner/repo.git
 "#,
     );
     let result = get_git_remote_url_impl(dir.path().to_str().unwrap()).unwrap();
     assert!(result.is_none());
+  }
+
+  const FORK_CONFIG: &str = r#"[remote "origin"]
+    url = git@github.com:me/repo.git
+[remote "upstream"]
+    url = https://github.com/owner/repo.git
+"#;
+
+  #[test]
+  fn base_repo_is_upstream_when_a_fork_has_one() {
+    let dir = TempDir::new().unwrap();
+    write_git_config(&dir, FORK_CONFIG);
+    let info = get_git_remote_url_impl(dir.path().to_str().unwrap()).unwrap().unwrap();
+    assert_eq!(info.full_name, "owner/repo");
+  }
+
+  #[test]
+  fn push_repo_is_origin_even_with_an_upstream() {
+    let dir = TempDir::new().unwrap();
+    write_git_config(&dir, FORK_CONFIG);
+    let info = get_push_remote_info_impl(dir.path().to_str().unwrap()).unwrap().unwrap();
+    assert_eq!(info.full_name, "me/repo");
+  }
+
+  #[test]
+  fn pr_head_names_the_fork_owner_only_for_a_fork() {
+    let dir = TempDir::new().unwrap();
+    write_git_config(&dir, FORK_CONFIG);
+    assert_eq!(pr_head_ref_impl(dir.path().to_str().unwrap(), "feat"), "me:feat");
+    let plain = TempDir::new().unwrap();
+    write_git_config(&plain, "[remote \"origin\"]\n url = git@github.com:owner/repo.git\n");
+    assert_eq!(pr_head_ref_impl(plain.path().to_str().unwrap(), "feat"), "feat");
   }
 
   #[test]
