@@ -296,6 +296,7 @@ function defaultLog(entry: Record<string, unknown>): void {
 const ALERT_RESULTS: ReadonlySet<unknown> = new Set([
   "duplicate_subscription",
   "owner_conflict",
+  "owner_plan_mismatch",
   "unknown_owner",
 ]);
 
