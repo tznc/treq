@@ -474,4 +474,23 @@ describe("handleStripeWebhook", () => {
       expect(result.status).toBe(500);
     });
   });
+
+  it("logs a duplicate live subscription loudly but acknowledges it", async () => {
+    const log = vi.fn();
+    const d = deps({
+      rpc: vi.fn(async () => ({ data: "duplicate_subscription", error: null })),
+      log,
+    });
+    const result = await handleStripeWebhook(
+      await signed(subscriptionCreated),
+      d,
+    );
+    expect(result.status).toBe(200);
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "error",
+        result: "duplicate_subscription",
+      }),
+    );
+  });
 });

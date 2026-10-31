@@ -279,6 +279,7 @@ function defaultLog(entry: Record<string, unknown>): void {
 // SQL results that need a person to look at them. Retrying cannot fix them,
 // so the webhook still answers 200.
 const ALERT_RESULTS: ReadonlySet<unknown> = new Set([
+  "duplicate_subscription",
   "owner_conflict",
   "unknown_owner",
 ]);

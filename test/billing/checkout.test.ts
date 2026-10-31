@@ -3,6 +3,10 @@ import {
   buildCheckoutSessionParams,
   parseCheckoutBody,
 } from "../../supabase/functions/_shared/billing/checkout.ts";
+import type {
+  BillingStore,
+  OrganizationBilling,
+} from "../../supabase/functions/_shared/billing/store.ts";
 import {
   createStripeClient,
   encodeStripeForm,
@@ -11,10 +15,6 @@ import {
   type StripeClient,
   type StripeParams,
 } from "../../supabase/functions/_shared/billing/stripe-api.ts";
-import type {
-  BillingStore,
-  OrganizationBilling,
-} from "../../supabase/functions/_shared/billing/store.ts";
 import { createCheckout } from "../../supabase/functions/billing-checkout/lib.ts";
 import { createPortal } from "../../supabase/functions/billing-portal/lib.ts";
 
@@ -290,14 +290,107 @@ const STRIPE_OK = {
     id: "cs_1",
     client_secret: "cs_1_secret_abc",
   },
+  "GET /v1/subscriptions": { data: [] },
+  "GET /v1/checkout/sessions": { data: [] },
 };
 
+function liveSubscription(status: string, lookupKey = "treq_pro_monthly") {
+  return {
+    data: [
+      {
+        id: "sub_live",
+        status,
+        items: { data: [{ price: { lookup_key: lookupKey } }] },
+      },
+    ],
+  };
+}
+
 function sessionParams(calls: Call[]): StripeParams | undefined {
-  return calls.find((c) => c.path === "/v1/checkout/sessions")?.params;
+  return calls.find(
+    (c) => c.method === "POST" && c.path === "/v1/checkout/sessions",
+  )?.params;
 }
 
 describe("createCheckout", () => {
   const user = { id: USER_ID, email: "dev@example.com" };
+  const existing = { stripe_customer_id: "cus_old", trial_used_at: null };
+
+  it("refuses a second Pro checkout while Stripe already has a live subscription the webhook has not recorded", async () => {
+    for (const status of ["trialing", "active", "past_due", "incomplete"]) {
+      const { stripe, calls } = fakeStripe({
+        ...STRIPE_OK,
+        "GET /v1/subscriptions": liveSubscription(status),
+      });
+      const result = await createCheckout(
+        { plan: "pro" },
+        {
+          user,
+          store: fakeStore({ getCustomer: vi.fn(async () => existing) }),
+          stripe,
+          webUrl: WEB_URL,
+        },
+      );
+      expect(result.status).toBe(409);
+      expect(sessionParams(calls)).toBeUndefined();
+      const list = calls.find((c) => c.path === "/v1/subscriptions");
+      expect(list?.params).toMatchObject({
+        customer: "cus_old",
+        status: "all",
+      });
+    }
+  });
+
+  it("opens a session when the customer's only Stripe subscription has ended", async () => {
+    const { stripe, calls } = fakeStripe({
+      ...STRIPE_OK,
+      "GET /v1/subscriptions": liveSubscription("canceled"),
+    });
+    const result = await createCheckout(
+      { plan: "pro" },
+      {
+        user,
+        store: fakeStore({ getCustomer: vi.fn(async () => existing) }),
+        stripe,
+        webUrl: WEB_URL,
+      },
+    );
+    expect(result.status).toBe(200);
+    expect(sessionParams(calls)).toBeDefined();
+  });
+
+  it("expires the customer's open checkout sessions before opening a new one", async () => {
+    const { stripe, calls } = fakeStripe({
+      ...STRIPE_OK,
+      "GET /v1/checkout/sessions": {
+        data: [{ id: "cs_old_a" }, { id: "cs_old_b" }],
+      },
+      "POST /v1/checkout/sessions/cs_old_a/expire": { id: "cs_old_a" },
+      "POST /v1/checkout/sessions/cs_old_b/expire": { id: "cs_old_b" },
+    });
+    const result = await createCheckout(
+      { plan: "pro" },
+      {
+        user,
+        store: fakeStore({ getCustomer: vi.fn(async () => existing) }),
+        stripe,
+        webUrl: WEB_URL,
+      },
+    );
+    expect(result.status).toBe(200);
+    const paths = calls.map((c) => `${c.method} ${c.path}`);
+    const created = paths.lastIndexOf("POST /v1/checkout/sessions");
+    expect(
+      paths.indexOf("POST /v1/checkout/sessions/cs_old_a/expire"),
+    ).toBeLessThan(created);
+    expect(
+      paths.indexOf("POST /v1/checkout/sessions/cs_old_b/expire"),
+    ).toBeLessThan(created);
+    const open = calls.find(
+      (c) => c.method === "GET" && c.path === "/v1/checkout/sessions",
+    );
+    expect(open?.params).toMatchObject({ customer: "cus_old", status: "open" });
+  });
 
   it("creates and records a customer, then offers the trial", async () => {
     const { stripe, calls } = fakeStripe(STRIPE_OK);
@@ -361,9 +454,11 @@ describe("createCheckout", () => {
       { plan: "pro" },
       { user, store, stripe, webUrl: WEB_URL },
     );
-    expect(calls.map((c) => c.path)).toEqual([
-      "/v1/prices",
-      "/v1/checkout/sessions",
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      "GET /v1/subscriptions",
+      "GET /v1/checkout/sessions",
+      "GET /v1/prices",
+      "POST /v1/checkout/sessions",
     ]);
     expect(sessionParams(calls)).toMatchObject({
       customer: "cus_old",
@@ -402,7 +497,7 @@ describe("createCheckout", () => {
       { plan: "pro" },
       { user, store, stripe, webUrl: WEB_URL },
     );
-    expect(calls[0]).toEqual({
+    expect(calls.find((c) => c.path === "/v1/prices")).toEqual({
       method: "GET",
       path: "/v1/prices",
       params: { "lookup_keys[0]": "treq_pro_monthly", active: true, limit: 1 },
@@ -566,7 +661,7 @@ describe("createCheckout for Team", () => {
     });
     expect(orgStore.attachCustomer).toHaveBeenCalledWith("cus_org");
     expect(userStore.attachCustomer).not.toHaveBeenCalled();
-    expect(calls[1]?.params).toEqual({
+    expect(calls.find((c) => c.path === "/v1/prices")?.params).toEqual({
       "lookup_keys[0]": "treq_team_monthly",
       active: true,
       limit: 1,

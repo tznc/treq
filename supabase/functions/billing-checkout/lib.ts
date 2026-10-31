@@ -76,6 +76,62 @@ async function customerFor(owner: Owner, deps: CheckoutDeps) {
   return recorded;
 }
 
+// Stripe statuses that mean the customer already has, or is about to have,
+// this plan. The webhook may not have recorded it yet, so hasPro() alone
+// lets two tabs each start a paid subscription.
+const LIVE_STATUSES: ReadonlySet<string> = new Set([
+  "trialing",
+  "active",
+  "past_due",
+  "incomplete",
+  "unpaid",
+  "paused",
+]);
+
+type StripeList<T> = { data?: T[] };
+type StripeSubscription = {
+  status?: string;
+  items?: { data?: { price?: { lookup_key?: string | null } }[] };
+};
+
+async function hasLiveSubscription(
+  customerId: string,
+  plan: BillingPlan,
+  stripe: StripeClient,
+): Promise<boolean> {
+  const subscriptions = await stripe.request<StripeList<StripeSubscription>>(
+    "GET",
+    "/v1/subscriptions",
+    { customer: customerId, status: "all", limit: 100 },
+  );
+  return (subscriptions.data ?? []).some(
+    (sub) =>
+      LIVE_STATUSES.has(sub.status ?? "") &&
+      (sub.items?.data ?? []).some(
+        (item) => item.price?.lookup_key === LOOKUP_KEY_BY_PLAN[plan],
+      ),
+  );
+}
+
+// Only one checkout per customer stays payable: the newest. An older tab
+// that is completed after this would otherwise start a second subscription.
+async function expireOpenSessions(
+  customerId: string,
+  stripe: StripeClient,
+): Promise<void> {
+  const sessions = await stripe.request<StripeList<{ id: string }>>(
+    "GET",
+    "/v1/checkout/sessions",
+    { customer: customerId, status: "open", limit: 100 },
+  );
+  for (const session of sessions.data ?? []) {
+    await stripe.request(
+      "POST",
+      `/v1/checkout/sessions/${encodeURIComponent(session.id)}/expire`,
+    );
+  }
+}
+
 async function openSession(
   plan: BillingPlan,
   owner: Owner,
@@ -83,6 +139,18 @@ async function openSession(
 ): Promise<CheckoutResult> {
   try {
     const customer = await customerFor(owner, deps);
+
+    if (
+      await hasLiveSubscription(customer.stripe_customer_id, plan, deps.stripe)
+    ) {
+      return {
+        status: 409,
+        body: {
+          error: `A ${PLAN_NAMES[plan]} subscription is already being set up. Refresh in a minute, or use Manage billing.`,
+        },
+      };
+    }
+    await expireOpenSessions(customer.stripe_customer_id, deps.stripe);
 
     const prices = await deps.stripe.request<{ data: { id: string }[] }>(
       "GET",
