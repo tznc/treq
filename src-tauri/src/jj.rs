@@ -5563,12 +5563,20 @@ mod tests {
       .get_wc_commit_id(&workspace_name)
       .expect("registered wc")
       .clone();
+    // The bookmark sits on the source commit, below the working copy.
+    let source = loaded
+      .repo
+      .view()
+      .get_local_bookmark(RefName::new("main"))
+      .as_normal()
+      .expect("main target")
+      .clone();
     let resolved = verify_created_workspace_bookmark(
       &loaded.workspace,
       "fix/concurrent",
       &workspace_name,
       &expected,
-      &expected,
+      &source,
     )
     .expect("registered target should resolve conflict");
 
@@ -5577,7 +5585,7 @@ mod tests {
         .view()
         .get_local_bookmark(RefName::new("fix/concurrent"))
         .as_normal(),
-      Some(&expected)
+      Some(&source)
     );
   }
 
@@ -5617,9 +5625,11 @@ mod tests {
       .clone();
     let root_id = base.repo.store().root_commit_id().clone();
     let mut left = base.repo.start_transaction();
-    left
-      .repo_mut()
-      .set_local_bookmark_target(RefName::new("fix/ambiguous"), RefTarget::normal(main_id));
+    // Neither side is the source commit (main) the creation put it on.
+    left.repo_mut().set_local_bookmark_target(
+      RefName::new("fix/ambiguous"),
+      RefTarget::normal(expected.clone()),
+    );
     let mut right = base.repo.start_transaction();
     right
       .repo_mut()
@@ -5632,7 +5642,7 @@ mod tests {
       "fix/ambiguous",
       &workspace_name,
       &expected,
-      &expected,
+      &main_id,
     )
     .expect_err("unrelated conflict must not be guessed");
     assert!(format!("{err}").contains("manual recovery is required"));
