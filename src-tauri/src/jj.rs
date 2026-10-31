@@ -4125,7 +4125,7 @@ fn validate_commit_message(message: &str) -> Result<(), JjError> {
   if message.contains('\0') {
     return Err(JjError::IoError("Invalid commit message".to_string()));
   }
-  if message.len() > 10000 {
+  if message.chars().count() > 10000 {
     return Err(JjError::IoError(
       "Commit message too long (max 10000 characters)".to_string(),
     ));
