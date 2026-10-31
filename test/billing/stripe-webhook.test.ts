@@ -474,4 +474,20 @@ describe("handleStripeWebhook", () => {
       expect(result.status).toBe(500);
     });
   });
+
+  it("logs a plan that does not fit its owner loudly but acknowledges it", async () => {
+    const log = vi.fn();
+    const d = deps({
+      rpc: vi.fn(async () => ({ data: "owner_plan_mismatch", error: null })),
+      log,
+    });
+    const result = await handleStripeWebhook(
+      await signed(subscriptionCreated),
+      d,
+    );
+    expect(result.status).toBe(200);
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({ level: "error", result: "owner_plan_mismatch" }),
+    );
+  });
 });
