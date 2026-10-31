@@ -116,6 +116,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
+          # Without its own key this job shares release.yml's `release` cache
+          # (fat LTO), restores it as an exact hit and never saves its own.
+          # The target is in the key since both macOS builds share a runner.
+          key: nightly-desktop-${{ matrix.target }}
           workspaces: ". -> target"
 
       # rustc only sets up the MSVC library paths (LIB) for link.exe, so
