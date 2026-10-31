@@ -4627,6 +4627,13 @@ mod tests {
   }
 
   #[test]
+  fn validate_commit_message_counts_characters_not_bytes() {
+    // 4000 characters, 12000 bytes: under the 10000-character limit.
+    assert!(validate_commit_message(&"漢".repeat(4000)).is_ok());
+    assert!(validate_commit_message(&"漢".repeat(10_001)).is_err());
+  }
+
+  #[test]
   fn update_stale_workspace_is_a_no_op_for_a_missing_path() {
     let (_temp, path) = missing_workspace();
     assert!(update_stale_workspace(&path).is_ok());
