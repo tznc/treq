@@ -17,13 +17,14 @@ use serde::Serialize;
 use super::{
   account::{self, Subscription},
   auth::{AuthStatus, Session},
-  control_plane::{self, InstanceStatus},
+  cloud_catalog::{self, Notification, SpendState, SpendStatus, Tier, UsageTotals},
+  control_plane::{self, InstanceStatus, Preflight, ProcessAction, ResizeError},
   managed::{self, Lease, RenewalHooks},
   remote::MachineUsageReport,
   remote_control_plane::{SshAuthentication, SshEndpoint, SshEndpointSource},
   remote_local_keys::LocalSshIdentity,
   remote_ssh_transport::CutoffReason,
-  supabase::{ApiError, Supabase},
+  supabase::{ApiError, Supabase, SPEND_CAP_REACHED},
 };
 use crate::lock_ext::LockExt;
 
@@ -41,6 +42,36 @@ pub struct CloudWorkspace {
   pub usage_error: Option<String>,
   /// One of the card's actions is running.
   pub submitting: bool,
+  /// The priced size tiers, once read.
+  pub catalog: Option<Vec<Tier>>,
+  /// The tier the size picker has selected: what Create and Resize use.
+  pub selected_tier: Option<String>,
+  /// This month's billed usage.
+  pub billing: Option<UsageTotals>,
+  /// A resize the server refused for unpushed work, waiting for the user
+  /// to confirm the loss: the tier and what would be lost.
+  pub resize_preflight: Option<(String, Preflight)>,
+  /// The monthly spend cap and this month's spend.
+  pub spend: Option<SpendStatus>,
+  /// Why the last cap change was refused.
+  pub spend_cap_error: Option<String>,
+  /// Stored notices (spend at 80%, cap reached), until dismissed.
+  pub notifications: Vec<Notification>,
+  /// The idle controller's last probe: background processes and the stop ETA.
+  pub activity: Option<crate::core::workspace_activity::WorkspaceActivity>,
+  /// Bring your own sandbox is on (the `byos` feature preview).
+  pub byos_enabled: bool,
+  /// The user's saved provider keys (never the keys themselves).
+  pub provider_keys: Vec<cloud_catalog::ProviderKey>,
+  /// A provider key is being saved or removed.
+  pub provider_key_saving: bool,
+  /// Why the last key save or removal was refused.
+  pub provider_key_error: Option<String>,
+  /// Tier prices on the providers the user has a key for.
+  pub byos_catalog: Vec<cloud_catalog::ByosMachineType>,
+  /// The provider Create runs on with the user's own key; `None` is treq
+  /// managed.
+  pub selected_provider: Option<String>,
 }
 
 /// Everything the account screens draw.
@@ -313,10 +344,254 @@ impl Cloud {
   /// Rereads the instance status and, once it is ready, its usage.
   pub async fn refresh_cloud(&self) {
     self.update_workspace(|w| w.provisioning_error = None);
-    if let Ok(status) = control_plane::instance_status(&self.supabase).await {
-      self.update_workspace(|w| w.instance_status = Some(status));
-    }
+    self.refresh_status().await;
+    self.load_billing().await;
+    self.load_activity().await;
     self.load_usage().await;
+  }
+
+  /// Applies a read to the workspace; a failed read keeps the last value.
+  async fn load<T>(
+    &self,
+    what: &str,
+    read: impl std::future::Future<Output = Result<T, ApiError>>,
+    apply: impl FnOnce(&mut CloudWorkspace, T),
+  ) {
+    match read.await {
+      Ok(value) => self.update_workspace(|w| apply(w, value)),
+      Err(error) => log::warn!("reading {what} failed: {error}"),
+    }
+  }
+
+  async fn load_activity(&self) {
+    let read = crate::core::workspace_activity::fetch_activity(&self.supabase);
+    self
+      .load("workspace activity", read, |w, a| w.activity = a)
+      .await;
+  }
+
+  /// Kills, pins ("keep alive", billed) or unpins a background process,
+  /// then rereads the list.
+  pub async fn process_action(&self, action: ProcessAction) {
+    let Some(instance_id) = self.instance_id() else {
+      return;
+    };
+    match control_plane::process_action(&self.supabase, &instance_id, &action).await {
+      Ok(_) => {
+        if let ProcessAction::Kill(pid) = action {
+          // The next probe confirms it; drop the row now.
+          self.update_workspace(|w| {
+            if let Some(a) = w.activity.as_mut() {
+              a.processes.retain(|p| p.pid != pid);
+            }
+          });
+        } else {
+          self.load_activity().await;
+        }
+      }
+      Err(error) => self.fail(error.to_string()),
+    }
+  }
+
+  /// Reads the size tiers and this month's billed usage. A failed read
+  /// keeps the last one.
+  async fn load_billing(&self) {
+    let s = &self.supabase;
+    let catalog = cloud_catalog::fetch_catalog(s);
+    self
+      .load("the machine catalog", catalog, |w, c| w.catalog = Some(c))
+      .await;
+    let usage = cloud_catalog::fetch_month_usage(s);
+    self
+      .load("the usage summary", usage, |w, u| w.billing = Some(u))
+      .await;
+    let spend = cloud_catalog::fetch_spend_status(s);
+    self
+      .load("the spend status", spend, |w, x| w.spend = Some(x))
+      .await;
+    let notes = cloud_catalog::fetch_notifications(s);
+    self
+      .load("notifications", notes, |w, n| w.notifications = n)
+      .await;
+    self.load_byos().await;
+  }
+
+  // -- Bring your own sandbox (BYOS) ----------------------------------------
+
+  /// Turns BYOS on or off (the `byos` feature preview). Off forgets the
+  /// keys read and the provider choice, so nothing BYOS shows or is sent.
+  pub fn set_byos_enabled(&self, enabled: bool) {
+    self.update_workspace(|w| {
+      w.byos_enabled = enabled;
+      if !enabled {
+        w.provider_keys.clear();
+        w.byos_catalog.clear();
+        w.selected_provider = None;
+        w.provider_key_error = None;
+      }
+    });
+  }
+
+  /// Picks the provider Create runs on with the user's key; `None` is
+  /// treq managed.
+  pub fn select_provider(&self, kind: Option<&str>) {
+    let kind = kind.map(str::to_string);
+    self.update_workspace(|w| w.selected_provider = kind);
+  }
+
+  /// Reads the saved keys and their tier prices, with BYOS on.
+  async fn load_byos(&self) {
+    if !self.workspace.lock_or_recover().byos_enabled {
+      return;
+    }
+    let keys = control_plane::list_provider_credentials(&self.supabase);
+    self
+      .load("provider keys", keys, |w, keys| {
+        let kept = |k: &String| keys.iter().any(|key| &key.provider_kind == k);
+        w.selected_provider = w.selected_provider.take().filter(kept);
+        w.provider_keys = keys;
+      })
+      .await;
+    let types = control_plane::byos_catalog(&self.supabase);
+    self
+      .load("BYOS prices", types, |w, t| w.byos_catalog = t)
+      .await;
+  }
+
+  /// Saves a provider key. The server checks it with the provider first.
+  pub async fn save_provider_key(&self, kind: &str, api_key: &str) {
+    let save = control_plane::save_provider_credential(&self.supabase, kind, api_key);
+    self.change_provider_key(kind, save).await;
+  }
+
+  /// Removes a provider key. The server refuses while a workspace uses it.
+  pub async fn remove_provider_key(&self, kind: &str) {
+    let remove = control_plane::delete_provider_credential(&self.supabase, kind);
+    self.change_provider_key(kind, remove).await;
+  }
+
+  async fn change_provider_key(
+    &self,
+    kind: &str,
+    change: impl std::future::Future<Output = Result<serde_json::Value, ApiError>>,
+  ) {
+    self.update_workspace(|w| {
+      w.provider_key_saving = true;
+      w.provider_key_error = None;
+    });
+    let error = change.await.err().map(|error| match error.code.as_str() {
+      "provider_credential_invalid" => format!(
+        "{} rejected this API key. Check it and try again.",
+        cloud_catalog::provider_name(kind)
+      ),
+      "byos_not_allowed" => "Bring your own sandbox needs Pro.".to_string(),
+      "byos_kind_unsupported" => format!(
+        "{} doesn't take your own key yet.",
+        cloud_catalog::provider_name(kind)
+      ),
+      "credential_in_use" => {
+        "A cloud workspace still runs on this key. Delete the workspace first.".to_string()
+      }
+      _ => format!("Couldn't save the key: {}", error.message),
+    });
+    let ok = error.is_none();
+    self.update_workspace(|w| {
+      w.provider_key_saving = false;
+      w.provider_key_error = error;
+    });
+    if ok {
+      self.load_byos().await;
+    }
+  }
+
+  /// Changes the monthly spend cap. Once the cap is above this month's
+  /// spend, a refusal for the cap no longer applies; the user wakes the
+  /// workspace again themselves.
+  pub async fn set_spend_cap(&self, cap_usd: f64) {
+    self.update_workspace(|w| w.spend_cap_error = None);
+    match cloud_catalog::set_spend_cap(&self.supabase, cap_usd).await {
+      Ok(spend) => self.update_workspace(|w| {
+        if spend.state != SpendState::Capped
+          && w
+            .provisioning_error
+            .as_deref()
+            .is_some_and(|e| e.starts_with(&format!("[{SPEND_CAP_REACHED}]")))
+        {
+          w.provisioning_error = None;
+        }
+        w.spend = Some(spend);
+      }),
+      Err(error) => {
+        let message = match error.message.as_str() {
+          "spend_cap_too_low" => "The cap must be at least $5.".to_string(),
+          "spend_cap_too_high" => "That cap is above the maximum allowed.".to_string(),
+          _ => format!("Couldn't change the cap: {}", error.message),
+        };
+        self.update_workspace(|w| w.spend_cap_error = Some(message));
+      }
+    }
+  }
+
+  /// Hides a stored notice for good.
+  pub async fn dismiss_notification(&self, id: &str) {
+    match cloud_catalog::dismiss_notification(&self.supabase, id).await {
+      Ok(()) => self.update_workspace(|w| w.notifications.retain(|n| n.id != id)),
+      Err(error) => log::warn!("dismissing a notification failed: {error}"),
+    }
+  }
+
+  /// Picks the tier Create and Resize use.
+  pub fn select_tier(&self, tier_id: &str) {
+    let tier_id = tier_id.to_string();
+    self.update_workspace(|w| w.selected_tier = Some(tier_id));
+  }
+
+  /// Moves the cloud workspace to the selected tier. When the server
+  /// refuses for unpushed work, keeps its preflight for the user to
+  /// confirm; `acknowledged_data_loss` is that confirmation.
+  pub async fn resize(&self, acknowledged_data_loss: bool) {
+    let Some(instance_id) = self.instance_id() else {
+      return;
+    };
+    let tier_id = {
+      let w = self.workspace.lock_or_recover();
+      match (&w.resize_preflight, acknowledged_data_loss) {
+        (Some((tier, _)), true) => Some(tier.clone()),
+        _ => w.selected_tier.clone(),
+      }
+    };
+    let Some(tier_id) = tier_id else {
+      return;
+    };
+    self
+      .submitting(async {
+        self.update_workspace(|w| {
+          w.provisioning_error = None;
+          w.resize_preflight = None;
+        });
+        let key = format!("resize-{instance_id}-{}", uuid::Uuid::new_v4());
+        match control_plane::resize(
+          &self.supabase,
+          &instance_id,
+          &tier_id,
+          acknowledged_data_loss,
+          &key,
+        )
+        .await
+        {
+          Ok(_) => self.refresh_status().await,
+          Err(ResizeError::UnpushedWork(preflight)) => {
+            self.update_workspace(|w| w.resize_preflight = Some((tier_id.clone(), preflight)))
+          }
+          Err(ResizeError::Api(error)) => self.fail(error.to_string()),
+        }
+      })
+      .await;
+  }
+
+  /// Drops a resize waiting for confirmation.
+  pub fn cancel_resize(&self) {
+    self.update_workspace(|w| w.resize_preflight = None);
   }
 
   async fn refresh_status(&self) {
@@ -476,7 +751,12 @@ impl Cloud {
       // One idempotency key per click, so a retry after a failure is not a
       // replay of that failure.
       let key = format!("provision-managed-{}", uuid::Uuid::new_v4());
-      control_plane::ensure(&self.supabase, &key)
+      let (tier, byos_kind) = {
+        let w = self.workspace.lock_or_recover();
+        let byos_kind = w.selected_provider.clone().filter(|_| w.byos_enabled);
+        (w.selected_tier.clone(), byos_kind)
+      };
+      control_plane::ensure(&self.supabase, &key, tier.as_deref(), byos_kind.as_deref())
         .await
         .map_err(|e| e.to_string())?;
       let progress = self.wait_progress();
@@ -812,7 +1092,7 @@ mod tests {
   fn endpoint() -> Value {
     json!({
       "id": "e1", "instance_id": "i1",
-      "source": {"type": "managed", "provider": "fly_sprites", "generation": 4},
+      "source": {"type": "managed", "provider": "boat", "generation": 4},
       "hostname": "h", "port": 22, "username": "treq", "host_keys": [],
       "authentication": {"type": "public_key", "key_reference": "server-key"}
     })
@@ -1168,6 +1448,195 @@ mod tests {
     }
   }
 
+  /// Answers `remote-instance` `action` with `response`.
+  async fn on_action(server: &MockServer, action: &str, response: Value) {
+    mount(
+      server,
+      "remote-instance",
+      json!({ "action": action }),
+      response,
+    )
+    .await;
+  }
+
+  /// Answers the RPC `name` with `body`.
+  async fn rpc(server: &MockServer, name: &str, body: Value) {
+    Mock::given(method("POST"))
+      .and(path(format!("/rest/v1/rpc/{name}")))
+      .respond_with(ResponseTemplate::new(200).set_body_json(body))
+      .mount(server)
+      .await;
+  }
+
+  #[tokio::test]
+  async fn refreshing_reads_the_catalog_and_this_months_billed_usage() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    on_action(&server, "status", json!({"instance": null})).await;
+    rpc(
+      &server,
+      "get_machine_catalog",
+      json!([
+        {"id": "s", "label": "Small", "vcpu": 2, "ram_gib": 4, "disk_gb": 10, "regions": []}
+      ]),
+    )
+    .await;
+    rpc(
+      &server,
+      "get_usage_summary",
+      json!([
+        {"hour": "2026-10-01T00:00:00+00:00", "seconds": 5400, "billed_usd": 0.05}
+      ]),
+    )
+    .await;
+    cloud.refresh_cloud().await;
+    let workspace = cloud.snapshot().cloud;
+    assert_eq!(workspace.catalog.unwrap()[0].id, "s");
+    let billing = workspace.billing.unwrap();
+    assert_eq!(billing.hours, 1.5);
+    assert_eq!(billing.billed_usd, 0.05);
+  }
+
+  fn spend(cap: f64, spent: f64, state: &str) -> serde_json::Value {
+    json!({"cap_usd": cap, "spent_usd": spent, "month_start": "2026-10-01T00:00:00+00:00", "state": state})
+  }
+
+  #[tokio::test]
+  async fn refreshing_reads_the_spend_cap_and_notifications() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    on_action(&server, "status", json!({"instance": null})).await;
+    rpc(&server, "get_spend_status", spend(50., 42., "warning")).await;
+    rpc(
+      &server,
+      "list_notifications",
+      json!([{
+        "id": "n1", "kind": "spend_cap_warning", "period": "2026-10",
+        "title": "Cloud spend at 80% of your cap", "body": "You spent $42.00.",
+        "created_at": "2026-10-28T12:00:00+00:00"
+      }]),
+    )
+    .await;
+    Mock::given(method("POST"))
+      .and(path("/rest/v1/rpc/dismiss_notification"))
+      .respond_with(ResponseTemplate::new(204))
+      .mount(&server)
+      .await;
+    cloud.refresh_cloud().await;
+    let workspace = cloud.snapshot().cloud;
+    assert_eq!(workspace.spend.unwrap().spent_usd, 42.);
+    assert_eq!(workspace.notifications.len(), 1);
+    cloud.dismiss_notification("n1").await;
+    assert!(cloud.snapshot().cloud.notifications.is_empty());
+  }
+
+  #[tokio::test]
+  async fn raising_the_spend_cap_clears_the_cap_refusal() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    on_action(&server, "status", status("suspended")).await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-instance"))
+      .and(body_partial_json(json!({"action": "wake"})))
+      .respond_with(ResponseTemplate::new(402).set_body_json(json!({
+        "error": "You reached your monthly cloud spend cap of $50.00. Raise the cap to keep working.",
+        "code": "spend_cap_reached", "cap_usd": 50, "spent_usd": 50.2
+      })))
+      .mount(&server)
+      .await;
+    Mock::given(method("POST"))
+      .and(path("/rest/v1/rpc/set_spend_cap"))
+      .and(body_partial_json(json!({"p_cap_usd": 80.0})))
+      .respond_with(ResponseTemplate::new(200).set_body_json(spend(80., 50.2, "ok")))
+      .mount(&server)
+      .await;
+    Mock::given(method("POST"))
+      .and(path("/rest/v1/rpc/set_spend_cap"))
+      .and(body_partial_json(json!({"p_cap_usd": 5000.0})))
+      .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+        "code": "P0001", "message": "spend_cap_too_high"
+      })))
+      .mount(&server)
+      .await;
+    cloud.refresh_cloud().await;
+    cloud.wake().await;
+    assert!(cloud
+      .snapshot()
+      .cloud
+      .provisioning_error
+      .unwrap()
+      .starts_with("[spend_cap_reached] "));
+
+    cloud.set_spend_cap(5000.).await;
+    let workspace = cloud.snapshot().cloud;
+    assert_eq!(
+      workspace.spend_cap_error.as_deref(),
+      Some("That cap is above the maximum allowed.")
+    );
+    assert!(workspace.provisioning_error.is_some());
+
+    cloud.set_spend_cap(80.).await;
+    let workspace = cloud.snapshot().cloud;
+    assert_eq!(workspace.spend.unwrap().cap_usd, 80.);
+    assert_eq!(workspace.spend_cap_error, None);
+    assert_eq!(
+      workspace.provisioning_error, None,
+      "the refusal no longer applies"
+    );
+  }
+
+  #[tokio::test]
+  async fn provisioning_sends_the_selected_tier() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    cloud.select_tier("l");
+    assert_eq!(provision_with(&cloud, &server).await[0]["tier_id"], "l");
+  }
+
+  #[tokio::test]
+  async fn resizing_with_unpushed_work_waits_for_confirmation_then_retries_with_the_ack() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    on_action(&server, "status", status("ready")).await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-instance"))
+      .and(body_partial_json(
+        json!({"action": "resize", "acknowledged_data_loss": true}),
+      ))
+      .respond_with(ResponseTemplate::new(200).set_body_json(json!({"operation_id": "o"})))
+      .with_priority(1)
+      .mount(&server)
+      .await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-instance"))
+      .and(body_partial_json(json!({"action": "resize"})))
+      .respond_with(ResponseTemplate::new(409).set_body_json(json!({
+        "code": "unpushed_work",
+        "preflight": {"requires_ack": true, "repos": [{"path": "acme/api", "unpushed": 1}]}
+      })))
+      .with_priority(2)
+      .mount(&server)
+      .await;
+    cloud.refresh_status().await;
+    cloud.select_tier("m");
+    cloud.resize(false).await;
+    let workspace = cloud.snapshot().cloud;
+    let (tier, preflight) = workspace
+      .resize_preflight
+      .expect("waiting for confirmation");
+    assert_eq!(tier, "m");
+    assert_eq!(preflight.repos[0].path, "acme/api");
+    assert_eq!(workspace.provisioning_error, None);
+
+    cloud.resize(true).await;
+    assert_eq!(cloud.snapshot().cloud.resize_preflight, None);
+    let resized = bodies(&server, "resize").await;
+    assert_eq!(resized.len(), 2);
+    assert_eq!(resized[1]["tier_id"], "m");
+    assert_eq!(resized[1]["acknowledged_data_loss"], true);
+    assert_ne!(resized[0]["idempotency_key"], resized[1]["idempotency_key"]);
+  }
+
   #[tokio::test]
   async fn provisions_then_polls_readiness_until_connectable() {
     let server = MockServer::start().await;
@@ -1365,5 +1834,127 @@ mod tests {
       Some(&ManagedEndpointEvent::Renewed { endpoint: renewed })
     );
     assert_eq!(events.len(), 2, "a renewal for another endpoint is dropped");
+  }
+
+  // -- Bring your own sandbox (BYOS) --------------------------------------
+
+  async fn provision_with(cloud: &Arc<Cloud>, server: &MockServer) -> Vec<Value> {
+    on_action(server, "ensure", json!({})).await;
+    on_action(server, "status", status("ready")).await;
+    trust_mocks(server, None).await;
+    cloud.provision().await;
+    bodies(server, "ensure").await
+  }
+
+  #[tokio::test]
+  async fn provisioning_on_the_users_own_provider_asks_for_byos() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    cloud.set_byos_enabled(true);
+    cloud.select_provider(Some("daytona"));
+    let ensured = provision_with(&cloud, &server).await;
+    assert_eq!(ensured[0]["credential_source"], "byos");
+    assert_eq!(ensured[0]["provider_kind"], "daytona");
+  }
+
+  #[tokio::test]
+  async fn provisioning_stays_treq_managed_with_byos_off() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    cloud.select_provider(Some("daytona"));
+    let ensured = provision_with(&cloud, &server).await;
+    assert_eq!(ensured[0].get("credential_source"), None);
+    assert_eq!(ensured[0].get("provider_kind"), None);
+  }
+
+  #[tokio::test]
+  async fn saving_a_provider_key_rereads_the_list() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    cloud.set_byos_enabled(true);
+    on_action(
+      &server,
+      "save_provider_credential",
+      json!({"credential": {"id": "c1", "provider_kind": "boat"}}),
+    )
+    .await;
+    on_action(
+      &server,
+      "list_provider_credentials",
+      json!({"credentials": [{"id": "c1", "provider_kind": "boat", "label": null,
+        "validated_at": "2026-10-28T00:00:00Z", "invalid_at": null}]}),
+    )
+    .await;
+    on_action(&server, "byos_catalog", json!({"machine_types": []})).await;
+    cloud.save_provider_key("boat", "sk-secret").await;
+    let saved = bodies(&server, "save_provider_credential").await;
+    assert_eq!(saved[0]["provider_kind"], "boat");
+    assert_eq!(saved[0]["api_key"], "sk-secret");
+    let w = cloud.snapshot().cloud;
+    assert_eq!(w.provider_key_error, None);
+    assert_eq!(w.provider_keys.len(), 1);
+    assert_eq!(w.provider_keys[0].provider_kind, "boat");
+    assert!(!serde_json::to_string(&cloud.snapshot())
+      .unwrap()
+      .contains("sk-secret"));
+  }
+
+  #[tokio::test]
+  async fn a_rejected_provider_key_says_so() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    cloud.set_byos_enabled(true);
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-instance"))
+      .and(body_partial_json(
+        json!({"action": "save_provider_credential"}),
+      ))
+      .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+        "error": "The provider rejected this API key", "code": "provider_credential_invalid"
+      })))
+      .mount(&server)
+      .await;
+    cloud.save_provider_key("daytona", "bad").await;
+    assert_eq!(
+      cloud.snapshot().cloud.provider_key_error.as_deref(),
+      Some("Daytona rejected this API key. Check it and try again.")
+    );
+  }
+
+  #[tokio::test]
+  async fn removing_a_provider_key_rereads_the_list() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    cloud.set_byos_enabled(true);
+    on_action(
+      &server,
+      "delete_provider_credential",
+      json!({"deleted": "boat"}),
+    )
+    .await;
+    on_action(
+      &server,
+      "list_provider_credentials",
+      json!({"credentials": []}),
+    )
+    .await;
+    on_action(&server, "byos_catalog", json!({"machine_types": []})).await;
+    cloud.remove_provider_key("boat").await;
+    assert_eq!(
+      bodies(&server, "delete_provider_credential").await[0]["provider_kind"],
+      "boat"
+    );
+    assert!(cloud.snapshot().cloud.provider_keys.is_empty());
+  }
+
+  #[tokio::test]
+  async fn provider_keys_are_not_read_with_byos_off() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    on_action(&server, "status", status("ready")).await;
+    cloud.refresh_cloud().await;
+    assert!(bodies(&server, "list_provider_credentials")
+      .await
+      .is_empty());
   }
 }

@@ -762,6 +762,34 @@
             }
           ]
         },
+        "gateway": {
+          "description": "Run the cloud machine's SSH gateway: a WebSocket server that lets the Treq SSH relay reach this machine's sshd",
+          "afterHelp": "Example:\n  treq gateway --placement-id pl_123 --listen 127.0.0.1:8022",
+          "args": [
+            {
+              "name": "placement-id",
+              "takesValue": true,
+              "required": true,
+              "description": "Placement this machine serves; tokens for other placements are refused"
+            },
+            {
+              "name": "secret-file",
+              "takesValue": true,
+              "description": "File holding the placement's gateway secret (default /etc/treq/gateway.secret)"
+            },
+            {
+              "name": "listen",
+              "takesValue": true,
+              "description": "Address to listen on (default 127.0.0.1:8022)"
+            },
+            {
+              "name": "allow",
+              "takesValue": true,
+              "multiple": true,
+              "description": "host:port a client may connect to; repeatable (default 127.0.0.1:2222 and localhost:2222)"
+            }
+          ]
+        },
         "pty-remote": {
           "description": "Persistent PTY sessions on this host (held by the Treq terminal daemon, or tmux) for full terminal streaming and reattach",
           "afterHelp": "Example:\n  treq pty-remote list --repo . --workspace 1",

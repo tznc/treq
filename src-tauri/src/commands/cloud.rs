@@ -173,10 +173,32 @@ pub fn start(app: &AppHandle) {
     cloud: cloud.clone(),
     effects,
   });
+  let sync_cloud = cloud.clone();
   tauri::async_runtime::spawn(async move {
     cloud.start().await;
     cloud.keep_fresh().await;
   });
+  tauri::async_runtime::spawn(sync_config(sync_cloud));
+}
+
+/// Config sync, once signed in: pulls a missing local copy, then pushes
+/// on change and hourly (`core::config_sync`). Covers the app settings and
+/// the last opened repository.
+async fn sync_config(cloud: Arc<Cloud>) {
+  use crate::core::config_sync;
+  while cloud.supabase.auth.session().is_none() {
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+  }
+  let Some(app_dir) = crate::core::app_data_dir() else {
+    return;
+  };
+  let mut sources = vec![config_sync::app_source(app_dir.clone())];
+  let last_repo = crate::db::Database::new(app_dir.join("treq.db"))
+    .ok()
+    .and_then(|db| db.get_setting("last_opened_repo_path").ok().flatten());
+  sources.extend(last_repo.as_deref().and_then(config_sync::repo_source));
+  let transport = Arc::new(config_sync::SupabaseTransport(cloud.supabase.clone()));
+  config_sync::run(transport, sources, app_dir.join("config-sync")).await;
 }
 
 /// The account, while Rust owns it.
@@ -210,8 +232,20 @@ pub fn window_focused(app: &AppHandle) {
   }
 }
 
+/// A provider API key on its way to the server. Its `Debug` never shows it,
+/// so logging an action cannot leak it.
+#[derive(Clone, PartialEq, serde::Deserialize)]
+#[serde(transparent)]
+pub struct ApiKey(pub String);
+
+impl std::fmt::Debug for ApiKey {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str("<redacted>")
+  }
+}
+
 /// A cloud workspace action, by the id the account screens use.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum CloudAction {
   Refresh,
@@ -221,12 +255,55 @@ pub enum CloudAction {
   Delete,
   OpenRepositories,
   #[serde(rename_all = "camelCase")]
+  SelectTier {
+    tier_id: String,
+  },
+  /// Resize to the selected tier; `acknowledged_data_loss` confirms the
+  /// unpushed work the server said would be lost.
+  #[serde(rename_all = "camelCase")]
+  Resize {
+    acknowledged_data_loss: bool,
+  },
+  CancelResize,
+  /// Change the monthly spend cap.
+  #[serde(rename_all = "camelCase")]
+  SetSpendCap {
+    cap_usd: f64,
+  },
+  /// Hide a stored notice.
+  DismissNotification {
+    id: String,
+  },
+  #[serde(rename_all = "camelCase")]
   Reauthenticate {
     endpoint_id: String,
   },
   #[serde(rename_all = "camelCase")]
   RevokeKey {
     key_reference: String,
+  },
+  KillProcess {
+    pid: u32,
+  },
+  /// "Keep alive (billed)".
+  PinProcess {
+    pid: u32,
+  },
+  #[serde(rename_all = "camelCase")]
+  UnpinProcess {
+    pin_id: String,
+  },
+  /// Bring your own sandbox: save a provider key (checked by the server).
+  SaveProviderKey {
+    kind: String,
+    key: ApiKey,
+  },
+  RemoveProviderKey {
+    kind: String,
+  },
+  /// The provider Create runs on with the user's key; `None` is treq managed.
+  SelectProvider {
+    kind: Option<String>,
   },
 }
 
@@ -241,6 +318,10 @@ pub async fn run_cloud_action(
     .ok_or("The account is not available in this window.")?;
   *state.effects.window.lock_or_recover() = Some(label.to_string());
   let cloud = state.cloud.clone();
+  cloud.set_byos_enabled(crate::core::feature_preview::is_enabled_in_app_db(
+    crate::core::feature_preview::PreviewFeature::Byos,
+  ));
+  use crate::core::control_plane::ProcessAction;
   match action {
     CloudAction::Refresh => cloud.refresh_cloud().await,
     CloudAction::Provision => cloud.provision().await,
@@ -248,8 +329,23 @@ pub async fn run_cloud_action(
     CloudAction::Repair => cloud.reprovision().await,
     CloudAction::Delete => cloud.delete().await,
     CloudAction::OpenRepositories => cloud.open_repositories().await,
+    CloudAction::SelectTier { tier_id } => cloud.select_tier(&tier_id),
+    CloudAction::Resize {
+      acknowledged_data_loss,
+    } => cloud.resize(acknowledged_data_loss).await,
+    CloudAction::CancelResize => cloud.cancel_resize(),
+    CloudAction::SetSpendCap { cap_usd } => cloud.set_spend_cap(cap_usd).await,
+    CloudAction::DismissNotification { id } => cloud.dismiss_notification(&id).await,
     CloudAction::Reauthenticate { endpoint_id } => cloud.reauthenticate(&endpoint_id).await,
     CloudAction::RevokeKey { key_reference } => cloud.revoke_key(&key_reference).await,
+    CloudAction::KillProcess { pid } => cloud.process_action(ProcessAction::Kill(pid)).await,
+    CloudAction::PinProcess { pid } => cloud.process_action(ProcessAction::Pin(pid)).await,
+    CloudAction::UnpinProcess { pin_id } => {
+      cloud.process_action(ProcessAction::Unpin(pin_id)).await
+    }
+    CloudAction::SaveProviderKey { kind, key } => cloud.save_provider_key(&kind, &key.0).await,
+    CloudAction::RemoveProviderKey { kind } => cloud.remove_provider_key(&kind).await,
+    CloudAction::SelectProvider { kind } => cloud.select_provider(kind.as_deref()),
   }
   Ok(())
 }

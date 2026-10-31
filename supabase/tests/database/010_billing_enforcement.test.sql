@@ -101,11 +101,11 @@ reset role;
 
 -- ── Cloud workspace lapse ─────────────────────────────────────────────────
 insert into public.remote_instances (id, owner_user_id, provider_kind, region, size_preset, status, lapsed_at) values
-  ('00000000-0000-0000-0000-00000000e001', '00000000-0000-0000-0000-0000000000d1', 'fly_sprites', 'us_east', 'small', 'ready', null),
-  ('00000000-0000-0000-0000-00000000e002', '00000000-0000-0000-0000-0000000000d2', 'fly_sprites', 'us_east', 'small', 'ready', null),
-  ('00000000-0000-0000-0000-00000000e003', '00000000-0000-0000-0000-0000000000d3', 'fly_sprites', 'us_east', 'small', 'suspended', now() - interval '8 days'),
-  ('00000000-0000-0000-0000-00000000e004', '00000000-0000-0000-0000-0000000000d4', 'fly_sprites', 'us_east', 'small', 'suspended', now() - interval '40 days'),
-  ('00000000-0000-0000-0000-00000000e005', '00000000-0000-0000-0000-0000000000d5', 'fly_sprites', 'us_east', 'small', 'suspended', now() - interval '6 days');
+  ('00000000-0000-0000-0000-00000000e001', '00000000-0000-0000-0000-0000000000d1', 'boat', 'us_east', 'small', 'ready', null),
+  ('00000000-0000-0000-0000-00000000e002', '00000000-0000-0000-0000-0000000000d2', 'boat', 'us_east', 'small', 'ready', null),
+  ('00000000-0000-0000-0000-00000000e003', '00000000-0000-0000-0000-0000000000d3', 'boat', 'us_east', 'small', 'suspended', now() - interval '8 days'),
+  ('00000000-0000-0000-0000-00000000e004', '00000000-0000-0000-0000-0000000000d4', 'boat', 'us_east', 'small', 'suspended', now() - interval '40 days'),
+  ('00000000-0000-0000-0000-00000000e005', '00000000-0000-0000-0000-0000000000d5', 'boat', 'us_east', 'small', 'suspended', now() - interval '6 days');
 
 -- d4 subscribes again. The webhook's write clears the lapse at once, so a
 -- sweep that has not run since cannot count the old lapse.

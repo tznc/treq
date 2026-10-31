@@ -51,6 +51,16 @@ describe("buildCheckoutSessionParams", () => {
     });
   });
 
+  it("adds the metered usage price as a second line item without a quantity", () => {
+    const params = buildCheckoutSessionParams({
+      ...base,
+      trialEligible: false,
+      usagePriceId: "price_usage",
+    });
+    expect(params["line_items[1][price]"]).toBe("price_usage");
+    expect(params).not.toHaveProperty("line_items[1][quantity]");
+  });
+
   it("leaves the trial out once the owner has used it", () => {
     const params = buildCheckoutSessionParams({
       ...base,
@@ -284,7 +294,10 @@ function fakeOrganizations(store: BillingStore, owner = true, members = 7) {
 const STRIPE_OK = {
   "POST /v1/customers": { id: "cus_new" },
   "GET /v1/prices": {
-    data: [{ id: "price_pro", lookup_key: "treq_pro_monthly" }],
+    data: [
+      { id: "price_pro", lookup_key: "treq_pro_monthly" },
+      { id: "price_usage", lookup_key: "treq_sandbox_usage" },
+    ],
   },
   "POST /v1/checkout/sessions": {
     id: "cs_1",
@@ -405,10 +418,37 @@ describe("createCheckout", () => {
     expect(calls[0]).toEqual({
       method: "GET",
       path: "/v1/prices",
-      params: { "lookup_keys[0]": "treq_pro_monthly", active: true, limit: 1 },
+      params: {
+        "lookup_keys[0]": "treq_pro_monthly",
+        "lookup_keys[1]": "treq_sandbox_usage",
+        active: true,
+        limit: 2,
+      },
       idempotencyKey: undefined,
     });
     expect(sessionParams(calls)?.["line_items[0][price]"]).toBe("price_pro");
+    expect(sessionParams(calls)?.["line_items[1][price]"]).toBe("price_usage");
+  });
+
+  it("opens Pro checkout without the usage line when that price is missing", async () => {
+    const { stripe, calls } = fakeStripe({
+      ...STRIPE_OK,
+      "GET /v1/prices": {
+        data: [{ id: "price_pro", lookup_key: "treq_pro_monthly" }],
+      },
+    });
+    const store = fakeStore({
+      getCustomer: vi.fn(async () => ({
+        stripe_customer_id: "cus_old",
+        trial_used_at: null,
+      })),
+    });
+    const result = await createCheckout(
+      { plan: "pro" },
+      { user, store, stripe, webUrl: WEB_URL },
+    );
+    expect(result.status).toBe(200);
+    expect(sessionParams(calls)).not.toHaveProperty("line_items[1][price]");
   });
 
   it("refuses a second subscription for someone who already has Pro", async () => {

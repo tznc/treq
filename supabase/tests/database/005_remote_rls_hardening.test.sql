@@ -15,8 +15,8 @@ insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-00000000000b', 'rls-b@example.com');
 
 insert into public.remote_instances (id, owner_user_id, provider_kind, region, size_preset) values
-  ('10000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-00000000000a', 'fly_sprites', 'us_east', 'small'),
-  ('10000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-00000000000b', 'fly_sprites', 'us_east', 'small');
+  ('10000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-00000000000a', 'boat', 'us_east', 'small'),
+  ('10000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-00000000000b', 'boat', 'us_east', 'small');
 
 insert into public.remote_endpoints (id, owner_user_id, instance_id, source, display_name, hostname, username) values
   ('20000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-00000000000a',

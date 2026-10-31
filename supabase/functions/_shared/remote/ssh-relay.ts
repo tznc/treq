@@ -1,11 +1,11 @@
 // Core of the `remote-ssh-relay` Edge Function: authorizes a client's
 // WebSocket upgrade and pipes raw SSH bytes between that socket and the
-// Sprites TCP proxy. Kept free of `Deno.serve` and Supabase clients so the
+// machine's treq-gateway (provider-tcp.ts). Kept free of `Deno.serve` and Supabase clients so the
 // authorization rules and the byte pump can be unit tested with fakes.
 //
-// Why a relay: a Sprite has no raw TCP ingress, and the Sprites TCP proxy
-// needs the org API token, which must never leave the server. The relay
-// holds that token; the client only proves who it is with its Supabase
+// Why a relay: a managed machine has no raw TCP ingress, and the provider's
+// ingress needs the provider's API token, which must never leave the
+// server. The relay holds that token; the client only proves who it is with its Supabase
 // session. SSH runs end to end through the relay, so the relay never sees
 // plaintext: the client still pins the host key and presents a Treq CA
 // certificate that sshd checks.
@@ -22,17 +22,27 @@ import {
   PRO_REQUIRED_CODE,
   PRO_REQUIRED_MESSAGES,
 } from "../billing/entitlement.ts";
-import { spritesProxyUrl, type SpritesConfig } from "./sprites-adapter.ts";
+import type { ProviderKind } from "./provider.ts";
+import {
+  type RelaySocket,
+  toBytes,
+  type UpstreamConnection,
+} from "./gateway-proxy.ts";
 
-// Instance states in which the Sprite exists and the proxy can reach it. A
-// paused Sprite is woken by the relay (see `openUpstreamWithWake`), so
+// Lives in gateway-proxy.ts so adapters can open the gateway without
+// importing the relay; re-exported for existing callers.
+export {
+  denoUpstreamSocket,
+  type RelaySocket,
+  type UpstreamConnection,
+  UpstreamError,
+  type UpstreamSocketFactory,
+} from "./gateway-proxy.ts";
+
+// Instance states in which the machine exists and the gateway can reach it.
+// A stopped machine is woken by the relay (see `openTcp` in provider-tcp.ts), so
 // `suspended` and `waking` are accepted as well as `ready`.
 const RELAYABLE_INSTANCE_STATES = new Set(["ready", "suspended", "waking"]);
-
-// How long to wait for the proxy's `{"status":"connected"}` reply. A cold
-// wake takes 1 to 2 s per the Sprites lifecycle docs, so this leaves room
-// for a wake plus sshd accepting the TCP connection.
-const UPSTREAM_CONNECT_TIMEOUT_MS = 15_000;
 
 // Bytes allowed to queue on one side before the relay gives up on that
 // connection. WebSocket has no way to pause reads, so this is a bound, not
@@ -45,7 +55,11 @@ export interface RelayTarget {
   ownerUserId: string;
   endpointId: string;
   instanceId: string;
-  spriteName: string;
+  providerResourceId: string;
+  /** Which adapter reaches the machine. */
+  providerKind: ProviderKind;
+  /** The active placement, whose gateway secret signs the gateway token. */
+  placementId: string | null;
   host: string;
   port: number;
 }
@@ -62,6 +76,8 @@ export interface RelayInstanceRow {
   id: string;
   status: string;
   provider_resource_id: string | null;
+  provider_kind: string;
+  active_placement_id?: string | null;
 }
 
 export interface RelayClientKeyRow {
@@ -150,7 +166,7 @@ export async function authorizeRelayRequest(
     );
   }
 
-  // Connecting wakes a paused Sprite, so this is what keeps the cloud
+  // Connecting wakes a stopped machine, so this is what keeps the cloud
   // workspace of an owner whose Pro ended stopped (prds/billing-and-teams.md,
   // "Enforcement").
   if (!(await deps.store.hasPro(ownerUserId))) {
@@ -172,7 +188,9 @@ export async function authorizeRelayRequest(
     ownerUserId,
     endpointId: endpoint.id,
     instanceId: instance.id,
-    spriteName: instance.provider_resource_id,
+    providerResourceId: instance.provider_resource_id,
+    providerKind: instance.provider_kind as ProviderKind,
+    placementId: instance.active_placement_id ?? null,
     host: endpoint.hostname,
     port: endpoint.port,
   };
@@ -195,149 +213,6 @@ export function relayUrlForEndpoint(endpointId: string, keyId: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Upstream (Sprites TCP proxy)
-// ---------------------------------------------------------------------------
-
-/** The subset of the WebSocket API the relay uses, so tests can pass fakes. */
-export interface RelaySocket {
-  readonly readyState: number;
-  readonly bufferedAmount: number;
-  binaryType: BinaryType;
-  send(data: ArrayBufferLike | ArrayBufferView | string): void;
-  close(code?: number, reason?: string): void;
-  addEventListener(type: "open", listener: () => void): void;
-  addEventListener(
-    type: "message",
-    listener: (event: MessageEvent) => void,
-  ): void;
-  addEventListener(type: "close", listener: (event: CloseEvent) => void): void;
-  addEventListener(type: "error", listener: (event: Event) => void): void;
-}
-
-export type UpstreamSocketFactory = (
-  url: string,
-  headers: Record<string, string>,
-) => RelaySocket;
-
-// Deno accepts a non-standard `headers` option on the WebSocket client
-// constructor, which is how the org token reaches the proxy without being
-// placed in the URL.
-export const denoUpstreamSocket: UpstreamSocketFactory = (url, headers) =>
-  new WebSocket(url, { headers }) as unknown as RelaySocket;
-
-/**
- * An open proxy socket plus any bytes that arrived after the handshake but
- * before the client side was ready. sshd sends its identification line as
- * soon as the TCP connection opens, so those first bytes can arrive early.
- */
-export interface UpstreamConnection {
-  socket: RelaySocket;
-  /** Stops early buffering and returns the bytes buffered so far. */
-  takeOver(): Uint8Array[];
-}
-
-export class UpstreamError extends Error {}
-
-// Opens the Sprites proxy and completes its JSON handshake. Resolves only
-// after `{"status":"connected"}`, so a failure here can still be returned to
-// the client as an HTTP error instead of an upgraded socket that closes.
-export function openUpstream(
-  config: SpritesConfig,
-  target: RelayTarget,
-  factory: UpstreamSocketFactory,
-  timeoutMs = UPSTREAM_CONNECT_TIMEOUT_MS,
-): Promise<UpstreamConnection> {
-  return new Promise((resolve, reject) => {
-    const socket = factory(spritesProxyUrl(config, target.spriteName), {
-      Authorization: `Bearer ${config.apiToken}`,
-    });
-    socket.binaryType = "arraybuffer";
-    let pending: Uint8Array[] | null = [];
-    let connected = false;
-    let settled = false;
-    const fail = (message: string) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try {
-        socket.close(1000);
-      } catch {
-        // Already closed.
-      }
-      reject(new UpstreamError(message));
-    };
-    const timer = setTimeout(
-      () => fail("timed out waiting for the Sprites proxy"),
-      timeoutMs,
-    );
-
-    socket.addEventListener("open", () => {
-      socket.send(JSON.stringify({ host: target.host, port: target.port }));
-    });
-    socket.addEventListener("message", (event: MessageEvent) => {
-      if (connected) {
-        pending?.push(toBytes(event.data));
-        return;
-      }
-      if (typeof event.data !== "string") {
-        fail("Sprites proxy sent data before the connect reply");
-        return;
-      }
-      let reply: { status?: unknown };
-      try {
-        reply = JSON.parse(event.data);
-      } catch {
-        fail("Sprites proxy sent an unreadable connect reply");
-        return;
-      }
-      if (reply.status !== "connected") {
-        fail(
-          `Sprites proxy refused the connection (status: ${String(reply.status)})`,
-        );
-        return;
-      }
-      connected = true;
-      settled = true;
-      clearTimeout(timer);
-      resolve({
-        socket,
-        takeOver: () => {
-          const early = pending ?? [];
-          pending = null;
-          return early;
-        },
-      });
-    });
-    socket.addEventListener("close", (event: CloseEvent) => {
-      fail(`Sprites proxy closed during connect (code ${event.code})`);
-    });
-    socket.addEventListener("error", () =>
-      fail("Sprites proxy connection failed"),
-    );
-  });
-}
-
-// A paused Sprite should resume when the proxy reaches it, but the Sprites
-// docs do not say so for the proxy endpoint specifically. If the first
-// attempt fails, wake the Sprite through the documented exec path and try
-// once more.
-export async function openUpstreamWithWake(
-  config: SpritesConfig,
-  target: RelayTarget,
-  factory: UpstreamSocketFactory,
-  wake: (spriteName: string) => Promise<void>,
-  timeoutMs?: number,
-): Promise<UpstreamConnection> {
-  try {
-    return await openUpstream(config, target, factory, timeoutMs);
-  } catch (err) {
-    if (!(err instanceof UpstreamError)) throw err;
-    await wake(target.spriteName);
-    return await openUpstream(config, target, factory, timeoutMs);
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Byte pump
 // ---------------------------------------------------------------------------
 
@@ -348,13 +223,6 @@ export interface PipeStats {
   code: number;
 }
 
-function toBytes(data: unknown): Uint8Array {
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  if (ArrayBuffer.isView(data))
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  if (typeof data === "string") return new TextEncoder().encode(data);
-  return new Uint8Array();
-}
 
 // 1005 and 1006 are reserved and may not be sent; 1015 likewise. Anything
 // else outside the application range is replaced by a normal close.

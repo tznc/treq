@@ -38,6 +38,7 @@ describe("actionForEvent: subscriptions", () => {
         p_current_period_end: iso(1791209600),
         p_cancel_at_period_end: false,
         p_trial_end: iso(1791209600),
+        p_current_period_start: iso(1790000000),
       },
     });
   });
@@ -49,6 +50,7 @@ describe("actionForEvent: subscriptions", () => {
         p_event_type: "customer.subscription.updated",
         p_status: "active",
         p_current_period_end: iso(1793801600),
+        p_current_period_start: iso(1791209600),
         p_cancel_at_period_end: true,
       },
     });
@@ -450,6 +452,7 @@ describe("handleStripeWebhook", () => {
           p_subscription_id: sub.id,
           p_status: "active",
           p_cancel_at_period_end: false,
+          p_current_period_start: expect.any(String),
           p_fetched_at: new Date(now * 1000).toISOString(),
         }),
       );

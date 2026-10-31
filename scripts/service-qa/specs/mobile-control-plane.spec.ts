@@ -6,7 +6,7 @@
  * command and the managed-connect flow send and expect against the
  * `remote-instance` / `remote-ssh-trust` edge functions.
  *
- * Requires `TREQ_REMOTE_SPRITES_STUB=1` (set by `scripts/service-qa/up.sh`) so
+ * Requires `TREQ_REMOTE_PROVIDER_STUB=1` (set by `scripts/service-qa/up.sh`) so
  * `ensure`/`wake`/`status` resolve without a real Fly.io account.
  */
 import { it, expect, afterEach } from "vitest";
@@ -75,9 +75,8 @@ async function invoke(
   return { status: response.status, json };
 }
 
-/** Minimal OpenSSH `ssh-ed25519 <base64> <comment>` line encoder, same
- * approach `supabase/functions/tests/remote_e2e.test.ts` uses, so this spec
- * doesn't need an SSH-key-format library either. */
+/** Minimal OpenSSH `ssh-ed25519 <base64> <comment>` line encoder, so this
+ * spec doesn't need an SSH-key-format library. */
 async function generateOpenSshEd25519PublicKey(comment: string): Promise<string> {
   const keyPair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
     "sign",
@@ -172,8 +171,7 @@ it(
 
     // registerClientKey: the app's own `ensure_mobile_device_key` Tauri
     // command produces a real ed25519 keypair via platform keystore; this
-    // spec's stand-in is the same OpenSSH-line encoding
-    // remote_e2e.test.ts uses.
+    // spec's stand-in is the OpenSSH-line encoding above.
     const publicKey = await generateOpenSshEd25519PublicKey(`${testUser.email}@mobile-qa`);
     const register = await invoke("remote-ssh-trust", accessToken, "register_client_key", {
       idempotency_key: `mobile-qa-${crypto.randomUUID()}`,

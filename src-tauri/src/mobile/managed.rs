@@ -96,7 +96,7 @@ pub async fn connect(progress: impl Fn(&'static str) + Send + Sync) -> Result<Co
       // retry after a failure is not a replay of it.
       progress("Creating the managed instance");
       let key = format!("provision-managed-{}", uuid::Uuid::new_v4());
-      control_plane::ensure(supabase, &key)
+      control_plane::ensure(supabase, &key, None, None)
         .await
         .map_err(|e| e.to_string())?;
     }

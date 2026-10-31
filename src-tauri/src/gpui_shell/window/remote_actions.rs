@@ -97,6 +97,15 @@ impl Model {
       "remote.cloud.repair" => cloud(CloudAction::Repair),
       "remote.cloud.delete" => cloud(CloudAction::Delete),
       "remote.cloud.openRepositories" => cloud(CloudAction::OpenRepositories),
+      // "Raise cap": the spend cap is changed in Account settings.
+      "remote.cloud.spendCap.edit" => {
+        self.remote.setup = false;
+        self.open_settings();
+        if let Page::Settings { tab } = &mut self.page {
+          *tab = "account".into();
+        }
+        Vec::new()
+      }
       id if id.starts_with("remoteRepo.") => remote(self.remote.form_press(id)),
       // The Overview screen's machines and recent repositories.
       // The cloud row before its workspace runs: the setup dialog, on the
