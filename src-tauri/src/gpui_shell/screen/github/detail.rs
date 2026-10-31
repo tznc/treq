@@ -4,8 +4,8 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, Context, Div, FontWeight, KeyDownEvent,
-  MouseButton, SharedString, Window,
+  self, deferred, div, prelude::*, Context, Div, FontWeight, KeyDownEvent, MouseButton,
+  SharedString, Window,
 };
 
 use super::{
@@ -23,11 +23,10 @@ use crate::{
     screen::{
       code::markdown,
       github_data::{self as data, CiState, GithubHost, IssueChange, PrChange, Tab},
-      workspace_modal::{dialog_description, dialog_header, dialog_panel},
     },
     theme::{self, Palette},
     time,
-    ui::{self, Button, EscapeExt as _, Size, TextSize, Tone, Variant},
+    ui::{self, Button, Size, TextSize, Tone, Variant},
   },
   local_db::Workspace,
 };
@@ -792,72 +791,51 @@ impl GithubView {
   ) -> impl IntoElement {
     let number = self.route.selected.unwrap_or_default();
     let pending = self.detail.busy.contains(&Busy::Delete);
-    let (backdrop, panel) = dialog_panel("github-delete-dialog", 512., window.viewport_size(), p);
     let cancel = |view: &mut Self, cx: &mut Context<Self>| {
       if !view.detail.busy.contains(&Busy::Delete) {
         view.detail.confirm_delete = false;
         cx.notify();
       }
     };
-    let panel = panel
-      .child(dialog_header(
-        format!("Delete issue #{number}?"),
-        dialog_description(
-          "This permanently deletes the issue and its comments on GitHub. You cannot undo this.",
-          p,
-        ),
-      ))
-      .child(
-        div()
-          .mt_4()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("github-delete-cancel", p)
-              .variant(Variant::Ghost)
-              .disabled(pending)
-              .label("Cancel")
-              .on_click(cx.listener(move |view, _, _, cx| cancel(view, cx))),
-          )
-          .child(
-            parts::busy_spinner(
-              Button::new("github-delete-confirm", p)
-                .variant(Variant::Destructive)
-                .gap_1()
-                .disabled(pending),
-              "github-delete-confirm",
-              pending,
-              p.destructive_foreground,
-            )
-            .label("Delete")
-            .on_click(cx.listener(|view, _, _, cx| {
-              view.change_issue(
-                Busy::Delete,
-                "Failed to delete issue",
-                IssueChange::Delete,
-                cx,
-              )
-            })),
-          ),
-      );
-    deferred(
-      anchored().position(point(px(0.), px(0.))).child(
-        backdrop
-          .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |view, _, _, cx| cancel(view, cx)),
-          )
-          .child(
-            panel
-              .id("github-delete-panel")
-              .track_focus(self.dialog_focus())
-              .on_escape(cx.listener(move |view, _, _, cx| cancel(view, cx)))
-              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
-          ),
-      ),
-    )
-    .with_priority(2)
+    let delete = |view: &mut Self, cx: &mut Context<Self>| {
+      view.change_issue(
+        Busy::Delete,
+        "Failed to delete issue",
+        IssueChange::Delete,
+        cx,
+      )
+    };
+    ui::Dialog::new("github-delete-dialog", p)
+      .overlay(window.viewport_size())
+      .width(512.)
+      .title(format!("Delete issue #{number}?"))
+      .description(
+        "This permanently deletes the issue and its comments on GitHub. You cannot undo this.",
+      )
+      .focus(self.dialog_focus())
+      .on_close(ui::handler(cx, move |view, _, cx| cancel(view, cx)))
+      .on_primary(ui::handler(cx, move |view, _, cx| delete(view, cx)))
+      .primary_disabled(pending)
+      .footer([
+        Button::new("github-delete-cancel", p)
+          .variant(Variant::Outline)
+          .disabled(pending)
+          .label("Cancel")
+          .on_click(cx.listener(move |view, _, _, cx| cancel(view, cx)))
+          .into_any_element(),
+        parts::busy_spinner(
+          Button::new("github-delete-confirm", p)
+            .variant(Variant::Destructive)
+            .gap_1()
+            .disabled(pending),
+          "github-delete-confirm",
+          pending,
+          p.destructive_foreground,
+        )
+        .label("Delete")
+        .on_click(cx.listener(move |view, _, _, cx| delete(view, cx)))
+        .into_any_element(),
+      ])
   }
 
   fn pr_content(

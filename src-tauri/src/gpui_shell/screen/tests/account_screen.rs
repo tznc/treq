@@ -382,10 +382,10 @@ fn cloud_workspace_shows_usage_and_deletes_after_confirming(cx: &mut TestAppCont
   h.click("cloud-open-repositories");
   h.click("cloud-delete");
   assert!(h.drawn("cloud-delete-dialog"));
-  h.click("cloud-delete-cancel");
+  h.click("cloud-delete-dialog-cancel");
   assert!(!h.drawn("cloud-delete-dialog"));
   h.click("cloud-delete");
-  h.click("cloud-delete-confirm");
+  h.click("cloud-delete-dialog-confirm");
   assert!(!h.drawn("cloud-delete-dialog"));
   assert_eq!(host.writes(), ["cloud OpenRepositories", "cloud Delete"]);
   assert_eq!(h.sent(), [press("settings.close")]);
@@ -588,4 +588,54 @@ fn linear_oauth_refused_for_want_of_pro_offers_the_upgrade(cx: &mut TestAppConte
     host.writes(),
     ["linear oauth", "notify toast Linear OAuth needs Pro"]
   );
+}
+
+#[gpui::test]
+fn the_cloud_delete_confirmation_cancels_on_escape_and_deletes_on_enter(cx: &mut TestAppContext) {
+  let ready = cloud(serde_json::json!({
+    "instance": { "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 5 },
+    "endpoint": { "username": "treq", "hostname": "box.treq.dev", "port": 2222 },
+  }));
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(cx, host.clone(), ready);
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(1200.)));
+  h.click("cloud-delete");
+  assert!(h.drawn("cloud-delete-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.drawn("cloud-delete-dialog"));
+  h.click("cloud-delete");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("cloud-delete-dialog"));
+  assert_eq!(host.writes(), ["cloud Delete"]);
+}
+
+#[gpui::test]
+fn the_account_delete_dialog_cancels_on_escape(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host);
+  h.click("account-delete");
+  assert!(h.drawn("account-delete-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert_eq!(delete_dialog(&mut h), None);
+}
+
+#[gpui::test]
+fn the_account_delete_dialog_deletes_on_enter_once_the_email_is_typed(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  // Enter waits for the email.
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(!host.writes().contains(&"delete account".to_string()));
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"delete account".to_string()));
 }

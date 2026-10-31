@@ -23,9 +23,8 @@ use std::{
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, AnyElement, App, ClipboardItem, Context,
-  Div, Entity, FontWeight, KeyDownEvent, MouseButton, Pixels, SharedString, Stateful, Subscription,
-  Window,
+  self, deferred, div, prelude::*, AnyElement, App, ClipboardItem, Context, Div, Entity,
+  FontWeight, KeyDownEvent, MouseButton, Pixels, SharedString, Stateful, Subscription, Window,
 };
 
 use super::{
@@ -1551,49 +1550,6 @@ fn diff_message(diff: &JjRevisionDiff, p: &Palette) -> Div {
     .child("No changes")
 }
 
-/// `ui/dialog.tsx`: the backdrop over the whole window and the panel.
-pub(super) fn dialog_panel(
-  id: &'static str,
-  max_width: f32,
-  viewport: gpui::Size<Pixels>,
-  p: &Palette,
-) -> (Stateful<Div>, Div) {
-  let backdrop = div()
-    .id(SharedString::from(format!("{id}-backdrop")))
-    .w(viewport.width)
-    .h(viewport.height)
-    .p_4()
-    .flex()
-    .items_center()
-    .justify_center()
-    .bg(p.scrim())
-    .occlude();
-  let panel = div()
-    .debug_selector(move || id.into())
-    .w_full()
-    .max_w(zpx(max_width))
-    .p_6()
-    .rounded(radius::LG)
-    .border_1()
-    .border_color(p.border.opacity(0.5))
-    .bg(p.popover)
-    .text_color(p.popover_foreground)
-    .shadow_2xl();
-  (backdrop, panel)
-}
-
-pub(super) fn dialog_title(title: impl IntoElement) -> Div {
-  ui::text(div(), TextSize::Lg)
-    .font_weight(FontWeight::SEMIBOLD)
-    .child(title)
-}
-
-pub(super) fn dialog_description(text: impl Into<SharedString>, p: &Palette) -> Div {
-  ui::text(div(), TextSize::Sm)
-    .text_color(p.muted_foreground)
-    .child(text.into())
-}
-
 impl Render for CommitsView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.tips.sync(cx);
@@ -2431,24 +2387,7 @@ impl CommitsView {
     cx: &mut Context<Self>,
   ) -> Option<impl IntoElement> {
     let viewport = window.viewport_size();
-    let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
-      let k = &e.keystroke;
-      if ui::is_escape(k) {
-        cx.stop_propagation();
-        view.close_dialog(cx);
-      } else if k.key == "enter"
-        && (crate::gpui_shell::keys::held(k.modifiers).platform
-          || crate::gpui_shell::keys::held(k.modifiers).control)
-      {
-        cx.stop_propagation();
-        match view.dialog {
-          Some(Dialog::Describe { .. }) => view.save_description(cx),
-          Some(Dialog::Timestamp { .. }) => view.apply_timestamp(cx),
-          Some(Dialog::Resolve { .. }) | None => {}
-        }
-      }
-    });
-    let (backdrop, panel) = match self.dialog.as_ref()? {
+    let dialog = match self.dialog.as_ref()? {
       Dialog::Describe {
         commit,
         loaded,
@@ -2456,30 +2395,22 @@ impl CommitsView {
         text,
         saving,
       } => {
-        let (backdrop, panel) = dialog_panel("edit-description-dialog", 560., viewport, p);
         let fetching = loaded.is_none();
         let unchanged = loaded.as_ref().and_then(|l| l.as_ref().ok()) == Some(text)
           || matches!(loaded, Some(Err(_))) && text.is_empty();
         let can_submit = !fetching && !saving && !unchanged;
         let error = loaded.as_ref().and_then(|l| l.as_ref().err()).cloned();
-        let panel = panel
-          .child(
-            div()
-              .flex()
-              .flex_col()
-              .gap_1p5()
-              .child(dialog_title("Edit Commit Description"))
-              .child(dialog_description(
-                format!("Editing {}", commit.short_id),
-                p,
-              )),
-          )
+        ui::Dialog::new("edit-description-dialog", p)
+          .width(560.)
+          .title("Edit Commit Description")
+          .description(format!("Editing {}", commit.short_id))
+          .on_primary(ui::handler(cx, |view, _, cx| view.save_description(cx)))
+          .primary_disabled(!can_submit)
           .child(
             div()
               .flex()
               .flex_col()
               .gap_4()
-              .py_4()
               .child(if fetching {
                 div()
                   .flex()
@@ -2502,26 +2433,19 @@ impl CommitsView {
                 )
               }),
           )
-          .child(
-            div()
-              .flex()
-              .justify_end()
-              .gap_2()
-              .child(
-                Button::new("description-cancel", p)
-                  .variant(Variant::Outline)
-                  .disabled(*saving)
-                  .label("Cancel")
-                  .on_click(cx.listener(|view, _, _, cx| view.close_dialog(cx))),
-              )
-              .child(
-                Button::new("description-save", p)
-                  .disabled(!can_submit)
-                  .label(if *saving { "Saving..." } else { "Save" })
-                  .on_click(cx.listener(|view, _, _, cx| view.save_description(cx))),
-              ),
-          );
-        (backdrop, panel)
+          .footer([
+            Button::new("description-cancel", p)
+              .variant(Variant::Outline)
+              .disabled(*saving)
+              .label("Cancel")
+              .on_click(cx.listener(|view, _, _, cx| view.close_dialog(cx)))
+              .into_any_element(),
+            Button::new("description-save", p)
+              .disabled(!can_submit)
+              .label(if *saving { "Saving..." } else { "Save" })
+              .on_click(cx.listener(|view, _, _, cx| view.save_description(cx)))
+              .into_any_element(),
+          ])
       }
       Dialog::Timestamp {
         commit,
@@ -2530,7 +2454,6 @@ impl CommitsView {
         saving,
         error,
       } => {
-        let (backdrop, panel) = dialog_panel("edit-timestamp-dialog", 520., viewport, p);
         let toggle = |id: &'static str, label: &'static str, on: bool| {
           Button::new(id, p)
             .size(Size::Sm)
@@ -2585,22 +2508,16 @@ impl CommitsView {
             .into_any_element()
         };
         let can_submit = !saving && form.shift().is_some();
-        let panel = panel
-          .child(
-            div()
-              .flex()
-              .flex_col()
-              .gap_1p5()
-              .child(dialog_title("Edit commit timestamp"))
-              .child(dialog_description(
-                format!(
-                  "Current time: {}. Later commits on this lineage that would become older are \
-                   shifted by the same gaps.",
-                  time::full(&commit.timestamp)
-                ),
-                p,
-              )),
-          )
+        ui::Dialog::new("edit-timestamp-dialog", p)
+          .width(520.)
+          .title("Edit commit timestamp")
+          .description(format!(
+            "Current time: {}. Later commits on this lineage that would become older are \
+             shifted by the same gaps.",
+            time::full(&commit.timestamp)
+          ))
+          .on_primary(ui::handler(cx, |view, _, cx| view.apply_timestamp(cx)))
+          .primary_disabled(!can_submit)
           .child(
             div()
               .flex()
@@ -2631,44 +2548,32 @@ impl CommitsView {
                 )
               }),
           )
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .justify_between()
-              .gap_2()
-              .child(
-                Button::new("shift-stack-to-now", p)
-                  .variant(Variant::Outline)
-                  .disabled(*saving)
-                  .label("Shift stack to now")
-                  .on_click(cx.listener(|view, _, _, cx| view.shift_to_now(true, cx))),
-              )
-              .child(
-                div()
-                  .flex()
-                  .gap_2()
-                  .child(
-                    Button::new("timestamp-cancel", p)
-                      .variant(Variant::Outline)
-                      .disabled(*saving)
-                      .label("Cancel")
-                      .on_click(cx.listener(|view, _, _, cx| view.close_dialog(cx))),
-                  )
-                  .child(
-                    Button::new("timestamp-apply", p)
-                      .disabled(!can_submit)
-                      .when(*saving, |this| {
-                        this
-                          .child(ui::spinner("timestamp-spin", 16., p.primary_foreground))
-                          .label("Saving...")
-                      })
-                      .when(!*saving, |this| this.label("Apply"))
-                      .on_click(cx.listener(|view, _, _, cx| view.apply_timestamp(cx))),
-                  ),
-              ),
-          );
-        (backdrop, panel)
+          // The stack-wide shift sits apart, left of the action pair.
+          .footer([
+            Button::new("shift-stack-to-now", p)
+              .variant(Variant::Outline)
+              .disabled(*saving)
+              .label("Shift stack to now")
+              .on_click(cx.listener(|view, _, _, cx| view.shift_to_now(true, cx)))
+              .into_any_element(),
+            div().flex_1().into_any_element(),
+            Button::new("timestamp-cancel", p)
+              .variant(Variant::Outline)
+              .disabled(*saving)
+              .label("Cancel")
+              .on_click(cx.listener(|view, _, _, cx| view.close_dialog(cx)))
+              .into_any_element(),
+            Button::new("timestamp-apply", p)
+              .disabled(!can_submit)
+              .when(*saving, |this| {
+                this
+                  .child(ui::spinner("timestamp-spin", 16., p.primary_foreground))
+                  .label("Saving...")
+              })
+              .when(!*saving, |this| this.label("Apply"))
+              .on_click(cx.listener(|view, _, _, cx| view.apply_timestamp(cx)))
+              .into_any_element(),
+          ])
       }
       Dialog::Resolve {
         session,
@@ -2676,12 +2581,6 @@ impl CommitsView {
         submitting,
         ..
       } => {
-        let (backdrop, panel) = dialog_panel(
-          "resolve-conflicts-dialog",
-          f32::from(viewport.width) * 0.42,
-          viewport,
-          p,
-        );
         let preparing = session.is_none();
         let ready = matches!(session, Some(Ok(_)));
         let failed = match session {
@@ -2707,19 +2606,23 @@ impl CommitsView {
             })),
           cx,
         );
-        let panel = panel
-          .w(viewport.width * 0.42)
-          .flex()
-          .flex_col()
-          .gap_4()
-          .child(
+        ui::Dialog::new("resolve-conflicts-dialog", p)
+          .relative_size(0.42, None)
+          .title("Resolve commit conflicts in place")
+          .header(
             div()
               .flex()
               .items_center()
               .gap_1p5()
-              .child(dialog_title("Resolve commit conflicts in place"))
+              .child(
+                ui::text(div(), TextSize::Lg)
+                  .font_weight(FontWeight::SEMIBOLD)
+                  .child("Resolve commit conflicts in place"),
+              )
               .child(help),
           )
+          .on_primary(ui::handler(cx, |view, _, cx| view.submit_resolve(cx)))
+          .primary_disabled(!ready || *submitting)
           .child(
             div()
               .debug_selector(|| "resolve-conflicts-prompt".into())
@@ -2733,57 +2636,36 @@ impl CommitsView {
                 .child(err),
             )
           })
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .justify_end()
-              .gap_2()
-              .child(
-                Button::new("resolve-cancel", p)
-                  .variant(Variant::Ghost)
-                  .disabled(*submitting)
-                  .label("Cancel")
-                  .on_click(cx.listener(|view, _, _, cx| view.close_dialog(cx))),
-              )
-              .child(
-                Button::new("resolve-conflicts-submit", p)
-                  .disabled(!ready || *submitting)
-                  .when(preparing, |this| {
-                    this
-                      .child(ui::spinner("resolve-spin", 16., p.primary_foreground))
-                      .label("Preparing…")
-                  })
-                  .when(!preparing, |this| {
-                    this.label(if *submitting {
-                      "Starting…"
-                    } else {
-                      "Resolve"
-                    })
-                  })
-                  .on_click(cx.listener(|view, _, _, cx| view.submit_resolve(cx))),
-              ),
-          );
-        (backdrop, panel)
+          .footer([
+            Button::new("resolve-cancel", p)
+              .variant(Variant::Outline)
+              .disabled(*submitting)
+              .label("Cancel")
+              .on_click(cx.listener(|view, _, _, cx| view.close_dialog(cx)))
+              .into_any_element(),
+            Button::new("resolve-conflicts-submit", p)
+              .disabled(!ready || *submitting)
+              .when(preparing, |this| {
+                this
+                  .child(ui::spinner("resolve-spin", 16., p.primary_foreground))
+                  .label("Preparing…")
+              })
+              .when(!preparing, |this| {
+                this.label(if *submitting {
+                  "Starting…"
+                } else {
+                  "Resolve"
+                })
+              })
+              .on_click(cx.listener(|view, _, _, cx| view.submit_resolve(cx)))
+              .into_any_element(),
+          ])
       }
     };
     Some(
-      deferred(
-        anchored().position(point(px(0.), px(0.))).child(
-          backdrop
-            .on_mouse_down(
-              MouseButton::Left,
-              cx.listener(|view, _, _, cx| view.close_dialog(cx)),
-            )
-            .child(
-              panel
-                .id("commits-dialog")
-                .capture_key_down(keys)
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
-            ),
-        ),
-      )
-      .with_priority(2),
+      dialog
+        .overlay(viewport)
+        .on_close(ui::handler(cx, |view, _, cx| view.close_dialog(cx))),
     )
   }
 }

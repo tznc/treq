@@ -1876,7 +1876,7 @@ impl Render for ChangesView {
           .child(self.content(&p, cx))
           .children(self.search_bar(&p, cx)),
       );
-    let dialog = self.dialog(window, &p, cx);
+    let dialog = self.discard_all_dialog(window, &p, cx);
     let finish = self.finish_popover(&p, cx);
     let review_dialog = self.review_dialog(window, &p, cx);
     root
@@ -3471,7 +3471,7 @@ impl ChangesView {
       .children(self.note_section(conflict, p, cx))
   }
 
-  fn dialog(
+  fn discard_all_dialog(
     &mut self,
     window: &mut Window,
     p: &Palette,
@@ -3489,95 +3489,28 @@ impl ChangesView {
         focus
       })
       .clone();
-    let viewport = window.viewport_size();
     let n = self.staging.unstaged(self.files()).len();
-    let panel = div()
-      .id("discard-all-dialog")
-      .debug_selector(|| "discard-all-dialog".into())
-      .track_focus(&focus)
-      .w_full()
-      .max_w(zpx(512.))
-      .p_6()
-      .rounded(radius::LG)
-      .border_1()
-      .border_color(p.border.opacity(0.5))
-      .bg(p.popover)
-      .text_color(p.popover_foreground)
-      .shadow_2xl()
-      .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
-        if ui::is_escape(&e.keystroke) {
-          cx.stop_propagation();
-          view.discard_dialog = false;
-          cx.notify();
-        }
-      }))
-      .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-      .child(
-        div()
-          .flex()
-          .flex_col()
-          .gap_1p5()
-          .child(
-            ui::text(div(), TextSize::Lg)
-              .font_weight(FontWeight::SEMIBOLD)
-              .child("Discard all changes?"),
-          )
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child(format!(
-                "This will discard all {n} unsaved {}. You can restore them from the Undo button on \
-                 the toast that follows.",
-                if n == 1 { "change" } else { "changes" }
-              )),
-          ),
-      )
-      .child(
-        div()
-          .mt_4()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("discard-all-cancel", p)
-              .variant(Variant::Ghost)
-              .label("Cancel")
-              .on_click(cx.listener(|view, _, _, cx| {
-                view.discard_dialog = false;
-                cx.notify();
-              })),
-          )
-          .child(
-            Button::new("discard-all-confirm", p)
-              .variant(Variant::Destructive)
-              .label("Discard all changes")
-              .on_click(cx.listener(|view, _, _, cx| view.discard_all(cx))),
-          ),
-      );
+    let message = format!(
+      "This will discard all {n} unsaved {}. You can restore them from the Undo button on the \
+       toast that follows.",
+      if n == 1 { "change" } else { "changes" }
+    );
     Some(
-      deferred(
-        anchored().position(point(px(0.), px(0.))).child(
-          div()
-            .id("discard-all-backdrop")
-            .w(viewport.width)
-            .h(viewport.height)
-            .p_4()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(p.scrim())
-            .occlude()
-            .on_mouse_down(
-              MouseButton::Left,
-              cx.listener(|view, _, _, cx| {
-                view.discard_dialog = false;
-                cx.notify();
-              }),
-            )
-            .child(panel),
-        ),
+      ui::ConfirmDialog::new(
+        "discard-all-dialog",
+        "Discard all changes?",
+        "Discard all changes",
+        p,
       )
-      .with_priority(2),
+      .overlay(window.viewport_size())
+      .message(message)
+      .destructive()
+      .focus(&focus)
+      .on_cancel(ui::handler(cx, |view, _, cx| {
+        view.discard_dialog = false;
+        cx.notify();
+      }))
+      .on_confirm(ui::handler(cx, |view, _, cx| view.discard_all(cx))),
     )
   }
 }

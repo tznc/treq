@@ -616,7 +616,7 @@ const CHANGES_CLICKS: &[&str] = &[
   "unstage-a.rs",
   "viewed-a.rs",
   "discard-all-changes",
-  "discard-all-confirm",
+  "discard-all-dialog-confirm",
   "changes-filter",
 ];
 
@@ -643,7 +643,7 @@ fn the_changes_tab_survives_random_review() {
         // Discarding everything needs its confirmation.
         if call.starts_with("discard /") {
           assert!(
-            log.contains("#discard-all-confirm") || log.contains("\"Discard all changes\""),
+            log.contains("#discard-all-dialog-confirm") || log.contains("\"Discard all changes\""),
             "{call} {}",
             run.context()
           );

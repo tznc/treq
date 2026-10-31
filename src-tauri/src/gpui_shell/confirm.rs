@@ -46,7 +46,7 @@ impl Question {
 
   /// The dialog over the whole window, taking Enter and Escape while
   /// `focus` is focused; `answer` hears true for the verb.
-  pub fn dialog(
+  pub fn confirm_dialog(
     &self,
     focus: &FocusHandle,
     window: &Window,
@@ -118,7 +118,7 @@ pub fn render<V: 'static>(
   Some(
     pending
       .question
-      .dialog(&focus, window, p, move |yes, _, cx| {
+      .confirm_dialog(&focus, window, p, move |yes, _, cx| {
         this
           .update(cx, |view, cx| answer(slot, view, yes, cx))
           .ignore_closed();

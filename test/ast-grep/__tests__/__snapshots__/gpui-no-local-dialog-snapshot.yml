@@ -1,0 +1,147 @@
+id: gpui-no-local-dialog
+snapshots:
+  ? |
+    fn cancel_button(&self, p: &Palette) -> Button {
+      Button::new("cancel", p)
+    }
+  : labels:
+    - source: |-
+        fn cancel_button(&self, p: &Palette) -> Button {
+          Button::new("cancel", p)
+        }
+      style: primary
+      start: 0
+      end: 77
+    - source: cancel_button
+      style: secondary
+      start: 3
+      end: 16
+  ? |
+    fn dialog_description(text: &str) -> Div {
+      div()
+    }
+  : labels:
+    - source: |-
+        fn dialog_description(text: &str) -> Div {
+          div()
+        }
+      style: primary
+      start: 0
+      end: 52
+    - source: dialog_description
+      style: secondary
+      start: 3
+      end: 21
+  ? |
+    fn dialog_footer() -> Div {
+      div()
+    }
+  : labels:
+    - source: |-
+        fn dialog_footer() -> Div {
+          div()
+        }
+      style: primary
+      start: 0
+      end: 37
+    - source: dialog_footer
+      style: secondary
+      start: 3
+      end: 16
+  ? |
+    fn modal_shell() -> Div {
+      div()
+    }
+  : labels:
+    - source: |-
+        fn modal_shell() -> Div {
+          div()
+        }
+      style: primary
+      start: 0
+      end: 35
+    - source: modal_shell
+      style: secondary
+      start: 3
+      end: 14
+  ? |
+    fn panel(p: &Palette) -> Div {
+      div().bg(p.popover).shadow_2xl()
+    }
+  : labels:
+    - source: div().bg(p.popover).shadow_2xl()
+      style: primary
+      start: 33
+      end: 65
+    - source: shadow_2xl
+      style: secondary
+      start: 53
+      end: 63
+    - source: div().bg(p.popover).shadow_2xl
+      style: secondary
+      start: 33
+      end: 63
+  ? |
+    pub fn dialog(id: &'static str, p: &Palette) -> (Stateful<Div>, Div) {
+      (div().id(id), div())
+    }
+  : labels:
+    - source: |-
+        pub fn dialog(id: &'static str, p: &Palette) -> (Stateful<Div>, Div) {
+          (div().id(id), div())
+        }
+      style: primary
+      start: 0
+      end: 96
+    - source: dialog
+      style: secondary
+      start: 7
+      end: 13
+  ? |
+    pub fn dialog_header(title: &str, description: Div) -> Div {
+      div()
+    }
+  : labels:
+    - source: |-
+        pub fn dialog_header(title: &str, description: Div) -> Div {
+          div()
+        }
+      style: primary
+      start: 0
+      end: 70
+    - source: dialog_header
+      style: secondary
+      start: 7
+      end: 20
+  ? |
+    pub fn dialog_title(title: impl Into<SharedString>) -> Div {
+      div()
+    }
+  : labels:
+    - source: |-
+        pub fn dialog_title(title: impl Into<SharedString>) -> Div {
+          div()
+        }
+      style: primary
+      start: 0
+      end: 70
+    - source: dialog_title
+      style: secondary
+      start: 7
+      end: 19
+  ? |
+    pub(super) fn dialog_panel(id: &'static str, p: &Palette) -> (Stateful<Div>, Div) {
+      (div().id(id), div())
+    }
+  : labels:
+    - source: |-
+        pub(super) fn dialog_panel(id: &'static str, p: &Palette) -> (Stateful<Div>, Div) {
+          (div().id(id), div())
+        }
+      style: primary
+      start: 0
+      end: 109
+    - source: dialog_panel
+      style: secondary
+      start: 14
+      end: 26

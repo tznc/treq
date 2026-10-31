@@ -287,7 +287,7 @@ impl Shell {
       .clone();
     let label = self.label.to_string();
     Some(
-      question.dialog(&focus, window, &theme::palette(dark), move |yes, _, cx| {
+      question.confirm_dialog(&focus, window, &theme::palette(dark), move |yes, _, cx| {
         window::answer(&label, yes, cx)
       }),
     )

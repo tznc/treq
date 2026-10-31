@@ -328,3 +328,20 @@ fn file_lines_show_their_numbers_in_a_gutter(cx: &mut TestAppContext) {
   assert!(gutter.size.width >= gpui::px(30.), "{gutter:?}");
   assert_eq!(gutter.left(), line.left());
 }
+
+#[gpui::test]
+fn file_browser_discard_review_keeps_on_escape_and_discards_on_enter(cx: &mut TestAppContext) {
+  let (mut h, host) = harness(cx, serde_json::json!({}));
+  comment_line_one(&mut h, "Drop me");
+  h.click("discard-review");
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.drawn("discard-review-dialog"));
+  assert!(h.drawn("file-browser-pending"));
+  h.click("discard-review");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("file-browser-pending"));
+  assert!(host
+    .calls()
+    .contains(&"notify toast Review canceled".to_string()));
+}

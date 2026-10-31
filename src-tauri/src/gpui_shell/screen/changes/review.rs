@@ -2255,90 +2255,34 @@ impl ChangesView {
     if !self.review.discard_dialog {
       return None;
     }
-    let viewport = window.viewport_size();
     let n = self.review.comments.len();
     let close = |view: &mut Self, cx: &mut Context<Self>| {
       view.review.discard_dialog = false;
       cx.notify();
     };
-    let panel = div()
-      .id("discard-review-dialog")
-      .debug_selector(|| "discard-review-dialog".into())
-      .w_full()
-      .max_w(zpx(512.))
-      .p_6()
-      .rounded(radius::LG)
-      .border_1()
-      .border_color(p.border.opacity(0.5))
-      .bg(p.popover)
-      .text_color(p.popover_foreground)
-      .shadow_2xl()
-      .capture_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
-        if ui::is_escape(&e.keystroke) {
-          cx.stop_propagation();
-          close(view, cx);
-        }
-      }))
-      .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-      .child(
-        div()
-          .flex()
-          .flex_col()
-          .gap_1p5()
-          .child(
-            ui::text(div(), TextSize::Lg)
-              .font_weight(FontWeight::SEMIBOLD)
-              .child("Discard review?"),
-          )
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child(format!(
-                "This will discard all {n} pending {}. This action cannot be undone.",
-                if n == 1 { "comment" } else { "comments" }
-              )),
-          ),
-      )
-      .child(
-        div()
-          .mt_4()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("keep-reviewing", p)
-              .variant(Variant::Ghost)
-              .label("Keep reviewing")
-              .on_click(cx.listener(move |view, _, _, cx| close(view, cx))),
-          )
-          .child(
-            Button::new("confirm-discard-review", p)
-              .variant(Variant::Destructive)
-              .label("Discard")
-              .on_click(cx.listener(|view, _, _, cx| view.discard_review(cx))),
-          ),
-      );
     Some(
-      deferred(
-        anchored().position(point(px(0.), px(0.))).child(
-          div()
-            .id("discard-review-backdrop")
-            .w(viewport.width)
-            .h(viewport.height)
-            .p_4()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(p.scrim())
-            .occlude()
-            .on_mouse_down(
-              MouseButton::Left,
-              cx.listener(move |view, _, _, cx| close(view, cx)),
-            )
-            .child(panel),
-        ),
-      )
-      .with_priority(2),
+      ui::Dialog::new("discard-review-dialog", p)
+        .overlay(window.viewport_size())
+        .width(512.)
+        .title("Discard review?")
+        .description(format!(
+          "This will discard all {n} pending {}. This action cannot be undone.",
+          if n == 1 { "comment" } else { "comments" }
+        ))
+        .on_close(ui::handler(cx, move |view, _, cx| close(view, cx)))
+        .on_primary(ui::handler(cx, |view, _, cx| view.discard_review(cx)))
+        .footer([
+          Button::new("keep-reviewing", p)
+            .variant(Variant::Outline)
+            .label("Keep reviewing")
+            .on_click(cx.listener(move |view, _, _, cx| close(view, cx)))
+            .into_any_element(),
+          Button::new("confirm-discard-review", p)
+            .variant(Variant::Destructive)
+            .label("Discard")
+            .on_click(cx.listener(|view, _, _, cx| view.discard_review(cx)))
+            .into_any_element(),
+        ]),
     )
   }
 }
