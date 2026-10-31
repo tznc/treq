@@ -683,3 +683,23 @@ fn code_tab_shows_no_rebase_warning_without_a_hold(cx: &mut TestAppContext) {
   }
   assert!(host.calls().contains(&"read rebase hold 7".to_string()));
 }
+
+#[gpui::test]
+fn code_tab_offers_archive_when_the_branch_was_deleted_on_remote(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    branch_deleted: true,
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("code-branch-deleted"));
+  h.click("code-branch-deleted-archive");
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"archive workspace 7".to_string()));
+}
+
+#[gpui::test]
+fn code_tab_shows_no_deleted_branch_alert_while_the_branch_exists(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  assert!(!h.drawn("code-branch-deleted"));
+  assert!(host.calls().contains(&"read branch deleted 7".to_string()));
+}

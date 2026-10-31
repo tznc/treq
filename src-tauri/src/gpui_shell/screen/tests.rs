@@ -76,6 +76,8 @@ struct FakeHost {
   pr_sync: Option<crate::local_db::PrSyncRecord>,
   /// Why the workspace's last rebase was held back.
   rebase_hold: Option<crate::core::rebase_guard::RebaseHold>,
+  /// The workspace's branch is gone, as after its PR merged.
+  branch_deleted: bool,
   /// The PR's title and body as GitHub has them.
   pr_text: Option<(String, String)>,
   /// What the Changes tab reads, and the repository's `.gitattributes`.
@@ -805,6 +807,11 @@ impl code_data::CodeHost for FakeHost {
   ) -> Option<crate::core::rebase_guard::RebaseHold> {
     self.record(format!("read rebase hold {workspace_id}"));
     self.rebase_hold.clone()
+  }
+
+  fn branch_deleted(&self, _: &str, workspace_id: i64) -> bool {
+    self.record(format!("read branch deleted {workspace_id}"));
+    self.branch_deleted
   }
 
   fn resync_from_pr(&self, _: &str, workspace_id: i64) -> Result<(), String> {

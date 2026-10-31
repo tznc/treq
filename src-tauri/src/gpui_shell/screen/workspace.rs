@@ -388,10 +388,17 @@ impl WorkspaceView {
     let children: ActionSink = {
       let (view, react) = (cx.weak_entity(), react.clone());
       Rc::new(move |action, cx| {
+        let view = view.clone();
+        if archives(&action) {
+          return cx.defer(move |cx| {
+            view
+              .update(cx, |view, cx| view.handle(action, cx))
+              .ignore_closed();
+          });
+        }
         if !launches(&action) {
           return react(action, cx);
         }
-        let view = view.clone();
         cx.defer(move |cx| {
           view
             .update(cx, |view, cx| view.launch(action, cx))
@@ -1801,6 +1808,11 @@ fn loc_marker(loc: &Loc, p: &Palette) -> Div {
 
 /// The tabs' actions that start an agent session, which the view handles
 /// itself ([`WorkspaceView::launch`]).
+/// A tab's Archive, which the header's own actions run (`actions::act`).
+fn archives(action: &ScreenAction) -> bool {
+  matches!(action, ScreenAction::Press { id } if id == "workspace.archive")
+}
+
 fn launches(action: &ScreenAction) -> bool {
   matches!(action, ScreenAction::Field { field, .. } if matches!(
     field.as_str(),
