@@ -4889,6 +4889,13 @@ mod tests {
   }
 
   #[test]
+  fn text_hunks_keep_a_carriage_return_ending_a_line() {
+    let hunks = build_text_hunks("x\r\r\n", "x\r\n");
+    assert_eq!(hunks.len(), 1);
+    assert_eq!(hunks[0].lines, ["-x\r", "+x"]);
+  }
+
+  #[test]
   fn text_hunks_keep_lines_that_look_like_file_headers() {
     let hunks = build_text_hunks("-- users\nkeep\n---\n", "++ accounts\nkeep\n");
     let lines: Vec<&str> = hunks
