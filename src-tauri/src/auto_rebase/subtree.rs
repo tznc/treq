@@ -98,10 +98,37 @@ pub fn rebase_root_subtree_from_workspace_force(
 
   for workspace in &scoped {
     if workspace.id == root.id {
-      combined_messages.push(format!(
-        "Workspace '{}': Skipped root workspace",
-        workspace.workspace_name
-      ));
+      // The root moves onto its own target first; its children follow below.
+      match super::rebase_single_workspace(
+        repo_path,
+        root.id,
+        default_branch,
+        false,
+        conflict_marker_style,
+      ) {
+        Ok(Some(result)) => {
+          all_success &= result.rebase_result.success;
+          workspace_branches.push(root.branch_name.clone());
+          bookmark_conflicts.extend(result.bookmark_conflicts);
+          combined_messages.push(format!(
+            "Workspace '{}': {}",
+            workspace.workspace_name, result.rebase_result.message
+          ));
+        }
+        Ok(None) => {
+          let held = crate::core::rebase_guard::hold(repo_path, root.id);
+          all_success &= !held.as_ref().is_some_and(|h| h.blocks());
+          combined_messages.push(format!(
+            "Workspace '{}': {}",
+            workspace.workspace_name,
+            held.map_or_else(|| "already up to date".to_string(), |h| h.message())
+          ));
+        }
+        Err(e) => {
+          all_success = false;
+          combined_messages.push(format!("Workspace '{}': {}", workspace.workspace_name, e));
+        }
+      }
       continue;
     }
 

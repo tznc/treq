@@ -287,3 +287,27 @@ fn force_rebase_moves_a_child_off_its_parent_working_copy() {
   ));
   assert!(has_file(&child_path, "feat/old-child", "child.txt"));
 }
+
+#[test]
+fn force_rebase_moves_a_workspace_without_a_stack_onto_its_target() {
+  let repo = TestRepo::with_remote().unwrap();
+  let (ws, path) = workspace_on_default(&repo, "feat/manual");
+  repo
+    .remote_commit_file("advance.txt", "new", "Advance main")
+    .unwrap();
+
+  let result = treq_lib::core::check_and_rebase_workspaces(
+    &repo.repo_path,
+    Some(ws.id),
+    None,
+    Some(true),
+    "diff",
+  )
+  .unwrap();
+
+  assert!(
+    has_file(&path, "feat/manual", "advance.txt"),
+    "{}",
+    result.message
+  );
+}
