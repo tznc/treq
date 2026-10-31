@@ -4,7 +4,9 @@ use std::time::Instant;
 use treq_lib::{jj, local_db};
 
 fn on_default(repo: &TestRepo, branch: &str, file: &str) -> (local_db::Workspace, String) {
-  let ws = repo.create_workspace_with_commit(branch, file, "work", None).unwrap();
+  let ws = repo
+    .create_workspace_with_commit(branch, file, "work", None)
+    .unwrap();
   let target = repo.default_branch().to_string();
   local_db::update_workspace_target_branch(&repo.repo_path, ws.id, &target).unwrap();
   let path = repo.workspace_full_path(&ws);
@@ -12,12 +14,25 @@ fn on_default(repo: &TestRepo, branch: &str, file: &str) -> (local_db::Workspace
 }
 
 fn has(path: &str, rev: &str, file: &str) -> bool {
-  TestRepo::jj_files_at_revision(path, rev).unwrap().iter().any(|f| f == file)
+  TestRepo::jj_files_at_revision(path, rev)
+    .unwrap()
+    .iter()
+    .any(|f| f == file)
 }
 
 fn divergent(path: &str) -> String {
-  TestRepo::run_jj_cli(path, &["log", "--no-graph", "-r", "divergent()", "-T", "change_id ++ \"\\n\""])
-    .unwrap()
+  TestRepo::run_jj_cli(
+    path,
+    &[
+      "log",
+      "--no-graph",
+      "-r",
+      "divergent()",
+      "-T",
+      "change_id ++ \"\\n\"",
+    ],
+  )
+  .unwrap()
 }
 
 fn rebase_all(repo: &TestRepo) -> treq_lib::core::SingleRebaseResult {
@@ -39,7 +54,9 @@ fn chaos_multiple_workspaces_all_follow_target() {
 fn chaos_stacked_child_follows_parent_and_target() {
   let repo = TestRepo::with_remote().unwrap();
   let (p, _) = on_default(&repo, "feat/p", "p.txt");
-  let c = repo.create_workspace_with_commit("feat/c", "c.txt", "c", Some("feat/p")).unwrap();
+  let c = repo
+    .create_workspace_with_commit("feat/c", "c.txt", "c", Some("feat/p"))
+    .unwrap();
   local_db::update_workspace_target_branch(&repo.repo_path, c.id, "feat/p").unwrap();
   let cp = repo.workspace_full_path(&c);
   repo.remote_commit_file("adv.txt", "x", "advance").unwrap();
@@ -63,8 +80,6 @@ fn chaos_repeated_trigger_is_idempotent() {
   }
   assert_eq!(jj::jj_get_commit_id(&a, "feat/idem").unwrap(), first);
 }
-
-
 
 #[test]
 fn chaos_missing_workspace_dir_does_not_block_others() {
@@ -96,8 +111,13 @@ fn chaos_deleted_target_on_remote_leaves_workspace_untouched() {
   // Retarget to a branch that exists on origin, then delete it there.
   local_db::update_workspace_target_branch(&repo.repo_path, ws.id, "feature-remote").unwrap();
   let before = jj::jj_get_commit_id(&a, "feat/orphan").unwrap();
-  TestRepo::run_git(&repo.remote_path().to_string_lossy(), &["update-ref", "-d", "refs/heads/feature-remote"]).unwrap();
-  let r = treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, None, "diff");
+  TestRepo::run_git(
+    &repo.remote_path().to_string_lossy(),
+    &["update-ref", "-d", "refs/heads/feature-remote"],
+  )
+  .unwrap();
+  let r =
+    treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, None, "diff");
   let _ = r; // error or no-op both fine
   assert_eq!(jj::jj_get_commit_id(&a, "feat/orphan").unwrap(), before);
 }
@@ -108,13 +128,18 @@ fn chaos_renamed_target_returns_error_not_panic() {
   let (ws, _) = on_default(&repo, "feat/renamed", "a.txt");
   local_db::update_workspace_target_branch(&repo.repo_path, ws.id, "no-such-branch").unwrap();
   let single = std::panic::catch_unwind(|| {
-    treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, Some(true), "diff")
+    treq_lib::core::check_and_rebase_workspaces(
+      &repo.repo_path,
+      Some(ws.id),
+      None,
+      Some(true),
+      "diff",
+    )
   });
   assert!(single.is_ok());
   let all = treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, None, None, None, "diff");
   assert!(all.is_ok(), "{all:?}");
 }
-
 
 #[test]
 fn chaos_huge_stack_rebases_in_reasonable_time() {
@@ -145,21 +170,34 @@ fn chaos_concurrent_batch_and_ensure_do_not_diverge() {
   repo.remote_commit_file("adv.txt", "x", "advance").unwrap();
   let rp = repo.repo_path.clone();
   std::thread::scope(|s| {
-    s.spawn(|| { let _ = treq_lib::core::check_and_rebase_workspaces(&rp, None, None, None, "diff"); });
+    s.spawn(|| {
+      let _ = treq_lib::core::check_and_rebase_workspaces(&rp, None, None, None, "diff");
+    });
     for id in &ids {
       let rp = rp.clone();
       let id = *id;
-      s.spawn(move || { let _ = treq_lib::core::app::ensure_workspace_rebased(&rp, id, "diff"); });
+      s.spawn(move || {
+        let _ = treq_lib::core::app::ensure_workspace_rebased(&rp, id, "diff");
+      });
     }
     for id in &ids {
       let rp = rp.clone();
       let id = *id;
-      s.spawn(move || { let _ = treq_lib::core::check_and_rebase_workspaces(&rp, Some(id), None, Some(true), "diff"); });
+      s.spawn(move || {
+        let _ =
+          treq_lib::core::check_and_rebase_workspaces(&rp, Some(id), None, Some(true), "diff");
+      });
     }
   });
-  assert_eq!(divergent(&repo.repo_path), "", "divergent changes after concurrent rebases");
+  assert_eq!(
+    divergent(&repo.repo_path),
+    "",
+    "divergent changes after concurrent rebases"
+  );
   for i in 0..4 {
-    assert!(!jj::jj_is_bookmark_conflicted(&repo.repo_path, &format!("feat/cc{i}")), "feat/cc{i} conflicted");
+    assert!(
+      !jj::jj_is_bookmark_conflicted(&repo.repo_path, &format!("feat/cc{i}")),
+      "feat/cc{i} conflicted"
+    );
   }
 }
-
