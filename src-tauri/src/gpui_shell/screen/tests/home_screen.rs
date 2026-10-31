@@ -9,7 +9,7 @@ const WORKSPACE_JSON: &str = r#"{
     "linear": {"key": "ENG-12", "url": "https://linear.app/t/ENG-12", "title": "Login"},
     "target": {"branch": "main", "loading": false, "disabled": false},
     "homeTarget": null,
-    "stack": null,
+    "stack": {"tooltip": "Stack a new workspace on feature/login"},
     "push": null,
     "viewPr": {"number": 42, "state": "OPEN", "draft": false},
     "createPr": null,
@@ -44,6 +44,12 @@ fn workspace_header_is_what_react_drew() {
 }
 
 #[test]
+fn labels_header_create_button_new_at_home_and_stack_in_a_workspace() {
+  assert_eq!(super::super::workspace::stack_label(true), "New workspace…");
+  assert_eq!(super::super::workspace::stack_label(false), "Stack on this…");
+}
+
+#[test]
 fn workspace_header_offers_the_home_rebase() {
   let route: ScreenSnapshot = serde_json::from_value(route_json(None, "feat/home")).expect("route");
   let loaded = workspace_data::Loaded {
@@ -65,7 +71,7 @@ fn workspace_header_offers_the_home_rebase() {
   );
   assert_eq!(
     header.stack.expect("stack").tooltip,
-    "Create stacked workspace from feat/home"
+    "Create a workspace from feat/home"
   );
 }
 

@@ -69,13 +69,13 @@ test("the file search takes paste, select all, cut and undo", async ({
   await page.keyboard.press("Escape");
 });
 
-test("the New Workspaces lines take paste, select all, cut and undo", async ({
+test("the New workspace lines take paste, select all, cut and undo", async ({
   page,
 }) => {
   await goHome(page);
-  await page.getByRole("button", { name: "New workspaces" }).click();
+  await page.getByRole("button", { name: "New workspace…" }).first().click();
   await expect(
-    page.getByRole("heading", { name: "New Workspaces" }),
+    page.getByRole("heading", { name: "New workspace" }),
   ).toBeVisible();
   await editsWithShortcuts(page.getByRole("textbox", { name: "Workspaces" }));
   await page.keyboard.press("Escape");

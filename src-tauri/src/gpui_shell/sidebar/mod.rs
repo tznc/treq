@@ -849,6 +849,18 @@ fn modal_backdrop(palette: &Palette, opacity: f32) -> gpui::Stateful<gpui::Div> 
     .occlude()
 }
 
+/// The WORKSPACES heading's create button.
+pub(super) const OPEN_WORKSPACES_LABEL: &str = "New workspace…";
+
+/// A row's stack button: a new workspace on the home row, one stacked on the
+/// workspace elsewhere.
+pub(super) fn stack_label(id: Option<i64>) -> &'static str {
+  match id {
+    None => "New workspace…",
+    Some(_) => "Stack on this…",
+  }
+}
+
 impl Sidebar {
   /// The WORKSPACES heading's Open button.
   fn open_workspaces_button(&self, palette: &Palette) -> impl IntoElement {
@@ -856,7 +868,7 @@ impl Sidebar {
       .id("open-workspaces")
       .debug_selector(|| "open-workspaces".into())
       .role(Role::Button)
-      .aria_label("New workspaces")
+      .aria_label(OPEN_WORKSPACES_LABEL)
       .test_support()
       .flex()
       .flex_none()
@@ -873,7 +885,7 @@ impl Sidebar {
         12.,
         palette.sidebar_foreground.opacity(0.7),
       ))
-      .child("New")
+      .child(OPEN_WORKSPACES_LABEL)
       .on_click(self.on_action(SidebarAction::OpenWorkspaces))
   }
 
@@ -1017,7 +1029,7 @@ impl Sidebar {
       .child(self.row_button(
         format!("{prefix}-stack").into(),
         theme::ICON_LAYERS,
-        "Stack workspace",
+        stack_label(id),
         None,
         SidebarAction::Stack { id },
         palette,

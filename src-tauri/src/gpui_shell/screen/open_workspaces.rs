@@ -1005,14 +1005,10 @@ impl OpenWorkspacesDialog {
       .iter()
       .filter(|(_, c)| matches!(c, Some(Err(_))))
       .count();
-    let existing = targets.iter().filter(|t| t.existing).count();
-    let new = targets.len() - existing;
     let status = if unchecked > 0 {
       format!("Checking {}...", plural(unchecked, "1 line", "lines"))
-    } else if targets.is_empty() {
-      "Nothing to create yet.".to_string()
     } else {
-      summary_future(new, existing)
+      data::preview(&targets)
     };
     let column = div()
       .flex()
@@ -1081,9 +1077,8 @@ impl OpenWorkspacesDialog {
           "Creating...".to_string()
         } else {
           match targets.len() {
-            0 => "Create Workspaces".to_string(),
-            1 => "Create 1 Workspace".to_string(),
-            n => format!("Create {n} Workspaces"),
+            0 | 1 => "Create workspace".to_string(),
+            n => format!("Create {n} workspaces"),
           }
         })
         .on_click(cx.listener(|view, _, _, cx| view.submit(cx)))
@@ -1712,23 +1707,6 @@ fn plural(n: usize, one: &str, many: &str) -> String {
   }
 }
 
-/// What the dialog will open, before it does.
-fn summary_future(new: usize, existing: usize) -> String {
-  let created = plural(
-    new,
-    "1 workspace will be created",
-    "workspaces will be created",
-  );
-  match (new, existing) {
-    (_, 0) => created,
-    (0, _) => plural(
-      existing,
-      "1 workspace is already open",
-      "workspaces are already open",
-    ),
-    _ => format!("{created}, {existing} already open"),
-  }
-}
 
 /// What the dialog opened.
 fn summary(created: usize, reused: usize) -> String {
@@ -1870,7 +1848,7 @@ impl Render for OpenWorkspacesDialog {
     ui::Dialog::new("open-workspaces-dialog", &p)
       .overlay(viewport)
       .width(if split { 1040. } else { 560. })
-      .title("New Workspaces")
+      .title("New workspace")
       .description(if split {
         "Create a workspace for each line, and for each item you pick."
       } else {

@@ -761,8 +761,12 @@ pub fn workspace_view(
       disabled: route.retargeting,
     }),
     home_target,
-    stack: workspace.is_none().then(|| Tooltip {
-      tooltip: format!("Create stacked workspace from {branch}"),
+    stack: Some(Tooltip {
+      tooltip: if workspace.is_none() {
+        format!("Create a workspace from {branch}")
+      } else {
+        format!("Stack a new workspace on {branch}")
+      },
     }),
     push: workspace
       .filter(|w| w.not_on_remote && (!has_remote || w.branch_name == DEFAULT_BRANCH))
