@@ -870,16 +870,6 @@ impl code_data::CodeHost for FakeHost {
     Ok(self.devcontainer_status(repo_path))
   }
 
-  fn branch_names(&self, _: &str) -> Result<std::collections::HashSet<String>, String> {
-    self.record("read branches".into());
-    Ok(["treq/fix-login".to_string()].into())
-  }
-
-  fn create_workspace(&self, _: &str, branch: &str, title: &str) -> Result<i64, String> {
-    self.record(format!("create workspace {branch} {title:?}"));
-    Ok(9)
-  }
-
   fn create_session(&self, _: &str, workspace_id: Option<i64>, name: &str) -> Result<i64, String> {
     self.record(format!("create session {workspace_id:?} {name:?}"));
     Ok(31)

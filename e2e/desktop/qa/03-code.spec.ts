@@ -1,94 +1,83 @@
-// The Code tab of a stacked, conflicted workspace: the conflict banner,
-// the prompt box and its menus, the stack panel, the file tree and the
-// file view (code and Markdown preview), plus one non-default zoom.
+// The Code tab of a stacked, conflicted workspace: the action row (Agent,
+// the alerts button and its popover, Go to file), the stack panel, the file
+// tree and the file view (code and Markdown preview), plus one non-default
+// zoom.
 //
-// File tree rows and the prompt box's menu buttons are not observable
-// elements, so those steps click a point found from an observable
-// neighbour (the window is a fixed 1400x900 and the seed deterministic).
+// File tree rows are not observable elements, so those steps click a point
+// found from an observable neighbour (the window is a fixed 1400x900 and the
+// seed deterministic).
 import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { home, mod, openTab, openWorkspace, settle, xPointer } from "./helpers.ts";
+import { dialogIn, home, mod, openTab, openWorkspace, settle, xPointer } from "./helpers.ts";
 
 const BRANCH = "feat/empty-event-message";
 
 test.describe.configure({ mode: "serial" });
 
-async function promptRow(page: Page) {
-  const edit = await page.getByRole("button", { name: "Edit", exact: true }).boundingBox();
-  const box = await page.getByRole("textbox", { name: "Describe a task…" }).boundingBox();
-  if (!edit || !box) throw new Error("prompt box not on screen");
-  return { y: edit.y + edit.height / 2, left: box.x, editX: edit.x };
-}
-
 /** Leaves the file view (its "Back" row is not observable) for the overview. */
 async function overview(page: Page) {
-  const prompt = page.getByRole("textbox", { name: "Describe a task…" });
-  if ((await prompt.count()) === 0) {
+  const goToFile = page.getByRole("button", { name: "Go to file" });
+  if ((await goToFile.count()) === 0) {
     await page.mouse.click(325, 123);
-    await expect(prompt).toBeVisible();
+    await expect(goToFile).toBeVisible();
     await settle(page, 800);
   }
 }
 
-async function popup(page: Page, x: number, y: number, name: string, title: string, expectations: string[]) {
-  await page.mouse.click(x, y);
-  await settle(page, 1000);
-  await capture(page, { name, title, screen: true, rest: false, expectations });
-  await page.keyboard.press("Escape");
-  await settle(page, 500);
-}
-
-test("code: workspace Code tab, prompt menus, tree and file view", async ({ page }) => {
+test("code: workspace Code tab, action row, alerts and Agent", async ({ page, context }) => {
   await openWorkspace(page, BRANCH);
   await openTab(page, "Code");
   await overview(page);
   await settle(page, 2000);
+  await expect(page.getByRole("textbox", { name: "Describe a task..." })).toHaveCount(0);
+  await expect(page.getByRole("alert", { name: "1 file has conflicts" })).toHaveCount(0);
   await capture(page, {
     name: "03-code-workspace",
     title: "Code tab of a stacked workspace with a conflict",
     expectations: [
-      "Header: branch → base picker, View PR, Checks GH 2/4 (red), Merge… disabled, Details, overflow",
-      "Red '1 file has conflicts' alert with Resolve…; tab badges Commits 2 / Changes 3",
-      "Stack panel lists feat/empty-event-message over feat/event-ingest over main, with +/- bars",
+      "Header: branch → base picker, View PR, a checks pill reading 'N of M checks failing' (red), Merge… disabled",
+      "Under the title card one row: Agent on the left; an alerts button (red icon and count) then Go to file on the right",
+      "No inline prompt card and no alert banners; the stack panel follows the action row",
     ],
   });
 
-  const prompt = page.getByRole("textbox", { name: "Describe a task…" });
-  await prompt.fill("Handle empty event_message in postEvent and add a regression test");
+  const alerts = page.getByRole("button", { name: /^Alerts/ });
+  await alerts.click();
+  const conflicts = page.getByRole("alert", { name: "1 file has conflicts" });
+  await expect(conflicts).toBeVisible();
+  await settle(page, 600);
   await capture(page, {
-    name: "03-code-prompt-typed",
-    title: "Prompt box with text",
+    name: "03-code-alerts-popover",
+    title: "Code tab: the alerts popover",
     expectations: [
-      "Typed text wraps inside the box; placeholder gone",
-      "Edit button becomes enabled (primary colour)",
+      "A popover under the alerts button lists each alert as its own card",
+      "The red '1 file has conflicts' alert keeps its Resolve… action",
     ],
-  });
-
-  const { y, left, editX } = await promptRow(page);
-  await popup(page, left + 30, y, "03-code-prompt-add-menu", "Prompt box: Add menu", [
-    "Menu opens under Add with its items aligned and readable",
-  ]);
-  await popup(page, editX - 55, y, "03-code-agent-picker", "Prompt box: agent picker (Claude)", [
-    "Agent list (Claude, Codex, …) with icons; the current one is marked",
-    "Uninstalled agents are disabled or labelled",
-  ]);
-  await popup(page, editX - 150, y, "03-code-prompt-target-menu", "Prompt box: Local / remote target menu", [
-    "Target options readable; the current one is marked",
-  ]);
-  await page.getByRole("button", { name: "More submit options" }).click();
-  await settle(page, 1000);
-  await capture(page, {
-    name: "03-code-submit-split-menu",
-    title: "Prompt box: Edit split-button menu",
-    screen: true,
-    rest: false,
-    expectations: ["Submit modes (Edit/Plan/…) listed under the split arrow, aligned"],
   });
   await page.keyboard.press("Escape");
-  await prompt.fill("");
+  await expect(conflicts).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Agent", exact: true }).click();
+  const title = (p: Page) => p.getByRole("dialog", { name: "Start a new agent session" });
+  const dialog = await dialogIn(page, context, title);
+  await expect(dialog.getByRole("button", { name: "Send" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "More submit options" })).toHaveCount(0);
+  await settle(page, 800);
+  await capture(page, {
+    name: "03-code-agent-prompt",
+    title: "Agent opens the agent prompt",
+    screen: true,
+    rest: false,
+    expectations: [
+      "The Start a new agent session dialog is open on this workspace",
+      "Its footer ends in a Send icon button, with no Edit/Plan split menu",
+    ],
+  });
+  await page.keyboard.press("Escape");
+  await settle(page, 600);
 
   // The stack panel's help icon, right of its "Stack" title (not
-  // observable; its place below the conflict banner and prompt box).
+  // observable; its place below the action row).
   await page.mouse.move(383, 367, { steps: 4 });
   await settle(page, 1500);
   await capture(page, {
@@ -233,7 +222,7 @@ test("code: workspace title above the description, edited inline", async ({ page
     name: "03-code-title",
     title: "Code tab: full workspace title with its edit pencil",
     expectations: [
-      "The workspace title sits under the prompt box as a large heading, wrapped rather than truncated",
+      "The workspace title sits at the top of the Code tab as a large heading, wrapped rather than truncated",
       "A small pencil button sits at the title's top right",
       "The header no longer repeats the title under the branch row",
     ],
@@ -253,31 +242,4 @@ test("code: workspace title above the description, edited inline", async ({ page
   await page.keyboard.press("Escape");
   await expect(input).toHaveCount(0);
   await home(page);
-});
-
-test("code: Escape closes the prompt box's Add menu", async ({ page }) => {
-  await home(page);
-  const add = page.getByRole("button", { name: "Add", exact: true });
-  const box = await add.boundingBox();
-  if (!box) throw new Error("no Add button");
-  // The menu's items are not observable elements: compare the area the
-  // menu opens over instead.
-  const under = { x: box.x, y: box.y + box.height, width: 200, height: 100 };
-  const closed = await page.screenshot({ clip: under });
-  await add.click();
-  await settle(page, 600);
-  expect(await page.screenshot({ clip: under }), "the Add menu opened").not.toEqual(closed);
-  await capture(page, {
-    name: "03-code-add-menu-open",
-    title: "Prompt box: Add menu open",
-    expectations: ["File and Attach listed under Add"],
-  });
-  await page.keyboard.press("Escape");
-  await settle(page, 600);
-  await capture(page, {
-    name: "03-code-add-menu-escape",
-    title: "Prompt box after Escape with the Add menu open",
-    expectations: ["The Add menu is closed; the prompt box is unchanged"],
-  });
-  expect(await page.screenshot({ clip: under }), "Escape closed the Add menu").toEqual(closed);
 });
