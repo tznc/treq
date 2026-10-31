@@ -30,7 +30,7 @@
 //                             017_remote_ssh_observability.sql)
 //   "prune_audit_events"    - runs the retention cleanup function
 //   "sweep_lapsed_instances" - stops the cloud workspace of every owner
-//                             whose Pro ended and deletes it 7 days later
+//                             whose Pro ended and deletes it 30 days later
 //                             (prds/billing-and-teams.md, open decision
 //                             B02; see `_shared/remote/lapse-sweep.ts`).
 //                             Schedule it hourly from the same scheduler
