@@ -3639,7 +3639,16 @@ fn sync_home_and_workspace_for_branch(
   if home_branch.is_empty() || home_branch == "HEAD" || home_branch != branch {
     return Ok(());
   }
+  sync_home_on_branch_and_workspace(repo_path, branch, source)
+}
 
+/// [`sync_home_and_workspace_for_branch`] for a caller that already knows
+/// the home repo is on `branch`.
+fn sync_home_on_branch_and_workspace(
+  repo_path: &str,
+  branch: &str,
+  source: SyncSource,
+) -> Result<(), String> {
   let Some(workspace) = local_db::get_workspace_by_branch(repo_path, branch)
     .map_err(|e| format!("Failed to get workspace by branch: {}", e))?
   else {
@@ -3659,8 +3668,17 @@ fn sync_home_and_workspace_for_branch(
   };
   jj::jj_workspace_update_stale(source_path).warn_on_err("jj workspace update stale");
   // Use `@-` when `@` is the empty working copy, so no empty commit gets pushed.
-  let source_tip = jj::jj_resolve_bookmark_tip(source_path)
+  let checkout_tip = jj::jj_resolve_bookmark_tip(source_path)
     .map_err(|e| format!("Failed to resolve source tip: {}", e))?;
+  // A fetch can move the bookmark past the source checkout; never sync the
+  // destination back to the older commit.
+  let source_tip = jj::jj_get_commit_id(source_path, branch)
+    .ok()
+    .filter(|bookmark| {
+      jj::jj_log_revset_commit_ids(source_path, &format!("{checkout_tip}::{bookmark}"))
+        .is_ok_and(|ids| ids.len() > 1)
+    })
+    .unwrap_or(checkout_tip);
 
   let destination_path = match source {
     SyncSource::HomeToWorkspace => workspace_path_str,
@@ -4380,11 +4398,15 @@ pub fn pull_workspace_from_remote(
 ) -> Result<PullWorkspaceResult, String> {
   // When workspace_id is None, do a simple pull for the home repo
   let Some(workspace_id) = workspace_id else {
-    // For home repo, just fetch — do not rebase, which would detach HEAD
-    jj::jj_git_fetch(repo_path).map_err(|e| format!("Fetch failed: {}", e))?;
+    // For home repo, just fetch — do not rebase, which would detach HEAD.
+    // Read the branch first: a fetch that moves it past the checkout leaves
+    // Git HEAD detached.
     let home_branch = jj::resolve_home_repo_branch(repo_path)
       .map_err(|e| format!("Failed to resolve home repo branch: {}", e))?;
-    sync_home_and_workspace_for_branch(repo_path, &home_branch, SyncSource::HomeToWorkspace)?;
+    jj::jj_git_fetch(repo_path).map_err(|e| format!("Fetch failed: {}", e))?;
+    if !home_branch.is_empty() && home_branch != "HEAD" {
+      sync_home_on_branch_and_workspace(repo_path, &home_branch, SyncSource::HomeToWorkspace)?;
+    }
     return Ok(PullWorkspaceResult {
       success: true,
       message: "Fetched home repo".to_string(),
@@ -4980,12 +5002,15 @@ pub fn check_and_rebase_workspaces(
           bookmark_conflicts: auto_result.bookmark_conflicts,
         })
       }
-      None => Ok(SingleRebaseResult {
-        rebased: false,
-        success: true,
-        message: "No rebase needed".to_string(),
-        bookmark_conflicts: Vec::new(),
-      }),
+      None => {
+        let held = crate::core::rebase_guard::hold(repo_path, id).filter(|h| h.blocks());
+        Ok(SingleRebaseResult {
+          rebased: false,
+          success: held.is_none(),
+          message: held.map_or_else(|| "No rebase needed".to_string(), |h| h.message()),
+          bookmark_conflicts: Vec::new(),
+        })
+      }
     }
   } else {
     let results = auto_rebase::check_and_rebase_all(repo_path, conflict_style)?;

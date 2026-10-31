@@ -74,6 +74,8 @@ struct FakeHost {
   description: String,
   /// Which of the workspace's fields follow its PR.
   pr_sync: Option<crate::local_db::PrSyncRecord>,
+  /// Why the workspace's last rebase was held back.
+  rebase_hold: Option<crate::core::rebase_guard::RebaseHold>,
   /// The PR's title and body as GitHub has them.
   pr_text: Option<(String, String)>,
   /// What the Changes tab reads, and the repository's `.gitattributes`.
@@ -794,6 +796,15 @@ impl code_data::CodeHost for FakeHost {
   fn pr_sync(&self, _: &str, _: i64) -> Option<crate::local_db::PrSyncRecord> {
     self.record("read pr sync".into());
     self.pr_sync.clone()
+  }
+
+  fn rebase_hold(
+    &self,
+    _: &str,
+    workspace_id: i64,
+  ) -> Option<crate::core::rebase_guard::RebaseHold> {
+    self.record(format!("read rebase hold {workspace_id}"));
+    self.rebase_hold.clone()
   }
 
   fn resync_from_pr(&self, _: &str, workspace_id: i64) -> Result<(), String> {

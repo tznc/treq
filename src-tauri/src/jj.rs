@@ -3045,7 +3045,13 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
   // sibling bookmarks from becoming part of the move target.
   let branch_only_commits = evaluate_revset(
     &loaded,
-    &format!("{}..{}", lineage_base, workspace_tip_commit.id().hex()),
+    // Other workspaces' working copies stay put: a child stacked on its
+    // parent's working copy moves onto the parent's bookmark instead.
+    &format!(
+      "({}..{}) ~ (working_copies() ~ @)",
+      lineage_base,
+      workspace_tip_commit.id().hex()
+    ),
   )?
   .iter()
   .commits(loaded.repo.store())
@@ -3079,6 +3085,29 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
       commits_to_move.insert(0, wc_commit.id().clone());
     }
   }
+  // Everything stacked on the branch tip moves with it: child workspaces sit
+  // on this branch's bookmark, and a commit set move would otherwise
+  // reparent them onto the lineage's old base. Children first, as
+  // `compute_move_commits` expects.
+  // A branch with no commits of its own has its tip on the shared base, so
+  // nothing above it is its own stack.
+  let stacked = if branch_only_commits.is_empty() {
+    Vec::new()
+  } else {
+    evaluate_revset(
+      &loaded,
+      &format!("{0}:: ~ {0}", workspace_tip_commit.id().hex()),
+    )?
+    .iter()
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| JjError::IoError(format!("Failed to find stacked commits: {}", e)))?
+  };
+  let mut with_stacked: Vec<_> = stacked
+    .into_iter()
+    .filter(|id| !commits_to_move.contains(id))
+    .collect();
+  with_stacked.append(&mut commits_to_move);
+  commits_to_move = with_stacked;
   // Other working copies sitting on moved commits move with them: the home
   // repo on the branch this workspace is stacked on, and stacked workspaces
   // with no commits yet, which chain on each other's working copies. Left
@@ -3142,6 +3171,14 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
       e
     ))
   })?;
+  // A branch with no commits of its own moves up to the target: its
+  // bookmark stays below the working copy, which just moved there.
+  if branch_only_commits.is_empty() {
+    tx.repo_mut().set_local_bookmark_target(
+      RefName::new(workspace_branch),
+      RefTarget::normal(target_commit.id().clone()),
+    );
+  }
 
   git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
@@ -3743,8 +3780,11 @@ pub fn jj_resolve_bookmark_conflict_losslessly(
       .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {e}")))?;
   } else {
     let workspace_name = loaded.workspace.workspace_name().to_owned();
-    block_on(tx.repo_mut().edit(workspace_name, &target))
+    // Above the target, never on it: edits there would move the bookmark.
+    block_on(tx.repo_mut().check_out(workspace_name, &target))
       .map_err(|e| JjError::IoError(format!("Failed to move working copy to target: {e}")))?;
+    block_on(tx.repo_mut().rebase_descendants())
+      .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {e}")))?;
   }
 
   let workspace_name = loaded.workspace.workspace_name().to_owned();
@@ -5523,11 +5563,20 @@ mod tests {
       .get_wc_commit_id(&workspace_name)
       .expect("registered wc")
       .clone();
+    // The bookmark sits on the source commit, below the working copy.
+    let source = loaded
+      .repo
+      .view()
+      .get_local_bookmark(RefName::new("main"))
+      .as_normal()
+      .expect("main target")
+      .clone();
     let resolved = verify_created_workspace_bookmark(
       &loaded.workspace,
       "fix/concurrent",
       &workspace_name,
       &expected,
+      &source,
     )
     .expect("registered target should resolve conflict");
 
@@ -5536,7 +5585,7 @@ mod tests {
         .view()
         .get_local_bookmark(RefName::new("fix/concurrent"))
         .as_normal(),
-      Some(&expected)
+      Some(&source)
     );
   }
 
@@ -5576,9 +5625,11 @@ mod tests {
       .clone();
     let root_id = base.repo.store().root_commit_id().clone();
     let mut left = base.repo.start_transaction();
-    left
-      .repo_mut()
-      .set_local_bookmark_target(RefName::new("fix/ambiguous"), RefTarget::normal(main_id));
+    // Neither side is the source commit (main) the creation put it on.
+    left.repo_mut().set_local_bookmark_target(
+      RefName::new("fix/ambiguous"),
+      RefTarget::normal(expected.clone()),
+    );
     let mut right = base.repo.start_transaction();
     right
       .repo_mut()
@@ -5591,6 +5642,7 @@ mod tests {
       "fix/ambiguous",
       &workspace_name,
       &expected,
+      &main_id,
     )
     .expect_err("unrelated conflict must not be guessed");
     assert!(format!("{err}").contains("manual recovery is required"));

@@ -131,13 +131,14 @@ fn workspace_creation_creates_empty_wc_but_bookmark_targets_parent() {
   let bookmark_tip = JjVerifier::get_bookmark_commit_id(&repo.repo_path, &workspace.branch_name)
     .expect("Failed to resolve workspace bookmark tip")
     .expect("Workspace bookmark should resolve");
+  // The bookmark stays below the working copy: only a commit moves it.
   assert_eq!(
-    bookmark_tip, at_commit,
-    "Workspace bookmark should point to @ (working-copy commit)"
+    bookmark_tip, parent_commit,
+    "Workspace bookmark should point to @- (the parent commit)"
   );
   assert_ne!(
-    bookmark_tip, parent_commit,
-    "Workspace bookmark should not point to @- (parent commit)"
+    bookmark_tip, at_commit,
+    "Workspace bookmark should not point to @ (the working copy)"
   );
 
   let recent_ids = TestRepo::jj_commit_ids_in_revset(workspace_path_str, "::@")
@@ -486,10 +487,11 @@ fn test_can_create_stacked_workspace() {
   let stacked_path = repo.workspaces_dir().join(&stacked.workspace_path);
   assert!(stacked_path.exists(), "Stacked workspace should exist");
 
-  // Verify it has the base file from the source branch
+  // The base's uncommitted edit stays in the base: a stacked workspace
+  // builds on the committed branch only.
   assert!(
-    stacked_path.join("base.txt").exists(),
-    "Stacked workspace should have file from source branch"
+    !stacked_path.join("base.txt").exists(),
+    "Stacked workspace must not pick up the source's uncommitted changes"
   );
 
   let workspaces =
