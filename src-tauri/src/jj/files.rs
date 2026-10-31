@@ -284,8 +284,10 @@ pub fn jj_sync_working_copy_if_safe(
   let old_wc_commit = get_workspace_wc_commit(&loaded)?;
 
   let mut tx = loaded.repo.start_transaction();
-  // Edit bookmark commit directly so @ == bookmark after sync (empty child caused infinite sync loop).
-  block_on(tx.repo_mut().edit(workspace_name, &destination))
+  // A new empty commit above the bookmark, never the bookmark itself: edits
+  // there would move it. `jj_working_copy_needs_sync` counts a bookmark below
+  // `@` as synced, so this does not loop.
+  block_on(tx.repo_mut().check_out(workspace_name, &destination))
     .map_err(|e| JjError::IoError(format!("Failed to sync working copy to bookmark: {}", e)))?;
   // jj requires rebase_descendants() after any rewrite before committing the transaction.
   block_on(tx.repo_mut().rebase_descendants())

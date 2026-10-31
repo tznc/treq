@@ -15,6 +15,7 @@
 mod common;
 
 mod auto_rebase_test;
+mod bookmark_off_working_copy_test;
 mod checks_test;
 mod cli_parallel_commit_test;
 mod cli_process_test;
@@ -62,3 +63,4 @@ mod jj_import_git_refs_test;
 mod jj_lib_vs_cli_test;
 mod jj_restore_test;
 mod pty_tests;
+mod rebase_guard_test;

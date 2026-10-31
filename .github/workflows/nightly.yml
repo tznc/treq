@@ -82,8 +82,9 @@ jobs:
           - platform: "windows-latest"
             target: "x86_64-pc-windows-msvc"
             args: "--target x86_64-pc-windows-msvc"
+            linker: "rust-lld.exe"
     runs-on: ${{ matrix.platform }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     environment: prod
     steps:
       - uses: actions/checkout@v5
@@ -117,6 +118,17 @@ jobs:
           cache-on-failure: true
           workspaces: ". -> target"
 
+      # rustc only sets up the MSVC library paths (LIB) for link.exe, so
+      # rust-lld needs the Visual Studio developer environment exported.
+      - name: Export MSVC environment for rust-lld (windows only)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" |
+            Where-Object { $_ -match '^(LIB|LIBPATH|INCLUDE)=' } |
+            Add-Content $env:GITHUB_ENV
+
       - name: Install dependencies
         run: npm ci
 
@@ -134,8 +146,12 @@ jobs:
           # Nightlies trade a slightly larger binary for a much faster link.
           # Cargo.toml's release profile (fat LTO, 1 codegen unit) is kept
           # for tagged releases.
-          CARGO_PROFILE_RELEASE_LTO: "thin"
+          # LTO is off: thin LTO alone took ~6m of the Windows link.
+          CARGO_PROFILE_RELEASE_LTO: "off"
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+          # rust-lld links much faster than MSVC link.exe. Empty elsewhere, and
+          # the variable only applies to the Windows target anyway.
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: ${{ matrix.linker }}
           RUSTC_WRAPPER: sccache
           SCCACHE_GHA_ENABLED: "true"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -267,10 +283,16 @@ jobs:
             cp "$aab" "$GITHUB_WORKSPACE/treq-nightly-android.aab"
             curl -fsSL -o "$RUNNER_TEMP/bundletool.jar" \
               https://github.com/google/bundletool/releases/download/1.18.1/bundletool-all-1.18.1.jar
+            # bundletool takes only `pass:` or `file:` passwords; a file keeps
+            # the secret out of the process arguments.
+            ks_pass=$RUNNER_TEMP/ks-pass
+            (umask 077; printf '%s' "$ANDROID_KEYSTORE_PASSWORD" > "$ks_pass")
+            trap 'rm -f "$ks_pass"' EXIT
             java -jar "$RUNNER_TEMP/bundletool.jar" build-apks --mode=universal \
               --bundle="$aab" --output="$RUNNER_TEMP/treq.apks" \
               --ks=src-tauri/gen/android/upload.jks --ks-key-alias="$ANDROID_KEY_ALIAS" \
-              --ks-pass=env:ANDROID_KEYSTORE_PASSWORD --key-pass=env:ANDROID_KEYSTORE_PASSWORD
+              --ks-pass="file:$ks_pass" --key-pass="file:$ks_pass"
+            rm -f "$ks_pass"
             unzip -o -q "$RUNNER_TEMP/treq.apks" universal.apk -d "$RUNNER_TEMP"
             apk=$RUNNER_TEMP/universal.apk
           else
