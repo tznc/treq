@@ -353,7 +353,7 @@ fn period_label(status: &str) -> &'static str {
 
 /// `toLocaleDateString()` in an en-US locale.
 /// Days a lapsed cloud workspace is kept before the sweep deletes it
-/// (supabase/migrations/038_lapse_grace_30_days.sql).
+/// (supabase/migrations/046_lapse_grace_30_days.sql).
 const LAPSE_GRACE_DAYS: i64 = 30;
 
 /// The warning for a workspace whose owner's Pro ended at `lapsed_at`.

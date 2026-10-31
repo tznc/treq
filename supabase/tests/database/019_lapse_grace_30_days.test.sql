@@ -1,5 +1,5 @@
 -- A lapsed cloud workspace is kept 30 days before the sweep may delete it
--- (038_lapse_grace_30_days.sql).
+-- (046_lapse_grace_30_days.sql).
 begin;
 select plan(3);
 
