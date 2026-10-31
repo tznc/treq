@@ -39,6 +39,10 @@ function stubStripe(customerId: string) {
       calls.push({ method, path, params });
       if (path === "/v1/customers") return { id: customerId };
       if (path === "/v1/prices") return { data: [{ id: "price_sqa_team" }] };
+      if (method === "GET" && path === "/v1/subscriptions") return { data: [] };
+      if (method === "GET" && path === "/v1/checkout/sessions") {
+        return { data: [] };
+      }
       if (path === "/v1/checkout/sessions") {
         return { id: "cs_sqa_team", client_secret: "cs_sqa_team_secret" };
       }
@@ -131,6 +135,8 @@ it("sells Team to an organization's owner and gives every member Pro", async () 
     });
     expect(asOwner.calls.map((c) => c.path)).toEqual([
       "/v1/customers",
+      "/v1/subscriptions",
+      "/v1/checkout/sessions",
       "/v1/prices",
       "/v1/checkout/sessions",
     ]);
@@ -138,10 +144,15 @@ it("sells Team to an organization's owner and gives every member Pro", async () 
       "metadata[owner_type]": "organization",
       "metadata[owner_id]": orgId,
     });
-    expect(asOwner.calls[1].params).toMatchObject({
+    expect(
+      asOwner.calls.find((c) => c.path === "/v1/prices")?.params,
+    ).toMatchObject({
       "lookup_keys[0]": "treq_team_monthly",
     });
-    const sessionParams = asOwner.calls[2].params ?? {};
+    const sessionParams =
+      asOwner.calls.find(
+        (c) => c.method === "POST" && c.path === "/v1/checkout/sessions",
+      )?.params ?? {};
     expect(sessionParams).toMatchObject({
       customer: customerId,
       client_reference_id: orgId,
