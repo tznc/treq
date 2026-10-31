@@ -64,7 +64,7 @@ test("changes review: character marks, keyboard, suggestion, stale banner", asyn
   });
 
   await page.keyboard.press("ArrowLeft");
-  const input = page.getByRole("textbox", { name: "Add a comment..." });
+  const input = page.getByRole("textbox", { name: "Add a comment…" });
   await expect(input).toBeVisible();
   await page.getByRole("button", { name: "Suggest change" }).click();
   await settle(page, 400);
@@ -78,7 +78,7 @@ test("changes review: character marks, keyboard, suggestion, stale banner", asyn
     ],
   });
   await input.fill('Wrap it\n```suggestion\n  return `[lorem:${level.toUpperCase()}] ${line}`;\n}\n```');
-  await page.getByRole("button", { name: "Add Comment", exact: true }).click();
+  await page.getByRole("button", { name: "Add comment", exact: true }).click();
   await expect(input).toHaveCount(0);
   await settle(page, 800);
   await capture(page, {

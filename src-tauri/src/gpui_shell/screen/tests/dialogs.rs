@@ -955,7 +955,7 @@ fn a_folder_that_is_not_a_repository_is_not_opened() {
 
   onboarding::open_repo(&host, path, |p| shown.push(p.to_string()));
 
-  assert_eq!(host.calls(), ["notify toast Not a Git Repository"]);
+  assert_eq!(host.calls(), ["notify toast Not a Git repository"]);
   assert!(shown.is_empty(), "not the window's repository");
   assert!(!dir.path().join(".treq").exists());
   assert!(!dir.path().join(".git").exists());

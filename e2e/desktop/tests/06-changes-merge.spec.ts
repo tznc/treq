@@ -30,7 +30,7 @@ test("commits a workspace's changes from the Changes tab", async ({ page }) => {
 test("merges the workspace from the merge preview", async ({ page }) => {
   await goHome(page);
   await page.getByRole("button", { name: "e2e/first", exact: true }).click();
-  await page.getByRole("button", { name: "Merge..." }).click();
+  await page.getByRole("button", { name: "Merge…" }).click();
   await expect(page.getByRole("button", { name: "Back" })).toBeVisible();
   const confirm = page.getByTestId("merge-confirm");
   await expect(confirm).toBeEnabled({ timeout: 20_000 });

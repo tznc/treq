@@ -138,7 +138,7 @@ pub fn path_items(relative_path: &str, full_path: &str, editors: EditorApps) -> 
       .icon(MenuIcon::Copy),
     MenuItem::item("Copy full path", MenuAction::Copy(full_path.into())).icon(MenuIcon::Copy),
     MenuItem::Submenu {
-      text: "Open in...".into(),
+      text: "Open in…".into(),
       icon: Some(MenuIcon::FolderOpen),
       items: open,
     },
@@ -252,7 +252,7 @@ pub fn workspace_items(
   }
   items.push(
     MenuItem::item(
-      "Rename Workspace",
+      "Rename workspace",
       MenuAction::RenameWorkspace {
         repo_path: repo_path.into(),
         workspace_id: workspace.id,
@@ -297,7 +297,7 @@ pub fn workspace_more_items(repo_path: &str, workspace_id: i64, on_remote: bool)
   }
   items.push(
     MenuItem::item(
-      "Delete Workspace",
+      "Delete workspace",
       MenuAction::DeleteWorkspace {
         repo_path: repo_path.into(),
         workspace_id,
@@ -372,7 +372,7 @@ mod tests {
       [
         "Copy relative path",
         "Copy full path",
-        format!("Open in...: [{REVEAL_LABEL}, Open in Cursor, Open in Zed]").as_str()
+        format!("Open in…: [{REVEAL_LABEL}, Open in Cursor, Open in Zed]").as_str()
       ]
     );
     let MenuItem::Submenu { items, .. } = &items[2] else {
@@ -401,7 +401,7 @@ mod tests {
         "---",
         "Copy relative path",
         "Copy full path",
-        format!("Open in...: [{REVEAL_LABEL}]").as_str(),
+        format!("Open in…: [{REVEAL_LABEL}]").as_str(),
         "---",
         "Add Repository…"
       ]
@@ -453,11 +453,11 @@ mod tests {
       [
         "Copy branch name",
         "Copy link to GitHub PR",
-        "Rename Workspace",
+        "Rename workspace",
         "---",
         "Copy relative path",
         "Copy full path",
-        format!("Open in...: [{REVEAL_LABEL}]").as_str(),
+        format!("Open in…: [{REVEAL_LABEL}]").as_str(),
         "---",
         "Archive Workspace"
       ]
@@ -496,11 +496,11 @@ mod tests {
   fn builds_the_header_menus() {
     assert_eq!(
       labels(&workspace_more_items("/r", 4, true)),
-      ["Reset to remote", "---", "Delete Workspace"]
+      ["Reset to remote", "---", "Delete workspace"]
     );
     assert_eq!(
       labels(&workspace_more_items("/r", 4, false)),
-      ["Delete Workspace"]
+      ["Delete workspace"]
     );
     assert_eq!(
       labels(&create_pr_items()),

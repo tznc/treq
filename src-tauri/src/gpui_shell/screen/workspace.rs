@@ -1190,7 +1190,7 @@ impl WorkspaceView {
     if !h.home {
       left = left.child(mono_title(&h.branch).debug_selector(|| "workspace-branch".into()));
       if let Some(target) = &h.target {
-        let label = target.branch.clone().unwrap_or_else(|| "Select...".into());
+        let label = target.branch.clone().unwrap_or_else(|| "Select…".into());
         let button = Button::new("workspace-target", p)
           .aria_label("Workspace target")
           .variant(Variant::Outline)
@@ -1415,7 +1415,7 @@ impl WorkspaceView {
     }
     if let Some(merge) = &h.merge {
       let button = Button::new("workspace-merge", p)
-        .aria_label("Merge...")
+        .aria_label("Merge…")
         .variant(if merge.passing {
           Variant::Success
         } else {
@@ -1425,7 +1425,7 @@ impl WorkspaceView {
         .gap_1()
         .disabled(merge.disabled)
         .icon(theme::ICON_COMPARE, 16.)
-        .label("Merge...")
+        .label("Merge…")
         .on_click(self.press("workspace.merge"));
       right = right.child(
         self.with_tooltip(
@@ -1898,7 +1898,7 @@ impl WorkspaceView {
         }
         self.start(cx, None, "Failed to create agent", move |host| {
           let agent = host.resolve_agent(&repo, None);
-          request("Code Review", markdown, &mode, agent)
+          request("Code review", markdown, &mode, agent)
         });
       }
       "changes.agentComment" => {
@@ -1917,7 +1917,7 @@ impl WorkspaceView {
         }
         let done = ("Comment sent to agent", "");
         self.start(cx, Some(done), "Failed to create agent", move |_| {
-          request("Review Comment", prompt, "acceptEdits", None)
+          request("Review comment", prompt, "acceptEdits", None)
         });
       }
       "logs.sendToAgent" => {

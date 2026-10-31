@@ -543,17 +543,17 @@ fn callback_token(pasted: &str) -> Result<String, String> {
 fn stage_label(status: &str) -> String {
   match status {
     "unprovisioned" => "Not provisioned",
-    "provisioning" => "Creating cloud workspace...",
-    "bootstrapping" => "Installing Treq, JJ, Git, and agents...",
-    "installing_access" => "Configuring access...",
-    "verifying" => "Verifying readiness...",
+    "provisioning" => "Creating cloud workspace…",
+    "bootstrapping" => "Installing Treq, JJ, Git, and agents…",
+    "installing_access" => "Configuring access…",
+    "verifying" => "Verifying readiness…",
     "ready" => "Ready",
     "suspended" => "Suspended (idle)",
-    "waking" => "Waking...",
-    "reprovisioning" => "Reprovisioning...",
+    "waking" => "Waking…",
+    "reprovisioning" => "Reprovisioning…",
     "degraded" => "Degraded",
     "failed" => "Failed",
-    "deleting" => "Deleting...",
+    "deleting" => "Deleting…",
     "deleted" => "Deleted",
     other => other,
   }
@@ -815,7 +815,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
     }),
     create: instance.is_none().then(|| CloudCreate {
       label: if creating || stage.is_some() {
-        "Creating..."
+        "Creating…"
       } else if creation_retry {
         "Retry cloud workspace creation"
       } else {
@@ -940,7 +940,7 @@ impl SettingsView {
         Some((period_label(&s.status).to_string(), local_date(end)))
       }),
       manage_label: if pro {
-        "Manage Subscription"
+        "Manage subscription"
       } else {
         "Upgrade to Pro"
       }
@@ -1516,7 +1516,7 @@ fn heading(text: &'static str) -> gpui::Div {
     .child(text)
 }
 
-/// "Sign in with Browser", which opens the website's sign-in page.
+/// "Sign in with browser", which opens the website's sign-in page.
 fn sign_in_button(id: &'static str, view: &SettingsView, p: &Palette) -> Button {
   Button::new(id, p)
     .child(ui::icon(
@@ -1524,7 +1524,7 @@ fn sign_in_button(id: &'static str, view: &SettingsView, p: &Palette) -> Button 
       16.,
       p.primary_foreground,
     ))
-    .label("Sign in with Browser")
+    .label("Sign in with browser")
     .on_click(view.press("account.signIn"))
 }
 
@@ -1873,7 +1873,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           .into_any_element(),
         CloudUsage::Loading => div()
           .text_color(p.muted_foreground)
-          .child("Loading usage...")
+          .child("Loading usage…")
           .into_any_element(),
         CloudUsage::Report {
           summary,
@@ -2199,7 +2199,7 @@ impl SettingsView {
     let input = self.controls.input(
       "account.callbackUrl",
       &dev.url,
-      "treq://auth/callback?token=...",
+      "treq://auth/callback?token=…",
       window,
       cx,
     );
@@ -2235,7 +2235,7 @@ impl SettingsView {
               .size(Size::Sm)
               .variant(Variant::Outline)
               .disabled(dev.loading || dev.url.trim().is_empty())
-              .label(if dev.loading { "..." } else { "Go" })
+              .label(if dev.loading { "…" } else { "Go" })
               .on_click(self.press("account.devCallback.go")),
           ),
       )
@@ -2560,7 +2560,7 @@ impl SettingsView {
             .size(Size::Sm)
             .text_color(p.destructive)
             .child(ui::icon(theme::ICON_LOG_OUT, 16., p.destructive))
-            .label("Sign Out")
+            .label("Sign out")
             .on_click(self.press("account.signOut")),
         ),
       )
@@ -2587,7 +2587,7 @@ impl SettingsView {
                 .size(Size::Sm)
                 .text_color(p.destructive)
                 .child(ui::icon(theme::ICON_TRASH, 16., p.destructive))
-                .label("Delete Account")
+                .label("Delete account")
                 .on_click(self.press("account.delete.ask")),
             ),
           ),
@@ -2681,7 +2681,7 @@ impl SettingsView {
             Button::new("account-delete-confirm", p)
               .variant(Variant::Destructive)
               .disabled(!can_confirm)
-              .label(if dialog.deleting { "Deleting…" } else { "Delete Account" })
+              .label(if dialog.deleting { "Deleting…" } else { "Delete account" })
               .on_click(self.press("account.delete.confirm"))
               .into_any_element(),
           ]),
@@ -2806,7 +2806,7 @@ impl SettingsView {
     let key_control: AnyElement = if linear.editing {
       let input = self
         .controls
-        .password("linear.apiKey", &linear.draft, "lin_api_...", window, cx);
+        .password("linear.apiKey", &linear.draft, "lin_api_…", window, cx);
       if let Some(state) = self.account.linear.as_mut().filter(|l| l.focus) {
         state.focus = false;
         input.read(cx).focus_handle(cx).focus(window, cx);

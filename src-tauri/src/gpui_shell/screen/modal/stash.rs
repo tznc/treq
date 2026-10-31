@@ -262,7 +262,7 @@ impl StashView {
 
   fn open_apply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     self.more_open = false;
-    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces..."));
+    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces…"));
     input.update(cx, |input, cx| input.focus(window, cx));
     self._apply_subscription = Some(cx.subscribe_in(
       &input,
@@ -294,7 +294,7 @@ impl StashView {
   }
 
   fn step_apply(&mut self, delta: isize, cx: &mut Context<Self>) {
-    // The filtered rows, then "New workspace...".
+    // The filtered rows, then "New workspace…".
     let len = self.filtered_targets().len() as isize + 1;
     self.apply_index = (self.apply_index as isize + delta).rem_euclid(len) as usize;
     cx.notify();
@@ -575,7 +575,7 @@ impl StashView {
       );
 
     let apply = Button::new("stash-apply-button", p)
-      .aria_label("Apply...")
+      .aria_label("Apply…")
       .size(Size::Sm)
       .h(zpx(28.))
       .px_2()
@@ -585,7 +585,7 @@ impl StashView {
       } else {
         ui::icon(theme::ICON_UPLOAD, 14., p.primary_foreground).into_any_element()
       })
-      .child(div().ml_1().child("Apply..."))
+      .child(div().ml_1().child("Apply…"))
       .child(
         ui::icon(theme::ICON_CHEVRONS_UP_DOWN, 12., p.primary_foreground)
           .ml_1()
@@ -649,7 +649,7 @@ impl StashView {
       },
       _ => ui::delayed(
         "stash-diff-loading",
-        message("stash-diff-loading", "Loading diff...", p),
+        message("stash-diff-loading", "Loading diff…", p),
       )
       .into_any_element(),
     };
@@ -795,11 +795,11 @@ impl StashView {
               .child(
                 row(
                   SharedString::from("stash-apply-new-workspace"),
-                  SharedString::from("New workspace..."),
+                  SharedString::from("New workspace…"),
                   new_active,
                 )
                 .child(ui::icon(theme::ICON_PLUS, 14., p.popover_foreground))
-                .child("New workspace...")
+                .child("New workspace…")
                 .on_click(
                   cx.listener(move |view, _, window, cx| view.apply_to_new(&new_entry, window, cx)),
                 ),
@@ -950,12 +950,12 @@ impl Render for StashView {
       .items_center()
       .gap_2()
       .child(ui::icon(theme::ICON_ARCHIVE, 16., p.popover_foreground))
-      .child("Stashed Changes");
+      .child("Stashed changes");
     let entries = self.entries.clone();
     let body = match &entries {
       None => ui::delayed(
         "stash-loading",
-        message("stash-loading", "Loading stashes...", &p),
+        message("stash-loading", "Loading stashes…", &p),
       )
       .into_any_element(),
       Some(entries) if entries.is_empty() => message(
@@ -991,7 +991,7 @@ impl Render for StashView {
           d.relative_size(0.75, Some(0.8))
         }
       })
-      .title("Stashed Changes")
+      .title("Stashed changes")
       .header(header)
       .focus(&self.focus)
       .on_close(close)

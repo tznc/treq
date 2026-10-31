@@ -230,7 +230,7 @@ fn file_browser_keeps_comments_and_finishes_the_review(cx: &mut TestAppContext) 
   assert!(fields(&h, "fileBrowser.review").is_empty());
   let launches = host.launches.lock().unwrap().clone();
   assert_eq!(launches.len(), 1);
-  assert_eq!(launches[0].0.session_name.as_deref(), Some("Code Review"));
+  assert_eq!(launches[0].0.session_name.as_deref(), Some("Code review"));
   assert_eq!(launches[0].0.mode.as_deref(), Some("plan"));
   let markdown = launches[0].0.prompt.clone().unwrap_or_default();
   assert!(markdown.contains("README.md"), "{markdown}");

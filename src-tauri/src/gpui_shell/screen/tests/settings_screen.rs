@@ -16,7 +16,7 @@ fn settings_saves_the_repository_itself(cx: &mut TestAppContext) {
   assert_eq!(repo.fields.branch_name_pattern, "treq/{name}");
   // The trigger's old name reads as the new one.
   assert_eq!(repo.fields.auto_review_trigger, "on-pull");
-  assert_eq!(repo.model_options[0].label, "Use Application Default");
+  assert_eq!(repo.model_options[0].label, "Use application default");
 
   h.click("settings-tab-application");
   h.click("settings-auto-push");

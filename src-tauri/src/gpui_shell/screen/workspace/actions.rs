@@ -394,7 +394,7 @@ impl WorkspaceView {
                 description: format!("#{number}"),
                 tone: ToastTone::Success,
                 action: Some(ToastAction {
-                  label: "Open in Web".into(),
+                  label: "Open in web".into(),
                   id: native::register_toast_action(move || opener.open_url(&url)),
                 }),
               });

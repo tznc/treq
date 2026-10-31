@@ -814,7 +814,7 @@ impl CodeView {
     }
     let task = cx.new(|cx| {
       TextareaState::new(window, cx)
-        .placeholder("Describe a task...")
+        .placeholder("Describe a task…")
         .auto_grow(1, 9)
     });
     self._subscriptions.push(cx.subscribe(
@@ -3204,7 +3204,7 @@ impl CodeView {
           .into_any_element(),
         None => ui::text(div(), TextSize::Sm)
           .text_color(p.muted_foreground)
-          .child("Loading commits...")
+          .child("Loading commits…")
           .into_any_element(),
       };
       return div()

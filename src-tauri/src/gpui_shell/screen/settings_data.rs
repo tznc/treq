@@ -383,11 +383,11 @@ pub const ZOOM: (f32, f32, f32) = (50., 200., 5.);
 
 /// `FONT_SIZE_PRESETS`: size and label.
 pub const FONT_SIZES: [(u32, &str); 5] = [
-  (10, "Extra Small"),
+  (10, "Extra small"),
   (12, "Small"),
   (14, "Medium (default)"),
   (16, "Large"),
-  (18, "Extra Large"),
+  (18, "Extra large"),
 ];
 
 /// `nearestFontSizePreset`: older builds allowed any size from 8 to 32.

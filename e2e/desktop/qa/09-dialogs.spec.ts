@@ -111,9 +111,9 @@ test("dialogs: delete workspace", async ({ page, context }) => {
   await home(page);
   await page.keyboard.press(`${mod}+k`);
   const palette = await overlay(page, context);
-  await palette.getByRole("textbox", { name: "Type a command or search..." }).fill("Delete Workspace");
-  await palette.getByRole("option", { name: "Delete Workspace" }).click();
-  const search = (p: Page) => p.getByRole("textbox", { name: "Search workspaces to delete..." });
+  await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("Delete workspace");
+  await palette.getByRole("option", { name: "Delete workspace" }).click();
+  const search = (p: Page) => p.getByRole("textbox", { name: "Search workspaces to delete…" });
   const dialog = await dialogIn(page, context, search);
   await settle(page, 800);
   await capture(page, {
@@ -206,7 +206,7 @@ test("dialogs: rename workspace from the context menu", async ({ page, context }
   focusMain();
   const menu = popupBox();
   if (!menu) throw new Error("no context menu");
-  // "Open in..." (the sixth row) opens a submenu on hover.
+  // "Open in…" (the sixth row) opens a submenu on hover.
   await xPointer(page, menu.x + 100, menu.y + 190);
   await settle(page, 900);
   await capture(page, {
@@ -219,7 +219,7 @@ test("dialogs: rename workspace from the context menu", async ({ page, context }
       "Editors listed with icons; nothing clipped at the screen edge",
     ],
   });
-  // "Rename Workspace" is the third row.
+  // "Rename workspace" is the third row.
   await xPointer(page, menu.x + 100, menu.y + 85, 1);
   const name = (p: Page) => p.getByRole("textbox", { name: "e.g., feat/new-name" });
   const dialog = await dialogIn(page, context, name);
@@ -277,7 +277,7 @@ test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page, context })
       "Submit split button and its shortcut hint readable",
     ],
   });
-  await dialog.getByRole("textbox", { name: "Describe a task..." }).last().fill(
+  await dialog.getByRole("textbox", { name: "Describe a task…" }).last().fill(
     "Add a TTL to the key-value cache and cover expiry in tests",
   );
   await settle(page, 500);

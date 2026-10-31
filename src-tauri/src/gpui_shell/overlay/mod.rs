@@ -105,7 +105,7 @@ pub(super) enum Body {
 }
 
 /// `BranchSwitcher`'s groups.
-const BRANCH_GROUPS: [&str; 3] = ["Current Branch", "Local Branches", "Remote Branches"];
+const BRANCH_GROUPS: [&str; 3] = ["Current branch", "Local Branches", "Remote Branches"];
 
 /// Up to this many rows the list draws them all in a scrolled column, so
 /// every row (the palette's commands, a short branch list) can be found and
@@ -552,9 +552,9 @@ impl Overlay {
 
   fn placeholder(&self) -> &'static str {
     match self.view {
-      OverlayView::CommandPalette(_) => "Type a command or search...",
-      OverlayView::WorkspacePicker { .. } => "Search workspaces...",
-      OverlayView::BranchSwitcher { .. } => "Search branches...",
+      OverlayView::CommandPalette(_) => "Type a command or search…",
+      OverlayView::WorkspacePicker { .. } => "Search workspaces…",
+      OverlayView::BranchSwitcher { .. } => "Search branches…",
       OverlayView::KeyboardShortcuts {} => "",
     }
   }
@@ -797,7 +797,7 @@ impl Overlay {
     } = &self.body
     {
       if branches.is_none() && error.is_none() {
-        children.push(empty(p, "Loading branches..."));
+        children.push(empty(p, "Loading branches…"));
       }
       if let Some(error) = error {
         children.push(
@@ -924,7 +924,7 @@ impl Render for Overlay {
       let (hints, right): (&[(&str, &str)], _) = match self.body {
         Body::Branches { .. } => (
           &[("↑↓", "Navigate"), ("↵", "Switch"), ("Esc", "Close")],
-          switching.then_some("Switching..."),
+          switching.then_some("Switching…"),
         ),
         _ => (
           &[("↑↓", "Navigate"), ("↵", "Select"), ("Esc", "Close")],

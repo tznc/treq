@@ -1,0 +1,43 @@
+id: ui-copy-sentence-case
+valid:
+  - |
+    fn sentence() -> Button {
+      ui::Button::new("merge", p).label("Merge preview")
+    }
+  - |
+    fn proper_noun() -> Button {
+      ui::Button::new("gh", p).label("Open in GitHub")
+    }
+  - |
+    fn product() -> &'static str {
+      "Treq Cloud"
+    }
+  - |
+    fn one_word() -> &'static str {
+      "Settings"
+    }
+  - |
+    impl Place {
+      fn section(&self) -> &'static str {
+        "This Computer"
+      }
+    }
+  - |
+    const BRANCH_GROUPS: [&str; 1] = ["Current Branch"];
+invalid:
+  - |
+    fn title() -> Button {
+      ui::Button::new("merge", p).label("Merge Preview")
+    }
+  - |
+    fn three() -> &'static str {
+      "Merge Commit Message"
+    }
+  - |
+    fn with_ellipsis() -> &'static str {
+      "Open Repository…"
+    }
+  - |
+    fn small_word() -> &'static str {
+      "Open in Logs"
+    }

@@ -13,7 +13,7 @@ use crate::gpui_shell::theme;
 pub struct Route {
   /// `dataRepoPath`; empty with no repository open.
   pub repo_path: String,
-  /// "View Stashed Changes" is offered (not for a remote repository).
+  /// "View stashed changes" is offered (not for a remote repository).
   pub stash: bool,
   /// A workspace is selected, so the terminal commands show.
   pub has_selected_workspace: bool,
@@ -63,17 +63,17 @@ pub fn commands(
   pr: Option<&PrLink>,
 ) -> Vec<Command> {
   let mut list = vec![
-    Command::new("dashboard", "Go to Home", None, theme::ICON_HOUSE),
-    Command::new("settings", "Go to Settings", None, theme::ICON_SETTINGS),
+    Command::new("dashboard", "Go to home", None, theme::ICON_HOUSE),
+    Command::new("settings", "Go to settings", None, theme::ICON_SETTINGS),
     Command::new(
       "open-repository",
-      "Open Repository",
+      "Open repository",
       Some("Open a different repository"),
       theme::ICON_FOLDER_OPEN,
     ),
     Command::new(
       "open-repository-new-window",
-      "Open Repository in New Window",
+      "Open repository in new window",
       Some("Open a repository in a separate window"),
       theme::ICON_APP_WINDOW,
     ),
@@ -82,13 +82,13 @@ pub fn commands(
     list.extend([
       Command::new(
         "switch-branch",
-        "Switch Branch",
+        "Switch branch",
         Some("Checkout a different branch in main tree"),
         theme::ICON_BRANCH,
       ),
       Command::new(
         "search-files",
-        "Search Files",
+        "Search files",
         Some("Jump to a file in the repository"),
         theme::ICON_FILE_SEARCH,
       ),
@@ -100,13 +100,13 @@ pub fn commands(
       ),
       Command::new(
         "create-workspace",
-        "Create Workspace",
+        "Create workspace",
         Some("Create a new workspace"),
         theme::ICON_PLUS,
       ),
       Command::new(
         "delete-workspace",
-        "Delete Workspace",
+        "Delete workspace",
         Some("Delete a workspace"),
         theme::ICON_TRASH,
       ),
@@ -124,7 +124,7 @@ pub fn commands(
       ),
       Command::new(
         "open-prompt-history",
-        "View Prompt History",
+        "View prompt history",
         Some("See every prompt ever sent, labeled by workspace"),
         theme::ICON_HISTORY,
       ),
@@ -132,7 +132,7 @@ pub fn commands(
     if route.stash {
       list.push(Command::new(
         "open-stash",
-        "View Stashed Changes",
+        "View stashed changes",
         Some("Browse and apply immutable stashed change sets"),
         theme::ICON_ARCHIVE,
       ));
@@ -142,19 +142,19 @@ pub fn commands(
     list.extend([
       Command::new(
         "toggle-terminal",
-        "Toggle Terminal",
+        "Toggle terminal",
         Some("Show or hide the terminal pane"),
         theme::ICON_CHEVRONS_UP_DOWN,
       ),
       Command::new(
         "maximize-terminal",
-        "Maximize Terminal",
+        "Maximize terminal",
         Some("Toggle maximize/restore terminal pane"),
         theme::ICON_MAXIMIZE,
       ),
       Command::new(
         "new-shell-terminal",
-        "New Shell Terminal",
+        "New shell terminal",
         Some("Create a new shell session"),
         theme::ICON_TERMINAL,
       ),

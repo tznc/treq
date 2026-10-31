@@ -613,11 +613,13 @@ fn onboarding_adds_machines_from_their_sections(cx: &mut TestAppContext) {
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, onboarding(), host.clone());
-  // Both sections show while empty, each with its +.
+  // Both kinds are offered under Other machines' +.
+  h.click("machines-add-other");
   assert!(h.drawn("machines-add-ssh"));
   assert!(h.drawn("machines-add-container"));
   h.click("machines-add-ssh");
   assert_eq!(h.sent(), vec![press("machines.addSsh")]);
+  h.click("machines-add-other");
   h.click("machines-add-container");
   h.cx.run_until_parked();
   assert!(host
@@ -634,6 +636,69 @@ fn onboarding_adds_machines_from_their_sections(cx: &mut TestAppContext) {
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, onboarding(), host);
-  assert!(!h.drawn("machines-add-ssh"), "the previews are off");
+  assert!(!h.drawn("machines-add-other"), "the previews are off");
+  assert!(!h.drawn("machines-add-ssh"));
   assert!(!h.drawn("machines-add-container"));
+}
+
+#[gpui::test]
+fn onboarding_titles_the_page_open_a_repository(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(gpui::Role::Heading).name("Open a repository")))
+    .to_be_visible();
+}
+
+#[gpui::test]
+fn onboarding_collapses_empty_host_groups_under_other_machines(cx: &mut TestAppContext) {
+  let mut empty = listing();
+  empty
+    .machines
+    .retain(|m| matches!(m.place, machines::Place::Local));
+  empty.ssh = true;
+  empty.containers = true;
+  let host = Arc::new(FakeHost {
+    listing: empty,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  // One group with one +, not two empty ones.
+  assert!(h.drawn("machines-group-other"));
+  assert!(!h.drawn("machines-group-ssh"));
+  assert!(!h.drawn("machines-group-containers"));
+  assert!(!h.drawn("machines-add-ssh"));
+  h.click("machines-add-other");
+  // Its + offers both kinds.
+  assert!(h.drawn("machines-add-ssh"));
+  assert!(h.drawn("machines-add-container"));
+  h.click("machines-add-ssh");
+  assert_eq!(h.sent(), vec![press("machines.addSsh")]);
+}
+
+#[gpui::test]
+fn onboarding_splits_other_machines_once_one_exists(cx: &mut TestAppContext) {
+  let mut with_host = listing();
+  with_host
+    .machines
+    .retain(|m| !matches!(m.place, machines::Place::DevContainer { .. }));
+  with_host.ssh = true;
+  with_host.containers = true;
+  let host = Arc::new(FakeHost {
+    listing: with_host,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(!h.drawn("machines-group-other"));
+  assert!(h.drawn("machines-group-ssh"));
+  assert!(h.drawn("machines-group-containers"));
+  assert!(h.drawn("machines-add-ssh"));
+  assert!(h.drawn("machines-add-container"));
 }

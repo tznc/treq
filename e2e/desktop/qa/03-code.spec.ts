@@ -15,14 +15,14 @@ test.describe.configure({ mode: "serial" });
 
 async function promptRow(page: Page) {
   const edit = await page.getByRole("button", { name: "Edit", exact: true }).boundingBox();
-  const box = await page.getByRole("textbox", { name: "Describe a task..." }).boundingBox();
+  const box = await page.getByRole("textbox", { name: "Describe a task…" }).boundingBox();
   if (!edit || !box) throw new Error("prompt box not on screen");
   return { y: edit.y + edit.height / 2, left: box.x, editX: edit.x };
 }
 
 /** Leaves the file view (its "Back" row is not observable) for the overview. */
 async function overview(page: Page) {
-  const prompt = page.getByRole("textbox", { name: "Describe a task..." });
+  const prompt = page.getByRole("textbox", { name: "Describe a task…" });
   if ((await prompt.count()) === 0) {
     await page.mouse.click(325, 123);
     await expect(prompt).toBeVisible();
@@ -53,7 +53,7 @@ test("code: workspace Code tab, prompt menus, tree and file view", async ({ page
     ],
   });
 
-  const prompt = page.getByRole("textbox", { name: "Describe a task..." });
+  const prompt = page.getByRole("textbox", { name: "Describe a task…" });
   await prompt.fill("Handle empty event_message in postEvent and add a regression test");
   await capture(page, {
     name: "03-code-prompt-typed",
@@ -118,7 +118,7 @@ test("code: file view, Markdown preview and a TSX file", async ({ page }) => {
   await openTab(page, "Code");
   // Open README.md from the picker: the tree rows are not observable.
   await page.keyboard.press(`${mod}+p`);
-  const search = page.getByRole("textbox", { name: "Search files..." });
+  const search = page.getByRole("textbox", { name: "Search files…" });
   await expect(search).toBeVisible();
   await search.fill("README");
   await settle(page, 800);

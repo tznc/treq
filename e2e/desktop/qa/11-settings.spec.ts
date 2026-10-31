@@ -122,7 +122,7 @@ test("settings: application and live theme switch", async ({ page }) => {
 test("settings: account, integrations, skills, feature preview", async ({ page }) => {
   await settings(page, "Account");
   // The pasted-callback box is for `cargo run` builds only.
-  await expect(page.getByRole("textbox", { name: "treq://auth/callback?token=..." })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "treq://auth/callback?token=…" })).toHaveCount(0);
   await capture(page, {
     name: "11-settings-account",
     title: "Settings: Account tab (signed out)",
@@ -176,7 +176,7 @@ test("settings: account, integrations, skills, feature preview", async ({ page }
   });
   await page.getByRole("textbox", { name: "Search by name or description" }).fill("");
 
-  await settings(page, "Feature Preview");
+  await settings(page, "Feature preview");
   await expect(page.getByRole("button", { name: "Logs docs" })).toBeVisible();
   await capture(page, {
     name: "11-settings-feature-preview",

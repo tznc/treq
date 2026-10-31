@@ -37,7 +37,7 @@ fn turning_the_agent_finished_notification_off_saves_it(cx: &mut TestAppContext)
   let toggle = screen.get_by_role(by::role(Role::Switch).name("Notify when an agent finishes"));
   user.click(&toggle);
   expect(&toggle).not().to_be_checked();
-  user.click(&screen.get_by_role(by::role(Role::Button).name("Save Settings")));
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Save settings")));
   h.cx.run_until_parked();
 
   let writes = host.writes();
@@ -118,12 +118,12 @@ fn escape_closes_the_workspace_picker_then_the_dialog(cx: &mut TestAppContext) {
   let screen = screen(&mut h);
   let user = screen.user();
   user.click(&screen.get_by_role(by::role(Role::Button).name("Workspace: treq/login")));
-  let search = screen.get_by_role(by::role(Role::TextInput).name("Search workspaces..."));
+  let search = screen.get_by_role(by::role(Role::TextInput).name("Search workspaces…"));
   expect(&search).to_have_focus();
 
   user.keyboard("{Escape}");
   assert!(screen
-    .query_by_role(by::role(Role::TextInput).name("Search workspaces..."))
+    .query_by_role(by::role(Role::TextInput).name("Search workspaces…"))
     .is_none());
   assert!(h.sent().is_empty(), "{:?}", h.sent());
 
@@ -213,9 +213,9 @@ fn the_create_dialog_names_the_branch_from_the_title(cx: &mut TestAppContext) {
     .advance_clock(std::time::Duration::from_millis(600));
   h.cx.run_until_parked();
   screen.redraw();
-  expect(screen.get_by_label_text("Branch Name")).to_have_value("treq/dark-mode");
+  expect(screen.get_by_label_text("Branch name")).to_have_value("treq/dark-mode");
 
-  user.click(&screen.get_by_role(by::role(Role::Button).name("Create Workspace")));
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Create workspace")));
   h.cx.run_until_parked();
   assert!(host
     .calls()
@@ -381,10 +381,10 @@ fn settings_selects_are_named_after_their_fields(cx: &mut TestAppContext) {
   let screen = screen(&mut h);
   for name in [
     "Theme",
-    "Font Size",
+    "Font size",
     "Claude Code Model",
-    "Default Agent",
-    "Conflict Marker Style",
+    "Default agent",
+    "Conflict marker style",
   ] {
     expect(screen.get_by_role(by::role(Role::ComboBox).name(name))).to_be_visible();
   }
@@ -478,7 +478,7 @@ fn account_deletion_refusal_is_announced_as_an_alert_in_a_dialog(cx: &mut TestAp
   let mut h = signed_in_as_ada(cx, host);
   let s = screen(&mut h);
   s.user()
-    .click(&s.get_by_role(by::role(Role::Button).name("Delete Account")));
+    .click(&s.get_by_role(by::role(Role::Button).name("Delete account")));
   let s = screen(&mut h);
   expect(s.get_by_role(by::role(Role::Dialog).name("Delete your Treq account?"))).to_be_visible();
   settings_act(

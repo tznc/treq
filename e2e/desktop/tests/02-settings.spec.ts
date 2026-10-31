@@ -23,7 +23,7 @@ test("opens on the repository tab and closes back to the repository", async ({
     "Application",
     "Account",
     "Integrations",
-    "Feature Preview",
+    "Feature preview",
   ]) {
     await expect(page.getByRole("tab", { name: tab })).toBeVisible();
   }
@@ -43,7 +43,7 @@ test("saves the agent notification switch and shows it when settings reopen", as
   await expect(toggle).toBeChecked();
   await toggle.click();
   await expect(toggle).not.toBeChecked();
-  await page.getByRole("button", { name: "Save Settings" }).click();
+  await page.getByRole("button", { name: "Save settings" }).click();
   await page.getByRole("button", { name: "Close" }).click();
   await expect(page.getByRole("tab", { name: "Code" })).toBeVisible();
 
@@ -51,6 +51,6 @@ test("saves the agent notification switch and shows it when settings reopen", as
   await expect(reopened).not.toBeChecked();
   // Back on for the other tests.
   await reopened.click();
-  await page.getByRole("button", { name: "Save Settings" }).click();
+  await page.getByRole("button", { name: "Save settings" }).click();
   await page.getByRole("button", { name: "Close" }).click();
 });

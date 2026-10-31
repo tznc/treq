@@ -1,4 +1,4 @@
-//! `WorkspaceDeletion`: the command palette's "Delete Workspace" search. It
+//! `WorkspaceDeletion`: the command palette's "Delete workspace" search. It
 //! picks the workspace; React asks for confirmation and deletes it, as it
 //! does from the workspace header.
 
@@ -201,7 +201,7 @@ impl WorkspaceDeletion {
       return input.clone();
     }
     let input =
-      cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces to delete..."));
+      cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces to delete…"));
     input.update(cx, |input, cx| input.focus(window, cx));
     self._subscription = Some(cx.subscribe(
       &input,
@@ -337,7 +337,7 @@ impl Render for WorkspaceDeletion {
             ui::text(div(), TextSize::Sm)
               .font_weight(FontWeight::MEDIUM)
               .text_color(p.destructive)
-              .child("Delete Workspace"),
+              .child("Delete workspace"),
           ),
       )
       .child(

@@ -23,7 +23,7 @@ test("opens the repository on its home view", async ({ page }) => {
   await expect(page.getByText("e2e fixture")).toHaveCount(1);
   // The home task input.
   await expect(
-    page.getByRole("textbox", { name: "Describe a task..." }),
+    page.getByRole("textbox", { name: "Describe a task…" }),
   ).toBeVisible();
 });
 

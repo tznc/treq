@@ -45,7 +45,7 @@ test("linear: connect with an API key in Settings", async ({ page }) => {
   linearKey(null);
   await linear(page);
   await expect(page.getByText(/Linear is not connected/)).toBeVisible();
-  await page.getByRole("button", { name: "Open Settings" }).click();
+  await page.getByRole("button", { name: "Open settings" }).click();
   await expect(page.getByRole("tab", { name: "Integrations", selected: true })).toBeVisible();
   await page.getByRole("button", { name: "Add API Key" }).click();
   await settle(page, 600);
@@ -77,19 +77,19 @@ test("linear: connect with an API key in Settings", async ({ page }) => {
 test("linear: issues", async ({ page }) => {
   linearKey("lin_api_qa");
   await linear(page);
-  await expect(page.getByRole("tab", { name: "All Issues", selected: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "All issues", selected: true })).toBeVisible();
   await settle(page, 1500);
   await capture(page, {
     name: "22-linear-03-all-issues",
     title: "Linear view: All Issues",
     expectations: [
-      "Header: Linear, an 'All Teams' selector, Issues / Projects tabs; view tabs, List / Kanban, Filter and Refresh",
+      "Header: Linear, an 'All teams' selector, Issues / Projects tabs; view tabs, List / Kanban, Filter and Refresh",
       "Two-line rows: the title, then identifier · state · priority · project · labels · assignee",
       "ENG-143 indented under ENG-142; a robot agent button at the right of each row; no spinner or error",
     ],
   });
 
-  await page.getByRole("tab", { name: "My Issues" }).click();
+  await page.getByRole("tab", { name: "My issues" }).click();
   await settle(page, 1000);
   await capture(page, {
     name: "22-linear-04-my-issues",
@@ -99,7 +99,7 @@ test("linear: issues", async ({ page }) => {
       "Same two-line rows as All Issues",
     ],
   });
-  await page.getByRole("tab", { name: "All Issues" }).click();
+  await page.getByRole("tab", { name: "All issues" }).click();
   await settle(page, 800);
 
   await page.getByRole("listitem", { name: "Retry webhook deliveries" }).click();
@@ -141,7 +141,7 @@ test("linear: issues", async ({ page }) => {
   await page.getByRole("tab", { name: "List" }).click();
   await settle(page, 800);
 
-  await page.getByRole("button", { name: "All Teams" }).click();
+  await page.getByRole("button", { name: "All teams" }).click();
   await settle(page, 1200);
   await capture(page, {
     name: "22-linear-07-team-menu",

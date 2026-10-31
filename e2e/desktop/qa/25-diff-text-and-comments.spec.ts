@@ -47,10 +47,10 @@ test("diff text selection and commented lines", async ({ page }) => {
   await page.keyboard.press("Escape");
   await drag(page, GUTTER_X, y(4), GUTTER_X, y(6));
   await page.keyboard.press("ArrowLeft");
-  const input = page.getByRole("textbox", { name: "Add a comment..." });
+  const input = page.getByRole("textbox", { name: "Add a comment…" });
   await expect(input).toBeVisible();
   await input.fill("Do these need a level too?");
-  await page.getByRole("button", { name: "Add Comment", exact: true }).click();
+  await page.getByRole("button", { name: "Add comment", exact: true }).click();
   await expect(input).toHaveCount(0);
   await page.mouse.move(1300, 850);
   await settle(page, 800);

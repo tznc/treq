@@ -1005,16 +1005,14 @@ impl FileBrowserView {
     cx: &mut Context<Self>,
   ) -> Option<Entity<TextareaState>> {
     let (slot, text, placeholder) = match field {
-      Field::Draft if self.draft_open && self.draft.is_some() => (
-        &self.draft_input,
-        self.draft_text.clone(),
-        "Add a comment...",
-      ),
+      Field::Draft if self.draft_open && self.draft.is_some() => {
+        (&self.draft_input, self.draft_text.clone(), "Add a comment…")
+      }
       Field::Edit if self.editing.is_some() => (&self.edit_input, self.edit_text.clone(), ""),
       Field::Summary if self.finish_open => (
         &self.summary_input,
         self.summary.clone(),
-        "Add a summary comment (optional)...",
+        "Add a summary comment (optional)…",
       ),
       _ => return None,
     };
@@ -1266,7 +1264,7 @@ impl FileBrowserView {
         .icon(MenuIcon::Copy),
       NativeMenuItem::Separator,
       NativeMenuItem::Submenu {
-        text: "Open in...".into(),
+        text: "Open in…".into(),
         icon: Some(MenuIcon::FolderOpen),
         detail: None,
         items: open,

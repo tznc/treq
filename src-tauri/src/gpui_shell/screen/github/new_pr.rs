@@ -26,13 +26,13 @@ use crate::{
 const PR_TYPES: [(bool, &str, &str, &str); 2] = [
   (
     false,
-    "Create Pull Request",
+    "Create pull request",
     "Create pull request",
     "Open a pull request that is ready for review",
   ),
   (
     true,
-    "Draft Pull Request",
+    "Draft pull request",
     "Create draft pull request",
     "Cannot be merged until marked ready for review",
   ),
@@ -343,7 +343,7 @@ impl GithubView {
     ui::Dialog::new("github-new-pr-dialog", p)
       .overlay(window.viewport_size())
       .width(576.)
-      .title("New Pull Request")
+      .title("New pull request")
       .focus(self.dialog_focus())
       // Escape closes the open menu first.
       .on_close(ui::handler(cx, |view, _, cx| {

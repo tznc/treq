@@ -340,7 +340,7 @@ impl From<RemoteEffect> for Effect {
 pub fn not_a_repository() -> Effect {
   Effect::Toast {
     tone: ToastTone::Error,
-    title: "Not a Git Repository".into(),
+    title: "Not a Git repository".into(),
     description: "Please select a folder that contains a git repository.".into(),
   }
 }

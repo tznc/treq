@@ -127,21 +127,23 @@ async function shot(name: string, title: string, expectations: string[]): Promis
 }
 
 test("ssh remote: connect and open a Git repository", async () => {
+  const other = page.getByRole("button", { name: "Add another machine" });
   const open = page.getByRole("button", { name: "Add SSH host" });
-  await expect(open).toBeVisible({ timeout: 60_000 });
+  await expect(other).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole("button", { name: "Sign in to Treq Cloud" })).toBeVisible();
   await expect(page.getByRole("listitem", { name: "Cloud workspace", exact: true })).toHaveCount(0);
   await shot("machines", "Overview: machines and recent repositories", [
-    "Left panel 'Machines' lists 'This computer' under THIS COMPUTER, then SSH HOSTS ('No hosts yet.') and DEV CONTAINERS, each with a + beside its heading",
+    "Left panel 'Machines' lists 'This computer' under THIS COMPUTER, then OTHER MACHINES with a + beside its heading",
     "Signed out there is no TREQ CLOUD group; 'Sign in to Treq Cloud' sits at the bottom",
-    "Right panel is headed 'Overview' with the Open repository… button; no recents yet says where they appear",
+    "Right panel is headed 'Open a repository' with the Open repository… button; no recents yet says where they appear",
   ]);
   await page.getByRole("button", { name: /on This computer$/ }).click();
   await shot("local-tools", "This computer's tools popover", [
     "A popover beside the row lists Required (Git), Agent CLI and Optional tools with Installed or Install",
   ]);
   await page.keyboard.press("Escape");
-  // The + next to SSH Hosts opens the own-VM form directly.
+  // Other machines' + offers Add SSH host, which opens the own-VM form.
+  await other.click();
   await open.click();
   await page.waitForTimeout(1500);
   // Display name, hostname, port, username: the form's text fields in order.
@@ -266,7 +268,7 @@ async function setDefaultAgent(row: number): Promise<void> {
   // The application's agent: a remote repository's setting is not read.
   await page.getByRole("tab", { name: "Application" }).click();
   await page.waitForTimeout(800);
-  const select = page.getByRole("combobox", { name: "Default Agent" });
+  const select = page.getByRole("combobox", { name: "Default agent" });
   await select.scrollIntoViewIfNeeded();
   const box = await select.boundingBox();
   if (!box) throw new Error("no Default Agent select");
@@ -275,7 +277,7 @@ async function setDefaultAgent(row: number): Promise<void> {
   // Options: Default, Claude, Codex, Cursor, Copilot.
   await page.mouse.click(box.x + 40, box.y + box.height + 26 + row * 30);
   await page.waitForTimeout(500);
-  await page.getByRole("button", { name: "Save Settings" }).click();
+  await page.getByRole("button", { name: "Save settings" }).click();
   await page.waitForTimeout(1000);
   await page.getByRole("button", { name: "Close", exact: true }).click();
 }

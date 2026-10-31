@@ -153,7 +153,7 @@ fn views_the_pull_request_in_treq(cx: &mut TestAppContext) {
 fn deletes_the_workspace_from_the_more_menu(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
   h.click("workspace-more");
-  h.pick("Delete Workspace");
+  h.pick("Delete workspace");
   assert!(calls_starting(&host, &["delete workspace"]).is_empty());
   h.answer("Delete workspace");
   assert_eq!(
@@ -176,7 +176,7 @@ fn restores_the_row_when_delete_fails(cx: &mut TestAppContext) {
   };
   let (mut h, host) = workspace_harness(cx, host, workspace_route());
   h.click("workspace-more");
-  h.pick("Delete Workspace");
+  h.pick("Delete workspace");
   h.answer("Delete workspace");
   assert_eq!(
     calls_starting(&host, &["delete workspace", "notify"]),
@@ -184,7 +184,7 @@ fn restores_the_row_when_delete_fails(cx: &mut TestAppContext) {
       "notify workspacesRemoving",
       "delete workspace 7",
       "notify workspacesRestored",
-      "notify toast Delete Failed",
+      "notify toast Delete failed",
     ]
   );
 }
@@ -193,7 +193,7 @@ fn restores_the_row_when_delete_fails(cx: &mut TestAppContext) {
 fn keeps_the_workspace_when_delete_is_declined(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
   h.click("workspace-more");
-  h.pick("Delete Workspace");
+  h.pick("Delete workspace");
   h.answer("Cancel");
   assert!(!h.drawn("confirm"));
   assert!(!host
@@ -222,7 +222,7 @@ fn menu_labels(h: &mut Harness) -> Vec<String> {
 fn resets_to_the_remote_from_the_more_menu(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
   h.click("workspace-more");
-  assert_eq!(menu_labels(&mut h), ["Reset to remote", "Delete Workspace"]);
+  assert_eq!(menu_labels(&mut h), ["Reset to remote", "Delete workspace"]);
   h.pick("Reset to remote");
   assert!(calls_starting(&host, &["reset"]).is_empty(), "asks first");
   h.answer("Reset to remote");
@@ -250,7 +250,7 @@ fn offers_no_reset_without_an_upstream(cx: &mut TestAppContext) {
   }
   let (mut h, _) = workspace_harness(cx, host, workspace_route());
   h.click("workspace-more");
-  assert_eq!(menu_labels(&mut h), ["Delete Workspace"]);
+  assert_eq!(menu_labels(&mut h), ["Delete workspace"]);
 }
 
 #[gpui::test]

@@ -122,7 +122,7 @@ fn commits_tab_sends_a_line_comment_to_an_agent(cx: &mut TestAppContext) {
   assert!(
     host
       .writes()
-      .contains(&r#"create session Some(7) "Code Comment""#.to_string()),
+      .contains(&r#"create session Some(7) "Code comment""#.to_string()),
     "{:?}",
     host.writes()
   );

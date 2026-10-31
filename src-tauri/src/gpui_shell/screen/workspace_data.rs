@@ -635,7 +635,7 @@ pub fn workspace_view(
     branch: DEFAULT_BRANCH.into(),
     rebase: (loaded.home_ahead > 0).then(|| Rebase {
       tooltip: if pending == Pending::HomeRebase {
-        "Rebasing...".into()
+        "Rebasing…".into()
       } else {
         format!(
           "Rebase {branch} onto {DEFAULT_BRANCH} ({})",
@@ -796,11 +796,12 @@ pub fn workspace_view(
       passing: ci_passing,
       disabled: merge_blocked,
       tooltip: merge_blocked.then(|| {
+        // It opens with what to do to merge.
         if route.retargeting {
-          "Rebasing in progress...".to_string()
+          "Wait for the rebase to finish to merge".to_string()
         } else {
           format!(
-            "Cannot merge: {} detected",
+            "Resolve conflicts to merge ({})",
             plural(conflict_count, "conflict")
           )
         }
@@ -841,7 +842,7 @@ pub fn workspace_view(
       }),
       logs: loaded.logs_enabled,
       busy: if route.retargeting {
-        Some("Rebasing...".into())
+        Some("Rebasing…".into())
       } else {
         None
       },
