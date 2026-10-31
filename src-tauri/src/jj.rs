@@ -4848,7 +4848,7 @@ mod tests {
     ) {
       let message = autosave_commit_message(&paths);
       proptest::prop_assert!(is_autosave_description(&message), "{:?}", message);
-      let mut reversed = paths.clone();
+      let mut reversed = paths;
       reversed.reverse();
       proptest::prop_assert_eq!(autosave_commit_message(&reversed), message);
     }
