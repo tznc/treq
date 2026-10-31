@@ -180,7 +180,10 @@ fn test_force_rebase_workspace_rebases_root_then_subtree() {
     .flatten()
     .unwrap_or_default();
 
-  assert!(a_last.is_empty(), "root was already on its target, so nothing to record");
+  assert!(
+    a_last.is_empty(),
+    "root was already on its target, so nothing to record"
+  );
   assert!(!b_last.is_empty(), "child should be rebased");
   assert!(!c_last.is_empty(), "grandchild should be rebased");
   assert!(!d_last.is_empty(), "sibling should be rebased");

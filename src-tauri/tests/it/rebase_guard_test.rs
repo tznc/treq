@@ -296,8 +296,18 @@ fn force_rebase_moves_a_workspace_without_a_stack_onto_its_target() {
     .remote_commit_file("advance.txt", "new", "Advance main")
     .unwrap();
 
-  let result = treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, Some(true), "diff")
-    .unwrap();
+  let result = treq_lib::core::check_and_rebase_workspaces(
+    &repo.repo_path,
+    Some(ws.id),
+    None,
+    Some(true),
+    "diff",
+  )
+  .unwrap();
 
-  assert!(has_file(&path, "feat/manual", "advance.txt"), "{}", result.message);
+  assert!(
+    has_file(&path, "feat/manual", "advance.txt"),
+    "{}",
+    result.message
+  );
 }
