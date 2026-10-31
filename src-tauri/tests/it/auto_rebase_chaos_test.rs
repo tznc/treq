@@ -153,10 +153,9 @@ fn chaos_huge_stack_rebases_in_reasonable_time() {
   let t = Instant::now();
   rebase_all(&repo);
   let dt = t.elapsed();
-  eprintln!("huge stack rebase: {dt:?}");
   assert!(has(&a, "feat/huge", "adv.txt"));
   assert!(has(&a, "feat/huge", "f39.txt"));
-  assert!(dt.as_secs() < 20);
+  assert!(dt.as_secs() < 20, "huge stack rebase took {dt:?}");
 }
 
 #[test]
