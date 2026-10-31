@@ -735,7 +735,7 @@ pub fn workspace_view(
     .collect();
     Some(Checks {
       status: combined.map(str::to_string),
-      count: format!("{}/{}", passed + ci_passed, total + ci_total),
+      count: checks_label(combined, passed + ci_passed, total + ci_total),
       name: format!("Checks: {}", parts.join(", ")),
     })
   });
@@ -866,6 +866,14 @@ pub fn workspace_view(
   (header, tab_row)
 }
 
+/// The header's checks pill: how many fail, else how many passed.
+fn checks_label(status: Option<&str>, passed: usize, total: usize) -> String {
+  match status {
+    Some("failed") => format!("{} of {total} checks failing", total.saturating_sub(passed)),
+    _ => format!("{passed}/{total} checks passed"),
+  }
+}
+
 #[cfg(test)]
 mod remote_header_tests {
   use std::{sync::Arc, time::Duration};
@@ -911,6 +919,14 @@ mod remote_header_tests {
     let mut kinds: Vec<_> = transport.sent().iter().map(|r| r.kind_name()).collect();
     kinds.sort_unstable();
     kinds
+  }
+
+  #[test]
+  fn checks_label_spells_out_failing_and_passed_checks() {
+    assert_eq!(checks_label(Some("failed"), 2, 4), "2 of 4 checks failing");
+    assert_eq!(checks_label(Some("passed"), 3, 3), "3/3 checks passed");
+    assert_eq!(checks_label(Some("running"), 1, 3), "1/3 checks passed");
+    assert_eq!(checks_label(None, 0, 3), "0/3 checks passed");
   }
 
   #[test]
