@@ -439,3 +439,28 @@ fn force_rebase_rooted_subtree_holds_children_of_conflicted_local_main() {
     })
   );
 }
+
+#[test]
+fn rebase_reports_failure_when_it_produces_conflicts() {
+  let repo = TestRepo::with_remote().unwrap();
+  let ws = repo
+    .create_workspace_with_commit("feat/conf", "shared.txt", "work", None)
+    .unwrap();
+  let target = repo.default_branch().to_string();
+  treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, &target).unwrap();
+  repo
+    .remote_commit_file("shared.txt", "upstream", "conflicting")
+    .unwrap();
+
+  let result =
+    treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, None, "diff")
+      .unwrap();
+
+  assert!(result.rebased);
+  assert!(
+    !result.success,
+    "conflicted rebase reported as success: {}",
+    result.message
+  );
+  assert!(result.message.contains("conflicts"), "{}", result.message);
+}
