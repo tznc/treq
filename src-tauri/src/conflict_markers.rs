@@ -383,7 +383,7 @@ mod proptests {
   use crate::test_repo::proptest_config;
   use proptest::prelude::*;
 
-  /// Lines that may be conflict markers, ordinary text, or marker look-alikes.
+  /// Lines that may be conflict markers, ordinary text, or text that looks like a marker.
   fn line() -> impl Strategy<Value = String> {
     prop_oneof![
       "[a-z ]{0,6}",
