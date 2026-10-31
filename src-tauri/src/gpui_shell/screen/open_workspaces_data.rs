@@ -2,6 +2,8 @@
 //! names, whether it opens an existing branch or creates a new one, and the
 //! backend calls that do it.
 
+use std::collections::{HashMap, HashSet};
+
 use serde::Deserialize;
 
 use super::{
@@ -107,6 +109,67 @@ impl Target {
       create: false,
     }
   }
+}
+
+/// The picked issue that `issue` is a sub-issue of.
+fn picked_parent<'a>(issue: &LinearIssue, issues: &'a [LinearIssue]) -> Option<&'a LinearIssue> {
+  issues.iter().find(|p| {
+    issue.parent_id.as_deref() == Some(p.id.as_str())
+      || issue.parent_identifier.as_deref() == Some(p.identifier.as_str())
+  })
+}
+
+/// The workspaces for the picked Linear issues, a parent before its
+/// sub-issues. A sub-issue stacks on its parent's workspace: the one the
+/// dialog makes for a picked parent, or the open one in `linked` (branches
+/// by Linear issue key).
+pub fn issue_targets(
+  repo_path: &str,
+  issues: &[LinearIssue],
+  open: &HashSet<String>,
+  linked: &HashMap<String, String>,
+) -> Vec<Target> {
+  fn visit<'a>(
+    issue: &'a LinearIssue,
+    issues: &'a [LinearIssue],
+    seen: &mut HashSet<&'a str>,
+    order: &mut Vec<&'a LinearIssue>,
+  ) {
+    if !seen.insert(&issue.id) {
+      return;
+    }
+    if let Some(parent) = picked_parent(issue, issues) {
+      visit(parent, issues, seen, order);
+    }
+    order.push(issue);
+  }
+  let (mut seen, mut order) = (HashSet::new(), Vec::new());
+  for issue in issues {
+    visit(issue, issues, &mut seen, &mut order);
+  }
+  order
+    .into_iter()
+    .map(|issue| {
+      let existing = open.contains(&issue.branch_name) || linked.contains_key(&issue.identifier);
+      let mut target = Target::from_issue(repo_path, issue, existing);
+      // Stacking only affects a workspace that is about to be made.
+      if !existing {
+        target.base = match picked_parent(issue, issues) {
+          Some(parent) => Some(
+            linked
+              .get(&parent.identifier)
+              .unwrap_or(&parent.branch_name)
+              .clone(),
+          ),
+          None => issue
+            .parent_identifier
+            .as_ref()
+            .and_then(|key| linked.get(key).cloned()),
+        };
+      }
+      target
+    })
+    .collect()
 }
 
 /// What checking a line found.
@@ -463,6 +526,61 @@ mod tests {
 
   fn ids(list: &[&LinearIssue]) -> Vec<String> {
     list.iter().map(|i| i.id.clone()).collect()
+  }
+
+  fn sub_issue(id: &str, parent: &str) -> LinearIssue {
+    let mut issue = issue(id, "unstarted", None);
+    issue.parent_id = Some(parent.to_string());
+    issue.parent_identifier = Some(format!("ENG-{parent}"));
+    issue
+  }
+
+  fn bases(targets: &[Target]) -> Vec<(&str, Option<&str>, bool)> {
+    targets
+      .iter()
+      .map(|t| (t.branch.as_str(), t.base.as_deref(), t.existing))
+      .collect()
+  }
+
+  #[test]
+  fn issue_targets_put_a_picked_parent_before_its_sub_issue() {
+    let picked = [sub_issue("2", "1"), issue("1", "unstarted", None)];
+    let targets = issue_targets("/repo", &picked, &HashSet::new(), &HashMap::new());
+    assert_eq!(
+      bases(&targets),
+      vec![("eng-1", None, false), ("eng-2", Some("eng-1"), false)]
+    );
+  }
+
+  #[test]
+  fn issue_targets_stack_on_a_parent_workspace_that_is_open() {
+    let linked = HashMap::from([("ENG-1".to_string(), "octocat/parent".to_string())]);
+    let targets = issue_targets("/repo", &[sub_issue("2", "1")], &HashSet::new(), &linked);
+    assert_eq!(
+      bases(&targets),
+      vec![("eng-2", Some("octocat/parent"), false)]
+    );
+  }
+
+  #[test]
+  fn issue_targets_keep_the_default_branch_without_a_parent_workspace() {
+    let targets = issue_targets(
+      "/repo",
+      &[sub_issue("2", "1")],
+      &HashSet::new(),
+      &HashMap::new(),
+    );
+    assert_eq!(bases(&targets), vec![("eng-2", None, false)]);
+  }
+
+  #[test]
+  fn issue_targets_leave_an_open_sub_issue_where_it_is() {
+    let linked = HashMap::from([
+      ("ENG-1".to_string(), "eng-1".to_string()),
+      ("ENG-2".to_string(), "eng-2".to_string()),
+    ]);
+    let targets = issue_targets("/repo", &[sub_issue("2", "1")], &HashSet::new(), &linked);
+    assert_eq!(bases(&targets), vec![("eng-2", None, true)]);
   }
 
   #[test]

@@ -382,7 +382,9 @@ pub fn rebase_single_workspace(
       Err(e) => return Err(format!("Failed to check workspace ancestry: {}", e)),
     };
     if is_descendant {
-      rebase_guard::record(repo_path, workspace.id, None);
+      // Up to date with the last-fetched target; still say when that fetch failed.
+      let stale = sync.hold().filter(|h| !h.blocks());
+      rebase_guard::record(repo_path, workspace.id, stale);
       return Ok(None);
     }
   }

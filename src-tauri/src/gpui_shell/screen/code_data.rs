@@ -167,6 +167,9 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     repo_path: &str,
     workspace_id: i64,
   ) -> Option<crate::core::rebase_guard::RebaseHold>;
+  /// The workspace's branch no longer exists, as after a fetch dropped a
+  /// branch deleted on the remote (`core::workspace_branch_deleted`).
+  fn branch_deleted(&self, repo_path: &str, workspace_id: i64) -> bool;
   /// Copies the pull request's title and body over local edits.
   fn resync_from_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
   /// Sends the workspace's local title and description edits to its pull
@@ -309,6 +312,13 @@ impl CodeHost for Backend {
       return None;
     }
     core::rebase_guard::hold(repo_path, workspace_id)
+  }
+
+  fn branch_deleted(&self, repo_path: &str, workspace_id: i64) -> bool {
+    if self.remote_containing(repo_path).is_some() {
+      return false;
+    }
+    core::workspace_branch_deleted(repo_path, workspace_id)
   }
 
   fn pr_sync(&self, repo_path: &str, workspace_id: i64) -> Option<crate::local_db::PrSyncRecord> {
@@ -913,6 +923,12 @@ mod tests {
       "me/add-api"
     );
     assert_eq!(apply_branch_name_pattern("{name}", "!!!"), "unnamed");
+  }
+
+  #[test]
+  fn branch_patterns_keep_a_one_letter_name() {
+    assert_eq!(apply_branch_name_pattern("treq/{name}", "a"), "treq/a");
+    assert_eq!(apply_branch_name_pattern("{name}-wip", "a"), "a-wip");
   }
 
   #[test]

@@ -354,6 +354,39 @@ pub fn merge_linear_issue_metadata(
     .ok_or_else(|| format!("Workspace not found after update: {workspace_id}"))
 }
 
+/// The branch to start a Linear issue's workspace on: its parent issue's
+/// workspace, when the parent has an open one, so the sub-issue stacks on it;
+/// otherwise `default`.
+pub fn linear_issue_base_branch(
+  workspaces: &[local_db::Workspace],
+  parent_identifier: Option<&str>,
+  default: &str,
+) -> String {
+  parent_identifier
+    .and_then(|parent| linear_issue_workspace_branch(workspaces, parent))
+    .unwrap_or_else(|| default.to_string())
+}
+
+/// The branch of the open workspace linked to Linear issue `identifier`.
+pub fn linear_issue_workspace_branch(
+  workspaces: &[local_db::Workspace],
+  identifier: &str,
+) -> Option<String> {
+  linear_issue_branches(workspaces).remove(identifier)
+}
+
+/// Each open workspace's branch, by the Linear issue key it is linked to.
+pub fn linear_issue_branches(workspaces: &[local_db::Workspace]) -> HashMap<String, String> {
+  workspaces
+    .iter()
+    .filter(|w| !w.archived)
+    .filter_map(|w| {
+      let key = parse_workspace_metadata(w.metadata.as_deref()).linear_issue_key?;
+      Some((key, w.branch_name.clone()))
+    })
+    .collect()
+}
+
 pub fn merge_tracker_item_metadata_json(
   existing: Option<&str>,
   provider: &str,
@@ -1896,6 +1929,74 @@ mod tests {
     }
   }
 
+  fn linear_workspace(id: i64, branch: &str, key: &str, archived: bool) -> Workspace {
+    Workspace {
+      metadata: Some(
+        merge_linear_issue_metadata_json(None, key, "https://linear.app/x", "Title")
+          .expect("metadata"),
+      ),
+      archived,
+      ..test_workspace(id, branch, Some("main"))
+    }
+  }
+
+  #[test]
+  fn linear_issue_base_branch_stacks_on_the_parents_workspace() {
+    let workspaces = [
+      test_workspace(1, "feat/plain", Some("main")),
+      linear_workspace(2, "eng-1-parent", "ENG-1", false),
+    ];
+    assert_eq!(
+      super::linear_issue_base_branch(&workspaces, Some("ENG-1"), "main"),
+      "eng-1-parent"
+    );
+  }
+
+  #[test]
+  fn linear_issue_base_branch_defaults_without_a_parent_workspace() {
+    let workspaces = [linear_workspace(2, "eng-9-other", "ENG-9", false)];
+    assert_eq!(
+      super::linear_issue_base_branch(&workspaces, Some("ENG-1"), "main"),
+      "main"
+    );
+    assert_eq!(
+      super::linear_issue_base_branch(&workspaces, None, "main"),
+      "main"
+    );
+  }
+
+  #[test]
+  fn linear_issue_base_branch_ignores_an_archived_parent_workspace() {
+    let workspaces = [linear_workspace(2, "eng-1-parent", "ENG-1", true)];
+    assert_eq!(
+      super::linear_issue_base_branch(&workspaces, Some("ENG-1"), "main"),
+      "main"
+    );
+  }
+
+  #[test]
+  fn sub_issue_workspace_targets_the_parents_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let (parent, _) =
+      super::open_or_create_workspace_from_issue(&repo_path, "eng-1-parent", "main", "P", None)
+        .expect("parent workspace");
+    super::merge_linear_issue_metadata(&repo_path, parent.id, "ENG-1", "u", "P")
+      .expect("link parent");
+
+    let base = super::linear_issue_base_branch(
+      &super::list_workspaces(&repo_path).expect("list"),
+      Some("ENG-1"),
+      "main",
+    );
+    let (child, created) =
+      super::open_or_create_workspace_from_issue(&repo_path, "eng-2-child", &base, "C", None)
+        .expect("child workspace");
+
+    assert!(created);
+    assert_eq!(child.target_branch.as_deref(), Some("eng-1-parent"));
+  }
+
   fn init_workspace_creation_repo(temp: &TempDir) -> String {
     let status = Command::new("jj")
       .current_dir(temp.path())
@@ -2402,6 +2503,68 @@ mod tests {
     let live = super::list_workspaces(&repo_path).expect("list workspaces");
     assert_eq!(live.len(), 1);
     assert_eq!(live[0].id, second.id);
+  }
+
+  #[test]
+  fn archive_keeps_workspace_bookmark() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let first = super::create_workspace(&repo_path, "fix/keep", None, None, None, None, None)
+      .expect("create workspace");
+    assert!(crate::jj::jj_get_commit_id(&repo_path, "fix/keep").is_ok());
+
+    super::archive_workspace(&repo_path, &first.id).expect("archive workspace");
+
+    // Archive keeps the branch: restoring or reopening the workspace needs it.
+    crate::jj::jj_get_commit_id(&repo_path, "fix/keep").expect("bookmark survives archive");
+  }
+
+  #[test]
+  fn archive_keeps_bookmark_on_working_copy_tip() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let ws = super::create_workspace(&repo_path, "fix/wc", None, None, None, None, None)
+      .expect("create workspace");
+    let ws_dir = temp
+      .path()
+      .join(".treq/workspaces")
+      .join(&ws.workspace_path);
+    let ws_dir = ws_dir.to_str().expect("utf-8");
+    // Workspaces made before d4a24ff, or advanced after a rebase, carry the
+    // bookmark on their (empty) working-copy commit.
+    super::advance_bookmark_to_working_copy_tip(ws_dir, "fix/wc").expect("advance bookmark");
+
+    super::archive_workspace(&repo_path, &ws.id).expect("archive workspace");
+
+    crate::jj::jj_get_commit_id(&repo_path, "fix/wc").expect("bookmark survives archive");
+  }
+
+  #[test]
+  fn workspace_branch_deleted_once_its_bookmark_is_gone() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let ws = super::create_workspace(&repo_path, "fix/merged", None, None, None, None, None)
+      .expect("create workspace");
+    assert!(!super::workspace_branch_deleted(&repo_path, ws.id));
+
+    crate::jj::jj_delete_bookmark(&repo_path, "fix/merged").expect("delete bookmark");
+
+    assert!(super::workspace_branch_deleted(&repo_path, ws.id));
+  }
+
+  #[test]
+  fn workspace_diff_tolerates_missing_workspace_bookmark() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let ws = super::create_workspace(&repo_path, "fix/gone", None, None, None, None, None)
+      .expect("create workspace");
+    let main = crate::jj::jj_get_commit_id(&repo_path, "main").expect("main commit");
+    crate::local_db::update_workspace_last_rebased_commit(&repo_path, ws.id, &main)
+      .expect("record rebase");
+    // A merged PR's bookmark is deleted by fetch while the workspace is open.
+    crate::jj::jj_delete_bookmark(&repo_path, "fix/gone").expect("delete bookmark");
+
+    super::workspace_cli_diff(&repo_path, ws.id).expect("diff without the bookmark");
   }
 
   #[test]
@@ -4818,6 +4981,28 @@ fn workspace_diff_with_conflict_style(
   Ok(diff)
 }
 
+/// The workspace's branch no longer exists locally, as after a fetch
+/// dropped a branch deleted on the remote.
+pub fn workspace_branch_deleted(repo_path: &str, workspace_id: i64) -> bool {
+  let Ok(Some(workspace)) = local_db::get_workspace_by_id(repo_path, workspace_id) else {
+    return false;
+  };
+  let workspace_dir = Path::new(repo_path)
+    .join(".treq")
+    .join("workspaces")
+    .join(&workspace.workspace_path);
+  let Some(workspace_dir) = workspace_dir.to_str().filter(|_| workspace_dir.exists()) else {
+    return false;
+  };
+  jj::WorkspaceRepo::load(workspace_dir)
+    .is_ok_and(|repo| !branch_exists(&repo, &workspace.branch_name))
+}
+
+/// A conflicted bookmark still exists, though it lists in neither side.
+fn branch_exists(repo: &jj::WorkspaceRepo, branch_name: &str) -> bool {
+  repo.bookmark_presence(branch_name, "origin").0 || repo.is_bookmark_conflicted(branch_name)
+}
+
 fn resolve_workspace_diff_base_revision(
   repo_path: &str,
   workspace: &local_db::Workspace,
@@ -4835,7 +5020,8 @@ fn resolve_workspace_diff_base_revision(
     last_rebased_target_commit,
     target_branch,
   );
-  if base_revision != target_branch {
+  // A deleted branch has no tip to compare; the diff runs to `@`.
+  if base_revision != target_branch && branch_exists(repo, &workspace.branch_name) {
     let workspace_revision = resolve_workspace_diff_workspace_revision(
       &workspace.branch_name,
       repo.is_bookmark_conflicted(&workspace.branch_name),
@@ -4864,6 +5050,9 @@ fn resolve_workspace_diff_tip_revision(
   repo: &jj::WorkspaceRepo,
 ) -> Result<String, String> {
   let target_branch = workspace.target_branch.as_deref().unwrap_or("main");
+  if !branch_exists(repo, &workspace.branch_name) {
+    return Ok("@".to_string());
+  }
   let committed_ahead = repo
     .commits_ahead(&workspace.branch_name)
     .map_err(|e| format!("Failed to get workspace commits ahead: {}", e))?;

@@ -24,6 +24,10 @@ pub struct ManagedInstance {
   pub provider_resource_id: Option<String>,
   #[serde(default)]
   pub disk_quota_gb: f64,
+  /// When the owner's Pro ended. The lapse sweep deletes the instance
+  /// `LAPSE_GRACE_DAYS` later.
+  #[serde(default)]
+  pub lapsed_at: Option<String>,
 }
 
 /// Where the cloud workspace's sshd listens, from the status response.
@@ -289,5 +293,26 @@ mod tests {
       .await
       .unwrap();
     assert_eq!(key.id, "k1");
+  }
+}
+
+#[cfg(test)]
+mod lapse_tests {
+  use super::*;
+
+  #[test]
+  fn reads_when_the_instance_lapsed() {
+    let status: InstanceStatus = serde_json::from_value(json!({
+      "instance": {
+        "instance_id": "i-1",
+        "status": "suspended",
+        "lapsed_at": "2026-11-01T12:00:00Z",
+      },
+    }))
+    .unwrap();
+    assert_eq!(
+      status.instance.unwrap().lapsed_at.as_deref(),
+      Some("2026-11-01T12:00:00Z")
+    );
   }
 }

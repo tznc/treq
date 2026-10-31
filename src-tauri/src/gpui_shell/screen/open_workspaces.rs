@@ -206,6 +206,8 @@ pub struct OpenWorkspacesDialog {
   lines_closed: Option<Instant>,
   /// Branches of the repository on screen that have a workspace.
   open_branches: HashSet<String>,
+  /// Those branches by the Linear issue key their workspace is linked to.
+  linear_branches: HashMap<String, String>,
   pub(super) pending: bool,
   /// What failed in the last open, a line per workspace.
   pub(super) errors: Vec<String>,
@@ -256,6 +258,7 @@ impl OpenWorkspacesDialog {
       lines_open: false,
       lines_closed: None,
       open_branches: HashSet::new(),
+      linear_branches: HashMap::new(),
       pending: false,
       errors: Vec::new(),
       dismissed: false,
@@ -323,16 +326,15 @@ impl OpenWorkspacesDialog {
     })
     .detach();
     cx.spawn(async move |this, cx| {
-      let (open, settings) = cx
+      let ((open, linear), settings) = cx
         .background_spawn({
           let (host, route) = (host.clone(), route.clone());
           async move {
             let repo = route.repo_path.as_str();
-            let open: HashSet<String> = super::github_data::GithubHost::workspaces(&*host, repo)
-              .unwrap_or_default()
-              .into_iter()
-              .map(|w| w.branch_name)
-              .collect();
+            let workspaces =
+              super::github_data::GithubHost::workspaces(&*host, repo).unwrap_or_default();
+            let open: HashSet<String> = workspaces.iter().map(|w| w.branch_name.clone()).collect();
+            let linear = crate::core::linear_issue_branches(&workspaces);
             let pattern = host
               .repo_settings(repo, &["branch_name_pattern".to_string()])
               .ok()
@@ -345,7 +347,7 @@ impl OpenWorkspacesDialog {
               .map(|b| b.name)
               .collect();
             let default = WorkspaceDialogHost::default_branch(&*host, repo).ok();
-            (open, (pattern, default, branches))
+            ((open, linear), (pattern, default, branches))
           }
         })
         .await;
@@ -358,6 +360,7 @@ impl OpenWorkspacesDialog {
           view.default_branch = default;
           view.branches = branches;
           view.open_branches = open;
+          view.linear_branches = linear;
           cx.notify();
         })
         .ignore_closed();
@@ -609,10 +612,12 @@ impl OpenWorkspacesDialog {
       let existing = self.open_branches.contains(&pr.head_ref_name);
       Target::from_pr(&self.route.repo_path, pr, existing)
     });
-    let from_issues = self.chosen_issues.iter().map(|issue| {
-      let existing = self.open_branches.contains(&issue.branch_name);
-      Target::from_issue(&self.route.repo_path, issue, existing)
-    });
+    let from_issues = data::issue_targets(
+      &self.route.repo_path,
+      &self.chosen_issues,
+      &self.open_branches,
+      &self.linear_branches,
+    );
     from_lines
       .chain(from_prs)
       .chain(from_issues)
@@ -1187,13 +1192,22 @@ impl OpenWorkspacesDialog {
           Target::from_pr(repo_path, pr, existing),
         )
       })
-      .chain(self.chosen_issues.iter().map(|issue| {
-        let existing = self.open_branches.contains(&issue.branch_name);
-        (
-          format!("open-workspaces-issue-{}", issue.id),
-          Target::from_issue(repo_path, issue, existing),
+      .chain(
+        data::issue_targets(
+          repo_path,
+          &self.chosen_issues,
+          &self.open_branches,
+          &self.linear_branches,
         )
-      }));
+        .into_iter()
+        .map(|target| {
+          let id = target
+            .issue
+            .as_ref()
+            .map_or_else(String::new, |i| i.id.clone());
+          (format!("open-workspaces-issue-{id}"), target)
+        }),
+      );
     deferred(
       anchored().anchor(gpui::Anchor::BottomLeft).child(
         div()

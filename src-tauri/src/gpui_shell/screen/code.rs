@@ -148,6 +148,7 @@ struct Read {
   settings: TaskSettings,
   pr_sync: PrSyncRead,
   rebase_hold: Option<RebaseHold>,
+  branch_deleted: bool,
 }
 
 /// The workspace's PR sync record, and when its read started: reads land out
@@ -182,6 +183,9 @@ impl Read {
       let rebase_hold = parent
         .workspace_id()
         .and_then(|id| host.rebase_hold(&parent.repo_path, id));
+      let branch_deleted = parent
+        .workspace_id()
+        .is_some_and(|id| host.branch_deleted(&parent.repo_path, id));
       let logs = host.logs_enabled();
       Read {
         overview: Overview::or_unavailable(super::joined(overview)),
@@ -192,6 +196,7 @@ impl Read {
         settings,
         pr_sync,
         rebase_hold,
+        branch_deleted,
       }
     })
   }
@@ -316,6 +321,8 @@ pub struct CodeView {
   pr_sync: PrSyncRead,
   /// Why the workspace's last rebase was held back (`core::rebase_guard`).
   rebase_hold: Option<RebaseHold>,
+  /// The workspace's branch is gone, as after its PR merged.
+  branch_deleted: bool,
   resyncing: bool,
   /// The card's tab while a local draft differs from the pull request, and
   /// the PR's title and body as the GitHub tab last read them.
@@ -417,6 +424,7 @@ impl CodeView {
       saving_description: false,
       pr_sync: (0, None),
       rebase_hold: None,
+      branch_deleted: false,
       resyncing: false,
       about_tab: AboutTab::Draft,
       pr_text: None,
@@ -590,6 +598,7 @@ impl CodeView {
       && self.settings.as_ref() == Some(&settings)
       && self.pr_sync.1 == read.pr_sync.1
       && self.rebase_hold == read.rebase_hold
+      && self.branch_deleted == read.branch_deleted
       && self.setup == read.setup
       && self.logs_enabled == read.logs;
     self.overview = Some(read.overview);
@@ -601,6 +610,7 @@ impl CodeView {
     self.settings = Some(settings);
     self.take_pr_sync(read.pr_sync);
     self.rebase_hold = read.rebase_hold;
+    self.branch_deleted = read.branch_deleted;
     if !unchanged {
       cx.notify();
     }
@@ -1630,6 +1640,7 @@ impl Render for CodeView {
           .gap_4()
           .when(self.overview.is_none(), |this| this.child(skeleton(&p)))
           .children(self.conflicts(&p))
+          .children(self.branch_deleted_alert(&p))
           .children(self.rebase_alert(&p))
           .children(self.setup_alert(&p, cx))
           .child(self.task_card(&p, window, cx))
@@ -1736,6 +1747,41 @@ impl CodeView {
             });
           }),
       ),
+    )
+  }
+
+  /// The workspace's branch was deleted, usually by a fetch after its pull
+  /// request merged: the work has landed, so offer to archive it.
+  fn branch_deleted_alert(&self, p: &Palette) -> Option<impl IntoElement> {
+    if !self.branch_deleted {
+      return None;
+    }
+    let branch = self.parent.workspace.as_ref()?.branch_name.clone();
+    let react = self.react.clone();
+    Some(
+      ui::Alert::new("code-branch-deleted", "Branch deleted on remote", p)
+        .severity(ui::Severity::Warning)
+        .message(format!(
+          "{branch} no longer exists, usually because its pull request merged. \
+           Archive the workspace once you no longer need it."
+        ))
+        .action(
+          Button::new("code-branch-deleted-archive", p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .label("Archive")
+            .on_click(move |_, _, cx| {
+              let react = react.clone();
+              cx.defer(move |cx| {
+                react(
+                  ScreenAction::Press {
+                    id: "workspace.archive".into(),
+                  },
+                  cx,
+                )
+              });
+            }),
+        ),
     )
   }
 

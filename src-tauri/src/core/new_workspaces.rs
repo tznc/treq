@@ -70,8 +70,12 @@ fn clean_branch_name_trailing(name: &str) -> String {
 
 /// `applyBranchNamePattern`.
 pub fn apply_branch_name_pattern(pattern: &str, name: &str) -> String {
-  let result =
-    clean_branch_name_trailing(&pattern.replace("{name}", &sanitize_for_branch_name(name)));
+  // Drop a trailing one-letter word from the name only, so a pattern
+  // prefix like `treq/` never strips a whole one-letter name.
+  let name = clean_branch_name_trailing(&sanitize_for_branch_name(name));
+  let result = TRAILING_SEPARATORS
+    .replace(&pattern.replace("{name}", &name), "")
+    .to_string();
   if result.is_empty() {
     "unnamed".into()
   } else {

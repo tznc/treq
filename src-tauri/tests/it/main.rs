@@ -14,6 +14,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod auto_rebase_chaos_test;
 mod auto_rebase_test;
 mod bookmark_off_working_copy_test;
 mod checks_test;
