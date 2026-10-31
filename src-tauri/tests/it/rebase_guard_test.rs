@@ -310,4 +310,16 @@ fn force_rebase_moves_a_workspace_without_a_stack_onto_its_target() {
     "{}",
     result.message
   );
+fn rebase_records_stale_target_when_fetch_fails_and_workspace_is_up_to_date() {
+  let repo = TestRepo::with_remote().unwrap();
+  let (ws, _) = workspace_on_default(&repo, "feat/offline");
+  TestRepo::run_git(&repo.repo_path, &["remote", "set-url", "origin", "/nonexistent/remote.git"]).unwrap();
+
+  treq_lib::auto_rebase::rebase_single_workspace(&repo.repo_path, ws.id, "main", false, "diff")
+    .unwrap();
+
+  assert!(matches!(
+    rebase_guard::hold(&repo.repo_path, ws.id),
+    Some(RebaseHold::StaleTarget { .. })
+  ));
 }
