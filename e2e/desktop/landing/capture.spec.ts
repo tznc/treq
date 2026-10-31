@@ -105,6 +105,8 @@ async function commentOnLine(
 ): Promise<void> {
   const add = page.getByRole("button", {
     name: `Add comment on ${path} line ${line}`,
+    // Without exact, "line 1" also matches "line 10" and "line 11".
+    exact: true,
   });
   // The button only shows while the line is hovered, so the pointer goes there
   // first.
