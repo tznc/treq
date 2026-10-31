@@ -1,6 +1,7 @@
 mod batch;
 mod subtree;
 
+use crate::core::rebase_guard::{self, TargetSync};
 use crate::jj::{self, BookmarkConflictCommit, JjRebaseResult};
 use crate::local_db::{self, Workspace};
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,53 @@ pub struct WorkspaceBookmarkConflict {
   pub branch_name: String,
   pub bookmark: String,
   pub commits: Vec<BookmarkConflictCommit>,
+}
+
+/// Records what holds `workspace` back from rebasing onto `sync`'s target,
+/// and whether the rebase may run. A stale target only warns.
+pub(crate) fn passes_guard(repo_path: &str, workspace: &Workspace, sync: &TargetSync) -> bool {
+  let hold = sync.hold();
+  let blocked = hold.as_ref().is_some_and(|h| h.blocks());
+  if let Some(hold) = &hold {
+    tracing::info!(
+      "Rebase of workspace '{}': {}",
+      workspace.workspace_name,
+      hold.message()
+    );
+  }
+  rebase_guard::record(repo_path, workspace.id, hold);
+  !blocked
+}
+
+/// Other workspaces' working-copy commits. A rebase leaves them out of the
+/// commits it moves, so a child stacked on its parent's working copy (as
+/// older stacks were) moves onto the parent's bookmark instead and stops
+/// picking up the parent's uncommitted changes.
+pub(crate) const OTHER_WORKING_COPIES: &str = "(working_copies() ~ @)";
+
+/// Moves a branch with no commits of its own (its bookmark is an ancestor of
+/// `jj_target`) up to `jj_target`, carrying its working copy along. Commit
+/// rebases have nothing to move for such a branch, since the bookmark never
+/// rides the working copy. Returns whether it moved.
+pub(crate) fn fast_forward_branch_without_commits(
+  workspace_path: &str,
+  branch: &str,
+  jj_target: &str,
+  conflict_marker_style: &str,
+) -> Result<bool, String> {
+  let behind = jj::jj_log_revset_commit_ids(
+    workspace_path,
+    &format!("({branch} & ::({jj_target})) ~ ({jj_target})"),
+  )
+  .map_err(|e| format!("Failed to compare '{branch}' with '{jj_target}': {e}"))?;
+  if behind.is_empty() {
+    return Ok(false);
+  }
+  jj::jj_set_bookmark(workspace_path, branch, jj_target)
+    .map_err(|e| format!("Failed to move '{branch}' to '{jj_target}': {e}"))?;
+  jj::jj_rebase_with_revset(workspace_path, "@", branch, branch, conflict_marker_style)
+    .map_err(|e| format!("Failed to move the working copy onto '{branch}': {e}"))?;
+  Ok(true)
 }
 
 /// Convert git remote branch format to jj format using centralized logic
@@ -99,6 +147,8 @@ pub fn rebase_workspaces_for_target(
   if workspaces.is_empty() {
     return Ok(None);
   }
+
+  let sync = rebase_guard::sync_target(repo_path, target_branch);
 
   // Convert target branch to jj format (origin/main -> main@origin)
   let jj_target_branch = convert_to_jj_branch_format(target_branch, repo_path);
@@ -172,6 +222,14 @@ pub fn rebase_workspaces_for_target(
       continue;
     }
 
+    if !passes_guard(repo_path, workspace, &sync) {
+      combined_messages.push(format!(
+        "Workspace '{}': skipped, see its Code tab",
+        workspace.workspace_name
+      ));
+      continue;
+    }
+
     // Resolve bookmark conflicts before building revsets like roots(target..branch_name).
     if let Err(e) =
       resolve_bookmark_conflict_if_needed(&full_path, &workspace.branch_name, conflict_marker_style)
@@ -189,10 +247,36 @@ pub fn rebase_workspaces_for_target(
       continue;
     }
 
+    match fast_forward_branch_without_commits(
+      &full_path,
+      &workspace.branch_name,
+      &jj_target_branch,
+      conflict_marker_style,
+    ) {
+      Ok(false) => {}
+      Ok(true) => {
+        workspace_branches.push(workspace.branch_name.clone());
+        combined_messages.push(format!(
+          "Workspace '{}': moved up to '{}'",
+          workspace.workspace_name, target_branch
+        ));
+        rebased_ids.push(workspace.id);
+        continue;
+      }
+      Err(e) => {
+        all_success = false;
+        combined_messages.push(format!("Workspace '{}': {}", workspace.workspace_name, e));
+        continue;
+      }
+    }
+
     // Use roots() from the workspace directory and rebase committed bookmark history only.
     let rebase_base = jj::jj_resolve_workspace_rebase_base(&full_path, &jj_target_branch)
       .unwrap_or_else(|_| jj_target_branch.clone());
-    let revset = format!("roots({}..{})", rebase_base, workspace.branch_name);
+    let revset = format!(
+      "roots(({}..{}) ~ {})",
+      rebase_base, workspace.branch_name, OTHER_WORKING_COPIES
+    );
 
     let rebase_result = jj::jj_rebase_with_revset(
       &full_path, // Run from workspace directory
@@ -279,6 +363,8 @@ pub fn rebase_single_workspace(
   }
 
   let full_path = get_full_workspace_path(&workspace);
+  // Fetch first so the needs-rebase check sees the target as origin has it.
+  let sync = rebase_guard::sync_target(repo_path, &target_branch);
   // Skip the needs-rebase check only when force=true.
   if !force {
     let is_descendant = match jj::jj_workspace_parent_descends_from_target(
@@ -296,8 +382,12 @@ pub fn rebase_single_workspace(
       Err(e) => return Err(format!("Failed to check workspace ancestry: {}", e)),
     };
     if is_descendant {
+      rebase_guard::record(repo_path, workspace.id, None);
       return Ok(None);
     }
+  }
+  if !passes_guard(repo_path, &workspace, &sync) {
+    return Ok(None);
   }
 
   // Convert target branch to jj format
@@ -310,12 +400,34 @@ pub fn rebase_single_workspace(
   resolve_bookmark_conflict_if_needed(&full_path, &workspace.branch_name, conflict_marker_style)
     .map_err(|e| format!("Failed to resolve bookmark conflict: {}", e))?;
 
+  if fast_forward_branch_without_commits(
+    &full_path,
+    &workspace.branch_name,
+    &jj_target_branch,
+    conflict_marker_style,
+  )? {
+    local_db::update_workspace_last_rebased_commit(
+      repo_path,
+      workspace.id,
+      &current_target_commit,
+    )?;
+    return Ok(Some(AutoRebaseResult {
+      target_branch: target_branch.clone(),
+      workspaces_rebased: vec![workspace.branch_name],
+      rebase_result: JjRebaseResult {
+        success: true,
+        message: format!("Moved up to '{target_branch}'"),
+      },
+      bookmark_conflicts: Vec::new(),
+    }));
+  }
+
   // Rebase mutable committed history only, excluding @ to keep working copy anchored.
   let rebase_base = jj::jj_resolve_workspace_rebase_base(&full_path, &jj_target_branch)
     .unwrap_or_else(|_| jj_target_branch.clone());
   let revset = format!(
-    "roots(mutable() & ({}..{}) ~ @)",
-    rebase_base, workspace.branch_name
+    "roots(mutable() & ({}..{}) ~ @ ~ {})",
+    rebase_base, workspace.branch_name, OTHER_WORKING_COPIES
   );
   let rebase_result = jj::jj_rebase_with_revset(
     &full_path, // Run from workspace directory

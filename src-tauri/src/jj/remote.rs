@@ -360,6 +360,19 @@ pub fn jj_get_diverged_sync_counts(
   Ok((ahead_count, behind_count))
 }
 
+/// How many commits the local `bookmark` has that `bookmark@origin` lacks,
+/// and the reverse. Errors when either side is missing or conflicted.
+pub fn jj_bookmark_ahead_behind_origin(
+  repo_path: &str,
+  bookmark: &str,
+) -> Result<(usize, usize), JjError> {
+  let local = format_revset_symbol(bookmark);
+  let remote = format_revset_symbol(&format!("{bookmark}@origin"));
+  let ahead = jj_log_revset_commit_ids(repo_path, &format!("{remote}..{local}"))?.len();
+  let behind = jj_log_revset_commit_ids(repo_path, &format!("{local}..{remote}"))?.len();
+  Ok((ahead, behind))
+}
+
 pub(super) fn get_sync_revset_tips(
   workspace_path: &str,
   branch_name: &str,

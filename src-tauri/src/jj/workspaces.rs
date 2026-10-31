@@ -403,33 +403,16 @@ pub fn create_workspace(
             JjError::GitWorkspaceError(format!("Remote bookmark '{}' not found", jj_ref))
           })?
       } else {
-        // Prefer the WC commit whose parent is the bookmark so stacked workspaces stay linear (main → bookmark → wc → child).
-        let bookmark_id = parent_repo
+        // On the bookmark, not the parent workspace's working copy: a child
+        // there would pick up the parent's uncommitted changes on every
+        // snapshot of the parent.
+        parent_repo
           .view()
           .get_local_bookmark(RefName::new(&jj_ref))
           .added_ids()
           .next()
           .cloned()
-          .ok_or_else(|| JjError::GitWorkspaceError(format!("Bookmark '{}' not found", jj_ref)))?;
-        let wc_override = parent_repo
-          .view()
-          .wc_commit_ids()
-          .iter()
-          // The home repo's working copy holds the user's uncommitted changes; never base a new workspace on it.
-          .filter(|(name, _)| name.as_str() != "default")
-          .map(|(_, wc_id)| wc_id)
-          .find(|wc_id| {
-            if *wc_id == &bookmark_id {
-              return false;
-            }
-            parent_repo
-              .store()
-              .get_commit(wc_id)
-              .map(|wc| wc.parent_ids() == [bookmark_id.clone()])
-              .unwrap_or(false)
-          })
-          .cloned();
-        wc_override.unwrap_or(bookmark_id)
+          .ok_or_else(|| JjError::GitWorkspaceError(format!("Bookmark '{}' not found", jj_ref)))?
       }
     } else {
       // Parent on target branch bookmark tip (post import_colocated_git_state); fall back to git HEAD if absent.
@@ -523,10 +506,11 @@ pub fn create_workspace(
   block_on(tx.repo_mut().edit(new_ws_name.clone(), &new_wc))
     .map_err(|e| JjError::GitWorkspaceError(format!("Failed to set wc: {}", e)))?;
 
-  // Set the local bookmark to the new wc commit
+  // The bookmark stays on the source commit, below the working copy: only a
+  // commit moves it, so uncommitted edits never reach workspaces stacked on it.
   tx.repo_mut().set_local_bookmark_target(
     RefName::new(branch_name),
-    RefTarget::normal(new_wc.id().clone()),
+    RefTarget::normal(source_commit.id().clone()),
   );
 
   // Track branch@origin if the remote bookmark exists and is not yet tracked
@@ -557,8 +541,13 @@ pub fn create_workspace(
   let _committed_repo = block_on(tx.commit("create_workspace"))
     .map_err(|e| JjError::GitWorkspaceError(format!("Failed to commit transaction: {}", e)))?;
 
-  let verified_repo =
-    verify_created_workspace_bookmark(&new_workspace, branch_name, &new_ws_name, new_wc.id())?;
+  let verified_repo = verify_created_workspace_bookmark(
+    &new_workspace,
+    branch_name,
+    &new_ws_name,
+    new_wc.id(),
+    source_commit.id(),
+  )?;
 
   // Update the physical working copy to match the new wc commit
   block_on(new_workspace.check_out(verified_repo.op_id().clone(), None, &new_wc))
@@ -1017,6 +1006,7 @@ pub(super) fn verify_created_workspace_bookmark(
   branch_name: &str,
   workspace_name: &WorkspaceNameBuf,
   expected_wc_id: &jj_lib::backend::CommitId,
+  expected_bookmark_id: &jj_lib::backend::CommitId,
 ) -> Result<Arc<ReadonlyRepo>, JjError> {
   let latest = block_on(workspace.repo_loader().load_at_head()).map_err(|e| {
     JjError::GitWorkspaceError(format!(
@@ -1040,15 +1030,15 @@ pub(super) fn verify_created_workspace_bookmark(
   }
 
   let target = latest.view().get_local_bookmark(RefName::new(branch_name));
-  if target.as_normal() == Some(registered_wc) {
+  if target.as_normal() == Some(expected_bookmark_id) {
     return Ok(latest);
   }
 
-  if target.has_conflict() && target.added_ids().any(|id| id == registered_wc) {
+  if target.has_conflict() && target.added_ids().any(|id| id == expected_bookmark_id) {
     let mut tx = latest.start_transaction();
     tx.repo_mut().set_local_bookmark_target(
       RefName::new(branch_name),
-      RefTarget::normal(registered_wc.clone()),
+      RefTarget::normal(expected_bookmark_id.clone()),
     );
     git::export_refs(tx.repo_mut()).map_err(|e| {
       JjError::GitWorkspaceError(format!(
@@ -1066,7 +1056,7 @@ pub(super) fn verify_created_workspace_bookmark(
     let resolved_target = resolved
       .view()
       .get_local_bookmark(RefName::new(branch_name));
-    if resolved_target.as_normal() == Some(registered_wc) {
+    if resolved_target.as_normal() == Some(expected_bookmark_id) {
       return Ok(resolved);
     }
   }

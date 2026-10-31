@@ -306,7 +306,7 @@ fn no_sync_when_home_on_different_branch() {
 }
 
 #[test]
-fn workspace_main_uncommitted_changes_take_precedence_when_rebasing_children() {
+fn dirty_workspace_main_holds_its_children_back() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let default_branch = repo.default_branch();
 
@@ -372,34 +372,18 @@ fn workspace_main_uncommitted_changes_take_precedence_when_rebasing_children() {
   )
   .expect("check_and_rebase_workspaces(force=true) should succeed");
 
-  assert!(
-    rebase_result.success,
-    "force rooted-subtree rebase should succeed: {}",
-    rebase_result.message
-  );
-
-  let child_workspace_after =
-    treq_lib::local_db::get_workspace_by_id(&repo.repo_path, child_workspace.id)
-      .expect("child workspace lookup should succeed")
-      .expect("child workspace should exist after rebase");
-  let child_workspace_root_after =
-    workspace_path(&repo.repo_path, &child_workspace_after.workspace_path);
-  assert!(
-    Path::new(&child_workspace_root_after).exists(),
-    "child workspace path should exist after rebase: {}",
-    child_workspace_root_after
-  );
-
-  let child_content_after_rebase = read_file(&child_workspace_root_after, shared_file);
+  // A dirty parent holds its children back: its uncommitted changes never
+  // reach them.
+  assert!(!rebase_result.success, "{}", rebase_result.message);
   assert_eq!(
-    child_content_after_rebase, "workspace-main-version\n",
-    "child workspace should reflect workspace-main uncommitted version after rebase propagation"
+    treq_lib::core::rebase_guard::hold(&repo.repo_path, child_workspace.id),
+    Some(treq_lib::core::rebase_guard::RebaseHold::ParentDirty {
+      branch: default_branch.to_string()
+    })
   );
-
-  let home_content = read_file(&repo.repo_path, shared_file);
-  assert_eq!(
-    home_content, "home-main-version\n",
-    "home repo should retain competing home version"
+  assert!(
+    !Path::new(&child_workspace_root).join(shared_file).exists(),
+    "child workspace must not pick up workspace-main's uncommitted version"
   );
 
   let workspace_main_content = read_file(&main_workspace_root, shared_file);
@@ -459,19 +443,22 @@ fn home_pull_syncs_workspace_working_copy_to_new_tip() {
     pull_result.message
   );
 
-  // The workspace working copy (@) should now equal the branch bookmark tip.
-  // Resolve both via jj log so the test stays at the command level.
-  let wc_id = TestRepo::jj_commit_ids_in_revset(&branch_workspace_root, "@")
-    .expect("Failed to resolve workspace @ commit id")
+  // The workspace working copy (@) should now sit directly on the branch
+  // bookmark tip, which then needs no further sync.
+  let wc_parent = TestRepo::jj_commit_ids_in_revset(&branch_workspace_root, "@-")
+    .expect("Failed to resolve workspace @- commit id")
     .into_iter()
     .next()
-    .expect("@ should resolve to exactly one commit");
+    .expect("@- should resolve to exactly one commit");
   let bookmark_ids = resolve_bookmark_tip_ids(&branch_workspace_root, PROP_BRANCH);
   assert_eq!(
     bookmark_ids,
-    vec![wc_id],
-    "workspace @ should equal the branch bookmark after home pull (HomeToWorkspace sync); \
-         if this fails the infinite rebase-sync loop will recur"
+    vec![wc_parent],
+    "workspace @ should sit on the branch bookmark after home pull (HomeToWorkspace sync)"
+  );
+  assert!(
+    !treq_lib::jj::jj_working_copy_needs_sync(&branch_workspace_root, PROP_BRANCH).unwrap(),
+    "a synced working copy must not ask for another sync"
   );
 }
 
@@ -496,7 +483,6 @@ fn home_commit_moves_branch_but_keeps_dirty_workspace_working_copy() {
 
   TestRepo::write_workspace_file(&workspace_root, "dirty.txt", "dirty workspace content\n")
     .expect("Failed to dirty the workspace");
-  let workspace_wc_before = JjVerifier::get_commit_id_for_rev(&workspace_root, "@").unwrap();
 
   TestRepo::write_workspace_file(&repo.repo_path, "home-dirty-safe-sync.txt", "home commit\n")
     .expect("Failed to write file in home repo");
@@ -508,10 +494,12 @@ fn home_commit_moves_branch_but_keeps_dirty_workspace_working_copy() {
     resolve_bookmark_tip_ids(&repo.repo_path, PROP_BRANCH),
     "workspace branch should follow the home commit"
   );
-  assert_eq!(
-    JjVerifier::get_commit_id_for_rev(&workspace_root, "@").unwrap(),
-    workspace_wc_before,
-    "a dirty workspace working copy must not be overwritten"
+  // The dirty working copy stays put above the old tip; only a snapshot
+  // rewrites it.
+  assert_ne!(
+    JjVerifier::get_commit_id_for_rev(&workspace_root, "@-").unwrap(),
+    JjVerifier::get_commit_id_for_rev(&workspace_root, PROP_BRANCH).unwrap(),
+    "a dirty workspace working copy must not be moved onto the new tip"
   );
   assert_eq!(
     read_file(&workspace_root, "dirty.txt"),

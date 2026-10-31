@@ -632,3 +632,54 @@ fn code_tab_discards_title_edits_on_cancel_and_escape(cx: &mut TestAppContext) {
     host.writes()
   );
 }
+
+#[gpui::test]
+fn code_tab_warns_when_rebase_held_for_a_dirty_parent(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    rebase_hold: Some(crate::core::rebase_guard::RebaseHold::ParentDirty {
+      branch: "feature/base".into(),
+    }),
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("code-rebase-held-parent-dirty"));
+  assert!(!h.drawn("code-rebase-held-diverged"));
+}
+
+#[gpui::test]
+fn code_tab_warns_when_rebase_held_for_diverged_target(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    rebase_hold: Some(crate::core::rebase_guard::RebaseHold::TargetDiverged {
+      bookmark: "main".into(),
+    }),
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("code-rebase-held-diverged"));
+  assert!(!h.drawn("code-rebase-held-parent-dirty"));
+}
+
+#[gpui::test]
+fn code_tab_notes_a_rebase_onto_a_stale_target(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    rebase_hold: Some(crate::core::rebase_guard::RebaseHold::StaleTarget {
+      error: "offline".into(),
+    }),
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("code-rebase-stale-target"));
+}
+
+#[gpui::test]
+fn code_tab_shows_no_rebase_warning_without_a_hold(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  for selector in [
+    "code-rebase-held-parent-dirty",
+    "code-rebase-held-diverged",
+    "code-rebase-stale-target",
+  ] {
+    assert!(!h.drawn(selector), "{selector}");
+  }
+  assert!(host.calls().contains(&"read rebase hold 7".to_string()));
+}

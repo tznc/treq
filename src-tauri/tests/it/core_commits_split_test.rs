@@ -37,14 +37,16 @@ fn split_rejects_path_without_changes() {
   let ws = repo.create_workspace_simple("split-missing").unwrap();
   let path = repo.workspace_full_path(&ws);
   TestRepo::write_workspace_file(&path, "a.txt", "a\n").unwrap();
+  let bookmark_before = treq_lib::jj::jj_get_commit_id(&path, "split-missing").unwrap();
 
   let error = treq_lib::jj::jj_split(&path, "nothing", vec!["missing.txt".to_string()])
     .unwrap_err()
     .to_string();
 
   assert!(error.contains("invalid_arguments:"), "{error}");
-  assert!(TestRepo::jj_bookmarks_on_revision(&path, "@-")
-    .unwrap()
-    .iter()
-    .all(|b| b != "split-missing"));
+  assert_eq!(
+    treq_lib::jj::jj_get_commit_id(&path, "split-missing").unwrap(),
+    bookmark_before,
+    "a rejected split must not move the bookmark"
+  );
 }
