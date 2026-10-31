@@ -310,6 +310,9 @@ fn force_rebase_moves_a_workspace_without_a_stack_onto_its_target() {
     "{}",
     result.message
   );
+}
+
+#[test]
 fn rebase_records_stale_target_when_fetch_fails_and_workspace_is_up_to_date() {
   let repo = TestRepo::with_remote().unwrap();
   let (ws, _) = workspace_on_default(&repo, "feat/offline");
