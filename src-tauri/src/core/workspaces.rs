@@ -2419,6 +2419,38 @@ mod tests {
   }
 
   #[test]
+  fn archive_keeps_bookmark_on_working_copy_tip() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let ws = super::create_workspace(&repo_path, "fix/wc", None, None, None, None, None)
+      .expect("create workspace");
+    let ws_dir = temp.path().join(".treq/workspaces").join(&ws.workspace_path);
+    let ws_dir = ws_dir.to_str().expect("utf-8");
+    // Workspaces made before d4a24ff, or advanced after a rebase, carry the
+    // bookmark on their (empty) working-copy commit.
+    super::advance_bookmark_to_working_copy_tip(ws_dir, "fix/wc").expect("advance bookmark");
+
+    super::archive_workspace(&repo_path, &ws.id).expect("archive workspace");
+
+    crate::jj::jj_get_commit_id(&repo_path, "fix/wc").expect("bookmark survives archive");
+  }
+
+  #[test]
+  fn workspace_diff_tolerates_missing_workspace_bookmark() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let ws = super::create_workspace(&repo_path, "fix/gone", None, None, None, None, None)
+      .expect("create workspace");
+    let main = crate::jj::jj_get_commit_id(&repo_path, "main").expect("main commit");
+    crate::local_db::update_workspace_last_rebased_commit(&repo_path, ws.id, &main)
+      .expect("record rebase");
+    // A merged PR's bookmark is deleted by fetch while the workspace is open.
+    crate::jj::jj_delete_bookmark(&repo_path, "fix/gone").expect("delete bookmark");
+
+    super::workspace_cli_diff(&repo_path, ws.id).expect("diff without the bookmark");
+  }
+
+  #[test]
   fn archive_moves_directory_out_before_background_removal() {
     let temp = TempDir::new().expect("tempdir");
     let repo_path = init_workspace_creation_repo(&temp);
