@@ -228,6 +228,46 @@ fn changes_tab_marks_files_viewed(cx: &mut TestAppContext) {
   assert!(host.writes().contains(&"unmark viewed a.rs".to_string()));
 }
 
+/// Viewed marks are kept, so reopening the tab (or the app) shows them
+/// again, except on a file whose diff changed since.
+#[gpui::test]
+fn reopening_the_tab_restores_viewed_files(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  let hunks = host.working.as_ref().expect("working").hunks_by_file[0]
+    .hunks
+    .clone();
+  host.viewed = vec![
+    (
+      "a.rs".into(),
+      crate::gpui_shell::screen::changes_data::hunks_hash(&hunks),
+    ),
+    ("b.rs".into(), "stale".into()),
+  ];
+  if let Some(diff) = host.working.as_mut() {
+    let mut b = diff.uncommitted_files[0].clone();
+    b.path = "b.rs".into();
+    diff.uncommitted_files.push(b);
+    let mut b = diff.hunks_by_file[0].clone();
+    b.path = "b.rs".into();
+    diff.hunks_by_file.push(b);
+  }
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.cx.run_until_parked();
+  let viewed = h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
+    let mut viewed: Vec<String> = changes.viewed.keys().cloned().collect();
+    viewed.sort();
+    viewed
+  });
+  assert_eq!(viewed, vec!["a.rs".to_string()], "{:?}", host.writes());
+  assert!(
+    host.writes().contains(&"unmark viewed b.rs".to_string()),
+    "{:?}",
+    host.writes()
+  );
+}
+
 #[gpui::test]
 fn a_viewed_committed_file_stays_viewed_across_reloads(cx: &mut TestAppContext) {
   let mut host = changes_host();

@@ -100,6 +100,8 @@ pub trait ChangesHost: CommitsHost {
   fn stash_all(&self, repo_path: &str, workspace_id: Option<i64>) -> Result<StashEntry, String>;
   fn mark_viewed(&self, workspace_path: &str, path: &str, hash: &str) -> Result<(), String>;
   fn unmark_viewed(&self, workspace_path: &str, path: &str) -> Result<(), String>;
+  /// The files marked viewed, with the hash of the diff each was viewed at.
+  fn viewed_files(&self, workspace_path: &str) -> Result<Vec<(String, String)>, String>;
   /// The repository has a GitHub remote (`useGitRemoteInfo`).
   fn github_remote(&self, repo_path: &str) -> bool;
   fn editor_apps(&self) -> EditorApps;
@@ -353,6 +355,20 @@ impl ChangesHost for Backend {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.unmark_file_viewed(&self.state_scope(workspace_path), path)
       .map_err(|e| e.to_string())
+  }
+
+  fn viewed_files(&self, workspace_path: &str) -> Result<Vec<(String, String)>, String> {
+    let state = tauri::Manager::state::<crate::AppState>(self.app());
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let views = db
+      .get_viewed_files(&self.state_scope(workspace_path))
+      .map_err(|e| e.to_string())?;
+    Ok(
+      views
+        .into_iter()
+        .map(|v| (v.file_path, v.content_hash))
+        .collect(),
+    )
   }
 
   fn github_remote(&self, repo_path: &str) -> bool {

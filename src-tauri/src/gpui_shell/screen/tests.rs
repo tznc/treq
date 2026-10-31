@@ -84,6 +84,8 @@ struct FakeHost {
   working: Option<crate::jj::JjRevisionDiff>,
   /// Replaces `working` once set: the files edited on disk meanwhile.
   edited: Mutex<Option<crate::jj::JjRevisionDiff>>,
+  /// The files kept as viewed, with their diff hashes.
+  viewed: Vec<(String, String)>,
   /// The token hunk reads report instead of the diff's: the disk moved on
   /// between the two reads.
   hunks_token: Mutex<Option<String>>,
@@ -1032,6 +1034,10 @@ impl changes_data::ChangesHost for FakeHost {
   fn unmark_viewed(&self, _: &str, path: &str) -> Result<(), String> {
     self.record(format!("unmark viewed {path}"));
     Ok(())
+  }
+
+  fn viewed_files(&self, _: &str) -> Result<Vec<(String, String)>, String> {
+    Ok(self.viewed.clone())
   }
 
   fn github_remote(&self, _: &str) -> bool {
