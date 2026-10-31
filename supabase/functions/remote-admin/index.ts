@@ -15,7 +15,7 @@
 //   "list_recent_failures" {limit?}            - read remote_recent_failures
 //   "prune_audit_events"                       - audit retention cleanup
 //   "sweep_lapsed_instances"                   - stop workspaces whose owner's Pro ended,
-//                                                delete them 7 days later (lapse-sweep.ts)
+//                                                delete them 30 days later (lapse-sweep.ts)
 //   "reconcile_stale_subscriptions"            - re-read from Stripe each subscription that still
 //                                                entitles past its period (billing/reconcile.ts)
 //   "report_usage"                             - send hourly usage to the Stripe meter
