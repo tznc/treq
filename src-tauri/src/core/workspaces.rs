@@ -354,6 +354,39 @@ pub fn merge_linear_issue_metadata(
     .ok_or_else(|| format!("Workspace not found after update: {workspace_id}"))
 }
 
+/// The branch to start a Linear issue's workspace on: its parent issue's
+/// workspace, when the parent has an open one, so the sub-issue stacks on it;
+/// otherwise `default`.
+pub fn linear_issue_base_branch(
+  workspaces: &[local_db::Workspace],
+  parent_identifier: Option<&str>,
+  default: &str,
+) -> String {
+  parent_identifier
+    .and_then(|parent| linear_issue_workspace_branch(workspaces, parent))
+    .unwrap_or_else(|| default.to_string())
+}
+
+/// The branch of the open workspace linked to Linear issue `identifier`.
+pub fn linear_issue_workspace_branch(
+  workspaces: &[local_db::Workspace],
+  identifier: &str,
+) -> Option<String> {
+  linear_issue_branches(workspaces).remove(identifier)
+}
+
+/// Each open workspace's branch, by the Linear issue key it is linked to.
+pub fn linear_issue_branches(workspaces: &[local_db::Workspace]) -> HashMap<String, String> {
+  workspaces
+    .iter()
+    .filter(|w| !w.archived)
+    .filter_map(|w| {
+      let key = parse_workspace_metadata(w.metadata.as_deref()).linear_issue_key?;
+      Some((key, w.branch_name.clone()))
+    })
+    .collect()
+}
+
 pub fn merge_tracker_item_metadata_json(
   existing: Option<&str>,
   provider: &str,
@@ -1894,6 +1927,74 @@ mod tests {
       sparse_patterns: None,
       archived: false,
     }
+  }
+
+  fn linear_workspace(id: i64, branch: &str, key: &str, archived: bool) -> Workspace {
+    Workspace {
+      metadata: Some(
+        merge_linear_issue_metadata_json(None, key, "https://linear.app/x", "Title")
+          .expect("metadata"),
+      ),
+      archived,
+      ..test_workspace(id, branch, Some("main"))
+    }
+  }
+
+  #[test]
+  fn linear_issue_base_branch_stacks_on_the_parents_workspace() {
+    let workspaces = [
+      test_workspace(1, "feat/plain", Some("main")),
+      linear_workspace(2, "eng-1-parent", "ENG-1", false),
+    ];
+    assert_eq!(
+      super::linear_issue_base_branch(&workspaces, Some("ENG-1"), "main"),
+      "eng-1-parent"
+    );
+  }
+
+  #[test]
+  fn linear_issue_base_branch_defaults_without_a_parent_workspace() {
+    let workspaces = [linear_workspace(2, "eng-9-other", "ENG-9", false)];
+    assert_eq!(
+      super::linear_issue_base_branch(&workspaces, Some("ENG-1"), "main"),
+      "main"
+    );
+    assert_eq!(
+      super::linear_issue_base_branch(&workspaces, None, "main"),
+      "main"
+    );
+  }
+
+  #[test]
+  fn linear_issue_base_branch_ignores_an_archived_parent_workspace() {
+    let workspaces = [linear_workspace(2, "eng-1-parent", "ENG-1", true)];
+    assert_eq!(
+      super::linear_issue_base_branch(&workspaces, Some("ENG-1"), "main"),
+      "main"
+    );
+  }
+
+  #[test]
+  fn sub_issue_workspace_targets_the_parents_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let (parent, _) =
+      super::open_or_create_workspace_from_issue(&repo_path, "eng-1-parent", "main", "P", None)
+        .expect("parent workspace");
+    super::merge_linear_issue_metadata(&repo_path, parent.id, "ENG-1", "u", "P")
+      .expect("link parent");
+
+    let base = super::linear_issue_base_branch(
+      &super::list_workspaces(&repo_path).expect("list"),
+      Some("ENG-1"),
+      "main",
+    );
+    let (child, created) =
+      super::open_or_create_workspace_from_issue(&repo_path, "eng-2-child", &base, "C", None)
+        .expect("child workspace");
+
+    assert!(created);
+    assert_eq!(child.target_branch.as_deref(), Some("eng-1-parent"));
   }
 
   fn init_workspace_creation_repo(temp: &TempDir) -> String {
