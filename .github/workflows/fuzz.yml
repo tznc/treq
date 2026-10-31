@@ -11,6 +11,9 @@ on:
     paths:
       - "src-tauri/src/unified_patch.rs"
       - "src-tauri/src/conflict_markers.rs"
+      - "src-tauri/src/cli/args.rs"
+      - "src-tauri/src/notify_dispatch.rs"
+      - "src-tauri/tauri.conf.json"
       - "src-tauri/fuzz/**"
       - ".github/workflows/fuzz.yml"
   workflow_dispatch:
@@ -22,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [unified_patch, conflict_markers]
+        target: [unified_patch, conflict_markers, cli_args]
     steps:
       - uses: actions/checkout@v5
 

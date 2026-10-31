@@ -1122,4 +1122,6 @@ mod agent_review_handlers;
 mod status_output;
 
 #[cfg(test)]
+mod proptests;
+#[cfg(test)]
 mod tests;
