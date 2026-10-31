@@ -916,6 +916,12 @@ mod tests {
   }
 
   #[test]
+  fn branch_patterns_keep_a_one_letter_name() {
+    assert_eq!(apply_branch_name_pattern("treq/{name}", "a"), "treq/a");
+    assert_eq!(apply_branch_name_pattern("{name}-wip", "a"), "a-wip");
+  }
+
+  #[test]
   fn session_names_cut_long_prompts() {
     assert_eq!(session_name("short"), "short");
     let long = "x".repeat(60);
