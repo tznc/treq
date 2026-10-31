@@ -4669,6 +4669,113 @@ mod tests {
   use std::process::Command;
   use tempfile::TempDir;
 
+  mod text_hunk_props {
+    use super::*;
+    use crate::test_repo::proptest_config;
+    use proptest::prelude::*;
+
+    /// A file of short lines from a small alphabet, so edits share lines;
+    /// with CRLF, lone CR and multi-byte characters. Ends with a newline:
+    /// a change to only the final newline is checked apart.
+    fn text() -> impl Strategy<Value = String> {
+      // A CR right before the newline is checked apart too.
+      prop::collection::vec(
+        "([ab é\u{1F600}\r]{0,2}[ab é\u{1F600}])?|-- x|\\+\\+ y",
+        0..12,
+      )
+      .prop_map(|lines| lines.iter().map(|l| format!("{l}\n")).collect())
+    }
+
+    fn range(part: &str) -> (usize, usize) {
+      let (start, count) = part.split_once(',').unwrap_or((part, "1"));
+      (start.parse().unwrap(), count.parse().unwrap())
+    }
+
+    /// `@@ -a,b +c,d @@` as `((a, b), (c, d))`.
+    fn header_ranges(header: &str) -> ((usize, usize), (usize, usize)) {
+      let mut parts = header.split(' ');
+      assert_eq!(parts.next(), Some("@@"));
+      let old = range(&parts.next().unwrap()[1..]);
+      let new = range(&parts.next().unwrap()[1..]);
+      (old, new)
+    }
+
+    /// `before`'s lines with every hunk applied at its header's old line.
+    fn apply(before: &str, hunks: &[JjDiffHunk]) -> Vec<String> {
+      let old: Vec<&str> = before.lines().collect();
+      let mut out = Vec::new();
+      let mut next = 0;
+      for hunk in hunks {
+        let ((start, count), _) = header_ranges(&hunk.header);
+        // A zero-length old side names the line after which to insert;
+        // the diff writes `-1,0` (not git's `-0,0`) for an empty file.
+        let at = if count == 0 {
+          start.min(old.len())
+        } else {
+          start - 1
+        };
+        out.extend(old[next..at].iter().map(|l| l.to_string()));
+        next = at;
+        for line in &hunk.lines {
+          match line.split_at(1) {
+            (" ", text) => {
+              assert_eq!(old[next], text, "context differs");
+              out.push(text.to_string());
+              next += 1;
+            }
+            ("-", text) => {
+              assert_eq!(old[next], text, "removed line differs");
+              next += 1;
+            }
+            ("+", text) => out.push(text.to_string()),
+            _ => panic!("unexpected hunk line {line:?}"),
+          }
+        }
+      }
+      out.extend(old[next..].iter().map(|l| l.to_string()));
+      out
+    }
+
+    proptest! {
+      #![proptest_config(proptest_config(256))]
+
+      /// Applying the hunks to the old text gives the new one.
+      #[test]
+      fn applying_hunks_gives_the_new_text(before in text(), after in text()) {
+        let hunks = build_text_hunks(&before, &after);
+        prop_assert_eq!(apply(&before, &hunks), after.lines().collect::<Vec<_>>());
+      }
+
+      /// A text diffed with itself has no hunks.
+      #[test]
+      fn identical_texts_have_no_hunks(text in text()) {
+        prop_assert!(build_text_hunks(&text, &text).is_empty());
+      }
+
+      /// Each header counts its own lines, the ranges sit inside both
+      /// files and in order, and the changed-line count matches the
+      /// histogram counter's.
+      #[test]
+      fn hunk_headers_match_their_lines(before in text(), after in text()) {
+        let hunks = build_text_hunks(&before, &after);
+        let (old_total, new_total) = (before.lines().count(), after.lines().count());
+        let (mut old_end, mut new_end) = (0, 0);
+        for hunk in &hunks {
+          let ((old_start, old_count), (new_start, new_count)) = header_ranges(&hunk.header);
+          let count = |signs: &[char]| hunk.lines.iter().filter(|l| l.starts_with(signs)).count();
+          prop_assert_eq!(old_count, count(&[' ', '-']), "{:?}", hunk);
+          prop_assert_eq!(new_count, count(&[' ', '+']), "{:?}", hunk);
+          prop_assert!(old_start + old_count <= old_total + 1);
+          prop_assert!(new_start + new_count <= new_total + 1);
+          prop_assert!(old_start >= old_end && new_start >= new_end, "{:?}", hunks);
+          (old_end, new_end) = (old_start + old_count, new_start + new_count);
+        }
+        let (added, removed) = diff_line_counts(&before, &after);
+        prop_assert_eq!(count_changed_lines(&hunks), (added + removed) as usize);
+      }
+    }
+  }
+
   #[test]
   fn text_hunks_keep_lines_that_look_like_file_headers() {
     let hunks = build_text_hunks("-- users\nkeep\n---\n", "++ accounts\nkeep\n");

@@ -237,4 +237,44 @@ mod tests {
       assert_eq!(&old[r.clone()], "ö");
     }
   }
+
+  mod props {
+    use super::*;
+    use crate::test_repo::proptest_config;
+    use proptest::prelude::*;
+
+    /// A hunk line: `+`, `-` or ` ` and text from a small alphabet with
+    /// multi-byte characters, so pairs share runs and marks cross UTF-8.
+    fn hunk_line() -> impl Strategy<Value = String> {
+      ("[-+ ]", "[ab é\u{1F600}\r\t]{0,12}").prop_map(|(sign, text)| format!("{sign}{text}"))
+    }
+
+    proptest! {
+      #![proptest_config(proptest_config(256))]
+
+      /// Marks sit only on changed lines and are ordered, non-empty byte
+      /// ranges on the text's char boundaries.
+      #[test]
+      fn marks_are_ordered_ranges_on_char_boundaries(
+        lines in prop::collection::vec(hunk_line(), 0..12),
+      ) {
+        for (index, marks) in changed_ranges(&lines) {
+          prop_assert!(lines[index].starts_with(['+', '-']));
+          let body = text(&lines[index]);
+          let mut previous_end = 0;
+          for mark in &marks {
+            prop_assert!(mark.start < mark.end && mark.start >= previous_end, "{marks:?}");
+            prop_assert!(body.get(mark.clone()).is_some(), "{mark:?} in {body:?}");
+            previous_end = mark.end;
+          }
+        }
+      }
+
+      /// A line paired with itself has nothing to mark.
+      #[test]
+      fn identical_lines_have_no_marks(line in "[ab é\u{1F600}]{0,16}") {
+        prop_assert!(line_marks(&line, &line).is_none());
+      }
+    }
+  }
 }
