@@ -35,7 +35,7 @@ const WEIGHTS = [5, 1, 0];
 // FTS4 has no bm25, so rank by matchinfo('pcx'): [phrases, columns, then per
 // phrase and column: hits in this row, hits in all rows, rows with a hit].
 // Each hit is weighted by column and by how rare the term is overall.
-function score(blob: Uint8Array): number {
+export function score(blob: Uint8Array): number {
   const m = new Uint32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
   const [phrases, cols] = m;
   let total = 0;

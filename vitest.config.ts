@@ -6,6 +6,8 @@ import { defineConfig } from "vitest/config";
  * (`cargo test`); `scripts/service-qa` has its own config.
  */
 export default defineConfig({
+  // test/web imports web/src, whose tsconfig extends a package only web/ installs.
+  esbuild: { tsconfigRaw: "{}" },
   test: {
     environment: "node",
     globals: true,

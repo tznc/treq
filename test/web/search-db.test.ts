@@ -1,32 +1,33 @@
-import { createRequire } from "node:module";
-import { execSearch } from "../../web/src/utils/searchDb";
+import { score } from "../../web/src/utils/searchDb";
 
-const require = createRequire(new URL("../../web/package.json", import.meta.url));
-const initSqlJs = require("sql.js");
-
-async function dbWith(rows: [string, string, string][]) {
-  const SQL = await initSqlJs();
-  const db = new SQL.Database();
-  db.run("CREATE VIRTUAL TABLE docs_fts USING fts4(title, body, url)");
-  for (const r of rows) db.run("INSERT INTO docs_fts(title, body, url) VALUES (?, ?, ?)", r);
-  return db;
+// matchinfo('pcx') for 3 phrases x 3 columns (title, body, url):
+// per phrase and column, [hits in this row, hits in all rows, rows with a hit].
+function matchinfo(cells: [number, number, number][]): Uint8Array {
+  return new Uint8Array(new Uint32Array([3, 3, ...cells.flat()]).buffer);
 }
 
-describe("execSearch", () => {
-  it("ranks the best match into the results even when weaker matches were indexed first", async () => {
-    const weak: [string, string, string][] = Array.from({ length: 10 }, (_, i) => [
-      `Page ${i}`,
-      "mentions the cli once, a workspace once, and its status once",
-      `/docs/weak-${i}`,
+describe("search score", () => {
+  it("ranks a page that matches every term in its title and body above one that mentions each once", () => {
+    const strong = matchinfo([
+      [1, 1, 1], [3, 12, 11], [1, 1, 1],
+      [0, 0, 0], [3, 12, 11], [0, 0, 0],
+      [0, 0, 0], [3, 12, 11], [0, 0, 0],
     ]);
-    const db = await dbWith([
-      ...weak,
-      ["CLI", "treq cli: workspace status. Show workspace status. cli status workspace", "/docs/reference/cli"],
+    const weak = matchinfo([
+      [0, 1, 1], [1, 12, 11], [0, 1, 1],
+      [0, 0, 0], [1, 12, 11], [0, 0, 0],
+      [0, 0, 0], [1, 12, 11], [0, 0, 0],
     ]);
+    expect(score(strong)).toBeGreaterThan(score(weak));
+  });
 
-    const urls = execSearch(db, "cli workspace status").map((r) => r.url);
+  it("weights a title hit above the same hit in the body", () => {
+    const inTitle = matchinfo([[1, 2, 2], [0, 2, 2], [0, 0, 0], ...Array(6).fill([0, 0, 0])]);
+    const inBody = matchinfo([[0, 2, 2], [1, 2, 2], [0, 0, 0], ...Array(6).fill([0, 0, 0])]);
+    expect(score(inTitle)).toBeGreaterThan(score(inBody));
+  });
 
-    expect(urls).toHaveLength(8);
-    expect(urls[0]).toBe("/docs/reference/cli");
+  it("scores a row with no hits as zero", () => {
+    expect(score(matchinfo(Array(9).fill([0, 4, 4])))).toBe(0);
   });
 });
