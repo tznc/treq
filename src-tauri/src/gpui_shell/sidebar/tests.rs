@@ -463,6 +463,29 @@ fn shows_status_dots(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn status_dots_name_their_state(cx: &mut TestAppContext) {
+  let mut dirty = row(7, "feat-a", 0);
+  dirty.status = Some(RowStatus {
+    color: StatusColor::Yellow,
+    spin: false,
+  });
+  let mut conflicted = row(8, "feat-b", 0);
+  conflicted.status = Some(RowStatus {
+    color: StatusColor::Red,
+    spin: false,
+  });
+  let mut h = Harness::new(cx, snapshot(vec![dirty, conflicted]));
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  use gpui_testing_library::prelude::*;
+  expect(screen.get_by_role(by::role(gpui::Role::Image).name("Uncommitted changes")))
+    .to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Image).name("Conflict"))).to_be_visible();
+}
+
+#[gpui::test]
 fn shows_skeleton_rows_while_loading(cx: &mut TestAppContext) {
   let mut s = snapshot(vec![]);
   s.repos[0].loading = true;
