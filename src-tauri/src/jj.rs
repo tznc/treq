@@ -945,18 +945,83 @@ fn diff_line_counts(before: &str, after: &str) -> (u32, u32) {
   (counts.insertions, counts.removals)
 }
 
+const NO_NEWLINE: &str = "\\ No newline at end of file";
+
 fn build_text_hunks(before: &str, after: &str) -> Vec<JjDiffHunk> {
-  let input = InternedInput::new(before, after);
+  // The line diff ignores line endings, so a file's missing final newline
+  // is diffed as a marker line after its last line, then turned into git's
+  // `-old`/`+new`/`\ No newline` form.
+  let mark = |text: &str| {
+    if text.is_empty() || text.ends_with('\n') {
+      text.to_string()
+    } else {
+      format!("{text}\n{NO_NEWLINE}\n")
+    }
+  };
+  let (before, after) = (mark(before), mark(after));
+  let input = InternedInput::new(before.as_str(), after.as_str());
   let patch = diff(
     Algorithm::Histogram,
     &input,
     UnifiedDiffBuilder::new(&input),
   );
   if patch.is_empty() {
-    Vec::new()
-  } else {
-    parse_git_diff_hunks(&patch).unwrap_or_default()
+    return Vec::new();
   }
+  let mut hunks = parse_git_diff_hunks(&patch).unwrap_or_default();
+  for hunk in &mut hunks {
+    rewrite_no_newline_marker(hunk);
+  }
+  hunks
+}
+
+/// Turns the marker line [`build_text_hunks`] diffs into git's form and
+/// recounts the header.
+fn rewrite_no_newline_marker(hunk: &mut JjDiffHunk) {
+  let Some(at) = hunk
+    .lines
+    .iter()
+    .position(|l| l.get(1..) == Some(NO_NEWLINE))
+  else {
+    return;
+  };
+  let sign = hunk.lines[at].as_bytes()[0];
+  let marker = NO_NEWLINE.to_string();
+  let previous = at.checked_sub(1).map(|i| hunk.lines[i].clone());
+  match (sign, previous) {
+    // Only one side lacks the newline, and its last line is unchanged
+    // text: show that line removed and added.
+    (b'-' | b'+', Some(line)) if line.starts_with(' ') => {
+      let text = &line[1..];
+      let (old, new) = (format!("-{text}"), format!("+{text}"));
+      let replacement = if sign == b'-' {
+        [old, marker, new]
+      } else {
+        [old, new, marker]
+      };
+      hunk.lines.splice(at - 1..=at, replacement);
+    }
+    _ => hunk.lines[at] = marker,
+  }
+  let Some((ranges, rest)) = hunk
+    .header
+    .strip_prefix("@@ ")
+    .and_then(|h| h.split_once(" @@"))
+  else {
+    return;
+  };
+  let Some((old, new)) = ranges.split_once(' ') else {
+    return;
+  };
+  let start = |range: &str| range[1..].split(',').next().unwrap_or("1").to_string();
+  let count = |signs: [char; 2]| hunk.lines.iter().filter(|l| l.starts_with(signs)).count();
+  hunk.header = format!(
+    "@@ -{},{} +{},{} @@{rest}",
+    start(old),
+    count([' ', '-']),
+    start(new),
+    count([' ', '+'])
+  );
 }
 
 fn compute_commit_stats(
