@@ -106,6 +106,8 @@ pub struct CloudInstance {
   pub status: String,
   pub provider_resource_id: Option<String>,
   pub disk_quota_gb: f64,
+  #[serde(default)]
+  pub lapsed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -224,6 +226,8 @@ pub struct CloudInstanceView {
   pub usage: Option<CloudUsage>,
   pub open_repositories: bool,
   pub wake: bool,
+  /// Why and when the lapse sweep will delete the workspace.
+  pub deletion: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -348,6 +352,20 @@ fn period_label(status: &str) -> &'static str {
 }
 
 /// `toLocaleDateString()` in an en-US locale.
+/// Days a lapsed cloud workspace is kept before the sweep deletes it
+/// (supabase/migrations/038_lapse_grace_30_days.sql).
+const LAPSE_GRACE_DAYS: i64 = 30;
+
+/// The warning for a workspace whose owner's Pro ended at `lapsed_at`.
+fn deletion_notice(lapsed_at: &str) -> Option<String> {
+  let lapsed = chrono::DateTime::parse_from_rfc3339(lapsed_at).ok()?;
+  let deletes = (lapsed + chrono::Duration::days(LAPSE_GRACE_DAYS)).to_rfc3339();
+  Some(format!(
+    "Pro ended, so this workspace will be deleted on {}. Resubscribe to keep it.",
+    local_date(&deletes)
+  ))
+}
+
 fn local_date(at: &str) -> String {
   chrono::DateTime::parse_from_rfc3339(at)
     .map(|at| {
@@ -477,6 +495,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
         }),
         open_repositories: ready && endpoint.is_some(),
         wake: ["suspended", "waking"].contains(&instance.status.as_str()),
+        deletion: instance.lapsed_at.as_deref().and_then(deletion_notice),
       }
     }),
     create: instance.is_none().then(|| CloudCreate {
@@ -1248,6 +1267,12 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           .label("Wake")
           .on_click(press("cloud.wake"))
       });
+      let deletion = instance.deletion.clone().map(|notice| {
+        div()
+          .debug_selector(|| "cloud-deletion-warning".into())
+          .text_color(p.warning)
+          .child(notice)
+      });
       let buttons = (open.is_some() || wake.is_some()).then(|| {
         div()
           .flex()
@@ -1272,6 +1297,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
               this.child(div().text_color(p.muted_foreground).child(endpoint))
             }),
         )
+        .children(deletion)
         .children(usage)
         .children(buttons)
         .into_any_element()

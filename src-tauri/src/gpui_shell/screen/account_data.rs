@@ -65,6 +65,7 @@ pub(crate) fn cloud_route(cloud: &CloudWorkspace) -> CloudRoute {
         status: i.status.clone(),
         provider_resource_id: i.provider_resource_id.clone(),
         disk_quota_gb: i.disk_quota_gb,
+        lapsed_at: i.lapsed_at.clone(),
       }),
     endpoint: status
       .and_then(|s| s.endpoint_summary())

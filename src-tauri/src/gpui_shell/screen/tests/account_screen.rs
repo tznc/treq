@@ -392,6 +392,40 @@ fn cloud_workspace_shows_usage_and_deletes_after_confirming(cx: &mut TestAppCont
 }
 
 #[gpui::test]
+fn cloud_workspace_warns_when_a_lapse_will_delete_it(cx: &mut TestAppContext) {
+  let lapsed = cloud(serde_json::json!({
+    "instance": {
+      "status": "suspended",
+      "providerResourceId": "m-1",
+      "diskQuotaGb": 5,
+      "lapsedAt": "2026-11-01T12:00:00Z",
+    },
+  }));
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(cx, host, lapsed);
+  let instance = cloud_card(&mut h).instance.expect("instance");
+  assert_eq!(
+    instance.deletion.as_deref(),
+    Some("Pro ended, so this workspace will be deleted on 12/1/2026. Resubscribe to keep it.")
+  );
+  assert!(h.drawn("cloud-deletion-warning"));
+}
+
+#[gpui::test]
+fn cloud_workspace_without_a_lapse_shows_no_deletion(cx: &mut TestAppContext) {
+  let kept = cloud(serde_json::json!({
+    "instance": { "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 5 },
+  }));
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(cx, host, kept);
+  assert_eq!(
+    cloud_card(&mut h).instance.expect("instance").deletion,
+    None
+  );
+  assert!(!h.drawn("cloud-deletion-warning"));
+}
+
+#[gpui::test]
 fn cloud_workspace_repairs_and_upsells_pro(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
   let degraded = cloud(serde_json::json!({
