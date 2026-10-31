@@ -70,7 +70,8 @@ fn chaos_offline_fetch_failure_records_stale_hold_and_does_not_error() {
   let repo = TestRepo::with_remote().unwrap();
   let (ws, _) = on_default(&repo, "feat/offline", "a.txt");
   TestRepo::run_git(&repo.repo_path, &["remote", "set-url", "origin", "/nonexistent/remote.git"]).unwrap();
-  let r = treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, Some(true), "diff");
+  repo.remote_commit_file("adv.txt", "x", "advance").unwrap();
+  let r = treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, None, "diff");
   assert!(r.is_ok(), "{r:?}");
   assert!(matches!(rebase_guard::hold(&repo.repo_path, ws.id), Some(RebaseHold::StaleTarget { .. })));
 }
@@ -208,4 +209,13 @@ fn chaos_concurrent_batch_and_ensure_do_not_diverge() {
   for i in 0..4 {
     assert!(!jj::jj_is_bookmark_conflicted(&repo.repo_path, &format!("feat/cc{i}")), "feat/cc{i} conflicted");
   }
+}
+
+#[test]
+fn chaos_manual_force_rebase_of_workspace_on_main_rebases_it() {
+  let repo = TestRepo::with_remote().unwrap();
+  let (ws, a) = on_default(&repo, "feat/manual", "a.txt");
+  repo.remote_commit_file("adv.txt", "x", "advance").unwrap();
+  let r = treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, Some(true), "diff").unwrap();
+  assert!(has(&a, "feat/manual", "adv.txt"), "manual rebase did not move workspace: {}", r.message);
 }
