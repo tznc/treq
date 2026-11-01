@@ -68,8 +68,15 @@ mod tests {
   }
 
   #[test]
-  fn self_target_is_a_cycle() {
-    assert!(would_create_stack_cycle(&[ws("a", Some("main"))], "a", "a"));
+  fn self_target_is_allowed() {
+    // A workspace on the default branch targets itself; that is not a stack.
+    assert!(!would_create_stack_cycle(&[ws("a", Some("main"))], "a", "a"));
+  }
+
+  #[test]
+  fn a_chain_through_a_self_targeted_workspace_ends() {
+    let w = [ws("main", Some("main")), ws("b", Some("main"))];
+    assert!(!would_create_stack_cycle(&w, "c", "b"));
   }
 
   #[test]
