@@ -1823,9 +1823,6 @@ impl CommitsView {
                   .child(ui::Badge::new("Conflict", p).tone(ui::Tone::Danger)),
               )
             })
-            .when(commit.is_immutable, |this| {
-              this.child(ui::Badge::new("Immutable", p))
-            })
             .child(time)
             .children(edit_timestamp)
             .when(commit.insertions > 0 || commit.deletions > 0, |this| {

@@ -338,14 +338,15 @@ fn indicators() -> Vec<Example> {
           .gap_2()
           .children([0, 3, 42, 1500].map(|n| Count::new(n, &p).into_any_element())),
         div().flex().items_center().gap_2().children(
+          // Every dot names its state; hover one for its tooltip.
           [
-            Tone::Neutral,
-            Tone::Primary,
-            Tone::Success,
-            Tone::Warning,
-            Tone::Danger,
+            (Tone::Neutral, "Agent running"),
+            (Tone::Primary, "Renamed"),
+            (Tone::Success, "Checks passing"),
+            (Tone::Warning, "Uncommitted changes"),
+            (Tone::Danger, "Conflict"),
           ]
-          .map(|tone| Dot::new(tone, &p).into_any_element()),
+          .map(|(tone, label)| Dot::new(tone, label, &p).into_any_element()),
         ),
       ])
     })
@@ -553,7 +554,7 @@ fn navigation() -> Vec<Example> {
           {
             let changes = Tab::new("changes", "Changes").count(3);
             if knobs.bool("conflict", false) {
-              changes.dot(Tone::Danger)
+              changes.dot(Tone::Danger, "Conflict")
             } else {
               changes
             }
@@ -600,7 +601,7 @@ fn navigation() -> Vec<Example> {
           Row::new("ws-1", &p)
             .icon(theme::ICON_CIRCLE_DOT)
             .title("feat/event-ingest")
-            .trailing(Dot::new(Tone::GitOpen, &p)),
+            .trailing(Dot::new(Tone::GitOpen, "Pull request open", &p)),
         )
         .child(
           Row::new("ws-2", &p)

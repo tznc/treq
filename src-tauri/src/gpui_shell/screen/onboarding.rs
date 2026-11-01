@@ -567,6 +567,15 @@ impl OnboardingView {
   }
 }
 
+/// The terminals status dot's label: green while terminals can run, amber
+/// when tmux is missing.
+fn terminals_dot_label(tone: Tone) -> &'static str {
+  match tone {
+    Tone::Warning => "tmux not installed",
+    _ => "Terminals running",
+  }
+}
+
 fn plural(n: usize, one: &str) -> String {
   if n == 1 {
     format!("1 {one}")
@@ -639,7 +648,7 @@ fn live_status(
     .flex()
     .items_center()
     .gap_2()
-    .children(tone.map(|tone| Dot::new(tone, p)))
+    .children(tone.map(|tone| Dot::new(tone, terminals_dot_label(tone), p)))
     .child(ui::text(div(), TextSize::Sm).min_w_0().child(line))
     .test_support()
     .into_any_element()
@@ -723,7 +732,9 @@ impl OnboardingView {
           .when(!machine.detail.is_empty(), |row| {
             row.meta(machine.detail.clone())
           })
-          .when_some(status, |row, tone| row.trailing(Dot::new(tone, &p)))
+          .when_some(status, |row, tone| {
+            row.trailing(Dot::new(tone, status_label, &p))
+          })
           .actions(tools_button, 24.)
           .selected(open)
           .on_click(ctx.send(press(format!("machines.open:{}", machine.id)))),

@@ -3322,7 +3322,17 @@ impl CodeView {
             )
           })
       } else {
-        div().child(format!("Recent on {}", log.target_branch))
+        {
+          let text = format!("On {} (read-only)", log.target_branch);
+          div().child(
+            div()
+              .id("history-divider")
+              .role(Role::Heading)
+              .aria_label(text.clone())
+              .child(text)
+              .test_support(),
+          )
+        }
       };
       track = track.child(separator(label, p));
       for (label, commits) in group_by_day(target.iter().copied()) {
@@ -3426,20 +3436,6 @@ impl CodeView {
           .gap_2()
           .mt_0p5()
           .flex_wrap()
-          .when(commit.is_immutable, |this| {
-            this.child(
-              ui::text(div(), TextSize::Xs)
-                .px_1p5()
-                .py_0p5()
-                .rounded_full()
-                .bg(p.muted)
-                .text_color(p.muted_foreground)
-                .border_1()
-                .border_color(p.border)
-                .font_weight(FontWeight::MEDIUM)
-                .child("Immutable"),
-            )
-          })
           .child(time)
           .when(commit.insertions > 0 || commit.deletions > 0, |this| {
             this.child(
@@ -3507,7 +3503,7 @@ fn day_label(label: &str, p: &Palette) -> impl IntoElement {
     .child(label.to_string())
 }
 
-/// The dashed `Diverged from` / `Recent on` rule.
+/// The dashed `Diverged from` / `On main (read-only)` rule.
 fn separator(label: Div, p: &Palette) -> impl IntoElement {
   // `border-t border-dashed`, as Chromium dashes a 1px border.
   let dashes = || {

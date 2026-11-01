@@ -1660,17 +1660,19 @@ impl WorkspaceView {
       Some(CommitsLabel::Count { count, tone }) => {
         let tab = commits.count(*count as usize);
         if *tone == Tone::Conflict {
-          tab.dot(ui::Tone::Danger)
+          tab.dot(ui::Tone::Danger, "Conflicted commits")
         } else {
           tab
         }
       }
-      Some(CommitsLabel::HomeConflict) => commits.dot(ui::Tone::Danger),
+      Some(CommitsLabel::HomeConflict) => commits.dot(ui::Tone::Danger, "Conflicted commits"),
       None => commits,
     };
     let changes = ui::Tab::new("workspace-tab-changes", "Changes").icon(theme::ICON_FILE_DIFF);
     let changes = match &row.changes {
-      Some(c) if c.tone == Tone::Conflict => changes.count(c.count as usize).dot(ui::Tone::Danger),
+      Some(c) if c.tone == Tone::Conflict => changes
+        .count(c.count as usize)
+        .dot(ui::Tone::Danger, "Conflict"),
       Some(c) => changes.count(c.count as usize),
       None => changes,
     };

@@ -1,0 +1,23 @@
+id: gpui-name-no-status-color
+valid:
+  - |
+    fn tree_row(p: &Palette) -> Div {
+      div().text_color(p.foreground).child(name).child(ui::Dot::new(Tone::Danger, "Conflict", p))
+    }
+  - |
+    fn error_banner(p: &Palette) -> Div {
+      div().text_color(p.destructive)
+    }
+invalid:
+  - |
+    fn tree_row(p: &Palette) -> Div {
+      div().text_color(p.destructive).child(name)
+    }
+  - |
+    fn file_row(p: &Palette) -> Div {
+      div().text_color(p.warning)
+    }
+  - |
+    fn conflict_list_row(p: &Palette, s: &str) -> Div {
+      div().text_color(status_tone(s).text(p))
+    }

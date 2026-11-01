@@ -1,0 +1,26 @@
+id: gpui-name-no-status-color
+language: rust
+severity: error
+message: >
+  A file or folder name in a tree or file list stays in the neutral text
+  color. Status is a `ui::Dot` after the name, with a label naming the state
+  ("Modified", "Conflict"), never a red, amber or green name.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  all:
+    - kind: call_expression
+    - any:
+        - pattern: $R.text_color($P.destructive)
+        - pattern: $R.text_color($P.warning)
+        - pattern: $R.text_color($P.success)
+        - pattern: $R.text_color($T.text($P))
+    - inside:
+        stopBy: end
+        kind: function_item
+        has:
+          field: name
+          regex: ^(tree_row|file_row|file_list_row|conflict_list_row|file_name_row|tree_name|file_name)$

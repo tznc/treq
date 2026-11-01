@@ -945,18 +945,83 @@ fn diff_line_counts(before: &str, after: &str) -> (u32, u32) {
   (counts.insertions, counts.removals)
 }
 
+const NO_NEWLINE: &str = "\\ No newline at end of file";
+
 fn build_text_hunks(before: &str, after: &str) -> Vec<JjDiffHunk> {
-  let input = InternedInput::new(before, after);
+  // The line diff ignores line endings, so a file's missing final newline
+  // is diffed as a marker line after its last line, then turned into git's
+  // `-old`/`+new`/`\ No newline` form.
+  let mark = |text: &str| {
+    if text.is_empty() || text.ends_with('\n') {
+      text.to_string()
+    } else {
+      format!("{text}\n{NO_NEWLINE}\n")
+    }
+  };
+  let (before, after) = (mark(before), mark(after));
+  let input = InternedInput::new(before.as_str(), after.as_str());
   let patch = diff(
     Algorithm::Histogram,
     &input,
     UnifiedDiffBuilder::new(&input),
   );
   if patch.is_empty() {
-    Vec::new()
-  } else {
-    parse_git_diff_hunks(&patch).unwrap_or_default()
+    return Vec::new();
   }
+  let mut hunks = parse_git_diff_hunks(&patch).unwrap_or_default();
+  for hunk in &mut hunks {
+    rewrite_no_newline_marker(hunk);
+  }
+  hunks
+}
+
+/// Turns the marker line [`build_text_hunks`] diffs into git's form and
+/// recounts the header.
+fn rewrite_no_newline_marker(hunk: &mut JjDiffHunk) {
+  let Some(at) = hunk
+    .lines
+    .iter()
+    .position(|l| l.get(1..) == Some(NO_NEWLINE))
+  else {
+    return;
+  };
+  let sign = hunk.lines[at].as_bytes()[0];
+  let marker = NO_NEWLINE.to_string();
+  let previous = at.checked_sub(1).map(|i| hunk.lines[i].clone());
+  match (sign, previous) {
+    // Only one side lacks the newline, and its last line is unchanged
+    // text: show that line removed and added.
+    (b'-' | b'+', Some(line)) if line.starts_with(' ') => {
+      let text = &line[1..];
+      let (old, new) = (format!("-{text}"), format!("+{text}"));
+      let replacement = if sign == b'-' {
+        [old, marker, new]
+      } else {
+        [old, new, marker]
+      };
+      hunk.lines.splice(at - 1..=at, replacement);
+    }
+    _ => hunk.lines[at] = marker,
+  }
+  let Some((ranges, rest)) = hunk
+    .header
+    .strip_prefix("@@ ")
+    .and_then(|h| h.split_once(" @@"))
+  else {
+    return;
+  };
+  let Some((old, new)) = ranges.split_once(' ') else {
+    return;
+  };
+  let start = |range: &str| range[1..].split(',').next().unwrap_or("1").to_string();
+  let count = |signs: [char; 2]| hunk.lines.iter().filter(|l| l.starts_with(signs)).count();
+  hunk.header = format!(
+    "@@ -{},{} +{},{} @@{rest}",
+    start(old),
+    count([' ', '-']),
+    start(new),
+    count([' ', '+'])
+  );
 }
 
 fn compute_commit_stats(
@@ -4669,6 +4734,134 @@ mod tests {
   use std::process::Command;
   use tempfile::TempDir;
 
+  mod text_hunk_props {
+    use super::*;
+    use crate::test_repo::proptest_config;
+    use proptest::prelude::*;
+
+    /// A file of short lines from a small alphabet, so edits share lines;
+    /// with CRLF, lone CR and multi-byte characters. Ends with a newline:
+    /// a change to only the final newline is checked apart.
+    fn text() -> impl Strategy<Value = String> {
+      // A CR right before the newline is checked apart too.
+      prop::collection::vec(
+        "([ab é\u{1F600}\r]{0,2}[ab é\u{1F600}])?|-- x|\\+\\+ y",
+        0..12,
+      )
+      .prop_map(|lines| lines.iter().map(|l| format!("{l}\n")).collect())
+    }
+
+    fn range(part: &str) -> (usize, usize) {
+      let (start, count) = part.split_once(',').unwrap_or((part, "1"));
+      (start.parse().unwrap(), count.parse().unwrap())
+    }
+
+    /// `@@ -a,b +c,d @@` as `((a, b), (c, d))`.
+    fn header_ranges(header: &str) -> ((usize, usize), (usize, usize)) {
+      let mut parts = header.split(' ');
+      assert_eq!(parts.next(), Some("@@"));
+      let old = range(&parts.next().unwrap()[1..]);
+      let new = range(&parts.next().unwrap()[1..]);
+      (old, new)
+    }
+
+    /// `before`'s lines with every hunk applied at its header's old line.
+    fn apply(before: &str, hunks: &[JjDiffHunk]) -> Vec<String> {
+      let old: Vec<&str> = before.lines().collect();
+      let mut out = Vec::new();
+      let mut next = 0;
+      for hunk in hunks {
+        let ((start, count), _) = header_ranges(&hunk.header);
+        // A zero-length old side names the line after which to insert;
+        // the diff writes `-1,0` (not git's `-0,0`) for an empty file.
+        let at = if count == 0 {
+          start.min(old.len())
+        } else {
+          start - 1
+        };
+        out.extend(old[next..at].iter().map(|l| l.to_string()));
+        next = at;
+        for line in &hunk.lines {
+          match line.split_at(1) {
+            (" ", text) => {
+              assert_eq!(old[next], text, "context differs");
+              out.push(text.to_string());
+              next += 1;
+            }
+            ("-", text) => {
+              assert_eq!(old[next], text, "removed line differs");
+              next += 1;
+            }
+            ("+", text) => out.push(text.to_string()),
+            _ => panic!("unexpected hunk line {line:?}"),
+          }
+        }
+      }
+      out.extend(old[next..].iter().map(|l| l.to_string()));
+      out
+    }
+
+    proptest! {
+      #![proptest_config(proptest_config(256))]
+
+      /// Applying the hunks to the old text gives the new one.
+      #[test]
+      fn applying_hunks_gives_the_new_text(before in text(), after in text()) {
+        let hunks = build_text_hunks(&before, &after);
+        prop_assert_eq!(apply(&before, &hunks), after.lines().collect::<Vec<_>>());
+      }
+
+      /// A text diffed with itself has no hunks.
+      #[test]
+      fn identical_texts_have_no_hunks(text in text()) {
+        prop_assert!(build_text_hunks(&text, &text).is_empty());
+      }
+
+      /// Each header counts its own lines, the ranges sit inside both
+      /// files and in order, and the changed-line count matches the
+      /// histogram counter's.
+      #[test]
+      fn hunk_headers_match_their_lines(before in text(), after in text()) {
+        let hunks = build_text_hunks(&before, &after);
+        let (old_total, new_total) = (before.lines().count(), after.lines().count());
+        let (mut old_end, mut new_end) = (0, 0);
+        for hunk in &hunks {
+          let ((old_start, old_count), (new_start, new_count)) = header_ranges(&hunk.header);
+          let count = |signs: &[char]| hunk.lines.iter().filter(|l| l.starts_with(signs)).count();
+          prop_assert_eq!(old_count, count(&[' ', '-']), "{:?}", hunk);
+          prop_assert_eq!(new_count, count(&[' ', '+']), "{:?}", hunk);
+          prop_assert!(old_start + old_count <= old_total + 1);
+          prop_assert!(new_start + new_count <= new_total + 1);
+          prop_assert!(old_start >= old_end && new_start >= new_end, "{:?}", hunks);
+          (old_end, new_end) = (old_start + old_count, new_start + new_count);
+        }
+        let (added, removed) = diff_line_counts(&before, &after);
+        prop_assert_eq!(count_changed_lines(&hunks), (added + removed) as usize);
+      }
+    }
+  }
+
+  #[test]
+  fn text_hunks_show_a_dropped_final_newline() {
+    let hunks = build_text_hunks("a\n", "a");
+    assert_eq!(hunks.len(), 1);
+    assert_eq!(hunks[0].header, "@@ -1,1 +1,1 @@");
+    assert_eq!(hunks[0].lines, ["-a", "+a", "\\ No newline at end of file"]);
+  }
+
+  #[test]
+  fn text_hunks_show_an_added_final_newline() {
+    let hunks = build_text_hunks("x\na", "y\na\n");
+    let lines: Vec<&str> = hunks
+      .iter()
+      .flat_map(|h| h.lines.iter().map(String::as_str))
+      .collect();
+    let at = lines.iter().position(|l| *l == "-a").unwrap();
+    assert_eq!(lines[at + 1], "\\ No newline at end of file");
+    assert!(lines.contains(&"+a"), "{lines:?}");
+    assert_eq!(hunks[0].header, "@@ -1,2 +1,2 @@");
+  }
+
   #[test]
   fn text_hunks_keep_lines_that_look_like_file_headers() {
     let hunks = build_text_hunks("-- users\nkeep\n---\n", "++ accounts\nkeep\n");
@@ -4836,6 +5029,22 @@ mod tests {
     ));
     assert!(!is_autosave_description("ship the good changes"));
     assert!(!is_autosave_description(""));
+  }
+
+  proptest::proptest! {
+    #![proptest_config(crate::test_repo::proptest_config(256))]
+
+    /// Every autosave message is recognised as one, and is independent of path order.
+    #[test]
+    fn autosave_message_is_recognised_and_order_free(
+      paths in proptest::collection::vec("\\PC{0,12}", 0..6),
+    ) {
+      let message = autosave_commit_message(&paths);
+      proptest::prop_assert!(is_autosave_description(&message), "{:?}", message);
+      let mut reversed = paths;
+      reversed.reverse();
+      proptest::prop_assert_eq!(autosave_commit_message(&reversed), message);
+    }
   }
 
   #[test]

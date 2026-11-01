@@ -1335,7 +1335,7 @@ impl Sidebar {
           this.child(
             div()
               .debug_selector(move || format!("conflict-{id}"))
-              .child(ui::Dot::new(Tone::Danger, palette)),
+              .child(ui::Dot::new(Tone::Danger, "Conflict", palette)),
           )
         },
       )
@@ -1346,11 +1346,19 @@ impl Sidebar {
         } else {
           this.child(
             div()
+              .id(("status-dot", id as u64))
+              .role(Role::Image)
+              .aria_label(match status.color {
+                StatusColor::Red => "Conflict",
+                StatusColor::Yellow => "Uncommitted changes",
+                StatusColor::Neutral => "Idle",
+              })
               .debug_selector(move || format!("status-{id}"))
               .flex_none()
               .size(zpx(8.))
               .rounded_full()
-              .bg(color),
+              .bg(color)
+              .test_support(),
           )
         }
       });

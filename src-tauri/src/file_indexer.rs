@@ -292,4 +292,43 @@ mod tests {
     let index = index(&["docs/résumé.md", "docs/readme.md"]);
     assert_eq!(index.search("résu", 10), ["docs/résumé.md"]);
   }
+
+  mod props {
+    use super::*;
+    use crate::test_repo::proptest_config;
+    use proptest::prelude::*;
+
+    proptest! {
+      #![proptest_config(proptest_config(256))]
+
+      /// Results are at most `limit` distinct indexed paths, each holding
+      /// the query's characters in order (case and whitespace ignored).
+      #[test]
+      fn search_returns_matching_paths_within_limit(
+        paths in prop::collection::btree_set("[aBé/._ ]{1,10}", 0..20),
+        query in "[aBé/ ]{0,4}",
+        limit in 0usize..8,
+      ) {
+        let paths: Vec<String> = paths.into_iter().collect();
+        let found = FileIndex::new(paths.clone()).search(&query, limit);
+        prop_assert!(found.len() <= limit);
+        let needle: String = query
+          .chars()
+          .filter(|c| !c.is_whitespace())
+          .map(|c| c.to_ascii_lowercase())
+          .collect();
+        let mut seen = std::collections::HashSet::new();
+        for path in &found {
+          prop_assert!(paths.contains(path));
+          prop_assert!(seen.insert(path));
+          prop_assert!(is_char_subsequence(&needle, &path.to_ascii_lowercase()));
+        }
+        let matching = paths
+          .iter()
+          .filter(|p| is_char_subsequence(&needle, &p.to_ascii_lowercase()))
+          .count();
+        prop_assert_eq!(found.len(), matching.min(limit));
+      }
+    }
+  }
 }
