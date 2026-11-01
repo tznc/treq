@@ -3869,6 +3869,10 @@ fn sync_home_on_branch_and_workspace(
     SyncSource::WorkspaceToHome => workspace_path_str,
   };
   jj::jj_workspace_update_stale(source_path).warn_on_err("jj workspace update stale");
+  // Setting a diverged bookmark to one checkout would drop `origin`'s side; a pull heals it instead.
+  if jj::jj_is_bookmark_conflicted(source_path, branch) {
+    return Ok(());
+  }
   // Use `@-` when `@` is the empty working copy, so no empty commit gets pushed.
   let checkout_tip = jj::jj_resolve_bookmark_tip(source_path)
     .map_err(|e| format!("Failed to resolve source tip: {}", e))?;
