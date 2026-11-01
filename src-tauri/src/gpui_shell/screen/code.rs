@@ -23,7 +23,7 @@ use std::{
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
-  input::{Enter, Escape, InputEvent, Textarea, TextareaState},
+  input::{Enter, Escape, Textarea, TextareaState},
   text::{TextView, TextViewStyle},
 };
 use serde_json::json;
@@ -126,6 +126,23 @@ impl Parent {
 }
 
 /// A stack row with its lines changed.
+/// What the stack card shows from the workspace header.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StackCard {
+  pub branch: String,
+  pub target: Option<super::workspace::Target>,
+  /// Stack on this…'s tooltip; `None` hides the button.
+  pub stack_tooltip: Option<String>,
+}
+
+/// The header's part of the Code tab: the stack card's data, and where the
+/// header's popovers anchor.
+#[derive(Clone, Default)]
+pub struct CodeChrome {
+  pub card: Rc<RefCell<StackCard>>,
+  pub bounds: Rc<RefCell<HashMap<SharedString, gpui::Bounds<Pixels>>>>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct StackRow {
   pub workspace: Workspace,
@@ -213,8 +230,10 @@ fn read_history(host: &dyn CodeHost, parent: &Parent, limit: usize) -> Result<Jj
 /// The workspace's stack with each row's diff stats; `None` at home.
 fn read_stack(host: &dyn CodeHost, parent: &Parent) -> Option<Vec<StackRow>> {
   let current = parent.workspace.as_ref()?;
-  let workspaces = host.workspaces(&parent.repo_path).ok()?;
-  let stack = workspace_stack(&workspaces, current.id, &parent.default_branch)?;
+  let workspaces = host.workspaces(&parent.repo_path).unwrap_or_default();
+  // A workspace outside any stack is a stack of one.
+  let stack = workspace_stack(&workspaces, current.id, &parent.default_branch)
+    .unwrap_or_else(|| vec![(current.clone(), true)]);
   // Each row's commits are an independent read: read them all at once.
   Some(std::thread::scope(|scope| {
     #[expect(
@@ -247,8 +266,6 @@ fn read_stack(host: &dyn CodeHost, parent: &Parent) -> Option<Vec<StackRow>> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Menu {
-  /// The title editor's Save options.
-  SaveTitle,
   /// The description editor's Save options.
   SaveDescription,
 }
@@ -288,8 +305,7 @@ pub struct CodeView {
   pub(super) settings: Option<TaskSettings>,
   pub(super) menu: Option<Menu>,
   /// The title being edited, and its editor.
-  pub(super) title_draft: Option<Entity<TextareaState>>,
-  saving_title: bool,
+  chrome: CodeChrome,
   /// The description being edited, and its editor.
   pub(super) description_draft: Option<Entity<TextareaState>>,
   saving_description: bool,
@@ -361,6 +377,7 @@ impl CodeView {
     host: Arc<dyn CodeHost>,
     react: ActionSink,
     popups: PopupSink,
+    chrome: CodeChrome,
     dark: bool,
     cx: &mut Context<Self>,
   ) -> Self {
@@ -383,8 +400,7 @@ impl CodeView {
       stack: None,
       settings: None,
       menu: None,
-      title_draft: None,
-      saving_title: false,
+      chrome,
       description_draft: None,
       saving_description: false,
       pr_sync: (0, None),
@@ -523,7 +539,6 @@ impl CodeView {
       Some(next) if next.key() == parent.key() => {
         self.parent = self.next.take().unwrap_or(parent);
         self.history_limit = HISTORY_PAGE;
-        self.title_draft = None;
         self.description_draft = None;
         self.about_tab = AboutTab::Draft;
         self.pr_text = None;
@@ -720,58 +735,6 @@ impl CodeView {
       ScreenAction::Field {
         field: field.into(),
         value,
-      },
-      cx,
-    );
-  }
-
-  fn edit_title(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
-    let draft = cx.new(|cx| {
-      TextareaState::new(window, cx)
-        .auto_grow(1, 5)
-        .placeholder("Workspace title")
-        .default_value(text)
-    });
-    draft.update(cx, |d, cx| d.focus(window, cx));
-    // Save is disabled while the title is blank.
-    self
-      ._subscriptions
-      .push(cx.subscribe(&draft, |_, _, event: &InputEvent, cx| {
-        if matches!(event, InputEvent::Change) {
-          cx.notify();
-        }
-      }));
-    self.title_draft = Some(draft);
-    cx.notify();
-  }
-
-  /// Saves the title being edited; on a workspace that follows its pull
-  /// request, to the PR too unless `draft` keeps it local until a push.
-  fn save_title(&mut self, draft: bool, cx: &mut Context<Self>) {
-    let (Some(editor), Some(ws)) = (&self.title_draft, &self.parent.workspace) else {
-      return;
-    };
-    let text = editor.read(cx).value().trim().to_string();
-    if text.is_empty() || self.saving_title {
-      return;
-    }
-    let (id, to_pr) = (ws.id, !draft && self.pr_sync.1.is_some());
-    self.saving_title = true;
-    self.menu = None;
-    self.read(
-      move |host, parent| {
-        host.set_title(&parent.repo_path, id, &text)?;
-        Ok(
-          to_pr
-            .then(|| host.push_to_pr(&parent.repo_path, id).err())
-            .flatten(),
-        )
-      },
-      |view, result, _| {
-        view.saving_title = false;
-        if view.saved("title", result) {
-          view.title_draft = None;
-        }
       },
       cx,
     );
@@ -1562,6 +1525,19 @@ impl CodeView {
       // The next draft opens on itself.
       self.about_tab = AboutTab::Draft;
     }
+    self.parent.workspace.as_ref()?;
+    let github = draft && self.about_tab == AboutTab::GitHub;
+    let body = if github {
+      Some(self.github_text(p).into_any_element())
+    } else {
+      self
+        .description(p, window, cx)
+        .map(IntoElement::into_any_element)
+    };
+    let footer = self.pr_footer(p, cx).map(IntoElement::into_any_element);
+    if !draft && body.is_none() && footer.is_none() {
+      return None;
+    }
     let card = section(p)
       .debug_selector(|| "workspace-about".into())
       .px_4()
@@ -1570,14 +1546,7 @@ impl CodeView {
       .flex_col()
       .gap_3()
       .when(draft, |card| card.child(self.about_tabs(p, cx)));
-    let card = if draft && self.about_tab == AboutTab::GitHub {
-      card.child(self.github_text(p))
-    } else {
-      card
-        .child(self.title(p, cx)?)
-        .children(self.description(p, window, cx))
-    };
-    Some(card.children(self.pr_footer(p, cx)))
+    Some(card.children(body).children(footer))
   }
 
   fn about_tabs(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1651,100 +1620,6 @@ impl CodeView {
           .child(body)
           .into_any_element()
       })
-  }
-
-  fn title(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-    let title = display_title(self.parent.workspace.as_ref()?);
-    let heading = |el: Div| {
-      ui::text(el, TextSize::Xl)
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(p.foreground)
-    };
-    let panel = div().debug_selector(|| "workspace-title".into());
-    let Some(draft) = self.title_draft.clone() else {
-      return Some(
-        panel
-          .flex()
-          .items_start()
-          .gap_2()
-          .child(
-            heading(div())
-              .flex_1()
-              .min_w_0()
-              .whitespace_normal()
-              .debug_selector(|| "workspace-title-text".into())
-              .child(title.clone()),
-          )
-          .child(
-            Button::new("workspace-title-edit", p)
-              .aria_label("Edit workspace title")
-              .variant(Variant::Ghost)
-              .size(Size::Icon)
-              .flex_none()
-              .w(zpx(20.))
-              .h(zpx(20.))
-              .child(ui::icon(theme::ICON_PENCIL, 16., p.muted_foreground))
-              .on_click(
-                cx.listener(move |view, _, window, cx| view.edit_title(title.clone(), window, cx)),
-              ),
-          )
-          .into_any_element(),
-      );
-    };
-    let saving = self.saving_title;
-    let empty = draft.read(cx).value().trim().is_empty();
-    Some(
-      panel
-        .child(
-          div()
-            .id("workspace-title-editor")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .capture_action(cx.listener(|view, action: &Enter, _, cx| {
-              if action.secondary {
-                view.save_title(false, cx);
-                cx.stop_propagation();
-              }
-            }))
-            .capture_action(cx.listener(|view, _: &Escape, _, cx| {
-              view.title_draft = None;
-              cx.notify();
-              cx.stop_propagation();
-            }))
-            .child(
-              heading(div())
-                .debug_selector(|| "workspace-title-input".into())
-                .child(Textarea::new(&draft)),
-            )
-            .child(
-              div()
-                .flex()
-                .justify_end()
-                .gap_2()
-                .child(
-                  Button::new("workspace-title-cancel", p)
-                    .variant(Variant::Ghost)
-                    .size(Size::Sm)
-                    .disabled(saving)
-                    .label("Cancel")
-                    .on_click(cx.listener(|view, _, _, cx| {
-                      view.title_draft = None;
-                      cx.notify();
-                    })),
-                )
-                .child(self.save_button(
-                  "workspace-title-save",
-                  Menu::SaveTitle,
-                  saving || empty,
-                  p,
-                  Self::save_title,
-                  cx,
-                )),
-            ),
-        )
-        .into_any_element(),
-    )
   }
 
   fn description(
@@ -1930,6 +1805,7 @@ impl CodeView {
       section(p)
         .debug_selector(|| "workspace-stack-panel".into())
         .p_4()
+        .child(self.branch_row(p, cx))
         .child(header)
         .child(
           div()
@@ -1947,6 +1823,99 @@ impl CodeView {
             .child(base),
         ),
     )
+  }
+
+  /// The card's top row: the branch, its target picker, and Stack on this….
+  fn branch_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let card = self.chrome.card.borrow().clone();
+    let press = |id: &'static str, react: ActionSink| {
+      move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
+        let react = react.clone();
+        cx.defer(move |cx| react(ScreenAction::Press { id: id.into() }, cx));
+      }
+    };
+    let mut row = div()
+      .flex()
+      .items_center()
+      .gap_2()
+      .min_w_0()
+      .mb_4()
+      .child(ui::icon(theme::ICON_BRANCH_BOLD, 16., p.muted_foreground))
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .font_family(theme::MONO_FONT)
+          .font_weight(FontWeight::SEMIBOLD)
+          .min_w_0()
+          .max_w(zpx(220.))
+          .truncate()
+          .debug_selector(|| "workspace-branch".into())
+          .child(card.branch.clone()),
+      );
+    if let Some(target) = &card.target {
+      let label = target.branch.clone().unwrap_or_else(|| "Select…".into());
+      let button = Button::new("workspace-target", p)
+        .aria_label("Workspace target")
+        .variant(Variant::Outline)
+        .size(Size::Sm)
+        .disabled(target.disabled)
+        .max_w(zpx(220.))
+        .map(|b| {
+          let fg = b.foreground();
+          if target.loading {
+            b.child(ui::spinner("workspace-target-spin", 16., fg))
+          } else {
+            b.icon(theme::ICON_BRANCH_BOLD, 16.)
+          }
+        })
+        .child(
+          div()
+            .font_family(theme::MONO_FONT)
+            .min_w_0()
+            .truncate()
+            .child(label),
+        )
+        .child(ui::icon(
+          theme::ICON_CHEVRON_DOWN,
+          16.,
+          p.foreground.opacity(0.5),
+        ))
+        .on_click(press("workspace.target", self.react.clone()));
+      let bounds = self.chrome.bounds.clone();
+      row = row
+        .child(ui::icon(theme::ICON_ARROW_RIGHT, 16., p.muted_foreground))
+        .child(
+          div().relative().flex_none().child(button).child(
+            gpui::canvas(
+              move |b, _, _| {
+                bounds.borrow_mut().insert("workspace-target".into(), b);
+              },
+              |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+          ),
+        );
+    }
+    if let Some(tooltip) = card.stack_tooltip {
+      let button = Button::new("workspace-stack", p)
+        .variant(Variant::Outline)
+        .size(Size::Sm)
+        .gap_1()
+        .px_2()
+        .icon(theme::ICON_LAYERS, 16.)
+        .label(super::workspace::stack_label(false))
+        .on_click(press("workspace.stack", self.react.clone()));
+      row = row.child(div().flex_1()).child(self.tips.wrap(
+        "workspace-stack",
+        Side::Top,
+        Some(TooltipContent::Text(tooltip.into())),
+        button,
+        cx,
+      ));
+    }
+    row
   }
 
   fn stack_row(
