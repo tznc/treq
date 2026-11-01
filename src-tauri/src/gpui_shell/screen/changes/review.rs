@@ -1020,15 +1020,15 @@ impl ChangesView {
         "Add a summary comment (optional)…",
         3,
       ),
-      Field::Suggestion => match &self.review.suggestion_text {
-        Some(lines) => (
+      Field::Suggestion => {
+        let lines = self.review.suggestion_text.as_ref()?;
+        (
           &self.review.suggestion_input,
           lines.clone(),
           "Suggested lines",
           lines.lines().count().max(1),
-        ),
-        None => return None,
-      },
+        )
+      }
       _ => return None,
     };
     if let Some(input) = slot {
