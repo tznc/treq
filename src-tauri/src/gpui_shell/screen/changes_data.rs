@@ -946,8 +946,8 @@ pub fn new_range(header: &str) -> (usize, usize) {
 /// lines shows none (`last == first - 1`).
 pub fn new_lines(header: &str) -> (usize, usize) {
   match new_range(header) {
-    (start, 0) => (start + 1, start),
-    (start, count) => (start, start + count - 1),
+    (start, 0) => (start.saturating_add(1), start),
+    (start, count) => (start, start.saturating_add(count - 1)),
   }
 }
 
@@ -957,7 +957,7 @@ static OLD_RANGE: LazyLock<Regex> =
 
 /// The old-side lines a hunk shows, as [`new_lines`] numbers the new side.
 fn old_lines(header: &str) -> (usize, usize) {
-  let (start, count) = OLD_RANGE
+  let (start, count): (usize, usize) = OLD_RANGE
     .captures(header)
     .map(|c| {
       (
@@ -967,8 +967,8 @@ fn old_lines(header: &str) -> (usize, usize) {
     })
     .unwrap_or((1, 1));
   match count {
-    0 => (start + 1, start),
-    _ => (start, start + count - 1),
+    0 => (start.saturating_add(1), start),
+    _ => (start, start.saturating_add(count - 1)),
   }
 }
 
@@ -978,11 +978,11 @@ pub fn context_number(header: &str, after: bool, new: usize) -> (i64, i64) {
   let (old_first, old_last) = old_lines(header);
   let (new_first, new_last) = new_lines(header);
   let shift = if after {
-    old_last as i64 - new_last as i64
+    (old_last as i64).saturating_sub(new_last as i64)
   } else {
-    old_first as i64 - new_first as i64
+    (old_first as i64).saturating_sub(new_first as i64)
   };
-  (new as i64 + shift, new as i64)
+  ((new as i64).saturating_add(shift), new as i64)
 }
 
 /// The old and new numbers of row `i` of the `read` lines shown above (or,
@@ -990,7 +990,7 @@ pub fn context_number(header: &str, after: bool, new: usize) -> (i64, i64) {
 pub fn context_row_numbers(header: &str, after: bool, read: usize, i: usize) -> (i64, i64) {
   let (first, last) = new_lines(header);
   let new = if after {
-    last + 1 + i
+    last.saturating_add(1).saturating_add(i)
   } else {
     (first + i).saturating_sub(read)
   };
@@ -1027,21 +1027,29 @@ pub fn context_ranges(
   let (first, last) = new_lines(&hunks[h].header);
   let (above, below) = loaded(h);
   let floor = match h.checked_sub(1) {
-    Some(prev) => new_lines(&hunks[prev].header).1 + loaded(prev).1,
+    Some(prev) => new_lines(&hunks[prev].header)
+      .1
+      .saturating_add(loaded(prev).1),
     None => 0,
   };
-  let before = (first - 1)
+  let before = first
+    .saturating_sub(1)
     .checked_sub(above)
     .filter(|end| *end > floor)
     .map(|end| ((end + 1).saturating_sub(CONTEXT_STEP).max(floor + 1), end));
-  let start = last + 1 + below;
+  let start = last.saturating_add(1).saturating_add(below);
   let after = match hunks.get(h + 1) {
     Some(next) => {
       let ceiling = new_lines(&next.header).0.saturating_sub(loaded(h + 1).0);
-      (start < ceiling).then(|| (start, (start + CONTEXT_STEP - 1).min(ceiling - 1)))
+      (start < ceiling).then(|| {
+        (
+          start,
+          start.saturating_add(CONTEXT_STEP - 1).min(ceiling - 1),
+        )
+      })
     }
     None if ended || (below == 0 && trailing_context(&hunks[h]) < DIFF_CONTEXT) => None,
-    None => Some((start, start + CONTEXT_STEP - 1)),
+    None => Some((start, start.saturating_add(CONTEXT_STEP - 1))),
   };
   (before, after)
 }
@@ -1058,15 +1066,18 @@ pub fn gap_ranges(
   let (first, last) = new_lines(&hunks[h].header);
   let (above, below) = loaded(h);
   let floor = match h.checked_sub(1) {
-    Some(prev) => new_lines(&hunks[prev].header).1 + loaded(prev).1,
+    Some(prev) => new_lines(&hunks[prev].header)
+      .1
+      .saturating_add(loaded(prev).1),
     None => 0,
   };
-  let before = (first - 1)
+  let before = first
+    .saturating_sub(1)
     .checked_sub(above)
     .filter(|end| *end > floor)
     .map(|end| (floor + 1, end));
   let after = hunks.get(h + 1).and_then(|next| {
-    let start = last + 1 + below;
+    let start = last.saturating_add(1).saturating_add(below);
     let ceiling = new_lines(&next.header).0.saturating_sub(loaded(h + 1).0);
     (!ended && start < ceiling).then(|| (start, ceiling - 1))
   });
@@ -1447,6 +1458,20 @@ mod tests {
     assert_eq!(gap_ranges(&hunks, 0, loaded, false).1, Some((5, 9)));
     // Above the first hunk the gap runs from line 1.
     assert_eq!(gap_ranges(&hunks[1..], 0, none, false).0, Some((1, 29)));
+  }
+
+  #[test]
+  fn malformed_hunk_headers_do_not_panic() {
+    let big = format!("@@ -{m},5 +{m},5 @@", m = usize::MAX);
+    for header in ["@@ -0,5 +0,5 @@", "@@ -1,1 +0,5 @@", big.as_str()] {
+      let hunks = [hunk(header, &[" a"])];
+      let _ = new_lines(header);
+      let _ = old_lines(header);
+      let _ = context_number(header, true, 1);
+      let _ = context_row_numbers(header, true, 3, 1);
+      let _ = context_ranges(&hunks, 0, |_| (0, 0), false);
+      let _ = gap_ranges(&hunks, 0, |_| (0, 0), false);
+    }
   }
 
   #[test]
