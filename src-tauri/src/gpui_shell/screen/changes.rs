@@ -25,6 +25,10 @@ use std::{
   time::{Duration, Instant},
 };
 
+/// Prefix of a viewed hash taken from a file's content id, for files with
+/// no diff lines to hash (binary, empty, mode-only, or not yet loaded).
+const CONTENT_ID_MARK: &str = "id:";
+
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use serde::Deserialize;
@@ -928,6 +932,11 @@ impl ChangesView {
     );
   }
 
+  /// The content id the latest snapshot lists for `path`.
+  fn content_id(&self, path: &str) -> Option<String> {
+    self.snapshot.as_ref()?.content_ids.get(path).cloned()
+  }
+
   /// The diff a file card shows: the working copy's, else the branch's.
   fn file_hunks(&self, path: &str) -> Option<FileHunks> {
     self.shown_hunks(path).cloned()
@@ -979,6 +988,10 @@ impl ChangesView {
       .viewed
       .iter()
       .filter(|(path, hash)| {
+        // Files with no diff lines to hash were marked by their content.
+        if let Some(id) = hash.strip_prefix(CONTENT_ID_MARK) {
+          return self.content_id(path).is_some_and(|now| now != id);
+        }
         !hash.is_empty()
           && read.is_none_or(|read| read.contains(*path))
           && self
@@ -1383,6 +1396,11 @@ impl ChangesView {
         .file_hunks(&path)
         .filter(|d| !d.loading && !d.hunks.is_empty())
         .map(|d| hunks_hash(&d.hunks))
+        .or_else(|| {
+          self
+            .content_id(&path)
+            .map(|id| format!("{CONTENT_ID_MARK}{id}"))
+        })
         .unwrap_or_default();
       self.viewed.insert(path.clone(), hash.clone());
       self.collapsed_files.insert(path.clone());
