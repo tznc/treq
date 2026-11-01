@@ -534,16 +534,30 @@ mod tests {
       .collect()
   }
 
+  /// `branch` is `base` plus a 6-hex-char suffix.
+  fn is_suffixed(branch: &str, base: &str) -> bool {
+    branch
+      .strip_prefix(base)
+      .and_then(|rest| rest.strip_prefix('-'))
+      .is_some_and(|hex| hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()))
+  }
+
+  fn branches(rows: &[NewWorkspaceRow]) -> Vec<&str> {
+    rows.iter().filter_map(|r| r.branch.as_deref()).collect()
+  }
+
   #[test]
   fn an_indented_run_stacks_in_order() {
     let text = "feat/api\n  Add the page\n  feat/tests\nfeat/open\n";
     let rows = plan_rows(text, "main", fake);
+    let added = rows[1].branch.as_deref().unwrap();
+    assert!(is_suffixed(added, "treq/add-the-page"), "{added}");
     assert_eq!(
       summary(&rows),
       vec![
         (0, Some("feat/api"), Some("main")),
-        (1, Some("treq/add-the-page"), Some("feat/api")),
-        (2, Some("feat/tests"), Some("treq/add-the-page")),
+        (1, Some(added), Some("feat/api")),
+        (2, Some("feat/tests"), Some(added)),
         (0, Some("feat/open"), Some("main")),
       ]
     );
@@ -566,7 +580,7 @@ mod tests {
   }
 
   #[test]
-  fn titles_that_share_a_branch_get_numbered_branches() {
+  fn titles_that_share_a_branch_get_different_suffixes() {
     // The branch name drops a trailing single letter, so both titles
     // would be treq/fix-the-page.
     let rows = plan_rows(
@@ -574,16 +588,77 @@ mod tests {
       "main",
       fake,
     );
-    assert_eq!(
-      summary(&rows),
-      vec![
-        (0, Some("treq/fix-the-page"), Some("main")),
-        (0, Some("treq/fix-the-page-2"), Some("main")),
-        (1, Some("treq/add-tests"), Some("treq/fix-the-page-2")),
-      ]
-    );
+    let [first, second, tests] = branches(&rows)[..] else {
+      panic!("{rows:?}")
+    };
+    assert!(is_suffixed(first, "treq/fix-the-page"), "{first}");
+    assert!(is_suffixed(second, "treq/fix-the-page"), "{second}");
+    assert_ne!(first, second);
+    assert!(is_suffixed(tests, "treq/add-tests"), "{tests}");
+    assert_eq!(rows[2].base.as_deref(), Some(second));
     assert_eq!(rows[1].title.as_deref(), Some("Fix the page B"));
     assert_eq!(rows[1].step, Some(NewWorkspaceStep::Create));
+  }
+
+  #[test]
+  fn identical_titles_get_different_suffixes() {
+    let rows = plan_rows("Fix it now\nfix it now\n", "main", fake);
+    let [first, second] = branches(&rows)[..] else {
+      panic!("{rows:?}")
+    };
+    assert!(is_suffixed(first, "treq/fix-it-now"), "{first}");
+    assert!(is_suffixed(second, "treq/fix-it-now"), "{second}");
+    assert_ne!(first, second);
+  }
+
+  #[test]
+  fn a_branch_line_keeps_its_name_and_the_title_gets_a_suffix() {
+    // `fix c` drops its trailing letter, so it would plan treq/fix too.
+    for text in ["fix c\ntreq/fix\n", "treq/fix\nfix c\n"] {
+      let rows = plan_rows(text, "main", fake);
+      let line = rows.iter().find(|r| r.line == "treq/fix").unwrap();
+      let title = rows.iter().find(|r| r.line == "fix c").unwrap();
+      assert_eq!(line.branch.as_deref(), Some("treq/fix"), "{text}");
+      let branch = title.branch.as_deref().unwrap();
+      assert!(is_suffixed(branch, "treq/fix"), "{text}: {branch}");
+    }
+  }
+
+  #[test]
+  fn planning_twice_gives_the_same_branches() {
+    let text = "Fix the page A\nfix c\ntreq/fix\n  Add tests\nFix it now\n";
+    assert_eq!(
+      plan_rows(text, "main", fake),
+      plan_rows(text, "main", fake)
+    );
+    assert_eq!(plan_unchecked(text, "main"), plan_unchecked(text, "main"));
+  }
+
+  #[test]
+  fn a_title_skips_a_suffixed_branch_a_line_names() {
+    // Whatever suffix `fix c` would take first, a branch line naming it
+    // (above or below) keeps it, and the title moves on.
+    let first = plan_rows("fix c\n", "main", fake)[0].branch.clone().unwrap();
+    for text in [format!("{first}\nfix c\n"), format!("fix c\n{first}\n")] {
+      let rows = plan_rows(&text, "main", fake);
+      let line = rows.iter().find(|r| r.line == first).unwrap();
+      let title = rows.iter().find(|r| r.line == "fix c").unwrap();
+      assert_eq!(line.branch.as_deref(), Some(first.as_str()));
+      let branch = title.branch.as_deref().unwrap();
+      assert_ne!(branch, first);
+      assert!(is_suffixed(branch, "treq/fix"), "{branch}");
+    }
+  }
+
+  #[test]
+  fn a_hex_suffix_ending_in_a_letter_is_kept() {
+    // `-a1b2c3`-style suffixes can end in a single hex letter; trailing
+    // cleanup must not strip it.
+    for n in 0..64 {
+      let rows = plan_rows(&format!("Title number {n}\n"), "main", fake);
+      let branch = rows[0].branch.as_deref().unwrap();
+      assert!(is_suffixed(branch, &format!("treq/title-number-{n}")), "{branch}");
+    }
   }
 
   #[test]
