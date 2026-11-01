@@ -4931,6 +4931,12 @@ mod tests {
   }
 
   #[test]
+  fn text_hunks_number_an_empty_side_from_zero_as_git_does() {
+    assert_eq!(build_text_hunks("", "x\n")[0].header, "@@ -0,0 +1,1 @@");
+    assert_eq!(build_text_hunks("x\n", "")[0].header, "@@ -1,1 +0,0 @@");
+  }
+
+  #[test]
   fn text_hunks_keep_lines_that_look_like_file_headers() {
     let hunks = build_text_hunks("-- users\nkeep\n---\n", "++ accounts\nkeep\n");
     let lines: Vec<&str> = hunks
