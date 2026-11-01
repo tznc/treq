@@ -265,7 +265,7 @@ test("linear: a sub-issue nests under its parent's workspace", async ({ page }) 
   await page.getByRole("checkbox", { name: "ENG-143 Back off on 429 responses" }).click();
   await page.getByRole("checkbox", { name: "ENG-142 Retry webhook deliveries" }).click();
   await settle(page, 600);
-  await page.getByRole("button", { name: /^Create 2 Workspaces/ }).click();
+  await page.getByRole("button", { name: /^Create 2 workspaces/ }).click();
   await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeHidden({ timeout: 60_000 });
   await expect(
     page.getByRole("button", { name: "Retry webhook deliveries" }).first(),

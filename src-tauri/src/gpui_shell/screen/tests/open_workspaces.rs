@@ -541,7 +541,7 @@ fn a_sub_issue_picked_with_its_parent_stacks_on_it(cx: &mut TestAppContext) {
 
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 Workspaces")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 workspaces")));
   h.cx.run_until_parked();
   let opened: Vec<_> = host
     .calls()
