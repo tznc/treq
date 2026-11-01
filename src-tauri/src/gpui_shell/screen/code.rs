@@ -2143,10 +2143,10 @@ impl CodeView {
         Some("workingCopy") => Some((ui::Tone::Warning.color(p), "Working copy change")),
         _ => None,
       };
-      let name_color = match (entry.status.as_deref(), pip) {
-        (Some("conflict"), _) => ui::Tone::Danger.color(p),
-        (_, Some(_)) => p.foreground,
-        _ => p.muted_foreground.opacity(0.7),
+      // The pip after the name carries the status; the name stays neutral.
+      let name_color = match pip {
+        Some(_) => p.foreground,
+        None => p.muted_foreground.opacity(0.7),
       };
       let pip_id = SharedString::from(format!("code-entry-status-{}", entry.name));
       // A row has something above it: an earlier row, or the toggle.

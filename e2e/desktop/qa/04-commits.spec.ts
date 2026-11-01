@@ -126,6 +126,9 @@ test("commits: large commit defers its diff", async ({ page }) => {
   // #388 is merged: its button reads Merged, Create PR doesn't show.
   await expect(page.getByRole("button", { name: "View PR" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create PR" })).toHaveCount(0);
+  // The work landed: the header offers Archive, not Merge….
+  await expect(page.getByRole("button", { name: "Archive", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Merge…" })).toHaveCount(0);
   await capture(page, {
     name: "04-commits-plain-workspace",
     title: "Commits tab of a workspace without conflicts",
@@ -133,6 +136,7 @@ test("commits: large commit defers its diff", async ({ page }) => {
       "Working copy row (uncommitted, amber) above two commits; newest +642",
       "No conflict card",
       "Header's PR button reads 'Merged' in purple with the merge icon; no 'Create PR'",
+      "An outline Archive button stands where Merge… was",
     ],
   });
   // The working copy row, at the top of the list. Its fold state outlives
