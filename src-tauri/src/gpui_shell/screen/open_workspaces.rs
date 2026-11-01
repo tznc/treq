@@ -1707,7 +1707,6 @@ fn plural(n: usize, one: &str, many: &str) -> String {
   }
 }
 
-
 /// What the dialog opened.
 fn summary(created: usize, reused: usize) -> String {
   match (created, reused) {

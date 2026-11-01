@@ -46,7 +46,10 @@ fn workspace_header_is_what_react_drew() {
 #[test]
 fn labels_header_create_button_new_at_home_and_stack_in_a_workspace() {
   assert_eq!(super::super::workspace::stack_label(true), "New workspace…");
-  assert_eq!(super::super::workspace::stack_label(false), "Stack on this…");
+  assert_eq!(
+    super::super::workspace::stack_label(false),
+    "Stack on this…"
+  );
 }
 
 #[test]

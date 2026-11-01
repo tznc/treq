@@ -164,17 +164,17 @@ fn pasted_lines_show_what_will_be_opened(cx: &mut TestAppContext) {
   let (mut h, host) = dialog(host, cx);
   let screen = screen(&mut h);
   expect(screen.get_by_role(by::role(Role::Heading).name("New workspace"))).to_be_visible();
-  assert_eq!(status(&screen), "Type a line or pick an item to create workspaces.");
+  assert_eq!(
+    status(&screen),
+    "Type a line or pick an item to create workspaces."
+  );
 
   screen.user().type_text(
     &screen.get_by_label_text("Workspaces"),
     "feat/a\norigin/feat/b\nnope\nfeat/a\nmain",
   );
   let screen = self::screen(&mut h);
-  assert_eq!(
-    status(&screen),
-    "Will create 2 workspaces, 1 already open"
-  );
+  assert_eq!(status(&screen), "Will create 2 workspaces, 1 already open");
   expect(screen.get_by_role(by::role(Role::Alert).name("1 line can't be opened"))).to_be_visible();
   // Each line shows in a popover from the summary.
   assert!(screen
