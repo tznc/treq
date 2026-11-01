@@ -755,6 +755,41 @@ fn keeps_the_home_shorthand_for_repo_dirs() {
 }
 
 #[test]
+fn rejects_an_empty_or_blank_repo_argument() {
+  for repo in ["", "   ", "\t"] {
+    let error = parse_remote_command_request(
+      "repo",
+      &remote_matches(&[("action", "status"), ("repo", repo)]),
+    )
+    .unwrap_err();
+    assert!(error.starts_with("invalid_arguments:"), "{repo:?}: {error}");
+    assert!(error.contains("--repo"), "{repo:?}: {error}");
+    assert_eq!(super::classify_cli_error(&error), "invalid_arguments");
+  }
+}
+
+#[test]
+fn cli_exits_non_zero_for_an_empty_repo_argument() {
+  for repo in ["", "  "] {
+    let code =
+      crate::cli::args::run(["treq", "repo", "status", "--repo", repo, "--format", "json"]);
+    assert_ne!(code, 0, "{repo:?}");
+  }
+}
+
+#[test]
+fn absolute_repo_arg_rejects_empty_and_blank_values() {
+  for repo in ["", " ", "\n\t "] {
+    let error = super::absolute_repo_arg(repo).unwrap_err();
+    assert!(error.starts_with("invalid_arguments:"), "{repo:?}: {error}");
+  }
+  assert_eq!(
+    super::absolute_repo_arg("/srv/./r/../repo").unwrap(),
+    "/srv/repo"
+  );
+}
+
+#[test]
 fn rejects_unknown_remote_action_and_arbitrary_command_kinds() {
   let error = parse_remote_command_request(
     "repo",
