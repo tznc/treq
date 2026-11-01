@@ -38,3 +38,7 @@ Never write implementation code before the test exists. For a bug, reproduce it 
 cargo test --manifest-path src-tauri/Cargo.toml
 npm test                                     # Supabase-side unit tests
 ```
+
+### Disk space
+
+Rust's incremental cache (`target/debug/incremental`) grows by gigabytes per build and fills small disks such as cloud sessions. When a build fails with "no space left on device" or `df` shows the disk nearly full, delete it: `rm -rf target/debug/incremental` (cargo rebuilds it; the next build is slower). Setting `CARGO_INCREMENTAL=0` avoids writing it at all, as CI does. Share one `CARGO_TARGET_DIR` across git worktrees instead of building each into its own `target/`.
