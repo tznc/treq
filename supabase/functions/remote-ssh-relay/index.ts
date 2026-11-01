@@ -1,5 +1,5 @@
 // Edge function: WebSocket relay from a Treq client to sshd on the user's
-// managed Sprite (prds/remote-development.md, "SSH identity and
+// managed machine (prds/remote-development.md, "SSH identity and
 // certificates" > "Managed VM certificate flow").
 //
 // GET wss://<project>/functions/v1/remote-ssh-relay?endpoint_id=<id>&key_id=<id>
@@ -7,8 +7,9 @@
 //
 // The relay checks the caller owns the endpoint, the instance can be
 // reached, the caller has Pro (402 `pro_required` otherwise), and the client
-// key is not revoked. It then opens the Sprites TCP
-// proxy with the org token (a server-side secret) and pipes raw bytes. SSH
+// key is not revoked. It then opens the machine's treq-gateway through the
+// provider's ingress (provider auth and a gateway token stay server-side)
+// and pipes raw bytes. SSH
 // runs end to end inside those bytes, so host-key pinning and certificate
 // auth are unchanged. See `_shared/remote/ssh-relay.ts` for why a relay
 // exists and why its connections are expected to drop after a few minutes.
@@ -22,17 +23,19 @@ import {
 import {
   authorizeRelayRequest,
   denoUpstreamSocket,
-  openUpstreamWithWake,
   pipeSockets,
   RelayError,
   type RelaySocket,
   type RelayStore,
+  type UpstreamConnection,
   UpstreamError,
 } from "../_shared/remote/ssh-relay.ts";
-import {
-  SpritesProvider,
-  spritesConfigFromEnv,
-} from "../_shared/remote/sprites-adapter.ts";
+import { placementProviders } from "../_shared/remote/byos.ts";
+import { openTcp } from "../_shared/remote/provider-tcp.ts";
+import { reensureServicesAfterWake, supabaseGatewaySecrets } from "../_shared/remote/machine-setup.ts";
+import { setPlacementState } from "../_shared/remote/placement-store.ts";
+import { wakeRecorded } from "../_shared/remote/wake.ts";
+import { must } from "../_shared/remote/db.ts";
 
 declare const EdgeRuntime:
   | { waitUntil(promise: Promise<unknown>): void }
@@ -75,40 +78,37 @@ Deno.serve(async (req) => {
 
   const store: RelayStore = {
     async getEndpoint(ownerUserId, endpointId) {
-      const { data, error } = await supabase
+      const data = must(await supabase
         .from("remote_endpoints")
         .select("id, instance_id, source, hostname, port")
         .eq("id", endpointId)
         .eq("owner_user_id", ownerUserId)
-        .maybeSingle();
-      if (error) throw new Error(`failed to read endpoint: ${error.message}`);
+        .maybeSingle(), "read endpoint");
       return data;
     },
     async getInstance(ownerUserId, instanceId) {
-      const { data, error } = await supabase
+      const data = must(await supabase
         .from("remote_instances")
-        .select("id, status, provider_resource_id")
+        .select("id, status, provider_resource_id, provider_kind, active_placement_id")
         .eq("id", instanceId)
         .eq("owner_user_id", ownerUserId)
-        .maybeSingle();
-      if (error) throw new Error(`failed to read instance: ${error.message}`);
+        .maybeSingle(), "read instance");
       return data;
     },
     async getClientKey(ownerUserId, keyId) {
-      const { data, error } = await supabase
+      const data = must(await supabase
         .from("remote_client_keys")
         .select("id, revoked_at")
         .eq("id", keyId)
         .eq("owner_user_id", ownerUserId)
-        .maybeSingle();
-      if (error) throw new Error(`failed to read client key: ${error.message}`);
+        .maybeSingle(), "read client key");
       return data;
     },
     hasPro: (ownerUserId) => userHasPro(supabase, ownerUserId),
   };
 
   let target: Awaited<ReturnType<typeof authorizeRelayRequest>>;
-  let upstream: Awaited<ReturnType<typeof openUpstreamWithWake>>;
+  let upstream: UpstreamConnection;
   try {
     target = await authorizeRelayRequest(req, {
       store,
@@ -120,13 +120,26 @@ Deno.serve(async (req) => {
         return error || !data.user ? null : data.user.id;
       },
     });
-    const config = spritesConfigFromEnv();
-    const provider = new SpritesProvider(config);
-    upstream = await openUpstreamWithWake(
-      config,
-      target,
+    const provider = placementProviders(supabase)(target.providerKind, target.placementId);
+    const placementId = target.placementId;
+    const secret = placementId
+      ? await supabaseGatewaySecrets(supabase).load(placementId)
+      : null;
+    upstream = await openTcp(
+      provider,
+      target.providerResourceId,
+      target.host,
+      target.port,
       denoUpstreamSocket,
-      (name) => provider.wakeInstance(name),
+      {
+        credential: secret && placementId ? { placementId, secret } : undefined,
+        // Recorded waking → ready, so billing and the idle controller see it.
+        wake: (id) =>
+          wakeRecorded(provider, id, placementId ?? null, {
+            setState: (pid, state) => setPlacementState(supabase, pid, state),
+            afterWake: reensureServicesAfterWake,
+          }),
+      },
     );
   } catch (err) {
     if (err instanceof RelayError) {

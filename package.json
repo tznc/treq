@@ -12,6 +12,7 @@
     "remoteSsh": false,
     "devcontainers": false,
     "linearIntegration": false,
+    "byos": false,
     "logs": true
   },
   "env": {
@@ -43,7 +44,7 @@
     "check:format": "biome format ./test",
     "check": "ast-grep test",
     "check:functions": "deno check supabase/functions/*/index.ts supabase/functions/tests/*.ts",
-    "test:functions": "deno test --allow-env --allow-net=example.invalid supabase/functions/tests/remote_ssh_relay.test.ts supabase/functions/tests/remote_quota.test.ts supabase/functions/tests/remote_instance_store.test.ts",
+    "test:functions": "deno test --allow-env --allow-read --allow-net=example.invalid supabase/functions/tests/bump_boot_manifest.test.ts supabase/functions/tests/remote_ssh_relay.test.ts supabase/functions/tests/remote_instance_store.test.ts supabase/functions/tests/provider_registry.test.ts supabase/functions/tests/provider_contract.test.ts supabase/functions/tests/boat_adapter.test.ts supabase/functions/tests/daytona_adapter.test.ts supabase/functions/tests/fly_adapter.test.ts supabase/functions/tests/e2b_adapter.test.ts supabase/functions/tests/local_provider.test.ts supabase/functions/tests/usage_report.test.ts supabase/functions/tests/remote_preflight.test.ts supabase/functions/tests/remote_migration_engine.test.ts supabase/functions/tests/remote_resize.test.ts supabase/functions/tests/remote_migration_ops.test.ts supabase/functions/tests/gateway_token.test.ts supabase/functions/tests/provider_tcp.test.ts supabase/functions/tests/gateway_setup.test.ts supabase/functions/tests/boot_manifest.test.ts supabase/functions/tests/activity_probe.test.ts supabase/functions/tests/idle_controller.test.ts supabase/functions/tests/process_actions.test.ts supabase/functions/tests/spend_cap.test.ts supabase/functions/tests/byos.test.ts supabase/functions/tests/remote_lifecycle.test.ts",
     "lint": "ast-grep scan && biome lint ./test ./supabase/functions && npm run lint:subprocess && npm run lint:home-head && npm run lint:a11y && npm run lint:design",
     "lint:e2e": "ast-grep test --skip-snapshot-tests && ast-grep scan web/e2e",
     "lint:subprocess": "ast-grep scan --filter '^(no-command-for-jj-or-git-tauri-src|no-command-new-git-rust-tests|no-subprocess-conflict-pipeline-tauri-src)$'",

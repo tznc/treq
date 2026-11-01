@@ -305,7 +305,7 @@ mod tests {
   fn endpoint_json() -> serde_json::Value {
     json!({
       "id": "e1", "instance_id": "i1",
-      "source": {"type": "managed", "provider": "fly_sprites", "generation": 2},
+      "source": {"type": "managed", "provider": "boat", "generation": 2},
       "hostname": "h", "port": 22, "username": "treq", "host_keys": [],
       "authentication": {"type": "public_key", "key_reference": "server-key"}
     })

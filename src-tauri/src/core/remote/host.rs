@@ -126,9 +126,9 @@ pub(super) fn probe_repo_path(repo_path: &str) -> Result<RemoteRepoProbe, String
 
 /// Recursively sums file sizes under `root` (best effort: unreadable entries
 /// are skipped rather than failing the whole walk) as the "disk used"
-/// figure for base-disk-quota enforcement. This walks the repository root
-/// rather than statvfs-ing the whole volume, since the quota is scoped to
-/// what the user's repositories occupy, not the base image itself.
+/// figure in the machine usage report. This walks the repository root
+/// rather than statvfs-ing the whole volume, so it counts what the user's
+/// repositories occupy, not the base image itself.
 pub(super) fn directory_usage_bytes(root: &Path) -> u64 {
   let mut total = 0u64;
   let mut stack = vec![root.to_path_buf()];
@@ -277,34 +277,6 @@ pub(super) fn machine_usage(root: &str) -> Result<MachineUsageReport, String> {
   })
 }
 
-/// Enforces the base disk quota (PRD "Resource quotas") before a
-/// write-triggering mutation (repo init, clone, patch apply) proceeds.
-/// Returns the distinct `disk_quota_exceeded: ...` structured error the PRD
-/// requires instead of letting the write fail as a generic filesystem
-/// error. `root` is the directory whose usage counts against the quota —
-/// callers pass the repository root (or its parent, before it exists) so
-/// the check reflects what the write is about to add to.
-pub(super) fn enforce_disk_quota(root: &Path) -> Result<(), String> {
-  enforce_disk_quota_against(root, crate::core::remote_provider::BASE_DISK_QUOTA_BYTES)
-}
-
-/// Same as [`enforce_disk_quota`] but against an arbitrary `quota_bytes`
-/// ceiling, so tests can exercise the failure path without writing 5 GB of
-/// fixture data to disk.
-pub(super) fn enforce_disk_quota_against(root: &Path, quota_bytes: u64) -> Result<(), String> {
-  let scan_root = if root.exists() {
-    root.to_path_buf()
-  } else {
-    root
-      .parent()
-      .map(Path::to_path_buf)
-      .unwrap_or_else(|| root.to_path_buf())
-  };
-  let used_bytes = directory_usage_bytes(&scan_root);
-  crate::core::remote_provider::check_disk_quota_against(used_bytes, quota_bytes)
-    .map_err(|err| err.to_string())
-}
-
 pub(super) fn init_repo_path(repo_path: &str) -> Result<RepositoryInspection, String> {
   let trimmed = repo_path.trim();
   if trimmed.is_empty() {
@@ -312,7 +284,6 @@ pub(super) fn init_repo_path(repo_path: &str) -> Result<RepositoryInspection, St
   }
   let path = Path::new(trimmed);
   if !path.join(".jj").is_dir() && !path.join(".git").exists() {
-    enforce_disk_quota(path)?;
     fs::create_dir_all(path)
       .map_err(|e| format!("filesystem_error: Failed to create {trimmed}: {e}"))?;
     jj::jj_git_init_colocated(trimmed)
@@ -341,7 +312,6 @@ pub(super) fn clone_repo_local(
     return Err("Repository URL is required".to_string());
   }
   validate_remote_path(destination)?;
-  enforce_disk_quota(Path::new(destination))?;
   let interrupt = std::sync::atomic::AtomicBool::new(false);
   let clone_err = |e: &dyn std::fmt::Display| format!("git_command_failed: {e}");
   // Dropping an unfinished clone removes the partial destination.
@@ -393,7 +363,6 @@ pub(super) fn apply_remote_patch(
   patch_base64: &str,
 ) -> Result<String, String> {
   let workspace_path = resolve_workspace_path(repo, workspace)?;
-  enforce_disk_quota(Path::new(&workspace_path))?;
   let decoded = decode_base64(patch_base64.trim())
     .map_err(|e| format!("invalid_arguments: patch is not valid base64: {e}"))?;
   let patch = String::from_utf8(decoded)

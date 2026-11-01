@@ -45,7 +45,7 @@ select is(public.billing_record_subscription_event('evt_tie_del', 'customer.subs
 
 reset role;
 select function_privs_are('public', 'billing_record_subscription_snapshot',
-  array['text','text','text','text','timestamptz','boolean','timestamptz','timestamptz'],
+  array['text','text','text','text','timestamptz','boolean','timestamptz','timestamptz','timestamptz'],
   'authenticated', array[]::text[], 'authenticated cannot write snapshots');
 
 select * from finish();

@@ -1924,3 +1924,56 @@ fn every_keyed_remote_request_is_claimed_in_the_idempotency_store() {
     assert_eq!(claimed, key, "{}", request.kind_name());
   }
 }
+
+#[test]
+fn gateway_parses_its_flags() {
+  let matches = super::args::parse([
+    "treq",
+    "gateway",
+    "--placement-id",
+    "pl_1",
+    "--secret-file",
+    "/tmp/s",
+    "--listen",
+    "0.0.0.0:8022",
+    "--allow",
+    "127.0.0.1:2222",
+    "--allow",
+    "localhost:22",
+  ])
+  .unwrap();
+  let sub = matches.subcommand.unwrap();
+  assert!(is_supported_cli_command("gateway"));
+  let args = super::parse_gateway_args(&sub.matches).unwrap();
+  assert_eq!(args.placement_id, "pl_1");
+  assert_eq!(args.secret_file, "/tmp/s");
+  assert_eq!(args.listen, "0.0.0.0:8022");
+  assert_eq!(
+    args.allow,
+    vec![
+      ("127.0.0.1".to_string(), 2222),
+      ("localhost".to_string(), 22)
+    ]
+  );
+}
+
+#[test]
+fn gateway_defaults_secret_file_and_listen() {
+  let matches = super::args::parse(["treq", "gateway", "--placement-id", "pl_1"]).unwrap();
+  let args = super::parse_gateway_args(&matches.subcommand.unwrap().matches).unwrap();
+  assert_eq!(args.secret_file, "/etc/treq/gateway.secret");
+  assert_eq!(args.listen, "127.0.0.1:8022");
+  assert!(args.allow.is_empty());
+}
+
+#[test]
+fn gateway_rejects_allow_without_port() {
+  let matches =
+    super::args::parse(["treq", "gateway", "--placement-id", "p", "--allow", "host"]).unwrap();
+  assert!(super::parse_gateway_args(&matches.subcommand.unwrap().matches).is_err());
+}
+
+#[test]
+fn gateway_requires_placement_id() {
+  assert!(super::args::parse(["treq", "gateway"]).is_err());
+}

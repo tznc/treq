@@ -9,6 +9,7 @@ on:
       - "src-tauri/src/lib.rs"
       - "src-tauri/Cargo.toml"
       - "src-tauri/build.rs"
+      - "crates/treq-gateway/**"
       - ".github/workflows/cli-binary.yml"
   workflow_dispatch:
 
@@ -32,6 +33,7 @@ jobs:
           filters: |
             rust:
               - "src-tauri/**"
+              - "crates/treq-gateway/**"
 
   sandboxed-cli:
     name: Sandboxed macOS CLI

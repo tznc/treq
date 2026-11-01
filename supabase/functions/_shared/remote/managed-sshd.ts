@@ -1,14 +1,14 @@
-// Brings up sshd on a managed Sprite and reads its real host key.
+// Brings up sshd on a managed machine and reads its real host key.
 //
-// A Sprite has no raw TCP ingress, so sshd only listens on loopback inside
-// the Sprite and clients reach it through the `remote-ssh-relay` Edge
-// Function, which opens the Sprites TCP proxy with the org token. The Sprite
-// URL and the org token never reach the client. SSH itself stays end to
+// A managed machine has no raw TCP ingress, so sshd only listens on
+// loopback inside it and clients reach it through the `remote-ssh-relay`
+// Edge Function, which opens the machine's treq-gateway through the
+// provider's ingress. Provider tokens never reach the client. SSH itself stays end to
 // end: the client still verifies the host key recorded here and presents a
 // Treq CA certificate that this sshd checks.
 
 import { parseOpenSshPublicKey } from "./ssh-keys.ts";
-import type { ManagedComputeProvider } from "./sprites-adapter.ts";
+import type { ManagedComputeProvider } from "./provider.ts";
 import {
   installCaTrustCommand,
   installSshdCommand,

@@ -294,7 +294,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.remote-ssh-relay]
-# WebSocket relay to sshd on managed Sprites. Native clients send the user's
+# WebSocket relay to sshd on managed machines. Native clients send the user's
 # Supabase JWT in the Authorization header of the upgrade request, so the
 # gateway can verify it; the function verifies it again and checks ownership.
 verify_jwt = true

@@ -35,9 +35,16 @@ import {
   type StripeClient,
 } from "../_shared/billing/stripe-api.ts";
 import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
-import type { ManagedComputeProvider } from "../_shared/remote/sprites-adapter.ts";
+import type { PlacementRow } from "../_shared/remote/migration-engine.ts";
+import { deleteInstanceMachines } from "../_shared/remote/placement-store.ts";
+import type { ManagedComputeProvider, ProviderKind } from "../_shared/remote/provider.ts";
 
-export type LiveInstance = { id: string; provider_resource_id: string | null };
+export type LiveInstance = {
+  id: string;
+  provider_kind: string;
+  provider_resource_id: string | null;
+  active_placement_id?: string | null;
+};
 
 export type OrganizationRef = { id: string; name: string };
 
@@ -48,6 +55,8 @@ export interface DeleteAccountStore {
   subscriptionsToCancel(): Promise<string[]>;
   /** The user's remote instances not yet marked deleted. */
   liveInstances(): Promise<LiveInstance[]>;
+  /** Cancels an open migration, then lists the instance's placements not yet dead. */
+  livePlacements(instanceId: string): Promise<Pick<PlacementRow, "id" | "provider_kind" | "provider_resource_id">[]>;
   markInstanceDeleted(instanceId: string): Promise<void>;
   linearAccessToken(): Promise<string | null>;
   deletePersonalInstallations(): Promise<void>;
@@ -65,7 +74,8 @@ export type DeleteAccountDeps = {
   storeFor(userId: string): DeleteAccountStore;
   /** Null when STRIPE_SECRET_KEY is not configured. */
   stripe: StripeClient | null;
-  provider(): ManagedComputeProvider;
+  /** The adapter for a placement (`placementProviders` in production). */
+  provider(kind: ProviderKind, placementId?: string | null): ManagedComputeProvider;
   revokeLinearToken(accessToken: string): Promise<void>;
 };
 
@@ -148,28 +158,23 @@ export async function deleteAccount(
     }
   }
 
-  const instances = await store.liveInstances();
-  if (instances.length > 0) {
-    const provider = deps.provider();
-    for (const instance of instances) {
-      try {
-        if (instance.provider_resource_id) {
-          await provider.deleteInstance(instance.provider_resource_id);
-        }
-        await store.markInstanceDeleted(instance.id);
-      } catch (err) {
-        console.error(
-          `[delete-account] delete instance ${instance.id} failed:`,
-          err instanceof Error ? err.message : String(err),
-        );
-        return {
-          status: 502,
-          body: {
-            error:
-              "Your cloud workspace could not be deleted. Your account was not deleted. Try again.",
-          },
-        };
-      }
+  for (const instance of await store.liveInstances()) {
+    try {
+      // Every placement: a migration's target machine is billed too.
+      await deleteInstanceMachines(deps.provider, instance, await store.livePlacements(instance.id));
+      await store.markInstanceDeleted(instance.id);
+    } catch (err) {
+      console.error(
+        `[delete-account] delete instance ${instance.id} failed:`,
+        err instanceof Error ? err.message : String(err),
+      );
+      return {
+        status: 502,
+        body: {
+          error:
+            "Your cloud workspace could not be deleted. Your account was not deleted. Try again.",
+        },
+      };
     }
   }
 
@@ -321,11 +326,28 @@ export function deleteAccountStoreFor(
       return check(
         await client
           .from("remote_instances")
-          .select("id, provider_resource_id")
+          .select("id, provider_kind, provider_resource_id, active_placement_id")
           .eq("owner_user_id", userId)
           .neq("status", "deleted"),
         "remote instance lookup",
       ) as LiveInstance[];
+    },
+
+    async livePlacements(instanceId) {
+      // Cancel an open migration first, so a worker mid-create deletes its
+      // own target (migration-engine.ts).
+      check(
+        await client.rpc("cancel_open_migration", { p_instance_id: instanceId, p_detail: { reason: "account_deleted" } }),
+        "cancel open migration",
+      );
+      return check(
+        await client
+          .from("remote_instance_placements")
+          .select("id, provider_kind, provider_resource_id")
+          .eq("instance_id", instanceId)
+          .neq("role", "dead"),
+        "placement lookup",
+      ) as Pick<PlacementRow, "id" | "provider_kind" | "provider_resource_id">[];
     },
 
     async markInstanceDeleted(instanceId) {

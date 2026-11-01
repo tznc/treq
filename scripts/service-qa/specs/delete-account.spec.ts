@@ -6,7 +6,7 @@
  * installation delete, auth.admin.deleteUser, the foreign key cascades and
  * the organizations_on_account_delete trigger are all the real ones. The
  * bearer token is checked by the real Auth server. Only the outbound
- * adapters are stubs: Stripe, the Sprites provider and Linear's revoke
+ * adapters are stubs: Stripe, the compute provider and Linear's revoke
  * endpoint, none of which exist locally.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -16,7 +16,7 @@ import {
   StripeApiError,
   type StripeClient,
 } from "../../../supabase/functions/_shared/billing/stripe-api";
-import type { ManagedComputeProvider } from "../../../supabase/functions/_shared/remote/sprites-adapter";
+import type { ManagedComputeProvider } from "../../../supabase/functions/_shared/remote/provider";
 import {
   deleteAccount,
   deleteAccountStoreFor,
@@ -212,7 +212,7 @@ it("deletes only the caller and releases their billing, machines and integration
       .from("remote_instances")
       .insert({
         owner_user_id: owner.user.id,
-        provider_kind: "fly_sprites",
+        provider_kind: "boat",
         provider_resource_id: providerId,
         region: "us_east",
         size_preset: "small",

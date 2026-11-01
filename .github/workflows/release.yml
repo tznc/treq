@@ -187,3 +187,50 @@ jobs:
           # Devcontainers verify the archive against this before installing it.
           sha256sum "$ASSET" > "$ASSET.sha256"
           gh release upload "v${VERSION}" "$ASSET" "$ASSET.sha256" --clobber
+
+  # Pins the Linux CLI digests into the machine boot manifests and opens a
+  # PR. Machines check the archive against the manifest, never against the
+  # release's own .sha256, so the pin goes through review.
+  boot-manifest:
+    needs: linux-cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.5.6
+
+      - name: Pin the release's digests
+        id: pin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          dir="$RUNNER_TEMP/assets"
+          gh release download "v${VERSION}" -D "$dir" -p "treq-cli-${VERSION}-linux-*.tar.gz"
+          digest() { sha256sum "$dir/treq-cli-${VERSION}-linux-$1.tar.gz" | cut -d' ' -f1; }
+          deno run --allow-read --allow-write scripts/bump-boot-manifest.ts \
+            "$VERSION" "$(digest x86_64)" "$(digest aarch64)"
+          if git diff --quiet; then echo "changed=false" >> "$GITHUB_OUTPUT"; else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Open the PR
+        if: steps.pin.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          BRANCH="release/boot-manifest-v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git commit -am "chore(cloud): pin treq ${VERSION} in the boot manifest"
+          git push --force -u origin "$BRANCH"
+          gh pr view "$BRANCH" > /dev/null 2>&1 || gh pr create --base main --head "$BRANCH" \
+            --title "chore(cloud): pin treq ${VERSION} in the boot manifest" \
+            --body "Pins the sha256 of the treq ${VERSION} Linux CLI archives, so cloud machines can install it."

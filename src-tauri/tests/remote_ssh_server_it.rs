@@ -20,9 +20,9 @@
 //!   current validity window) and reject (wrong CA, invalid principal,
 //!   not-yet-valid, expired);
 //! - PTY start in a selected directory, input/output, resize, and close;
-//! - the WebSocket relay transport used for managed Sprites, through a
-//!   local WebSocket-to-TCP bridge standing in for `remote-ssh-relay` and
-//!   the Sprites TCP proxy: certificate auth, host-key pinning, pooling,
+//! - the WebSocket relay transport used for managed VMs, through a local
+//!   WebSocket-to-TCP bridge standing in for `remote-ssh-relay` and
+//!   treq-gateway: certificate auth, host-key pinning, pooling,
 //!   and token refusal all run through the relayed byte stream.
 //!
 //! Certificates are issued with `ssh-keygen -s`, which writes the same
@@ -836,7 +836,7 @@ const RELAY_IT_TOKEN: &str = "relay-it-session-token";
 
 /// Stands in for the `remote-ssh-relay` Edge Function: accepts a WebSocket
 /// only when the Authorization header carries `RELAY_IT_TOKEN`, then pipes
-/// raw bytes to the real sshd over TCP, as the Sprites TCP proxy does.
+/// raw bytes to the real sshd over TCP, as treq-gateway does.
 /// Returns the relay URL.
 async fn spawn_ws_to_tcp_bridge(sshd_host: String, sshd_port: u16) -> String {
   use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
@@ -889,7 +889,7 @@ async fn relay_endpoint(mut endpoint: SshEndpoint) -> SshEndpoint {
   endpoint.id = format!("{}-relay", endpoint.id);
   endpoint.transport = SshTransport::Relay { url };
   // The relay transport never dials these; poison them to prove it.
-  endpoint.hostname = "sshd-inside-the-sprite.invalid".to_string();
+  endpoint.hostname = "sshd-inside-the-machine.invalid".to_string();
   endpoint.port = 1;
   endpoint
 }

@@ -11,8 +11,6 @@ import {
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   authorizeRelayRequest,
-  openUpstream,
-  openUpstreamWithWake,
   pipeSockets,
   RelayError,
   type RelaySocket,
@@ -22,7 +20,7 @@ import {
   UpstreamError,
 } from "../_shared/remote/ssh-relay.ts";
 import { parseHostKeyLines } from "../_shared/remote/managed-sshd.ts";
-import { spritesProxyUrl } from "../_shared/remote/sprites-adapter.ts";
+import { openProxy } from "../_shared/remote/gateway-proxy.ts";
 
 const OWNER = "user-1";
 
@@ -51,6 +49,8 @@ function store(
           id: "inst-1",
           status: "ready",
           provider_resource_id: "dev-treq-user-1",
+          provider_kind: "boat",
+          active_placement_id: "pl-1",
         };
   const key =
     "key" in overrides ? overrides.key : { id: "key-1", revoked_at: null };
@@ -112,7 +112,9 @@ Deno.test("relay authorizes the owner of a ready managed endpoint", async () => 
     ownerUserId: OWNER,
     endpointId: "ep-1",
     instanceId: "inst-1",
-    spriteName: "dev-treq-user-1",
+    providerResourceId: "dev-treq-user-1",
+    providerKind: "boat",
+    placementId: "pl-1",
     host: "localhost",
     port: 2222,
   });
@@ -178,7 +180,7 @@ Deno.test("relay refuses non-managed endpoints", async () => {
 Deno.test("relay refuses instances that cannot be reached", async () => {
   for (const status of ["provisioning", "failed", "deleted", "deleting"]) {
     const s = store({
-      instance: { id: "inst-1", status, provider_resource_id: "x" },
+      instance: { id: "inst-1", status, provider_resource_id: "x", provider_kind: "boat" },
     });
     await expectRelayError(
       authorizeRelayRequest(relayRequest(), { getUserId, store: s }),
@@ -186,7 +188,7 @@ Deno.test("relay refuses instances that cannot be reached", async () => {
     );
   }
   const noResource = store({
-    instance: { id: "inst-1", status: "ready", provider_resource_id: null },
+    instance: { id: "inst-1", status: "ready", provider_resource_id: null, provider_kind: "boat" },
   });
   await expectRelayError(
     authorizeRelayRequest(relayRequest(), { getUserId, store: noResource }),
@@ -196,13 +198,13 @@ Deno.test("relay refuses instances that cannot be reached", async () => {
 
 Deno.test("relay accepts a suspended instance because the proxy wakes it", async () => {
   const s = store({
-    instance: { id: "inst-1", status: "suspended", provider_resource_id: "x" },
+    instance: { id: "inst-1", status: "suspended", provider_resource_id: "x", provider_kind: "boat" },
   });
   const target = await authorizeRelayRequest(relayRequest(), {
     getUserId,
     store: s,
   });
-  assertEquals(target.spriteName, "x");
+  assertEquals(target.providerResourceId, "x");
 });
 
 Deno.test("relay refuses revoked or foreign client keys", async () => {
@@ -238,16 +240,6 @@ Deno.test("relay URL carries ids only and uses a WebSocket scheme", () => {
     "ws://127.0.0.1:54321/functions/v1/remote-ssh-relay?endpoint_id=ep-1&key_id=key-1",
   );
   Deno.env.delete("REMOTE_SSH_RELAY_URL");
-});
-
-Deno.test("sprites proxy URL follows the documented path", () => {
-  assertEquals(
-    spritesProxyUrl(
-      { baseUrl: "https://api.sprites.dev/", apiToken: "t" },
-      "dev-treq-a",
-    ),
-    "wss://api.sprites.dev/v1/sprites/dev-treq-a/proxy",
-  );
 });
 
 // ---------------------------------------------------------------------------
@@ -304,20 +296,25 @@ const TARGET: RelayTarget = {
   ownerUserId: OWNER,
   endpointId: "ep-1",
   instanceId: "inst-1",
-  spriteName: "dev-treq-user-1",
+  providerResourceId: "dev-treq-user-1",
+  providerKind: "boat",
+  placementId: null,
   host: "localhost",
   port: 2222,
 };
-const CONFIG = { baseUrl: "https://api.sprites.dev", apiToken: "org-token" };
+const ENDPOINT = {
+  url: "wss://gateway.example.invalid/machines/dev-treq-user-1",
+  headers: { Authorization: "Bearer provider-token" },
+};
 
 function bytes(...values: number[]): ArrayBuffer {
   return new Uint8Array(values).buffer;
 }
 
-Deno.test("upstream handshake sends the target and authenticates with the org token header", async () => {
+Deno.test("upstream handshake sends the target and authenticates with the endpoint's headers", async () => {
   const upstream = new FakeSocket();
   const seen: { url?: string; headers?: Record<string, string> } = {};
-  const pending = openUpstream(CONFIG, TARGET, (url, headers) => {
+  const pending = openProxy(ENDPOINT, TARGET, (url, headers) => {
     seen.url = url;
     seen.headers = headers;
     return upstream;
@@ -333,21 +330,21 @@ Deno.test("upstream handshake sends the target and authenticates with the org to
   assert(connection.socket === upstream);
   assertEquals(
     seen.url,
-    "wss://api.sprites.dev/v1/sprites/dev-treq-user-1/proxy",
+    "wss://gateway.example.invalid/machines/dev-treq-user-1",
   );
-  assertEquals(seen.headers, { Authorization: "Bearer org-token" });
+  assertEquals(seen.headers, { Authorization: "Bearer provider-token" });
   assertEquals(upstream.binaryType, "arraybuffer");
 });
 
 Deno.test("upstream handshake fails on a refusal or early close", async () => {
   const refused = new FakeSocket();
-  const p1 = openUpstream(CONFIG, TARGET, () => refused);
+  const p1 = openProxy(ENDPOINT, TARGET, () => refused);
   refused.open();
   refused.message(JSON.stringify({ status: "error" }));
   await assertRejects(() => p1, UpstreamError);
 
   const dropped = new FakeSocket();
-  const p2 = openUpstream(CONFIG, TARGET, () => dropped);
+  const p2 = openProxy(ENDPOINT, TARGET, () => dropped);
   dropped.remoteClose(1006);
   await assertRejects(() => p2, UpstreamError);
 });
@@ -355,44 +352,18 @@ Deno.test("upstream handshake fails on a refusal or early close", async () => {
 Deno.test("upstream handshake times out", async () => {
   const silent = new FakeSocket();
   await assertRejects(
-    () => openUpstream(CONFIG, TARGET, () => silent, 10),
+    () => openProxy(ENDPOINT, TARGET, () => silent, 10),
     UpstreamError,
   );
   assert(silent.closed);
 });
 
-Deno.test("a failed first connect wakes the sprite and retries once", async () => {
-  const sockets: FakeSocket[] = [];
-  const woke: string[] = [];
-  const factory = () => {
-    const socket = new FakeSocket();
-    sockets.push(socket);
-    queueMicrotask(() => {
-      socket.open();
-      if (sockets.length === 1) socket.remoteClose(1011);
-      else socket.message(JSON.stringify({ status: "connected" }));
-    });
-    return socket;
-  };
-  const connection = await openUpstreamWithWake(
-    CONFIG,
-    TARGET,
-    factory,
-    (name) => {
-      woke.push(name);
-      return Promise.resolve();
-    },
-  );
-  assertEquals(woke, ["dev-treq-user-1"]);
-  assert(connection.socket === sockets[1]);
-});
-
 async function connected(): Promise<{
   upstream: FakeSocket;
-  connection: Awaited<ReturnType<typeof openUpstream>>;
+  connection: Awaited<ReturnType<typeof openProxy>>;
 }> {
   const upstream = new FakeSocket();
-  const pending = openUpstream(CONFIG, TARGET, () => upstream);
+  const pending = openProxy(ENDPOINT, TARGET, () => upstream);
   upstream.open();
   upstream.message(JSON.stringify({ status: "connected" }));
   return { upstream, connection: await pending };
@@ -461,10 +432,19 @@ Deno.test("pipe closes both sides on a socket error", async () => {
 
 Deno.test("host key parsing reads real key lines and skips noise", async () => {
   const line =
-    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl root@sprite";
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl root@machine";
   const keys = await parseHostKeyLines(`sudo: warning\n${line}\n\n`);
   assertEquals(keys.length, 1);
   assertEquals(keys[0].algorithm, "ssh-ed25519");
   assert(keys[0].fingerprintSha256.startsWith("SHA256:"));
   assertEquals(await parseHostKeyLines(""), []);
+});
+
+Deno.test("the local provider has no TCP path and says so", async () => {
+  const { LocalProvider } = await import("../_shared/remote/local-provider.ts");
+  const { ProviderError } = await import("../_shared/remote/provider.ts");
+  await assertRejects(
+    () => new LocalProvider().gatewayEndpoint("local-x"),
+    ProviderError,
+  );
 });
