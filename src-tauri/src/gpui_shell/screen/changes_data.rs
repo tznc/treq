@@ -1434,6 +1434,20 @@ mod tests {
   }
 
   #[test]
+  fn malformed_hunk_headers_do_not_panic() {
+    let big = format!("@@ -{m},5 +{m},5 @@", m = usize::MAX);
+    for header in ["@@ -0,5 +0,5 @@", "@@ -1,1 +0,5 @@", big.as_str()] {
+      let hunks = [hunk(header, &[" a"])];
+      let _ = new_lines(header);
+      let _ = old_lines(header);
+      let _ = context_number(header, true, 1);
+      let _ = context_row_numbers(header, true, 3, 1);
+      let _ = context_ranges(&hunks, 0, |_| (0, 0), false);
+      let _ = gap_ranges(&hunks, 0, |_| (0, 0), false);
+    }
+  }
+
+  #[test]
   fn context_ranges_step_twenty_lines() {
     let mid = [hunk(
       "@@ -30,4 +30,4 @@",
