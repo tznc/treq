@@ -2175,8 +2175,10 @@ mod tests {
     assert!(!crate::jj::list_jj_workspaces(&repo_path)
       .expect("list jj workspaces")
       .iter()
-      .any(|name| name == "fix-rollback"));
-    assert!(!temp.path().join(".treq/workspaces/fix-rollback").exists());
+      .any(|name| name.ends_with("fix-rollback")));
+    assert!(fs::read_dir(temp.path().join(".treq/workspaces"))
+      .map(|mut entries| entries.next().is_none())
+      .unwrap_or(true));
     assert!(super::list_workspaces(&repo_path)
       .expect("list workspaces")
       .is_empty());
@@ -2626,12 +2628,16 @@ mod tests {
     assert!(!workspace_dir.exists());
     let second = super::create_workspace(&repo_path, "fix/race", None, None, None, None, None)
       .expect("recreate while removal is pending");
-    let marker = workspace_dir.join("keep-me.txt");
+    let marker = temp
+      .path()
+      .join(".treq/workspaces")
+      .join(&second.workspace_path)
+      .join("keep-me.txt");
     fs::write(&marker, "new work").expect("write marker");
 
     crate::jj::remove_workspace_directory_only(&leftover).expect("background removal");
 
-    assert_eq!(second.workspace_path, first.workspace_path);
+    assert_ne!(second.workspace_path, first.workspace_path);
     assert_eq!(fs::read_to_string(marker).expect("marker"), "new work");
   }
 
@@ -2669,7 +2675,11 @@ mod tests {
         .expect("open PR workspace");
 
     assert!(created);
-    assert!(workspace_dir.exists());
+    assert!(temp
+      .path()
+      .join(".treq/workspaces")
+      .join(&workspace.workspace_path)
+      .exists());
     let listed = super::list_workspace_statuses(&repo_path).expect("list statuses");
     assert!(listed.iter().any(|s| s.current.id == workspace.id));
   }
@@ -2733,7 +2743,7 @@ mod tests {
   }
 
   #[test]
-  fn create_workspace_recovers_orphaned_partial_directory() {
+  fn create_workspace_ignores_orphaned_partial_directory_under_the_old_name() {
     let temp = TempDir::new().expect("tempdir");
     let repo_path = init_workspace_creation_repo(&temp);
     let partial = temp.path().join(".treq/workspaces/fix-partial");
@@ -2741,10 +2751,13 @@ mod tests {
     fs::write(partial.join("partial"), "incomplete").expect("write marker");
 
     let created = super::create_workspace(&repo_path, "fix/partial", None, None, None, None, None)
-      .expect("recover partial workspace");
+      .expect("create beside the orphaned partial dir");
 
     assert_eq!(created.branch_name, "fix/partial");
-    assert!(!partial.join("partial").exists());
+    assert_eq!(
+      created.workspace_path,
+      format!("{}-fix-partial", created.id)
+    );
   }
 
   #[test]
@@ -2765,7 +2778,7 @@ mod tests {
     let created = super::create_workspace(&repo_path, "fix/killed", None, None, None, None, None)
       .expect("retry recovers the interrupted create");
 
-    assert_eq!(created.workspace_path, "fix-killed");
+    assert_eq!(created.workspace_path, format!("{}-fix-killed", created.id));
     assert!(crate::jj::jj_get_commit_id(&repo_path, "fix/killed").is_ok());
   }
 
@@ -2785,7 +2798,12 @@ mod tests {
     )
     .expect_err("missing source must fail");
 
-    assert!(!temp.path().join(".treq/workspaces/fix-bad-source").exists());
+    assert!(fs::read_dir(temp.path().join(".treq/workspaces"))
+      .map(|mut entries| entries.next().is_none())
+      .unwrap_or(true));
+    assert!(super::list_workspaces(&repo_path)
+      .expect("list workspaces")
+      .is_empty());
   }
 
   #[test]
