@@ -1941,6 +1941,45 @@ mod tests {
   }
 
   #[test]
+  fn apply_workspace_target_branch_refuses_a_stack_cycle_before_rebasing() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    crate::local_db::init_local_db(repo_path).expect("initialize database");
+    let a = crate::local_db::add_workspace_targeting(
+      repo_path,
+      "a".into(),
+      "a".into(),
+      "a".into(),
+      None,
+      None,
+      None,
+      false,
+      "main",
+    )
+    .expect("register a");
+    crate::local_db::add_workspace_targeting(
+      repo_path,
+      "b".into(),
+      "b".into(),
+      "b".into(),
+      None,
+      None,
+      None,
+      false,
+      "a",
+    )
+    .expect("register b");
+
+    let err = super::apply_workspace_target_branch(repo_path, a.id, "b").unwrap_err();
+
+    assert_eq!(err, "Retargeting a onto b would create a stack cycle");
+    let stored = crate::local_db::get_workspace_by_id(repo_path, a.id)
+      .expect("lookup")
+      .expect("stored");
+    assert_eq!(stored.target_branch.as_deref(), Some("main"));
+  }
+
+  #[test]
   fn linear_issue_base_branch_stacks_on_the_parents_workspace() {
     let workspaces = [
       test_workspace(1, "feat/plain", Some("main")),

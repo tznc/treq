@@ -3388,6 +3388,66 @@ mod tests {
     assert!(stored.not_on_remote);
   }
 
+  fn add_stacked(repo_path: &str, branch: &str, target: &str) -> Workspace {
+    add_workspace_targeting(
+      repo_path,
+      branch.to_string(),
+      branch.to_string(),
+      branch.to_string(),
+      None,
+      None,
+      None,
+      false,
+      target,
+    )
+    .expect("register workspace")
+  }
+
+  #[test]
+  fn update_workspace_target_branch_refuses_a_stack_cycle() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let a = add_stacked(repo_path, "a", "main");
+    add_stacked(repo_path, "b", "a");
+
+    let err = update_workspace_target_branch(repo_path, a.id, "b").unwrap_err();
+    assert!(err.contains("would create a stack cycle"), "{err}");
+    let err = update_workspace_target_branch(repo_path, a.id, "a").unwrap_err();
+    assert!(err.contains("would create a stack cycle"), "{err}");
+
+    let stored = get_workspace_by_id(repo_path, a.id)
+      .expect("lookup")
+      .expect("stored");
+    assert_eq!(stored.target_branch.as_deref(), Some("main"));
+  }
+
+  #[test]
+  fn add_workspace_targeting_refuses_a_stack_cycle() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    // An existing workspace already stacks on the branch about to be created.
+    add_stacked(repo_path, "child", "new");
+
+    let err = add_workspace_targeting(
+      repo_path,
+      "new".to_string(),
+      "new".to_string(),
+      "new".to_string(),
+      None,
+      None,
+      None,
+      false,
+      "child",
+    )
+    .unwrap_err();
+    assert!(err.contains("would create a stack cycle"), "{err}");
+    assert!(get_workspace_by_branch(repo_path, "new")
+      .expect("lookup")
+      .is_none());
+  }
+
   #[test]
   fn init_new_workspace_state_sets_the_title_and_clears_the_rebase_mark() {
     let temp = TempDir::new().expect("tempdir");
