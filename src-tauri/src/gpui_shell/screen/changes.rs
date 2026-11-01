@@ -123,6 +123,16 @@ enum SideRow {
   /// By index into [`SideData::conflicted`].
   Conflict(usize),
   Header(List),
+  /// The message and Commit button, under the first uncommitted group's
+  /// header. What changes its height is in the key, so a change re-measures
+  /// the row.
+  CommitBox {
+    lines: usize,
+    error: bool,
+    pending: bool,
+  },
+  /// Where the uncommitted groups would be, when nothing is uncommitted.
+  NothingToCommit,
   /// By index into the list's files in [`SideData`].
   File(List, usize),
   CommittedHeader,
@@ -1950,16 +1960,27 @@ impl ChangesView {
       Some(false) => 0,
       _ => snapshot.committed.len(),
     };
-    if listed.is_empty() && committed == 0 {
+    let commit_box = SideRow::CommitBox {
+      lines: self.message.lines().count().max(1),
+      error: self.message_error.is_some(),
+      pending: self.pending.is_some(),
+    };
+    if listed.is_empty() && committed == 0 && data.conflicted.is_empty() {
       rows.push(SideRow::Empty);
-    } else if !listed.is_empty() {
+    } else if listed.is_empty() {
+      rows.push(SideRow::NothingToCommit);
+    } else {
       if !data.staged.is_empty() {
         rows.push(SideRow::Header(List::Selected));
+        rows.push(commit_box);
         if !self.collapsed_sections.contains(&Section::Selected) {
           rows.extend((0..data.staged.len()).map(|k| SideRow::File(List::Selected, k)));
         }
       }
       rows.push(SideRow::Header(List::Changes));
+      if data.staged.is_empty() {
+        rows.push(commit_box);
+      }
       if !self.collapsed_sections.contains(&Section::Changes) {
         rows.extend((0..data.unstaged.len()).map(|k| SideRow::File(List::Changes, k)));
       }
@@ -2040,7 +2061,6 @@ impl ChangesView {
       .border_r_1()
       .border_color(p.border)
       .bg(p.sidebar)
-      .child(self.commit_box(p, cx))
       .child(list)
   }
 
@@ -2088,6 +2108,13 @@ impl ChangesView {
           .child(self.file_row(list, &file, selected, last, p, cx))
           .into_any_element()
       }
+      SideRow::CommitBox { .. } => self.commit_box(p, cx).into_any_element(),
+      SideRow::NothingToCommit => ui::text(div(), TextSize::Sm)
+        .debug_selector(|| "changes-nothing-to-commit".into())
+        .py_2()
+        .text_color(p.muted_foreground)
+        .child("Nothing to commit")
+        .into_any_element(),
       SideRow::CommittedHeader => self.committed_header(p, cx).into_any_element(),
       SideRow::Committed(i) => self.committed_row(i, p, cx).into_any_element(),
       SideRow::Empty => div()
@@ -2251,10 +2278,9 @@ impl ChangesView {
       )
       .child(self.anchor("commit-menu".into()));
     div()
-      .px_4()
-      .py_3()
-      .border_b_1()
-      .border_color(p.border)
+      .w_full()
+      .pt_1()
+      .pb_3()
       .flex()
       .flex_col()
       .gap_2()

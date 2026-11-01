@@ -11,9 +11,8 @@ import { capture } from "./capture.ts";
 import { mod, openTab, openWorkspace, settle } from "./helpers.ts";
 
 /** alerting.ts in feat/alerting-logs's Uncommitted list. */
-const SELECTED_ROW = { x: 330, y: 283 };
+const SELECTED_ROW = { x: 330, y: 297 };
 /** The Uncommitted header's discard all button, for feat/alerting-logs. */
-const DISCARD_ALL = { x: 453, y: 251 };
 
 test.describe.configure({ mode: "serial" });
 
@@ -48,10 +47,10 @@ test("changes: conflict card and resolve popover", async ({ page }) => {
     expectations: [
       "File list: Conflicts (Home.tsx, C) above Committed 3 (A/A/M badges)",
       "Review bar: '0 comments pending', Start Review, Reset, red Resolve conflicts…",
-      "Commit box (Message, Commit split button) at the top of the list",
+      "No commit box: nothing is uncommitted, so 'Nothing to commit' sits between Conflicts and Committed",
     ],
   });
-  await page.mouse.move(330, 315, { steps: 4 }); // Home.tsx under Conflicts
+  await page.mouse.move(330, 183, { steps: 4 }); // Home.tsx under Conflicts
   await settle(page, 500);
   await capture(page, {
     name: "05-changes-file-row-hover",
@@ -62,7 +61,7 @@ test("changes: conflict card and resolve popover", async ({ page }) => {
       "No shadow or border appears around the hovered row",
     ],
   });
-  await page.mouse.click(330, 283); // Home.tsx under Conflicts
+  await page.mouse.click(330, 183); // Home.tsx under Conflicts
   await settle(page, 1500);
   await capture(page, {
     name: "05-changes-conflict-card",
@@ -100,7 +99,7 @@ test("changes: diff, inline comment add/edit, review bar", async ({ page }) => {
       "Diff code reads the same size as the 13px UI text beside it",
     ],
   });
-  await page.mouse.click(326, 383); // client.ts under Committed
+  await page.mouse.click(326, 320); // client.ts under Committed
   await settle(page, 1500);
   await capture(page, {
     name: "05-changes-diff",
@@ -190,7 +189,7 @@ test("changes: commit box and its split menu", async ({ page }) => {
     title: "Changes tab with uncommitted edits",
     expectations: [
       "Uncommitted section lists alerting.ts (M) and levels.ts (A) with checkboxes",
-      "Commit box above; Commit disabled until a message is typed",
+      "Commit box under the Changes header, above its files; Commit disabled until a message is typed",
     ],
   });
   const message = page.getByRole("textbox", { name: "Message" });
@@ -233,7 +232,7 @@ test("changes: selected file row keeps its actions", async ({ page }) => {
 test("changes: Escape closes the discard all confirmation", async ({ page }) => {
   await openWorkspace(page, "feat/alerting-logs");
   await openTab(page, "Changes");
-  await page.mouse.click(DISCARD_ALL.x, DISCARD_ALL.y); // Uncommitted's discard all
+  await page.mouse.click(440, 151); // the Changes header's discard all (not observable)
   const confirm = page.getByRole("button", { name: "Discard all changes", exact: true });
   await expect(confirm).toBeVisible();
   await settle(page, 500);

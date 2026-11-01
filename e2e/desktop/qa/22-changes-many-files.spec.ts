@@ -46,7 +46,7 @@ test("changes-many-files: a long file list scrolls and picks a file", async ({ p
       name: "22-changes-many-files-01-top",
       title: "Changes tab with 1,500 new files, list at the top",
       expectations: [
-        "Sidebar: commit box, then a Changes header with a count near 1,500 and file rows below",
+        "Sidebar: a Changes header with a count near 1,500, the commit box under it, then file rows",
         "The diff shows the first files' cards on the right",
       ],
     });

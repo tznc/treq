@@ -164,6 +164,56 @@ fn changes_tab_hides_the_committed_group_when_filtered_out(cx: &mut TestAppConte
   assert!(!h.drawn("file-card-c.rs"));
 }
 
+fn changes_host_committed_only() -> FakeHost {
+  let mut host = changes_host();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [
+      {"path": "c.rs", "status": "M", "previous_path": null, "changed_line_count": 1, "diff_deferred": false}
+    ],
+    "uncommitted_files": [],
+    "hunks_by_file": [
+      {"path": "c.rs", "hunks": [{"id": "h", "header": "@@ -1 +1 @@", "lines": ["-c", "+d"], "patch": ""}]}
+    ],
+    "too_large_to_render": false
+  }))
+  .ok();
+  host
+}
+
+/// With nothing uncommitted there is nothing to commit: no commit box, one
+/// muted line where the Changes group would be.
+#[gpui::test]
+fn changes_tab_offers_no_commit_box_with_nothing_to_commit(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_committed_only(), committed_route(true));
+  assert!(h.drawn("committed-section-toggle"));
+  assert!(!h.drawn("commit-button"));
+  assert!(!h.drawn("commit-message"));
+  assert!(h.drawn("changes-nothing-to-commit"));
+}
+
+/// The commit box sits in the Changes group: under its header, above its
+/// files.
+#[gpui::test]
+fn changes_tab_draws_the_commit_box_inside_the_changes_group(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(true));
+  assert!(!h.drawn("changes-nothing-to-commit"));
+  let mut top = |s: &'static str| {
+    h.cx.run_until_parked();
+    h.cx
+      .debug_bounds(s)
+      .unwrap_or_else(|| panic!("{s} not drawn"))
+      .origin
+      .y
+  };
+  let header = top("changes-section-toggle");
+  let message = top("commit-message");
+  let file = top("file-row-a.rs");
+  let committed = top("committed-section-toggle");
+  assert!(header < message, "header above the commit box");
+  assert!(message < file, "commit box above the group's files");
+  assert!(file < committed, "the Committed group follows");
+}
+
 #[gpui::test]
 fn changes_tab_asks_for_a_commit_message(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
