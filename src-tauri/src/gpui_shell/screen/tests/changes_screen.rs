@@ -820,15 +820,23 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
   h.click("gutter-a.rs-0-1");
   h.cx.simulate_keystrokes("shift-down left");
   h.click("suggest-change");
-  assert_eq!(
-    h.screen.read_with(&h.cx, |screen, cx| {
-      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-      let changes = workspace.changes().expect("changes").read(cx);
-      changes.review.draft_text.clone()
-    }),
-    "```suggestion\nb\nc\n```\n"
-  );
+  // A code editor with the lines and a preview, not fences in the comment.
+  assert!(h.drawn("suggestion-editor"));
+  assert!(h.drawn("suggestion-preview"));
+  let (comment, suggestion) = h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
+    (
+      changes.review.draft_text.clone(),
+      changes.review.suggestion_text.clone(),
+    )
+  });
+  assert_eq!(comment, "");
+  assert_eq!(suggestion.as_deref(), Some("b\nc"));
   h.cx.simulate_keystrokes("secondary-enter");
+  settle_save(&mut h);
+  let saved = host.review.lock().unwrap().clone().unwrap_or_default();
+  assert!(saved.contains(r"```suggestion\nb\nc\n```"), "{saved}");
   assert!(h.drawn("agent-review-suggestion"), "drawn as a diff");
   // The write changes a.rs on disk; that read is not stale.
   let mut applied = host.working.clone().expect("working");
