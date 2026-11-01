@@ -2,7 +2,7 @@
 // connecting it from Settings with an API key, the Linear view (issue
 // views, an issue's page with its comments, Kanban, the team menu,
 // projects with a document), the agent button into the agent prompt, a
-// workspace created from an issue in the New Workspaces dialog with its
+// workspace created from an issue in the New workspace dialog with its
 // header chip, and a key Linear rejects.
 //
 // Project rows and documents are not observable; they are clicked at
@@ -220,8 +220,8 @@ test("linear: kick off an issue", async ({ page }) => {
 test("linear: new workspace from an issue", async ({ page }) => {
   linearKey("lin_api_qa");
   await home(page);
-  await page.getByRole("button", { name: "New workspaces" }).click();
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeVisible();
+  await page.getByRole("button", { name: "New workspace…" }).first().click();
+  await expect(page.getByRole("heading", { name: "New workspace" })).toBeVisible();
   await page.getByRole("tab", { name: "Linear" }).click();
   await expect(page.getByRole("heading", { name: "Your issues" })).toBeVisible({ timeout: 20_000 });
   await page.getByRole("textbox", { name: "Search issues" }).click();
@@ -231,14 +231,14 @@ test("linear: new workspace from an issue", async ({ page }) => {
   await settle(page, 600);
   await capture(page, {
     name: "22-linear-11-dialog-search",
-    title: "New Workspaces: searching Linear issues",
+    title: "New workspace: searching Linear issues",
     expectations: [
       "Heading 'Matching issues' with only ENG-139 listed and checked",
-      "Linear tab shows a '1' badge; button reads 'Create 1 Workspace'",
+      "Linear tab shows a '1' badge; button reads 'Create workspace'",
     ],
   });
-  await page.getByRole("button", { name: /^Create 1 Workspace/ }).click();
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeHidden({ timeout: 30_000 });
+  await page.getByRole("button", { name: /^Create workspace/ }).click();
+  await expect(page.getByRole("heading", { name: "New workspace" })).toBeHidden({ timeout: 30_000 });
   // The new workspace opens, its sidebar row named by the issue title.
   await expect(
     page.getByRole("button", { name: "Cache key-value lookups", selected: true }),
@@ -258,15 +258,15 @@ test("linear: a sub-issue nests under its parent's workspace", async ({ page }) 
   linearKey("lin_api_qa");
   await home(page);
   await page.getByRole("button", { name: "New workspaces" }).click();
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "New workspace" })).toBeVisible();
   await page.getByRole("tab", { name: "Linear" }).click();
   await expect(page.getByRole("heading", { name: "Your issues" })).toBeVisible({ timeout: 20_000 });
   // The sub-issue first: its parent still opens before it.
   await page.getByRole("checkbox", { name: "ENG-143 Back off on 429 responses" }).click();
   await page.getByRole("checkbox", { name: "ENG-142 Retry webhook deliveries" }).click();
   await settle(page, 600);
-  await page.getByRole("button", { name: /^Create 2 Workspaces/ }).click();
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeHidden({ timeout: 60_000 });
+  await page.getByRole("button", { name: /^Create 2 workspaces/ }).click();
+  await expect(page.getByRole("heading", { name: "New workspace" })).toBeHidden({ timeout: 60_000 });
   await expect(
     page.getByRole("button", { name: "Retry webhook deliveries" }).first(),
   ).toBeVisible({ timeout: 30_000 });
@@ -297,12 +297,12 @@ test("linear: a rejected key", async ({ page }) => {
     ],
   });
   await home(page);
-  await page.getByRole("button", { name: "New workspaces" }).click();
+  await page.getByRole("button", { name: "New workspace…" }).first().click();
   await page.getByRole("tab", { name: "Linear" }).click();
   await settle(page, 2000);
   await capture(page, {
     name: "22-linear-15-rejected-key-dialog",
-    title: "New Workspaces: Linear rejects the key",
+    title: "New workspace: Linear rejects the key",
     expectations: ["'Could not load Linear issues' with the rejection message and a Try again button"],
   });
   await page.keyboard.press("Escape");

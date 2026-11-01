@@ -255,6 +255,13 @@ fn serializes_actions_for_react() {
 }
 
 #[test]
+fn names_create_buttons_by_what_they_open() {
+  assert_eq!(stack_label(None), "New workspace…");
+  assert_eq!(stack_label(Some(7)), "Stack on this…");
+  assert_eq!(OPEN_WORKSPACES_LABEL, "New workspace…");
+}
+
+#[test]
 fn indents_rows_like_the_react_sidebar() {
   assert_eq!(row_indent(0), 10.);
   assert_eq!(row_indent(1), 16.);

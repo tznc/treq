@@ -44,7 +44,7 @@ async function dialogIn(
   }
 }
 
-const heading = (p: Page) => p.getByRole("heading", { name: "New Workspaces" });
+const heading = (p: Page) => p.getByRole("heading", { name: "New workspace" });
 
 test("dialogs: create workspace", async ({ page, context }) => {
   await home(page);
@@ -53,12 +53,12 @@ test("dialogs: create workspace", async ({ page, context }) => {
   await settle(page, 800);
   await capture(page, {
     name: "09-create-workspace-dialog",
-    title: "New Workspaces dialog (Ctrl+N) from home",
+    title: "New workspace dialog (Ctrl+N) from home",
     screen: true,
     rest: false,
     expectations: [
       "'Workspaces' textarea focused; Stack on reads the default branch",
-      "Cancel and a disabled Create Workspaces at the bottom right",
+      "Cancel and a disabled Create workspace at the bottom right",
       "Backdrop dims the window evenly",
     ],
   });
@@ -71,7 +71,7 @@ test("dialogs: create workspace", async ({ page, context }) => {
     expect((await heading(dialog).boundingBox())?.x).toBe(before?.x);
     await capture(page, {
       name: "09-create-workspace-advanced",
-      title: "New Workspaces: Advanced section open",
+      title: "New workspace: Advanced section open",
       screen: true,
       rest: false,
       expectations: [
@@ -86,13 +86,13 @@ test("dialogs: create workspace", async ({ page, context }) => {
   await settle(page, 500);
   await capture(page, {
     name: "09-create-workspace-title",
-    title: "New Workspaces: branch named from the title",
+    title: "New workspace: branch named from the title",
     screen: true,
     rest: false,
     expectations: ["The popover lists prefix/qa-scratch-space as a new branch"],
   });
   await dialog.keyboard.press("Escape");
-  await dialog.getByRole("button", { name: "Create 1 Workspace" }).click();
+  await dialog.getByRole("button", { name: "Create workspace" }).click();
   await expect(heading(dialog)).toHaveCount(0, { timeout: 30_000 });
   await settle(page, 1500);
   await capture(page, {
@@ -169,12 +169,12 @@ test("dialogs: delete workspace", async ({ page, context }) => {
 test("dialogs: stack workspace", async ({ page, context }) => {
   await openWorkspace(page, "feat/keyvalues-cache");
   await row(page, "feat/keyvalues-cache").hover();
-  await row(page, "feat/keyvalues-cache").getByRole("button", { name: "Stack workspace" }).click();
+  await row(page, "feat/keyvalues-cache").getByRole("button", { name: "Stack on this…" }).click();
   const dialog = await dialogIn(page, context, heading);
   await settle(page, 1200);
   await capture(page, {
     name: "09-stack-dialog",
-    title: "Stack on feat/keyvalues-cache opens New Workspaces",
+    title: "Stack on feat/keyvalues-cache opens New workspace",
     screen: true,
     rest: false,
     expectations: [
@@ -191,7 +191,7 @@ test("dialogs: stack workspace", async ({ page, context }) => {
   await settle(page, 1000);
   await capture(page, {
     name: "09-stack-dialog-shortcut",
-    title: "New Workspaces from Ctrl+Shift+N",
+    title: "New workspace from Ctrl+Shift+N",
     screen: true,
     rest: false,
     expectations: ["Same dialog, 'Stack on' reads the open workspace"],

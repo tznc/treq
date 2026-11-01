@@ -164,6 +164,16 @@ pub struct ViewPr {
 
 /// React's `View PR (#12, open)`: the number and state the icon and color show.
 /// What the sync pip signals, as its tooltip and accessible name say it.
+/// The header's create button: a new workspace at home, one stacked on the
+/// workspace on screen elsewhere.
+pub(super) fn stack_label(home: bool) -> &'static str {
+  if home {
+    "New workspace…"
+  } else {
+    "Stack on this…"
+  }
+}
+
 fn sync_state(sync: &Sync) -> String {
   match (sync.ahead, sync.behind) {
     (a, 0) => format!("{a} to push"),
@@ -1304,21 +1314,21 @@ impl WorkspaceView {
           ));
         }
       }
-      if let Some(stack) = &h.stack {
-        let button = Button::new("workspace-stack", p)
-          .size(Size::Sm)
-          .gap_1()
-          .px_2()
-          .icon(theme::ICON_LAYERS, 16.)
-          .label("Stack")
-          .on_click(self.press("workspace.stack"));
-        left = left.child(self.with_tooltip(
-          "workspace-stack",
-          Some(TooltipContent::Text(stack.tooltip.clone().into())),
-          button,
-          cx,
-        ));
-      }
+    }
+    if let Some(stack) = &h.stack {
+      let button = Button::new("workspace-stack", p)
+        .size(Size::Sm)
+        .gap_1()
+        .px_2()
+        .icon(theme::ICON_LAYERS, 16.)
+        .label(stack_label(h.home))
+        .on_click(self.press("workspace.stack"));
+      left = left.child(self.with_tooltip(
+        "workspace-stack",
+        Some(TooltipContent::Text(stack.tooltip.clone().into())),
+        button,
+        cx,
+      ));
     }
 
     // The row wraps it whole first; alone on its row and still too wide (at
