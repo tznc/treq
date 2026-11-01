@@ -120,12 +120,17 @@ pub fn ensure_jj_initialized(db: &crate::db::Database, repo_path: &str) -> Resul
 
 /// Sanitize workspace name for filesystem use
 pub fn sanitize_workspace_name(name: &str) -> String {
-  name
+  let name = name
     .replace(['/', '\\'], "-")
     .replace(['*', '?', '<', '>', '|', '"', ':'], "_")
-    .trim_matches('.')
-    .trim()
-    .to_string()
+    .trim_matches(|c: char| c == '.' || c.is_whitespace())
+    .to_string();
+  // An empty name would make the workspace dir `.treq/workspaces/` itself.
+  if name.is_empty() {
+    "workspace".to_string()
+  } else {
+    name
+  }
 }
 
 /// Read the working copy's current sparse checkout patterns (equivalent to
