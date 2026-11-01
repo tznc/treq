@@ -47,7 +47,8 @@ test("linear: connect with an API key in Settings", async ({ page }) => {
   await expect(page.getByText(/Linear is not connected/)).toBeVisible();
   await page.getByRole("button", { name: "Open settings" }).click();
   await expect(page.getByRole("tab", { name: "Integrations", selected: true })).toBeVisible();
-  await page.getByRole("button", { name: "Add API Key" }).click();
+  await page.getByRole("button", { name: "Linear integration" }).click();
+  await page.getByRole("button", { name: "Add API key" }).click();
   await settle(page, 600);
   await page.getByRole("textbox").last().click();
   await page.keyboard.type("lin_api_qa");
@@ -57,19 +58,19 @@ test("linear: connect with an API key in Settings", async ({ page }) => {
     title: "Settings: typing a Linear API key",
     expectations: [
       "Linear card on the Integrations tab: a masked key field (typed, focused), Cancel and an enabled Save",
-      "The field and Save sit on the API Key row, aligned with its label",
+      "The field and Save sit on the API key row, aligned with its label",
     ],
   });
   await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByRole("button", { name: "Update API Key" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Update API key" })).toBeVisible();
   await settle(page, 800);
   await capture(page, {
     name: "22-linear-02-key-saved",
     title: "Settings: Linear connected",
     screen: true,
     expectations: [
-      "API Key row reads 'Direct API access configured' with an 'Update API Key' button",
-      "An 'API Key saved' toast",
+      "API key row reads 'Direct API access configured' with an 'Update API key' button; the card says Connected",
+      "An 'API key saved' toast",
     ],
   });
 });

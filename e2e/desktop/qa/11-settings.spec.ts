@@ -137,9 +137,32 @@ test("settings: account, integrations, skills, feature preview", async ({ page }
   await capture(page, {
     name: "11-settings-integrations",
     title: "Settings: Integrations tab",
-    expectations: ["GitHub and Linear cards with their state and actions aligned"],
+    expectations: [
+      "One collapsed card each for GitHub and Linear: icon, name, a one-line purpose",
+      "Each card shows 'Not connected' or 'Connected' with a dot, and a chevron on the right",
+    ],
   });
-  await page.getByRole("button", { name: "Add API Key" }).click();
+  await page.getByRole("button", { name: "GitHub integration" }).click();
+  await settle(page, 600);
+  await capture(page, {
+    name: "11-settings-integrations-github-signed-out",
+    title: "Settings: GitHub card expanded while signed out",
+    expectations: [
+      "The GitHub card is open: 'Sign in to Treq Cloud to connect GitHub' and a Sign in with browser button",
+      "No full-page sign-in block",
+    ],
+  });
+  await page.getByRole("button", { name: "Linear integration" }).click();
+  await settle(page, 600);
+  await capture(page, {
+    name: "11-settings-integrations-linear",
+    title: "Settings: Linear card expanded",
+    expectations: [
+      "The Linear card is open: an 'API key' row reading 'Paste a Linear personal API key' with Add API key",
+      "A 'Create a key in Linear' link under it",
+    ],
+  });
+  await page.getByRole("button", { name: "Add API key" }).click();
   await settle(page, 1000);
   await capture(page, {
     name: "11-settings-linear-key",
