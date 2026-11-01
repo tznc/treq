@@ -4679,9 +4679,19 @@ pub fn pull_workspace_from_remote(
 
   // Step 3: Diverged — capture local-only commit IDs BEFORE resolving bookmark
   let remote_ref = format!("{}@origin", branch_name);
-  let local_revset = format!("({}..@-) & mutable()", remote_ref);
+  // The local side can come from another checkout of the branch (the home repo), not only `@-`.
+  let local_revset = format!(
+    "({}..(@- | bookmarks(exact:\"{}\"))) & mutable()",
+    remote_ref, branch_name
+  );
   let local_commit_ids = jj::jj_log_revset_commit_ids(full_path_str, &local_revset)
     .map_err(|e| format!("Failed to capture local commits: {}", e))?;
+  let local_change_ids = if local_commit_ids.is_empty() {
+    Vec::new()
+  } else {
+    jj::jj_log_revset_change_ids(full_path_str, &local_commit_ids.join(" | "))
+      .map_err(|e| format!("Failed to capture local commits: {}", e))?
+  };
 
   let commits_rebased = local_commit_ids.len();
 
@@ -4706,7 +4716,16 @@ pub fn pull_workspace_from_remote(
     // Step 5b: Advance the bookmark to the rebased local tip.
     // Without this, the bookmark stays on origin and Sync reports InSync while
     // conflicted/rebased work only lives on @ — users can't resolve locally and push.
-    advance_bookmark_to_working_copy_tip(full_path_str, branch_name)?;
+    let rebased_heads = jj::jj_log_revset_commit_ids(
+      full_path_str,
+      &format!("heads({})", local_change_ids.join(" | ")),
+    )
+    .unwrap_or_default();
+    match rebased_heads.as_slice() {
+      [tip] => jj::jj_set_bookmark(full_path_str, branch_name, tip)
+        .map_err(|e| format!("Failed to advance bookmark '{branch_name}': {e}"))?,
+      _ => advance_bookmark_to_working_copy_tip(full_path_str, branch_name)?,
+    }
   }
 
   // Step 6: refresh stale working copy only; do not sync bookmark tip here.
