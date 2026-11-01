@@ -216,13 +216,20 @@ fn plan_rows(
   let parents = stack_parents(text);
   let mut rows: Vec<NewWorkspaceRow> = Vec::new();
   let mut index: HashMap<String, usize> = HashMap::new();
-  for (line, parsed) in parse_lines(text) {
+  let lines = parse_lines(text);
+  // Branch lines keep their names: reserve them before any title is planned.
+  let reserved: HashSet<String> = lines
+    .iter()
+    .filter(|(_, parsed)| matches!(parsed, Line::Branch(_)))
+    .filter_map(|(_, parsed)| check(parsed).ok().map(|c| c.branch))
+    .collect();
+  for (position, (line, parsed)) in lines.into_iter().enumerate() {
     let parent = parents
       .get(&line)
       .and_then(|p| index.get(p))
       .map(|&i| rows[i].clone());
     let checked = check(&parsed)
-      .map(|checked| unique_title_branch(checked, &rows, &check))
+      .map(|checked| unique_title_branch(checked, position, &reserved, &rows, &check))
       .and_then(|checked| match &parent {
         Some(parent) if parent.step.is_none() => {
           Err("Stacks on a line that can't be opened".to_string())
@@ -262,22 +269,43 @@ fn plan_rows(
   rows
 }
 
-/// A new branch named after a title, made unique among the rows above:
-/// titles that differ only past the branch name's cut ("Fix the page A",
-/// "Fix the page B") would otherwise plan one branch twice, and only the
-/// first could be made.
+/// Six lowercase hex characters from a SHA-256 of the title, its line
+/// position and a salt. Stable across runs, so the preview and the run agree.
+fn title_suffix(title: &str, position: usize, salt: u32) -> String {
+  use sha2::{Digest, Sha256};
+  let digest = Sha256::new()
+    .chain_update(title.as_bytes())
+    .chain_update([0])
+    .chain_update(position.to_le_bytes())
+    .chain_update(salt.to_le_bytes())
+    .finalize();
+  digest[..3].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A new branch named after a title, with a short hash suffix so it never
+/// takes a branch a line names, a row above already planned, or one that
+/// exists. The suffix is re-hashed with the next salt until it is free.
 fn unique_title_branch(
   checked: Checked,
+  position: usize,
+  reserved: &HashSet<String>,
   rows: &[NewWorkspaceRow],
   check: &impl Fn(&Line) -> Result<Checked, String>,
 ) -> Checked {
-  let taken = |branch: &str| rows.iter().any(|r| r.branch.as_deref() == Some(branch));
-  if checked.title.is_none() || checked.step != NewWorkspaceStep::Create || !taken(&checked.branch)
-  {
+  let Some(title) = checked.title.clone() else {
     return checked;
-  }
-  (2..100)
-    .map(|n| format!("{}-{n}", checked.branch))
+  };
+  let taken = |branch: &str| {
+    reserved.contains(branch) || rows.iter().any(|r| r.branch.as_deref() == Some(branch))
+  };
+  (0..1000)
+    .map(|salt| {
+      format!(
+        "{}-{}",
+        checked.branch,
+        title_suffix(&title, position, salt)
+      )
+    })
     .filter(|branch| !taken(branch))
     .find_map(|branch| {
       check(&Line::Branch(branch))
@@ -285,7 +313,7 @@ fn unique_title_branch(
         .filter(|c| c.step == NewWorkspaceStep::Create)
     })
     .map(|c| Checked {
-      title: checked.title.clone(),
+      title: Some(title.clone()),
       ..c
     })
     .unwrap_or(checked)
@@ -534,16 +562,35 @@ mod tests {
       .collect()
   }
 
+  /// `branch` is `base` plus a 6-hex-char suffix.
+  fn is_suffixed(branch: &str, base: &str) -> bool {
+    branch
+      .strip_prefix(base)
+      .and_then(|rest| rest.strip_prefix('-'))
+      .is_some_and(|hex| {
+        hex.len() == 6
+          && hex
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+      })
+  }
+
+  fn branches(rows: &[NewWorkspaceRow]) -> Vec<&str> {
+    rows.iter().filter_map(|r| r.branch.as_deref()).collect()
+  }
+
   #[test]
   fn an_indented_run_stacks_in_order() {
     let text = "feat/api\n  Add the page\n  feat/tests\nfeat/open\n";
     let rows = plan_rows(text, "main", fake);
+    let added = rows[1].branch.as_deref().unwrap();
+    assert!(is_suffixed(added, "treq/add-the-page"), "{added}");
     assert_eq!(
       summary(&rows),
       vec![
         (0, Some("feat/api"), Some("main")),
-        (1, Some("treq/add-the-page"), Some("feat/api")),
-        (2, Some("feat/tests"), Some("treq/add-the-page")),
+        (1, Some(added), Some("feat/api")),
+        (2, Some("feat/tests"), Some(added)),
         (0, Some("feat/open"), Some("main")),
       ]
     );
@@ -566,7 +613,7 @@ mod tests {
   }
 
   #[test]
-  fn titles_that_share_a_branch_get_numbered_branches() {
+  fn titles_that_share_a_branch_get_different_suffixes() {
     // The branch name drops a trailing single letter, so both titles
     // would be treq/fix-the-page.
     let rows = plan_rows(
@@ -574,16 +621,80 @@ mod tests {
       "main",
       fake,
     );
-    assert_eq!(
-      summary(&rows),
-      vec![
-        (0, Some("treq/fix-the-page"), Some("main")),
-        (0, Some("treq/fix-the-page-2"), Some("main")),
-        (1, Some("treq/add-tests"), Some("treq/fix-the-page-2")),
-      ]
-    );
+    let [first, second, tests] = branches(&rows)[..] else {
+      panic!("{rows:?}")
+    };
+    assert!(is_suffixed(first, "treq/fix-the-page"), "{first}");
+    assert!(is_suffixed(second, "treq/fix-the-page"), "{second}");
+    assert_ne!(first, second);
+    assert!(is_suffixed(tests, "treq/add-tests"), "{tests}");
+    assert_eq!(rows[2].base.as_deref(), Some(second));
     assert_eq!(rows[1].title.as_deref(), Some("Fix the page B"));
     assert_eq!(rows[1].step, Some(NewWorkspaceStep::Create));
+  }
+
+  #[test]
+  fn identical_titles_get_different_suffixes() {
+    let rows = plan_rows("Fix it now\nfix it now\n", "main", fake);
+    let [first, second] = branches(&rows)[..] else {
+      panic!("{rows:?}")
+    };
+    assert!(is_suffixed(first, "treq/fix-it-now"), "{first}");
+    assert!(is_suffixed(second, "treq/fix-it-now"), "{second}");
+    assert_ne!(first, second);
+  }
+
+  #[test]
+  fn a_branch_line_keeps_its_name_and_the_title_gets_a_suffix() {
+    // `fix c` drops its trailing letter, so it would plan treq/fix too.
+    for text in ["fix c\ntreq/fix\n", "treq/fix\nfix c\n"] {
+      let rows = plan_rows(text, "main", fake);
+      let line = rows.iter().find(|r| r.line == "treq/fix").unwrap();
+      let title = rows.iter().find(|r| r.line == "fix c").unwrap();
+      assert_eq!(line.branch.as_deref(), Some("treq/fix"), "{text}");
+      let branch = title.branch.as_deref().unwrap();
+      assert!(is_suffixed(branch, "treq/fix"), "{text}: {branch}");
+    }
+  }
+
+  #[test]
+  fn planning_twice_gives_the_same_branches() {
+    let text = "Fix the page A\nfix c\ntreq/fix\n  Add tests\nFix it now\n";
+    assert_eq!(plan_rows(text, "main", fake), plan_rows(text, "main", fake));
+    assert_eq!(plan_unchecked(text, "main"), plan_unchecked(text, "main"));
+  }
+
+  #[test]
+  fn a_title_skips_a_suffixed_branch_a_line_names() {
+    // Whatever suffix `fix c` would take first, a branch line naming it
+    // (above or below) keeps it, and the title moves on.
+    let first = plan_rows("fix c\n", "main", fake)[0]
+      .branch
+      .clone()
+      .unwrap();
+    for text in [format!("{first}\nfix c\n"), format!("fix c\n{first}\n")] {
+      let rows = plan_rows(&text, "main", fake);
+      let line = rows.iter().find(|r| r.line == first).unwrap();
+      let title = rows.iter().find(|r| r.line == "fix c").unwrap();
+      assert_eq!(line.branch.as_deref(), Some(first.as_str()));
+      let branch = title.branch.as_deref().unwrap();
+      assert_ne!(branch, first);
+      assert!(is_suffixed(branch, "treq/fix"), "{branch}");
+    }
+  }
+
+  #[test]
+  fn a_hex_suffix_ending_in_a_letter_is_kept() {
+    // `-a1b2c3`-style suffixes can end in a single hex letter; trailing
+    // cleanup must not strip it.
+    for n in 0..64 {
+      let rows = plan_rows(&format!("Title number {n}\n"), "main", fake);
+      let branch = rows[0].branch.as_deref().unwrap();
+      assert!(
+        is_suffixed(branch, &format!("treq/title-number-{n}")),
+        "{branch}"
+      );
+    }
   }
 
   #[test]
