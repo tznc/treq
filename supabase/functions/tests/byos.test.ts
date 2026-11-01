@@ -125,8 +125,8 @@ function fakeCredentialStore(
       loads.push(placementId);
       return Promise.resolve(rows[placementId] ?? null);
     },
-    markInvalid: (id) => {
-      invalid.push(id);
+    markInvalid: (id, key) => {
+      invalid.push(`${id}:${key}`);
       return Promise.resolve();
     },
   };
@@ -184,7 +184,8 @@ Deno.test("an unauthorized answer marks the credential invalid and is rethrown",
   const { build } = recordingBuild(new ProviderError("unauthorized", "revoked"));
   const err = await assertRejects(() => providerForPlacement(store, "boat", "p4", build).getInstance("x"), ProviderError);
   assertEquals(err.kind, "unauthorized");
-  assertEquals(invalid, ["c4"]);
+  // The key that failed goes along, so a 401 racing a rotation spares the new key.
+  assertEquals(invalid, ["c4:k"]);
 });
 
 Deno.test("unauthorized surfaces to the app as provider_credential_invalid", () => {
