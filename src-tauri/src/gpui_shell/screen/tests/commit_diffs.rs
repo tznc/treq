@@ -175,3 +175,44 @@ fn commit_rows_open_a_context_menu(cx: &mut TestAppContext) {
   h.answer("Revert commit");
   assert!(host.writes().contains(&"revert a".to_string()));
 }
+
+/// An immutable commit offers no action that rewrites it.
+#[gpui::test]
+fn immutable_commits_offer_no_rewriting_actions(cx: &mut TestAppContext) {
+  use crate::gpui_shell::popup::{MenuEntry, PopupRequest};
+  use gpui::{Modifiers, MouseButton};
+  let mut pushed = commit("a", 1, 0);
+  pushed["is_immutable"] = true.into();
+  let host = host_with_log(vec![pushed], "feature/login");
+  let (mut h, _) = workspace_harness(cx, host, commits_route());
+  h.cx.run_until_parked();
+  let at = h.cx.debug_bounds("commit-row-a").expect("row").center();
+  h.cx
+    .simulate_mouse_down(at, MouseButton::Right, Modifiers::none());
+  h.cx
+    .simulate_mouse_up(at, MouseButton::Right, Modifiers::none());
+  h.cx.run_until_parked();
+  let texts: Vec<String> = match h.popups.borrow().last() {
+    Some(PopupRequest::ShowMenu { entries, .. }) => entries
+      .iter()
+      .filter_map(|e| match e {
+        MenuEntry::Item { text, .. } => Some(text.clone()),
+        _ => None,
+      })
+      .collect(),
+    _ => panic!("no menu is shown"),
+  };
+  for rewrite in [
+    "Edit description",
+    "Undo commit",
+    "Edit timestamp",
+    "Stash commit",
+    "Delete commit",
+  ] {
+    assert!(
+      !texts.iter().any(|t| t == rewrite),
+      "{rewrite} offered: {texts:?}"
+    );
+  }
+  assert!(texts.iter().any(|t| t == "Revert commit"), "{texts:?}");
+}
