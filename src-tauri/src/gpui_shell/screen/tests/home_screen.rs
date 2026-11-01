@@ -15,7 +15,7 @@ const WORKSPACE_JSON: &str = r#"{
     "createPr": null,
     "statusLoading": false,
     "sync": {"ahead": 2, "behind": 0, "disabled": false, "spinning": false},
-    "checks": {"status": "passed", "count": "7/7", "name": "Checks: Treq 3/3, GitHub 4/4"},
+    "checks": {"status": "passed", "count": "7/7 checks passed", "name": "Checks: Treq 3/3, GitHub 4/4"},
     "merge": {"passing": true, "disabled": false, "tooltip": null},
     "details": true,
     "more": {"disabled": false}

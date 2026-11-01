@@ -976,8 +976,28 @@ fn build_text_hunks(before: &str, after: &str) -> Vec<JjDiffHunk> {
   let mut hunks = parse_git_diff_hunks(&patch).unwrap_or_default();
   for hunk in &mut hunks {
     rewrite_no_newline_marker(hunk);
+    hunk.header = empty_side_from_zero(&hunk.header);
   }
   hunks
+}
+
+/// Git starts an empty range at the line before it (`-0,0` for an empty
+/// file); imara-diff starts it at the line after.
+fn empty_side_from_zero(header: &str) -> String {
+  let Some((ranges, rest)) = header.strip_prefix("@@ ").and_then(|h| h.split_once(" @@")) else {
+    return header.to_string();
+  };
+  let fix = |range: &str| match range[1..].split_once(',') {
+    Some((start, "0")) => {
+      let start = start.parse::<usize>().map_or(0, |s| s.saturating_sub(1));
+      format!("{}{start},0", &range[..1])
+    }
+    _ => range.to_string(),
+  };
+  let Some((old, new)) = ranges.split_once(' ') else {
+    return header.to_string();
+  };
+  format!("@@ {} {} @@{rest}", fix(old), fix(new))
 }
 
 /// Turns the marker line [`build_text_hunks`] diffs into git's form and
@@ -4928,6 +4948,12 @@ mod tests {
     let hunks = build_text_hunks("x\r\r\n", "x\r\n");
     assert_eq!(hunks.len(), 1);
     assert_eq!(hunks[0].lines, ["-x\r", "+x"]);
+  }
+
+  #[test]
+  fn text_hunks_number_an_empty_side_from_zero_as_git_does() {
+    assert_eq!(build_text_hunks("", "x\n")[0].header, "@@ -0,0 +1,1 @@");
+    assert_eq!(build_text_hunks("x\n", "")[0].header, "@@ -1,1 +0,0 @@");
   }
 
   #[test]

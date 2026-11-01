@@ -263,6 +263,7 @@ impl Model {
       "workspace.stack" => return Some(self.stack(data)),
       "workspace.merge" => self.open_merge_preview(),
       "code.filePicker" => self.dialogs.file_picker = true,
+      "code.agentPrompt" => self.open_agent_prompt(),
       "fileBrowser.back" => self.view.file_browser = None,
       // The dialogs.
       "workspaceDialog.close" => self.dialogs.workspace_dialog = None,

@@ -213,10 +213,15 @@ fn buttons() -> Vec<Example> {
             .disabled(true)
             .size(size),
         )
+        .child(
+          IconButton::new("primary", theme::ICON_SEND, "Send", &p)
+            .primary()
+            .size(size),
+        )
     })
     .component("IconButton")
     .title("States")
-    .size(232., 56.),
+    .size(268., 56.),
     example!("copy-feedback/states", |knobs, _, cx| {
       let p = p(cx);
       let copied = knobs.bool("copied", true);
