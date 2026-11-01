@@ -18,10 +18,19 @@ fn settings_saves_the_repository_itself(cx: &mut TestAppContext) {
   assert_eq!(repo.fields.auto_review_trigger, "on-pull");
   assert_eq!(repo.model_options[0].label, "Use application default");
 
-  h.click("settings-tab-application");
+  // A switch saves as it flips: no Save button, and no toast.
   h.click("settings-auto-push");
-  h.click("settings-save");
-  h.click("settings-close");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "set repo /repo branch_name_pattern=treq/{name} included_copy_files= default_model= default_agent= auto_push=true review_prompt= review_agent= auto_review_trigger=on-pull",
+      "notify repoSettingsChanged",
+    ]
+  );
+  assert!(h.drawn("settings-saved-repo.autoPush"), "the Saved tick");
+  h.click("settings-tab-application");
+  h.click("settings-back");
   // React still owns the tab and closing the page.
   assert_eq!(
     h.sent(),
@@ -30,15 +39,59 @@ fn settings_saves_the_repository_itself(cx: &mut TestAppContext) {
       press("settings.close"),
     ]
   );
+}
+
+#[gpui::test]
+fn settings_has_a_back_arrow_instead_of_save_and_close(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, settings());
+  assert!(h.drawn("settings-back"));
+  assert!(!h.drawn("settings-save"));
+  assert!(!h.drawn("settings-close"));
+}
+
+#[gpui::test]
+fn settings_saves_a_typed_field_after_a_pause(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, settings(), host.clone());
+  h.click("settings-branch-pattern");
+  h.cx.simulate_input("x");
   h.cx.run_until_parked();
-  assert_eq!(
-    host.writes(),
-    [
-      "set repo /repo branch_name_pattern=treq/{name} included_copy_files= default_model= default_agent= auto_push=true review_prompt= review_agent= auto_review_trigger=on-pull",
-      "notify repoSettingsChanged",
-      "notify toast Settings saved",
-    ]
+  assert!(host.writes().is_empty(), "{:?}", host.writes());
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(600));
+  h.cx.run_until_parked();
+  let writes = host.writes();
+  assert!(
+    writes[0].starts_with("set repo /repo branch_name_pattern=") && writes[0].contains('x'),
+    "{writes:?}"
   );
+  assert!(h.drawn("settings-saved-repo.branchNamePattern"));
+  // The tick fades after a moment.
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(2000));
+  h.cx.run_until_parked();
+  assert!(!h.drawn("settings-saved-repo.branchNamePattern"));
+}
+
+#[gpui::test]
+fn settings_keeps_a_typed_value_and_shows_why_it_did_not_save(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    fail_repo_settings: true,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, settings(), host.clone());
+  h.click("settings-branch-pattern");
+  h.cx.simulate_input("x");
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(600));
+  h.cx.run_until_parked();
+  assert!(h.drawn("settings-error-repo.branchNamePattern"));
+  assert!(!h.drawn("settings-saved-repo.branchNamePattern"));
+  let fields = drawn_settings(&mut h).repository.expect("drawn").fields;
+  assert!(fields.branch_name_pattern.contains('x'), "{fields:?}");
 }
 
 #[gpui::test]
@@ -103,18 +156,21 @@ fn settings_saves_the_application_itself(cx: &mut TestAppContext) {
     view.update(&mut h.cx, |view, cx| view.handle(action, cx));
   };
   send(&mut h, field("app.theme", "dark".into()));
-  send(&mut h, field("app.fontSize", "16".into()));
-  send(&mut h, field("app.defaultAgent", "codex".into()));
-  h.click("settings-save");
   h.cx.run_until_parked();
+  send(&mut h, field("app.fontSize", "16".into()));
+  h.cx.run_until_parked();
+  send(&mut h, field("app.defaultAgent", "codex".into()));
+  h.cx.run_until_parked();
+  // Each choice saves as it is made, without a toast.
   assert_eq!(
     host.writes(),
     [
       "set theme=dark",
       "notify settingsChanged",
+      "set default_model= default_agent= conflict_marker_style=git notify_agent_finished=true terminal_font_size=16 ui_zoom=120",
+      "notify settingsChanged",
       "set default_model= default_agent=codex conflict_marker_style=git notify_agent_finished=true terminal_font_size=16 ui_zoom=120",
       "notify settingsChanged",
-      "notify toast Settings saved",
     ]
   );
 }
@@ -150,7 +206,7 @@ fn settings_runs_only_the_saved_setup_script(cx: &mut TestAppContext) {
     .expect("drawn")
     .setup_script;
   assert!(!setup.can_run);
-  assert_eq!(setup.status, "Save settings to run the edited script.");
+  assert_eq!(setup.status, "Saving the edited script…");
 }
 
 #[gpui::test]

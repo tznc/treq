@@ -33,7 +33,7 @@ test.afterAll(() => linearKey(null));
 
 async function linear(page: Page): Promise<void> {
   await ready(page);
-  const close = page.getByRole("button", { name: "Close", exact: true });
+  const close = page.getByRole("button", { name: "Back", exact: true });
   if ((await close.count()) > 0) await close.first().click();
   await page.getByRole("button", { name: "Linear", exact: true }).click();
   await expect(page.getByRole("button", { name: "Linear", selected: true })).toBeVisible();

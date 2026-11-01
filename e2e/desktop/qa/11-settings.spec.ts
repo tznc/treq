@@ -1,7 +1,7 @@
 // Settings: every tab (Repository, Application, Account, Integrations,
 // Skills, Feature Preview), the long tabs scrolled, the theme select
 // switching the app live to light and back, the Linear API key dialog,
-// a skills search and an unsaved edit.
+// a skills search and a field saving itself.
 //
 // A select's options are not observable: they are clicked at their place
 // under the select (one row is 30px).
@@ -13,7 +13,7 @@ test.describe.configure({ mode: "serial" });
 
 async function settings(page: Page, tab: string): Promise<void> {
   await ready(page);
-  const close = page.getByRole("button", { name: "Close", exact: true });
+  const close = page.getByRole("button", { name: "Back", exact: true });
   if ((await close.count()) === 0) {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(close).toBeVisible();
@@ -38,7 +38,7 @@ test("settings: repository", async ({ page }) => {
     title: "Settings: Repository tab",
     expectations: [
       "Nav on the left, form column centred; labels, fields and help text aligned",
-      "Close and Save Settings at the top right",
+      "A back arrow left of the Settings title; no Save or Close buttons",
     ],
   });
   await scroll(page, 900);
@@ -50,16 +50,18 @@ test("settings: repository", async ({ page }) => {
   await scroll(page, -2000);
   const pattern = page.getByRole("textbox", { name: "treq/{name}" });
   await pattern.fill("qa/{name}");
-  await settle(page, 600);
+  // The field saves once typing pauses (500ms), then shows its tick.
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await capture(page, {
-    name: "11-settings-unsaved",
-    title: "Settings: an unsaved edit",
+    name: "11-settings-saved-tick",
+    title: "Settings: a typed field saved itself",
     expectations: [
-      "The preview under Branch Name Pattern follows the edit (qa/add-dark-mode)",
-      "Save Settings reads as the primary action; unsaved state is visible",
+      "The preview under Branch name pattern follows the edit (qa/add-dark-mode)",
+      "A muted check and 'Saved' sit right of the Branch name pattern label",
     ],
   });
   await pattern.fill("treq/{name}");
+  await settle(page, 2500);
 });
 
 test("settings: application and live theme switch", async ({ page }) => {
@@ -186,6 +188,6 @@ test("settings: account, integrations, skills, feature preview", async ({ page }
       "Each row has a Docs button and a switch on the right",
     ],
   });
-  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   await settle(page, 800);
 });
