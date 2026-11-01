@@ -4,8 +4,12 @@
 use crate::local_db::Workspace;
 
 /// Whether pointing `branch` at `new_target` would form a stack cycle: the
-/// target chain starting at `new_target` reaches `branch`. Self-targets count.
+/// target chain starting at `new_target` reaches `branch`. A self-target is
+/// allowed: it marks a workspace on its own branch, such as the default one.
 pub fn would_create_stack_cycle(workspaces: &[Workspace], branch: &str, new_target: &str) -> bool {
+  if branch == new_target {
+    return false;
+  }
   let mut current = new_target;
   // Bounded walk: a corrupt chain that loops elsewhere must still end.
   for _ in 0..=workspaces.len() {
@@ -70,7 +74,11 @@ mod tests {
   #[test]
   fn self_target_is_allowed() {
     // A workspace on the default branch targets itself; that is not a stack.
-    assert!(!would_create_stack_cycle(&[ws("a", Some("main"))], "a", "a"));
+    assert!(!would_create_stack_cycle(
+      &[ws("a", Some("main"))],
+      "a",
+      "a"
+    ));
   }
 
   #[test]
