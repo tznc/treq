@@ -1394,3 +1394,21 @@ fn test_commit_diff_of_over_five_thousand_paths_skips_rename_tracking() {
   assert_eq!(status_of(&many, "newer.txt").as_deref(), Some("A"));
   assert_eq!(status_of(&many, "new.txt").as_deref(), Some("D"));
 }
+
+/// jj's git backend stores commit times in whole seconds, so redoing an
+/// abandon in the same second rewrites descendants to commits that already
+/// exist.
+#[test]
+fn abandon_succeeds_again_right_after_undo() {
+  let repo = TestRepo::new().unwrap();
+  repo.commit_file("f1.txt", "f1\n", "f1").unwrap();
+  repo.commit_file("f2.txt", "f2\n", "f2").unwrap();
+  let path = &repo.repo_path;
+  treq_lib::jj::jj_get_changed_files(path).unwrap();
+  let f1 = treq_lib::jj::jj_get_change_id(path, "@--").unwrap();
+
+  let op = treq_lib::jj::jj_abandon(path, &f1).unwrap();
+  treq_lib::jj::jj_undo_operation(path, &op).unwrap();
+
+  treq_lib::jj::jj_abandon(path, &f1).unwrap();
+}

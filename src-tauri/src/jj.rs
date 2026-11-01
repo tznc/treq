@@ -940,7 +940,12 @@ async fn materialized_value_to_bytes(
 }
 
 fn diff_line_counts(before: &str, after: &str) -> (u32, u32) {
-  let input = InternedInput::new(before, after);
+  // Keep line terminators so a missing final newline changes the last line,
+  // as git counts it.
+  let input = InternedInput::new(
+    imara_diff::sources::lines_with_terminator(before),
+    imara_diff::sources::lines_with_terminator(after),
+  );
   let counts = diff(Algorithm::Histogram, &input, Counter::default());
   (counts.insertions, counts.removals)
 }
@@ -1736,6 +1741,21 @@ username = "{}"
 /// Runs: jj abandon <change_id>
 // home-head-test: abandon_tip, undo_commit
 pub fn jj_abandon(workspace_path: &str, change_id: &str) -> Result<String, JjError> {
+  match abandon_once(workspace_path, change_id) {
+    // Commit times are stored in whole seconds, so redoing an abandon right
+    // after undoing it can rewrite descendants into commits that already
+    // exist. A second later the rewrite gets a new timestamp.
+    Err(JjError::InitFailed(msg)) if msg.contains("already exists") => {
+      std::thread::sleep(std::time::Duration::from_secs(1));
+      abandon_once(workspace_path, change_id)
+    }
+    result => result,
+  }
+}
+
+/// One abandon attempt; [`jj_abandon`] retries it.
+// home-head-test: abandon_tip, undo_commit
+fn abandon_once(workspace_path: &str, change_id: &str) -> Result<String, JjError> {
   let loaded = load_workspace_repo(workspace_path)?;
   let commit = resolve_commit_by_revision(&loaded, change_id)?;
   reject_root_commit(&loaded, &commit)?;
@@ -4860,6 +4880,12 @@ mod tests {
     assert_eq!(lines[at + 1], "\\ No newline at end of file");
     assert!(lines.contains(&"+a"), "{lines:?}");
     assert_eq!(hunks[0].header, "@@ -1,2 +1,2 @@");
+  }
+
+  #[test]
+  fn diff_line_counts_counts_final_newline_change() {
+    assert_eq!(diff_line_counts("a\n", "a"), (1, 1));
+    assert_eq!(diff_line_counts("a", "a\n"), (1, 1));
   }
 
   #[test]
