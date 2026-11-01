@@ -778,6 +778,17 @@ fn cli_exits_non_zero_for_an_empty_repo_argument() {
 }
 
 #[test]
+fn resolve_command_repo_rejects_an_empty_or_blank_repo_flag() {
+  for repo in ["", "  ", "\t"] {
+    let error = super::resolve_command_repo(&remote_matches(&[("repo", repo)])).unwrap_err();
+    assert_eq!(
+      error, "invalid_arguments: --repo must not be empty",
+      "{repo:?}"
+    );
+  }
+}
+
+#[test]
 fn absolute_repo_arg_rejects_empty_and_blank_values() {
   for repo in ["", " ", "\n\t "] {
     let error = super::absolute_repo_arg(repo).unwrap_err();
