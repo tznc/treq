@@ -1132,7 +1132,7 @@ fn applying_an_agent_suggestion_refuses_when_its_lines_moved() {
     workspace_with_suggestion(&repo, "feat/moved-lines", "a\ninserted\ntarget\n", "target");
 
   let result =
-    treq_lib::core::agent_review::apply_agent_review_suggestion(repo.repo_path.clone(), id);
+    treq_lib::core::agent_review::apply_agent_review_suggestion(repo.repo_path, id);
 
   assert!(result.is_err(), "applied onto moved lines");
   let now = std::fs::read_to_string(std::path::Path::new(&path).join("README.md")).unwrap();
