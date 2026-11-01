@@ -5,9 +5,11 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { commitSubjects, fixture, git, goHome } from "../fixture.ts";
+import { workspaceDir } from "../landing/seed.ts";
 
+/** The e2e/first checkout: `.treq/workspaces/<id>-e2e-first`. */
 function workspacePath(): string {
-  return join(fixture().repo, ".treq", "workspaces", "e2e-first");
+  return workspaceDir(fixture().repo, "e2e/first");
 }
 
 test("commits a workspace's changes from the Changes tab", async ({ page }) => {
