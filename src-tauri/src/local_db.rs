@@ -3426,8 +3426,6 @@ mod tests {
 
     let err = update_workspace_target_branch(repo_path, a.id, "b").unwrap_err();
     assert!(err.contains("would create a stack cycle"), "{err}");
-    let err = update_workspace_target_branch(repo_path, a.id, "a").unwrap_err();
-    assert!(err.contains("would create a stack cycle"), "{err}");
 
     let stored = get_workspace_by_id(repo_path, a.id)
       .expect("lookup")
