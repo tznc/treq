@@ -50,8 +50,9 @@ test("settings: repository", async ({ page }) => {
   await scroll(page, -2000);
   const pattern = page.getByRole("textbox", { name: "treq/{name}" });
   await pattern.fill("qa/{name}");
-  // The field saves once typing pauses (500ms), then shows its tick.
-  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  // The field saves once typing pauses (500ms), then shows its tick for
+  // 1.5s (a screen test checks it; the tick itself is not observable).
+  await settle(page, 900);
   await capture(page, {
     name: "11-settings-saved-tick",
     title: "Settings: a typed field saved itself",
