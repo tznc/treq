@@ -72,8 +72,13 @@ pub(super) fn workspace_dir_name_from_cwd(cwd: &Path) -> Option<String> {
 /// Repository a workspace command acts on: the repository containing the
 /// current directory or, with `-r <repo>`, one of its supporting repositories.
 pub(super) fn resolve_command_repo(matches: &Matches) -> Result<String, String> {
+  let spec = match required_repo_arg(matches) {
+    Ok(spec) => Some(spec),
+    Err(error) if error.starts_with("invalid_arguments:") => return Err(error),
+    Err(_) => None,
+  };
   let repo_path = detect_repo_path()?;
-  match get_arg_value(matches, "repo") {
+  match spec {
     None => Ok(repo_path),
     Some(spec) => {
       let cwd = std::env::current_dir().map_err(|e| format!("Failed to get CWD: {}", e))?;
