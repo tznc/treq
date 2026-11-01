@@ -61,10 +61,10 @@ async function shot(page: Page, name: string, clip?: Clip): Promise<void> {
   written.add(name);
 }
 
-/** The prompt card around the "Describe a task..." box. */
+/** The prompt card around the "Describe a task…" box. */
 async function promptCard(page: Page): Promise<Clip> {
   const box = await page
-    .getByRole("textbox", { name: "Describe a task..." })
+    .getByRole("textbox", { name: "Describe a task…" })
     .boundingBox();
   const edit = await page
     .getByRole("button", { name: "Edit", exact: true })
@@ -116,10 +116,10 @@ async function commentOnLine(
   await page.mouse.move(x + 150, y);
   await page.mouse.move(x, y, { steps: 4 });
   await page.mouse.click(x, y);
-  const input = page.getByRole("textbox", { name: "Add a comment..." });
+  const input = page.getByRole("textbox", { name: "Add a comment…" });
   await expect(input).toBeVisible();
   await input.fill(text);
-  await page.getByRole("button", { name: "Add Comment", exact: true }).click();
+  await page.getByRole("button", { name: "Add comment", exact: true }).click();
   await expect(input).toHaveCount(0);
 }
 
@@ -128,7 +128,7 @@ async function typePrompt(
   name: string,
   text: string,
 ): Promise<void> {
-  const box = page.getByRole("textbox", { name: "Describe a task..." });
+  const box = page.getByRole("textbox", { name: "Describe a task…" });
   await box.fill(text);
   await expect(box).toHaveValue(text);
   await shot(page, name, await promptCard(page));
@@ -159,7 +159,7 @@ test("captures the landing screenshots", async ({ page }) => {
   ).toBeVisible();
   await page.waitForTimeout(2000);
   await shot(page, "github-issues.png", MAIN);
-  await page.mouse.click(422, 62); // the "Pull Requests" tab
+  await page.mouse.click(422, 62); // the "Pull requests" tab
   await page.waitForTimeout(2000);
   await shot(page, "github.png", MAIN);
 
@@ -177,7 +177,7 @@ test("captures the landing screenshots", async ({ page }) => {
     "break-workspace.png",
     "Break up this workspace into smaller stacked or separate workspaces",
   );
-  await page.getByRole("textbox", { name: "Describe a task..." }).fill("");
+  await page.getByRole("textbox", { name: "Describe a task…" }).fill("");
   await openWorkspace(page, CACHE);
   await openTab(page, "Code");
   await typePrompt(
@@ -185,12 +185,12 @@ test("captures the landing screenshots", async ({ page }) => {
     "spawn-before.png",
     "Split the work across 3 agents in 3 different workspaces",
   );
-  await page.getByRole("textbox", { name: "Describe a task..." }).fill("");
+  await page.getByRole("textbox", { name: "Describe a task…" }).fill("");
 
   // The conflicted Home.tsx, handed to an agent for a new commit.
   await openWorkspace(page, MARKETING);
   await openTab(page, "Changes");
-  const resolve = page.getByRole("button", { name: "Resolve conflicts..." });
+  const resolve = page.getByRole("button", { name: "Resolve conflicts…" });
   await expect(resolve).toBeVisible();
   await page.mouse.click(330, 283); // Home.tsx under Conflicts
   await page.waitForTimeout(1000);

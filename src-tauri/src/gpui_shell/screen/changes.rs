@@ -1058,7 +1058,7 @@ impl ChangesView {
             view.staging.selected.clear();
             view.discarded(workspace, snapshot, discarded(&paths), cx);
           }
-          Err(err) => view.toast(ToastTone::Error, "Discard Failed", err),
+          Err(err) => view.toast(ToastTone::Error, "Discard failed", err),
         }
       },
       cx,
@@ -1080,7 +1080,7 @@ impl ChangesView {
         Ok((workspace, snapshot)) => {
           view.discarded(workspace, snapshot, "All changes discarded".into(), cx)
         }
-        Err(err) => view.toast(ToastTone::Error, "Discard All Failed", err),
+        Err(err) => view.toast(ToastTone::Error, "Discard all failed", err),
       },
       cx,
     );
@@ -1102,7 +1102,7 @@ impl ChangesView {
           Self::changed(host.as_ref(), &parent);
           toast_event(ToastTone::Success, "Changes restored", "")
         }
-        Err(err) => toast_event(ToastTone::Error, "Undo Failed", err),
+        Err(err) => toast_event(ToastTone::Error, "Undo failed", err),
       };
       tell(host.as_ref(), event);
     });
@@ -1132,7 +1132,7 @@ impl ChangesView {
           view.field("commits.stashed", serde_json::Value::Null, cx);
           view.load(cx);
         }
-        Err(err) => view.toast(ToastTone::Error, "Stash Failed", err),
+        Err(err) => view.toast(ToastTone::Error, "Stash failed", err),
       },
       cx,
     );
@@ -1484,7 +1484,7 @@ impl ChangesView {
     );
   }
 
-  /// "Start Review": a review agent with the repository's prompt.
+  /// "Start review": a review agent with the repository's prompt.
   fn start_review(&mut self, cx: &mut Context<Self>) {
     let Some(workspace) = self.parent.workspace.clone() else {
       return;
@@ -1584,7 +1584,7 @@ impl ChangesView {
         .icon(MenuIcon::Copy),
       NativeMenuItem::Separator,
       NativeMenuItem::Submenu {
-        text: "Open in...".into(),
+        text: "Open in…".into(),
         icon: Some(MenuIcon::FolderOpen),
         detail: None,
         items: open,
@@ -1608,7 +1608,7 @@ impl ChangesView {
       let paths = self.staging.targets(path);
       items.push(NativeMenuItem::Separator);
       items.push(NativeMenuItem::Submenu {
-        text: "Move to workspace...".into(),
+        text: "Move to workspace…".into(),
         icon: Some(MenuIcon::ArrowRightLeft),
         detail: None,
         items: targets
@@ -2809,7 +2809,7 @@ impl ChangesView {
     }))
   }
 
-  /// `ReviewActionBar`: for now, "Start Review" on workspaces.
+  /// `ReviewActionBar`: for now, "Start review" on workspaces.
   fn action_bar(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     self.parent.workspace.as_ref()?;
     let bar = if self.show_review_bar() {

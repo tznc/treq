@@ -182,7 +182,7 @@ fn palette_reruns_setup_and_trusts_without_a_toast(cx: &mut TestAppContext) {
 #[gpui::test]
 fn palette_gives_the_terminal_pane_its_commands(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, palette_json(true), FakeHost::default());
-  pick(&mut h, "Maximize Terminal");
+  pick(&mut h, "Maximize terminal");
   assert_eq!(effects(&h), ["terminal toggleMaximize"]);
   assert_eq!(h.sent(), vec![press("overlay.close")]);
 }
@@ -316,7 +316,7 @@ fn serializes_overlay_actions_as_react_reads_them() {
 fn palette_runs_the_first_command_on_enter(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
   assert!(h.drawn("overlay-dialog"));
-  assert_eq!(h.selected().as_deref(), Some("Go to Home"));
+  assert_eq!(h.selected().as_deref(), Some("Go to home"));
   h.keys("enter");
   assert_eq!(h.sent(), vec![press("palette.dashboard")]);
 }
@@ -325,15 +325,15 @@ fn palette_runs_the_first_command_on_enter(cx: &mut TestAppContext) {
 fn palette_moves_the_selection_with_the_arrow_keys(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
   h.keys("down down");
-  assert_eq!(h.selected().as_deref(), Some("Open Repository"));
+  assert_eq!(h.selected().as_deref(), Some("Open repository"));
   h.keys("up");
-  assert_eq!(h.selected().as_deref(), Some("Go to Settings"));
+  assert_eq!(h.selected().as_deref(), Some("Go to settings"));
   h.keys("up up");
-  assert_eq!(h.selected().as_deref(), Some("Go to Home"));
+  assert_eq!(h.selected().as_deref(), Some("Go to home"));
   h.keys("end");
-  assert_eq!(h.selected().as_deref(), Some("View Stashed Changes"));
+  assert_eq!(h.selected().as_deref(), Some("View stashed changes"));
   h.keys("ctrl-p");
-  assert_eq!(h.selected().as_deref(), Some("View Prompt History"));
+  assert_eq!(h.selected().as_deref(), Some("View prompt history"));
   h.keys("enter");
   assert_eq!(h.sent(), vec![press("palette.open-prompt-history")]);
 }
@@ -342,8 +342,8 @@ fn palette_moves_the_selection_with_the_arrow_keys(cx: &mut TestAppContext) {
 fn palette_filters_as_cmdk_does(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
   h.type_text("branch");
-  assert_eq!(h.shown(), vec!["Switch Branch"]);
-  assert_eq!(h.selected().as_deref(), Some("Switch Branch"));
+  assert_eq!(h.shown(), vec!["Switch branch"]);
+  assert_eq!(h.selected().as_deref(), Some("Switch branch"));
   h.type_text("zzz");
   assert!(h.shown().is_empty());
   h.keys("enter");
@@ -404,8 +404,8 @@ fn palette_reads_the_workspace_checks_and_pr(cx: &mut TestAppContext) {
   );
   let shown = h.shown();
   assert!(shown.contains(&"Run check: CI".to_string()));
-  assert!(shown.contains(&"Toggle Terminal".to_string()));
-  assert_eq!(h.selected().as_deref(), Some("Go to Home"));
+  assert!(shown.contains(&"Toggle terminal".to_string()));
+  assert_eq!(h.selected().as_deref(), Some("Go to home"));
 
   h.type_text("PR in browser");
   assert_eq!(
@@ -448,7 +448,7 @@ fn palette_selects_the_row_under_the_pointer(cx: &mut TestAppContext) {
   let row = h.cx.debug_bounds("overlay-item-2").expect("row");
   h.cx
     .simulate_mouse_move(row.center(), None, Modifiers::none());
-  assert_eq!(h.selected().as_deref(), Some("Open Repository"));
+  assert_eq!(h.selected().as_deref(), Some("Open repository"));
 }
 
 fn workspace_host() -> FakeHost {
@@ -604,7 +604,7 @@ mod testing_library {
     let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
     let screen = screen(&mut h);
     expect(screen.get_by_role(by::role(Role::Dialog))).to_be_visible();
-    let search = screen.get_by_role(option("Search Files"));
+    let search = screen.get_by_role(option("Search files"));
     expect(&search).to_be_visible();
     // gpui-testing-library 0.1 does not read gpui-kit's descriptions yet;
     // the e2e suite checks the description text.
@@ -615,10 +615,10 @@ mod testing_library {
     for workspace in [false, true] {
       let mut h = Harness::new(cx, palette_json(workspace), FakeHost::default());
       let screen = screen(&mut h);
-      expect(screen.get_by_role(option("Go to Home"))).to_be_visible();
-      expect(screen.get_by_role(option("Go to Settings"))).to_be_visible();
+      expect(screen.get_by_role(option("Go to home"))).to_be_visible();
+      expect(screen.get_by_role(option("Go to settings"))).to_be_visible();
       // The first command is selected, as cmdk selects it.
-      expect(screen.get_by_role(option("Go to Home"))).to_be_selected();
+      expect(screen.get_by_role(option("Go to home"))).to_be_selected();
     }
   }
 
@@ -628,7 +628,7 @@ mod testing_library {
     let screen = screen(&mut h);
     screen
       .user()
-      .click(&screen.get_by_role(option("Search Files")));
+      .click(&screen.get_by_role(option("Search files")));
     h.cx.run_until_parked();
     assert_eq!(h.sent(), vec![press("palette.search-files")]);
   }
@@ -639,8 +639,8 @@ mod testing_library {
     let screen = screen(&mut h);
     screen.user().keyboard("branch");
     screen.redraw();
-    expect(screen.get_by_role(option("Switch Branch"))).to_be_selected();
-    assert!(screen.query_by_role(option("Go to Home")).is_none());
+    expect(screen.get_by_role(option("Switch branch"))).to_be_selected();
+    assert!(screen.query_by_role(option("Go to home")).is_none());
   }
 }
 

@@ -76,7 +76,7 @@ test("onboarding: first run and open repository", async () => {
     name: "01-onboarding-first-run",
     title: "Onboarding: first run, no repository",
     expectations: [
-      "'Overview' heading and helper text are centred and unclipped",
+      "'Open a repository' heading and helper text are centred and unclipped",
       "Open repository… is the primary action, aligned with the text",
       "Background and text colours match the theme",
     ],
@@ -92,7 +92,7 @@ test("onboarding: first run and open repository", async () => {
       file: `01-onboarding-folder-picker-${theme}.png`,
       title: "Onboarding: native Select Folder dialog",
       what_to_check: [
-        "The GTK 'Select Folder' dialog opens over the app window",
+        "The GTK 'Select folder' dialog opens over the app window",
         "The app window behind it is not blank or frozen",
       ],
     }, null, 2),
@@ -113,12 +113,13 @@ test("onboarding: first run and open repository", async () => {
 
   // Signed out, Treq Cloud is a sign-in button, not a machine group.
   await expect(page.getByRole("button", { name: "Sign in to Treq Cloud" })).toBeVisible();
-  // The + next to SSH Hosts opens the own-VM form directly.
+  // Other machines' + offers Add SSH host, which opens the own-VM form.
+  await page.getByRole("button", { name: "Add another machine" }).click();
   await page.getByRole("button", { name: "Add SSH host" }).click();
   await page.waitForTimeout(1500);
   await capture(page, {
     name: "01-onboarding-ssh-own-vm",
-    title: "Overview: Add SSH host (your own VM) form",
+    title: "Open a repository: Add SSH host (your own VM) form",
     screen: true,
     expectations: [
       "The own-VM form opens directly; Cancel and Continue at the bottom and no X, as it has an action pair",
@@ -138,11 +139,13 @@ test("onboarding: first run and open repository", async () => {
     screen: true,
     expectations: ["The remote dialog is closed and the onboarding card shows"],
   });
+  await page.getByRole("button", { name: "Add another machine" }).click();
   await page.getByRole("button", { name: "Add SSH host" }).click();
   await page.waitForTimeout(1000);
   await close.click();
   await page.waitForTimeout(1000);
   await expect(close).toHaveCount(0);
+  await page.getByRole("button", { name: "Add another machine" }).click();
   await page.getByRole("button", { name: "Add SSH host" }).click();
   await page.waitForTimeout(1000);
   await page.mouse.click(80, 80);
@@ -157,7 +160,7 @@ test("onboarding: first run and open repository", async () => {
 
 function closePicker(): void {
   try {
-    const dialog = execFileSync("xdotool", ["search", "--onlyvisible", "--name", "Select Folder"], {
+    const dialog = execFileSync("xdotool", ["search", "--onlyvisible", "--name", "Select folder"], {
       encoding: "utf8",
     }).split("\n").filter(Boolean)[0];
     if (!dialog) return;

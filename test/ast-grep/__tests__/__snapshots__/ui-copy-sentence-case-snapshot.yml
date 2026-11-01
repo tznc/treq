@@ -1,0 +1,38 @@
+id: ui-copy-sentence-case
+snapshots:
+  ? |
+    fn small_word() -> &'static str {
+      "Open in Logs"
+    }
+  : labels:
+    - source: '"Open in Logs"'
+      style: primary
+      start: 36
+      end: 50
+  ? |
+    fn three() -> &'static str {
+      "Merge Commit Message"
+    }
+  : labels:
+    - source: '"Merge Commit Message"'
+      style: primary
+      start: 31
+      end: 53
+  ? |
+    fn title() -> Button {
+      ui::Button::new("merge", p).label("Merge Preview")
+    }
+  : labels:
+    - source: '"Merge Preview"'
+      style: primary
+      start: 59
+      end: 74
+  ? |
+    fn with_ellipsis() -> &'static str {
+      "Open Repository…"
+    }
+  : labels:
+    - source: '"Open Repository…"'
+      style: primary
+      start: 39
+      end: 59

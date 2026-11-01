@@ -346,7 +346,7 @@ fn pick_folder_and_notify(app: AppHandle, label: String) {
   app
     .dialog()
     .file()
-    .set_title("Select Folder")
+    .set_title("Select folder")
     .pick_folder(move |folder| {
       let Some(file_path) = folder else {
         open_new_window::OPEN_REPO_GATE.end();
@@ -394,7 +394,7 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
   app
     .dialog()
     .file()
-    .set_title("Select Folder")
+    .set_title("Select folder")
     .pick_folder(move |folder| {
       let Some(file_path) = folder else {
         open_new_window::OPEN_NEW_WINDOW_GATE.end();

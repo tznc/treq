@@ -14,7 +14,7 @@ test("a home task starts the agent at home when the new-workspace switch is off"
 
   const before = agentCalls().length;
   await page
-    .getByRole("textbox", { name: "Describe a task..." })
+    .getByRole("textbox", { name: "Describe a task…" })
     .fill("say hello from e2e");
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await expect
@@ -42,7 +42,7 @@ test("the palette's prompt dialog starts a session", async ({
   );
   const before = agentCalls().length;
   await dialog
-    .getByRole("textbox", { name: "Describe a task..." })
+    .getByRole("textbox", { name: "Describe a task…" })
     .fill("prompt dialog task");
   await dialog.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(dialog).toHaveCount(0);

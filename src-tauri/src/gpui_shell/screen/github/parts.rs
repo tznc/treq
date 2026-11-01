@@ -231,7 +231,7 @@ pub fn open_in_web(id: &'static str, p: &Palette, on_click: OnClick) -> Button {
     .size(Size::Sm)
     .gap_1p5()
     .icon(theme::ICON_EXTERNAL_LINK, 16.)
-    .label("Open in Web")
+    .label("Open in web")
     .on_click(on_click)
 }
 

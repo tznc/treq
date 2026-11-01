@@ -207,7 +207,7 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     workspace_id: Option<i64>,
     name: &str,
   ) -> Result<i64, String>;
-  /// The native "Attach Files" dialog; `None` when cancelled.
+  /// The native "Attach files" dialog; `None` when cancelled.
   fn pick_files(&self) -> Option<Vec<String>>;
   /// The workspace setup script's status; `None` when it cannot be read.
   fn setup(&self, repo_path: &str, workspace_id: i64) -> Option<crate::core::SetupScriptStatus>;
@@ -469,7 +469,7 @@ impl CodeHost for Backend {
         app
           .dialog()
           .file()
-          .set_title("Attach Files")
+          .set_title("Attach files")
           .pick_files(move |files| {
             tx.send(files).ignore_closed();
           });

@@ -13,10 +13,10 @@ const BRANCH = "feat/keyvalues-cache";
 async function askDelete(page: Page, context: BrowserContext): Promise<void> {
   await page.keyboard.press(`${mod}+k`);
   const palette = await overlay(page, context);
-  await palette.getByRole("textbox", { name: "Type a command or search..." }).fill("Delete Workspace");
-  await palette.getByRole("option", { name: "Delete Workspace" }).click();
+  await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("Delete workspace");
+  await palette.getByRole("option", { name: "Delete workspace" }).click();
   // The picker draws in the repo window or in the shared dialog window.
-  const find = (p: Page) => p.getByRole("textbox", { name: "Search workspaces to delete..." });
+  const find = (p: Page) => p.getByRole("textbox", { name: "Search workspaces to delete…" });
   let picker: Page | undefined;
   await expect
     .poll(async () => {

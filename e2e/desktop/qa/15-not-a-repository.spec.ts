@@ -111,7 +111,7 @@ test("not-a-repository: asks, and cancelled leaves the folder alone", async () =
       screen: true,
       expectations: [
         "The onboarding card shows",
-        "A 'Not a Git Repository' error toast",
+        "A 'Not a Git repository' error toast",
       ],
     });
     // The toast's Copy button sits left of its close button, `p-4` in.

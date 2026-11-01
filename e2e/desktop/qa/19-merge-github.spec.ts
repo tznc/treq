@@ -11,7 +11,7 @@ test.describe.configure({ mode: "serial" });
 
 async function openPreview(page: Page, branch: string): Promise<void> {
   await openWorkspace(page, branch);
-  await page.getByRole("button", { name: "Merge..." }).click();
+  await page.getByRole("button", { name: "Merge…" }).click();
   await expect(page.getByRole("button", { name: "Back" })).toBeVisible();
   await settle(page, 2500);
 }

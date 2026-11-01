@@ -31,8 +31,8 @@ pub const SECTIONS: &[(&str, &[Shortcut])] = &[
     &[
       (&[SECONDARY, "N"], "New workspace"),
       (&[SECONDARY, SHIFT, "N"], "Create stacked workspace"),
-      (&[SECONDARY, "K"], "Command Palette"),
-      (&[SECONDARY, "P"], "File Search"),
+      (&[SECONDARY, "K"], "Command palette"),
+      (&[SECONDARY, "P"], "File search"),
       (&["?"], "Show keyboard shortcuts"),
       (&["Esc"], "Close dialog"),
     ],

@@ -23,7 +23,7 @@ test("setup-output: Code tab setup alert", async ({ page, context }) => {
     await openWorkspace(page, BRANCH);
     await page.keyboard.press(`${mod}+k`);
     const palette = await overlay(page, context);
-    await palette.getByRole("textbox", { name: "Type a command or search..." }).fill("setup");
+    await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("setup");
     await palette.getByRole("option", { name: "Re-run setup script" }).click();
     await settle(page, 3000);
     await page.keyboard.press("Escape");

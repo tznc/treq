@@ -22,7 +22,7 @@ async function commentOnLine(page: Page, y: number, text: string, shot?: string)
   await page.mouse.move(800, y);
   await page.mouse.move(645, y, { steps: 4 });
   await page.mouse.click(645, y);
-  const input = page.getByRole("textbox", { name: "Add a comment..." });
+  const input = page.getByRole("textbox", { name: "Add a comment…" });
   await expect(input).toBeVisible();
   await input.fill(text);
   if (shot) {
@@ -35,7 +35,7 @@ async function commentOnLine(page: Page, y: number, text: string, shot?: string)
       ],
     });
   }
-  await page.getByRole("button", { name: "Add Comment", exact: true }).click();
+  await page.getByRole("button", { name: "Add comment", exact: true }).click();
   await expect(input).toHaveCount(0);
 }
 
@@ -72,7 +72,7 @@ test("changes: conflict card and resolve popover", async ({ page }) => {
       "Add comment / resolution note controls aligned",
     ],
   });
-  const resolve = page.getByRole("button", { name: "Resolve conflicts..." });
+  const resolve = page.getByRole("button", { name: "Resolve conflicts…" });
   await resolve.click();
   await expect(page.getByRole("button", { name: "Plan" })).toBeVisible();
   await settle(page, 600);
@@ -147,7 +147,7 @@ test("changes: diff, inline comment add/edit, review bar", async ({ page }) => {
     ],
   });
 
-  await page.getByRole("button", { name: "Start Review" }).click();
+  await page.getByRole("button", { name: "Start review" }).click();
   await settle(page, 1000);
   await capture(page, {
     name: "05-changes-review-started",

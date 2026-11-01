@@ -459,7 +459,7 @@ impl WindowHost for Backend {
       .app()
       .dialog()
       .file()
-      .set_title("Select Folder")
+      .set_title("Select folder")
       .blocking_pick_folder()
       .and_then(|folder| folder.into_path().ok())
       .map(|path| path.to_string_lossy().into_owned())
@@ -473,7 +473,7 @@ impl WindowHost for Backend {
     if !core::init_deferring_rebase(path).unwrap_or(false) {
       self.toast(
         ToastTone::Error,
-        "Not a Git Repository",
+        "Not a Git repository",
         "Please select a folder that contains a git repository.",
       );
       return;

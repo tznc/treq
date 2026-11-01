@@ -365,7 +365,7 @@ impl MachinesHost for Backend {
       .app()
       .dialog()
       .file()
-      .set_title("Select Repository")
+      .set_title("Select repository")
       .blocking_pick_folder()
       .and_then(|folder| folder.into_path().ok())
       .map(|path| path.to_string_lossy().into_owned())

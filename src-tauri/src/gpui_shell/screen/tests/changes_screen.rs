@@ -885,7 +885,7 @@ fn changes_tab_sends_the_review_to_an_agent(cx: &mut TestAppContext) {
   let launches = host.launches.lock().unwrap().clone();
   assert_eq!(launches.len(), 1);
   let (request, select) = &launches[0];
-  assert_eq!(request.session_name.as_deref(), Some("Code Review"));
+  assert_eq!(request.session_name.as_deref(), Some("Code review"));
   assert_eq!(request.mode.as_deref(), Some("plan"));
   assert_eq!(request.workspace_id, Some(7));
   let recorded: Vec<String> = host
@@ -1184,7 +1184,7 @@ fn changes_tab_starts_an_agent_for_a_comment_without_an_idle_one(cx: &mut TestAp
   let launches = host.launches.lock().unwrap().clone();
   assert_eq!(launches.len(), 1, "{:?}", host.calls());
   let request = &launches[0].0;
-  assert_eq!(request.session_name.as_deref(), Some("Review Comment"));
+  assert_eq!(request.session_name.as_deref(), Some("Review comment"));
   assert_eq!(request.mode.as_deref(), Some("acceptEdits"));
   assert_eq!(
     request.prompt.as_deref(),
