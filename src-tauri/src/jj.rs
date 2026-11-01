@@ -1736,6 +1736,21 @@ username = "{}"
 /// Runs: jj abandon <change_id>
 // home-head-test: abandon_tip, undo_commit
 pub fn jj_abandon(workspace_path: &str, change_id: &str) -> Result<String, JjError> {
+  match abandon_once(workspace_path, change_id) {
+    // Commit times are stored in whole seconds, so redoing an abandon right
+    // after undoing it can rewrite descendants into commits that already
+    // exist. A second later the rewrite gets a new timestamp.
+    Err(JjError::InitFailed(msg)) if msg.contains("already exists") => {
+      std::thread::sleep(std::time::Duration::from_secs(1));
+      abandon_once(workspace_path, change_id)
+    }
+    result => result,
+  }
+}
+
+/// One abandon attempt; [`jj_abandon`] retries it.
+// home-head-test: abandon_tip, undo_commit
+fn abandon_once(workspace_path: &str, change_id: &str) -> Result<String, JjError> {
   let loaded = load_workspace_repo(workspace_path)?;
   let commit = resolve_commit_by_revision(&loaded, change_id)?;
   reject_root_commit(&loaded, &commit)?;
