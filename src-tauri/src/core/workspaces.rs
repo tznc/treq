@@ -4051,6 +4051,7 @@ pub(crate) fn apply_workspace_target_branch_after(
     &local_db::get_workspaces(repo_path)?,
     &workspace.branch_name,
     target_branch,
+    &crate::core::get_repo_default_branch(repo_path).unwrap_or_default(),
   )?;
 
   let workspace_path = Path::new(repo_path)

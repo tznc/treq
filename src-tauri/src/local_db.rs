@@ -619,6 +619,7 @@ pub fn add_workspace_targeting(
     &get_workspaces(repo_path)?,
     &branch_name,
     target_branch,
+    &crate::core::get_repo_default_branch(repo_path).unwrap_or_default(),
   )?;
   let conn = get_connection(repo_path)?;
   let tx = conn
@@ -858,6 +859,7 @@ pub fn update_workspace_target_branch(
       &workspaces,
       &workspace.branch_name,
       target_branch,
+      &crate::core::get_repo_default_branch(repo_path).unwrap_or_default(),
     )?;
   }
   let conn = get_connection(repo_path)?;
@@ -3457,6 +3459,67 @@ mod tests {
     assert!(get_workspace_by_branch(repo_path, "new")
       .expect("lookup")
       .is_none());
+  }
+
+  // A temp dir with no git repo resolves its default branch to "main".
+  #[test]
+  fn update_workspace_target_branch_refuses_a_self_target_off_the_default_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let a = add_stacked(repo_path, "a", "main");
+
+    let err = update_workspace_target_branch(repo_path, a.id, "a").unwrap_err();
+    assert!(err.contains("would create a stack cycle"), "{err}");
+
+    let stored = get_workspace_by_id(repo_path, a.id)
+      .expect("lookup")
+      .expect("stored");
+    assert_eq!(stored.target_branch.as_deref(), Some("main"));
+  }
+
+  #[test]
+  fn update_workspace_target_branch_allows_a_self_target_on_the_default_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let main = add_stacked(repo_path, "main", "main");
+
+    update_workspace_target_branch(repo_path, main.id, "main").expect("self-target main");
+  }
+
+  #[test]
+  fn add_workspace_targeting_refuses_a_self_target_off_the_default_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+
+    let err = add_workspace_targeting(
+      repo_path,
+      "a".to_string(),
+      "a".to_string(),
+      "a".to_string(),
+      None,
+      None,
+      None,
+      false,
+      "a",
+    )
+    .unwrap_err();
+    assert!(err.contains("would create a stack cycle"), "{err}");
+    assert!(get_workspace_by_branch(repo_path, "a")
+      .expect("lookup")
+      .is_none());
+  }
+
+  #[test]
+  fn add_workspace_targeting_allows_a_self_target_on_the_default_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+
+    let main = add_stacked(repo_path, "main", "main");
+    assert_eq!(main.target_branch.as_deref(), Some("main"));
   }
 
   #[test]
