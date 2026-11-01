@@ -615,6 +615,64 @@ pub fn add_workspace_targeting(
   not_on_remote: bool,
   target_branch: &str,
 ) -> Result<Workspace, String> {
+  insert_workspace_targeting(
+    repo_path,
+    branch_name,
+    description,
+    moved_files,
+    sparse_patterns,
+    not_on_remote,
+    target_branch,
+    |_| (workspace_name, workspace_path),
+  )
+}
+
+/// [`add_workspace_targeting`] for a workspace whose directory is not made
+/// yet: the row is inserted first and `dir_name` turns its id into the
+/// directory (and jj workspace) name, stored in the same transaction.
+#[expect(
+  clippy::too_many_arguments,
+  reason = "the columns of one insert, as add_workspace takes them"
+)]
+pub fn reserve_workspace(
+  repo_path: &str,
+  branch_name: String,
+  description: Option<String>,
+  moved_files: Option<Vec<String>>,
+  sparse_patterns: Option<Vec<String>>,
+  not_on_remote: bool,
+  target_branch: &str,
+  dir_name: impl FnOnce(i64) -> String,
+) -> Result<Workspace, String> {
+  insert_workspace_targeting(
+    repo_path,
+    branch_name,
+    description,
+    moved_files,
+    sparse_patterns,
+    not_on_remote,
+    target_branch,
+    |id| {
+      let name = dir_name(id);
+      (name.clone(), name)
+    },
+  )
+}
+
+#[expect(
+  clippy::too_many_arguments,
+  reason = "the columns of one insert, as add_workspace takes them"
+)]
+fn insert_workspace_targeting(
+  repo_path: &str,
+  branch_name: String,
+  description: Option<String>,
+  moved_files: Option<Vec<String>>,
+  sparse_patterns: Option<Vec<String>>,
+  not_on_remote: bool,
+  target_branch: &str,
+  name_and_path: impl FnOnce(i64) -> (String, String),
+) -> Result<Workspace, String> {
   crate::core::stack_cycle::ensure_no_stack_cycle(
     &get_workspaces(repo_path)?,
     &branch_name,
@@ -625,20 +683,23 @@ pub fn add_workspace_targeting(
   let tx = conn
     .unchecked_transaction()
     .map_err(|e| format!("Failed to start workspace insert: {}", e))?;
+  // The path depends on the id: insert under a placeholder, then set it in this transaction.
   let id = insert_workspace(
     &tx,
-    &workspace_name,
-    &workspace_path,
+    "",
+    ".pending",
     &branch_name,
     description,
     moved_files,
     sparse_patterns,
   )?;
+  let (workspace_name, workspace_path) = name_and_path(id);
+  release_archived_workspace_path(&tx, &workspace_path)?;
   tx.execute(
-    "UPDATE workspaces SET not_on_remote = ?1, target_branch = ?2 WHERE id = ?3",
-    params![not_on_remote as i64, target_branch, id],
+    "UPDATE workspaces SET workspace_name = ?1, workspace_path = ?2, not_on_remote = ?3, target_branch = ?4 WHERE id = ?5",
+    params![workspace_name, workspace_path, not_on_remote as i64, target_branch, id],
   )
-  .map_err(|e| format!("Failed to set workspace target branch: {}", e))?;
+  .map_err(|e| format!("Failed to set workspace path and target branch: {}", e))?;
   let workspace = workspace_by_id(&tx, repo_path, id)?
     .ok_or_else(|| format!("Workspace not found in database after creation: {id}"))?;
   tx.commit()

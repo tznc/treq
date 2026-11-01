@@ -1304,11 +1304,24 @@ impl<'a> BookmarkIndex<'a> {
   }
 }
 
+/// The sanitized branch part of a `<id>-<branch>` workspace name.
+fn strip_workspace_id_prefix(workspace_name: &str) -> Option<&str> {
+  let (id, rest) = workspace_name.split_once('-')?;
+  (!id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) && !rest.is_empty()).then_some(rest)
+}
+
 pub(super) fn branch_name_for_workspace_commit(
   bookmarks: &BookmarkIndex<'_>,
   workspace_name: &str,
   wc_commit: &jj_lib::commit::Commit,
 ) -> (String, bool) {
+  // New workspaces are named `<id>-<branch>`: fall back to matching the branch part.
+  let registered_name = workspace_name;
+  let workspace_name = if bookmarks.matching(workspace_name).is_empty() {
+    strip_workspace_id_prefix(workspace_name).unwrap_or(workspace_name)
+  } else {
+    workspace_name
+  };
   if let Some(name) = bookmarks.exact_for(wc_commit.id(), workspace_name) {
     return (name.to_string(), false);
   }
@@ -1342,7 +1355,7 @@ pub(super) fn branch_name_for_workspace_commit(
     return (name.to_string(), target.has_conflict());
   }
 
-  (workspace_name.to_string(), false)
+  (registered_name.to_string(), false)
 }
 
 pub fn discover_workspaces_with_conflicts(

@@ -321,7 +321,7 @@ fn dirty_workspace_main_holds_its_children_back() {
   )
   .expect("Failed to set main workspace target branch");
 
-  let main_workspace_root = workspace_path(&repo.repo_path, default_branch);
+  let main_workspace_root = workspace_path(&repo.repo_path, &main_workspace.workspace_path);
   let shared_file = "shared-precedence.txt";
 
   TestRepo::write_workspace_file(
