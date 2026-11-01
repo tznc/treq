@@ -142,7 +142,8 @@ pub struct AgentReviewComment {
   pub created_at: String,
   pub resolved_at: Option<String>,
   /// The exact text of `start_line..=end_line` when the comment was written.
-  /// Set for Linear targets, whose suggestions are applied by text match.
+  /// Set for Linear targets, whose suggestions are applied by text match, and
+  /// for workspace diffs, whose suggestions are refused once those lines move.
   #[serde(default)]
   pub quoted_text: Option<String>,
   /// Hash of the commented diff lines when the comment was anchored; a PR

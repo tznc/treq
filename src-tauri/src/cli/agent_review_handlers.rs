@@ -232,7 +232,18 @@ fn quoted_text_for(
     return core::review_prompt::quote_lines(repo_path, file, start_line, end_line).map(Some);
   }
   validate_add_target(repo_path, target_type, target_id, file, end_line, side)?;
-  Ok(None)
+  // On the new side, quote the lines so a later apply can tell they moved.
+  if side == Some("old") {
+    return Ok(None);
+  }
+  core::agent_review::quote_target_lines(
+    repo_path,
+    target_type,
+    target_id,
+    file,
+    start_line,
+    end_line,
+  )
 }
 
 /// Rejects an `add` that nothing could display: an unknown target type, a
