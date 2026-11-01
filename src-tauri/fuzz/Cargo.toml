@@ -42,6 +42,6 @@ test = false
 doc = false
 bench = false
 
-# serde is used by the parser sources pulled in with #[path].
+# serde and clap are used by the sources pulled in with #[path].
 [package.metadata.cargo-machete]
-ignored = ["serde"]
+ignored = ["serde", "clap"]
