@@ -11,6 +11,7 @@ on:
     paths:
       - "src-tauri/src/unified_patch.rs"
       - "src-tauri/src/conflict_markers.rs"
+      - "src-tauri/src/gpui_shell/screen/intraline.rs"
       - "src-tauri/fuzz/**"
       - ".github/workflows/fuzz.yml"
   workflow_dispatch:
@@ -22,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [unified_patch, conflict_markers]
+        target: [unified_patch, conflict_markers, intraline]
     steps:
       - uses: actions/checkout@v7
 
