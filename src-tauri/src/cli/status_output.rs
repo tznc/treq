@@ -88,10 +88,13 @@ pub(crate) fn format_workspace_stack_lines(
       status.current.branch_name, status.current.title
     ));
     if let Some(description) = status.current.description.as_deref() {
-      lines.push(format!(
-        "{}   Description: {description}",
-        "   ".repeat(depth)
-      ));
+      let label = format!("{}   Description: ", "   ".repeat(depth));
+      let continuation = " ".repeat(label.chars().count());
+      let body = description.trim_end_matches(['\r', '\n']);
+      for (index, line) in body.lines().enumerate() {
+        let lead = if index == 0 { &label } else { &continuation };
+        lines.push(format!("{lead}{line}").trim_end().to_string());
+      }
     }
     if let Some(descendants) = children.get(status.current.branch_name.as_str()) {
       for child in descendants {
