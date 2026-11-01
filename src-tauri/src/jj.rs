@@ -1683,6 +1683,8 @@ pub fn jj_abandon(workspace_path: &str, change_id: &str) -> Result<String, JjErr
   }
 }
 
+/// One abandon attempt; [`jj_abandon`] retries it.
+// home-head-test: abandon_tip, undo_commit
 fn abandon_once(workspace_path: &str, change_id: &str) -> Result<String, JjError> {
   let loaded = load_workspace_repo(workspace_path)?;
   let commit = resolve_commit_by_revision(&loaded, change_id)?;
