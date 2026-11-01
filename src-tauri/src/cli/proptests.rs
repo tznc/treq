@@ -167,11 +167,17 @@ proptest! {
 
   #[test]
   fn absolute_repo_arg_is_absolute_normalized_and_idempotent(raw in "[a-z./~]{1,20}") {
-    let out = absolute_repo_arg(&raw);
+    let out = absolute_repo_arg(&raw).unwrap();
     let path = Path::new(&out);
     prop_assert!(path.is_absolute(), "{out}");
     prop_assert!(path.components().all(|c| !matches!(c, Component::CurDir | Component::ParentDir)));
-    prop_assert_eq!(absolute_repo_arg(&out), out.clone());
+    prop_assert_eq!(absolute_repo_arg(&out).unwrap(), out.clone());
+  }
+
+  #[test]
+  fn absolute_repo_arg_never_accepts_a_blank_value(raw in "[ \t\r\n]{0,8}") {
+    let error = absolute_repo_arg(&raw).unwrap_err();
+    prop_assert_eq!(classify_cli_error(&error), "invalid_arguments");
   }
 
   #[test]
