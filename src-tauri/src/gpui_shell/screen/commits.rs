@@ -1734,7 +1734,7 @@ impl CommitsView {
     // An unfolded own commit edits its description and timestamp in place.
     let own = expanded && matches!(kind, Kind::Own { .. });
     let short = &commit.change_id;
-    let edit_description = own.then(|| {
+    let edit_description = (own && !commit.is_immutable).then(|| {
       self.edit_icon(
         format!("edit-description-{short}"),
         "Edit description",
@@ -2117,17 +2117,19 @@ impl CommitsView {
       ),
       NativeMenuItem::Separator,
     ];
-    if own {
+    // Immutable commits are already published: offer nothing that rewrites them.
+    let rewritable = own && !commit.is_immutable;
+    if rewritable {
       items.push(run("Edit description", Self::edit_description).icon(MenuIcon::Pencil));
     }
-    if matches!(kind, Kind::Own { first: true }) && workspace && !removing {
+    if matches!(kind, Kind::Own { first: true }) && rewritable && workspace && !removing {
       items.push(run("Undo commit", Self::undo));
     }
     items.push(run("Revert commit", Self::revert));
-    if own && workspace && !commit.is_immutable {
+    if rewritable && workspace {
       items.push(run("Edit timestamp", Self::edit_timestamp));
     }
-    if own && !removing {
+    if rewritable && !removing {
       items.push(run("Stash commit", Self::stash).icon(MenuIcon::Archive));
       items.push(NativeMenuItem::Separator);
       items.push(
