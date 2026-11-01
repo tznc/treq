@@ -4702,6 +4702,17 @@ pub use merge_commits::*;
 
 #[cfg(test)]
 mod tests {
+
+  #[test]
+  fn sanitize_workspace_name_never_yields_empty_or_hidden_names() {
+    for raw in ["..", " ..", ".", "", " ", ". .", " .a", "..a"] {
+      let name = sanitize_workspace_name(raw);
+      assert!(!name.is_empty(), "{raw:?} sanitized to an empty name");
+      assert!(!name.starts_with('.'), "{raw:?} sanitized to hidden {name:?}");
+    }
+    assert_eq!(sanitize_workspace_name(" .a"), "a");
+    assert_eq!(sanitize_workspace_name("feat/x"), "feat-x");
+  }
   use super::*;
 
   /// A workspace path that does not exist, under a temp dir that does.
