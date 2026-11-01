@@ -4,11 +4,17 @@
 use crate::local_db::Workspace;
 
 /// Whether pointing `branch` at `new_target` would form a stack cycle: the
-/// target chain starting at `new_target` reaches `branch`. A self-target is
-/// allowed: it marks a workspace on its own branch, such as the default one.
-pub fn would_create_stack_cycle(workspaces: &[Workspace], branch: &str, new_target: &str) -> bool {
+/// target chain starting at `new_target` reaches `branch`. Only a workspace
+/// on the repo's `default_branch` may target itself; any other self-target
+/// counts as a cycle.
+pub fn would_create_stack_cycle(
+  workspaces: &[Workspace],
+  branch: &str,
+  new_target: &str,
+  default_branch: &str,
+) -> bool {
   if branch == new_target {
-    return false;
+    return branch != default_branch;
   }
   let mut current = new_target;
   // Bounded walk: a corrupt chain that loops elsewhere must still end.
@@ -33,8 +39,9 @@ pub fn ensure_no_stack_cycle(
   workspaces: &[Workspace],
   branch: &str,
   new_target: &str,
+  default_branch: &str,
 ) -> Result<(), String> {
-  if would_create_stack_cycle(workspaces, branch, new_target) {
+  if would_create_stack_cycle(workspaces, branch, new_target, default_branch) {
     return Err(format!(
       "Retargeting {branch} onto {new_target} would create a stack cycle"
     ));

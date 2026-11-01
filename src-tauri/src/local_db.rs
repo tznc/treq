@@ -619,6 +619,7 @@ pub fn add_workspace_targeting(
     &get_workspaces(repo_path)?,
     &branch_name,
     target_branch,
+    &crate::core::get_repo_default_branch(repo_path).unwrap_or_default(),
   )?;
   let conn = get_connection(repo_path)?;
   let tx = conn
@@ -858,6 +859,7 @@ pub fn update_workspace_target_branch(
       &workspaces,
       &workspace.branch_name,
       target_branch,
+      &crate::core::get_repo_default_branch(repo_path).unwrap_or_default(),
     )?;
   }
   let conn = get_connection(repo_path)?;
