@@ -43,12 +43,15 @@ async function editsWithShortcuts(field: Locator) {
   await field.fill("");
 }
 
-test("the home task field takes paste, select all, cut and undo", async ({
+test("the agent prompt field takes paste, select all, cut and undo", async ({
   page,
 }) => {
   await goHome(page);
+  await page.getByRole("button", { name: "Agent", exact: true }).click();
   await editsWithShortcuts(
-    page.getByRole("textbox", { name: "Describe a task…" }),
+    page
+      .getByRole("dialog", { name: "Start a new agent session" })
+      .getByRole("textbox", { name: "Describe a task…" }),
   );
 });
 

@@ -53,19 +53,34 @@ fn turning_the_agent_finished_notification_off_saves_it(cx: &mut TestAppContext)
   );
 }
 
-// plan-split-button.test.tsx
+// The prompt's Send button.
 
 #[gpui::test]
-fn claude_offers_plan_mode_from_the_submit_menu(cx: &mut TestAppContext) {
+fn the_prompt_dialog_sends_in_edit_mode_from_the_send_button(cx: &mut TestAppContext) {
   let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
   let screen = screen(&mut h);
   let user = screen.user();
   expect(screen.get_by_role(by::role(Role::Dialog).name("Start a new agent session")))
     .to_be_visible();
-  expect(screen.get_by_role(by::role(Role::Button).name("Edit"))).to_be_visible();
-  user.click(&screen.get_by_role(by::role(Role::Button).name("More submit options")));
-  user.click(&screen.get_by_role(by::role(Role::MenuItem).name("Plan")));
-  assert_eq!(tasks(&mut h, &host)[0].mode, "plan");
+  assert!(screen
+    .query_by_role(by::role(Role::Button).name("More submit options"))
+    .is_none());
+  assert!(screen
+    .query_by_role(by::role(Role::Button).name("Edit"))
+    .is_none());
+  let send = screen.get_by_role(by::role(Role::Button).name("Send"));
+  expect(&send).to_be_enabled();
+  user.click(&send);
+  assert_eq!(tasks(&mut h, &host)[0].mode, "acceptEdits");
+}
+
+#[gpui::test]
+fn the_send_button_is_disabled_without_a_prompt(cx: &mut TestAppContext) {
+  let mut modal = agent_modal();
+  modal["initialPrompt"] = serde_json::Value::Null;
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), modal);
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Button).name("Send"))).to_be_disabled();
 }
 
 #[gpui::test]
@@ -83,13 +98,13 @@ fn the_prompt_dialog_targets_the_workspace_it_opened_on(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
-fn agents_without_plan_mode_hide_the_submit_menu(cx: &mut TestAppContext) {
+fn agents_without_plan_mode_send_the_same_way(cx: &mut TestAppContext) {
   let host = FakeHost::with_settings(&[("/repo:default_agent", "codex")]);
   let (mut h, _) = modal_harness(cx, host, agent_modal());
   let screen = screen(&mut h);
-  expect(screen.get_by_role(by::role(Role::Button).name("Run"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Button).name("Send"))).to_be_visible();
   assert!(screen
-    .query_by_role(by::role(Role::Button).name("More submit options"))
+    .query_by_role(by::role(Role::Button).name("Run"))
     .is_none());
 }
 
@@ -181,7 +196,7 @@ fn choosing_another_agent_offers_to_make_it_the_repo_default(cx: &mut TestAppCon
   user.click(&screen.get_by_role(by::role(Role::ComboBox).name("Agent")));
   user.click(&screen.get_by_role(by::role(Role::MenuItem).name("Codex")));
   user.click(&screen.get_by_role(save_default));
-  user.click(&screen.get_by_role(by::role(Role::Button).name("Run")));
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Send")));
   let start = &tasks(&mut h, &host)[0];
   assert_eq!(start.agent, "codex");
   assert!(start.save_as_repo_default);
@@ -520,6 +535,7 @@ fn code_tab_alerts_on_a_failed_setup_script_and_opens_its_logs(cx: &mut TestAppC
     ..code_host()
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("code-status");
   assert!(h.drawn("code-setup"));
   h.click("code-setup-logs");
   h.cx.run_until_parked();
@@ -544,6 +560,7 @@ fn code_tab_offers_setup_logs_only_once_the_script_has_run(cx: &mut TestAppConte
     ..code_host()
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("code-status");
   assert!(h.drawn("code-setup"));
   assert!(!h.drawn("code-setup-logs"));
 }
@@ -555,6 +572,7 @@ fn code_tab_offers_no_setup_logs_without_the_logs_preview(cx: &mut TestAppContex
     ..code_host()
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("code-status");
   assert!(h.drawn("code-setup"));
   assert!(!h.drawn("code-setup-logs"));
 }
@@ -566,6 +584,7 @@ fn code_tab_reruns_the_setup_script(cx: &mut TestAppContext) {
     ..code_host()
   };
   let (mut h, host) = workspace_harness(cx, host, code_route());
+  h.click("code-status");
   h.click("code-setup-rerun");
   h.cx.run_until_parked();
   assert!(host.calls().contains(&"run setup 7".to_string()));

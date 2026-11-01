@@ -1110,6 +1110,10 @@ fn the_agent_prompt_starts_on_the_open_workspace(cx: &mut TestAppContext) {
   });
   cx.run_until_parked();
   assert_eq!(initial(&window), Some(2), "the palette's command");
+  window.press(cx, "agentPrompt.close");
+
+  window.press(cx, "code.agentPrompt");
+  assert_eq!(initial(&window), Some(2), "the Code tab's Agent button");
 }
 
 #[gpui::test]
