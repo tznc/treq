@@ -4238,7 +4238,7 @@ fn validate_commit_message(message: &str) -> Result<(), JjError> {
   if message.contains('\0') {
     return Err(JjError::IoError("Invalid commit message".to_string()));
   }
-  if message.len() > 10000 {
+  if message.chars().count() > 10000 {
     return Err(JjError::IoError(
       "Commit message too long (max 10000 characters)".to_string(),
     ));
@@ -4737,6 +4737,13 @@ mod tests {
     let temp = TempDir::new().expect("tempdir");
     let path = temp.path().join(".treq/workspaces/gone");
     (temp, path.to_string_lossy().into_owned())
+  }
+
+  #[test]
+  fn validate_commit_message_counts_characters_not_bytes() {
+    // 4000 characters, 12000 bytes: under the 10000-character limit.
+    assert!(validate_commit_message(&"漢".repeat(4000)).is_ok());
+    assert!(validate_commit_message(&"漢".repeat(10_001)).is_err());
   }
 
   #[test]
