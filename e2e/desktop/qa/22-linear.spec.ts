@@ -258,7 +258,7 @@ test("linear: a sub-issue nests under its parent's workspace", async ({ page }) 
   linearKey("lin_api_qa");
   await home(page);
   await page.getByRole("button", { name: "New workspaces" }).click();
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "New workspace" })).toBeVisible();
   await page.getByRole("tab", { name: "Linear" }).click();
   await expect(page.getByRole("heading", { name: "Your issues" })).toBeVisible({ timeout: 20_000 });
   // The sub-issue first: its parent still opens before it.
@@ -266,7 +266,7 @@ test("linear: a sub-issue nests under its parent's workspace", async ({ page }) 
   await page.getByRole("checkbox", { name: "ENG-142 Retry webhook deliveries" }).click();
   await settle(page, 600);
   await page.getByRole("button", { name: /^Create 2 workspaces/ }).click();
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeHidden({ timeout: 60_000 });
+  await expect(page.getByRole("heading", { name: "New workspace" })).toBeHidden({ timeout: 60_000 });
   await expect(
     page.getByRole("button", { name: "Retry webhook deliveries" }).first(),
   ).toBeVisible({ timeout: 30_000 });
