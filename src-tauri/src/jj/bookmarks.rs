@@ -27,15 +27,21 @@ pub fn jj_rename_bookmark(
   new_name: &str,
 ) -> Result<(), JjError> {
   let loaded = load_workspace_repo(workspace_path)?;
-  let target = loaded
-    .repo
-    .view()
-    .get_local_bookmark(RefName::new(old_name))
-    .clone();
+  let view = loaded.repo.view();
+  let target = view.get_local_bookmark(RefName::new(old_name)).clone();
   if target.is_absent() {
     return Err(JjError::IoError(format!(
       "Bookmark '{}' does not exist",
       old_name
+    )));
+  }
+  if old_name == new_name {
+    return Ok(());
+  }
+  if view.get_local_bookmark(RefName::new(new_name)).is_present() {
+    return Err(JjError::IoError(format!(
+      "Bookmark '{}' already exists",
+      new_name
     )));
   }
   let mut tx = loaded.repo.start_transaction();
