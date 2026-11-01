@@ -216,13 +216,20 @@ fn plan_rows(
   let parents = stack_parents(text);
   let mut rows: Vec<NewWorkspaceRow> = Vec::new();
   let mut index: HashMap<String, usize> = HashMap::new();
-  for (line, parsed) in parse_lines(text) {
+  let lines = parse_lines(text);
+  // Branch lines keep their names: reserve them before any title is planned.
+  let reserved: HashSet<String> = lines
+    .iter()
+    .filter(|(_, parsed)| matches!(parsed, Line::Branch(_)))
+    .filter_map(|(_, parsed)| check(parsed).ok().map(|c| c.branch))
+    .collect();
+  for (position, (line, parsed)) in lines.into_iter().enumerate() {
     let parent = parents
       .get(&line)
       .and_then(|p| index.get(p))
       .map(|&i| rows[i].clone());
     let checked = check(&parsed)
-      .map(|checked| unique_title_branch(checked, &rows, &check))
+      .map(|checked| unique_title_branch(checked, position, &reserved, &rows, &check))
       .and_then(|checked| match &parent {
         Some(parent) if parent.step.is_none() => {
           Err("Stacks on a line that can't be opened".to_string())
@@ -262,22 +269,43 @@ fn plan_rows(
   rows
 }
 
-/// A new branch named after a title, made unique among the rows above:
-/// titles that differ only past the branch name's cut ("Fix the page A",
-/// "Fix the page B") would otherwise plan one branch twice, and only the
-/// first could be made.
+/// Six lowercase hex characters from a SHA-256 of the title, its line
+/// position and a salt. Stable across runs, so the preview and the run agree.
+fn title_suffix(title: &str, position: usize, salt: u32) -> String {
+  use sha2::{Digest, Sha256};
+  let digest = Sha256::new()
+    .chain_update(title.as_bytes())
+    .chain_update([0])
+    .chain_update(position.to_le_bytes())
+    .chain_update(salt.to_le_bytes())
+    .finalize();
+  digest[..3].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A new branch named after a title, with a short hash suffix so it never
+/// takes a branch a line names, a row above already planned, or one that
+/// exists. The suffix is re-hashed with the next salt until it is free.
 fn unique_title_branch(
   checked: Checked,
+  position: usize,
+  reserved: &HashSet<String>,
   rows: &[NewWorkspaceRow],
   check: &impl Fn(&Line) -> Result<Checked, String>,
 ) -> Checked {
-  let taken = |branch: &str| rows.iter().any(|r| r.branch.as_deref() == Some(branch));
-  if checked.title.is_none() || checked.step != NewWorkspaceStep::Create || !taken(&checked.branch)
-  {
+  let Some(title) = checked.title.clone() else {
     return checked;
-  }
-  (2..100)
-    .map(|n| format!("{}-{n}", checked.branch))
+  };
+  let taken = |branch: &str| {
+    reserved.contains(branch) || rows.iter().any(|r| r.branch.as_deref() == Some(branch))
+  };
+  (0..1000)
+    .map(|salt| {
+      format!(
+        "{}-{}",
+        checked.branch,
+        title_suffix(&title, position, salt)
+      )
+    })
     .filter(|branch| !taken(branch))
     .find_map(|branch| {
       check(&Line::Branch(branch))
@@ -285,7 +313,7 @@ fn unique_title_branch(
         .filter(|c| c.step == NewWorkspaceStep::Create)
     })
     .map(|c| Checked {
-      title: checked.title.clone(),
+      title: Some(title.clone()),
       ..c
     })
     .unwrap_or(checked)
@@ -539,7 +567,12 @@ mod tests {
     branch
       .strip_prefix(base)
       .and_then(|rest| rest.strip_prefix('-'))
-      .is_some_and(|hex| hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()))
+      .is_some_and(|hex| {
+        hex.len() == 6
+          && hex
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+      })
   }
 
   fn branches(rows: &[NewWorkspaceRow]) -> Vec<&str> {
@@ -627,10 +660,7 @@ mod tests {
   #[test]
   fn planning_twice_gives_the_same_branches() {
     let text = "Fix the page A\nfix c\ntreq/fix\n  Add tests\nFix it now\n";
-    assert_eq!(
-      plan_rows(text, "main", fake),
-      plan_rows(text, "main", fake)
-    );
+    assert_eq!(plan_rows(text, "main", fake), plan_rows(text, "main", fake));
     assert_eq!(plan_unchecked(text, "main"), plan_unchecked(text, "main"));
   }
 
@@ -638,7 +668,10 @@ mod tests {
   fn a_title_skips_a_suffixed_branch_a_line_names() {
     // Whatever suffix `fix c` would take first, a branch line naming it
     // (above or below) keeps it, and the title moves on.
-    let first = plan_rows("fix c\n", "main", fake)[0].branch.clone().unwrap();
+    let first = plan_rows("fix c\n", "main", fake)[0]
+      .branch
+      .clone()
+      .unwrap();
     for text in [format!("{first}\nfix c\n"), format!("fix c\n{first}\n")] {
       let rows = plan_rows(&text, "main", fake);
       let line = rows.iter().find(|r| r.line == first).unwrap();
@@ -657,7 +690,10 @@ mod tests {
     for n in 0..64 {
       let rows = plan_rows(&format!("Title number {n}\n"), "main", fake);
       let branch = rows[0].branch.as_deref().unwrap();
-      assert!(is_suffixed(branch, &format!("treq/title-number-{n}")), "{branch}");
+      assert!(
+        is_suffixed(branch, &format!("treq/title-number-{n}")),
+        "{branch}"
+      );
     }
   }
 
