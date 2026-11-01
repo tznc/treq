@@ -162,7 +162,8 @@ select throws_ok($$ select public.delete_provider_credential('boat') $$, 'P0001'
   'a credential a live workspace uses cannot be removed');
 reset role;
 
-update public.remote_instance_placements set role = 'dead' where id = '00000000-0000-0000-0000-00000000b101';
+update public.remote_instance_placements set role = 'dead', state = 'deleted'
+ where id = '00000000-0000-0000-0000-00000000b101';
 set local role authenticated;
 select set_config('request.jwt.claims',
   '{"sub":"00000000-0000-0000-0000-0000000000b1","role":"authenticated"}', true);
