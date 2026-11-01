@@ -763,9 +763,9 @@ impl WorkspacesScreen {
       );
     }
     if summary.has_conflicts {
-      status.push(Dot::new(Tone::Danger, &palette).into_any_element());
+      status.push(Dot::new(Tone::Danger, "Conflict", &palette).into_any_element());
     } else if summary.has_changes {
-      status.push(Dot::new(Tone::Warning, &palette).into_any_element());
+      status.push(Dot::new(Tone::Warning, "Uncommitted changes", &palette).into_any_element());
     }
 
     let trailing = h_flex()
@@ -1172,16 +1172,16 @@ impl Render for Switcher {
           .children(machines.into_iter().zip(statuses).enumerate().map(
             |(i, ((machine, name), status))| {
               let tone = match status {
-                MachineStatus::Ready => Some(Tone::Success),
-                MachineStatus::Failed(_) => Some(Tone::Danger),
-                MachineStatus::CutOff(_) => Some(Tone::Warning),
+                MachineStatus::Ready => Some((Tone::Success, "Connected")),
+                MachineStatus::Failed(_) => Some((Tone::Danger, "Can't connect")),
+                MachineStatus::CutOff(_) => Some((Tone::Warning, "Access ended")),
                 _ => None,
               };
               let leading = div()
                 .w(px(14.))
                 .flex()
                 .justify_center()
-                .children(tone.map(|t| Dot::new(t, &palette)))
+                .children(tone.map(|(t, label)| Dot::new(t, label, &palette)))
                 .into_any_element();
               widgets::row_full(("switch-machine", i), Some(leading), name, None, None, cx)
                 .on_click(move |_, _, cx| {

@@ -944,7 +944,7 @@ impl WorkspaceScreen {
         .tab({
           let tab = counted(Tab::new("tab-changes", "Changes"), files);
           if conflicts {
-            tab.dot(Tone::Danger)
+            tab.dot(Tone::Danger, "Conflict")
           } else {
             tab
           }

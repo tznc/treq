@@ -50,7 +50,7 @@
     "lint:subprocess": "ast-grep scan --filter '^(no-command-for-jj-or-git-tauri-src|no-command-new-git-rust-tests|no-subprocess-conflict-pipeline-tauri-src)$'",
     "lint:home-head": "ast-grep scan --filter '^home-git-head-history-edit-needs-test$'",
     "lint:a11y": "ast-grep scan --filter '^gpui-control-needs-accessible-name$'",
-    "lint:design": "ast-grep scan --filter '^(gpui-button-no-restyle|gpui-escape-via-layers|gpui-hover-token|gpui-no-adhoc-controls|gpui-no-adhoc-tabs|gpui-no-local-dialog|gpui-no-local-row|gpui-no-raw-color|gpui-no-raw-text-size|gpui-no-zpx-spacing|gpui-row-selected-token|ui-copy-no-yes-no)$'",
+    "lint:design": "ast-grep scan --filter '^(gpui-button-no-restyle|gpui-escape-via-layers|gpui-hover-token|gpui-name-no-status-color|gpui-no-adhoc-controls|gpui-no-adhoc-tabs|gpui-no-local-dialog|gpui-no-local-row|gpui-no-raw-color|gpui-no-raw-text-size|gpui-no-zpx-spacing|gpui-row-selected-token|ui-copy-no-yes-no)$'",
     "design:audit": "node scripts/design-audit.mjs",
     "icons:generate": "node scripts/generate-icons.js && npx @tauri-apps/cli icon assets/logo-white.imageset/logo-white-rounded.svg && node scripts/flatten-ios-icons.js"
   },

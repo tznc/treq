@@ -2,6 +2,7 @@
 //! neutral, and a problem shows once, as a dot.
 
 use gpui::{div, prelude::*, App, Hsla, SharedString, Window};
+use gpui_kit::base::TestSupportExt as _;
 
 use crate::{text, theme::Palette, zpx, TextSize};
 
@@ -139,18 +140,21 @@ impl RenderOnce for Count {
   }
 }
 
-/// A 6px status dot, one per object, after its name. Give its holder a
-/// tooltip saying what it means.
+/// A 6px status dot, one per object, after its name. `label` names the
+/// state ("Conflict", "Uncommitted changes"): hovering the dot shows it as
+/// a tooltip, and screen readers read it, since a color alone says nothing.
 #[derive(IntoElement)]
 pub struct Dot {
   tone: Tone,
+  label: SharedString,
   palette: Palette,
 }
 
 impl Dot {
-  pub fn new(tone: Tone, palette: &Palette) -> Self {
+  pub fn new(tone: Tone, label: impl Into<SharedString>, palette: &Palette) -> Self {
     Self {
       tone,
+      label: label.into(),
       palette: *palette,
     }
   }
@@ -158,11 +162,19 @@ impl Dot {
 
 impl RenderOnce for Dot {
   fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    let label = self.label.clone();
     div()
+      .id(gpui::ElementId::Name(format!("dot-{}", self.label).into()))
+      .role(gpui::Role::Image)
+      .aria_label(self.label)
       .flex_none()
       .size(zpx(6.))
       .rounded_full()
       .bg(self.tone.color(&self.palette))
+      .tooltip(move |window, cx| {
+        gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
+      })
+      .test_support()
   }
 }
 
@@ -194,6 +206,14 @@ mod tests {
       Tone::Danger.text(&theme::palette(false)),
       theme::tw::color(theme::tw::RED_700)
     );
+  }
+
+  #[test]
+  fn test_dot_builder() {
+    let p = theme::palette(false);
+    let dot = Dot::new(Tone::Danger, "Conflict", &p);
+    assert_eq!(dot.tone, Tone::Danger);
+    assert_eq!(dot.label.as_ref(), "Conflict");
   }
 
   #[test]

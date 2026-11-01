@@ -107,7 +107,7 @@ test("code: workspace Code tab, prompt menus, tree and file view", async ({ page
     name: "03-code-tree-and-readme",
     title: "Code tab scrolled: file tree and README preview",
     expectations: [
-      "Tree rows (packages, .gitignore, README.md) aligned; packages has a red changed dot",
+      "Tree rows (packages, .gitignore, README.md) aligned; names in the neutral text colour, packages has a changed dot after its name",
       "README card renders headings, inline code and bullets",
     ],
   });

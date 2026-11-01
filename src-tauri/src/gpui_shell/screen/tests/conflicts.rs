@@ -132,3 +132,17 @@ fn changes_tab_draws_the_deleted_side_of_a_delete_modify_conflict(cx: &mut TestA
   assert!(h.drawn(CARD));
   assert!(h.drawn("conflict-deleted-side"));
 }
+
+/// The Conflicts section's dot and each conflicted file's dot say what
+/// they mean.
+#[gpui::test]
+fn conflict_dots_are_named(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(cx, conflict_host(SIDES, true, true), changes_route());
+  assert!(h.drawn("conflict-row-README.md"));
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  let dots = screen.get_all_by_role(by::role(gpui::Role::Image).name("Conflict"));
+  assert!(dots.len() >= 2, "{}", dots.len());
+}

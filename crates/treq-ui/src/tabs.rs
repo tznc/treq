@@ -25,7 +25,7 @@ pub struct Tab {
   label: SharedString,
   badge: Option<(SharedString, Tone)>,
   count: Option<usize>,
-  dot: Option<Tone>,
+  dot: Option<(Tone, SharedString)>,
   icon: Option<&'static str>,
   disabled: bool,
 }
@@ -61,9 +61,10 @@ impl Tab {
     self
   }
 
-  /// A status dot, such as danger for a tab that holds a conflict.
-  pub fn dot(mut self, tone: Tone) -> Self {
-    self.dot = Some(tone);
+  /// A status dot, such as danger for a tab that holds a conflict, with
+  /// the label its tooltip shows.
+  pub fn dot(mut self, tone: Tone, label: impl Into<SharedString>) -> Self {
+    self.dot = Some((tone, label.into()));
     self
   }
 
@@ -270,9 +271,13 @@ impl RenderOnce for Tabs {
                 .child(Count::new(count, &p)),
             )
           })
-          .when_some(tab.dot, |el, tone| {
+          .when_some(tab.dot, |el, (tone, label)| {
             let id = format!("{id}-dot");
-            el.child(div().debug_selector(move || id).child(Dot::new(tone, &p)))
+            el.child(
+              div()
+                .debug_selector(move || id)
+                .child(Dot::new(tone, label, &p)),
+            )
           })
           .when_some(on_select, move |el, f| {
             el.on_click(move |_, window, cx| f(ix, window, cx))
@@ -293,14 +298,16 @@ mod tests {
       .tab(Tab::new("code", "Code"))
       .tabs([
         Tab::new("commits", "Commits").count(2),
-        Tab::new("changes", "Changes").count(3).dot(Tone::Danger),
+        Tab::new("changes", "Changes")
+          .count(3)
+          .dot(Tone::Danger, "Conflict"),
         Tab::new("logs", "Logs").disabled(true),
         Tab::new("team", "Team").badge("PRO", Tone::Neutral),
       ])
       .selected(1);
     assert_eq!(tabs.tabs.len(), 5);
     assert_eq!(tabs.tabs[4].badge, Some(("PRO".into(), Tone::Neutral)));
-    assert_eq!(tabs.tabs[2].dot, Some(Tone::Danger));
+    assert_eq!(tabs.tabs[2].dot, Some((Tone::Danger, "Conflict".into())));
     assert_eq!(tabs.selected, 1);
   }
 
