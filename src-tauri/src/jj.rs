@@ -4924,6 +4924,22 @@ mod tests {
     assert!(!is_autosave_description(""));
   }
 
+  proptest::proptest! {
+    #![proptest_config(crate::test_repo::proptest_config(256))]
+
+    /// Every autosave message is recognised as one, and is independent of path order.
+    #[test]
+    fn autosave_message_is_recognised_and_order_free(
+      paths in proptest::collection::vec("\\PC{0,12}", 0..6),
+    ) {
+      let message = autosave_commit_message(&paths);
+      proptest::prop_assert!(is_autosave_description(&message), "{:?}", message);
+      let mut reversed = paths;
+      reversed.reverse();
+      proptest::prop_assert_eq!(autosave_commit_message(&reversed), message);
+    }
+  }
+
   #[test]
   fn autosave_commit_message_lists_up_to_two_files() {
     assert_eq!(
