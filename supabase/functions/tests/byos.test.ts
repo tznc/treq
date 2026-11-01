@@ -253,6 +253,20 @@ Deno.test("an invalid key is refused and not stored", async () => {
   assertEquals(saved, []);
 });
 
+Deno.test("a key with characters no HTTP header can carry is a validation error, not a retry", async () => {
+  for (const key of ["ключ", "a\nb", "tab\tkey", "😀"]) {
+    const { store, saved } = fakeActionStore();
+    const r = await handleByosAction("save_provider_credential", { provider_kind: "boat", api_key: key }, {
+      canByos: () => Promise.resolve(true),
+      store,
+      build: validatingProvider("ok"),
+    });
+    assertEquals(r?.status, 400, JSON.stringify(key));
+    assertEquals((r?.body as { code: string }).code, "validation_error");
+    assertEquals(saved, []);
+  }
+});
+
 Deno.test("a user the gate refuses cannot save a key", async () => {
   const { store, saved } = fakeActionStore();
   const r = await handleByosAction("save_provider_credential", { provider_kind: "boat", api_key: "sk-user" }, {
