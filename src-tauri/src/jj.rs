@@ -2899,8 +2899,26 @@ pub fn jj_commit(workspace_path: &str, message: &str) -> Result<String, JjError>
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
 
   let ref_name = RefName::new(&branch);
-  tx.repo_mut()
-    .set_local_bookmark_target(ref_name, RefTarget::normal(committed.id().clone()));
+  let branch_target = tx.repo().view().get_local_bookmark(ref_name).clone();
+  if branch_target.has_conflict() {
+    // Move only the side this commit grew from; a later push must not drop `origin`'s side.
+    let grown_side = branch_target
+      .added_ids()
+      .find(|id| *id == wc_commit.id() || wc_commit.parent_ids().contains(id))
+      .cloned();
+    if let Some(side) = grown_side {
+      tx.repo_mut()
+        .merge_local_bookmark(
+          ref_name,
+          &RefTarget::normal(side),
+          &RefTarget::normal(committed.id().clone()),
+        )
+        .map_err(|e| JjError::IoError(format!("Failed to advance bookmark: {}", e)))?;
+    }
+  } else {
+    tx.repo_mut()
+      .set_local_bookmark_target(ref_name, RefTarget::normal(committed.id().clone()));
+  }
 
   if !workspace_names.is_empty() {
     let new_wc = block_on(
