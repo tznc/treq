@@ -1233,3 +1233,38 @@ fn the_discard_review_confirmation_keeps_on_escape_and_discards_on_enter(cx: &mu
   assert!(!h.drawn("discard-review-dialog"));
   assert!(!h.drawn("review-action-bar"));
 }
+
+/// A file with no diff lines (here a binary) is marked viewed by its
+/// content, so it is viewed no longer once that content changes.
+#[gpui::test]
+fn a_viewed_file_without_diff_lines_unmarks_when_it_changes(cx: &mut TestAppContext) {
+  let diff = |id: &str| -> crate::jj::JjRevisionDiff {
+    serde_json::from_value(serde_json::json!({
+      "committed_files": [],
+      "uncommitted_files": [
+        {"path": "img.png", "status": "M", "previous_path": null, "changed_line_count": 0,
+         "diff_deferred": false, "content_id": id}
+      ],
+      "hunks_by_file": [{"path": "img.png", "hunks": []}],
+      "too_large_to_render": false
+    }))
+    .expect("diff")
+  };
+  let mut host = changes_host();
+  host.working = Some(diff("v1"));
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.click("viewed-img.png");
+  h.cx.run_until_parked();
+  *host.edited.lock().unwrap() = Some(diff("v2"));
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.changes_revision += 1;
+    }
+  });
+  h.cx.run_until_parked();
+  assert!(
+    host.writes().contains(&"unmark viewed img.png".to_string()),
+    "{:?}",
+    host.writes()
+  );
+}
