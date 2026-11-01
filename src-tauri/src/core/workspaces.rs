@@ -816,14 +816,25 @@ pub fn create_workspace_with_symlinked_dirs(
   let repo_mutation_lock = commit_lock_for_repo(repo_path);
   let _repo_mutation_guard = repo_mutation_lock.lock_or_recover();
 
-  if local_db::get_workspace_by_branch(repo_path, branch_name)
+  if let Some(existing) = local_db::get_workspace_by_branch(repo_path, branch_name)
     .map_err(|e| format!("Failed to check existing workspace: {e}"))?
-    .is_some()
   {
-    return Err(format!(
-      "Workspace '{}' is already registered; refusing to recreate it",
-      branch_name
-    ));
+    let existing_dir = Path::new(repo_path)
+      .join(".treq")
+      .join("workspaces")
+      .join(&existing.workspace_path);
+    if existing_dir.join(".jj").exists() {
+      return Err(format!(
+        "Workspace '{}' is already registered; refusing to recreate it",
+        branch_name
+      ));
+    }
+    // A create killed between reserving its row and making the dir: drop it and retry.
+    rollback_created_workspace(
+      repo_path,
+      &existing_dir.to_string_lossy(),
+      Some(existing.id),
+    );
   }
 
   // Moved files outside the sparse cone would land in the commit but be invisible on disk.
@@ -894,21 +905,40 @@ pub fn create_workspace_with_symlinked_dirs(
   let new_branch: bool = !branch_exists || resolved_source_branch.as_deref() == Some(&remote_ref);
   let prior_bookmark = branch_exists.then(|| existing.commit_id(branch_name));
   drop(existing);
-  let workspace_name = jj::create_workspace(
+
+  // The row's id prefixes the dir and jj name, so `feat/x` and `feat-x` never collide.
+  let reserved = local_db::reserve_workspace(
     repo_path,
-    branch_name,
+    branch_name.to_string(),
+    description,
+    moved_files.clone(),
+    sparse_patterns.clone(),
+    !branch_exists_on_remote,
+    &effective_target_branch,
+    |id| jj::sanitize_workspace_name(&format!("{id}-{branch_name}")),
+  )
+  .map_err(|e| format!("Failed to add workspace to db: {}", e))?;
+
+  let workspace_name = match jj::create_workspace(
+    repo_path,
+    &reserved.workspace_name,
     branch_name,
     new_branch,
     resolved_source_branch.as_deref(),
     Some(&effective_target_branch),
     sparse_patterns.as_deref(),
-  )
-  .map_err(|e| format!("Failed to create workspace: {}", e))?;
+  ) {
+    Ok(name) => name,
+    Err(e) => {
+      if let Err(error) = local_db::delete_workspace(repo_path, reserved.id) {
+        tracing::warn!(%error, id = reserved.id, "Rollback: failed to delete reserved workspace row");
+      }
+      return Err(format!("Failed to create workspace: {}", e));
+    }
+  };
 
-  // jj has registered the workspace. Any failure from here on must undo that,
-  // or the half-made workspace blocks a retry and later shows up in the
-  // sidebar through discovery without its metadata.
-  let mut registered_id: Option<i64> = None;
+  // jj has registered the workspace; any later failure undoes it and the reserved row.
+  let registered_id = Some(reserved.id);
   let result = (|| -> Result<local_db::Workspace, String> {
     // Extract just the sanitized workspace name from the full path
     let workspace_path = Path::new(&workspace_name)
@@ -958,21 +988,7 @@ pub fn create_workspace_with_symlinked_dirs(
       .map_err(|e| format!("Failed to install library skills into workspace: {e}"))?;
     }
 
-    // One transaction: the row, the not_on_remote flag (set when the branch
-    // isn't on the remote) and the target branch.
-    let workspace = local_db::add_workspace_targeting(
-      repo_path,
-      workspace_path.clone(),
-      workspace_path,
-      branch_name.to_string(),
-      description,
-      moved_files.clone(),
-      sparse_patterns.clone(),
-      !branch_exists_on_remote,
-      &effective_target_branch,
-    )
-    .map_err(|e| format!("Failed to add workspace to db: {}", e))?;
-    registered_id = Some(workspace.id);
+    let workspace = reserved;
 
     // If moved_files are specified, perform the squash operation
     if let Some(files) = moved_files.clone() {
