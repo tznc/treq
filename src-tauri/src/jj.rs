@@ -940,7 +940,12 @@ async fn materialized_value_to_bytes(
 }
 
 fn diff_line_counts(before: &str, after: &str) -> (u32, u32) {
-  let input = InternedInput::new(before, after);
+  // Keep line terminators so a missing final newline changes the last line,
+  // as git counts it.
+  let input = InternedInput::new(
+    imara_diff::sources::lines_with_terminator(before),
+    imara_diff::sources::lines_with_terminator(after),
+  );
   let counts = diff(Algorithm::Histogram, &input, Counter::default());
   (counts.insertions, counts.removals)
 }
