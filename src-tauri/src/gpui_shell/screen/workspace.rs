@@ -1413,7 +1413,28 @@ impl WorkspaceView {
     if let Some(sync) = &h.sync {
       right = right.child(self.sync(sync, p, cx));
     }
-    if let Some(merge) = &h.merge {
+    let merged = h
+      .view_pr
+      .as_ref()
+      .is_some_and(|pr| pr.state == PrState::Merged);
+    if h.merge.is_some() && merged {
+      // The work landed: archiving is the next step, not merging again.
+      let button = Button::new("workspace-archive", p)
+        .variant(Variant::Outline)
+        .size(Size::Md)
+        .gap_1()
+        .icon(theme::ICON_ARCHIVE, 16.)
+        .label("Archive")
+        .on_click(self.press("workspace.archive"));
+      right = right.child(self.with_tooltip(
+        "workspace-archive",
+        Some(TooltipContent::Text(
+          "The pull request merged. Archive this workspace.".into(),
+        )),
+        button,
+        cx,
+      ));
+    } else if let Some(merge) = &h.merge {
       let button = Button::new("workspace-merge", p)
         .aria_label("Merge…")
         .variant(if merge.passing {
