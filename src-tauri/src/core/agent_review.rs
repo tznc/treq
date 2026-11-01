@@ -33,8 +33,15 @@ pub fn apply_agent_review_suggestion(repo_path: String, comment_id: String) -> R
     .as_deref()
     .ok_or_else(|| "Review comment has no suggested change".to_string())?;
 
+  // A workspace diff's file lives in that workspace, not the home repo.
+  let root = match comment.target_id.parse() {
+    Ok(id) if comment.target_type == crate::core::agent_launch::REVIEW_TARGET => {
+      crate::core::changes::resolve_workspace_dir(&repo_path, Some(id))?
+    }
+    _ => repo_path.clone(),
+  };
   splice_lines(
-    &repo_path,
+    &root,
     &comment.file_path,
     comment.start_line,
     comment.end_line,
@@ -171,7 +178,7 @@ mod tests {
     std::fs::write(root.path().join("a.rs"), "a\nb\n").unwrap();
     let comment = local_db::create_agent_review_comment(
       repo,
-      "workspace_diff",
+      "github_pr",
       "7",
       "a.rs",
       None,

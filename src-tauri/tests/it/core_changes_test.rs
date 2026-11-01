@@ -1057,3 +1057,40 @@ fn workspace_diff_names_each_files_content() {
   );
   assert_eq!(second["b.txt"], first["b.txt"], "the other file's id stays");
 }
+
+#[test]
+fn applying_an_agent_suggestion_edits_the_reviewed_workspace() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let workspace = repo
+    .create_workspace_simple("feat/apply-suggestion")
+    .expect("Failed to create workspace");
+  let workspace_path = repo.workspace_full_path(&workspace);
+  TestRepo::write_workspace_file(&workspace_path, "README.md", "# Workspace\n").unwrap();
+  let comment = treq_lib::local_db::create_agent_review_comment(
+    &repo.repo_path,
+    "workspace_diff",
+    &workspace.id.to_string(),
+    "README.md",
+    None,
+    1,
+    1,
+    Some("new"),
+    "Rename the heading",
+    Some("# Fixed\n"),
+    "local-agent",
+    None,
+  )
+  .unwrap();
+
+  treq_lib::core::agent_review::apply_agent_review_suggestion(repo.repo_path.clone(), comment.id)
+    .unwrap();
+
+  let read =
+    |root: &str| std::fs::read_to_string(std::path::Path::new(root).join("README.md")).unwrap();
+  assert_eq!(
+    read(&repo.repo_path),
+    "# Test Repository\n",
+    "the home repo is untouched"
+  );
+  assert_eq!(read(&workspace_path), "# Fixed\n");
+}
