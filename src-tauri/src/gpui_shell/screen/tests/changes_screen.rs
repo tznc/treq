@@ -820,15 +820,23 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
   h.click("gutter-a.rs-0-1");
   h.cx.simulate_keystrokes("shift-down left");
   h.click("suggest-change");
-  assert_eq!(
-    h.screen.read_with(&h.cx, |screen, cx| {
-      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-      let changes = workspace.changes().expect("changes").read(cx);
-      changes.review.draft_text.clone()
-    }),
-    "```suggestion\nb\nc\n```\n"
-  );
+  // A code editor with the lines and a preview, not fences in the comment.
+  assert!(h.drawn("suggestion-editor"));
+  assert!(h.drawn("suggestion-preview"));
+  let (comment, suggestion) = h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
+    (
+      changes.review.draft_text.clone(),
+      changes.review.suggestion_text.clone(),
+    )
+  });
+  assert_eq!(comment, "");
+  assert_eq!(suggestion.as_deref(), Some("b\nc"));
   h.cx.simulate_keystrokes("secondary-enter");
+  settle_save(&mut h);
+  let saved = host.review.lock().unwrap().clone().unwrap_or_default();
+  assert!(saved.contains(r"```suggestion\nb\nc\n```"), "{saved}");
   assert!(h.drawn("agent-review-suggestion"), "drawn as a diff");
   // The write changes a.rs on disk; that read is not stale.
   let mut applied = host.working.clone().expect("working");
@@ -1272,4 +1280,69 @@ fn the_discard_review_confirmation_keeps_on_escape_and_discards_on_enter(cx: &mu
   h.cx.simulate_keystrokes("enter");
   assert!(!h.drawn("discard-review-dialog"));
   assert!(!h.drawn("review-action-bar"));
+}
+
+fn a11y_screen(h: &mut Harness) -> gpui_testing_library::Screen {
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  screen
+}
+
+/// The review toolbar's discard says what it discards, and its
+/// confirmation counts the comments it drops.
+#[gpui::test]
+fn discarding_pending_comments_names_what_it_discards(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  let screen = a11y_screen(&mut h);
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Discard pending comments…")))
+    .to_be_visible();
+  h.click("discard-review");
+  let screen = a11y_screen(&mut h);
+  expect(screen.get_by_role(by::role(gpui::Role::Heading).name("Discard 1 pending comment?")))
+    .to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Cancel"))).to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Discard comments"))).to_be_visible();
+}
+
+fn changes_host_with_named_statuses() -> FakeHost {
+  let mut host = changes_host();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [
+      {"path": "c.rs", "status": "R", "previous_path": "old.rs", "changed_line_count": 1, "diff_deferred": false}
+    ],
+    "uncommitted_files": [
+      {"path": "a.rs", "status": "M", "previous_path": null, "changed_line_count": 2, "diff_deferred": false},
+      {"path": "b.rs", "status": "A", "previous_path": null, "changed_line_count": 1, "diff_deferred": false}
+    ],
+    "hunks_by_file": [
+      {"path": "a.rs", "hunks": [{"id": "h", "header": "@@ -1,2 +1,3 @@", "lines": [" a", "+b", "+c"], "patch": ""}]},
+      {"path": "b.rs", "hunks": [{"id": "h", "header": "@@ -0,0 +1,1 @@", "lines": ["+d"], "patch": ""}]},
+      {"path": "c.rs", "hunks": [{"id": "h", "header": "@@ -1,1 +1,1 @@", "lines": ["-x", "+y"], "patch": ""}]}
+    ],
+    "too_large_to_render": false
+  }))
+  .ok();
+  host
+}
+
+/// The file list's status letters name their status, and a committed file's
+/// card no longer repeats "Committed": the list's group label says it.
+#[gpui::test]
+fn file_statuses_are_named_and_committed_cards_carry_no_pill(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(
+    cx,
+    changes_host_with_named_statuses(),
+    committed_route(true),
+  );
+  assert!(h.drawn("file-card-c.rs"), "the committed file's card");
+  let screen = a11y_screen(&mut h);
+  for name in ["Modified", "Added", "Renamed"] {
+    expect(screen.get_by_role(by::role(gpui::Role::Label).name(name))).to_be_visible();
+  }
+  assert!(!h.drawn("committed-file-label"));
 }

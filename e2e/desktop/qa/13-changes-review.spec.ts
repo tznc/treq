@@ -67,17 +67,21 @@ test("changes review: character marks, keyboard, suggestion, stale banner", asyn
   const input = page.getByRole("textbox", { name: "Add a comment…" });
   await expect(input).toBeVisible();
   await page.getByRole("button", { name: "Suggest change" }).click();
+  const suggested = page.getByRole("textbox", { name: "Suggested lines" });
+  await expect(suggested).toBeVisible();
+  await expect(input).toHaveValue("");
   await settle(page, 400);
   await capture(page, {
     name: "13-review-03-suggest-change",
-    title: "Left opens the comment box; Suggest change quotes the lines",
+    title: "Left opens the comment box; Suggest change opens a suggestion editor",
     expectations: [
-      "Comment box under the selected lines with their range label",
-      "Text holds a ```suggestion block with the two lines",
-      "Suggest change on the left, Cancel and Add Comment on the right",
+      "Comment box under the selected lines with their range label; its text field stays empty",
+      "Below it a monospace 'Suggested change' field holds the two lines, and a preview shows them as - and + rows",
+      "'Remove suggestion' on the left, Cancel and Add comment on the right",
     ],
   });
-  await input.fill('Wrap it\n```suggestion\n  return `[lorem:${level.toUpperCase()}] ${line}`;\n}\n```');
+  await input.fill("Wrap it");
+  await suggested.fill("  return `[lorem:${level.toUpperCase()}] ${line}`;\n}");
   await page.getByRole("button", { name: "Add comment", exact: true }).click();
   await expect(input).toHaveCount(0);
   await settle(page, 800);
