@@ -3006,7 +3006,7 @@ impl SettingsView {
     div()
       .child(setting_row("API key", &linear.description, key_control, p))
       .when(!linear.connected, |this| {
-        this.child(div().pb_2().child(create_key))
+        this.child(div().pb_2().flex().child(create_key))
       })
       .children(oauth)
       .when(linear.key_priority_note, |this| {
