@@ -4670,6 +4670,12 @@ mod tests {
   use tempfile::TempDir;
 
   #[test]
+  fn diff_line_counts_counts_final_newline_change() {
+    assert_eq!(diff_line_counts("a\n", "a"), (1, 1));
+    assert_eq!(diff_line_counts("a", "a\n"), (1, 1));
+  }
+
+  #[test]
   fn text_hunks_keep_lines_that_look_like_file_headers() {
     let hunks = build_text_hunks("-- users\nkeep\n---\n", "++ accounts\nkeep\n");
     let lines: Vec<&str> = hunks
