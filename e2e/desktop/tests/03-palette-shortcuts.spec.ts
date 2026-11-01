@@ -68,11 +68,15 @@ test("? opens the keyboard shortcuts, but not while typing", async ({
   context,
 }) => {
   await goHome(page);
-  const task = page.getByRole("textbox", { name: "Describe a task…" });
+  await page.getByRole("button", { name: "Agent", exact: true }).click();
+  const prompt = page.getByRole("dialog", { name: "Start a new agent session" });
+  const task = prompt.getByRole("textbox", { name: "Describe a task…" });
   await task.click();
   await task.pressSequentially("why?");
   await expect(task).toHaveValue("why?");
   await task.fill("");
+  await page.keyboard.press("Escape");
+  await expect(prompt).toHaveCount(0);
 
   await page.getByRole("tab", { name: "Commits" }).click();
   await page.keyboard.press("Shift+?");

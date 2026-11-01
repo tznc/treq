@@ -29,7 +29,7 @@ test("code: workspace Code tab, action row, alerts and Agent", async ({ page, co
   await openTab(page, "Code");
   await overview(page);
   await settle(page, 2000);
-  await expect(page.getByRole("textbox", { name: "Describe a task..." })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Describe a task…" })).toHaveCount(0);
   await expect(page.getByRole("alert", { name: "1 file has conflicts" })).toHaveCount(0);
   await capture(page, {
     name: "03-code-workspace",
