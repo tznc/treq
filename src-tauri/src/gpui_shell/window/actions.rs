@@ -61,6 +61,9 @@ pub enum Shortcut {
 /// action to `sidebar_actions` (a menu or drag) or to nobody.
 pub type Handled = Option<Vec<Effect>>;
 
+/// The session name an AI review's agent runs under.
+const REVIEW_SESSION: &str = "AI Review";
+
 fn done() -> Handled {
   Some(Vec::new())
 }
@@ -553,6 +556,33 @@ impl Model {
     done()
   }
 
+  /// `ReviewDone` for each AI Review agent whose turn just ended, for the
+  /// workspace it reviews.
+  fn reviews_done(&self, previous: &[TerminalSummary], data: &Data) -> Vec<Effect> {
+    self
+      .terminals
+      .iter()
+      .filter(|t| t.agent && !t.streaming && t.name.as_deref() == Some(REVIEW_SESSION))
+      .filter(|t| {
+        previous
+          .iter()
+          .any(|p| p.id.is_some() && p.id == t.id && p.streaming)
+      })
+      .filter_map(|t| {
+        let (repo, branch) = (t.repo_path.as_deref()?, t.branch.as_deref()?);
+        let workspace = data
+          .workspaces(repo)
+          .iter()
+          .find(|w| w.branch_name == branch)?;
+        Some(Effect::ReviewDone {
+          repo_path: repo.to_string(),
+          workspace_id: workspace.id,
+          branch: branch.to_string(),
+        })
+      })
+      .collect()
+  }
+
   /// The selected workspace's checkout, else the repository's.
   fn working_directory(&self, data: &Data) -> String {
     self
@@ -692,12 +722,15 @@ impl Model {
           terminals.iter().filter(|t| t.agent && t.streaming).count()
         };
         let was = streaming(&self.terminals);
+        let previous = std::mem::take(&mut self.terminals);
         self.terminals = value
           .as_array()
           .map(|list| {
             list
               .iter()
               .map(|s| TerminalSummary {
+                id: s["id"].as_str().map(str::to_string),
+                name: s["name"].as_str().map(str::to_string),
                 agent: s["kind"] == "agent",
                 branch: s["branchName"].as_str().map(str::to_string),
                 repo_path: s["repoPath"].as_str().map(str::to_string),
@@ -710,6 +743,10 @@ impl Model {
         // treq, so the tab counts and the Changes tab read again.
         if streaming(&self.terminals) < was {
           self.view.changes_revision += 1;
+        }
+        let effects = self.reviews_done(&previous, data);
+        if !effects.is_empty() {
+          return Some(effects);
         }
       }
       "terminal.dismissAsset" => {
@@ -950,6 +987,15 @@ impl Model {
         }
       }
       OpenRequest::PrReview { number, state } => self.open_github_pr(*number, state),
+      OpenRequest::WorkspaceChanges {
+        repo_path,
+        workspace_id,
+      } => {
+        if let Some(workspace) = self.workspace_in(repo_path, *workspace_id, data) {
+          self.select_workspace(Some(&workspace), data);
+          self.view.tab = Tab::Changes;
+        }
+      }
     }
     Vec::new()
   }
@@ -1346,6 +1392,69 @@ mod tests {
     assert_eq!(model.selected, Some(1));
     model.screen_action(&field("terminal.shortcut", "k".into()), &data);
     assert!(model.dialogs.palette);
+  }
+
+  /// The AI Review agent's turn ending is the review done: the controller
+  /// counts its comments for a toast. Other agents' turns are not.
+  #[test]
+  fn an_ai_review_turn_ending_reports_the_review_done() {
+    let (mut model, data) = (model(), data());
+    let summary = |name: &str, streaming: bool| json!([{"id": "agent-5", "kind": "agent", "name": name, "branchName": "b", "repoPath": "/repo", "isStreaming": streaming}]);
+    model.screen_action(
+      &field("terminal.summaries", summary("AI Review", true)),
+      &data,
+    );
+    let effects = model
+      .screen_action(
+        &field("terminal.summaries", summary("AI Review", false)),
+        &data,
+      )
+      .unwrap_or_default();
+    assert_eq!(
+      effects,
+      vec![Effect::ReviewDone {
+        repo_path: "/repo".into(),
+        workspace_id: 2,
+        branch: "b".into(),
+      }]
+    );
+    model.screen_action(
+      &field("terminal.summaries", summary("Claude 1", true)),
+      &data,
+    );
+    let effects = model
+      .screen_action(
+        &field("terminal.summaries", summary("Claude 1", false)),
+        &data,
+      )
+      .unwrap_or_default();
+    assert!(effects.is_empty(), "{effects:?}");
+  }
+
+  #[test]
+  fn review_done_titles_count_the_comments() {
+    use super::super::model::review_done_title;
+    assert_eq!(review_done_title(0), "Review done · no comments");
+    assert_eq!(review_done_title(1), "Review done · 1 comment");
+    assert_eq!(review_done_title(3), "Review done · 3 comments");
+  }
+
+  /// A review-done toast's Show comments opens that workspace's Changes tab.
+  #[test]
+  fn showing_a_reviews_comments_opens_its_changes_tab() {
+    let (mut model, data) = (model(), data());
+    model.native_event(
+      &NativeEvent::Open {
+        what: OpenRequest::WorkspaceChanges {
+          repo_path: "/repo".into(),
+          workspace_id: 3,
+        },
+      },
+      &data,
+    );
+    assert_eq!(model.selected, Some(3));
+    assert_eq!(model.view.tab, Tab::Changes);
+    assert!(matches!(model.page, Page::Workspace));
   }
 
   /// An agent's turn ends when its terminal stops streaming: it may have

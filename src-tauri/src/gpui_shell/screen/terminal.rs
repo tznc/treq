@@ -2343,6 +2343,11 @@ impl TerminalPane {
       || route.pending != previous.pending
     {
       if let Some(id) = route.active_session_id {
+        // A session that just became active shows: the pane expands to at
+        // least its default height.
+        if previous.active_session_id != Some(id) {
+          self.reveal_pane();
+        }
         // `auto-mount`: the active session opens and takes focus.
         self.open_agent(id, window, cx);
       } else if previous.active_session_id.is_some() {
@@ -2452,6 +2457,12 @@ impl TerminalPane {
       Kind::Shell { dir, .. } => dir.clone(),
       Kind::Remote { target } => target.remote_working_directory.clone(),
     }
+  }
+
+  /// Uncollapses the pane and grows it to a readable height.
+  fn reveal_pane(&mut self) {
+    self.collapsed = false;
+    self.height = self.height.max(HEIGHT_DEFAULT);
   }
 
   fn toggle_collapse(&mut self, cx: &mut Context<Self>) {

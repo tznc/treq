@@ -305,6 +305,8 @@ mod tests {
     let mut model = Model::new(Some("/repo".into()));
     model.selected = Some(2);
     model.terminals = vec![TerminalSummary {
+      id: None,
+      name: None,
       agent: true,
       branch: Some("login".into()),
       repo_path: Some("/repo".into()),

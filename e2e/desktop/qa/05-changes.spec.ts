@@ -151,10 +151,11 @@ test("changes: diff, inline comment add/edit, review bar", async ({ page }) => {
   await settle(page, 1000);
   await capture(page, {
     name: "05-changes-review-started",
-    title: "Review bar after Start Review",
+    title: "After Start review",
     screen: true,
     expectations: [
-      "Review submit controls (send to agent / Plan / Edit) readable",
+      "A 'Review started on feat/empty-event-message' toast reads 'Comments will appear inline'",
+      "The AI Review terminal pane is open at a readable height, its column active",
       "Pending comment count still shown",
     ],
   });

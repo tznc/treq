@@ -461,6 +461,28 @@ fn terminal_pane_runs_dashboard_commands(cx: &mut TestAppContext) {
   assert!(h.drawn("terminal-expand"));
 }
 
+/// A session that becomes active (a review that just started, say) shows:
+/// a collapsed pane expands so its column is on screen.
+#[gpui::test]
+fn terminal_pane_expands_for_a_newly_active_session(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "activeSessionId": 3,
+      "commands": [{ "nonce": 1, "kind": "toggleCollapse" }],
+    }),
+  );
+  assert!(h.drawn("terminal-expand"), "collapsed");
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 4 }));
+  assert!(
+    !h.drawn("terminal-expand"),
+    "the new session's column shows"
+  );
+  assert!(h.drawn("terminal-column-active"));
+}
+
 #[gpui::test]
 fn terminal_pane_activates_the_selected_workspaces_terminal(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));

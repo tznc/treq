@@ -964,6 +964,20 @@ fn changes_tab_starts_an_ai_review_in_a_new_terminal(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn starting_an_ai_review_says_so_in_a_toast(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("start-agent-review");
+  h.cx.run_until_parked();
+  let calls = host.calls();
+  assert!(
+    calls
+      .iter()
+      .any(|c| c.starts_with("notify toast Review started on ")),
+    "{calls:?}"
+  );
+}
+
+#[gpui::test]
 fn changes_tab_discards_the_review_once_confirmed(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   comment_line(&mut h, "Nit");
