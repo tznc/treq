@@ -264,25 +264,25 @@ pub fn jj_get_log(
       last_error.unwrap_or_else(|| JjError::IoError("Failed to evaluate log revset".to_string())),
     );
   };
-  // Home-repo immutability uses the remote tracking bookmark (e.g. `main@origin`); unpushed commits stay mutable, pushed commits immutable; falls back to local bookmark when no remote ref exists.
-  let immutable_ref = if is_home_repo.unwrap_or(false) {
+  // Home-repo immutability follows the remote tracking bookmark (e.g. `main@origin`): pushed commits are immutable, unpushed ones mutable, and without a remote only the root is.
+  let immutable_expr = if is_home_repo.unwrap_or(false) {
     let remote_symbol = RemoteRefSymbol {
       name: RefName::new(target_branch),
       remote: RemoteName::new("origin"),
     };
     let remote_ref = loaded.repo.view().get_remote_bookmark(remote_symbol);
     if !remote_ref.target.is_absent() {
-      format!("{}@origin", target_branch)
+      format!(
+        "::{}",
+        format_revset_symbol(&format!("{}@origin", target_branch))
+      )
     } else {
-      selected_target_ref
+      "root()".to_string()
     }
   } else {
-    selected_target_ref
+    format!("::{}", format_revset_symbol(&selected_target_ref))
   };
-  let immutable_revset = evaluate_revset(
-    &loaded,
-    &format!("::{}", format_revset_symbol(&immutable_ref)),
-  )?;
+  let immutable_revset = evaluate_revset(&loaded, &immutable_expr)?;
   let is_immutable = immutable_revset.containing_fn();
   let wc_commit_ids: HashSet<_> = loaded
     .repo
