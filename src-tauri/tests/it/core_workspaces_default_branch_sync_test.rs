@@ -506,3 +506,52 @@ fn home_commit_moves_branch_but_keeps_dirty_workspace_working_copy() {
     "dirty workspace content\n"
   );
 }
+
+/// When the default branch has diverged because of a commit made in the home
+/// repo, a pull from the default-branch workspace must rebase that commit
+/// onto `origin` too, not only the commits under the workspace's own `@`.
+#[test]
+fn workspace_pull_on_diverged_default_branch_keeps_home_commit() {
+  let repo = TestRepo::with_remote().expect("Failed to create test repo with remote");
+  let default_branch = repo.default_branch();
+  let main_workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    default_branch,
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("Failed to create main workspace");
+  treq_lib::local_db::update_workspace_target_branch(
+    &repo.repo_path,
+    main_workspace.id,
+    default_branch,
+  )
+  .expect("Failed to set main workspace target branch");
+
+  repo
+    .remote_commit_file("remote.txt", "remote\n", "remote commit")
+    .expect("Failed to commit on the remote");
+  TestRepo::write_workspace_file(&repo.repo_path, "home.txt", "home\n")
+    .expect("Failed to write home file");
+  treq_lib::jj::jj_commit(&repo.repo_path, "home commit").expect("Home commit should succeed");
+  treq_lib::core::fetch_repo(&repo.repo_path).expect("Fetch should succeed");
+  assert!(treq_lib::jj::jj_is_bookmark_conflicted(
+    &repo.repo_path,
+    default_branch
+  ));
+
+  let pull =
+    treq_lib::core::pull_workspace_from_remote(&repo.repo_path, Some(main_workspace.id), "git")
+      .expect("Workspace pull should succeed");
+  assert!(pull.success, "{}", pull.message);
+
+  let on_branch = TestRepo::jj_commit_ids_in_revset(
+    &repo.repo_path,
+    &format!("::{default_branch} & description(substring:\"home commit\")"),
+  )
+  .expect("Failed to query the branch");
+  assert_eq!(on_branch.len(), 1, "home commit left the default branch");
+}
