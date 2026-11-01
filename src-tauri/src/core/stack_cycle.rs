@@ -6,7 +6,21 @@ use crate::local_db::Workspace;
 /// Whether pointing `branch` at `new_target` would form a stack cycle: the
 /// target chain starting at `new_target` reaches `branch`. Self-targets count.
 pub fn would_create_stack_cycle(workspaces: &[Workspace], branch: &str, new_target: &str) -> bool {
-  let _ = (workspaces, branch, new_target);
+  let mut current = new_target;
+  // Bounded walk: a corrupt chain that loops elsewhere must still end.
+  for _ in 0..=workspaces.len() {
+    if current == branch {
+      return true;
+    }
+    let Some(next) = workspaces
+      .iter()
+      .find(|ws| ws.branch_name == current)
+      .and_then(|ws| ws.target_branch.as_deref())
+    else {
+      return false;
+    };
+    current = next;
+  }
   false
 }
 

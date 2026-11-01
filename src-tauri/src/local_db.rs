@@ -615,6 +615,11 @@ pub fn add_workspace_targeting(
   not_on_remote: bool,
   target_branch: &str,
 ) -> Result<Workspace, String> {
+  crate::core::stack_cycle::ensure_no_stack_cycle(
+    &get_workspaces(repo_path)?,
+    &branch_name,
+    target_branch,
+  )?;
   let conn = get_connection(repo_path)?;
   let tx = conn
     .unchecked_transaction()
@@ -847,6 +852,14 @@ pub fn update_workspace_target_branch(
   id: i64,
   target_branch: &str,
 ) -> Result<(), String> {
+  let workspaces = get_workspaces(repo_path)?;
+  if let Some(workspace) = workspaces.iter().find(|ws| ws.id == id) {
+    crate::core::stack_cycle::ensure_no_stack_cycle(
+      &workspaces,
+      &workspace.branch_name,
+      target_branch,
+    )?;
+  }
   let conn = get_connection(repo_path)?;
   conn
     .execute(

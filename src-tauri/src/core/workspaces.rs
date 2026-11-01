@@ -4046,6 +4046,12 @@ pub(crate) fn apply_workspace_target_branch_after(
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
     .map_err(|e| format!("Failed to get workspace from db: {}", e))?
     .ok_or("Workspace not found in database")?;
+  // Refuse before the rebase so a blocked retarget leaves the repo untouched.
+  crate::core::stack_cycle::ensure_no_stack_cycle(
+    &local_db::get_workspaces(repo_path)?,
+    &workspace.branch_name,
+    target_branch,
+  )?;
 
   let workspace_path = Path::new(repo_path)
     .join(".treq")
