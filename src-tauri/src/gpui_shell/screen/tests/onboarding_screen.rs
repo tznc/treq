@@ -97,6 +97,9 @@ impl crate::gpui_shell::overlay::OverlayHost for NoOverlayHost {
   fn branches(&self, _: &str) -> Result<Vec<crate::jj::JjBranch>, String> {
     Ok(Vec::new())
   }
+  fn current_branch(&self, _: &str) -> Option<String> {
+    None
+  }
   fn switch_branch(&self, _: &str, _: &str) -> Result<(), String> {
     Ok(())
   }

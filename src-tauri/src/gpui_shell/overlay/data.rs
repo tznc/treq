@@ -48,6 +48,8 @@ pub trait OverlayHost: Send + Sync {
   fn pr(&self, repo_path: &str, branch: &str) -> Option<PrLink>;
   fn workspaces(&self, repo_path: &str) -> Result<Vec<WorkspaceRow>, String>;
   fn branches(&self, repo_path: &str) -> Result<Vec<JjBranch>, String>;
+  /// The branch the home repository has checked out; `None` when detached.
+  fn current_branch(&self, repo_path: &str) -> Option<String>;
   fn switch_branch(&self, repo_path: &str, name: &str) -> Result<(), String>;
   fn open_url(&self, url: &str);
   /// Where workspace `workspace_id`'s checks run.
@@ -109,6 +111,12 @@ impl OverlayHost for Backend {
 
   fn branches(&self, repo_path: &str) -> Result<Vec<JjBranch>, String> {
     core::list_repo_branches(repo_path)
+  }
+
+  fn current_branch(&self, repo_path: &str) -> Option<String> {
+    core::repo::get_repo_current_branch(repo_path)
+      .ok()
+      .and_then(|branch| branch.current_branch)
   }
 
   fn switch_branch(&self, repo_path: &str, name: &str) -> Result<(), String> {

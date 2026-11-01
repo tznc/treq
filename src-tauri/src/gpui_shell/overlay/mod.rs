@@ -307,20 +307,21 @@ impl Overlay {
         };
         self.changed();
         self._load = Some(cx.spawn(async move |this, cx| {
-          let (read, workspaces) = cx
+          let (read, workspaces, current) = cx
             .background_spawn(async move {
               let workspaces = host.workspaces(&repo_path).unwrap_or_else(|err| {
                 log::warn!("branch switcher: {err}");
                 Vec::new()
               });
-              (host.branches(&repo_path), workspaces)
+              let current = host.current_branch(&repo_path);
+              (host.branches(&repo_path), workspaces, current)
             })
             .await;
           this
             .update(cx, |this, cx| {
               this.body = match read {
                 Ok(list) => Body::Branches {
-                  branches: Some(group_branches(list, &workspaces)),
+                  branches: Some(group_branches(list, &workspaces, current.as_deref())),
                   error: None,
                   switching: false,
                 },
@@ -661,10 +662,15 @@ impl Overlay {
   }
 }
 
-/// The switcher's groups: the branch the home repository has checked out,
-/// then those a workspace has, then the other local and the remote (`@` in
-/// the name) branches.
-fn group_branches(list: Vec<JjBranch>, workspaces: &[WorkspaceRow]) -> Vec<BranchRow> {
+/// The switcher's groups: `current`, the branch the home repository has
+/// checked out, then those a workspace has, then the other local and the
+/// remote (`@` in the name) branches. jj marks every bookmark on the
+/// checkout's commit current, so only `current` is the main tree's.
+fn group_branches(
+  list: Vec<JjBranch>,
+  workspaces: &[WorkspaceRow],
+  current: Option<&str>,
+) -> Vec<BranchRow> {
   let mut grouped: Vec<BranchRow> = list
     .into_iter()
     .map(|branch| {
@@ -674,7 +680,7 @@ fn group_branches(list: Vec<JjBranch>, workspaces: &[WorkspaceRow]) -> Vec<Branc
         .cloned();
       let group = if workspace.is_some() {
         1
-      } else if branch.is_current {
+      } else if current == Some(branch.name.as_str()) {
         0
       } else if branch.name.contains('@') {
         3
@@ -827,7 +833,14 @@ impl Overlay {
           1 => (
             theme::ICON_BRANCH,
             p.muted_foreground,
-            row.workspace.as_ref().map(|w| w.title.clone()),
+            // Its workspace's name, unless that is the branch itself.
+            row.workspace.as_ref().map(|w| {
+              if w.title == w.branch_name {
+                "workspace".to_string()
+              } else {
+                w.title.clone()
+              }
+            }),
           ),
           2 => (theme::ICON_BRANCH, p.muted_foreground, None),
           _ => (
@@ -848,9 +861,7 @@ impl Overlay {
           .children(tag.map(|tag| {
             ui::text(div(), TextSize::Sm)
               .text_color(p.muted_foreground)
-              .when(in_workspace, |this| {
-                this.debug_selector(move || tag_id)
-              })
+              .when(in_workspace, |this| this.debug_selector(move || tag_id))
               .child(tag)
           }))
       }

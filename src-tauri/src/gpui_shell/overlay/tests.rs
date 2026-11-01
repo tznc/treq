@@ -13,6 +13,8 @@ struct FakeHost {
   pr: Option<PrLink>,
   workspaces: Vec<WorkspaceRow>,
   branches: Vec<JjBranch>,
+  /// The home repository's checked-out branch.
+  current: Option<String>,
   switch_error: Option<String>,
   /// Checks fail with this error.
   run_error: Option<String>,
@@ -48,6 +50,10 @@ impl OverlayHost for FakeHost {
   fn branches(&self, repo_path: &str) -> Result<Vec<JjBranch>, String> {
     self.record(format!("branches {repo_path}"));
     Ok(self.branches.clone())
+  }
+
+  fn current_branch(&self, _: &str) -> Option<String> {
+    self.current.clone()
   }
 
   fn switch_branch(&self, repo_path: &str, name: &str) -> Result<(), String> {
@@ -519,6 +525,7 @@ fn branch_host() -> FakeHost {
       branch("main@origin", false),
       branch("main", true),
     ],
+    current: Some("main".into()),
     ..FakeHost::default()
   }
 }
@@ -573,15 +580,18 @@ fn branch_switcher_shows_a_failed_switch(cx: &mut TestAppContext) {
   assert!(h.shown().is_empty());
 }
 
-/// `main` in the home repository, `feat/alpha` in workspace 3.
+/// `main` in the home repository, `feat/alpha` in workspace 3, and
+/// `chore/x`, another bookmark on the home checkout's commit.
 fn held_branch_host() -> FakeHost {
   FakeHost {
     branches: vec![
       branch("feat/x", false),
       branch("feat/alpha", true),
+      branch("chore/x", true),
       branch("main@origin", false),
       branch("main", true),
     ],
+    current: Some("main".into()),
     ..workspace_host()
   }
 }
@@ -589,15 +599,16 @@ fn held_branch_host() -> FakeHost {
 #[gpui::test]
 fn branch_switcher_groups_main_tree_workspaces_local_and_remote(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, branch_json(), held_branch_host());
+  // Only the branch the home repository has checked out is the main tree's.
   assert_eq!(
     h.shown(),
-    vec!["main", "feat/alpha", "feat/x", "main@origin"]
+    vec!["main", "feat/alpha", "feat/x", "chore/x", "main@origin"]
   );
   assert!(h.host.calls().contains(&"workspaces /repo".to_string()));
   let groups = h.overlay.read_with(&h.cx, |o, _| {
     o.entries().iter().map(|e| e.group).collect::<Vec<_>>()
   });
-  assert_eq!(groups, vec![Some(0), Some(1), Some(2), Some(3)]);
+  assert_eq!(groups, vec![Some(0), Some(1), Some(2), Some(2), Some(3)]);
   assert!(h.drawn("overlay-branch-workspace-1"));
 }
 
