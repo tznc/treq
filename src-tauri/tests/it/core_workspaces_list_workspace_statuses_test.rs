@@ -351,8 +351,14 @@ fn test_workspace_list_statuses_does_not_cross_assign_sibling_branch_name_when_e
     .find(|s| s.current.workspace_name == logging.workspace_name)
     .expect("logging workspace should be returned");
 
-  assert_eq!(checks.workspace_name, "treq-feat-checks");
-  assert_eq!(logging.workspace_name, "treq-feat-logging");
+  assert_eq!(
+    checks.workspace_name,
+    format!("{}-treq-feat-checks", checks.id)
+  );
+  assert_eq!(
+    logging.workspace_name,
+    format!("{}-treq-feat-logging", logging.id)
+  );
   assert_ne!(logging_status.current.branch_name, "treq/feat-checks");
 }
 

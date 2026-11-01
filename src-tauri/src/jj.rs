@@ -2899,8 +2899,31 @@ pub fn jj_commit(workspace_path: &str, message: &str) -> Result<String, JjError>
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
 
   let ref_name = RefName::new(&branch);
-  tx.repo_mut()
-    .set_local_bookmark_target(ref_name, RefTarget::normal(committed.id().clone()));
+  let branch_target = tx.repo().view().get_local_bookmark(ref_name).clone();
+  let committed_target = RefTarget::normal(committed.id().clone());
+  let grown_side = branch_target
+    .added_ids()
+    .find(|id| *id == wc_commit.id() || wc_commit.parent_ids().contains(id))
+    .cloned();
+  let fast_forward = match (&grown_side, branch_target.as_normal()) {
+    (Some(_), Some(_)) => true,
+    (Some(_), None) => false,
+    (None, Some(tip)) => tx
+      .repo()
+      .index()
+      .is_ancestor(tip, committed.id())
+      .map_err(|e| JjError::IoError(format!("Failed ancestry check: {}", e)))?,
+    (None, None) => branch_target.is_absent(),
+  };
+  if fast_forward {
+    tx.repo_mut()
+      .set_local_bookmark_target(ref_name, committed_target);
+  } else if let Some(base) = grown_side.or_else(|| wc_commit.parent_ids().first().cloned()) {
+    // A diverged branch, or one a fetch moved past this checkout: keep both sides for a pull to heal.
+    tx.repo_mut()
+      .merge_local_bookmark(ref_name, &RefTarget::normal(base), &committed_target)
+      .map_err(|e| JjError::IoError(format!("Failed to advance bookmark: {}", e)))?;
+  }
 
   if !workspace_names.is_empty() {
     let new_wc = block_on(
@@ -4750,6 +4773,20 @@ pub use merge_commits::*;
 
 #[cfg(test)]
 mod tests {
+
+  #[test]
+  fn sanitize_workspace_name_never_yields_empty_or_hidden_names() {
+    for raw in ["..", " ..", ".", "", " ", ". .", " .a", "..a"] {
+      let name = sanitize_workspace_name(raw);
+      assert!(!name.is_empty(), "{raw:?} sanitized to an empty name");
+      assert!(
+        !name.starts_with('.'),
+        "{raw:?} sanitized to hidden {name:?}"
+      );
+    }
+    assert_eq!(sanitize_workspace_name(" .a"), "a");
+    assert_eq!(sanitize_workspace_name("feat/x"), "feat-x");
+  }
   use super::*;
 
   /// A workspace path that does not exist, under a temp dir that does.

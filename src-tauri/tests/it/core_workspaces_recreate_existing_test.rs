@@ -35,9 +35,16 @@ fn test_create_workspace_recovers_orphaned_jj_dir() {
     )
   });
 
-  // .jj must still exist on disk.
-  assert!(jj_dir.exists(), ".jj must exist after recovery create");
-  assert!(!workspace_dir.join("partial").exists());
+  // The new workspace lives in its own id-prefixed dir.
+  assert!(repo
+    .workspaces_dir()
+    .join(&ws2.workspace_path)
+    .join(".jj")
+    .exists());
+  assert_eq!(
+    ws2.workspace_path,
+    format!("{}-feat-orphan-recovery", ws2.id)
+  );
 
   // Exactly one db row for this branch.
   let all = treq_lib::local_db::get_workspace_by_branch(&repo.repo_path, branch)

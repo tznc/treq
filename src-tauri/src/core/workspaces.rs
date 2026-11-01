@@ -816,14 +816,25 @@ pub fn create_workspace_with_symlinked_dirs(
   let repo_mutation_lock = commit_lock_for_repo(repo_path);
   let _repo_mutation_guard = repo_mutation_lock.lock_or_recover();
 
-  if local_db::get_workspace_by_branch(repo_path, branch_name)
+  if let Some(existing) = local_db::get_workspace_by_branch(repo_path, branch_name)
     .map_err(|e| format!("Failed to check existing workspace: {e}"))?
-    .is_some()
   {
-    return Err(format!(
-      "Workspace '{}' is already registered; refusing to recreate it",
-      branch_name
-    ));
+    let existing_dir = Path::new(repo_path)
+      .join(".treq")
+      .join("workspaces")
+      .join(&existing.workspace_path);
+    if existing_dir.join(".jj").exists() {
+      return Err(format!(
+        "Workspace '{}' is already registered; refusing to recreate it",
+        branch_name
+      ));
+    }
+    // A create killed between reserving its row and making the dir: drop it and retry.
+    rollback_created_workspace(
+      repo_path,
+      &existing_dir.to_string_lossy(),
+      Some(existing.id),
+    );
   }
 
   // Moved files outside the sparse cone would land in the commit but be invisible on disk.
@@ -894,21 +905,40 @@ pub fn create_workspace_with_symlinked_dirs(
   let new_branch: bool = !branch_exists || resolved_source_branch.as_deref() == Some(&remote_ref);
   let prior_bookmark = branch_exists.then(|| existing.commit_id(branch_name));
   drop(existing);
-  let workspace_name = jj::create_workspace(
+
+  // The row's id prefixes the dir and jj name, so `feat/x` and `feat-x` never collide.
+  let reserved = local_db::reserve_workspace(
     repo_path,
-    branch_name,
+    branch_name.to_string(),
+    description,
+    moved_files.clone(),
+    sparse_patterns.clone(),
+    !branch_exists_on_remote,
+    &effective_target_branch,
+    |id| jj::sanitize_workspace_name(&format!("{id}-{branch_name}")),
+  )
+  .map_err(|e| format!("Failed to add workspace to db: {}", e))?;
+
+  let workspace_name = match jj::create_workspace(
+    repo_path,
+    &reserved.workspace_name,
     branch_name,
     new_branch,
     resolved_source_branch.as_deref(),
     Some(&effective_target_branch),
     sparse_patterns.as_deref(),
-  )
-  .map_err(|e| format!("Failed to create workspace: {}", e))?;
+  ) {
+    Ok(name) => name,
+    Err(e) => {
+      if let Err(error) = local_db::delete_workspace(repo_path, reserved.id) {
+        tracing::warn!(%error, id = reserved.id, "Rollback: failed to delete reserved workspace row");
+      }
+      return Err(format!("Failed to create workspace: {}", e));
+    }
+  };
 
-  // jj has registered the workspace. Any failure from here on must undo that,
-  // or the half-made workspace blocks a retry and later shows up in the
-  // sidebar through discovery without its metadata.
-  let mut registered_id: Option<i64> = None;
+  // jj has registered the workspace; any later failure undoes it and the reserved row.
+  let registered_id = Some(reserved.id);
   let result = (|| -> Result<local_db::Workspace, String> {
     // Extract just the sanitized workspace name from the full path
     let workspace_path = Path::new(&workspace_name)
@@ -958,21 +988,7 @@ pub fn create_workspace_with_symlinked_dirs(
       .map_err(|e| format!("Failed to install library skills into workspace: {e}"))?;
     }
 
-    // One transaction: the row, the not_on_remote flag (set when the branch
-    // isn't on the remote) and the target branch.
-    let workspace = local_db::add_workspace_targeting(
-      repo_path,
-      workspace_path.clone(),
-      workspace_path,
-      branch_name.to_string(),
-      description,
-      moved_files.clone(),
-      sparse_patterns.clone(),
-      !branch_exists_on_remote,
-      &effective_target_branch,
-    )
-    .map_err(|e| format!("Failed to add workspace to db: {}", e))?;
-    registered_id = Some(workspace.id);
+    let workspace = reserved;
 
     // If moved_files are specified, perform the squash operation
     if let Some(files) = moved_files.clone() {
@@ -2175,8 +2191,10 @@ mod tests {
     assert!(!crate::jj::list_jj_workspaces(&repo_path)
       .expect("list jj workspaces")
       .iter()
-      .any(|name| name == "fix-rollback"));
-    assert!(!temp.path().join(".treq/workspaces/fix-rollback").exists());
+      .any(|name| name.ends_with("fix-rollback")));
+    assert!(fs::read_dir(temp.path().join(".treq/workspaces"))
+      .map(|mut entries| entries.next().is_none())
+      .unwrap_or(true));
     assert!(super::list_workspaces(&repo_path)
       .expect("list workspaces")
       .is_empty());
@@ -2626,12 +2644,16 @@ mod tests {
     assert!(!workspace_dir.exists());
     let second = super::create_workspace(&repo_path, "fix/race", None, None, None, None, None)
       .expect("recreate while removal is pending");
-    let marker = workspace_dir.join("keep-me.txt");
+    let marker = temp
+      .path()
+      .join(".treq/workspaces")
+      .join(&second.workspace_path)
+      .join("keep-me.txt");
     fs::write(&marker, "new work").expect("write marker");
 
     crate::jj::remove_workspace_directory_only(&leftover).expect("background removal");
 
-    assert_eq!(second.workspace_path, first.workspace_path);
+    assert_ne!(second.workspace_path, first.workspace_path);
     assert_eq!(fs::read_to_string(marker).expect("marker"), "new work");
   }
 
@@ -2669,7 +2691,11 @@ mod tests {
         .expect("open PR workspace");
 
     assert!(created);
-    assert!(workspace_dir.exists());
+    assert!(temp
+      .path()
+      .join(".treq/workspaces")
+      .join(&workspace.workspace_path)
+      .exists());
     let listed = super::list_workspace_statuses(&repo_path).expect("list statuses");
     assert!(listed.iter().any(|s| s.current.id == workspace.id));
   }
@@ -2733,7 +2759,7 @@ mod tests {
   }
 
   #[test]
-  fn create_workspace_recovers_orphaned_partial_directory() {
+  fn create_workspace_ignores_orphaned_partial_directory_under_the_old_name() {
     let temp = TempDir::new().expect("tempdir");
     let repo_path = init_workspace_creation_repo(&temp);
     let partial = temp.path().join(".treq/workspaces/fix-partial");
@@ -2741,10 +2767,13 @@ mod tests {
     fs::write(partial.join("partial"), "incomplete").expect("write marker");
 
     let created = super::create_workspace(&repo_path, "fix/partial", None, None, None, None, None)
-      .expect("recover partial workspace");
+      .expect("create beside the orphaned partial dir");
 
     assert_eq!(created.branch_name, "fix/partial");
-    assert!(!partial.join("partial").exists());
+    assert_eq!(
+      created.workspace_path,
+      format!("{}-fix-partial", created.id)
+    );
   }
 
   #[test]
@@ -2765,7 +2794,7 @@ mod tests {
     let created = super::create_workspace(&repo_path, "fix/killed", None, None, None, None, None)
       .expect("retry recovers the interrupted create");
 
-    assert_eq!(created.workspace_path, "fix-killed");
+    assert_eq!(created.workspace_path, format!("{}-fix-killed", created.id));
     assert!(crate::jj::jj_get_commit_id(&repo_path, "fix/killed").is_ok());
   }
 
@@ -2785,7 +2814,12 @@ mod tests {
     )
     .expect_err("missing source must fail");
 
-    assert!(!temp.path().join(".treq/workspaces/fix-bad-source").exists());
+    assert!(fs::read_dir(temp.path().join(".treq/workspaces"))
+      .map(|mut entries| entries.next().is_none())
+      .unwrap_or(true));
+    assert!(super::list_workspaces(&repo_path)
+      .expect("list workspaces")
+      .is_empty());
   }
 
   #[test]
@@ -3869,6 +3903,10 @@ fn sync_home_on_branch_and_workspace(
     SyncSource::WorkspaceToHome => workspace_path_str,
   };
   jj::jj_workspace_update_stale(source_path).warn_on_err("jj workspace update stale");
+  // Setting a diverged bookmark to one checkout would drop `origin`'s side; a pull heals it instead.
+  if jj::jj_is_bookmark_conflicted(source_path, branch) {
+    return Ok(());
+  }
   // Use `@-` when `@` is the empty working copy, so no empty commit gets pushed.
   let checkout_tip = jj::jj_resolve_bookmark_tip(source_path)
     .map_err(|e| format!("Failed to resolve source tip: {}", e))?;
@@ -4046,6 +4084,7 @@ pub(crate) fn apply_workspace_target_branch_after(
     &local_db::get_workspaces(repo_path)?,
     &workspace.branch_name,
     target_branch,
+    &crate::core::get_repo_default_branch(repo_path).unwrap_or_default(),
   )?;
 
   let workspace_path = Path::new(repo_path)

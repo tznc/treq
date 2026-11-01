@@ -72,8 +72,13 @@ pub(super) fn workspace_dir_name_from_cwd(cwd: &Path) -> Option<String> {
 /// Repository a workspace command acts on: the repository containing the
 /// current directory or, with `-r <repo>`, one of its supporting repositories.
 pub(super) fn resolve_command_repo(matches: &Matches) -> Result<String, String> {
+  let spec = match required_repo_arg(matches) {
+    Ok(spec) => Some(spec),
+    Err(error) if error.starts_with("invalid_arguments:") => return Err(error),
+    Err(_) => None,
+  };
   let repo_path = detect_repo_path()?;
-  match get_arg_value(matches, "repo") {
+  match spec {
     None => Ok(repo_path),
     Some(spec) => {
       let cwd = std::env::current_dir().map_err(|e| format!("Failed to get CWD: {}", e))?;
@@ -230,7 +235,7 @@ pub(super) fn classify_cli_error(message: &str) -> &'static str {
 fn handle_repo_command(matches: &Matches, format: OutputFormat) -> Result<(), String> {
   let action =
     get_arg_value(matches, "action").ok_or_else(|| "repo action is required".to_string())?;
-  let repo_path = get_arg_value(matches, "repo").ok_or_else(|| "--repo is required".to_string())?;
+  let repo_path = required_repo_arg(matches)?;
 
   match action.as_str() {
     "inspect" => {
@@ -306,7 +311,22 @@ fn require_idempotency_key(key: Option<String>) -> Result<String, String> {
 /// resolved lexically. Symlinks are kept, so an already-absolute path, and the
 /// DB keys stored under it, stay as they are. Remote commands run without a
 /// shell, so nothing else expands a `~` a phone sends.
-fn absolute_repo_arg(repo: &str) -> String {
+/// The raw `--repo` value; a given but empty or blank value is an error, not
+/// the current directory.
+fn required_repo_arg(matches: &Matches) -> Result<String, String> {
+  match matches.args.get("repo").and_then(|arg| arg.value.as_str()) {
+    Some(repo) if repo.trim().is_empty() => {
+      Err("invalid_arguments: --repo must not be empty".to_string())
+    }
+    Some(repo) => Ok(repo.to_string()),
+    None => Err("--repo is required".to_string()),
+  }
+}
+
+fn absolute_repo_arg(repo: &str) -> Result<String, String> {
+  if repo.trim().is_empty() {
+    return Err("invalid_arguments: --repo must not be empty".to_string());
+  }
   let repo = crate::core::remote::expand_home(repo, std::env::var("HOME").ok().as_deref());
   let absolute = std::path::absolute(&repo).unwrap_or_else(|_| repo.clone().into());
   let mut normalized = std::path::PathBuf::new();
@@ -319,7 +339,7 @@ fn absolute_repo_arg(repo: &str) -> String {
       other => normalized.push(other),
     }
   }
-  normalized.to_string_lossy().to_string()
+  Ok(normalized.to_string_lossy().to_string())
 }
 
 /// Validates `--metadata` as a JSON object and folds `--title` into it.
@@ -348,8 +368,8 @@ pub(crate) fn parse_remote_command_request(
   use crate::core::remote::{FileRevision, TreqCommandRequest};
   let action =
     get_arg_value(matches, "action").ok_or_else(|| format!("{command} action is required"))?;
-  let raw_repo = get_arg_value(matches, "repo").ok_or_else(|| "--repo is required".to_string())?;
-  let repo = absolute_repo_arg(&raw_repo);
+  let raw_repo = required_repo_arg(matches)?;
+  let repo = absolute_repo_arg(&raw_repo)?;
   // A workspace path means its home repo (no stray local.db in the workspace).
   let repo = match (command, action.as_str()) {
     // `~` is the host's home, which only the listing resolves.

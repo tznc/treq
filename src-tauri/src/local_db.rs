@@ -615,29 +615,91 @@ pub fn add_workspace_targeting(
   not_on_remote: bool,
   target_branch: &str,
 ) -> Result<Workspace, String> {
+  insert_workspace_targeting(
+    repo_path,
+    branch_name,
+    description,
+    moved_files,
+    sparse_patterns,
+    not_on_remote,
+    target_branch,
+    |_| (workspace_name, workspace_path),
+  )
+}
+
+/// [`add_workspace_targeting`] for a workspace whose directory is not made
+/// yet: the row is inserted first and `dir_name` turns its id into the
+/// directory (and jj workspace) name, stored in the same transaction.
+#[expect(
+  clippy::too_many_arguments,
+  reason = "the columns of one insert, as add_workspace takes them"
+)]
+pub fn reserve_workspace(
+  repo_path: &str,
+  branch_name: String,
+  description: Option<String>,
+  moved_files: Option<Vec<String>>,
+  sparse_patterns: Option<Vec<String>>,
+  not_on_remote: bool,
+  target_branch: &str,
+  dir_name: impl FnOnce(i64) -> String,
+) -> Result<Workspace, String> {
+  insert_workspace_targeting(
+    repo_path,
+    branch_name,
+    description,
+    moved_files,
+    sparse_patterns,
+    not_on_remote,
+    target_branch,
+    |id| {
+      let name = dir_name(id);
+      (name.clone(), name)
+    },
+  )
+}
+
+#[expect(
+  clippy::too_many_arguments,
+  reason = "the columns of one insert, as add_workspace takes them"
+)]
+fn insert_workspace_targeting(
+  repo_path: &str,
+  branch_name: String,
+  description: Option<String>,
+  moved_files: Option<Vec<String>>,
+  sparse_patterns: Option<Vec<String>>,
+  not_on_remote: bool,
+  target_branch: &str,
+  name_and_path: impl FnOnce(i64) -> (String, String),
+) -> Result<Workspace, String> {
   crate::core::stack_cycle::ensure_no_stack_cycle(
     &get_workspaces(repo_path)?,
     &branch_name,
     target_branch,
+    &crate::core::get_repo_default_branch(repo_path).unwrap_or_default(),
   )?;
   let conn = get_connection(repo_path)?;
   let tx = conn
     .unchecked_transaction()
     .map_err(|e| format!("Failed to start workspace insert: {}", e))?;
+  // The path depends on the id: insert under a placeholder, then set it in this transaction.
   let id = insert_workspace(
     &tx,
-    &workspace_name,
-    &workspace_path,
+    "",
+    ".pending",
     &branch_name,
     description,
     moved_files,
     sparse_patterns,
   )?;
+  let (workspace_name, workspace_path) = name_and_path(id);
+  release_archived_workspace_path(&tx, &workspace_path)?;
   tx.execute(
-    "UPDATE workspaces SET not_on_remote = ?1, target_branch = ?2 WHERE id = ?3",
-    params![not_on_remote as i64, target_branch, id],
+    "UPDATE workspaces SET workspace_name = ?1, workspace_path = ?2, not_on_remote = ?3, target_branch = ?4 WHERE id = ?5",
+    params![workspace_name, workspace_path, not_on_remote as i64, target_branch, id],
   )
-  .map_err(|e| format!("Failed to set workspace target branch: {}", e))?;
+  .map_err(|e| format!("Failed to set workspace path and target branch: {}", e))?;
   let workspace = workspace_by_id(&tx, repo_path, id)?
     .ok_or_else(|| format!("Workspace not found in database after creation: {id}"))?;
   tx.commit()
@@ -858,6 +920,7 @@ pub fn update_workspace_target_branch(
       &workspaces,
       &workspace.branch_name,
       target_branch,
+      &crate::core::get_repo_default_branch(repo_path).unwrap_or_default(),
     )?;
   }
   let conn = get_connection(repo_path)?;
@@ -3457,6 +3520,67 @@ mod tests {
     assert!(get_workspace_by_branch(repo_path, "new")
       .expect("lookup")
       .is_none());
+  }
+
+  // A temp dir with no git repo resolves its default branch to "main".
+  #[test]
+  fn update_workspace_target_branch_refuses_a_self_target_off_the_default_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let a = add_stacked(repo_path, "a", "main");
+
+    let err = update_workspace_target_branch(repo_path, a.id, "a").unwrap_err();
+    assert!(err.contains("would create a stack cycle"), "{err}");
+
+    let stored = get_workspace_by_id(repo_path, a.id)
+      .expect("lookup")
+      .expect("stored");
+    assert_eq!(stored.target_branch.as_deref(), Some("main"));
+  }
+
+  #[test]
+  fn update_workspace_target_branch_allows_a_self_target_on_the_default_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let main = add_stacked(repo_path, "main", "main");
+
+    update_workspace_target_branch(repo_path, main.id, "main").expect("self-target main");
+  }
+
+  #[test]
+  fn add_workspace_targeting_refuses_a_self_target_off_the_default_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+
+    let err = add_workspace_targeting(
+      repo_path,
+      "a".to_string(),
+      "a".to_string(),
+      "a".to_string(),
+      None,
+      None,
+      None,
+      false,
+      "a",
+    )
+    .unwrap_err();
+    assert!(err.contains("would create a stack cycle"), "{err}");
+    assert!(get_workspace_by_branch(repo_path, "a")
+      .expect("lookup")
+      .is_none());
+  }
+
+  #[test]
+  fn add_workspace_targeting_allows_a_self_target_on_the_default_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+
+    let main = add_stacked(repo_path, "main", "main");
+    assert_eq!(main.target_branch.as_deref(), Some("main"));
   }
 
   #[test]
