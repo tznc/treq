@@ -266,6 +266,9 @@ pub struct SetupScript {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Repository {
+  /// The repository's folder name, the page's title; its full path under it.
+  pub name: String,
+  pub path: String,
   pub yaml_card: Option<YamlCard>,
   pub current_branch: Option<String>,
   pub loading: bool,
@@ -1671,6 +1674,8 @@ impl SettingsView {
           .and_then(|l| l.as_ref().err())
           .map(|err| format!("Failed to load settings: {err}"));
         Repository {
+          name: data::repo_name(&repo.path),
+          path: repo.path.clone(),
           yaml_card: (config_error.is_some() || config.is_some_and(data::sets_any_value))
             .then_some(YamlCard {
               error: config_error,
@@ -2576,20 +2581,44 @@ impl SettingsView {
           self.mark_of("repo.includedFiles"),
           p,
         ))
-        .child(saved_field_block(
-          "Claude Code Model",
-          form::select_field("settings-repo-default-model", "Claude Code Model", &model, managed("defaultModel")),
-          Some("Default model for new Claude Code sessions in this repository (overrides application default)"),
-          self.mark_of("repo.defaultModel"),
-          p,
-        ))
-        .child(saved_field_block(
-          "Default agent",
-          form::select_field("settings-repo-default-agent", "Default agent", &agent, managed("defaultAgent")),
-          Some("Default agent for new sessions in this repository (overrides application default)"),
-          self.mark_of("repo.defaultAgent"),
-          p,
-        ))
+        .child(
+          // The repository's own choices over the Application tab's.
+          div()
+            .debug_selector(|| "settings-repo-overrides".into())
+            .flex()
+            .flex_col()
+            .gap_4()
+            .border_t_1()
+            .border_color(p.border)
+            .pt_6()
+            .child(
+              div()
+                .child(
+                  ui::text(div(), TextSize::Sm)
+                    .font_weight(FontWeight::MEDIUM)
+                    .child("Overrides for this repository"),
+                )
+                .child(help(
+                  "Leave on 'Use application default' to follow Application settings.",
+                  p,
+                  4.,
+                )),
+            )
+            .child(saved_field_block(
+              "Claude Code Model",
+              form::select_field("settings-repo-default-model", "Claude Code Model", &model, managed("defaultModel")),
+              Some("Default model for new Claude Code sessions in this repository"),
+              self.mark_of("repo.defaultModel"),
+              p,
+            ))
+            .child(saved_field_block(
+              "Default agent",
+              form::select_field("settings-repo-default-agent", "Default agent", &agent, managed("defaultAgent")),
+              Some("Default agent for new sessions in this repository"),
+              self.mark_of("repo.defaultAgent"),
+              p,
+            )),
+        )
         .child(switch_row(
           "Auto-push to remote",
           "Automatically push to the remote after every commit in this repository",
@@ -2678,10 +2707,26 @@ impl SettingsView {
         .into_any_element()
     };
 
+    // Which repository these settings belong to.
+    let title = div()
+      .debug_selector(|| "settings-repo-name".into())
+      .child(
+        ui::text(div(), TextSize::Xl)
+          .font_weight(FontWeight::SEMIBOLD)
+          .child(repo.name.clone()),
+      )
+      .child(
+        ui::text(div().mt_1(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .truncate()
+          .child(repo.path.clone()),
+      );
+
     div()
       .flex()
       .flex_col()
       .gap_6()
+      .child(title)
       .children(yaml_card)
       .children(branch)
       .child(body)

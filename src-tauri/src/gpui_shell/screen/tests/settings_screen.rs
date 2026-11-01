@@ -42,6 +42,21 @@ fn settings_saves_the_repository_itself(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn settings_names_the_repository_it_configures(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, settings());
+  let repo = drawn_settings(&mut h).repository.expect("repository tab");
+  assert_eq!(repo.name, "repo");
+  assert_eq!(repo.path, "/repo");
+  assert!(h.drawn("settings-repo-name"));
+}
+
+#[gpui::test]
+fn settings_groups_the_repository_overrides(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, settings());
+  assert!(h.drawn("settings-repo-overrides"));
+}
+
+#[gpui::test]
 fn settings_has_a_back_arrow_instead_of_save_and_close(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, settings());
   assert!(h.drawn("settings-back"));

@@ -630,6 +630,17 @@ pub fn setup_status_text(status: &AppSetupScriptStatus) -> String {
   )
 }
 
+/// A repository's name as the Repository page titles it: its folder's.
+pub fn repo_name(path: &str) -> String {
+  let trimmed = path.trim_end_matches(['/', '\\']);
+  trimmed
+    .rsplit(['/', '\\'])
+    .next()
+    .filter(|name| !name.is_empty())
+    .unwrap_or(trimmed)
+    .to_string()
+}
+
 /// When an edited field saves itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveTiming {
@@ -682,6 +693,14 @@ pub fn save_repo_settings(
 #[cfg(test)]
 mod save_timing_tests {
   use super::*;
+
+  #[test]
+  fn names_a_repository_by_its_folder() {
+    assert_eq!(repo_name("/Users/me/code/event-bus"), "event-bus");
+    assert_eq!(repo_name("/Users/me/code/event-bus/"), "event-bus");
+    assert_eq!(repo_name("C:\\code\\event-bus"), "event-bus");
+    assert_eq!(repo_name("/"), "");
+  }
 
   #[test]
   fn saves_typed_fields_after_a_pause_and_choices_at_once() {
