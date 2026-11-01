@@ -2,7 +2,7 @@
 // tab's Agent button and from the palette: Send starts the agent CLI (a fake
 // `claude` that records its arguments).
 import { expect, test } from "@playwright/test";
-import { agentCalls, dialogPage, goHome, mod } from "../fixture.ts";
+import { agentCalls, goHome, mod } from "../fixture.ts";
 
 test("the home Code tab's Agent button starts a session", async ({
   page,
@@ -31,9 +31,9 @@ test("the palette's prompt dialog starts a session", async ({
 }) => {
   await goHome(page);
   await page.keyboard.press(`${mod}+k`);
-  const palette = await dialogPage(context);
+  const palette = page;
   await palette
-    .getByRole("option", { name: "Start a new agent session with a prompt" })
+    .getByRole("option", { name: "New agent session with a prompt…" })
     .click();
 
   const dialog = page.getByRole("dialog", {

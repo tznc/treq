@@ -3,7 +3,7 @@
 // the window the palette and other dialogs open in is titled "Treq".
 import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { home, mod, overlay, row, settle } from "./helpers.ts";
+import { home, mod, row, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
@@ -40,7 +40,7 @@ test("row-hover: a hovered workspace row keeps its branch name clear of the acti
 test("dialog-title: the palette window is titled Treq", async ({ page, context }) => {
   await home(page);
   await page.keyboard.press(`${mod}+k`);
-  const dialog = await overlay(page, context);
+  const dialog = page;
   await expect(dialog.getByRole("textbox").first()).toBeVisible();
   expect(await dialog.title()).toBe("Treq");
   await dialog.keyboard.press("Escape");
