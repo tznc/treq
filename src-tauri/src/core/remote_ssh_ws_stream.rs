@@ -1,10 +1,10 @@
 //! WebSocket byte stream for managed SSH through the `remote-ssh-relay`
 //! Edge Function.
 //!
-//! Fly Sprites have no raw TCP ingress, so the client cannot dial sshd on a
-//! managed VM. Instead it opens a WebSocket to the relay, which checks the
-//! caller's Supabase session and forwards raw bytes to sshd through the
-//! Sprites TCP proxy. [`WsByteStream`] turns that WebSocket back into a plain
+//! Managed VMs have no raw TCP ingress, so the client cannot dial sshd on
+//! one. Instead it opens a WebSocket to the relay, which checks the caller's
+//! Supabase session and forwards raw bytes to sshd through treq-gateway
+//! inside the VM. [`WsByteStream`] turns that WebSocket back into a plain
 //! byte stream so `russh::client::connect_stream` can run the same SSH
 //! handshake, host-key pinning, and certificate auth it runs over TCP.
 //!

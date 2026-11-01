@@ -349,7 +349,7 @@ pub fn skill_details(skill: &SkillCatalogEntry) -> Vec<(String, String)> {
 pub const NOTIFY_AGENT_FINISHED: &str = "notify_agent_finished";
 
 /// Each preview feature's title and its page on the website.
-pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 5] = [
+pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 6] = [
   (
     PreviewFeature::SkillsInstallation,
     "Skills installation",
@@ -370,6 +370,11 @@ pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 5] = [
     PreviewFeature::Devcontainers,
     "Devcontainer environments",
     "/docs/how-to/devcontainer-environments",
+  ),
+  (
+    PreviewFeature::Byos,
+    "Bring your own sandbox",
+    "/docs/how-to/cloud-workspaces",
   ),
 ];
 

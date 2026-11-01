@@ -27,7 +27,7 @@ test("row-hover: a hovered workspace row keeps its branch name clear of the acti
   await home(page);
   await row(page, BRANCH).hover();
   await settle(page, 1500);
-  await expect(row(page, BRANCH).getByRole("button", { name: "Stack workspace" })).toBeVisible();
+  await expect(row(page, BRANCH).getByRole("button", { name: "Stack on this…" })).toBeVisible();
   await capture(page, {
     name: "15-row-hover-actions",
     title: "Hovered workspace row at the default sidebar width",

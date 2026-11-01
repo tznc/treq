@@ -105,6 +105,8 @@ async function commentOnLine(
 ): Promise<void> {
   const add = page.getByRole("button", {
     name: `Add comment on ${path} line ${line}`,
+    // Without exact, "line 1" also matches "line 10" and "line 11".
+    exact: true,
   });
   // The button only shows while the line is hovered, so the pointer goes there
   // first.
@@ -249,10 +251,10 @@ test("captures the landing screenshots", async ({ page }) => {
     const branch = `feat/agent-${name}`;
     await row(page, CACHE).hover();
     await row(page, CACHE)
-      .getByRole("button", { name: "Stack workspace" })
+      .getByRole("button", { name: "Stack on this…" })
       .click();
     await page.getByLabel("Workspaces", { exact: true }).fill(branch);
-    await page.getByRole("button", { name: "Create 1 Workspace" }).click({ timeout: 20_000 });
+    await page.getByRole("button", { name: "Create workspace" }).click({ timeout: 20_000 });
     await expect(row(page, branch)).toBeVisible({ timeout: 20_000 });
     await rest(page);
   }

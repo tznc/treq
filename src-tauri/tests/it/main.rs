@@ -20,6 +20,7 @@ mod bookmark_off_working_copy_test;
 mod checks_test;
 mod cli_parallel_commit_test;
 mod cli_process_test;
+mod commit_ops_proptest;
 mod core_app_test;
 mod core_changes_test;
 mod core_commits_list_test;

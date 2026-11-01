@@ -107,7 +107,7 @@ impl HomeScreen {
     let detail = [
       address,
       // A failure is explained under the row; only progress goes here.
-      status_text.filter(|_| state.status.is_connecting()),
+      status_text.clone().filter(|_| state.status.is_connecting()),
       last_repo.as_deref().map(|r| repo_name(r).to_string()),
     ]
     .into_iter()
@@ -123,7 +123,11 @@ impl HomeScreen {
       .justify_center()
       .map(|slot| match (connecting, tone) {
         (true, _) => slot.child(Spinner::new().small()),
-        (false, Some(tone)) => slot.child(Dot::new(tone, &palette)),
+        (false, Some(tone)) => slot.child(Dot::new(
+          tone,
+          status_text.clone().unwrap_or_default(),
+          &palette,
+        )),
         (false, None) => slot,
       })
       .into_any_element();

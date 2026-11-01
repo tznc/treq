@@ -234,7 +234,7 @@ select is((select count(*)::int from public.billing_subscriptions), 0,
 reset role;
 insert into public.remote_instances (id, owner_user_id, provider_kind, region, size_preset, status, lapsed_at)
 values ('00000000-0000-0000-0000-00000000f002', '00000000-0000-0000-0000-0000000000f2',
-        'fly_sprites', 'us_east', 'small', 'suspended', now() - interval '20 days');
+        'boat', 'us_east', 'small', 'suspended', now() - interval '20 days');
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 select public.organization_accept_invite('00000000-0000-0000-0000-0000000000f2',
@@ -283,7 +283,7 @@ select is((select linked_user_id from public.github_app_installations where id =
 reset role;
 insert into public.remote_instances (id, owner_user_id, provider_kind, region, size_preset, status, lapsed_at)
 values ('00000000-0000-0000-0000-00000000f004', '00000000-0000-0000-0000-0000000000f4',
-        'fly_sprites', 'us_east', 'small', 'suspended', now() - interval '20 days');
+        'boat', 'us_east', 'small', 'suspended', now() - interval '20 days');
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 

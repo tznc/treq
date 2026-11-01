@@ -703,3 +703,34 @@ fn code_tab_shows_no_deleted_branch_alert_while_the_branch_exists(cx: &mut TestA
   assert!(!h.drawn("code-branch-deleted"));
   assert!(host.calls().contains(&"read branch deleted 7".to_string()));
 }
+
+fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  screen
+}
+
+/// Trunk commits sit under one "On main (read-only)" divider, not an
+/// "Immutable" pill on every row.
+#[gpui::test]
+fn code_tab_groups_trunk_commits_under_a_read_only_divider(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let mut host = code_host();
+  let mut target = commit("t", 1, 0);
+  target["on_target_only"] = true.into();
+  target["is_immutable"] = true.into();
+  host.history = serde_json::from_value(serde_json::json!({
+    "commits": [commit("a", 10, 4), target],
+    "target_branch": "main",
+    "workspace_branch": "feature/login"
+  }))
+  .ok();
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("commit-item-t"));
+  let screen = screen(&mut h);
+  expect(screen.get_by_text("On main (read-only)")).to_be_visible();
+  assert!(screen.query_by_text("Recent on main").is_none());
+  assert!(screen.query_by_text("Immutable").is_none());
+}

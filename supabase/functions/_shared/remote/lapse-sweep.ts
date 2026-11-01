@@ -15,10 +15,22 @@
 // only chooses which instances to ask about. A clock running ahead cannot
 // delete early, and an owner who subscribes again after the listing keeps
 // their instance.
+//
+// The sweep works on any provider: each instance's machine is reached
+// through `providers(instance.provider_kind)`, stops go through
+// set_placement_state so billing intervals close, and a deletion removes
+// every live placement's machine, as remote-instance `delete` does.
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
 import { recordAuditEvent, type RemoteAuditEventType } from "./audit.ts";
-import type { ManagedComputeProvider } from "./sprites-adapter.ts";
+import {
+  cancelOpenMigration,
+  deleteInstanceMachines,
+  stopWorkspace,
+  setPlacementState,
+} from "./placement-store.ts";
+import type { ManagedComputeProvider, ProviderKind } from "./provider.ts";
+import { must, rpc } from "./db.ts";
 
 export const LAPSE_GRACE_DAYS = 7;
 const DAY_MS = 86_400_000;
@@ -35,6 +47,18 @@ export interface LapseCandidate {
   provider_resource_id: string | null;
   lapsed_at: string | null;
   owner_has_pro: boolean;
+  /** From remote_instances. */
+  provider_kind: ProviderKind;
+  active_placement_id?: string | null;
+}
+
+/** A placement of the instance whose role is not 'dead'. */
+export interface LapsePlacement {
+  id: string;
+  instance_id: string;
+  provider_kind: ProviderKind;
+  provider_resource_id: string | null;
+  role: string;
 }
 
 export interface LapseSweepStore {
@@ -43,9 +67,12 @@ export interface LapseSweepStore {
   syncLapse(instanceId: string): Promise<string | null>;
   /** remote_claim_lapsed_deletion: true once the instance is 'deleting'. */
   claimDeletion(instanceId: string): Promise<boolean>;
-  /** Shows a running instance as suspended. */
-  markStopped(instanceId: string): Promise<void>;
-  markDeleted(instanceId: string): Promise<void>;
+  /** Shows a running instance as suspended, through its active placement when it has one. */
+  markStopped(instanceId: string, activePlacementId: string | null): Promise<void>;
+  /** Cancels an open switch, then lists the placements whose role is not 'dead'. */
+  livePlacements(instanceId: string): Promise<LapsePlacement[]>;
+  /** Marks the instance deleted and the placements deleted and dead, closing billing. */
+  markDeleted(instanceId: string, placementIds: string[]): Promise<void>;
   audit(event: {
     ownerUserId: string;
     instanceId: string;
@@ -56,7 +83,10 @@ export interface LapseSweepStore {
 
 export interface LapseSweepDeps {
   store: LapseSweepStore;
-  provider: Pick<ManagedComputeProvider, "stopInstance" | "deleteInstance">;
+  providers: (
+    kind: ProviderKind,
+    placementId?: string | null,
+  ) => Pick<ManagedComputeProvider, "stopInstance" | "deleteInstance">;
   now: () => Date;
   log: (fields: Record<string, unknown>) => void;
 }
@@ -119,10 +149,9 @@ export async function sweepLapsedInstances(
           result.kept.push(id);
           continue;
         }
-        if (instance.provider_resource_id) {
-          await deps.provider.deleteInstance(instance.provider_resource_id);
-        }
-        await deps.store.markDeleted(id);
+        const placements = await deps.store.livePlacements(id);
+        await deleteInstanceMachines(deps.providers, instance, placements);
+        await deps.store.markDeleted(id, placements.map((p) => p.id));
         await audit("instance_lapse_deleted", {
           lapsed_at: instance.lapsed_at,
           provider_resource_id: instance.provider_resource_id,
@@ -157,12 +186,8 @@ export async function sweepLapsedInstances(
   return result;
 }
 
-async function stop(instance: LapseCandidate, deps: LapseSweepDeps) {
-  if (instance.provider_resource_id) {
-    await deps.provider.stopInstance(instance.provider_resource_id);
-  }
-  await deps.store.markStopped(instance.instance_id);
-}
+const stop = (instance: LapseCandidate, deps: LapseSweepDeps) =>
+  stopWorkspace(deps.providers, instance, deps.store.markStopped);
 
 /** The store above, through the service-role client. */
 export function supabaseLapseSweepStore(
@@ -171,34 +196,63 @@ export function supabaseLapseSweepStore(
 ): LapseSweepStore {
   return {
     async candidates() {
-      const { data, error } = await supabase.rpc("remote_lapse_candidates");
-      if (error) throw new Error(`remote_lapse_candidates failed: ${error.message}`);
-      return (data ?? []) as LapseCandidate[];
+      const data = await rpc(supabase, "remote_lapse_candidates");
+      const rows = (data ?? []) as LapseCandidate[];
+      if (rows.length === 0) return rows;
+      // The candidates function predates placements; add each instance's
+      // provider and active placement.
+      const instances = must(await supabase
+        .from("remote_instances")
+        .select("id, provider_kind, active_placement_id")
+        .in("id", rows.map((r) => r.instance_id)), "read lapse candidates' providers");
+      const byId = new Map((instances ?? []).map((i) => [i.id as string, i]));
+      return rows.map((r) => ({
+        ...r,
+        provider_kind: byId.get(r.instance_id)?.provider_kind as ProviderKind,
+        active_placement_id: (byId.get(r.instance_id)?.active_placement_id as string | null | undefined) ?? null,
+      }));
     },
     async syncLapse(instanceId) {
-      const { data, error } = await supabase.rpc("remote_sync_instance_lapse", {
+      return ((await rpc(supabase, "remote_sync_instance_lapse", {
         p_instance_id: instanceId,
-      });
-      if (error) throw new Error(`remote_sync_instance_lapse failed: ${error.message}`);
-      return (data as string | null) ?? null;
+      })) as string | null) ?? null;
     },
     async claimDeletion(instanceId) {
-      const { data, error } = await supabase.rpc("remote_claim_lapsed_deletion", {
+      return (await rpc(supabase, "remote_claim_lapsed_deletion", {
         p_instance_id: instanceId,
-      });
-      if (error) throw new Error(`remote_claim_lapsed_deletion failed: ${error.message}`);
-      return data === true;
+      })) === true;
     },
-    async markStopped(instanceId) {
-      const { error } = await supabase
+    async markStopped(instanceId, activePlacementId) {
+      if (activePlacementId) {
+        const data = must(await supabase
+          .from("remote_instance_placements")
+          .select("state")
+          .eq("id", activePlacementId)
+          .maybeSingle(), "read placement");
+        if (data && RUNNING_STATES.has(data.state as string)) {
+          await setPlacementState(supabase, activePlacementId, "suspended");
+        }
+        return;
+      }
+      must(await supabase
         .from("remote_instances")
         .update({ status: "suspended", updated_at: new Date().toISOString() })
         .eq("id", instanceId)
-        .in("status", [...RUNNING_STATES]);
-      if (error) throw new Error(`failed to mark instance stopped: ${error.message}`);
+        .in("status", [...RUNNING_STATES]), "mark instance stopped");
     },
-    async markDeleted(instanceId) {
-      const { error } = await supabase
+    async livePlacements(instanceId) {
+      // Cancel an open switch first, in one statement so a worker advancing
+      // it cannot make the cancel miss. A worker mid-create sees the cancel
+      // and deletes its own target (migration-engine.ts).
+      await cancelOpenMigration(supabase, instanceId, "instance_lapse_deleted");
+      return (must(await supabase
+        .from("remote_instance_placements")
+        .select("id, instance_id, provider_kind, provider_resource_id, role")
+        .eq("instance_id", instanceId)
+        .neq("role", "dead"), "list placements") ?? []) as LapsePlacement[];
+    },
+    async markDeleted(instanceId, placementIds) {
+      must(await supabase
         .from("remote_instances")
         .update({
           status: "deleted",
@@ -206,8 +260,16 @@ export function supabaseLapseSweepStore(
           updated_at: new Date().toISOString(),
         })
         .eq("id", instanceId)
-        .eq("status", "deleting");
-      if (error) throw new Error(`failed to mark instance deleted: ${error.message}`);
+        .eq("status", "deleting"), "mark instance deleted");
+      // set_placement_state closes each placement's billing interval.
+      const retiredAt = new Date().toISOString();
+      for (const placementId of placementIds) {
+        await setPlacementState(supabase, placementId, "deleted");
+        must(await supabase
+          .from("remote_instance_placements")
+          .update({ role: "dead", retired_at: retiredAt })
+          .eq("id", placementId), "retire placement");
+      }
     },
     async audit(event) {
       await recordAuditEvent(supabase, { ...event, correlationId });

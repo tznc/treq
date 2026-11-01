@@ -1,7 +1,7 @@
 // A titled workspace's sidebar row: the title in the sans face, truncated
 // before the row's status, with the full title and the mono branch in its
 // tooltip. Untitled rows keep their mono branch. The test creates the
-// titled workspace through the New Workspaces dialog and deletes it again,
+// titled workspace through the New workspace dialog and deletes it again,
 // so the sidebar is back to the seed for later areas.
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
@@ -27,7 +27,7 @@ async function dialogIn(
   }
 }
 
-const heading = (p: Page) => p.getByRole("heading", { name: "New Workspaces" });
+const heading = (p: Page) => p.getByRole("heading", { name: "New workspace" });
 
 test("sidebar-workspace-title: a titled row shows its title", async ({ page, context }) => {
   await home(page);
@@ -35,7 +35,7 @@ test("sidebar-workspace-title: a titled row shows its title", async ({ page, con
   const d = await dialogIn(page, context, heading);
   await d.getByLabel("Workspaces", { exact: true }).fill(TITLE);
   await settle(page, 1200);
-  await d.getByRole("button", { name: "Create 1 Workspace" }).click();
+  await d.getByRole("button", { name: "Create workspace" }).click();
   await expect(heading(d)).toHaveCount(0, { timeout: 30_000 });
   await ready(page);
   await settle(page, 1500);

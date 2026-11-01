@@ -163,18 +163,18 @@ fn pasted_lines_show_what_will_be_opened(cx: &mut TestAppContext) {
   host.github.workspaces = vec![workspace(7, "feat/b", Some("main"))];
   let (mut h, host) = dialog(host, cx);
   let screen = screen(&mut h);
-  expect(screen.get_by_role(by::role(Role::Heading).name("New Workspaces"))).to_be_visible();
-  assert_eq!(status(&screen), "Nothing to create yet.");
+  expect(screen.get_by_role(by::role(Role::Heading).name("New workspace"))).to_be_visible();
+  assert_eq!(
+    status(&screen),
+    "Type a line or pick an item to create workspaces."
+  );
 
   screen.user().type_text(
     &screen.get_by_label_text("Workspaces"),
     "feat/a\norigin/feat/b\nnope\nfeat/a\nmain",
   );
   let screen = self::screen(&mut h);
-  assert_eq!(
-    status(&screen),
-    "2 workspaces will be created, 1 already open"
-  );
+  assert_eq!(status(&screen), "Will create 2 workspaces, 1 already open");
   expect(screen.get_by_role(by::role(Role::Alert).name("1 line can't be opened"))).to_be_visible();
   // Each line shows in a popover from the summary.
   assert!(screen
@@ -189,7 +189,7 @@ fn pasted_lines_show_what_will_be_opened(cx: &mut TestAppContext) {
 
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Create 3 Workspaces")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 3 workspaces")));
   h.cx.run_until_parked();
   assert!(host
     .calls()
@@ -201,7 +201,7 @@ fn pasted_lines_show_what_will_be_opened(cx: &mut TestAppContext) {
   )));
   let screen = self::screen(&mut h);
   assert!(screen
-    .query_by_role(by::role(Role::Heading).name("New Workspaces"))
+    .query_by_role(by::role(Role::Heading).name("New workspace"))
     .is_none());
 }
 
@@ -218,7 +218,7 @@ fn pull_request_links_open_their_head_branch(cx: &mut TestAppContext) {
     "https://github.com/acme/treq/pull/42\nhttps://github.com/other/app/pull/1",
   );
   let screen = show_lines(&mut h);
-  assert_eq!(status(&screen), "1 workspace will be created");
+  assert_eq!(status(&screen), "Will create feat/x from PR #42");
   expect(screen.get_by_role(by::role(Role::ListItem).name("feat/x: PR #42 · new"))).to_be_visible();
   expect(
     screen.get_by_role(
@@ -229,7 +229,7 @@ fn pull_request_links_open_their_head_branch(cx: &mut TestAppContext) {
   .to_be_visible();
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Create 1 Workspace")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create workspace")));
   h.cx.run_until_parked();
   assert!(host
     .calls()
@@ -397,11 +397,11 @@ fn picked_pull_requests_are_opened(cx: &mut TestAppContext) {
     .click(&screen.get_by_role(by::role(Role::CheckBox).name("#5 Change 5")));
   let screen = self::screen(&mut h);
   expect(screen.get_by_role(by::role(Role::CheckBox).name("#6 Change 6"))).to_be_checked();
-  assert_eq!(status(&screen), "2 workspaces will be created");
+  assert_eq!(status(&screen), "Will create 2 workspaces");
 
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 Workspaces")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 workspaces")));
   h.cx.run_until_parked();
   assert!(host
     .calls()
@@ -422,10 +422,10 @@ fn a_failed_open_keeps_the_dialog_with_the_error(cx: &mut TestAppContext) {
   let screen = self::screen(&mut h);
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 Workspaces")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 workspaces")));
   let screen = self::screen(&mut h);
   expect(screen.get_by_role(by::role(Role::Alert).name("feat/b: create failed"))).to_be_visible();
-  expect(screen.get_by_role(by::role(Role::Heading).name("New Workspaces"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Heading).name("New workspace"))).to_be_visible();
 }
 
 #[gpui::test]
@@ -473,7 +473,7 @@ fn linear_issues_are_picked_from_the_users_task_list(cx: &mut TestAppContext) {
     .user()
     .click(&screen.get_by_role(by::role(Role::CheckBox).name("ENG-1 Issue 1")));
   let screen = show_lines(&mut h);
-  assert_eq!(status(&screen), "1 workspace will be created");
+  assert_eq!(status(&screen), "Will create eng-1 from ENG-1");
   expect(screen.get_by_role(by::role(Role::ListItem).name("eng-1: new"))).to_be_visible();
 
   // A search looks through everyone's.
@@ -486,7 +486,7 @@ fn linear_issues_are_picked_from_the_users_task_list(cx: &mut TestAppContext) {
 
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Create 1 Workspace")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create workspace")));
   h.cx.run_until_parked();
   assert!(host.calls().contains(&"open issue /repo ENG-1".to_string()));
   assert!(!host
@@ -541,7 +541,7 @@ fn a_sub_issue_picked_with_its_parent_stacks_on_it(cx: &mut TestAppContext) {
 
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 Workspaces")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 workspaces")));
   h.cx.run_until_parked();
   let opened: Vec<_> = host
     .calls()
@@ -575,21 +575,21 @@ fn titles_and_new_branches_stack_on_the_picked_branch(cx: &mut TestAppContext) {
   host.workspaces = vec![workspace(7, "feat/base", Some("main"))];
   let (mut h, host) = dialog_on(host, false, Some("feat/base"), cx);
   let screen = screen(&mut h);
-  expect(screen.get_by_role(by::role(Role::Heading).name("New Workspaces"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Heading).name("New workspace"))).to_be_visible();
 
   screen.user().type_text(
     &screen.get_by_label_text("Workspaces"),
     "Fix the login flow\nfeat/a",
   );
   let screen = show_lines(&mut h);
-  assert_eq!(status(&screen), "2 workspaces will be created");
+  assert_eq!(status(&screen), "Will create 2 workspaces");
   // A title names its branch by the repository's pattern.
   expect(screen.get_by_role(by::role(Role::ListItem).name("treq/fix-the-login-flow: new branch")))
     .to_be_visible();
 
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 Workspaces")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 workspaces")));
   h.cx.run_until_parked();
   let calls = host.calls();
   assert!(
@@ -617,7 +617,7 @@ fn indented_lines_stack_in_order_on_the_line_above(cx: &mut TestAppContext) {
     "Fix the login flow\n  feat/a\n  Add tests\nfeat/b",
   );
   let screen = show_lines(&mut h);
-  assert_eq!(status(&screen), "4 workspaces will be created");
+  assert_eq!(status(&screen), "Will create 4 workspaces, 2 stacked");
   expect(
     screen.get_by_role(by::role(Role::ListItem).name("feat/a: on treq/fix-the-login-flow · new")),
   )
@@ -629,7 +629,7 @@ fn indented_lines_stack_in_order_on_the_line_above(cx: &mut TestAppContext) {
 
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Create 4 Workspaces")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 4 workspaces")));
   h.cx.run_until_parked();
   let calls = host.calls();
   let at = |call: &str| {
@@ -850,7 +850,7 @@ mod dlg_scale {
 fn the_dialog_closes_on_escape(cx: &mut TestAppContext) {
   let (mut h, _) = dialog(FakeHost::default(), cx);
   let screen = screen(&mut h);
-  expect(screen.get_by_role(by::role(Role::Heading).name("New Workspaces"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Heading).name("New workspace"))).to_be_visible();
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![press("openWorkspaces.close")]);

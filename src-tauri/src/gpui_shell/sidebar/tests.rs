@@ -255,6 +255,13 @@ fn serializes_actions_for_react() {
 }
 
 #[test]
+fn names_create_buttons_by_what_they_open() {
+  assert_eq!(stack_label(None), "New workspace…");
+  assert_eq!(stack_label(Some(7)), "Stack on this…");
+  assert_eq!(OPEN_WORKSPACES_LABEL, "New workspace…");
+}
+
+#[test]
 fn indents_rows_like_the_react_sidebar() {
   assert_eq!(row_indent(0), 10.);
   assert_eq!(row_indent(1), 16.);
@@ -460,6 +467,29 @@ fn shows_status_dots(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![dirty, row(8, "clean", 0)]));
   assert!(h.bounds("status-7").is_some());
   assert!(h.bounds("status-8").is_none());
+}
+
+#[gpui::test]
+fn status_dots_name_their_state(cx: &mut TestAppContext) {
+  let mut dirty = row(7, "feat-a", 0);
+  dirty.status = Some(RowStatus {
+    color: StatusColor::Yellow,
+    spin: false,
+  });
+  let mut conflicted = row(8, "feat-b", 0);
+  conflicted.status = Some(RowStatus {
+    color: StatusColor::Red,
+    spin: false,
+  });
+  let mut h = Harness::new(cx, snapshot(vec![dirty, conflicted]));
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  use gpui_testing_library::prelude::*;
+  expect(screen.get_by_role(by::role(gpui::Role::Image).name("Uncommitted changes")))
+    .to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Image).name("Conflict"))).to_be_visible();
 }
 
 #[gpui::test]

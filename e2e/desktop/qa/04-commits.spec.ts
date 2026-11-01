@@ -19,8 +19,8 @@ test("commits: conflicted stack, resolve dialog, unfolded diff", async ({ page }
     title: "Commits tab: conflicted commit in a stack",
     expectations: [
       "Red '1 conflicted commit' card with Resolve conflicts…",
-      "Top commit carries a red Conflict badge; base commits marked Immutable",
-      "'Recent on feat/event-ingest' divider separates the base's commits",
+      "Top commit carries a red Conflict badge; base commits carry no per-row Immutable pill",
+      "'On feat/event-ingest (read-only)' divider groups the base's commits",
     ],
   });
 

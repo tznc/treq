@@ -1,5 +1,5 @@
 [workspace]
-members = ["src-tauri", "crates/treq-ui"]
+members = ["src-tauri", "crates/treq-ui", "crates/treq-gateway"]
 resolver = "3"
 
 [patch.crates-io]

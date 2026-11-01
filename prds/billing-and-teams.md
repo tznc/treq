@@ -86,7 +86,7 @@ Each check calls `has_pro` on the server. The desktop and web gates stay for dis
 
 For an organization's installation, `installation_has_pro` checks the organization's Team subscription. For a personal installation, it checks the linking user.
 
-Sprites have no stop call. A Sprite pauses on its own about 30 seconds after its last activity, so the service stops it by refusing every action that would wake it. Its disk is still billed by the provider for those 7 days. An hourly scheduled job runs the lapse sweep, because the project has no in-database scheduler.
+The lapse sweep stops the machine through its provider (Boat or Daytona), and the service refuses every action that would wake it. Its disk is still billed by the provider for those 7 days. An hourly scheduled job runs the lapse sweep, because the project has no in-database scheduler.
 
 ## Organizations and seats
 

@@ -202,15 +202,15 @@ test("ssh remote: connect and open a Git repository", async () => {
   ]);
 });
 
-test("ssh remote: New Workspaces creates on the server", async () => {
-  await page.getByRole("button", { name: "New workspaces" }).click();
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeVisible();
+test("ssh remote: New workspace creates on the server", async () => {
+  await page.getByRole("button", { name: "New workspace…" }).first().click();
+  await expect(page.getByRole("heading", { name: "New workspace" })).toBeVisible();
   await page.getByLabel("Workspaces", { exact: true }).fill("Remote feature");
-  await expect(page.getByRole("button", { name: "Create 1 Workspace" })).toBeEnabled({ timeout: 20_000 });
-  await page.getByRole("button", { name: "Create 1 Workspace" }).click();
+  await expect(page.getByRole("button", { name: "Create workspace" })).toBeEnabled({ timeout: 20_000 });
+  await page.getByRole("button", { name: "Create workspace" }).click();
   const row = page.getByRole("button", { name: WORKSPACE, exact: true });
   await expect(row).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "New workspace" })).toHaveCount(0);
   await shot("workspace-created", "Remote workspace created", [
     `${WORKSPACE} shows under WORKSPACES; the dialog closed with no error`,
   ]);

@@ -2326,7 +2326,7 @@ impl ChangesView {
             .items_center()
             .gap_2()
             .child(header)
-            .child(ui::Dot::new(Tone::Danger, p)),
+            .child(ui::Dot::new(Tone::Danger, "Conflict", p)),
         )
         .child(ui::Count::new(count, p)),
     )
@@ -2370,7 +2370,11 @@ impl ChangesView {
             )
           }),
       )
-      .trailing(div().mr_1().child(ui::Dot::new(Tone::Danger, p)))
+      .trailing(
+        div()
+          .mr_1()
+          .child(ui::Dot::new(Tone::Danger, "Conflict", p)),
+      )
       .on_click(cx.listener(move |view, _, _, cx| view.show_file(&file, cx)));
     div().when(i == 0, |this| this.pt_2()).child(row)
   }

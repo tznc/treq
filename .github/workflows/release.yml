@@ -13,7 +13,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -66,16 +66,16 @@ jobs:
     timeout-minutes: 20
     environment: prod
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: lts/*
           cache: "npm"
 
       - name: install Rust stable
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
@@ -88,7 +88,7 @@ jobs:
             libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev \
             libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-on-failure: true
           workspaces: ". -> target"
@@ -105,7 +105,7 @@ jobs:
           grep -qx 'crate-type = \["rlib"\]' src-tauri/Cargo.toml
           rm src-tauri/Cargo.toml.bak
 
-      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -148,10 +148,10 @@ jobs:
     timeout-minutes: 20
     environment: prod
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: install Rust stable
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
@@ -161,7 +161,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-on-failure: true
           workspaces: ". -> target"
@@ -187,3 +187,50 @@ jobs:
           # Devcontainers verify the archive against this before installing it.
           sha256sum "$ASSET" > "$ASSET.sha256"
           gh release upload "v${VERSION}" "$ASSET" "$ASSET.sha256" --clobber
+
+  # Pins the Linux CLI digests into the machine boot manifests and opens a
+  # PR. Machines check the archive against the manifest, never against the
+  # release's own .sha256, so the pin goes through review.
+  boot-manifest:
+    needs: linux-cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.5.6
+
+      - name: Pin the release's digests
+        id: pin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          dir="$RUNNER_TEMP/assets"
+          gh release download "v${VERSION}" -D "$dir" -p "treq-cli-${VERSION}-linux-*.tar.gz"
+          digest() { sha256sum "$dir/treq-cli-${VERSION}-linux-$1.tar.gz" | cut -d' ' -f1; }
+          deno run --allow-read --allow-write scripts/bump-boot-manifest.ts \
+            "$VERSION" "$(digest x86_64)" "$(digest aarch64)"
+          if git diff --quiet; then echo "changed=false" >> "$GITHUB_OUTPUT"; else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Open the PR
+        if: steps.pin.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          BRANCH="release/boot-manifest-v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git commit -am "chore(cloud): pin treq ${VERSION} in the boot manifest"
+          git push --force -u origin "$BRANCH"
+          gh pr view "$BRANCH" > /dev/null 2>&1 || gh pr create --base main --head "$BRANCH" \
+            --title "chore(cloud): pin treq ${VERSION} in the boot manifest" \
+            --body "Pins the sha256 of the treq ${VERSION} Linux CLI archives, so cloud machines can install it."

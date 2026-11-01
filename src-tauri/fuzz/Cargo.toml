@@ -42,6 +42,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "intraline"
+path = "fuzz_targets/intraline.rs"
+test = false
+doc = false
+bench = false
+
 # serde and clap are used by the sources pulled in with #[path].
 [package.metadata.cargo-machete]
 ignored = ["serde", "clap"]

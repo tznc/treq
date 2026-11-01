@@ -414,7 +414,15 @@ impl IssuesScreen {
       .border_b_1()
       .border_color(theme.border)
       .active(|s| s.bg(theme.accent))
-      .child(Dot::new(tone, &palette))
+      .child(Dot::new(
+        tone,
+        if tone == Tone::Neutral {
+          "Closed"
+        } else {
+          "Open"
+        },
+        &palette,
+      ))
       .child(
         v_flex()
           .flex_1()
