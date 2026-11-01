@@ -1,0 +1,62 @@
+id: gpui-name-no-status-color
+snapshots:
+  ? |
+    fn conflict_list_row(p: &Palette, s: &str) -> Div {
+      div().text_color(status_tone(s).text(p))
+    }
+  : labels:
+    - source: div().text_color(status_tone(s).text(p))
+      style: primary
+      start: 54
+      end: 94
+    - source: conflict_list_row
+      style: secondary
+      start: 3
+      end: 20
+    - source: |-
+        fn conflict_list_row(p: &Palette, s: &str) -> Div {
+          div().text_color(status_tone(s).text(p))
+        }
+      style: secondary
+      start: 0
+      end: 96
+  ? |
+    fn file_row(p: &Palette) -> Div {
+      div().text_color(p.warning)
+    }
+  : labels:
+    - source: div().text_color(p.warning)
+      style: primary
+      start: 36
+      end: 63
+    - source: file_row
+      style: secondary
+      start: 3
+      end: 11
+    - source: |-
+        fn file_row(p: &Palette) -> Div {
+          div().text_color(p.warning)
+        }
+      style: secondary
+      start: 0
+      end: 65
+  ? |
+    fn tree_row(p: &Palette) -> Div {
+      div().text_color(p.destructive).child(name)
+    }
+  : labels:
+    - source: div().text_color(p.destructive)
+      style: primary
+      start: 36
+      end: 67
+    - source: tree_row
+      style: secondary
+      start: 3
+      end: 11
+    - source: |-
+        fn tree_row(p: &Palette) -> Div {
+          div().text_color(p.destructive).child(name)
+        }
+      style: secondary
+      start: 0
+      end: 81
