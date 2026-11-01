@@ -37,7 +37,7 @@ fn turning_the_agent_finished_notification_off_saves_it(cx: &mut TestAppContext)
   let toggle = screen.get_by_role(by::role(Role::Switch).name("Notify when an agent finishes"));
   user.click(&toggle);
   expect(&toggle).not().to_be_checked();
-  user.click(&screen.get_by_role(by::role(Role::Button).name("Save settings")));
+  // The switch saves as it flips, with no Save button and no toast.
   h.cx.run_until_parked();
 
   let writes = host.writes();
@@ -48,7 +48,7 @@ fn turning_the_agent_finished_notification_off_saves_it(cx: &mut TestAppContext)
     "{writes:?}"
   );
   assert!(
-    writes.contains(&"notify toast Settings saved".to_string()),
+    !writes.iter().any(|w| w.starts_with("notify toast")),
     "{writes:?}"
   );
 }
