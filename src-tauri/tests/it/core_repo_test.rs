@@ -642,7 +642,10 @@ fn rename_bookmark_onto_existing_bookmark_fails() {
 
   assert!(treq_lib::jj::jj_rename_bookmark(path, "src", "dst").is_err());
 
-  assert_eq!(treq_lib::jj::jj_get_commit_id(path, "dst").unwrap(), dst_before);
+  assert_eq!(
+    treq_lib::jj::jj_get_commit_id(path, "dst").unwrap(),
+    dst_before
+  );
   let loaded = treq_lib::jj::WorkspaceRepo::load(path).unwrap();
   assert!(loaded.bookmark_presence("src", "origin").0);
 }
