@@ -96,7 +96,7 @@ fn settings_keeps_a_typed_value_and_shows_why_it_did_not_save(cx: &mut TestAppCo
     fail_repo_settings: true,
     ..FakeHost::default()
   });
-  let mut h = Harness::with_host(cx, settings(), host.clone());
+  let mut h = Harness::with_host(cx, settings(), host);
   h.click("settings-branch-pattern");
   h.cx.simulate_input("x");
   h.cx

@@ -1951,7 +1951,7 @@ impl Mark {
     self.saved.then(|| {
       let id = format!("settings-saved-{}", self.key);
       ui::text(div(), TextSize::Sm)
-        .debug_selector(move || id.clone())
+        .debug_selector(move || id)
         .flex()
         .items_center()
         .gap_1()
@@ -1966,7 +1966,7 @@ impl Mark {
     self.error.clone().map(|text| {
       let id = format!("settings-error-{}", self.key);
       ui::text(div().mt_1(), TextSize::Sm)
-        .debug_selector(move || id.clone())
+        .debug_selector(move || id)
         .text_color(ui::Tone::Danger.text(p))
         .child(text)
     })

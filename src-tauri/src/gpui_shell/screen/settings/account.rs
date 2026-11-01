@@ -2790,7 +2790,7 @@ impl SettingsView {
     let status = div()
       .debug_selector({
         let id = format!("integration-status-{}", card.id);
-        move || id.clone()
+        move || id
       })
       .flex()
       .items_center()
