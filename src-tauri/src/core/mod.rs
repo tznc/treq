@@ -64,6 +64,7 @@ pub mod session_secrets;
 pub mod sessions;
 pub mod shell_step;
 pub mod skills;
+pub mod stack_cycle;
 pub mod stash;
 pub mod submodules;
 pub mod supabase;
