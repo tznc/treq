@@ -1965,7 +1965,7 @@ impl Mark {
   fn error(&self, p: &Palette) -> Option<gpui::Div> {
     self.error.clone().map(|text| {
       let id = format!("settings-error-{}", self.key);
-      ui::text(div().mt(zpx(4.)), TextSize::Sm)
+      ui::text(div().mt_1(), TextSize::Sm)
         .debug_selector(move || id.clone())
         .text_color(ui::Tone::Danger.text(p))
         .child(text)
@@ -2264,7 +2264,7 @@ impl SettingsView {
               .flex()
               .items_center()
               .justify_between()
-              .child(label("UI Zoom"))
+              .child(label("UI zoom"))
               .child(
                 ui::text(div(), TextSize::Sm)
                   .text_color(p.muted_foreground)
@@ -2304,8 +2304,8 @@ impl SettingsView {
           )),
       )
       .child(saved_field_block(
-        "Claude Code Model",
-        form::select_field("settings-default-model", "Claude Code Model", &model, false),
+        "Claude Code model",
+        form::select_field("settings-default-model", "Claude Code model", &model, false),
         Some("Default model for new Claude Code sessions"),
         self.mark_of("app.defaultModel"),
         p,
@@ -2575,7 +2575,7 @@ impl SettingsView {
           p,
         ))
         .child(saved_field_block(
-          "Included Files/Directories",
+          "Included files and directories",
           form::textarea_field(&included, true, managed("includedFiles")),
           Some("Paths to copy into each new workspace (e.g. .env). For heavy dirs like node_modules, use Symlink from home repo under Advanced when creating a workspace."),
           self.mark_of("repo.includedFiles"),
@@ -2605,8 +2605,8 @@ impl SettingsView {
                 )),
             )
             .child(saved_field_block(
-              "Claude Code Model",
-              form::select_field("settings-repo-default-model", "Claude Code Model", &model, managed("defaultModel")),
+              "Claude Code model",
+              form::select_field("settings-repo-default-model", "Claude Code model", &model, managed("defaultModel")),
               Some("Default model for new Claude Code sessions in this repository"),
               self.mark_of("repo.defaultModel"),
               p,

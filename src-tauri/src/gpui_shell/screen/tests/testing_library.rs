@@ -397,7 +397,7 @@ fn settings_selects_are_named_after_their_fields(cx: &mut TestAppContext) {
   for name in [
     "Theme",
     "Font size",
-    "Claude Code Model",
+    "Claude Code model",
     "Default agent",
     "Conflict marker style",
   ] {
