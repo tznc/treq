@@ -57,6 +57,13 @@ impl IconButton {
     }
   }
 
+  /// A filled button in the primary colour: the one control that sends or
+  /// submits, such as a prompt's Send.
+  pub fn primary(mut self) -> Self {
+    self.button = self.button.variant(Variant::Default);
+    self
+  }
+
   /// A bordered button, for one that sits beside a field.
   pub fn outline(mut self) -> Self {
     self.button = self.button.variant(Variant::Outline);
@@ -149,5 +156,12 @@ mod tests {
     assert!(button.selected);
     assert_eq!(button.tone, Some(Tone::Danger));
     assert_eq!(IconButtonSize::default().metrics(), (28., 16.));
+  }
+
+  #[test]
+  fn test_icon_button_primary_fills_with_the_primary_variant() {
+    let p = theme::palette(false);
+    let button = IconButton::new("send", theme::ICON_SEND, "Send", &p).primary();
+    assert!(button.button.variant == Variant::Default);
   }
 }

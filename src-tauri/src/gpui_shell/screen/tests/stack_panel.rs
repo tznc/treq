@@ -34,7 +34,7 @@ fn the_home_view_draws_no_stack_panel(cx: &mut TestAppContext) {
   let mut route = route_json(None, "main");
   route["code"] = true.into();
   let (mut h, _) = workspace_harness(cx, host, serde_json::from_value(route).expect("route"));
-  assert!(h.drawn("task-new-workspace"), "the home Code tab");
+  assert!(h.drawn("code-action-row"), "the home Code tab");
   assert!(!h.drawn("workspace-stack-panel"));
 }
 

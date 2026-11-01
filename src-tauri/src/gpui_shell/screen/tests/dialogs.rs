@@ -256,10 +256,10 @@ fn agent_prompt_starts_with_what_react_sent(cx: &mut TestAppContext) {
     "task-add",
     "task-agent",
     "task-submit",
-    "task-submit-menu",
   ] {
     assert!(h.drawn(selector), "{selector}");
   }
+  assert!(!h.drawn("task-submit-menu"), "no Edit/Plan split menu");
   assert_eq!(agent_view(&h, |v| v.selected), Some(7));
   assert_eq!(agent_view(&h, |v| v.task_text.clone()), "fix it");
   assert_eq!(
@@ -308,14 +308,6 @@ fn agent_prompt_toasts_a_failed_start_and_allows_another(cx: &mut TestAppContext
 }
 
 #[gpui::test]
-fn agent_prompt_plans_instead_of_editing(cx: &mut TestAppContext) {
-  let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
-  h.click("task-submit-menu");
-  h.click("task-plan");
-  assert_eq!(tasks(&mut h, &host)[0].mode, "plan");
-}
-
-#[gpui::test]
 fn agent_prompt_runs_the_default_agent_unless_changed(cx: &mut TestAppContext) {
   let host = FakeHost::with_settings(&[("/repo:default_agent", "codex")]);
   let (mut h, host) = modal_harness(cx, host, agent_modal());
@@ -330,7 +322,7 @@ fn agent_prompt_runs_the_default_agent_unless_changed(cx: &mut TestAppContext) {
     (Agent::Codex, Agent::Cursor)
   );
   assert!(h.drawn("task-save-default-box"));
-  assert!(h.drawn("task-submit-menu"));
+  assert!(!h.drawn("task-submit-menu"));
   h.click("task-save-default-box");
   h.click("task-submit");
   let start = &tasks(&mut h, &host)[0];

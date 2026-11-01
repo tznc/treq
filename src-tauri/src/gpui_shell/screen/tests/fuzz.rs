@@ -698,40 +698,6 @@ fn the_logs_tab_survives_random_queries() {
   );
 }
 
-// The file picker: its search, list and Escape.
-
-const PICKER_CLICKS: &[&str] = &[
-  "task-add",
-  "task-add-file",
-  "file-picker-item-0",
-  "file-picker-item-1",
-  "file-picker-item-2",
-];
-
-#[test]
-fn the_file_picker_survives_random_searches() {
-  fuzz::check(
-    "the_file_picker_survives_random_searches",
-    3,
-    vec(step(), 1..20),
-    |cx, steps| {
-      let scenario = Scenario {
-        snapshot: code_route(),
-        host: code_host(),
-        wide: true,
-        clicks: PICKER_CLICKS,
-        fields: &[],
-        layers: &["file-picker"],
-      };
-      let mut run = Run::open(cx, scenario);
-      run.h.click("task-add");
-      run.h.click("task-add-file");
-      run.settle();
-      fuzz_from(run, &steps);
-    },
-  );
-}
-
 // The Overview's machine popover: switching a host's terminals and
 // resetting them only after the confirmation, whatever else is clicked.
 

@@ -1,4 +1,4 @@
-use gpui::{Modifiers, TestAppContext};
+use gpui::TestAppContext;
 
 use super::*;
 
@@ -7,7 +7,8 @@ fn code_tab_draws_files_history_and_readme(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
   for selector in [
     "workspace-code",
-    "agent-task-input",
+    "code-action-row",
+    "code-agent",
     "workspace-description",
     "code-go-to-file",
     "code-entry-src",
@@ -18,6 +19,7 @@ fn code_tab_draws_files_history_and_readme(cx: &mut TestAppContext) {
   ] {
     assert!(h.drawn(selector), "{selector}");
   }
+  assert!(!h.drawn("agent-task-input"), "no inline prompt card");
   let calls = host.calls();
   assert!(
     calls.contains(&"read overview Some(7)".to_string()),
@@ -77,118 +79,10 @@ fn code_tab_hands_navigation_to_react(cx: &mut TestAppContext) {
   assert!(h.sent().contains(&press("code.filePicker")));
 }
 
-#[gpui::test]
-fn code_tab_starts_a_task_in_the_workspace(cx: &mut TestAppContext) {
-  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
-  h.click("task-input");
-  h.cx.simulate_input("fix the login button");
-  h.click("task-submit");
-  h.cx.run_until_parked();
-  assert!(
-    host
-      .writes()
-      .contains(&r#"create session Some(7) "fix the login button""#.to_string()),
-    "{:?}",
-    host.writes()
-  );
-  let created = host.started_sessions();
-  assert_eq!(created.len(), 1, "{:?}", h.sent());
-  assert_eq!(created[0]["sessionId"], 31);
-  assert_eq!(created[0]["workspaceId"], 7);
-  assert_eq!(created[0]["pendingPrompt"], "fix the login button");
-  assert_eq!(created[0]["permissionMode"], "acceptEdits");
-  assert_eq!(created[0]["agent"], "claude");
-}
-
-#[gpui::test]
-fn code_tab_runs_home_tasks_in_a_new_workspace(cx: &mut TestAppContext) {
-  let mut host = code_host();
-  host.loaded.workspace = None;
-  let mut route = route_json(None, "main");
-  route["code"] = true.into();
-  let route = serde_json::from_value(route).expect("home route");
-  let (mut h, host) = workspace_harness(cx, host, route);
-  assert!(h.drawn("task-new-workspace"));
-  h.click("task-input");
-  h.cx.simulate_input("fix login");
-  h.click("task-submit");
-  h.cx.run_until_parked();
-  let writes = host.writes();
-  let create = writes
-    .iter()
-    .find(|c| c.starts_with("create workspace "))
-    .unwrap_or_else(|| panic!("{writes:?}"));
-  // `treq/fix-login` is taken, so the branch gets a suffix.
-  assert!(
-    create.starts_with("create workspace treq/fix-login-"),
-    "{create}"
-  );
-  assert!(
-    writes.contains(&r#"create session Some(9) "fix login""#.to_string()),
-    "{writes:?}"
-  );
-  assert_eq!(host.started_sessions()[0]["workspaceId"], 9);
-}
-
 fn home_code_route() -> ScreenSnapshot {
   let mut route = route_json(None, "main");
   route["code"] = true.into();
   serde_json::from_value(route).expect("home route")
-}
-
-#[gpui::test]
-fn code_tab_turning_the_new_workspace_toggle_off_runs_home_tasks_at_home(cx: &mut TestAppContext) {
-  let mut host = code_host();
-  host.loaded.workspace = None;
-  let (mut h, host) = workspace_harness(cx, host, home_code_route());
-  h.click("task-new-workspace");
-  h.cx.run_until_parked();
-  assert!(
-    host
-      .writes()
-      .contains(&"set repo /repo home_task_new_workspace=false".to_string()),
-    "{:?}",
-    host.writes()
-  );
-  h.click("task-input");
-  h.cx.simulate_input("fix login");
-  h.click("task-submit");
-  h.cx.run_until_parked();
-  let writes = host.writes();
-  assert!(
-    !writes.iter().any(|c| c.starts_with("create workspace ")),
-    "{writes:?}"
-  );
-  assert!(
-    writes.contains(&r#"create session None "fix login""#.to_string()),
-    "{writes:?}"
-  );
-}
-
-#[gpui::test]
-fn code_tab_remembers_running_home_tasks_at_home(cx: &mut TestAppContext) {
-  let mut host = code_host();
-  host.loaded.workspace = None;
-  host
-    .settings
-    .lock()
-    .unwrap()
-    .insert("/repo:home_task_new_workspace".into(), Some("false".into()));
-  let (mut h, host) = workspace_harness(cx, host, home_code_route());
-  assert!(h.drawn("task-new-workspace"));
-  h.click("task-input");
-  h.cx.simulate_input("fix login");
-  h.click("task-submit");
-  h.cx.run_until_parked();
-  let writes = host.writes();
-  assert!(
-    !writes.iter().any(|c| c.starts_with("create workspace ")),
-    "{writes:?}"
-  );
-  assert!(
-    writes.contains(&r#"create session None "fix login""#.to_string()),
-    "{writes:?}"
-  );
 }
 
 #[gpui::test]
@@ -256,106 +150,6 @@ fn switching_workspaces_keeps_the_last_one_drawn_until_the_next_loads(cx: &mut T
     assert!(h.cx.debug_bounds(selector).is_some(), "{selector}");
   }
   assert!(h.cx.debug_bounds("workspace-overview-skeleton").is_none());
-}
-
-fn task_text(h: &mut Harness) -> Option<String> {
-  h.cx.run_until_parked();
-  h.screen.read_with(&h.cx, |s, cx| {
-    let code = s.workspace.as_ref()?.read(cx).code.clone()?;
-    Some(code.read(cx).task_text.clone())
-  })
-}
-
-#[gpui::test]
-fn file_picker_searches_the_workspace_and_inserts_the_picked_file(cx: &mut TestAppContext) {
-  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
-  h.click("task-add");
-  h.click("task-add-file");
-  assert!(h.drawn("file-picker"));
-  h.cx.simulate_input("log");
-  h.cx
-    .executor()
-    .advance_clock(std::time::Duration::from_millis(500));
-  assert!(host.calls().contains(&r#"read files "log""#.to_string()));
-  assert!(h.drawn("file-picker-item-0") && h.drawn("file-picker-item-1"));
-  h.click("file-picker-item-1");
-  assert!(!h.drawn("file-picker"));
-  assert_eq!(task_text(&mut h).as_deref(), Some("@src/logout.rs "));
-}
-
-#[gpui::test]
-fn file_picker_lists_nothing_for_an_unknown_name_and_closes_on_escape(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
-  h.click("task-add");
-  h.click("task-add-file");
-  h.cx.simulate_input("nothing-here");
-  h.cx
-    .executor()
-    .advance_clock(std::time::Duration::from_millis(500));
-  assert!(h.drawn("file-picker"));
-  assert!(!h.drawn("file-picker-item-0"));
-  h.cx.simulate_keystrokes("escape");
-  assert!(!h.drawn("file-picker"));
-  assert_eq!(task_text(&mut h).as_deref(), Some(""));
-}
-
-#[gpui::test]
-fn code_tab_offers_no_new_workspace_toggle_inside_a_workspace(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
-  assert!(h.drawn("agent-task-input"));
-  assert!(!h.drawn("task-new-workspace"));
-}
-
-#[gpui::test]
-fn clicking_empty_space_blurs_the_focused_input(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
-  let focused = |h: &mut Harness| {
-    h.cx.run_until_parked();
-    h.cx.update(|window, cx| window.focused(cx).is_some())
-  };
-  // The task input starts focused.
-  assert!(focused(&mut h));
-  // A mouse-down on a spot nothing focuses takes the focus off it, as in a
-  // browser, so a key such as "?" then reaches the app's shortcuts.
-  h.cx.simulate_click(
-    gpui::point(gpui::px(1395.), gpui::px(895.)),
-    Modifiers::none(),
-  );
-  assert!(!focused(&mut h));
-  // Clicking an input focuses it again.
-  h.click("task-input");
-  assert!(focused(&mut h));
-}
-
-#[gpui::test]
-fn code_tab_searches_mentions_without_waiting_when_the_host_is_local(cx: &mut TestAppContext) {
-  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
-  h.click("task-input");
-  h.cx.simulate_input("look at @log");
-  // No clock advance: a zero `file_search_delay` skips the debounce timer.
-  h.cx.run_until_parked();
-  assert!(h.drawn("task-mention-0"));
-  assert!(host.calls().contains(&r#"read files "log""#.to_string()));
-}
-
-#[gpui::test]
-fn code_tab_suggests_files_for_mentions(cx: &mut TestAppContext) {
-  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
-  h.click("task-input");
-  h.cx.simulate_input("look at @log");
-  h.cx
-    .executor()
-    .advance_clock(std::time::Duration::from_millis(500));
-  assert!(h.drawn("task-mentions"));
-  assert!(h.drawn("task-mention-0") && h.drawn("task-mention-1"));
-  assert!(host.calls().contains(&r#"read files "log""#.to_string()));
-  h.click("task-mention-1");
-  h.cx.run_until_parked();
-  let text = h.screen.read_with(&h.cx, |s, cx| {
-    let code = s.workspace.as_ref()?.read(cx).code.clone()?;
-    Some(code.read(cx).task_text.clone())
-  });
-  assert_eq!(text.as_deref(), Some("look at @src/logout.rs "));
 }
 
 #[gpui::test]
@@ -642,6 +436,7 @@ fn code_tab_warns_when_rebase_held_for_a_dirty_parent(cx: &mut TestAppContext) {
     ..code_host()
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("code-status");
   assert!(h.drawn("code-rebase-held-parent-dirty"));
   assert!(!h.drawn("code-rebase-held-diverged"));
 }
@@ -655,6 +450,7 @@ fn code_tab_warns_when_rebase_held_for_diverged_target(cx: &mut TestAppContext) 
     ..code_host()
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("code-status");
   assert!(h.drawn("code-rebase-held-diverged"));
   assert!(!h.drawn("code-rebase-held-parent-dirty"));
 }
@@ -668,6 +464,7 @@ fn code_tab_notes_a_rebase_onto_a_stale_target(cx: &mut TestAppContext) {
     ..code_host()
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("code-status");
   assert!(h.drawn("code-rebase-stale-target"));
 }
 
@@ -682,6 +479,56 @@ fn code_tab_shows_no_rebase_warning_without_a_hold(cx: &mut TestAppContext) {
     assert!(!h.drawn(selector), "{selector}");
   }
   assert!(host.calls().contains(&"read rebase hold 7".to_string()));
+  assert!(!h.drawn("code-status"), "no alerts, no status button");
+}
+
+#[gpui::test]
+fn code_tab_agent_button_opens_the_agent_prompt(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  h.click("code-agent");
+  h.cx.run_until_parked();
+  assert!(h.sent().contains(&press("code.agentPrompt")));
+}
+
+#[gpui::test]
+fn home_code_tab_has_the_action_row_and_no_prompt_card(cx: &mut TestAppContext) {
+  let mut host = code_host();
+  host.loaded.workspace = None;
+  let (mut h, _) = workspace_harness(cx, host, home_code_route());
+  assert!(h.drawn("code-action-row"));
+  assert!(h.drawn("code-agent"));
+  assert!(h.drawn("code-go-to-file"));
+  assert!(!h.drawn("agent-task-input"));
+}
+
+#[gpui::test]
+fn code_tab_gathers_its_alerts_behind_the_status_button(cx: &mut TestAppContext) {
+  let mut host = FakeHost {
+    rebase_hold: Some(crate::core::rebase_guard::RebaseHold::StaleTarget {
+      error: "offline".into(),
+    }),
+    ..code_host()
+  };
+  host
+    .loaded
+    .status
+    .as_mut()
+    .expect("code host reads a status")
+    .conflicted_files = vec!["README.md".into()];
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("code-status"));
+  assert!(!h.drawn("code-conflicts"), "alerts wait in the popover");
+  assert!(!h.drawn("code-rebase-stale-target"));
+  h.click("code-status");
+  assert!(h.drawn("code-status-popover"));
+  assert!(h.drawn("code-conflicts"));
+  assert!(h.drawn("code-rebase-stale-target"));
+  h.click("code-view-conflicts");
+  h.cx.run_until_parked();
+  assert_eq!(
+    fields(&h, "workspace.tab"),
+    vec![serde_json::json!("changes")]
+  );
 }
 
 #[gpui::test]
@@ -691,6 +538,11 @@ fn code_tab_offers_archive_when_the_branch_was_deleted_on_remote(cx: &mut TestAp
     ..code_host()
   };
   let (mut h, host) = workspace_harness(cx, host, code_route());
+  assert!(
+    !h.drawn("code-branch-deleted"),
+    "alerts wait in the popover"
+  );
+  h.click("code-status");
   assert!(h.drawn("code-branch-deleted"));
   h.click("code-branch-deleted-archive");
   h.cx.run_until_parked();
@@ -700,7 +552,7 @@ fn code_tab_offers_archive_when_the_branch_was_deleted_on_remote(cx: &mut TestAp
 #[gpui::test]
 fn code_tab_shows_no_deleted_branch_alert_while_the_branch_exists(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
-  assert!(!h.drawn("code-branch-deleted"));
+  assert!(!h.drawn("code-status"), "no alerts, no status button");
   assert!(host.calls().contains(&"read branch deleted 7".to_string()));
 }
 
