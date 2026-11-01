@@ -21,6 +21,20 @@ pub fn delete_comment(repo_path: &str, id: &str) -> Result<(), String> {
   local_db::delete_agent_review_comment(repo_path, id)
 }
 
+/// The text of `start_line..=end_line` of `file` as the reviewed target has
+/// it now, stored with a comment so applying its suggestion later can tell
+/// whether those lines moved. `None` for targets read from elsewhere.
+pub fn quote_target_lines(
+  _repo_path: &str,
+  _target_type: &str,
+  _target_id: &str,
+  _file: &str,
+  _start_line: i64,
+  _end_line: i64,
+) -> Result<Option<String>, String> {
+  Ok(None)
+}
+
 /// Replace `start_line..=end_line` of the comment's file with its suggested
 /// text. Deliberately not the generic patch-file path: a suggestion already
 /// carries an exact line range, so applying it is a splice, not a diff apply.
