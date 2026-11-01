@@ -143,7 +143,7 @@ fn switching_workspaces_keeps_the_last_one_drawn_until_the_next_loads(cx: &mut T
   });
   draw_now(&mut h);
   for selector in [
-    "workspace-branch",
+    "workspace-title",
     "workspace-tab-row",
     "workspace-description",
   ] {
@@ -282,7 +282,7 @@ fn code_tab_shows_github_beside_a_local_draft(cx: &mut TestAppContext) {
   assert!(!h.drawn("workspace-about-github"));
   h.click("workspace-about-tab-github");
   assert!(h.drawn("workspace-about-github"));
-  assert!(!h.drawn("workspace-description-edit") && !h.drawn("workspace-title-edit"));
+  assert!(!h.drawn("workspace-description-edit"));
   assert!(host.calls().contains(&"read pr text".to_string()));
   // Sync stays in the footer under either tab.
   assert!(h.drawn("workspace-description-resync"));
@@ -304,13 +304,39 @@ fn code_tab_has_no_tabs_without_a_draft(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn code_tab_holds_title_and_description_in_one_card(cx: &mut TestAppContext) {
+fn the_about_card_keeps_the_description_but_not_the_title(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
   h.cx.run_until_parked();
   let card = h.cx.debug_bounds("workspace-about").expect("card");
   let title = h.cx.debug_bounds("workspace-title").expect("title");
   let text = h.cx.debug_bounds("workspace-description").expect("text");
-  assert!(card.contains(&title.center()) && card.contains(&text.center()));
+  assert!(card.contains(&text.center()));
+  assert!(!card.intersects(&title), "{card:?} {title:?}");
+}
+
+#[gpui::test]
+fn no_about_card_without_a_description_or_pull_request(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, feature_host(), code_route());
+  h.cx.run_until_parked();
+  assert!(h.drawn("workspace-code"));
+  assert!(!h.drawn("workspace-about"));
+}
+
+#[gpui::test]
+fn the_title_edits_in_the_header_on_any_tab(cx: &mut TestAppContext) {
+  let mut route = route_json(Some(7), "main");
+  route["tab"] = "commits".into();
+  let route = serde_json::from_value(route).expect("route");
+  let (mut h, host) = workspace_harness(cx, feature_host(), route);
+  h.click("workspace-title-edit");
+  h.cx.simulate_input("!");
+  h.click("workspace-title-save");
+  h.cx.run_until_parked();
+  assert!(
+    host.writes().iter().any(|c| c.starts_with("set title 7 ")),
+    "{:?}",
+    host.writes()
+  );
 }
 
 #[gpui::test]
@@ -373,20 +399,17 @@ fn code_tab_shows_no_sync_note_without_a_pr(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn code_tab_shows_the_title_above_the_description_not_in_the_header(cx: &mut TestAppContext) {
+fn the_header_shows_the_title_in_place_of_the_branch(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
   h.cx.run_until_parked();
   let title = h.cx.debug_bounds("workspace-title").expect("title");
-  let description = h
-    .cx
-    .debug_bounds("workspace-description")
-    .expect("description");
-  assert!(
-    title.bottom() <= description.top(),
-    "{title:?} {description:?}"
-  );
   let header = h.cx.debug_bounds("workspace-header").expect("header");
-  assert!(!header.intersects(&title), "{header:?} {title:?}");
+  assert!(header.contains(&title.center()), "{header:?} {title:?}");
+  let branch = h.cx.debug_bounds("workspace-branch").expect("branch");
+  assert!(
+    !header.intersects(&branch),
+    "the branch moved to the stack card"
+  );
 }
 
 #[gpui::test]

@@ -5,6 +5,7 @@ use super::*;
 const WORKSPACE_JSON: &str = r#"{
   "header": {
     "branch": "feature/login",
+    "title": "Add login",
     "home": false,
     "linear": {"key": "ENG-12", "url": "https://linear.app/t/ENG-12", "title": "Login"},
     "target": {"branch": "main", "loading": false, "disabled": false},
