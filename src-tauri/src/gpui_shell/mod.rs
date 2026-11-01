@@ -18,6 +18,7 @@ use tauri_plugin_gpui::{
   GpuiConfig, GpuiWindowExt,
 };
 
+mod actions;
 mod checks_run;
 mod confirm;
 #[cfg(feature = "e2e")]
@@ -28,7 +29,6 @@ mod fuzz;
 mod keys;
 pub mod launch;
 mod menus;
-mod modal;
 pub mod native;
 mod overlay;
 mod popover;
@@ -56,8 +56,8 @@ pub use sidebar::SidebarSnapshot;
 use sidebar::{Sidebar, SidebarAction};
 pub(crate) use window::note_just_initialized;
 
-/// Tooltips, menus, toasts and the modal window are windows of their own,
-/// placed at screen positions (`popup`, `modal`), which a Wayland client
+/// Tooltips, menus and toasts are windows of their own, placed at screen
+/// positions (`popup`), which a Wayland client
 /// cannot choose, so a Wayland session runs GTK through XWayland. Call
 /// before GTK starts, while the process is still single-threaded.
 pub fn force_x11_on_wayland() {
@@ -132,6 +132,11 @@ impl Shell {
       let keystroke = &event.keystroke;
       let m = keys::held(keystroke.modifiers);
       let within = |name: &str| event.context_stack.iter().any(|c| c.contains(name));
+      // An open dialog (the palette, the shortcuts sheet, a picker) takes
+      // every key, its own Escape included.
+      if within(overlay::KEY_CONTEXT) {
+        return;
+      }
       let found = shortcuts::app_shortcut(
         &keystroke.key,
         keystroke.key_char.as_deref(),
@@ -145,9 +150,7 @@ impl Shell {
       let shortcut = found
         .map(window::from_app)
         .or_else(|| window::window_shortcut(&keystroke.key, m, within(screen::TERMINAL_CONTEXT)));
-      if shortcut == Some(window::Shortcut::Escape)
-        && (modal::escape_popover(&label, cx) || ui::escape_menus(cx))
-      {
+      if shortcut == Some(window::Shortcut::Escape) && ui::escape_menus(cx) {
         cx.stop_propagation();
         return;
       }
@@ -428,7 +431,7 @@ impl Shell {
       self.show_modal(next.modal.clone(), cx);
     }
     if before.as_ref().is_none_or(|b| b.overlay != next.overlay) {
-      self.show_overlay(next.overlay.clone());
+      self.show_overlay(next.overlay.clone(), cx);
     }
     self.show_file_picker(next.file_picker.clone(), cx);
     // Every GPUI window draws at the app's zoom.
@@ -502,12 +505,18 @@ impl Shell {
     }
   }
 
-  fn show_overlay(&self, snapshot: Option<OverlaySnapshot>) {
-    let label = self.label.to_string();
-    defer_main(&self.app, move |app| {
-      let host = std::sync::Arc::new(native::Backend::new(app.clone(), label.clone()));
-      let sink = overlay_sink(label.clone());
-      modal::update(app, &label, snapshot, host, sink);
+  /// Hands the screen the window-wide dialog to draw over itself.
+  fn show_overlay(&mut self, snapshot: Option<OverlaySnapshot>, cx: &mut gpui::Context<Self>) {
+    let Some(screen) = &self.screen else {
+      return;
+    };
+    let host = std::sync::Arc::new(native::Backend::new(
+      self.app.clone(),
+      self.label.to_string(),
+    ));
+    let sink = overlay_sink(self.label.to_string());
+    screen.update(cx, |screen, cx| {
+      screen.set_overlay(snapshot, host, sink, cx)
     });
   }
 
@@ -714,13 +723,11 @@ fn draw_toasts(app: &AppHandle, label: &str, toasts: Vec<Toast>) {
   });
 }
 
-/// Keeps window `label`'s toasts in its corner, and its open dialog over
-/// it, as it moves or resizes.
+/// Keeps window `label`'s toasts in its corner as it moves or resizes.
 pub fn place_toasts(app: &AppHandle, label: &str) {
   let label = label.to_string();
   defer_main(app, move |app| {
     popup::place_owner_toasts(app, &label);
-    modal::place(app, &label);
   });
 }
 
@@ -793,7 +800,6 @@ pub fn forget_window(label: &str) {
   popup::forget_owner(label);
   toasts::forget(label);
   remote_repo::set_window(label, None);
-  modal::forget(label);
   window::forget(label);
   let label = label.to_string();
   tauri_plugin_gpui::with_app(move |cx| {

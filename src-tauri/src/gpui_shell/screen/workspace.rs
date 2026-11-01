@@ -302,11 +302,8 @@ pub struct WorkspaceView {
   confirm: Option<crate::gpui_shell::confirm::Pending<Self>>,
   popover_host: Arc<dyn PopoverHost>,
   code_host: Arc<dyn TerminalHost>,
-  /// The header popover that shows in the modal window, if one does.
+  /// The header popover drawn over the window, if one shows.
   popover: Option<(Entity<Popover>, gpui::Subscription)>,
-  /// The window this view draws in, which a press outside the popover goes
-  /// on to.
-  window: Option<gpui::AnyWindowHandle>,
   /// The terminal pane, while GPUI draws it, and the workspace it was
   /// last placed in.
   terminal: Option<(Entity<TerminalPane>, TerminalPlace)>,
@@ -431,7 +428,6 @@ impl WorkspaceView {
       confirm: None,
       popover_host: host.clone(),
       popover: None,
-      window: None,
       code_host: host,
       terminal: None,
       code: None,
@@ -903,7 +899,7 @@ impl WorkspaceView {
     }
   }
 
-  /// Opens the popover under header button `key` in the modal window.
+  /// Opens the popover under header button `key`, drawn over the window.
   fn open_popover(&mut self, key: &'static str, cx: &mut Context<Self>) {
     let Some(anchor) = self.bounds.borrow().get(key).copied() else {
       return;
@@ -923,19 +919,29 @@ impl WorkspaceView {
       cx.notify();
     }
     let (host, react, dark) = (self.popover_host.clone(), self.sink.clone(), self.dark);
-    let shell = self.window;
-    let popover = cx.new(|cx| Popover::new(kind, anchor, shell, dark, host, react, cx));
+    let popover = cx.new(|cx| Popover::new(kind, anchor, dark, host, react, cx));
     let subscription = cx.subscribe(&popover, |this, _, _: &popover::Closed, cx| {
       this.close_popover(cx)
     });
-    self.popover = Some((popover.clone(), subscription));
-    (self.popups)(PopupRequest::ShowPopover { popover, dark }, cx);
+    self.popover = Some((popover, subscription));
+    cx.notify();
   }
 
   fn close_popover(&mut self, cx: &mut Context<Self>) {
     if self.popover.take().is_some() {
-      (self.popups)(PopupRequest::HidePopover, cx);
+      cx.notify();
     }
+  }
+
+  /// The open popover, laid over the whole window from its origin, as the
+  /// popover's anchor is in window coordinates.
+  fn popover_layer(&self) -> Option<impl IntoElement> {
+    let (popover, _) = self.popover.as_ref()?;
+    Some(gpui::deferred(
+      gpui::anchored()
+        .position(gpui::Point::default())
+        .child(popover.clone()),
+    ))
   }
 
   /// Passes the open popover what changed under it.
@@ -2367,7 +2373,6 @@ impl Body {
 
 impl Render for WorkspaceView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    self.window = Some(window.window_handle());
     self.sync_tooltip_popup(cx);
     self.idle(window, cx);
     let p = theme::palette(self.dark);
@@ -2453,6 +2458,7 @@ impl Render for WorkspaceView {
           .text_color(p.foreground)
           .children(strip)
           .child(pane_area)
+          .children(self.popover_layer())
           .children(confirm)
           .into_any_element();
       }
@@ -2486,6 +2492,7 @@ impl Render for WorkspaceView {
             d.child(super::remote_chrome::cutoff_overlay(&p))
           }),
       )
+      .children(self.popover_layer())
       .children(confirm)
       .into_any_element()
   }

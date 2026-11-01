@@ -1002,6 +1002,7 @@ impl WindowController {
       workspace_path: workspace
         .map(model::full_path)
         .unwrap_or_else(|| self.model.repo().to_string()),
+      query: self.model.dialogs.file_query.clone(),
     })
   }
 }

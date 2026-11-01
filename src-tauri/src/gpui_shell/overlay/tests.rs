@@ -182,7 +182,7 @@ fn palette_reruns_setup_and_trusts_without_a_toast(cx: &mut TestAppContext) {
 #[gpui::test]
 fn palette_gives_the_terminal_pane_its_commands(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, palette_json(true), FakeHost::default());
-  pick(&mut h, "Maximize terminal");
+  pick(&mut h, "Maximize/restore terminal");
   assert_eq!(effects(&h), ["terminal toggleMaximize"]);
   assert_eq!(h.sent(), vec![press("overlay.close")]);
 }
@@ -346,8 +346,12 @@ fn palette_filters_as_cmdk_does(cx: &mut TestAppContext) {
   assert_eq!(h.selected().as_deref(), Some("Switch branch"));
   h.type_text("zzz");
   assert!(h.shown().is_empty());
+  // No command matches: Enter goes to the file of that name instead.
   h.keys("enter");
-  assert!(h.sent().is_empty());
+  assert_eq!(
+    h.sent(),
+    vec![field("palette.goToFile", "branchzzz".into())]
+  );
 }
 
 #[gpui::test]
@@ -404,7 +408,7 @@ fn palette_reads_the_workspace_checks_and_pr(cx: &mut TestAppContext) {
   );
   let shown = h.shown();
   assert!(shown.contains(&"Run check: CI".to_string()));
-  assert!(shown.contains(&"Toggle terminal".to_string()));
+  assert!(shown.contains(&"Show/hide terminal".to_string()));
   assert_eq!(h.selected().as_deref(), Some("Go to home"));
 
   h.type_text("PR in browser");
@@ -457,11 +461,13 @@ fn workspace_host() -> FakeHost {
       WorkspaceRow {
         id: 3,
         branch_name: "feat/alpha".into(),
+        title: "Alpha work".into(),
         agents: 1,
       },
       WorkspaceRow {
         id: 5,
         branch_name: "fix/beta".into(),
+        title: "fix/beta".into(),
         agents: 2,
       },
     ],
@@ -486,6 +492,7 @@ fn describes_a_workspace_as_react_does() {
   let row = |agents| WorkspaceRow {
     id: 1,
     branch_name: "a".into(),
+    title: "a".into(),
     agents,
   };
   assert_eq!(
@@ -566,6 +573,63 @@ fn branch_switcher_shows_a_failed_switch(cx: &mut TestAppContext) {
   assert!(h.shown().is_empty());
 }
 
+/// `main` in the home repository, `feat/alpha` in workspace 3.
+fn held_branch_host() -> FakeHost {
+  FakeHost {
+    branches: vec![
+      branch("feat/x", false),
+      branch("feat/alpha", true),
+      branch("main@origin", false),
+      branch("main", true),
+    ],
+    ..workspace_host()
+  }
+}
+
+#[gpui::test]
+fn branch_switcher_groups_main_tree_workspaces_local_and_remote(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, branch_json(), held_branch_host());
+  assert_eq!(
+    h.shown(),
+    vec!["main", "feat/alpha", "feat/x", "main@origin"]
+  );
+  assert!(h.host.calls().contains(&"workspaces /repo".to_string()));
+  let groups = h.overlay.read_with(&h.cx, |o, _| {
+    o.entries().iter().map(|e| e.group).collect::<Vec<_>>()
+  });
+  assert_eq!(groups, vec![Some(0), Some(1), Some(2), Some(3)]);
+  assert!(h.drawn("overlay-branch-workspace-1"));
+}
+
+#[gpui::test]
+fn branch_switcher_opens_the_workspace_that_holds_a_branch(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, branch_json(), held_branch_host());
+  h.keys("down enter");
+  assert_eq!(
+    h.sent(),
+    vec![field("branchSwitcher.openWorkspace", 3.into())]
+  );
+  assert!(!h.host.calls().iter().any(|c| c.starts_with("switch")));
+}
+
+#[gpui::test]
+fn palette_offers_go_to_file_when_no_command_matches(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
+  h.type_text("zzzz");
+  assert!(h.shown().is_empty());
+  assert!(h.drawn("overlay-go-to-file"));
+  h.keys("enter");
+  assert_eq!(h.sent(), vec![field("palette.goToFile", "zzzz".into())]);
+}
+
+#[gpui::test]
+fn palette_rows_show_their_shortcuts(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
+  // 5 is Go to file (Ctrl/⌘ + P); 0 is Go to home, which has none.
+  assert!(h.drawn("overlay-item-5-keys"));
+  assert!(!h.drawn("overlay-item-0-keys"));
+}
+
 #[gpui::test]
 fn keyboard_shortcuts_close_on_escape_and_question_mark(cx: &mut TestAppContext) {
   let json = serde_json::json!({"kind": "keyboardShortcuts", "dark": false});
@@ -604,7 +668,7 @@ mod testing_library {
     let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
     let screen = screen(&mut h);
     expect(screen.get_by_role(by::role(Role::Dialog))).to_be_visible();
-    let search = screen.get_by_role(option("Search files"));
+    let search = screen.get_by_role(option("Go to file"));
     expect(&search).to_be_visible();
     // gpui-testing-library 0.1 does not read gpui-kit's descriptions yet;
     // the e2e suite checks the description text.
@@ -628,7 +692,7 @@ mod testing_library {
     let screen = screen(&mut h);
     screen
       .user()
-      .click(&screen.get_by_role(option("Search files")));
+      .click(&screen.get_by_role(option("Go to file")));
     h.cx.run_until_parked();
     assert_eq!(h.sent(), vec![press("palette.search-files")]);
   }

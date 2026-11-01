@@ -156,16 +156,6 @@ struct Harness {
 
 impl Harness {
   fn new(cx: &mut TestAppContext, kind: Kind, host: FakeHost) -> Self {
-    Self::over(cx, kind, host, None)
-  }
-
-  /// A popover over `shell`, which its outside presses go on to.
-  fn over(
-    cx: &mut TestAppContext,
-    kind: Kind,
-    host: FakeHost,
-    shell: Option<gpui::AnyWindowHandle>,
-  ) -> Self {
     let sent = Rc::new(RefCell::new(Vec::new()));
     let sink: ActionSink = {
       let sent = sent.clone();
@@ -176,7 +166,7 @@ impl Harness {
     let dyn_host: Arc<dyn PopoverHost> = host.clone();
     let anchor = Bounds::new(point(px(700.), px(10.)), size(px(80.), px(32.)));
     let (popover, cx) =
-      cx.add_window_view(|_, cx| Popover::new(kind, anchor, shell, false, dyn_host, sink, cx));
+      cx.add_window_view(|_, cx| Popover::new(kind, anchor, false, dyn_host, sink, cx));
     let mut cx = cx.clone();
     let closed = Rc::new(Cell::new(false));
     let subscription = {
@@ -405,56 +395,16 @@ fn popovers_close_from_an_outside_press_and_escape(cx: &mut TestAppContext) {
   assert!(h.closed.get());
 }
 
-/// The shell window under the backdrop: records the presses it gets.
-struct Shell {
-  presses: Rc<RefCell<Vec<gpui::Point<Pixels>>>>,
-}
-
-impl Render for Shell {
-  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-    let presses = self.presses.clone();
-    div()
-      .id("shell")
-      .size_full()
-      .on_click(move |event, _, _| presses.borrow_mut().push(event.position()))
-  }
-}
-
-fn shell(
-  cx: &mut TestAppContext,
-) -> (gpui::AnyWindowHandle, Rc<RefCell<Vec<gpui::Point<Pixels>>>>) {
-  let presses = Rc::new(RefCell::new(Vec::new()));
-  let window = cx.add_window({
-    let presses = presses.clone();
-    |_, _| Shell { presses }
-  });
-  cx.run_until_parked();
-  (window.into(), presses)
-}
-
 #[gpui::test]
-fn an_outside_press_goes_on_to_the_shell_window(cx: &mut TestAppContext) {
-  let (window, presses) = shell(cx);
-  let mut h = Harness::over(cx, details(), prompt_host(), Some(window));
+fn the_backdrop_covers_the_window(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, details(), prompt_host());
   h.cx.run_until_parked();
-  h.cx
-    .simulate_click(point(px(10.), px(600.)), Modifiers::none());
-  h.cx.run_until_parked();
-  assert!(h.closed.get());
-  assert_eq!(*presses.borrow(), [point(px(10.), px(600.))]);
-}
-
-#[gpui::test]
-fn a_press_on_the_popover_button_only_closes_it(cx: &mut TestAppContext) {
-  let (window, presses) = shell(cx);
-  let mut h = Harness::over(cx, details(), prompt_host(), Some(window));
-  h.cx.run_until_parked();
-  // The Harness's anchor.
-  h.cx
-    .simulate_click(point(px(720.), px(20.)), Modifiers::none());
-  h.cx.run_until_parked();
-  assert!(h.closed.get());
-  assert!(presses.borrow().is_empty());
+  let backdrop = h
+    .cx
+    .debug_bounds("header-popover-backdrop")
+    .expect("backdrop");
+  let viewport = h.cx.update(|window, _| window.viewport_size());
+  assert_eq!(backdrop.size, viewport);
 }
 
 #[gpui::test]

@@ -281,6 +281,7 @@ fn the_file_picker_searches_its_empty_query_at_once(cx: &mut TestAppContext) {
     repo_path: "/repo".into(),
     workspace_id: Some(7),
     workspace_path: "/repo/.treq/workspaces/login".into(),
+    query: String::new(),
   };
   h.screen
     .update(&mut h.cx, |s, cx| s.set_file_picker(Some(scope), cx));

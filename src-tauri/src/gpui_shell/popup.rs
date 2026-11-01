@@ -161,13 +161,6 @@ pub enum PopupRequest {
     anchor: Bounds<Pixels>,
     dark: bool,
   },
-  /// A header popover, drawn in the modal window over the whole shell
-  /// window (see `popover`).
-  ShowPopover {
-    popover: gpui::Entity<super::popover::Popover>,
-    dark: bool,
-  },
-  HidePopover,
 }
 
 /// Item ids at and above this run a GPUI screen's own handler instead of
@@ -1667,11 +1660,6 @@ fn screen_bounds(window: &tauri::Window<Wry>) -> Option<Bounds<Pixels>> {
 pub fn handle(app: &AppHandle, owner: &str, request: PopupRequest) {
   match request {
     PopupRequest::HideTooltip => hide(Slot::Tooltip),
-    PopupRequest::ShowPopover { popover, dark } => {
-      hide(Slot::Tooltip);
-      super::modal::show_popover(app, owner, popover, dark);
-    }
-    PopupRequest::HidePopover => super::modal::hide_popover(app, owner),
     PopupRequest::ShowMenu { entries, at, dark } => show_menu(app, owner, entries, at, dark),
     PopupRequest::ShowDropdown {
       entries,

@@ -185,6 +185,9 @@ pub struct Dialogs {
   pub workspace_picker: bool,
   pub branch_switcher: bool,
   pub file_picker: bool,
+  /// What the file picker opens searching for: the palette's text when no
+  /// command matched it, else empty.
+  pub file_query: String,
 }
 
 impl Dialogs {

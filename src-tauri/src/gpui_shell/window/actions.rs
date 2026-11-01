@@ -87,7 +87,7 @@ impl Model {
       Shortcut::Stack if repo && free => return self.stack(data),
       Shortcut::Palette if free => self.dialogs.palette = true,
       Shortcut::AgentPrompt if repo && free => self.open_agent_prompt(),
-      Shortcut::FilePicker if repo && free => self.dialogs.file_picker = true,
+      Shortcut::FilePicker if repo && free => self.open_file_picker(String::new()),
       Shortcut::ToggleShortcuts if free || self.dialogs.shortcuts => {
         self.dialogs.shortcuts = !self.dialogs.shortcuts;
       }
@@ -262,7 +262,7 @@ impl Model {
       "workspace.branchSwitcher" => self.dialogs.branch_switcher = true,
       "workspace.stack" => return Some(self.stack(data)),
       "workspace.merge" => self.open_merge_preview(),
-      "code.filePicker" => self.dialogs.file_picker = true,
+      "code.filePicker" => self.open_file_picker(String::new()),
       "code.agentPrompt" => self.open_agent_prompt(),
       "fileBrowser.back" => self.view.file_browser = None,
       // The dialogs.
@@ -766,6 +766,22 @@ impl Model {
             None => done(),
           }
         }
+        "palette.goToFile" => {
+          self.dialogs.palette = false;
+          self.open_file_picker(value.as_str().unwrap_or_default().to_string());
+          done()
+        }
+        "branchSwitcher.openWorkspace" => {
+          let repo = self.repo().to_string();
+          if let Some(workspace) = value
+            .as_i64()
+            .and_then(|id| self.workspace_in(&repo, id, data))
+          {
+            self.set_selected(Some(workspace.id));
+          }
+          self.dialogs.branch_switcher = false;
+          done()
+        }
         "workspacePicker.select" => {
           let repo = self.repo().to_string();
           if let Some(workspace) = value
@@ -786,6 +802,12 @@ impl Model {
       },
       _ => None,
     }
+  }
+
+  /// Opens the file picker searching for `query`.
+  fn open_file_picker(&mut self, query: String) {
+    self.dialogs.file_picker = true;
+    self.dialogs.file_query = query;
   }
 
   fn close_top_overlay(&mut self) {
@@ -816,7 +838,7 @@ impl Model {
         Vec::new()
       }
       "search-files" => {
-        self.dialogs.file_picker = true;
+        self.open_file_picker(String::new());
         Vec::new()
       }
       "go-to-workspace" => {
@@ -1289,6 +1311,30 @@ mod tests {
     assert!(model.dialogs.change_move.is_some());
     model.screen_action(&press("changeMove.done"), &data);
     assert!(model.dialogs.change_move.is_none());
+  }
+
+  #[test]
+  fn goes_to_file_with_the_palette_query() {
+    let (mut model, data) = (model(), data());
+    model.dialogs.palette = true;
+    model.overlay_action(&field("palette.goToFile", "zzzz".into()), &data);
+    assert!(!model.dialogs.palette);
+    assert!(model.dialogs.file_picker);
+    assert_eq!(model.dialogs.file_query, "zzzz");
+    model.overlay_action(&press("filePicker.close"), &data);
+    model.screen_action(&press("filePicker.close"), &data);
+    assert!(!model.dialogs.file_picker);
+    model.shortcut(Shortcut::FilePicker, &data);
+    assert_eq!(model.dialogs.file_query, "", "Cmd+P opens empty");
+  }
+
+  #[test]
+  fn opens_the_workspace_that_holds_a_branch() {
+    let (mut model, data) = (model(), data());
+    model.dialogs.branch_switcher = true;
+    model.overlay_action(&field("branchSwitcher.openWorkspace", 4.into()), &data);
+    assert_eq!(model.selected, Some(4));
+    assert!(!model.dialogs.branch_switcher);
   }
 
   #[test]

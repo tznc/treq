@@ -1041,6 +1041,7 @@ fn opens_the_dialogs_and_file_picker_from_shortcuts(cx: &mut TestAppContext) {
     .update(cx, |c, cx| c.shortcut(Shortcut::FilePicker, cx));
   let picker = window.last().file_picker.expect("no file picker");
   assert_eq!(picker.workspace_path, "/repo");
+  assert_eq!(picker.query, "");
   window.screen(
     cx,
     ScreenAction::Press {

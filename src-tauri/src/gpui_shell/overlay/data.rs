@@ -35,6 +35,8 @@ pub struct PrLink {
 pub struct WorkspaceRow {
   pub id: i64,
   pub branch_name: String,
+  /// What the workspace is called (its title, else its branch).
+  pub title: String,
   /// The workspace's agent sessions.
   pub agents: usize,
 }
@@ -98,6 +100,7 @@ impl OverlayHost for Backend {
             .filter(|s| s.workspace_id == Some(w.id))
             .count(),
           id: w.id,
+          title: crate::gpui_shell::screen::code_data::display_title(&w),
           branch_name: w.branch_name,
         })
         .collect(),

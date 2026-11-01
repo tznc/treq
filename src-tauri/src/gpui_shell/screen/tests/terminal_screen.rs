@@ -963,18 +963,13 @@ fn terminal_pane_tooltips_show_shortcuts_as_kbd(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn header_buttons_open_their_popovers_in_the_modal_window(cx: &mut TestAppContext) {
+fn header_buttons_open_their_popovers_over_the_window(cx: &mut TestAppContext) {
   for button in ["workspace-details", "workspace-target", "workspace-checks"] {
     let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
     h.click(button);
     h.cx.run_until_parked();
-    let opened = h
-      .popups
-      .borrow()
-      .iter()
-      .any(|p| matches!(p, PopupRequest::ShowPopover { .. }));
-    assert!(opened, "{button}: {:?}", h.popups.borrow());
-    // The screen stays: nothing is handed to React to draw.
+    // Drawn in the repo window itself, over an in-window backdrop.
+    assert!(h.drawn("header-popover-backdrop"), "{button}");
     assert!(h.drawn("workspace-header"));
     assert!(h.sent().is_empty(), "{button}");
   }
@@ -1021,9 +1016,8 @@ fn opening_details_hides_its_tooltip(cx: &mut TestAppContext) {
     matches!(last_tooltip, Some(PopupRequest::HideTooltip)),
     "{popups:?}"
   );
-  assert!(popups
-    .iter()
-    .any(|p| matches!(p, PopupRequest::ShowPopover { .. })));
+  drop(popups);
+  assert!(h.drawn("header-popover-backdrop"));
 }
 
 fn send_assets() -> serde_json::Value {
