@@ -421,6 +421,55 @@ mod tests {
     );
   }
 
+  #[test]
+  fn stack_renders_every_line_of_a_multiline_description_aligned() {
+    let statuses = vec![
+      sidebar(workspace(1, "main-work", "Main", None, Some("main"))),
+      sidebar(workspace(
+        2,
+        "feat/api",
+        "API",
+        Some("Add endpoints\r\n\r\n- list\n- get\n"),
+        Some("main-work"),
+      )),
+      sidebar(workspace(3, "feat/ui", "UI", None, Some("feat/api"))),
+    ];
+
+    assert_eq!(
+      format_workspace_stack_lines(&statuses),
+      vec![
+        "Stack:",
+        "● main-work — Main",
+        "  └─ ● feat/api — API",
+        "      Description: Add endpoints",
+        "",
+        "                   - list",
+        "                   - get",
+        "     └─ ● feat/ui — UI",
+      ]
+    );
+  }
+
+  #[test]
+  fn stack_renders_single_line_description_unchanged() {
+    let statuses = vec![sidebar(workspace(
+      1,
+      "main-work",
+      "Main",
+      Some("Just one line\n"),
+      Some("main"),
+    ))];
+
+    assert_eq!(
+      format_workspace_stack_lines(&statuses),
+      vec![
+        "Stack:",
+        "● main-work — Main",
+        "   Description: Just one line"
+      ]
+    );
+  }
+
   fn checks(state: &str, passed: u32, failed: u32, pending: u32) -> PrCiStatus {
     PrCiStatus {
       state: state.to_string(),
