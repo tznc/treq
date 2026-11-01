@@ -72,25 +72,36 @@ mod tests {
   }
 
   #[test]
-  fn self_target_is_allowed() {
-    // A workspace on the default branch targets itself; that is not a stack.
-    assert!(!would_create_stack_cycle(
+  fn a_self_target_on_the_default_branch_is_allowed() {
+    let w = [ws("main", Some("main"))];
+    assert!(!would_create_stack_cycle(&w, "main", "main", "main"));
+    assert!(ensure_no_stack_cycle(&w, "main", "main", "main").is_ok());
+  }
+
+  #[test]
+  fn a_self_target_off_the_default_branch_is_refused() {
+    assert!(would_create_stack_cycle(
       &[ws("a", Some("main"))],
       "a",
-      "a"
+      "a",
+      "main"
     ));
+    assert_eq!(
+      ensure_no_stack_cycle(&[ws("a", Some("main"))], "a", "a", "main").unwrap_err(),
+      "Retargeting a onto a would create a stack cycle"
+    );
   }
 
   #[test]
   fn a_chain_through_a_self_targeted_workspace_ends() {
     let w = [ws("main", Some("main")), ws("b", Some("main"))];
-    assert!(!would_create_stack_cycle(&w, "c", "b"));
+    assert!(!would_create_stack_cycle(&w, "c", "b", "main"));
   }
 
   #[test]
   fn targeting_a_direct_child_is_a_cycle() {
     let w = [ws("a", Some("main")), ws("b", Some("a"))];
-    assert!(would_create_stack_cycle(&w, "a", "b"));
+    assert!(would_create_stack_cycle(&w, "a", "b", "main"));
   }
 
   #[test]
@@ -100,7 +111,7 @@ mod tests {
       ws("b", Some("a")),
       ws("c", Some("b")),
     ];
-    assert!(would_create_stack_cycle(&w, "a", "c"));
+    assert!(would_create_stack_cycle(&w, "a", "c", "main"));
   }
 
   #[test]
@@ -110,22 +121,22 @@ mod tests {
       ws("b", Some("main")),
       ws("c", Some("b")),
     ];
-    assert!(!would_create_stack_cycle(&w, "a", "c"));
-    assert!(!would_create_stack_cycle(&w, "a", "main"));
-    assert!(ensure_no_stack_cycle(&w, "a", "c").is_ok());
+    assert!(!would_create_stack_cycle(&w, "a", "c", "main"));
+    assert!(!would_create_stack_cycle(&w, "a", "main", "main"));
+    assert!(ensure_no_stack_cycle(&w, "a", "c", "main").is_ok());
   }
 
   #[test]
   fn a_new_branch_that_an_existing_workspace_targets_is_checked() {
     let w = [ws("child", Some("new"))];
-    assert!(would_create_stack_cycle(&w, "new", "child"));
+    assert!(would_create_stack_cycle(&w, "new", "child", "main"));
   }
 
   #[test]
   fn ensure_reports_the_cycle() {
     let w = [ws("a", Some("main")), ws("b", Some("a"))];
     assert_eq!(
-      ensure_no_stack_cycle(&w, "a", "b").unwrap_err(),
+      ensure_no_stack_cycle(&w, "a", "b", "main").unwrap_err(),
       "Retargeting a onto b would create a stack cycle"
     );
   }

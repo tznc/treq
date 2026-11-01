@@ -212,12 +212,6 @@ fn workspace_merge_same_branch_syncs_home_branch_tip_and_working_copy() {
     None,
   )
   .expect("Failed to create branch workspace");
-  treq_lib::local_db::update_workspace_target_branch(
-    &repo.repo_path,
-    branch_workspace.id,
-    PROP_BRANCH,
-  )
-  .expect("Failed to set branch workspace target branch");
 
   let feature_workspace = treq_lib::core::create_workspace(
     &repo.repo_path,
