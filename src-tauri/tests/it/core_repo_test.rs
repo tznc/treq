@@ -619,3 +619,30 @@ fn bookmark_presence_reads_local_and_remote_from_one_load() {
     (false, false)
   );
 }
+
+#[test]
+fn rename_bookmark_to_same_name_keeps_it() {
+  let repo = TestRepo::new().unwrap();
+  let path = &repo.repo_path;
+  treq_lib::jj::jj_set_bookmark(path, "same", "@-").unwrap();
+
+  treq_lib::jj::jj_rename_bookmark(path, "same", "same").unwrap();
+
+  let loaded = treq_lib::jj::WorkspaceRepo::load(path).unwrap();
+  assert!(loaded.bookmark_presence("same", "origin").0);
+}
+
+#[test]
+fn rename_bookmark_onto_existing_bookmark_fails() {
+  let repo = TestRepo::new().unwrap();
+  let path = &repo.repo_path;
+  treq_lib::jj::jj_set_bookmark(path, "src", "@-").unwrap();
+  treq_lib::jj::jj_set_bookmark(path, "dst", "@").unwrap();
+  let dst_before = treq_lib::jj::jj_get_commit_id(path, "dst").unwrap();
+
+  assert!(treq_lib::jj::jj_rename_bookmark(path, "src", "dst").is_err());
+
+  assert_eq!(treq_lib::jj::jj_get_commit_id(path, "dst").unwrap(), dst_before);
+  let loaded = treq_lib::jj::WorkspaceRepo::load(path).unwrap();
+  assert!(loaded.bookmark_presence("src", "origin").0);
+}
