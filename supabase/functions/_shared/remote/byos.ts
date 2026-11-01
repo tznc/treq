@@ -252,6 +252,11 @@ async function saveCredential(body: Record<string, unknown>, deps: ByosActionDep
   if (typeof key !== "string" || key.length === 0 || key.length > 4096) {
     return refuse(400, "validation_error", "api_key is required");
   }
+  // Printable ASCII only: a header cannot carry anything else, and fetch's
+  // TypeError would otherwise read as a provider outage worth retrying.
+  if (!/^[\x20-\x7e]+$/.test(key)) {
+    return refuse(400, "validation_error", "api_key has characters an API key cannot contain");
+  }
   if (label !== undefined && label !== null && (typeof label !== "string" || label.length > 80)) {
     return refuse(400, "validation_error", "label must be at most 80 characters");
   }

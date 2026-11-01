@@ -192,13 +192,14 @@ fn test_force_rebase_workspace_rebases_root_then_subtree() {
 #[test]
 fn test_check_and_rebase_workspaces_skips_self_rebase() {
   let repo = TestRepo::new().expect("Failed to create test repo");
+  let default_branch = repo.default_branch().to_string();
   // Set target_branch equal to branch_name — should be a no-op.
-  let ws = setup_workspace_with_target(&repo, "feat/self-target", "feat/self-target");
+  let ws = setup_workspace_with_target(&repo, &default_branch, &default_branch);
 
   let result = treq_lib::core::check_and_rebase_workspaces(
     &repo.repo_path,
     Some(ws.id),
-    Some("feat/self-target".to_string()),
+    Some(default_branch),
     None,
     "git",
   )
@@ -217,8 +218,9 @@ fn test_check_and_rebase_workspaces_skips_self_rebase() {
 #[test]
 fn test_check_and_rebase_workspaces_all_skips_self_rebase() {
   let repo = TestRepo::new().expect("Failed to create test repo");
+  let default_branch = repo.default_branch().to_string();
   // All workspaces target their own branch → nothing to rebase.
-  let _ws = setup_workspace_with_target(&repo, "feat/self-all", "feat/self-all");
+  let _ws = setup_workspace_with_target(&repo, &default_branch, &default_branch);
 
   let result =
     treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, None, None, None, "git")
@@ -229,6 +231,28 @@ fn test_check_and_rebase_workspaces_all_skips_self_rebase() {
     "all-rebase should skip workspaces where branch_name == target_branch"
   );
   assert!(result.success);
+}
+
+#[test]
+fn test_apply_workspace_target_branch_refuses_a_feature_self_target() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let ws = setup_workspace_with_target(&repo, "feat/self-retarget", repo.default_branch());
+  let ws_path = repo.workspace_full_path(&ws);
+  let before = jj::jj_get_commit_id(&ws_path, "@-").expect("parent before");
+
+  let err = treq_lib::core::apply_workspace_target_branch(&repo.repo_path, ws.id, &ws.branch_name)
+    .unwrap_err();
+
+  assert!(err.contains("would create a stack cycle"), "{err}");
+  let stored = treq_lib::local_db::get_workspace_by_id(&repo.repo_path, ws.id)
+    .expect("lookup")
+    .expect("stored");
+  assert_eq!(stored.target_branch.as_deref(), Some(repo.default_branch()));
+  assert_eq!(
+    jj::jj_get_commit_id(&ws_path, "@-").expect("parent after"),
+    before,
+    "a refused retarget must not rebase"
+  );
 }
 
 #[test]
