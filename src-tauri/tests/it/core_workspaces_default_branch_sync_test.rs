@@ -547,3 +547,40 @@ fn home_pull_with_dirty_home_keeps_default_branch_on_origin() {
     "the default branch left origin's tip"
   );
 }
+
+/// A home pull with nothing new on `origin` must not move the default branch
+/// onto the home checkout's uncommitted changes either.
+#[test]
+fn home_pull_with_dirty_home_and_no_remote_change_keeps_default_branch() {
+  let repo = TestRepo::with_remote().expect("Failed to create test repo with remote");
+  let default_branch = repo.default_branch();
+  let main_workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    default_branch,
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("Failed to create main workspace");
+  treq_lib::local_db::update_workspace_target_branch(
+    &repo.repo_path,
+    main_workspace.id,
+    default_branch,
+  )
+  .expect("Failed to set main workspace target branch");
+  let branch_before = JjVerifier::get_commit_id_for_rev(&repo.repo_path, default_branch).unwrap();
+
+  TestRepo::write_workspace_file(&repo.repo_path, "wip.txt", "uncommitted\n")
+    .expect("Failed to dirty the home repo");
+  let pull = treq_lib::core::pull_workspace_from_remote(&repo.repo_path, None, "git")
+    .expect("Home pull should succeed");
+  assert!(pull.success, "{}", pull.message);
+
+  assert_eq!(
+    JjVerifier::get_commit_id_for_rev(&repo.repo_path, default_branch).unwrap(),
+    branch_before,
+    "the default branch moved onto uncommitted home changes"
+  );
+}
