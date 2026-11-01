@@ -1953,7 +1953,7 @@ impl ChangesView {
             Button::new("discard-review", p)
               .variant(Variant::Outline)
               .size(Size::Sm)
-              .label(if conflicts { "Reset" } else { "Discard" })
+              .label("Discard pending comments…")
               .on_click(cx.listener(|view, _, _, cx| {
                 view.review.discard_dialog = true;
                 cx.notify();
@@ -2264,22 +2264,22 @@ impl ChangesView {
       ui::Dialog::new("discard-review-dialog", p)
         .overlay(window.viewport_size())
         .width(512.)
-        .title("Discard review?")
-        .description(format!(
-          "This will discard all {n} pending {}. This action cannot be undone.",
+        .title(format!(
+          "Discard {n} pending {}?",
           if n == 1 { "comment" } else { "comments" }
         ))
+        .description("They are deleted from this machine. This can't be undone.")
         .on_close(ui::handler(cx, move |view, _, cx| close(view, cx)))
         .on_primary(ui::handler(cx, |view, _, cx| view.discard_review(cx)))
         .footer([
           Button::new("keep-reviewing", p)
             .variant(Variant::Outline)
-            .label("Keep reviewing")
+            .label("Cancel")
             .on_click(cx.listener(move |view, _, _, cx| close(view, cx)))
             .into_any_element(),
           Button::new("confirm-discard-review", p)
             .variant(Variant::Destructive)
-            .label("Discard")
+            .label("Discard comments")
             .on_click(cx.listener(|view, _, _, cx| view.discard_review(cx)))
             .into_any_element(),
         ]),

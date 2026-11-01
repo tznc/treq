@@ -2675,7 +2675,7 @@ impl ChangesView {
           )
         }),
     )
-    .trailing(div().text_color(muted).child(file.status))
+    .trailing(self.status_letter(format!("committed-{}", file.path), &file.status, muted, cx))
     .on_mouse_down(
       MouseButton::Right,
       cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
@@ -2684,6 +2684,30 @@ impl ChangesView {
     )
     .on_click(cx.listener(move |view, _, _, cx| view.show_file(&path, cx)));
     div().when(i == 0, |this| this.pt_2()).child(row)
+  }
+
+  /// A file's status letter, named in words for its tooltip and readers.
+  fn status_letter(
+    &self,
+    key: String,
+    status: &str,
+    color: Hsla,
+    cx: &mut Context<Self>,
+  ) -> Stateful<Div> {
+    let word = super::file_browser_data::status_title(status);
+    self.tip(
+      format!("status-tip-{key}"),
+      word,
+      div()
+        .id(SharedString::from(format!("status-{key}")))
+        .role(gpui::Role::Label)
+        .aria_label(word)
+        .test_support()
+        .min_w(zpx(8.))
+        .text_color(color)
+        .child(status.to_string()),
+      cx,
+    )
   }
 
   /// `el` with a tooltip of `text` above it.
@@ -2724,12 +2748,17 @@ impl ChangesView {
       |id: String, icon: &'static str, fg: Hsla, hidden: bool| file_action(id, icon, fg, hidden, p);
     let red = Tone::Danger.text(p);
     let status_color = p.muted_foreground;
-    let mut actions = div().flex().items_center().gap_1().flex_none().child(
-      div()
-        .min_w(zpx(8.))
-        .text_color(status_color)
-        .child(file.status.clone()),
-    );
+    let mut actions = div()
+      .flex()
+      .items_center()
+      .gap_1()
+      .flex_none()
+      .child(self.status_letter(
+        format!("{list:?}-{}", file.path),
+        &file.status,
+        status_color,
+        cx,
+      ));
     if last && selected && !staged {
       let target = path.clone();
       let tip_key = format!("discard-tip-{}", file.path);
@@ -3213,14 +3242,7 @@ impl ChangesView {
               },
             ),
             cx,
-          ))
-          .when(committed, |this| {
-            this.child(
-              div()
-                .debug_selector(|| "committed-file-label".into())
-                .child(badge("Committed", Tone::Primary)),
-            )
-          }),
+          )),
       );
     let mut right = div().flex().items_center().gap_2();
     if !committed && !self.read_only() {
