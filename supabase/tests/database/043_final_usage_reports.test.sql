@@ -1,4 +1,4 @@
--- Final usage for an account being deleted (057): every hour up to now,
+-- Final usage for an account being deleted (060): every hour up to now,
 -- including the current partial hour, for that owner only.
 begin;
 select plan(6);
