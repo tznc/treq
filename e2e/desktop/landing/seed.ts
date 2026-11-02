@@ -4,7 +4,7 @@
 // Workspaces and commits go through the `treq` CLI, so the app opens on the
 // same database a user's repository would have.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { appBinary } from "../env.ts";
@@ -159,7 +159,14 @@ type Fixture = ReturnType<typeof makeFixture>;
 
 /** A workspace's checkout: `.treq/workspaces/<branch with / as ->`. */
 export function workspaceDir(repo: string, branch: string): string {
-  return join(repo, ".treq", "workspaces", branch.replaceAll("/", "-"));
+  // A new workspace's directory starts with its id: `<id>-<branch>`.
+  const root = join(repo, ".treq", "workspaces");
+  const name = branch.replaceAll("/", "-");
+  const dirs = existsSync(root) ? readdirSync(root) : [];
+  const found = dirs.find(
+    (d) => d === name || (d.endsWith(`-${name}`) && /^\d+$/.test(d.slice(0, -name.length - 1))),
+  );
+  return join(root, found ?? name);
 }
 
 /** Writes `file` in a workspace's checkout, as an editor would. */
