@@ -504,7 +504,10 @@ describe("createCheckout", () => {
   it("offers no trial when the email already had one", async () => {
     const { stripe, calls } = fakeStripe(STRIPE_OK);
     const store = fakeStore({
-      getCustomer: vi.fn(async () => ({ stripe_customer_id: "cus_new_account", trial_used_at: null })),
+      getCustomer: vi.fn(async () => ({
+        stripe_customer_id: "cus_new_account",
+        trial_used_at: null,
+      })),
       trialClaimed: vi.fn(async () => true),
     });
     const result = await createCheckout(
