@@ -685,9 +685,12 @@ fn entry_top(entries: &[MenuEntry], index: usize) -> f32 {
 
 /// The number of lines `text` takes in Inter at `text-sm` within `width`.
 fn wrapped_lines(cx: &App, text: &str, width: f32) -> usize {
-  let mut wrapper = cx
-    .text_system()
-    .line_wrapper(gpui::font(theme::SANS_FONT), px(TEXT_SIZE));
+  wrapped_lines_in(cx, text, width, gpui::font(theme::SANS_FONT))
+}
+
+/// [`wrapped_lines`] in `font`, a bold title's, say.
+fn wrapped_lines_in(cx: &App, text: &str, width: f32, font: gpui::Font) -> usize {
+  let mut wrapper = cx.text_system().line_wrapper(font, px(TEXT_SIZE));
   text
     .split('\n')
     .map(|line| {
@@ -744,7 +747,18 @@ fn toast_width(cx: &App, toast: &Toast) -> f32 {
 /// title, the description and action below it with `space-y-1`), or the
 /// close button where taller, in `p-4` and a border.
 fn toast_height(cx: &App, toast: &Toast, width: f32) -> f32 {
-  let mut text = TEXT_SIZE;
+  // A long title (a branch name, say) wraps at `max-w-sm`.
+  let chrome = if is_compact(toast) {
+    COMPACT_CHROME
+  } else {
+    TOAST_CHROME
+  };
+  let bold = gpui::Font {
+    weight: gpui::FontWeight::SEMIBOLD,
+    ..gpui::font(theme::SANS_FONT)
+  };
+  let title_lines = wrapped_lines_in(cx, &toast.title, width - chrome, bold).max(1);
+  let mut text = TEXT_SIZE + LINE_HEIGHT * (title_lines - 1) as f32;
   if let Some(description) = &toast.description {
     let lines = wrapped_lines(cx, description, width - TOAST_CHROME);
     text += 4. + LINE_HEIGHT * lines as f32;
@@ -2046,6 +2060,29 @@ mod tests {
       // `max-w-sm`; the description wraps onto several lines.
       assert_eq!(width, 384.);
       assert!(height > 58. + 8. + 34. + 14. + 4. + 2. * LINE_HEIGHT);
+    });
+  }
+
+  /// A title too long for one line wraps, and the toast grows to fit it
+  /// rather than clipping the description below.
+  #[gpui::test]
+  fn a_wrapping_toast_title_makes_the_toast_taller(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+      theme::init(cx);
+      let short = Toast {
+        id: "a".into(),
+        title: "Review started".into(),
+        description: Some("Comments will appear inline".into()),
+        kind: ToastKind::Success,
+        action: None,
+      };
+      let long = Toast {
+        title: format!("Review started on {}", "feat-".repeat(30)),
+        ..short.clone()
+      };
+      let (_, one_line) = toasts_size(cx, std::slice::from_ref(&short));
+      let (_, wrapped) = toasts_size(cx, std::slice::from_ref(&long));
+      assert!(wrapped >= one_line + LINE_HEIGHT, "{one_line} → {wrapped}");
     });
   }
 

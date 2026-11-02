@@ -249,6 +249,10 @@ impl WindowHost for FakeHost {
     self.record(format!("toast {title}"));
   }
 
+  fn review_done(&self, repo_path: &str, workspace_id: i64) {
+    self.record(format!("review done {repo_path} {workspace_id}"));
+  }
+
   fn open_url(&self, url: &str) {
     self.record(format!("url {url}"));
   }
