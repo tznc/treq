@@ -46,7 +46,7 @@ function openLink(url: string): void {
 }
 
 async function skillsTab(page: Page): Promise<void> {
-  const close = page.getByRole("button", { name: "Close", exact: true });
+  const close = page.getByRole("button", { name: "Back", exact: true });
   if ((await close.count()) === 0) {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(close).toBeVisible();
@@ -150,7 +150,7 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
   mark("Customize: Treq writes a user-owned copy and starts an agent on it");
   try {
     await customize.click();
-    await expect(page.getByRole("button", { name: "Close", exact: true })).toHaveCount(0, {
+    await expect(page.getByRole("button", { name: "Back", exact: true })).toHaveCount(0, {
       timeout: 30_000,
     });
     await expect

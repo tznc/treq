@@ -630,6 +630,53 @@ pub fn setup_status_text(status: &AppSetupScriptStatus) -> String {
   )
 }
 
+/// A repository's name as the Repository page titles it: its folder's.
+pub fn repo_name(path: &str) -> String {
+  let trimmed = path.trim_end_matches(['/', '\\']);
+  trimmed
+    .rsplit(['/', '\\'])
+    .next()
+    .filter(|name| !name.is_empty())
+    .unwrap_or(trimmed)
+    .to_string()
+}
+
+/// When an edited field saves itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveTiming {
+  /// A choice (select, switch): as soon as it is made.
+  Now,
+  /// Typed text: once typing pauses for [`SAVE_DEBOUNCE`].
+  Debounced,
+}
+
+/// How long typing must pause before a text field saves.
+pub const SAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(500);
+/// How long the "Saved" tick stays next to a field's label.
+pub const SAVED_TICK: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// When `field` (a screen field id) saves, or `None` when it saves itself
+/// (theme, zoom, previews) or isn't a setting at all.
+pub fn save_timing(field: &str) -> Option<SaveTiming> {
+  match field {
+    "repo.branchNamePattern" | "repo.includedFiles" | "repo.reviewPrompt" | "app.setupScript" => {
+      Some(SaveTiming::Debounced)
+    }
+    "repo.defaultModel"
+    | "repo.defaultAgent"
+    | "repo.autoPush"
+    | "repo.reviewAgent"
+    | "repo.autoReviewTrigger"
+    | "app.fontSize"
+    | "app.defaultModel"
+    | "app.defaultAgent"
+    | "app.conflictMarkerStyle"
+    | "app.notifyAgentFinished"
+    | "app.setupScriptAlwaysRun" => Some(SaveTiming::Now),
+    _ => None,
+  }
+}
+
 /// `set_repo_setting` for each value.
 pub fn save_repo_settings(
   db: &crate::db::Database,
@@ -641,4 +688,58 @@ pub fn save_repo_settings(
       .map_err(|e| e.to_string())?;
   }
   Ok(())
+}
+
+#[cfg(test)]
+mod save_timing_tests {
+  use super::*;
+
+  #[test]
+  fn names_a_repository_by_its_folder() {
+    assert_eq!(repo_name("/Users/me/code/event-bus"), "event-bus");
+    assert_eq!(repo_name("/Users/me/code/event-bus/"), "event-bus");
+    assert_eq!(repo_name("C:\\code\\event-bus"), "event-bus");
+    assert_eq!(repo_name("/"), "");
+  }
+
+  #[test]
+  fn saves_typed_fields_after_a_pause_and_choices_at_once() {
+    for field in [
+      "repo.branchNamePattern",
+      "repo.includedFiles",
+      "repo.reviewPrompt",
+      "app.setupScript",
+    ] {
+      assert_eq!(save_timing(field), Some(SaveTiming::Debounced), "{field}");
+    }
+    for field in [
+      "repo.defaultModel",
+      "repo.defaultAgent",
+      "repo.autoPush",
+      "repo.reviewAgent",
+      "repo.autoReviewTrigger",
+      "app.fontSize",
+      "app.defaultModel",
+      "app.defaultAgent",
+      "app.conflictMarkerStyle",
+      "app.notifyAgentFinished",
+      "app.setupScriptAlwaysRun",
+    ] {
+      assert_eq!(save_timing(field), Some(SaveTiming::Now), "{field}");
+    }
+  }
+
+  #[test]
+  fn gives_no_timing_to_fields_that_save_themselves() {
+    // Theme, zoom and previews write on their own; tabs and searches don't save.
+    for field in [
+      "app.theme",
+      "app.zoom",
+      "settings.tab",
+      "skills.query",
+      "preview.x",
+    ] {
+      assert_eq!(save_timing(field), None, "{field}");
+    }
+  }
 }
