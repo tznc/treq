@@ -306,8 +306,8 @@ impl CodeHost for Backend {
   }
 
   fn branch_deleted(&self, repo_path: &str, workspace_id: i64) -> bool {
-    if self.remote_containing(repo_path).is_some() {
-      return false;
+    if let Some(remote) = self.remote_containing(repo_path) {
+      return remote.branch_deleted(workspace_id);
     }
     core::workspace_branch_deleted(repo_path, workspace_id)
   }

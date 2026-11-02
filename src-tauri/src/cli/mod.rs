@@ -645,6 +645,10 @@ pub(crate) fn parse_remote_command_request(
     }),
     ("conflicts", "list") => Ok(TreqCommandRequest::ListConflicts { repo, workspace }),
     ("workspace", "marker") => Ok(TreqCommandRequest::WorkspaceChangeMarker { repo, workspace }),
+    ("workspace", "branch-deleted") => Ok(TreqCommandRequest::WorkspaceBranchDeleted {
+      repo,
+      workspace: require_workspace()?,
+    }),
     ("conflicts", "resolve") => Ok(TreqCommandRequest::ResolveConflict {
       repo,
       revision: require_target("revision")?,
