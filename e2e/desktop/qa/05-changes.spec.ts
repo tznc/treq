@@ -161,6 +161,20 @@ test("changes: diff, inline comment add/edit, review bar", async ({ page }) => {
   });
   await page.keyboard.press("Escape");
   await settle(page, 600);
+
+  // Every workspace's terminals stay in the pane: another workspace's
+  // review column dims while the one on screen stands out.
+  await openWorkspace(page, "feat/alerting-logs");
+  await settle(page, 1200);
+  await capture(page, {
+    name: "05-changes-review-other-workspace",
+    title: "Switched workspace while a review runs",
+    screen: true,
+    expectations: [
+      "The terminal pane still shows the AI Review column of feat/empty-event-message, dimmed",
+      "Any feat/alerting-logs terminal is highlighted and scrolled into view",
+    ],
+  });
 });
 
 test("changes: search in diff", async ({ page }) => {
