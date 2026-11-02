@@ -395,6 +395,56 @@ fn popovers_close_from_an_outside_press_and_escape(cx: &mut TestAppContext) {
   assert!(h.closed.get());
 }
 
+/// A view with a button under a popover's backdrop.
+struct Under {
+  clicks: Rc<Cell<usize>>,
+  popover: Entity<Popover>,
+}
+
+impl Render for Under {
+  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    let clicks = self.clicks.clone();
+    div()
+      .size_full()
+      .child(
+        div()
+          .id("under")
+          .absolute()
+          .left(px(0.))
+          .top(px(500.))
+          .size(px(100.))
+          .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
+      )
+      .child(
+        div()
+          .absolute()
+          .top_0()
+          .left_0()
+          .child(self.popover.clone()),
+      )
+  }
+}
+
+#[gpui::test]
+fn a_press_outside_does_not_reach_what_is_under_the_backdrop(cx: &mut TestAppContext) {
+  cx.update(theme::init);
+  let clicks = Rc::new(Cell::new(0));
+  let host: Arc<dyn PopoverHost> = Arc::new(prompt_host());
+  let anchor = Bounds::new(point(px(700.), px(10.)), size(px(80.), px(32.)));
+  let (_, cx) = cx.add_window_view({
+    let clicks = clicks.clone();
+    move |_, cx| {
+      let popover =
+        cx.new(|cx| Popover::new(details(), anchor, false, host, Rc::new(|_, _| {}), cx));
+      Under { clicks, popover }
+    }
+  });
+  cx.run_until_parked();
+  cx.simulate_click(point(px(50.), px(550.)), Modifiers::none());
+  cx.run_until_parked();
+  assert_eq!(clicks.get(), 0);
+}
+
 #[gpui::test]
 fn the_backdrop_covers_the_window(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, details(), prompt_host());

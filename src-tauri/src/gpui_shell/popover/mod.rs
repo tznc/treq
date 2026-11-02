@@ -12,6 +12,7 @@ use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{
   Input, InputEvent, InputState, MoveEnd, MoveHome, MoveToEnd, MoveToStart,
 };
@@ -253,6 +254,8 @@ impl Render for Popover {
       // window.
       .w(viewport.width)
       .h(viewport.height)
+      // What lies under the backdrop gets no press while the popover shows.
+      .occlude()
       .font_family(theme::SANS_FONT)
       .text_color(p.foreground)
       .capture_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key_down(event, cx)))
@@ -277,6 +280,9 @@ impl Render for Popover {
       .on_mouse_down(MouseButton::Right, cx.listener(close))
       .child(
         div()
+          .id("header-popover")
+          .role(gpui::Role::Dialog)
+          .test_support()
           .absolute()
           .left(origin.x)
           .top(origin.y)

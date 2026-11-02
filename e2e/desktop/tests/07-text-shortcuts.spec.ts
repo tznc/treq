@@ -8,8 +8,21 @@ import { goHome } from "../fixture.ts";
 
 test.skip(process.platform !== "linux", "presses keys with xdotool");
 
-/** Presses `keys` (xdotool's names, e.g. "ctrl+v") in the focused window. */
+/**
+ * Gives the repo window the X keyboard focus. Without a window manager
+ * (Xvfb) nothing else does, and every dialog now draws in that window.
+ */
+function focusRepoWindow() {
+  const ids = execFileSync("xdotool", ["search", "--onlyvisible", "--name", "^Treq - "])
+    .toString()
+    .trim()
+    .split("\n");
+  if (ids[0]) execFileSync("xdotool", ["windowfocus", "--sync", ids[0]]);
+}
+
+/** Presses `keys` (xdotool's names, e.g. "ctrl+v") in the repo window. */
 function press(keys: string) {
+  focusRepoWindow();
   execFileSync("xdotool", ["key", "--clearmodifiers", keys]);
 }
 
