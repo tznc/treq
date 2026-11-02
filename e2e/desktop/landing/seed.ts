@@ -157,20 +157,16 @@ export const FEED_SRC = 'export const FEED_SOURCE = "discord";\n';
 
 type Fixture = ReturnType<typeof makeFixture>;
 
-/**
- * A workspace's checkout: `.treq/workspaces/<id>-<branch with / as ->`, or
- * the unprefixed name a workspace made before ids prefixed the directory.
- */
+/** A workspace's checkout: `.treq/workspaces/<branch with / as ->`. */
 export function workspaceDir(repo: string, branch: string): string {
+  // A new workspace's directory starts with its id: `<id>-<branch>`.
   const root = join(repo, ".treq", "workspaces");
-  const slug = branch.replaceAll("/", "-");
-  const prefixed = existsSync(root)
-    ? readdirSync(root).find((name) => {
-        const dash = name.indexOf("-");
-        return dash > 0 && /^\d+$/.test(name.slice(0, dash)) && name.slice(dash + 1) === slug;
-      })
-    : undefined;
-  return join(root, prefixed ?? slug);
+  const name = branch.replaceAll("/", "-");
+  const dirs = existsSync(root) ? readdirSync(root) : [];
+  const found = dirs.find(
+    (d) => d === name || (d.endsWith(`-${name}`) && /^\d+$/.test(d.slice(0, -name.length - 1))),
+  );
+  return join(root, found ?? name);
 }
 
 /** Writes `file` in a workspace's checkout, as an editor would. */
