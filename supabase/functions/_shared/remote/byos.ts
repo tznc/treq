@@ -251,7 +251,8 @@ async function saveCredential(body: Record<string, unknown>, deps: ByosActionDep
     return refuse(403, "byos_not_allowed", "Bring your own sandbox needs Pro");
   }
   const kind = body.provider_kind;
-  const key = body.api_key;
+  // A pasted key often ends in a newline; headers trim it, so store it trimmed.
+  const key = typeof body.api_key === "string" ? body.api_key.trim() : body.api_key;
   const label = body.label;
   if (typeof key !== "string" || key.length === 0 || key.length > 4096) {
     return refuse(400, "validation_error", "api_key is required");

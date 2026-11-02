@@ -268,6 +268,19 @@ Deno.test("a key with characters no HTTP header can carry is a validation error,
   }
 });
 
+// A pasted key often carries a trailing newline or spaces. Headers trim it on
+// the wire, but the stored key kept them; it is trimmed before validating.
+Deno.test("a key is trimmed before it is validated and stored", async () => {
+  const { store, saved } = fakeActionStore();
+  const r = await handleByosAction("save_provider_credential", { provider_kind: "boat", api_key: "  sk-user\n" }, {
+    canByos: () => Promise.resolve(true),
+    store,
+    build: validatingProvider("ok"),
+  });
+  assertEquals(r?.status, 200);
+  assertEquals(saved.map((x) => x.key), ["sk-user"]);
+});
+
 Deno.test("a user the gate refuses cannot save a key", async () => {
   const { store, saved } = fakeActionStore();
   const r = await handleByosAction("save_provider_credential", { provider_kind: "boat", api_key: "sk-user" }, {
