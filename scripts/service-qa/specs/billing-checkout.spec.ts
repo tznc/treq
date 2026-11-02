@@ -39,6 +39,10 @@ function stubStripe(customerId: string): {
       calls.push({ method, path, params });
       if (path === "/v1/customers") return { id: customerId };
       if (path === "/v1/prices") return { data: [{ id: "price_sqa_pro" }] };
+      if (method === "GET" && path === "/v1/subscriptions") return { data: [] };
+      if (method === "GET" && path === "/v1/checkout/sessions") {
+        return { data: [] };
+      }
       if (path === "/v1/checkout/sessions") {
         return { id: "cs_sqa", client_secret: "cs_sqa_secret" };
       }
@@ -52,7 +56,9 @@ function stubStripe(customerId: string): {
 }
 
 function sessionParams(calls: StripeCall[]): StripeParams | undefined {
-  return calls.find((c) => c.path === "/v1/checkout/sessions")?.params;
+  return calls.find(
+    (c) => c.method === "POST" && c.path === "/v1/checkout/sessions",
+  )?.params;
 }
 
 function event(type: string, object: Record<string, unknown>) {
@@ -88,6 +94,8 @@ it("opens checkout with one trial per user and a portal for the customer", async
     });
     expect(first.calls.map((c) => c.path)).toEqual([
       "/v1/customers",
+      "/v1/subscriptions",
+      "/v1/checkout/sessions",
       "/v1/prices",
       "/v1/checkout/sessions",
     ]);
@@ -115,6 +123,8 @@ it("opens checkout with one trial per user and a portal for the customer", async
       { user, store, stripe: second.stripe, webUrl: WEB_URL },
     );
     expect(second.calls.map((c) => c.path)).toEqual([
+      "/v1/subscriptions",
+      "/v1/checkout/sessions",
       "/v1/prices",
       "/v1/checkout/sessions",
     ]);
