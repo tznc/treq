@@ -279,6 +279,7 @@ function fakeStore(overrides: Partial<BillingStore> = {}): BillingStore {
     hasPro: vi.fn(async () => false),
     getCustomer: vi.fn(async () => null),
     attachCustomer: vi.fn(async (id: string) => id),
+    trialClaimed: vi.fn(async () => false),
     ...overrides,
   };
 }
@@ -487,6 +488,24 @@ describe("createCheckout", () => {
         stripe_customer_id: "cus_old",
         trial_used_at: "2026-09-01T00:00:00Z",
       })),
+    });
+    const result = await createCheckout(
+      { plan: "pro" },
+      { user, store, stripe, webUrl: WEB_URL },
+    );
+    expect(result.status).toBe(200);
+    expect(sessionParams(calls)).not.toHaveProperty(
+      "subscription_data[trial_period_days]",
+    );
+  });
+
+  // A deleted account's trial is remembered by email, so deleting and
+  // signing up again (new user, new Stripe customer) gets no second trial.
+  it("offers no trial when the email already had one", async () => {
+    const { stripe, calls } = fakeStripe(STRIPE_OK);
+    const store = fakeStore({
+      getCustomer: vi.fn(async () => ({ stripe_customer_id: "cus_new_account", trial_used_at: null })),
+      trialClaimed: vi.fn(async () => true),
     });
     const result = await createCheckout(
       { plan: "pro" },

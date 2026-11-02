@@ -195,7 +195,7 @@ async function openSession(
         priceId,
         ownerId: owner.id,
         ownerType: owner.type,
-        trialEligible: plan === "pro" && customer.trial_used_at === null,
+        trialEligible: plan === "pro" && customer.trial_used_at === null && !(await owner.store.trialClaimed()),
         webUrl: deps.webUrl,
         quantity: owner.quantity,
         usagePriceId,
