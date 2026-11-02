@@ -517,7 +517,7 @@ Also, renewal's `onCutoff` does **not** record the cutoff locally; it waits for 
 ## 6. App identity and deep-link configuration
 
 - **`src-tauri/tauri.conf.json`:**
-  - `productName: "Treq"` (line 3), `version: "0.3.0"` (line 4), `identifier: "com.treq"` (line 5).
+  - `productName: "Treq"` (line 3), `version: "0.4.0"` (line 4), `identifier: "com.treq"` (line 5).
   - `build.frontendDist: "../src/dist"`, `devUrl http://localhost:1420`.
   - `app.windows: []`; the window is created in setup.
   - CSP `connect-src` allows `http://127.0.0.1:54321` and `https://xnlljmfiqyumiyexydyl.supabase.co`.
