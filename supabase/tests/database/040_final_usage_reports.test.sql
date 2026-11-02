@@ -3,6 +3,9 @@
 begin;
 select plan(6);
 
+-- Seed prices start at db reset; let them cover the backdated usage below.
+update public.machine_type_prices set effective_from = now() - interval '30 days' where effective_to is null;
+
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000040a1', 'final-usage@example.com'),
   ('00000000-0000-0000-0000-0000000040a2', 'final-usage-other@example.com');
