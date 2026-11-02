@@ -4,6 +4,7 @@ import {
   PRO_REQUIRED_CODE,
   proRequired,
   refuseGatedAction,
+  userHasCloud,
   userHasPro,
 } from "../../supabase/functions/_shared/billing/entitlement.ts";
 
@@ -89,5 +90,21 @@ describe("installationHasPro", () => {
         42,
       ),
     ).rejects.toThrow("installation_has_pro failed: down");
+  });
+});
+
+// Cloud usage bills the owner's own Stripe customer, so cloud gates ask
+// has_cloud (personal Pro), not has_pro (which Team members also have).
+describe("userHasCloud", () => {
+  it("asks has_cloud about the user", async () => {
+    const client = rpcReturning({ data: true, error: null });
+    await expect(userHasCloud(client, "user-1")).resolves.toBe(true);
+    expect(client.rpc).toHaveBeenCalledWith("has_cloud", { p_user_id: "user-1" });
+  });
+
+  it("fails closed by throwing when the check itself fails", async () => {
+    await expect(
+      userHasCloud(rpcReturning({ data: null, error: { message: "boom" } }), "user-1"),
+    ).rejects.toThrow("has_cloud failed");
   });
 });

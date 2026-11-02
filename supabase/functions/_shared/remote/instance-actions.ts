@@ -77,7 +77,7 @@ export interface RemoteInstanceDeps {
   provider: (kind: ProviderKind, placementId?: string | null) => SandboxProvider;
   /** The in-memory stub: there is no machine to exec on. */
   stub: boolean;
-  /** has_pro for the caller. */
+  /** has_cloud for the caller: personal Pro (cloud bills their own Stripe customer). */
   hasPro: () => Promise<boolean>;
   /** The caller's monthly spend (get_spend_status_for); ensure/wake/resize get 402 when capped. */
   spendStatus?: () => Promise<SpendStatus | null>;

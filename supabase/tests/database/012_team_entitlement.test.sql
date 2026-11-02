@@ -318,8 +318,9 @@ select is(public.has_pro('00000000-0000-0000-0000-0000000000f4'), true,
   'the webhook''s Team subscription entitles the organization''s members');
 select is((select trial_used_at from public.billing_customers where stripe_customer_id = 'cus_team_labs'),
   null, 'Team records no trial');
-select is((select lapsed_at from public.remote_instances where id = '00000000-0000-0000-0000-00000000f004'),
-  null, 'a Team subscription clears its members'' cloud workspace lapses');
+-- Cloud needs personal Pro (058): Team leaves a member's cloud lapse in place.
+select isnt((select lapsed_at from public.remote_instances where id = '00000000-0000-0000-0000-00000000f004'),
+  null, 'a Team subscription does not clear a Team-only member''s cloud workspace lapse');
 
 reset role;
 

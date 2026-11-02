@@ -101,7 +101,7 @@ export interface RelayStore {
     ownerUserId: string,
     keyId: string,
   ): Promise<RelayClientKeyRow | null>;
-  /** has_pro for the owner. */
+  /** has_cloud for the owner: personal Pro. */
   hasPro(ownerUserId: string): Promise<boolean>;
 }
 

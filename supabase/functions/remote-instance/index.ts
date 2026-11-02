@@ -29,7 +29,7 @@
 // lib.ts.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
-import { userHasPro } from "../_shared/billing/entitlement.ts";
+import { userHasCloud } from "../_shared/billing/entitlement.ts";
 import { spendStatusFor } from "../_shared/billing/spend-cap.ts";
 import { correlationIdFromRequest } from "../_shared/remote/correlation.ts";
 import { providerFor } from "../_shared/remote/provider-registry.ts";
@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
     supabase,
     ownerUserId: user.id,
     correlationId: correlationIdFromRequest(req),
-    hasPro: () => userHasPro(supabase, user.id),
+    hasPro: () => userHasCloud(supabase, user.id),
     spendStatus: () => spendStatusFor(supabase, user.id),
     stub,
     provider: placementProviders(supabase),
