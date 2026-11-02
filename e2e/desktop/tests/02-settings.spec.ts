@@ -30,7 +30,7 @@ test("opens on the repository tab and closes back to the repository", async ({
   await expect(
     page.getByRole("switch", { name: "Auto-push to remote" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(page.getByRole("tab", { name: "Code" })).toBeVisible();
 });
 
@@ -43,14 +43,12 @@ test("saves the agent notification switch and shows it when settings reopen", as
   await expect(toggle).toBeChecked();
   await toggle.click();
   await expect(toggle).not.toBeChecked();
-  await page.getByRole("button", { name: "Save settings" }).click();
-  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(page.getByRole("tab", { name: "Code" })).toBeVisible();
 
   const reopened = await openApplicationSettings(page);
   await expect(reopened).not.toBeChecked();
   // Back on for the other tests.
   await reopened.click();
-  await page.getByRole("button", { name: "Save settings" }).click();
-  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
 });

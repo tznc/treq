@@ -37,6 +37,20 @@ use crate::gpui_shell::{
 
 /// The repository setting the Linear API key is stored under.
 const LINEAR_API_KEY: &str = "linear_api_key";
+/// Where Linear users create a personal API key.
+const LINEAR_API_KEYS_URL: &str = "https://linear.app/settings/account/security";
+
+/// The header an Integrations card draws.
+struct IntegrationCard {
+  /// "github", "linear": its selector and toggle id.
+  id: &'static str,
+  icon: &'static str,
+  name: &'static str,
+  /// One line on what connecting it does.
+  purpose: &'static str,
+  connected: bool,
+  open: bool,
+}
 
 /// The account as the tabs draw it: Rust's [`Account`], with what the tabs
 /// load and run themselves.
@@ -381,8 +395,12 @@ pub struct CloudCreate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct IntegrationsTab {
   pub github: GithubSection,
+  /// Signed in to Treq Cloud, which connects GitHub.
+  pub github_connected: bool,
   /// While the Linear integration preview is on.
   pub linear: Option<LinearSection>,
+  /// The cards shown expanded ("github", "linear").
+  pub expanded: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -401,6 +419,8 @@ pub enum GithubSection {
 pub struct LinearSection {
   /// False when no repository is open, which the key belongs to.
   pub repo: bool,
+  /// An API key is set for the repository.
+  pub connected: bool,
   pub description: String,
   pub editing: bool,
   pub draft: String,
@@ -416,6 +436,8 @@ pub struct LinearSection {
 /// The tabs' own state.
 #[derive(Default)]
 pub(super) struct State {
+  /// The Integrations cards the user expanded.
+  expanded: std::collections::BTreeSet<String>,
   /// Rust's account, as of the last change.
   rust: AccountRoute,
   /// The pasted token being exchanged, and why the last exchange failed.
@@ -1023,16 +1045,17 @@ impl SettingsView {
         let key = linear.and_then(|l| l.key.clone());
         LinearSection {
           repo: self.repo.is_some(),
+          connected: key.is_some(),
           description: if key.is_some() {
             "Direct API access configured"
           } else {
-            "Free plan: provide your API key"
+            "Paste a Linear personal API key"
           }
           .into(),
           editing: linear.is_some_and(|l| l.editing),
           draft: linear.map(|l| l.draft.clone()).unwrap_or_default(),
           saving: linear.is_some_and(|l| l.saving),
-          edit_label: format!("{} API Key", if key.is_some() { "Update" } else { "Add" }),
+          edit_label: format!("{} API key", if key.is_some() { "Update" } else { "Add" }),
           oauth: pro && native::feature_flag("pro"),
           oauth_description: if key.is_some() {
             "API key takes priority, but you can also connect via OAuth"
@@ -1044,7 +1067,19 @@ impl SettingsView {
           key_priority_note: key.is_some() && pro,
         }
       });
-    IntegrationsTab { github, linear }
+    IntegrationsTab {
+      github_connected: matches!(github, GithubSection::SignedIn { .. }),
+      github,
+      linear,
+      expanded: self.account.expanded.iter().cloned().collect(),
+    }
+  }
+
+  /// Opens or closes an Integrations card.
+  pub(super) fn toggle_integration(&mut self, id: &str) {
+    if !self.account.expanded.remove(id) {
+      self.account.expanded.insert(id.to_string());
+    }
   }
 
   /// Reads the Linear API key each time the Integrations tab shows, as
@@ -1100,7 +1135,7 @@ impl SettingsView {
           match &result {
             Ok(()) => {
               host.notify(NativeEvent::RepoSettingsChanged { repo_path: path });
-              host.notify(toast(ToastTone::Success, "API Key saved", ""));
+              host.notify(toast(ToastTone::Success, "API key saved", ""));
             }
             Err(err) => host.notify(toast(ToastTone::Error, "Error saving API key", err)),
           }
@@ -1345,6 +1380,9 @@ impl SettingsView {
       "github.manage" => self
         .host
         .open_url(&format!("{web}/dashboard?tab=integrations")),
+      "integration.toggle.github" => self.toggle_integration("github"),
+      "integration.toggle.linear" => self.toggle_integration("linear"),
+      "linear.createKey" => self.host.open_url(LINEAR_API_KEYS_URL),
       "account.devCallback.go" => match callback_token(&self.account.callback_url) {
         Ok(token) => {
           self.account.callback_error = None;
@@ -2705,16 +2743,112 @@ impl SettingsView {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let linear = tab
-      .linear
-      .as_ref()
-      .map(|linear| self.linear(linear, p, window, cx));
+    let open = |id: &str| tab.expanded.iter().any(|e| e == id);
+    let github = self.integration_card(
+      IntegrationCard {
+        id: "github",
+        icon: theme::ICON_GITHUB,
+        name: "GitHub",
+        purpose: "Pull requests, checks and reviews for your repositories",
+        connected: tab.github_connected,
+        open: open("github"),
+      },
+      open("github").then(|| self.github(&tab.github, p)),
+      p,
+    );
+    let linear = tab.linear.as_ref().map(|linear| {
+      let body = open("linear").then(|| self.linear(linear, p, window, cx));
+      self.integration_card(
+        IntegrationCard {
+          id: "linear",
+          icon: theme::ICON_LINEAR,
+          name: "Linear",
+          purpose: "Issues to start workspaces from",
+          connected: linear.connected,
+          open: open("linear"),
+        },
+        body,
+        p,
+      )
+    });
     div()
       .flex()
       .flex_col()
-      .gap_12()
-      .child(self.github(&tab.github, p))
+      .gap_3()
+      .child(github)
       .children(linear)
+  }
+
+  /// One integration's card: a header row (icon, name, purpose, status,
+  /// chevron) that expands the card to configure it.
+  fn integration_card(
+    &self,
+    card: IntegrationCard,
+    body: Option<AnyElement>,
+    p: &Palette,
+  ) -> gpui::Div {
+    let status = div()
+      .debug_selector({
+        let id = format!("integration-status-{}", card.id);
+        move || id
+      })
+      .flex()
+      .items_center()
+      .gap_1p5()
+      .child(ui::Dot::new(
+        if card.connected {
+          Tone::Success
+        } else {
+          Tone::Neutral
+        },
+        if card.connected {
+          "Connected"
+        } else {
+          "Not connected"
+        },
+        p,
+      ))
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child(if card.connected {
+            "Connected"
+          } else {
+            "Not connected"
+          }),
+      );
+    let header = ui::Row::new(format!("integration-card-{}", card.id), p)
+      .role(gpui::Role::Button)
+      .label(format!("{} integration", card.name))
+      .density(ui::RowDensity::TwoLine)
+      .leading(ui::icon(card.icon, 20., p.foreground))
+      .title(card.name)
+      .meta(card.purpose)
+      .trailing(status)
+      .trailing(ui::icon(
+        if card.open {
+          theme::ICON_CHEVRON_UP
+        } else {
+          theme::ICON_CHEVRON_DOWN
+        },
+        16.,
+        p.muted_foreground,
+      ))
+      .px_4()
+      .on_click(self.press(&format!("integration.toggle.{}", card.id)));
+    ui::card(p)
+      .overflow_hidden()
+      .child(header)
+      .when_some(body, |this, body| {
+        this.child(
+          div()
+            .border_t_1()
+            .border_color(p.border)
+            .px_4()
+            .py_2()
+            .child(body),
+        )
+      })
   }
 
   fn github(&self, github: &GithubSection, p: &Palette) -> AnyElement {
@@ -2722,23 +2856,19 @@ impl SettingsView {
       GithubSection::Loading => div()
         .flex()
         .justify_center()
-        .py_16()
+        .py_6()
         .child(ui::spinner("github-loading", 24., p.muted_foreground))
         .into_any_element(),
-      GithubSection::SignedOut => centered(16.)
-        .text_center()
-        .child(ui::icon(theme::ICON_GITHUB, 48., p.muted_foreground))
+      GithubSection::SignedOut => div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_4()
+        .py_3()
         .child(
-          div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .child(heading("Sign in to manage integrations"))
-            .child(help(
-              "Connect your GitHub repositories through Treq.",
-              p,
-              4.,
-            )),
+          ui::text(div(), TextSize::Sm)
+            .text_color(p.muted_foreground)
+            .child("Sign in to Treq Cloud to connect GitHub"),
         )
         .child(sign_in_button("integrations-sign-in", self, p))
         .into_any_element(),
@@ -2863,18 +2993,21 @@ impl SettingsView {
         })
         .label("Connect via OAuth")
         .on_click(self.press("linear.oauth"));
-      setting_row("OAuth Connect", &linear.oauth_description, button, p)
+      setting_row("OAuth connection", &linear.oauth_description, button, p)
         .border_t_1()
         .border_color(p.border)
     });
+    let create_key = Button::new("linear-create-key", p)
+      .variant(Variant::Link)
+      .size(Size::Sm)
+      .child(ui::icon(theme::ICON_EXTERNAL_LINK, 12., p.primary))
+      .label("Create a key in Linear")
+      .on_click(self.press("linear.createKey"));
     div()
-      .child(section_header(
-        theme::ICON_LINEAR,
-        "Linear",
-        "Issue tracker integration",
-        p,
-      ))
-      .child(setting_row("API Key", &linear.description, key_control, p))
+      .child(setting_row("API key", &linear.description, key_control, p))
+      .when(!linear.connected, |this| {
+        this.child(div().pb_2().flex().child(create_key))
+      })
       .children(oauth)
       .when(linear.key_priority_note, |this| {
         this.child(
