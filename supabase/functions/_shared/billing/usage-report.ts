@@ -26,6 +26,11 @@ import { must, rpc } from "../remote/db.ts";
 
 export const DEFAULT_USAGE_METER_EVENT = "treq_sandbox_usage";
 export const MAX_USAGE_REPORT_ATTEMPTS = 10;
+/**
+ * Stripe dedupes meter events by identifier for about 24 hours. A row tried
+ * before may already be in Stripe, so past this age it is not resent.
+ */
+export const RESEND_WINDOW_MS = 23 * 60 * 60_000;
 /** A row still unsent this long after its hour ended misses the invoice it belongs to. */
 const LATE_AFTER_MS = 60 * 60_000;
 
@@ -36,6 +41,8 @@ export interface PendingUsageReport {
   hour: string;
   billed_nanousd: number;
   stripe_customer_id: string | null;
+  /** When the row was built; its first send follows within minutes. */
+  created_at: string;
   /** Failed send attempts so far. */
   attempts: number;
 }
@@ -104,6 +111,22 @@ export async function reportUsage(deps: UsageReportDeps): Promise<UsageReportRes
     const value = microUsd(row.billed_nanousd);
     if (value <= 0) {
       await deps.store.markSent(row.identifier, "zero");
+      continue;
+    }
+    if (row.attempts > 0 && nowMs - Date.parse(row.created_at) > RESEND_WINDOW_MS) {
+      result.dead++;
+      await deps.store.markTerminal(
+        row.identifier,
+        "dead",
+        "past Stripe's identifier dedupe window after a failed send; reconcile by hand",
+      );
+      deps.log({
+        level: "error",
+        alert: true,
+        msg: "usage report past dedupe window",
+        identifier: row.identifier,
+        attempts: row.attempts,
+      });
       continue;
     }
     if (!row.stripe_customer_id) {
@@ -177,7 +200,7 @@ export function supabaseUsageReportStore(supabase: SupabaseClient): UsageReportS
     async pendingReports() {
       const rows = must(await supabase
         .from("usage_reports")
-        .select("identifier, owner_user_id, hour, billed_nanousd, attempts")
+        .select("identifier, owner_user_id, hour, billed_nanousd, attempts, created_at")
         .is("sent_at", null)
         .or("stripe_status.is.null,stripe_status.eq.error")
         .order("created_at")
@@ -199,6 +222,7 @@ export function supabaseUsageReportStore(supabase: SupabaseClient): UsageReportS
         billed_nanousd: Number(r.billed_nanousd),
         stripe_customer_id: byOwner.get(r.owner_user_id as string) ?? null,
         attempts: Number(r.attempts ?? 0),
+        created_at: r.created_at as string,
       }));
     },
     async markSent(identifier, stripeStatus) {
