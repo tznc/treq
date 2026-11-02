@@ -37,7 +37,8 @@ test("switches between the workspace tabs", async ({ page }) => {
   await expect(
     page.getByRole("tab", { name: "Changes", selected: true }),
   ).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  // A clean home repository has no changes, so no commit box.
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveCount(0);
   await page.getByRole("tab", { name: "Code" }).click();
   await expect(
     page.getByRole("tab", { name: "Code", selected: true }),
