@@ -56,7 +56,7 @@ Every Pro user has a cap: US$50 by default, minimum US$5, maximum `treq.spend_ca
 
 ### Bring your own sandbox (BYOS)
 
-A Pro user saves their own provider key (Boat, Daytona, E2B) and runs on their own account; treq bills 5% of list price. The desktop `byos` feature preview is the only flag; `treq_internal.user_can_byos()` is the plan gate. Keys live in Vault (`remote_provider_credentials`, one per owner and kind); owners list metadata only. `remote-instance` validates a key with one read-only call before saving it. A 401/403 marks it invalid and the app sees `provider_credential_invalid`; treq never falls back to its own account. A trigger keeps a BYOS workspace on BYOS placements with its owner's credential, and operator drains skip BYOS placements. A key in use by a live placement cannot be removed.
+A Pro user saves their own provider key (Boat, Daytona, E2B) and runs on their own account; treq bills 5% of the provider's list price (the catalog price), not the user's negotiated rate. There is no feature flag; `treq_internal.user_can_byos()` is the plan gate and the desktop shows BYOS to Pro. Keys live in Vault (`remote_provider_credentials`, one per owner and kind); owners list metadata only. `remote-instance` validates a key with one read-only call before saving it. A 401/403 marks it invalid and the app sees `provider_credential_invalid`; treq never falls back to its own account. A trigger keeps a BYOS workspace on BYOS placements with its owner's credential, and operator drains skip BYOS placements. A key in use by a live placement cannot be removed.
 
 ## Provider switches
 

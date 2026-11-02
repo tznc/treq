@@ -211,7 +211,7 @@ pub struct SignedIn {
   pub cloud: Option<CloudCard>,
   /// The spend cap row, once the spend status is read.
   pub spend_cap: Option<SpendCapEditor>,
-  /// "Provider keys", with the `byos` preview on and Pro.
+  /// "Provider keys", for Pro.
   pub provider_keys: Option<ProviderKeysSection>,
   /// The delete-account confirmation, while it is open.
   pub delete_account: Option<DeleteAccountDialog>,
@@ -712,12 +712,12 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
     let price = tier.and_then(|t| byos_price(&t.id).map(|b| (t, b)));
     match price {
       Some((t, b)) => format!(
-        "{name} bills you directly for the machine ({} for {}). treq charges 5% of {name}'s price.",
+        "{name} bills you directly for the machine ({} for {}). treq charges 5% of {name}'s list price.",
         crate::core::cloud_catalog::format_hourly(b.provider_hourly_usd),
         t.label
       ),
       None => {
-        format!("{name} bills you directly for the machine. treq charges 5% of {name}'s price.")
+        format!("{name} bills you directly for the machine. treq charges 5% of {name}'s list price.")
       }
     }
   });
@@ -879,8 +879,8 @@ impl SettingsView {
     };
     let subscription = account.subscription.as_ref();
     let pro = is_pro(subscription);
-    // Bring your own sandbox shows only with its preview on, for Pro.
-    let byos = pro && self.preview_on(crate::core::feature_preview::PreviewFeature::Byos);
+    // Bring your own sandbox shows only for Pro.
+    let byos = pro;
     let mut cloud_route = account.cloud.clone();
     if !byos {
       if let Some(cloud) = cloud_route.as_mut() {
@@ -2352,7 +2352,7 @@ impl SettingsView {
       .child(
         ui::text(div(), TextSize::Sm)
           .text_color(p.muted_foreground)
-          .child("Run your cloud workspace on your own provider account. The provider bills you for the machine; treq charges 5% of the provider's price."),
+          .child("Run your cloud workspace on your own provider account. The provider bills you for the machine; treq charges 5% of the provider's list price."),
       )
       .children(rows)
       .children(editor)

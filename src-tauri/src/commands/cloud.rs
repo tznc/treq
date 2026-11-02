@@ -318,9 +318,6 @@ pub async fn run_cloud_action(
     .ok_or("The account is not available in this window.")?;
   *state.effects.window.lock_or_recover() = Some(label.to_string());
   let cloud = state.cloud.clone();
-  cloud.set_byos_enabled(crate::core::feature_preview::is_enabled_in_app_db(
-    crate::core::feature_preview::PreviewFeature::Byos,
-  ));
   use crate::core::control_plane::ProcessAction;
   match action {
     CloudAction::Refresh => cloud.refresh_cloud().await,

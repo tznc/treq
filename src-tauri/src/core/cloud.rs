@@ -59,8 +59,6 @@ pub struct CloudWorkspace {
   pub notifications: Vec<Notification>,
   /// The idle controller's last probe: background processes and the stop ETA.
   pub activity: Option<crate::core::workspace_activity::WorkspaceActivity>,
-  /// Bring your own sandbox is on (the `byos` feature preview).
-  pub byos_enabled: bool,
   /// The user's saved provider keys (never the keys themselves).
   pub provider_keys: Vec<cloud_catalog::ProviderKey>,
   /// A provider key is being saved or removed.
@@ -418,20 +416,6 @@ impl Cloud {
 
   // -- Bring your own sandbox (BYOS) ----------------------------------------
 
-  /// Turns BYOS on or off (the `byos` feature preview). Off forgets the
-  /// keys read and the provider choice, so nothing BYOS shows or is sent.
-  pub fn set_byos_enabled(&self, enabled: bool) {
-    self.update_workspace(|w| {
-      w.byos_enabled = enabled;
-      if !enabled {
-        w.provider_keys.clear();
-        w.byos_catalog.clear();
-        w.selected_provider = None;
-        w.provider_key_error = None;
-      }
-    });
-  }
-
   /// Picks the provider Create runs on with the user's key; `None` is
   /// treq managed.
   pub fn select_provider(&self, kind: Option<&str>) {
@@ -439,11 +423,8 @@ impl Cloud {
     self.update_workspace(|w| w.selected_provider = kind);
   }
 
-  /// Reads the saved keys and their tier prices, with BYOS on.
+  /// Reads the saved keys and their tier prices.
   async fn load_byos(&self) {
-    if !self.workspace.lock_or_recover().byos_enabled {
-      return;
-    }
     let keys = control_plane::list_provider_credentials(&self.supabase);
     self
       .load("provider keys", keys, |w, keys| {
@@ -753,7 +734,7 @@ impl Cloud {
       let key = format!("provision-managed-{}", uuid::Uuid::new_v4());
       let (tier, byos_kind) = {
         let w = self.workspace.lock_or_recover();
-        let byos_kind = w.selected_provider.clone().filter(|_| w.byos_enabled);
+        let byos_kind = w.selected_provider.clone();
         (w.selected_tier.clone(), byos_kind)
       };
       control_plane::ensure(&self.supabase, &key, tier.as_deref(), byos_kind.as_deref())
@@ -1850,7 +1831,6 @@ mod tests {
   async fn provisioning_on_the_users_own_provider_asks_for_byos() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    cloud.set_byos_enabled(true);
     cloud.select_provider(Some("daytona"));
     let ensured = provision_with(&cloud, &server).await;
     assert_eq!(ensured[0]["credential_source"], "byos");
@@ -1858,10 +1838,9 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn provisioning_stays_treq_managed_with_byos_off() {
+  async fn provisioning_stays_treq_managed_without_a_chosen_provider() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    cloud.select_provider(Some("daytona"));
     let ensured = provision_with(&cloud, &server).await;
     assert_eq!(ensured[0].get("credential_source"), None);
     assert_eq!(ensured[0].get("provider_kind"), None);
@@ -1871,7 +1850,6 @@ mod tests {
   async fn saving_a_provider_key_rereads_the_list() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    cloud.set_byos_enabled(true);
     on_action(
       &server,
       "save_provider_credential",
@@ -1903,7 +1881,6 @@ mod tests {
   async fn a_rejected_provider_key_says_so() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    cloud.set_byos_enabled(true);
     Mock::given(method("POST"))
       .and(path("/functions/v1/remote-instance"))
       .and(body_partial_json(
@@ -1925,7 +1902,6 @@ mod tests {
   async fn removing_a_provider_key_rereads_the_list() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    cloud.set_byos_enabled(true);
     on_action(
       &server,
       "delete_provider_credential",
@@ -1945,16 +1921,5 @@ mod tests {
       "boat"
     );
     assert!(cloud.snapshot().cloud.provider_keys.is_empty());
-  }
-
-  #[tokio::test]
-  async fn provider_keys_are_not_read_with_byos_off() {
-    let server = MockServer::start().await;
-    let (cloud, _) = signed_in(&server).await;
-    on_action(&server, "status", status("ready")).await;
-    cloud.refresh_cloud().await;
-    assert!(bodies(&server, "list_provider_credentials")
-      .await
-      .is_empty());
   }
 }

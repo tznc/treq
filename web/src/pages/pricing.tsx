@@ -31,6 +31,7 @@ const PRO_FEATURES: PlanFeature[] = [
   {key: 'free', text: 'Everything in Free'},
   {key: 'github-app', text: 'Treq GitHub App'},
   {key: 'cloud', text: 'Cloud workspaces, pay-as-you-go at provider cost plus 20%'},
+  {key: 'byos', text: "Your own provider account: 5% of the provider's list price"},
   {key: 'linear-oauth', text: 'Linear OAuth'},
 ];
 
