@@ -1734,16 +1734,17 @@ impl CommitsView {
     // An unfolded own commit edits its description and timestamp in place.
     let own = expanded && matches!(kind, Kind::Own { .. });
     let short = &commit.change_id;
-    let edit_description = (own && !commit.is_immutable).then(|| {
-      self.edit_icon(
-        format!("edit-description-{short}"),
-        "Edit description",
-        commit,
-        Self::edit_description,
-        p,
-        cx,
-      )
-    });
+    let edit_description =
+      (own && (self.parent.workspace.is_some() || !commit.is_immutable)).then(|| {
+        self.edit_icon(
+          format!("edit-description-{short}"),
+          "Edit description",
+          commit,
+          Self::edit_description,
+          p,
+          cx,
+        )
+      });
     let edit_timestamp =
       (own && self.parent.workspace.is_some() && !commit.is_immutable).then(|| {
         self.edit_icon(
@@ -2117,8 +2118,10 @@ impl CommitsView {
       ),
       NativeMenuItem::Separator,
     ];
-    // Immutable commits are already published: offer nothing that rewrites them.
-    let rewritable = own && !commit.is_immutable;
+    // In the home repo an immutable commit is already pushed: offer nothing that
+    // rewrites it. A workspace's own commits stay editable even once its target
+    // holds them; core refuses the target's own commits.
+    let rewritable = own && (workspace || !commit.is_immutable);
     if rewritable {
       items.push(run("Edit description", Self::edit_description).icon(MenuIcon::Pencil));
     }
@@ -2126,7 +2129,7 @@ impl CommitsView {
       items.push(run("Undo commit", Self::undo));
     }
     items.push(run("Revert commit", Self::revert));
-    if rewritable && workspace {
+    if rewritable && workspace && !commit.is_immutable {
       items.push(run("Edit timestamp", Self::edit_timestamp));
     }
     if rewritable && !removing {
