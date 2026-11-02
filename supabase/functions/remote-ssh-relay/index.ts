@@ -16,6 +16,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import { userHasPro } from "../_shared/billing/entitlement.ts";
+import { spendStatusFor } from "../_shared/billing/spend-cap.ts";
 import {
   correlationIdFromRequest,
   logWithCorrelation,
@@ -105,6 +106,7 @@ Deno.serve(async (req) => {
       return data;
     },
     hasPro: (ownerUserId) => userHasPro(supabase, ownerUserId),
+    spendCapped: async (ownerUserId) => (await spendStatusFor(supabase, ownerUserId)).state === "capped",
   };
 
   let target: Awaited<ReturnType<typeof authorizeRelayRequest>>;

@@ -83,8 +83,12 @@ export interface SpendCapResult {
   rolledBackMigrations: string[];
 }
 
-/** The actions that start or grow a machine; refused while capped. */
-export const SPEND_CAP_GATED_ACTIONS: ReadonlySet<string> = new Set(["ensure", "wake", "resize"]);
+/**
+ * The actions that start or grow a machine; refused while capped.
+ * reprovision runs the boot manifest over exec, which resumes a paused E2B
+ * sandbox.
+ */
+export const SPEND_CAP_GATED_ACTIONS: ReadonlySet<string> = new Set(["ensure", "wake", "resize", "reprovision"]);
 
 const RUNNING_STATES = ["ready", "waking"];
 

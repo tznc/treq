@@ -134,9 +134,11 @@ Deno.test("a provider failure on one workspace does not stop the rest", async ()
   assertEquals(stopped, [{ instanceId: "c2", placementId: "pl-c2" }]);
 });
 
-Deno.test("ensure, wake and resize are refused with 402 when capped", () => {
+Deno.test("ensure, wake, resize and reprovision are refused with 402 when capped", () => {
   const status = { cap_usd: 50, spent_usd: 50.25, month_start: "2026-10-01T00:00:00+00:00", state: "capped" as const };
-  for (const action of ["ensure", "wake", "resize"]) {
+  // reprovision runs the boot manifest over exec, which resumes a paused
+  // E2B sandbox and records it ready.
+  for (const action of ["ensure", "wake", "resize", "reprovision"]) {
     assertEquals(spendCapRefusal(action, status), {
       status: 402,
       body: {
