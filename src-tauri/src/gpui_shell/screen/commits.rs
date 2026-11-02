@@ -2118,10 +2118,10 @@ impl CommitsView {
       ),
       NativeMenuItem::Separator,
     ];
-    // In the home repo an immutable commit is already pushed: offer nothing that
-    // rewrites it. A workspace's own commits stay editable even once its target
-    // holds them; core refuses the target's own commits.
-    let rewritable = own && (workspace || !commit.is_immutable);
+    // Immutable means on the workspace's target branch, or for the home repo
+    // pushed to origin: offer nothing that rewrites it. A workspace's commits
+    // pushed to its own branch stay mutable, so they stay editable.
+    let rewritable = own && !commit.is_immutable;
     if rewritable {
       items.push(run("Edit description", Self::edit_description).icon(MenuIcon::Pencil));
     }
@@ -2129,7 +2129,7 @@ impl CommitsView {
       items.push(run("Undo commit", Self::undo));
     }
     items.push(run("Revert commit", Self::revert));
-    if rewritable && workspace && !commit.is_immutable {
+    if rewritable && workspace {
       items.push(run("Edit timestamp", Self::edit_timestamp));
     }
     if rewritable && !removing {
