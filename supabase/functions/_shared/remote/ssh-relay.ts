@@ -60,6 +60,8 @@ export interface RelayTarget {
   providerKind: ProviderKind;
   /** The active placement, whose gateway secret signs the gateway token. */
   placementId: string | null;
+  /** The instance status when authorized; `suspended` means wake first. */
+  instanceStatus: string;
   host: string;
   port: number;
 }
@@ -191,9 +193,22 @@ export async function authorizeRelayRequest(
     providerResourceId: instance.provider_resource_id,
     providerKind: instance.provider_kind as ProviderKind,
     placementId: instance.active_placement_id ?? null,
+    instanceStatus: instance.status,
     host: endpoint.hostname,
     port: endpoint.port,
   };
+}
+
+/**
+ * Wakes a suspended machine through `wake` (wakeRecorded: waking -> ready, so
+ * billing opens) before the relay connects. Each adapter's gatewayEndpoint
+ * also resumes a suspended machine, but without recording it.
+ */
+export async function wakeBeforeConnect(
+  target: Pick<RelayTarget, "instanceStatus" | "providerResourceId">,
+  wake: (providerResourceId: string) => Promise<void>,
+): Promise<void> {
+  if (target.instanceStatus === "suspended") await wake(target.providerResourceId);
 }
 
 /// Public relay URL for an endpoint. `REMOTE_SSH_RELAY_URL` overrides the

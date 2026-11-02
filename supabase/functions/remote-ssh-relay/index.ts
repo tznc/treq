@@ -29,6 +29,7 @@ import {
   type RelayStore,
   type UpstreamConnection,
   UpstreamError,
+  wakeBeforeConnect,
 } from "../_shared/remote/ssh-relay.ts";
 import { placementProviders } from "../_shared/remote/byos.ts";
 import { openTcp } from "../_shared/remote/provider-tcp.ts";
@@ -125,6 +126,12 @@ Deno.serve(async (req) => {
     const secret = placementId
       ? await supabaseGatewaySecrets(supabase).load(placementId)
       : null;
+    const wake = (id: string) =>
+      wakeRecorded(provider, id, placementId ?? null, {
+        setState: (pid, state) => setPlacementState(supabase, pid, state),
+        afterWake: reensureServicesAfterWake,
+      });
+    await wakeBeforeConnect(target, wake);
     upstream = await openTcp(
       provider,
       target.providerResourceId,
@@ -134,11 +141,7 @@ Deno.serve(async (req) => {
       {
         credential: secret && placementId ? { placementId, secret } : undefined,
         // Recorded waking → ready, so billing and the idle controller see it.
-        wake: (id) =>
-          wakeRecorded(provider, id, placementId ?? null, {
-            setState: (pid, state) => setPlacementState(supabase, pid, state),
-            afterWake: reensureServicesAfterWake,
-          }),
+        wake,
       },
     );
   } catch (err) {
