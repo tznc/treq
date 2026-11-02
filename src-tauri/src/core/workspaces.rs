@@ -3910,14 +3910,9 @@ fn sync_home_on_branch_and_workspace(
   // Use `@-` when `@` is the empty working copy, so no empty commit gets pushed.
   let checkout_tip = jj::jj_resolve_bookmark_tip(source_path)
     .map_err(|e| format!("Failed to resolve source tip: {}", e))?;
-  // A fetch can move the bookmark past the source checkout; never sync the
-  // destination back to the older commit.
+  // The bookmark is the branch; a checkout's working copy, dirty or not, is never moved onto it.
   let source_tip = jj::jj_get_commit_id(source_path, branch)
     .ok()
-    .filter(|bookmark| {
-      jj::jj_log_revset_commit_ids(source_path, &format!("{checkout_tip}::{bookmark}"))
-        .is_ok_and(|ids| ids.len() > 1)
-    })
     .unwrap_or(checkout_tip);
 
   let destination_path = match source {
