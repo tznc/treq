@@ -431,7 +431,10 @@ describe("deleteAccount final invoice", () => {
     const stripe: StripeClient = {
       async request<T>(method: string, path: string, p?: unknown): Promise<T> {
         params.push([`${method} ${path}`, p]);
-        return { id: "sub_a", status: method === "GET" ? "active" : "canceled" } as T;
+        return {
+          id: "sub_a",
+          status: method === "GET" ? "active" : "canceled",
+        } as T;
       },
     };
     const result = await deleteAccount(deps({ store, stripe }));
