@@ -48,7 +48,8 @@ pub struct Row {
   base: Stateful<Div>,
   palette: Palette,
   density: RowDensity,
-  role: Role,
+  role: Option<Role>,
+  clickable: bool,
   label: Option<SharedString>,
   icon: Option<&'static str>,
   leading: Vec<AnyElement>,
@@ -72,7 +73,8 @@ impl Row {
       base: div().id(id).debug_selector(move || selector),
       palette: *palette,
       density: RowDensity::default(),
-      role: Role::ListItem,
+      role: None,
+      clickable: false,
       label: None,
       icon: None,
       leading: Vec::new(),
@@ -111,11 +113,34 @@ impl Row {
     self
   }
 
-  /// The accessibility role, [`Role::ListItem`] unless set: a palette's
-  /// rows are options, a menu's are menu items.
+  /// The accessibility role. Unless set, a row that takes a click (see
+  /// [`Row::on_click`]) is a [`Role::Button`] and any other a
+  /// [`Role::ListItem`]: a palette's rows are options, a menu's are menu
+  /// items.
   pub fn role(mut self, role: Role) -> Self {
-    self.role = role;
+    self.role = Some(role);
     self
+  }
+
+  /// Runs `listener` on a click, and makes the row a button unless its role
+  /// is set.
+  pub fn on_click(
+    mut self,
+    listener: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+  ) -> Self {
+    self.clickable = true;
+    self.base = self.base.on_click(listener);
+    self
+  }
+
+  /// The role the row draws with: [`Row::role`], else by whether it takes
+  /// a click.
+  pub fn resolved_role(&self) -> Role {
+    self.role.unwrap_or(if self.clickable {
+      Role::Button
+    } else {
+      Role::ListItem
+    })
   }
 
   /// The accessible name, when it isn't the title (or there is none).
@@ -241,8 +266,8 @@ impl RenderOnce for Row {
     let name = self.accessible_name();
     let interactive = self.interactive && !self.disabled;
     // A checkbox row says it is toggled, and load more is a plain button.
-    let selectable =
-      !matches!(self.role, Role::CheckBox | Role::MenuItemCheckBox) && !self.centered;
+    let role = self.resolved_role();
+    let selectable = !matches!(role, Role::CheckBox | Role::MenuItemCheckBox) && !self.centered;
     let centered = self.centered;
     let title = self.title.map(|title| {
       text(div(), TextSize::Sm)
@@ -261,7 +286,7 @@ impl RenderOnce for Row {
     // The row's defaults go first, so styles set on it win.
     let user: StyleRefinement = std::mem::take(self.base.style());
     let mut base = text(self.base, TextSize::Sm)
-      .role(self.role)
+      .role(role)
       .when_some(name, |el, name| el.aria_label(name))
       .when(selectable, |el| el.aria_selected(self.selected))
       .test_support()
@@ -383,10 +408,38 @@ mod tests {
   fn load_more_is_a_button_named_load_more() {
     let p = theme::palette(false);
     let row = Row::load_more("prs-more", false, &p);
-    assert_eq!(row.role, gpui::Role::Button);
+    assert_eq!(row.resolved_role(), gpui::Role::Button);
     assert_eq!(row.accessible_name().as_deref(), Some("Load more"));
     assert!(!row.disabled);
     assert!(Row::load_more("prs-more", true, &p).disabled);
+  }
+
+  #[test]
+  fn a_row_that_takes_a_click_is_a_button() {
+    let p = theme::palette(false);
+    let row = Row::new("file", &p)
+      .title("README.md")
+      .on_click(|_, _, _| {});
+    assert_eq!(row.resolved_role(), gpui::Role::Button);
+  }
+
+  #[test]
+  fn a_row_without_a_click_is_a_list_item() {
+    let p = theme::palette(false);
+    assert_eq!(Row::new("line", &p).resolved_role(), gpui::Role::ListItem);
+  }
+
+  #[test]
+  fn an_explicit_role_wins_over_the_click_default() {
+    let p = theme::palette(false);
+    let option = Row::new("cmd", &p)
+      .on_click(|_, _, _| {})
+      .role(gpui::Role::ListBoxOption);
+    assert_eq!(option.resolved_role(), gpui::Role::ListBoxOption);
+    let item = Row::new("item", &p)
+      .role(gpui::Role::MenuItem)
+      .on_click(|_, _, _| {});
+    assert_eq!(item.resolved_role(), gpui::Role::MenuItem);
   }
 
   #[test]
@@ -405,8 +458,6 @@ mod tests {
       div, px, Context, IntoElement, ParentElement as _, Render, Styled as _, TestAppContext,
       VisualTestContext, Window,
     };
-
-    use gpui::prelude::*;
 
     use crate::{theme, Row, RowDensity};
 

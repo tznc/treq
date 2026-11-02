@@ -1940,7 +1940,9 @@ impl CodeView {
     );
     let (ins, del) = row.stats;
     let workspace = row.workspace.clone();
+    // A stack entry: the sidebar row is the button that opens it.
     ui::Row::new(id, p)
+      .role(Role::ListItem)
       .label(title.clone())
       .selected(row.current)
       .relative()

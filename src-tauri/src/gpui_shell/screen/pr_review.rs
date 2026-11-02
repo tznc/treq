@@ -13,6 +13,7 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::RefCell,
   ops::Range,
@@ -698,6 +699,13 @@ impl PrReviewView {
             let id = format!("pr-review-event-{}", event.value());
             move || id
           })
+          .role(gpui::Role::RadioButton)
+          .aria_label(event.label())
+          .aria_toggled(if checked {
+            gpui::accesskit::Toggled::True
+          } else {
+            gpui::accesskit::Toggled::False
+          })
           .flex()
           .items_start()
           .gap_2()
@@ -721,7 +729,8 @@ impl PrReviewView {
                   .text_color(p.muted_foreground)
                   .child(if disabled { OWN_PR_HINT } else { event.hint() }),
               ),
-          ),
+          )
+          .test_support(),
       );
     }
     let enabled = !self.submitting && can_submit(self.event, &self.summary, postable.len());

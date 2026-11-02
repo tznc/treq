@@ -4,7 +4,7 @@
 // Workspaces and commits go through the `treq` CLI, so the app opens on the
 // same database a user's repository would have.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { appBinary } from "../env.ts";
@@ -216,6 +216,15 @@ export function seedLandingRepo(fixture: Fixture) {
     "origin",
     "https://github.com/lorem-ipsum/event-bus.git",
   );
+  // origin keeps its GitHub URL (the fake `gh` and the PR links read it),
+  // but git fetches and pushes a local bare repository in its place, so
+  // fetch, push and merge-and-push work with no network.
+  const origin = join(dirname(repo), "origin.git");
+  gitIn(dirname(repo), home, "init", "--bare", "-b", "main", origin);
+  appendFileSync(
+    join(home, ".gitconfig"),
+    `[url "${origin}"]\n\tinsteadOf = https://github.com/lorem-ipsum/event-bus.git\n`,
+  );
   write(repo, "README.md", README);
   // What `treq add` would add on first use, committed up front so main
   // does not grow a .gitignore commit the workspaces miss.
@@ -234,6 +243,9 @@ export function seedLandingRepo(fixture: Fixture) {
   write(repo, "packages/web/src/components/EventFeed.tsx", EVENT_FEED);
   git("add", ".");
   git("commit", "-m", "feat: add event feed stub");
+
+  git("push", "-q", "origin", "main");
+  git("fetch", "-q", "origin");
 
   for (const branch of [ALERTING, CACHE, STACK_PARENT]) treq("add", branch);
   commitIn(

@@ -2,15 +2,14 @@
 // and Settings → Code Review's "Tune with agent" button.
 import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { openTab, openWorkspace, ready, settle, xPointer } from "./helpers.ts";
+import { focusMain, openTab, openWorkspace, popupBox, ready, settle, xPointer } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
 test("review history: Logs → Reviews", async ({ page }) => {
   await openWorkspace(page, "feat/keyvalues-cache");
   await openTab(page, "Logs");
-  // The source picker is the toolbar's first button (see 06-logs).
-  await page.mouse.click(340, 130);
+  await page.getByRole("combobox", { name: "Log source: Checks" }).click();
   await settle(page, 900);
   await capture(page, {
     name: "23-review-history-source-menu",
@@ -19,8 +18,12 @@ test("review history: Logs → Reviews", async ({ page }) => {
     rest: false,
     expectations: ["Reviews listed among the sources, after Agent"],
   });
-  // Menu rows: Checks, Agent, Reviews.
-  await xPointer(page, 360, 150 + 2 * 28, 1);
+  // A native menu, out of Playwright's reach: its rows are Checks, Agent,
+  // Reviews, App setup and System, of equal height.
+  focusMain();
+  const menu = popupBox();
+  if (!menu) throw new Error("no source menu");
+  await xPointer(page, menu.x + menu.w / 2, menu.y + (menu.h * 2.5) / 5, 1);
   await settle(page, 1200);
   await expect(page.getByRole("textbox", { name: "Search reviews…" })).toBeVisible();
   await capture(page, {

@@ -1745,6 +1745,7 @@ impl LinearView {
   ) -> impl IntoElement {
     let id = issue.id.clone();
     ui::Row::new(SharedString::from(format!("linear-issue-{id}")), p)
+      .role(gpui::Role::ListItem)
       .density(ui::RowDensity::TwoLine)
       .title(issue.title.clone())
       .meta(issue_meta_line(issue))
