@@ -210,6 +210,10 @@ impl Dialogs {
 /// `TerminalSessionSummary`, as far as the sidebar reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalSummary {
+  /// The pane's column id; `None` from older summaries.
+  pub id: Option<String>,
+  /// The session's name ("AI Review" for a review's agent).
+  pub name: Option<String>,
   pub agent: bool,
   pub branch: Option<String>,
   pub repo_path: Option<String>,
@@ -324,6 +328,13 @@ pub enum Effect {
     tone: ToastTone,
     title: String,
     description: String,
+  },
+  /// An AI review of the workspace finished: toast its comment count, with
+  /// a button to its Changes tab.
+  ReviewDone {
+    repo_path: String,
+    workspace_id: i64,
+    branch: String,
   },
   OpenUrl(String),
   /// The remote side's ([`super::remote`]).
@@ -1025,4 +1036,13 @@ pub fn workspace_source(workspace: &Workspace) -> Value {
     "branchName": workspace.branch_name,
     "targetBranch": workspace.target_branch,
   })
+}
+
+/// The finished-review toast's title.
+pub fn review_done_title(comments: usize) -> String {
+  match comments {
+    0 => "Review done · no comments".into(),
+    1 => "Review done · 1 comment".into(),
+    n => format!("Review done · {n} comments"),
+  }
 }

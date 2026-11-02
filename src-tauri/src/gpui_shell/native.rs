@@ -107,6 +107,12 @@ pub enum OpenRequest {
     repo_path: String,
     workspace_id: i64,
   },
+  /// A workspace's Changes tab, as a finished review's toast opens it.
+  #[serde(rename_all = "camelCase")]
+  WorkspaceChanges {
+    repo_path: String,
+    workspace_id: i64,
+  },
   /// The pull request in Treq's PR view (`onViewPrInApp`).
   PrReview {
     number: u64,

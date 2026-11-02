@@ -55,6 +55,8 @@ use crate::gpui_shell::{
 
 /// `useTerminalPaneHeightResize`: the pane's share of the workspace view.
 const HEIGHT_DEFAULT: f32 = 33.;
+/// Another workspace's terminal, while not hovered or focused.
+const DIMMED_OPACITY: f32 = 0.55;
 const HEIGHT_MIN: f32 = 15.;
 const HEIGHT_MAX: f32 = 60.;
 /// `h-1`: the divider above the pane, outside its share of the view.
@@ -1858,6 +1860,8 @@ pub struct TerminalPane {
   tooltips: Tooltips,
   /// The attachment under the mouse, which Cmd+C copies.
   hovered_asset: Option<SendAsset>,
+  /// The column under the mouse, which shows undimmed.
+  hovered_column: Option<String>,
   /// `SendAssetLightbox`, for the column it opened from.
   lightbox: Option<(String, Entity<Lightbox>, Subscription)>,
   /// `useRepoEnvironment`: where new terminals run, while the
@@ -1958,6 +1962,7 @@ impl TerminalPane {
       summaries: Vec::new(),
       tooltips: Tooltips::new(popups, false),
       hovered_asset: None,
+      hovered_column: None,
       lightbox: None,
       environment: None,
       environment_repo: None,
@@ -2343,6 +2348,11 @@ impl TerminalPane {
       || route.pending != previous.pending
     {
       if let Some(id) = route.active_session_id {
+        // A session that just became active shows: the pane expands to at
+        // least its default height.
+        if previous.active_session_id != Some(id) {
+          self.reveal_pane();
+        }
         // `auto-mount`: the active session opens and takes focus.
         self.open_agent(id, window, cx);
       } else if previous.active_session_id.is_some() {
@@ -2452,6 +2462,12 @@ impl TerminalPane {
       Kind::Shell { dir, .. } => dir.clone(),
       Kind::Remote { target } => target.remote_working_directory.clone(),
     }
+  }
+
+  /// Uncollapses the pane and grows it to a readable height.
+  fn reveal_pane(&mut self) {
+    self.collapsed = false;
+    self.height = self.height.max(HEIGHT_DEFAULT);
   }
 
   fn toggle_collapse(&mut self, cx: &mut Context<Self>) {
@@ -3707,6 +3723,26 @@ impl TerminalPane {
       column.bounds.clone(),
     );
     let active = self.active.as_deref() == Some(id.as_str());
+    // Every workspace's terminals show: the shown workspace's stand out,
+    // the others dim until hovered or focused.
+    let current = self.column_key(column) == self.place.working_directory;
+    let dimmed = !current && !active && self.hovered_column.as_deref() != Some(id.as_str());
+    let state = format!(
+      "terminal-{}-{}",
+      if current {
+        "current"
+      } else if dimmed {
+        "dimmed"
+      } else {
+        "other"
+      },
+      if id.starts_with("agent-") {
+        "agent"
+      } else {
+        "shell"
+      }
+    );
+    let hover_id = id.clone();
     let focus_id = id.clone();
     let double_id = id.clone();
     let name = match &column.kind {
@@ -3736,6 +3772,7 @@ impl TerminalPane {
       .when_some(column.width, |d, w| d.w(zpx(w)))
       .when(column.width.is_none(), |d| d.flex_1())
       .min_w(zpx(min))
+      .relative()
       .on_mouse_down(
         MouseButton::Left,
         cx.listener(move |pane, e: &MouseDownEvent, _, cx| {
@@ -3750,12 +3787,40 @@ impl TerminalPane {
           .absolute()
           .size_full(),
       )
-      .child(header.when(active, |d| {
-        d.debug_selector(|| "terminal-column-active".into())
+      .on_hover(cx.listener(move |pane, hovered: &bool, _, cx| {
+        let id = Some(hover_id.clone());
+        if *hovered {
+          pane.hovered_column = id;
+        } else if pane.hovered_column == id {
+          pane.hovered_column = None;
+        }
+        cx.notify();
       }))
+      .child(
+        header
+          .when(dimmed, |d| d.opacity(DIMMED_OPACITY))
+          .when(active, |d| {
+            d.debug_selector(|| "terminal-column-active".into())
+          }),
+      )
+      // The shown workspace's terminals: an accent along the top, over
+      // the header, which keeps its own colours.
+      .when(current, |d| {
+        d.child(
+          div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .h(zpx(2.))
+            .bg(p.primary),
+        )
+      })
       .child({
         let (on_asset, on_files) = (view.clone(), view.clone());
         div()
+          .debug_selector(move || state)
+          .when(dimmed, |d| d.opacity(DIMMED_OPACITY))
           .relative()
           .flex_1()
           .min_h_0()

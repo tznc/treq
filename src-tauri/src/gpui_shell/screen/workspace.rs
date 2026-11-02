@@ -1864,7 +1864,14 @@ impl WorkspaceView {
       "changes.startReview" => {
         let agent = value["agent"].as_str().map(str::to_string);
         let prompt = text("prompt");
-        self.start(cx, None, "Failed to create agent", move |host| {
+        let branch = self
+          .snapshot_branch()
+          .unwrap_or_else(|| "this workspace".into());
+        let started = (
+          format!("Review started on {branch}"),
+          "Comments will appear inline",
+        );
+        self.start_then(cx, Some(started), "Failed to create agent", move |host| {
           let agent = host.resolve_agent(&repo, agent.as_deref());
           request("AI Review", prompt, "acceptEdits", agent)
         });
@@ -1960,6 +1967,18 @@ impl WorkspaceView {
     failed: &'static str,
     request: impl FnOnce(&dyn TerminalHost) -> LaunchRequest + Send + 'static,
   ) {
+    let done = done.map(|(title, description)| (title.to_string(), description));
+    self.start_then(cx, done, failed, request);
+  }
+
+  /// [`Self::start`] with a toast title built at the call.
+  fn start_then(
+    &self,
+    cx: &mut Context<Self>,
+    done: Option<(String, &'static str)>,
+    failed: &'static str,
+    request: impl FnOnce(&dyn TerminalHost) -> LaunchRequest + Send + 'static,
+  ) {
     let host = self.code_host.clone();
     cx.spawn(async move |this, cx| {
       let result = cx
@@ -1970,7 +1989,9 @@ impl WorkspaceView {
         .await;
       this
         .update(cx, |view, _| match (result, done) {
-          (Ok(_), Some((title, description))) => view.toast(ToastTone::Success, title, description),
+          (Ok(_), Some((title, description))) => {
+            view.toast(ToastTone::Success, &title, description)
+          }
           (Ok(_), None) => {}
           (Err(err), _) => view.toast(ToastTone::Error, failed, err),
         })
