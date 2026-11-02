@@ -9,12 +9,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
 import {
-  dialogIn,
   focusMain,
   home,
   mod,
   openWorkspace,
-  overlay,
   popupBox,
   ready,
   row,
@@ -31,7 +29,8 @@ const heading = (p: Page) => p.getByRole("heading", { name: "New workspace" });
 test("dialogs: create workspace", async ({ page, context }) => {
   await home(page);
   await page.keyboard.press(`${mod}+n`);
-  const dialog = await dialogIn(page, context, heading);
+  await expect(heading(page)).toBeVisible();
+  const dialog = page;
   await settle(page, 800);
   await capture(page, {
     name: "09-create-workspace-dialog",
@@ -92,11 +91,12 @@ test("dialogs: create workspace", async ({ page, context }) => {
 test("dialogs: delete workspace", async ({ page, context }) => {
   await home(page);
   await page.keyboard.press(`${mod}+k`);
-  const palette = await overlay(page, context);
+  const palette = page;
   await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("Delete workspace");
   await palette.getByRole("option", { name: "Delete workspace" }).click();
   const search = (p: Page) => p.getByRole("textbox", { name: "Search workspaces to delete…" });
-  const dialog = await dialogIn(page, context, search);
+  await expect(search(page)).toBeVisible();
+  const dialog = page;
   await settle(page, 800);
   await capture(page, {
     name: "09-delete-workspace-search",
@@ -152,7 +152,8 @@ test("dialogs: stack workspace", async ({ page, context }) => {
   await openWorkspace(page, "feat/keyvalues-cache");
   await row(page, "feat/keyvalues-cache").hover();
   await row(page, "feat/keyvalues-cache").getByRole("button", { name: "Stack on this…" }).click();
-  const dialog = await dialogIn(page, context, heading);
+  await expect(heading(page)).toBeVisible();
+  const dialog = page;
   await settle(page, 1200);
   await capture(page, {
     name: "09-stack-dialog",
@@ -169,7 +170,8 @@ test("dialogs: stack workspace", async ({ page, context }) => {
 
   // Ctrl+Shift+N stacks on the open workspace.
   await page.keyboard.press(`${mod}+Shift+N`);
-  const again = await dialogIn(page, context, heading);
+  await expect(heading(page)).toBeVisible();
+  const again = page;
   await settle(page, 1000);
   await capture(page, {
     name: "09-stack-dialog-shortcut",
@@ -204,7 +206,8 @@ test("dialogs: rename workspace from the context menu", async ({ page, context }
   // "Rename workspace" is the third row.
   await xPointer(page, menu.x + 100, menu.y + 85, 1);
   const name = (p: Page) => p.getByRole("textbox", { name: "e.g., feat/new-name" });
-  const dialog = await dialogIn(page, context, name);
+  await expect(name(page)).toBeVisible();
+  const dialog = page;
   await settle(page, 800);
   await capture(page, {
     name: "09-rename-dialog",
@@ -242,7 +245,8 @@ test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page, context })
   await openWorkspace(page, "feat/keyvalues-cache");
   await page.keyboard.press(`${mod}+i`);
   const title = (p: Page) => p.getByRole("dialog", { name: "Start a new agent session" });
-  const dialog = await dialogIn(page, context, title);
+  await expect(title(page)).toBeVisible();
+  const dialog = page;
   await settle(page, 1000);
   // Opened from a workspace, the prompt targets it rather than main.
   await expect(

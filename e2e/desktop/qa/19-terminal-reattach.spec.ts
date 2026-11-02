@@ -8,9 +8,9 @@ import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { dialogPage } from "../fixture.ts";
+import { windowPage } from "../fixture.ts";
 import { capture, outDir, theme } from "./capture.ts";
-import { mod, openTab, openWorkspace, overlay, row, settle } from "./helpers.ts";
+import { mod, openTab, openWorkspace, row, settle } from "./helpers.ts";
 
 const BRANCH = "feat/keyvalues-cache";
 const scale = Number(process.env.GDK_SCALE ?? "2");
@@ -179,13 +179,13 @@ test("terminal-reattach: a closed window's terminals open again", async ({ page,
   // A second window on the repository, then the first one closes.
   const first = repoWindows()[0];
   await page.keyboard.press(`${mod}+k`);
-  const palette = await overlay(page, context);
+  const palette = page;
   await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("new window");
   await settle(page, 600);
   await palette.getByRole("option", { name: "Open repository in new window" }).click();
   await pickFolder(repoDir());
   await expect.poll(() => repoWindows().length, { timeout: 30_000 }).toBe(2);
-  const second = await dialogPage(context);
+  const second = await windowPage(context);
   await second.setViewportSize({ width: 1400, height: 900 });
   await expect(second.getByRole("button", { name: "Command palette" })).toBeVisible({
     timeout: 30_000,

@@ -626,6 +626,7 @@ impl AgentPromptView {
       repo_path: self.route.repo_path.clone(),
       workspace_id: self.selected,
       workspace_path: self.working_directory(),
+      query: String::new(),
     };
     let host: std::sync::Arc<dyn code_data::CodeHost> = self.env.host.clone();
     let dark = self.dark;

@@ -3,12 +3,11 @@
 //! when `GPUI_PLAYWRIGHT` is set (see `gpui_playwright::Server::from_env`),
 //! and release builds leave the feature out.
 //!
-//! `context.newPage()` adopts a repo window. The command palette and the
-//! other overlays open in a dialog window of their own (see `modal`), so a
-//! test asks for a second page once one shows (`dialogPage` in the suite):
-//! with the repo window taken, a page adopts the active window, since a
-//! dialog takes focus as it opens. Adopted windows stay open when a test's
-//! context closes.
+//! `context.newPage()` adopts a repo window. Dialogs and popovers draw in
+//! the repo window itself, so one page drives them. A second repo window
+//! gets a page of its own (`windowPage` in the suite): with the first one
+//! taken, a page adopts the active window. Adopted windows stay open when a
+//! test's context closes.
 
 use std::cell::RefCell;
 

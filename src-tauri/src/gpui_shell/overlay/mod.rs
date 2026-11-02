@@ -2,11 +2,11 @@
 //! the command palette, the keyboard shortcuts sheet, the workspace picker
 //! and the branch switcher.
 //!
-//! The window model keeps which one is open and pushes it; GPUI shows it in
-//! a modal window over the shell window (see `modal`). The dialogs read and
-//! switch branches through the backend themselves. What the model decides
-//! (a palette command, the picked workspace, closing) goes back to it as a
-//! screen action, and the model pushes what shows next.
+//! The window model keeps which one is open and pushes it; the screen draws
+//! it as its top layer, over the dimmed window, as it draws the file picker.
+//! The dialogs read and switch branches through the backend themselves.
+//! What the model decides (a palette command, the picked workspace, closing)
+//! goes back to it as a screen action, and the model pushes what shows next.
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
@@ -38,8 +38,11 @@ mod shortcuts;
 #[cfg(test)]
 mod tests;
 
-pub use data::OverlayHost;
-use data::{PaletteChecks, PrLink, WorkspaceRow};
+pub use data::{OverlayHost, PaletteChecks, PrLink, WorkspaceRow};
+
+/// The key context the dialogs set, inside which the window's own
+/// shortcuts stand aside: the dialog takes every key while it shows.
+pub const KEY_CONTEXT: &str = "Overlay";
 
 /// Which dialog shows, and the theme to draw it in.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -97,15 +100,29 @@ pub(super) enum Body {
   /// `None` until read.
   Workspaces(Option<Vec<WorkspaceRow>>),
   Branches {
-    /// Grouped current, local, remote; `None` while loading.
-    branches: Option<Vec<(JjBranch, usize)>>,
+    /// Grouped main tree, workspaces, local, remote; `None` while loading.
+    branches: Option<Vec<BranchRow>>,
     error: Option<String>,
     switching: bool,
   },
 }
 
 /// `BranchSwitcher`'s groups.
-const BRANCH_GROUPS: [&str; 3] = ["Current branch", "Local Branches", "Remote Branches"];
+const BRANCH_GROUPS: [&str; 4] = [
+  "Main tree",
+  "In workspaces",
+  "Local branches",
+  "Remote branches",
+];
+
+/// A branch of the switcher, its group, and the workspace that has it
+/// checked out (the "In workspaces" group).
+#[derive(Debug, Clone)]
+pub(super) struct BranchRow {
+  pub branch: JjBranch,
+  pub group: usize,
+  pub workspace: Option<WorkspaceRow>,
+}
 
 /// Up to this many rows the list draws them all in a scrolled column, so
 /// every row (the palette's commands, a short branch list) can be found and
@@ -205,7 +222,7 @@ impl Overlay {
     &self.view
   }
 
-  /// Takes React's next snapshot of the same dialog.
+  /// Takes the window model's next snapshot of the same dialog.
   pub fn set_snapshot(&mut self, snapshot: OverlaySnapshot, cx: &mut Context<Self>) {
     let reload = self.view != snapshot.view;
     self.view = snapshot.view;
@@ -224,7 +241,7 @@ impl Overlay {
     self.send(ScreenAction::Press { id: id.into() }, cx);
   }
 
-  /// Asks React to close the dialog (`onOpenChange(false)`).
+  /// Asks the window model to close the dialog.
   pub(super) fn close(&self, cx: &mut gpui::App) {
     self.press("overlay.close", cx);
   }
@@ -290,14 +307,21 @@ impl Overlay {
         };
         self.changed();
         self._load = Some(cx.spawn(async move |this, cx| {
-          let read = cx
-            .background_spawn(async move { host.branches(&repo_path) })
+          let (read, workspaces, current) = cx
+            .background_spawn(async move {
+              let workspaces = host.workspaces(&repo_path).unwrap_or_else(|err| {
+                log::warn!("branch switcher: {err}");
+                Vec::new()
+              });
+              let current = host.current_branch(&repo_path);
+              (host.branches(&repo_path), workspaces, current)
+            })
             .await;
           this
             .update(cx, |this, cx| {
               this.body = match read {
                 Ok(list) => Body::Branches {
-                  branches: Some(group_branches(list)),
+                  branches: Some(group_branches(list, &workspaces, current.as_deref())),
                   error: None,
                   switching: false,
                 },
@@ -376,9 +400,9 @@ impl Overlay {
         switching,
       } => list
         .iter()
-        .map(|(b, group)| cmdk::Entry {
-          value: b.name.clone(),
-          group: Some(*group),
+        .map(|row| cmdk::Entry {
+          value: row.branch.name.clone(),
+          group: Some(row.group),
           disabled: *switching,
         })
         .collect(),
@@ -490,14 +514,21 @@ impl Overlay {
         switching: false,
         ..
       } => {
-        let Some((branch, _)) = list.get(index) else {
+        let Some(row) = list.get(index) else {
           return;
         };
-        if branch.is_current {
+        if let Some(workspace) = &row.workspace {
+          self.send(
+            field("branchSwitcher.openWorkspace", workspace.id.into()),
+            cx,
+          );
+          return;
+        }
+        if row.group == 0 {
           self.close(cx);
           return;
         }
-        let name = branch.name.clone();
+        let name = row.branch.name.clone();
         self.switch_branch(name, cx);
       }
       Body::Branches { .. } => {}
@@ -612,31 +643,58 @@ impl Overlay {
     } else if key == "enter" {
       if let Some(selected) = self.selected {
         self.choose(selected, cx);
+      } else if matches!(self.body, Body::Palette { .. }) && !self.search.trim().is_empty() {
+        self.go_to_file(cx);
       }
       cx.stop_propagation();
     }
   }
+
+  /// No command matched: opens the file picker on what was typed.
+  fn go_to_file(&mut self, cx: &mut Context<Self>) {
+    self.send(
+      ScreenAction::Field {
+        field: "palette.goToFile".into(),
+        value: self.search.trim().into(),
+      },
+      cx,
+    );
+  }
 }
 
-/// `groupedBranches`: current, then local, then remote (`@` in the name).
-fn group_branches(list: Vec<JjBranch>) -> Vec<(JjBranch, usize)> {
-  let group = |b: &JjBranch| {
-    if b.is_current {
-      0
-    } else if b.name.contains('@') {
-      2
-    } else {
-      1
-    }
-  };
-  let mut grouped: Vec<(JjBranch, usize)> = list
+/// The switcher's groups: `current`, the branch the home repository has
+/// checked out, then those a workspace has, then the other local and the
+/// remote (`@` in the name) branches. jj marks every bookmark on the
+/// checkout's commit current, so only `current` is the main tree's.
+fn group_branches(
+  list: Vec<JjBranch>,
+  workspaces: &[WorkspaceRow],
+  current: Option<&str>,
+) -> Vec<BranchRow> {
+  let mut grouped: Vec<BranchRow> = list
     .into_iter()
-    .map(|b| {
-      let g = group(&b);
-      (b, g)
+    .map(|branch| {
+      let workspace = workspaces
+        .iter()
+        .find(|w| w.branch_name == branch.name)
+        .cloned();
+      let group = if workspace.is_some() {
+        1
+      } else if current == Some(branch.name.as_str()) {
+        0
+      } else if branch.name.contains('@') {
+        3
+      } else {
+        2
+      };
+      BranchRow {
+        branch,
+        group,
+        workspace,
+      }
     })
     .collect();
-  grouped.sort_by_key(|(_, g)| *g);
+  grouped.sort_by_key(|row| row.group);
   grouped
 }
 
@@ -669,13 +727,13 @@ fn footer(p: &Palette, hints: &[(&str, &str)], right: Option<&'static str>) -> g
 }
 
 /// A centred `px-4 py-8 text-sm text-muted-foreground` message.
-fn message(p: &Palette, text: &'static str) -> gpui::Div {
+fn message(p: &Palette, text: impl Into<SharedString>) -> gpui::Div {
   ui::text(div(), TextSize::Sm)
     .px_4()
     .py_8()
     .text_center()
     .text_color(p.muted_foreground)
-    .child(text)
+    .child(text.into())
 }
 
 impl Overlay {
@@ -693,7 +751,7 @@ impl Overlay {
       Body::Branches {
         branches: Some(list),
         ..
-      } => Some(list[index].0.name.clone().into()),
+      } => Some(list[index].branch.name.clone().into()),
       _ => None,
     };
     let base = ui::Row::new(id, p)
@@ -738,6 +796,10 @@ impl Overlay {
     match &self.body {
       Body::Palette { commands, .. } => {
         let command = &commands[index];
+        let keys = (!command.keys.is_empty()).then(|| {
+          let id = SharedString::from(format!("overlay-item-{index}-keys"));
+          shortcuts::keys(p, command.keys).debug_selector(move || id.to_string())
+        });
         base
           .py_1p5()
           .mx_2()
@@ -748,6 +810,7 @@ impl Overlay {
             command.description.as_deref(),
             true,
           ))
+          .children(keys)
       }
       Body::Workspaces(rows) => {
         let row = &rows.as_deref().unwrap_or_default()[index];
@@ -764,22 +827,41 @@ impl Overlay {
         switching,
         ..
       } => {
-        let (branch, group) = &list[index];
-        let (icon, color, tag) = match group {
-          0 => (theme::ICON_CHECK, p.success, Some("current")),
-          1 => (theme::ICON_BRANCH, p.muted_foreground, None),
-          _ => (theme::ICON_ARROW_RIGHT, p.muted_foreground, Some("remote")),
+        let row = &list[index];
+        let (icon, color, tag) = match row.group {
+          0 => (theme::ICON_CHECK, p.success, Some("current".to_string())),
+          1 => (
+            theme::ICON_BRANCH,
+            p.muted_foreground,
+            // Its workspace's name, unless that is the branch itself.
+            row.workspace.as_ref().map(|w| {
+              if w.title == w.branch_name {
+                "workspace".to_string()
+              } else {
+                w.title.clone()
+              }
+            }),
+          ),
+          2 => (theme::ICON_BRANCH, p.muted_foreground, None),
+          _ => (
+            theme::ICON_ARROW_RIGHT,
+            p.muted_foreground,
+            Some("remote".to_string()),
+          ),
         };
+        let tag_id = format!("overlay-branch-workspace-{index}");
+        let in_workspace = row.group == 1;
         base
           .py_2()
           .rounded_none()
           .interactive(!*switching)
           .when(*switching, |this| this.opacity(0.5))
           .leading(ui::icon(icon, 16., color))
-          .child(two_lines(&branch.name, None, *group == 0))
+          .child(two_lines(&row.branch.name, None, row.group == 0))
           .children(tag.map(|tag| {
             ui::text(div(), TextSize::Sm)
               .text_color(p.muted_foreground)
+              .when(in_workspace, |this| this.debug_selector(move || tag_id))
               .child(tag)
           }))
       }
@@ -788,10 +870,10 @@ impl Overlay {
   }
 
   /// The `Command.List`'s messages, which sit above its rows.
-  fn messages(&mut self, p: &Palette) -> Vec<gpui::AnyElement> {
+  fn messages(&mut self, p: &Palette, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
     let listing = self.listing();
     let mut children: Vec<gpui::AnyElement> = Vec::new();
-    let empty = |p: &Palette, text| message(p, text).into_any_element();
+    let empty = |p: &Palette, text: &'static str| message(p, text).into_any_element();
     if let Body::Branches {
       branches, error, ..
     } = &self.body
@@ -814,7 +896,34 @@ impl Overlay {
       }
     }
     let loaded = !matches!(self.body, Body::Workspaces(None));
-    if listing.order.is_empty() && loaded {
+    let query = self.search.trim().to_string();
+    if listing.order.is_empty() && matches!(self.body, Body::Palette { .. }) && !query.is_empty() {
+      // Nothing to run: say so, and offer the file picker on the same text.
+      children.push(
+        message(p, format!("No commands match \"{query}\""))
+          .py_4()
+          .into_any_element(),
+      );
+      children.push(
+        ui::Row::new("overlay-go-to-file", p)
+          .role(gpui::Role::ListBoxOption)
+          .label(SharedString::from(format!("Go to file \"{query}\"")))
+          .selected(true)
+          .gap_3()
+          .px_3()
+          .py_1p5()
+          .mx_2()
+          .rounded(radius::MD)
+          .leading(ui::icon(theme::ICON_FILE_SEARCH, 16., p.muted_foreground))
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .child(SharedString::from(format!("Go to file \"{query}\""))),
+          )
+          .on_click(cx.listener(|this, _, _, cx| this.go_to_file(cx)))
+          .into_any_element(),
+      );
+    } else if listing.order.is_empty() && loaded {
       children.push(empty(
         p,
         match self.body {
@@ -914,7 +1023,7 @@ impl Render for Overlay {
           ..
         }
       );
-      let messages = self.messages(&p);
+      let messages = self.messages(&p, cx);
       let list = self.list(window, cx);
       let rows: Vec<gpui::AnyElement> = if list.is_none() {
         (0..self.items.len()).map(|ix| self.item(ix, cx)).collect()
@@ -999,7 +1108,11 @@ impl Render for Overlay {
     div()
       .id("overlay-backdrop")
       .debug_selector(|| "overlay-backdrop".into())
+      .key_context(KEY_CONTEXT)
       .track_focus(&self.focus)
+      .absolute()
+      .top_0()
+      .left_0()
       .size_full()
       .flex()
       .items_center()

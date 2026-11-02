@@ -197,6 +197,7 @@ fn input_latency_file_picker(cx: &mut TestAppContext) {
     repo_path: "/repo".into(),
     workspace_id: None,
     workspace_path: "/repo".into(),
+    query: String::new(),
   };
   h.screen
     .update(&mut h.cx, |s, cx| s.set_file_picker(Some(scope), cx));

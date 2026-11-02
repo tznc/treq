@@ -1,8 +1,8 @@
 // Navigation the QA specs share. Every spec starts from `ready`, so one
 // area can run alone (`--grep`).
 import { execFileSync } from "node:child_process";
-import { expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
-import { dialogPage, mod } from "../fixture.ts";
+import { expect, type Page } from "@playwright/test";
+import { mod } from "../fixture.ts";
 
 export { mod };
 
@@ -92,10 +92,10 @@ export async function openTab(page: Page, name: string): Promise<void> {
   await page.waitForTimeout(1500);
 }
 
-/** The palette (Ctrl+K), in its dialog window. */
-export async function palette(page: Page, context: BrowserContext): Promise<Page> {
+/** Opens the palette (Ctrl+K), drawn over the repo window. */
+export async function palette(page: Page): Promise<void> {
   await page.keyboard.press(`${mod}+k`);
-  return dialogPage(context);
+  await expect(page.getByRole("textbox", { name: "Type a command or search…" })).toBeVisible();
 }
 
 /** Settles async reads (PR polls, diffs) before a shot. */
@@ -123,23 +123,10 @@ export async function xPointer(
 }
 
 /**
- * The page of the dialog window the palette and the other overlays open
- * in. The app reuses one dialog window, and a page holds its window for
- * the test's context, so a second overlay in the same test reuses the
- * page the first one adopted.
- */
-export async function overlay(page: Page, context: BrowserContext): Promise<Page> {
-  const held = context.pages().find((p) => p !== page);
-  if (held) return held;
-  return dialogPage(context);
-}
-
-/**
- * Closes a popover (Checks, Details, the checks badge, menus). Popovers
- * ignore Escape and put a full-window backdrop window over the repo
- * window that only a real click dismisses (`page.mouse` reaches the repo
- * window only). Without a compositor that backdrop paints black. The click
- * lands on an empty part of the header row.
+ * Closes a popover (Checks, Details, the checks badge) or a menu. Popovers
+ * draw in the repo window and close on Escape; menus are popup windows of
+ * their own that only a real click outside dismisses (`page.mouse` reaches
+ * the repo window only), on an empty part of the header row.
  */
 export async function dismissPopover(page: Page): Promise<void> {
   await page.keyboard.press("Escape");
@@ -155,21 +142,3 @@ export async function dismissPopover(page: Page): Promise<void> {
   await page.waitForTimeout(500);
 }
 
-/**
- * The page a dialog renders in: the repo window when it draws the dialog
- * itself, else the shared dialog window.
- */
-export async function dialogIn(
-  page: Page,
-  context: BrowserContext,
-  find: (p: Page) => Locator,
-): Promise<Page> {
-  try {
-    await expect(find(page)).toBeVisible({ timeout: 4000 });
-    return page;
-  } catch {
-    const other = await overlay(page, context);
-    await expect(find(other)).toBeVisible();
-    return other;
-  }
-}

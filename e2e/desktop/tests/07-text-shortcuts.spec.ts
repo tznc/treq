@@ -4,12 +4,25 @@
 // own keyboard injects into GPUI and would skip that layer.
 import { execFileSync } from "node:child_process";
 import { expect, test, type Locator } from "@playwright/test";
-import { dialogPage, goHome } from "../fixture.ts";
+import { goHome } from "../fixture.ts";
 
 test.skip(process.platform !== "linux", "presses keys with xdotool");
 
-/** Presses `keys` (xdotool's names, e.g. "ctrl+v") in the focused window. */
+/**
+ * Gives the repo window the X keyboard focus. Without a window manager
+ * (Xvfb) nothing else does, and every dialog now draws in that window.
+ */
+function focusRepoWindow() {
+  const ids = execFileSync("xdotool", ["search", "--onlyvisible", "--name", "^Treq - "])
+    .toString()
+    .trim()
+    .split("\n");
+  if (ids[0]) execFileSync("xdotool", ["windowfocus", "--sync", ids[0]]);
+}
+
+/** Presses `keys` (xdotool's names, e.g. "ctrl+v") in the repo window. */
 function press(keys: string) {
+  focusRepoWindow();
   execFileSync("xdotool", ["key", "--clearmodifiers", keys]);
 }
 
@@ -61,13 +74,13 @@ test("the file search takes paste, select all, cut and undo", async ({
 }) => {
   await goHome(page);
   await page.getByRole("button", { name: "Command palette" }).click();
-  const palette = await dialogPage(context);
-  await palette.getByRole("option", { name: "Search files" }).click();
+  const palette = page;
+  await palette.getByRole("option", { name: "Go to file" }).click();
   // The picker draws in the repo window, which keeps X's input focus;
   // xdotool can't move focus to the palette's own window without a window
   // manager.
   await editsWithShortcuts(
-    page.getByRole("textbox", { name: "Search files…" }),
+    page.getByRole("textbox", { name: "Go to file…" }),
   );
   await page.keyboard.press("Escape");
 });

@@ -5,7 +5,13 @@
 use serde::Deserialize;
 
 use super::data::{PaletteChecks, PrLink};
-use crate::gpui_shell::theme;
+use crate::gpui_shell::{
+  actions::{
+    self, Action, GO_TO_FILE, MAXIMIZE_TERMINAL, NEW_AGENT_SESSION, NEW_AGENT_WITH_PROMPT,
+    NEW_SHELL, TOGGLE_TERMINAL,
+  },
+  theme,
+};
 
 /// What React sends for the palette: what it knows of the Dashboard.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -37,6 +43,8 @@ pub struct Command {
   pub label: String,
   pub description: Option<String>,
   pub icon: &'static str,
+  /// Its shortcut's keys, empty for none, as the shortcuts sheet shows them.
+  pub keys: &'static [&'static str],
 }
 
 impl Command {
@@ -46,6 +54,18 @@ impl Command {
       label: label.into(),
       description: description.map(Into::into),
       icon,
+      keys: &[],
+    }
+  }
+
+  /// A command for one of the app's named actions, with its shortcut.
+  fn action(id: &str, action: Action, icon: &'static str) -> Self {
+    Self {
+      id: id.into(),
+      label: action.label.into(),
+      description: action.description.map(Into::into),
+      icon,
+      keys: action.keys,
     }
   }
 }
@@ -83,43 +103,31 @@ pub fn commands(
       Command::new(
         "switch-branch",
         "Switch branch",
-        Some("Checkout a different branch in main tree"),
+        Some("Switch the home repository's branch"),
         theme::ICON_BRANCH,
       ),
-      Command::new(
-        "search-files",
-        "Search files",
-        Some("Jump to a file in the repository"),
-        theme::ICON_FILE_SEARCH,
-      ),
+      Command::action("search-files", GO_TO_FILE, theme::ICON_FILE_SEARCH),
       Command::new(
         "go-to-workspace",
         "Go to workspace",
         Some("Open and filter workspaces"),
         theme::ICON_BRANCH,
       ),
-      Command::new(
-        "create-workspace",
-        "Create workspace",
-        Some("Create a new workspace"),
-        theme::ICON_PLUS,
-      ),
+      Command::action("create-workspace", actions::NEW_WORKSPACE, theme::ICON_PLUS),
       Command::new(
         "delete-workspace",
         "Delete workspace",
         Some("Delete a workspace"),
         theme::ICON_TRASH,
       ),
-      Command::new(
+      Command::action(
         "start-agent-with-prompt",
-        "Start a new agent session with a prompt",
-        Some("Write a prompt and choose its workspace"),
+        NEW_AGENT_WITH_PROMPT,
         theme::ICON_AGENT_CLAUDE,
       ),
-      Command::new(
+      Command::action(
         "start-agent-terminal",
-        "Start a new agent terminal",
-        Some("Start the default agent immediately"),
+        NEW_AGENT_SESSION,
         theme::ICON_AGENT_CLAUDE,
       ),
       Command::new(
@@ -140,24 +148,13 @@ pub fn commands(
   }
   if route.has_selected_workspace {
     list.extend([
-      Command::new(
+      Command::action(
         "toggle-terminal",
-        "Toggle terminal",
-        Some("Show or hide the terminal pane"),
+        TOGGLE_TERMINAL,
         theme::ICON_CHEVRONS_UP_DOWN,
       ),
-      Command::new(
-        "maximize-terminal",
-        "Maximize terminal",
-        Some("Toggle maximize/restore terminal pane"),
-        theme::ICON_MAXIMIZE,
-      ),
-      Command::new(
-        "new-shell-terminal",
-        "New shell terminal",
-        Some("Create a new shell session"),
-        theme::ICON_TERMINAL,
-      ),
+      Command::action("maximize-terminal", MAXIMIZE_TERMINAL, theme::ICON_MAXIMIZE),
+      Command::action("new-shell-terminal", NEW_SHELL, theme::ICON_TERMINAL),
     ]);
   }
   if route.workspace.is_some() {
@@ -170,12 +167,14 @@ pub fn commands(
         label: "Open Workspace PR in Browser".into(),
         description: Some(format!("Open PR #{} on GitHub", pr.number)),
         icon: theme::ICON_EXTERNAL_LINK,
+        keys: &[],
       });
       list.push(Command {
         id: OPEN_PR_HERE.into(),
         label: "Open Workspace PR".into(),
         description: Some(format!("Navigate to PR #{}", pr.number)),
         icon: theme::ICON_APP_WINDOW,
+        keys: &[],
       });
     }
   }
@@ -204,6 +203,7 @@ fn checks_commands(checks: &PaletteChecks) -> Vec<Command> {
         workflows.len()
       )),
       icon: theme::ICON_LIST_CHECKS,
+      keys: &[],
     });
     for (filename, name) in workflows {
       list.push(Command {
@@ -211,6 +211,7 @@ fn checks_commands(checks: &PaletteChecks) -> Vec<Command> {
         label: format!("Run check: {name}"),
         description: Some(filename.clone()),
         icon: theme::ICON_PLAY,
+        keys: &[],
       });
     }
   }
@@ -274,8 +275,36 @@ mod tests {
     );
     assert_eq!(
       list[4].description.as_deref(),
-      Some("Checkout a different branch in main tree")
+      Some("Switch the home repository's branch")
     );
+  }
+
+  fn find<'a>(list: &'a [Command], id: &str) -> &'a Command {
+    list.iter().find(|c| c.id == id).expect(id)
+  }
+
+  #[test]
+  fn names_commands_as_the_action_table_does() {
+    use crate::gpui_shell::actions;
+    let route = Route {
+      has_selected_workspace: true,
+      ..route("/repo")
+    };
+    let list = commands(&route, None, None);
+    for (id, action) in [
+      ("search-files", actions::GO_TO_FILE),
+      ("create-workspace", actions::NEW_WORKSPACE),
+      ("start-agent-terminal", actions::NEW_AGENT_SESSION),
+      ("start-agent-with-prompt", actions::NEW_AGENT_WITH_PROMPT),
+      ("new-shell-terminal", actions::NEW_SHELL),
+      ("toggle-terminal", actions::TOGGLE_TERMINAL),
+      ("maximize-terminal", actions::MAXIMIZE_TERMINAL),
+    ] {
+      let command = find(&list, id);
+      assert_eq!(command.label, action.label, "{id}");
+      assert_eq!(command.keys, action.keys, "{id}");
+    }
+    assert!(find(&list, "dashboard").keys.is_empty());
   }
 
   #[test]
@@ -323,6 +352,7 @@ mod tests {
       ]
     );
     let run = &list[16];
+    assert!(run.keys.is_empty());
     assert_eq!(run.label, "Run checks…");
     assert_eq!(
       run.description.as_deref(),

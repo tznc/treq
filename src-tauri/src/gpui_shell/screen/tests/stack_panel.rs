@@ -68,17 +68,14 @@ fn the_stack_panel_holds_the_target_picker_and_stack_button(cx: &mut TestAppCont
 
 #[gpui::test]
 fn the_stack_panel_target_picker_opens_the_target_popover(cx: &mut TestAppContext) {
-  use crate::gpui_shell::popup::PopupRequest;
   let host = stack_host(&[(6, "feat/alpha", "main"), (7, "feat/beta", "feat/alpha")]);
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.click("workspace-target");
   h.cx.run_until_parked();
-  let opened = h
-    .popups
-    .borrow()
-    .iter()
-    .any(|p| matches!(p, PopupRequest::ShowPopover { .. }));
-  assert!(opened, "{:?}", h.popups.borrow());
+  assert!(
+    h.drawn("header-popover-backdrop"),
+    "the target popover opens over the window"
+  );
 }
 
 #[gpui::test]

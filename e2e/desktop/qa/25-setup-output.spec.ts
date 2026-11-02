@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { fixture } from "../fixture.ts";
 import { capture } from "./capture.ts";
-import { mod, openTab, openWorkspace, overlay, settle } from "./helpers.ts";
+import { mod, openTab, openWorkspace, settle } from "./helpers.ts";
 
 const BRANCH = "feat/empty-event-message";
 
@@ -22,7 +22,7 @@ test("setup-output: Code tab setup alert", async ({ page, context }) => {
     // disables the alert's re-run button); the palette runs it regardless.
     await openWorkspace(page, BRANCH);
     await page.keyboard.press(`${mod}+k`);
-    const palette = await overlay(page, context);
+    const palette = page;
     await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("setup");
     await palette.getByRole("option", { name: "Re-run setup script" }).click();
     await settle(page, 3000);

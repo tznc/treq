@@ -8,7 +8,7 @@
 // seed deterministic).
 import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { dialogIn, home, mod, openTab, openWorkspace, settle, xPointer } from "./helpers.ts";
+import { home, mod, openTab, openWorkspace, settle, xPointer } from "./helpers.ts";
 
 const BRANCH = "feat/empty-event-message";
 
@@ -59,7 +59,8 @@ test("code: workspace Code tab, action row, alerts and Agent", async ({ page, co
 
   await page.getByRole("button", { name: "Agent", exact: true }).click();
   const title = (p: Page) => p.getByRole("dialog", { name: "Start a new agent session" });
-  const dialog = await dialogIn(page, context, title);
+  await expect(title(page)).toBeVisible();
+  const dialog = page;
   await expect(dialog.getByRole("button", { name: "Send" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "More submit options" })).toHaveCount(0);
   await settle(page, 800);
@@ -107,7 +108,7 @@ test("code: file view, Markdown preview and a TSX file", async ({ page }) => {
   await openTab(page, "Code");
   // Open README.md from the picker: the tree rows are not observable.
   await page.keyboard.press(`${mod}+p`);
-  const search = page.getByRole("textbox", { name: "Search files…" });
+  const search = page.getByRole("textbox", { name: "Go to file…" });
   await expect(search).toBeVisible();
   await search.fill("README");
   await settle(page, 800);
