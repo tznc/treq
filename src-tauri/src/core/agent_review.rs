@@ -21,6 +21,45 @@ pub fn delete_comment(repo_path: &str, id: &str) -> Result<(), String> {
   local_db::delete_agent_review_comment(repo_path, id)
 }
 
+/// The text of `start_line..=end_line` of `file` as the reviewed target has
+/// it now, stored with a comment so applying its suggestion later can tell
+/// whether those lines moved. `None` for targets read from elsewhere.
+pub fn quote_target_lines(
+  repo_path: &str,
+  target_type: &str,
+  target_id: &str,
+  file: &str,
+  start_line: i64,
+  end_line: i64,
+) -> Result<Option<String>, String> {
+  let Some(root) = workspace_root(repo_path, target_type, target_id)? else {
+    return Ok(None);
+  };
+  let path = contained_path(Path::new(&root), file)?;
+  let text = std::fs::read_to_string(&path)
+    .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+  let lines: Vec<&str> = text.lines().collect();
+  let (start, end) = (start_line.max(1) as usize - 1, end_line.max(0) as usize);
+  if start >= end || end > lines.len() {
+    return Ok(None);
+  }
+  Ok(Some(lines[start..end].join("\n")))
+}
+
+/// The workspace folder a `workspace_diff` target's files live in.
+fn workspace_root(
+  repo_path: &str,
+  target_type: &str,
+  target_id: &str,
+) -> Result<Option<String>, String> {
+  match target_id.parse() {
+    Ok(id) if target_type == crate::core::agent_launch::REVIEW_TARGET => {
+      crate::core::changes::resolve_workspace_dir(repo_path, Some(id)).map(Some)
+    }
+    _ => Ok(None),
+  }
+}
+
 /// Replace `start_line..=end_line` of the comment's file with its suggested
 /// text. Deliberately not the generic patch-file path: a suggestion already
 /// carries an exact line range, so applying it is a splice, not a diff apply.
@@ -33,19 +72,19 @@ pub fn apply_agent_review_suggestion(repo_path: String, comment_id: String) -> R
     .as_deref()
     .ok_or_else(|| "Review comment has no suggested change".to_string())?;
 
-  // A workspace diff's file lives in that workspace, not the home repo.
-  let root = match comment.target_id.parse() {
-    Ok(id) if comment.target_type == crate::core::agent_launch::REVIEW_TARGET => {
-      crate::core::changes::resolve_workspace_dir(&repo_path, Some(id))?
-    }
-    _ => repo_path.clone(),
-  };
+  // A workspace diff's file lives in that workspace, not the home repo, and
+  // its comment quotes the lines it covered: refuse if they have moved since.
+  let workspace = workspace_root(&repo_path, &comment.target_type, &comment.target_id)?;
+  let expected: Option<Vec<String>> = workspace
+    .as_ref()
+    .and(comment.quoted_text.as_ref())
+    .map(|quoted| quoted.split('\n').map(str::to_string).collect());
   splice_lines(
-    &root,
+    workspace.as_deref().unwrap_or(&repo_path),
     &comment.file_path,
     comment.start_line,
     comment.end_line,
-    None,
+    expected.as_deref(),
     replacement,
   )?;
   local_db::resolve_agent_review_comment(&repo_path, &comment.id)?;

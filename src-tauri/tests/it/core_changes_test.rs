@@ -1094,3 +1094,66 @@ fn applying_an_agent_suggestion_edits_the_reviewed_workspace() {
   );
   assert_eq!(read(&workspace_path), "# Fixed\n");
 }
+
+/// A workspace with `README.md` reading `content`, and an agent comment on
+/// its line 2 that quotes `quoted` and suggests `# Fixed`.
+fn workspace_with_suggestion(
+  repo: &TestRepo,
+  branch: &str,
+  content: &str,
+  quoted: &str,
+) -> (String, String) {
+  let workspace = repo.create_workspace_simple(branch).unwrap();
+  let path = repo.workspace_full_path(&workspace);
+  TestRepo::write_workspace_file(&path, "README.md", content).unwrap();
+  let comment = treq_lib::local_db::create_agent_review_comment(
+    &repo.repo_path,
+    "workspace_diff",
+    &workspace.id.to_string(),
+    "README.md",
+    None,
+    2,
+    2,
+    Some("new"),
+    "Rename",
+    Some("# Fixed\n"),
+    "local-agent",
+    Some(quoted),
+  )
+  .unwrap();
+  (path, comment.id)
+}
+
+#[test]
+fn applying_an_agent_suggestion_refuses_when_its_lines_moved() {
+  let repo = TestRepo::new().unwrap();
+  // The agent commented on "target" at line 2; a new line pushed it to line 3.
+  let (path, id) =
+    workspace_with_suggestion(&repo, "feat/moved-lines", "a\ninserted\ntarget\n", "target");
+
+  let result = treq_lib::core::agent_review::apply_agent_review_suggestion(repo.repo_path, id);
+
+  assert!(result.is_err(), "applied onto moved lines");
+  let now = std::fs::read_to_string(std::path::Path::new(&path).join("README.md")).unwrap();
+  assert_eq!(now, "a\ninserted\ntarget\n");
+}
+
+#[test]
+fn adding_a_workspace_diff_comment_quotes_its_lines() {
+  let repo = TestRepo::new().unwrap();
+  let workspace = repo.create_workspace_simple("feat/quote").unwrap();
+  let path = repo.workspace_full_path(&workspace);
+  TestRepo::write_workspace_file(&path, "README.md", "a\nb\nc\n").unwrap();
+
+  let quoted = treq_lib::core::agent_review::quote_target_lines(
+    &repo.repo_path,
+    "workspace_diff",
+    &workspace.id.to_string(),
+    "README.md",
+    2,
+    3,
+  )
+  .unwrap();
+
+  assert_eq!(quoted.as_deref(), Some("b\nc"));
+}
