@@ -760,12 +760,31 @@ impl Render for Screen {
       .capture_any_mouse_down(|_, window, cx| window.blur(cx))
       .child(body)
       .children(remote)
-      .children(workspace_modal)
-      .children(modal)
+      .children(workspace_modal.map(|m| window_layer(m, 1, window)))
+      .children(modal.map(|m| window_layer(m, 1, window)))
       .children(self.file_picker.as_ref().map(|(_, picker)| picker.clone()))
-      .children(self.overlay.clone())
-      .children(confirm)
+      .children(self.overlay.clone().map(|o| window_layer(o, 3, window)))
+      .children(confirm.map(|c| window_layer(c, 4, window)))
   }
+}
+
+/// Draws `layer` over the whole window, sidebar included, rather than over
+/// the screen beside it: a box the window's size at the window's origin,
+/// painted after the rest of the window. A dialog that centres itself in
+/// its parent is centred on the window. Higher `priority` draws on top.
+fn window_layer(layer: impl IntoElement, priority: usize, window: &Window) -> gpui::AnyElement {
+  let viewport = window.viewport_size();
+  gpui::deferred(
+    gpui::anchored().position(gpui::Point::default()).child(
+      div()
+        .relative()
+        .w(viewport.width)
+        .h(viewport.height)
+        .child(layer),
+    ),
+  )
+  .with_priority(priority)
+  .into_any_element()
 }
 
 impl Screen {

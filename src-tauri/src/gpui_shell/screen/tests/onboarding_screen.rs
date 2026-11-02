@@ -792,3 +792,84 @@ fn onboarding_splits_other_machines_once_one_exists(cx: &mut TestAppContext) {
   assert!(h.drawn("machines-add-ssh"));
   assert!(h.drawn("machines-add-container"));
 }
+
+/// The screen beside a sidebar, as the shell lays them out.
+struct BesideSidebar {
+  screen: Entity<Screen>,
+}
+
+impl Render for BesideSidebar {
+  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    div()
+      .size_full()
+      .flex()
+      .child(
+        div()
+          .w(gpui::px(260.))
+          .h_full()
+          .flex_none()
+          .debug_selector(|| "sidebar".into()),
+      )
+      .child(
+        div()
+          .flex_1()
+          .min_w_0()
+          .h_full()
+          .child(Screen::element(&self.screen)),
+      )
+  }
+}
+
+/// The palette's backdrop dims the whole window, sidebar included, and its
+/// dialog is centred on the window, not on the screen beside the sidebar.
+#[gpui::test]
+fn the_palette_covers_and_centres_on_the_whole_window(cx: &mut TestAppContext) {
+  cx.update(crate::gpui_shell::theme::init);
+  let (root, vcx) = cx.add_window_view(|_, cx| BesideSidebar {
+    screen: cx.new(|cx| {
+      Screen::new(
+        workspace_route(),
+        std::rc::Rc::new(|_, _| {}),
+        std::rc::Rc::new(|_, _| {}),
+        std::sync::Arc::new(FakeHost::default()),
+        cx,
+      )
+    }),
+  });
+  vcx.simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  let screen = root.read_with(vcx, |root, _| root.screen.clone());
+  let snapshot: crate::gpui_shell::OverlaySnapshot = serde_json::from_value(serde_json::json!({
+    "kind": "commandPalette", "dark": false, "repoPath": "/repo", "stash": true,
+    "hasSelectedWorkspace": false, "workspace": null,
+  }))
+  .expect("snapshot");
+  screen.update(vcx, |s, cx| {
+    s.set_overlay(
+      Some(snapshot),
+      std::sync::Arc::new(NoOverlayHost),
+      std::rc::Rc::new(|_, _| {}),
+      cx,
+    )
+  });
+  vcx.run_until_parked();
+  let window = vcx.update(|window, _| window.viewport_size());
+  let backdrop = vcx
+    .debug_bounds("overlay-backdrop")
+    .expect("backdrop drawn");
+  assert_eq!(
+    backdrop.origin,
+    gpui::Point::default(),
+    "the backdrop starts at the window's origin"
+  );
+  assert_eq!(
+    backdrop.size, window,
+    "the backdrop covers the whole window"
+  );
+  let dialog = vcx.debug_bounds("overlay-dialog").expect("dialog drawn");
+  assert!(
+    (dialog.center().x - window.width / 2.).abs() < gpui::px(1.),
+    "dialog centred at {:?}, window centre {:?}",
+    dialog.center().x,
+    window.width / 2.
+  );
+}

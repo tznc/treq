@@ -72,7 +72,10 @@ fn the_stack_panel_target_picker_opens_the_target_popover(cx: &mut TestAppContex
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.click("workspace-target");
   h.cx.run_until_parked();
-  assert!(h.drawn("header-popover-backdrop"), "the target popover opens over the window");
+  assert!(
+    h.drawn("header-popover-backdrop"),
+    "the target popover opens over the window"
+  );
 }
 
 #[gpui::test]
