@@ -249,3 +249,31 @@ fn refuses_home_rewrite_of_pushed_commit() {
   treq_lib::core::describe_commit(&repo.repo_path, None, "@-", "Local renamed")
     .expect("unpushed commit stays editable");
 }
+
+/// A workspace commit already pushed to its own remote branch stays mutable
+/// and editable: only the workspace's target branch is protected.
+#[test]
+fn workspace_commit_pushed_to_its_own_branch_stays_editable() {
+  let repo = TestRepo::with_remote().unwrap();
+  let ws = repo
+    .setup_workspace_with_pushed_commit("feat/pushed", "p.txt", "p")
+    .unwrap();
+  let path = repo.workspace_full_path(&ws);
+  let target = repo.default_branch().to_string();
+  treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, &target).unwrap();
+
+  let log = treq_lib::core::list_commits(&repo.repo_path, Some(ws.id), false, None, None).unwrap();
+  let pushed = log
+    .commits
+    .iter()
+    .find(|c| c.description.starts_with("Add p.txt"))
+    .expect("pushed commit listed");
+  assert!(
+    !pushed.is_immutable,
+    "pushed workspace commit marked immutable"
+  );
+
+  treq_lib::core::describe_commit(&repo.repo_path, Some(ws.id), &pushed.change_id, "Reworded")
+    .unwrap();
+  let _ = path;
+}

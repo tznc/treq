@@ -226,16 +226,60 @@ fn home_offers_no_rewriting_actions_on_pushed_commits(cx: &mut TestAppContext) {
   assert!(texts.iter().any(|t| t == "Revert commit"), "{texts:?}");
 }
 
-/// A commit on the workspace's own branch stays editable even when its
-/// target already holds it; core refuses only the target's own commits.
+const REWRITES: [&str; 5] = [
+  "Edit description",
+  "Undo commit",
+  "Edit timestamp",
+  "Stash commit",
+  "Delete commit",
+];
+
+/// In a workspace, a commit its target branch already holds is not editable.
 #[gpui::test]
-fn workspace_branch_commits_stay_editable(cx: &mut TestAppContext) {
+fn workspace_commits_on_the_target_are_not_editable(cx: &mut TestAppContext) {
   let mut merged = commit("a", 1, 0);
   merged["is_immutable"] = true.into();
   let host = host_with_log(vec![merged], "feature/login");
   let (mut h, _) = workspace_harness(cx, host, commits_route());
   let texts = row_menu(&mut h, "commit-row-a");
-  for edit in ["Edit description", "Stash commit", "Delete commit"] {
+  for rewrite in REWRITES {
+    assert!(
+      !texts.iter().any(|t| t == rewrite),
+      "{rewrite} offered: {texts:?}"
+    );
+  }
+}
+
+/// In a workspace, a commit only on its own branch stays editable, pushed or
+/// not: the log marks immutable only what the target holds.
+#[gpui::test]
+fn workspace_branch_commits_stay_editable(cx: &mut TestAppContext) {
+  let host = host_with_log(vec![commit("a", 1, 0)], "feature/login");
+  let (mut h, _) = workspace_harness(cx, host, commits_route());
+  let texts = row_menu(&mut h, "commit-row-a");
+  for edit in [
+    "Edit description",
+    "Edit timestamp",
+    "Stash commit",
+    "Delete commit",
+  ] {
     assert!(texts.iter().any(|t| t == edit), "{edit} missing: {texts:?}");
+  }
+}
+
+/// A workspace on the default branch blocks every rewrite of its immutable
+/// commits.
+#[gpui::test]
+fn default_branch_workspace_blocks_immutable_commits(cx: &mut TestAppContext) {
+  let mut pushed = commit("a", 1, 0);
+  pushed["is_immutable"] = true.into();
+  let host = host_with_log(vec![pushed], "main");
+  let (mut h, _) = workspace_harness(cx, host, commits_route());
+  let texts = row_menu(&mut h, "commit-row-a");
+  for rewrite in REWRITES {
+    assert!(
+      !texts.iter().any(|t| t == rewrite),
+      "{rewrite} offered: {texts:?}"
+    );
   }
 }
