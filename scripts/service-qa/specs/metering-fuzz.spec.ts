@@ -9,13 +9,26 @@
  * against an independent recomputation from usage_intervals.
  */
 import { randomUUID } from "node:crypto";
-import { expect, it } from "vitest";
+import { beforeAll, expect, it } from "vitest";
 import { clearBilling, grantPro } from "../billing";
 import { getServiceClient } from "../clients";
 import { recordOutcome } from "../record";
 import { createTestUser, deleteTestUser } from "../seed";
 
 const admin = getServiceClient();
+
+// Seed prices take effect at `db reset`. These specs backdate usage by hours,
+// which needs a price in effect then, so open prices start 30 days back.
+beforeAll(async () => {
+  const { error } = await admin
+    .from("machine_type_prices")
+    .update({
+      effective_from: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+    })
+    .is("effective_to", null)
+    .gt("effective_from", new Date(Date.now() - 30 * 86_400_000).toISOString());
+  if (error) throw new Error(error.message);
+});
 const SEEDS = Number(process.env.METERING_FUZZ_SEEDS ?? 12);
 const STATES = [
   "ready",

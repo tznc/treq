@@ -4,7 +4,7 @@
  * handlers in-process against the real database.
  */
 import { randomUUID } from "node:crypto";
-import { expect, it } from "vitest";
+import { beforeAll, expect, it } from "vitest";
 import { userHasPro } from "../../../supabase/functions/_shared/billing/entitlement";
 import { spendStatusFor } from "../../../supabase/functions/_shared/billing/spend-cap";
 import { LocalProvider } from "../../../supabase/functions/_shared/remote/local-provider";
@@ -23,6 +23,19 @@ import {
 } from "../seed";
 
 const admin = getServiceClient();
+
+// Seed prices take effect at `db reset`. These specs backdate usage by hours,
+// which needs a price in effect then, so open prices start 30 days back.
+beforeAll(async () => {
+  const { error } = await admin
+    .from("machine_type_prices")
+    .update({
+      effective_from: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+    })
+    .is("effective_to", null)
+    .gt("effective_from", new Date(Date.now() - 30 * 86_400_000).toISOString());
+  if (error) throw new Error(error.message);
+});
 
 it("refuses every direct write to the billing ledger and spend tables", async () => {
   const u = await createTestUser();
