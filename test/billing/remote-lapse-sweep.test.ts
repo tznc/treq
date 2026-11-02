@@ -368,7 +368,7 @@ describe("sweepLapsedInstances", () => {
         provider_kind: "boat",
         provider_resource_id: "boat-b",
         status: "suspended",
-        lapsed_at: daysAgo(8),
+        lapsed_at: daysAgo(31),
       }),
     ];
     const { store } = fakeStore(rows, {
@@ -407,7 +407,7 @@ describe("sweepLapsedInstances", () => {
         provider_kind: "boat",
         provider_resource_id: "boat-new",
         active_placement_id: "pl-new",
-        lapsed_at: daysAgo(8),
+        lapsed_at: daysAgo(31),
       }),
     ];
     const { store, closed } = fakeStore(rows, {
@@ -448,7 +448,7 @@ describe("sweepLapsedInstances", () => {
   });
 
   it("treats a machine that is already gone as deleted", async () => {
-    const rows = [candidate({ status: "deleting", lapsed_at: daysAgo(9) })];
+    const rows = [candidate({ status: "deleting", lapsed_at: daysAgo(32) })];
     const { store } = fakeStore(rows);
     const provider = fakeProvider();
     provider.deleteInstance.mockRejectedValueOnce(
