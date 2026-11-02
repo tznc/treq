@@ -742,6 +742,7 @@ pub fn workspace_view(
 
   let header = Header {
     branch: branch.clone(),
+    title: workspace.map(super::code_data::display_title),
     home: workspace.is_none(),
     linear: match (&metadata.linear_issue_key, &metadata.linear_issue_url) {
       (Some(key), Some(url)) if workspace.is_some() && loaded.linear_enabled => Some(Linear {

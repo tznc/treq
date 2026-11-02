@@ -16,7 +16,7 @@ test.describe.configure({ mode: "serial" });
 
 /**
  * Gives the workspace a committed top-level file (blue) and an uncommitted
- * one (yellow) beside its conflicted `packages` (red). The commit takes the
+ * one (yellow) beside its conflicted `packages` (red pip). The commit takes the
  * workspace's uncommitted edits with it, so this spec runs after the others.
  */
 function seedStatuses(): void {
@@ -43,7 +43,7 @@ test("file-status: Code tab file list", async ({ page }) => {
     name: "24-file-status-01-changed-only",
     title: "Code tab: changed files only",
     expectations: [
-      "packages (conflicted) has a red name and red pip; CHANGELOG.md a blue pip; NOTES.md a yellow pip",
+      "packages (conflicted) has a neutral name and a red pip; CHANGELOG.md a blue pip; NOTES.md a yellow pip",
       "README.md and .gitignore (untouched) are not listed",
       "A 'Show N unchanged files' row with a right chevron closes the list",
     ],

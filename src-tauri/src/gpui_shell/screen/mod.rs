@@ -85,6 +85,7 @@ mod workspace_dialog;
 mod workspace_dialog_data;
 mod workspace_modal;
 pub(super) mod workspace_ops;
+mod workspace_title;
 
 #[cfg(test)]
 mod tests;
