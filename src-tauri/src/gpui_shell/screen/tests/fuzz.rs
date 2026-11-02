@@ -497,16 +497,14 @@ fn settings_survive_random_edits() {
       let mut run = fuzz(cx, settings_scenario(tab), &steps);
       // Whatever was edited, saving it reads back the same in a reopened screen.
       run.settle();
-      if !run.h.drawn("settings-save") {
-        return;
-      }
-      run.h.click("settings-save");
+      // Typed fields save once typing pauses.
+      run
+        .h
+        .cx
+        .executor()
+        .advance_clock(std::time::Duration::from_millis(600));
       run.settle();
       let saved = drawn_settings(&mut run.h);
-      if saved.save.as_ref().is_some_and(|s| !s.disabled) {
-        // Nothing to compare: the save did not go through.
-        return;
-      }
       let mut reopened = Harness::with_host(cx, settings_route(tab), run.host.clone());
       let again = drawn_settings(&mut reopened);
       assert_eq!(

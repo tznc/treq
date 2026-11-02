@@ -155,7 +155,7 @@ test("terminal-reattach: a closed window's terminals open again", async ({ page,
 
   // Away to Settings and back: the same shell, still running.
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Close", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back", exact: true })).toBeVisible();
   await page.mouse.move(1000, 860);
   await settle(page, 1500);
   await capture(page, {
