@@ -304,6 +304,27 @@ fn a_merged_pull_request_hides_create_pr(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_merged_pull_request_offers_archive_instead_of_merge(cx: &mut TestAppContext) {
+  let mut host = feature_host();
+  if let Some(Some(pr)) = host.pr.pr.as_mut() {
+    pr.state = "MERGED".into();
+  }
+  let (mut h, host) = workspace_harness(cx, host, workspace_route());
+  assert!(!h.drawn("workspace-merge"), "no Merge… once the PR merged");
+  assert!(h.drawn("workspace-archive"));
+  h.click("workspace-archive");
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"archive workspace 7".to_string()));
+}
+
+#[gpui::test]
+fn an_open_pull_request_keeps_merge(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
+  assert!(h.drawn("workspace-merge"));
+  assert!(!h.drawn("workspace-archive"));
+}
+
+#[gpui::test]
 fn a_closed_pull_request_can_be_replaced(cx: &mut TestAppContext) {
   let mut host = feature_host();
   if let Some(Some(pr)) = host.pr.pr.as_mut() {

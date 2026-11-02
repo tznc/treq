@@ -659,6 +659,11 @@ fn integrations_sign_in_when_signed_out(cx: &mut TestAppContext) {
   let integrations = drawn_settings(&mut h).integrations.expect("integrations");
   assert_eq!(integrations.github, settings::GithubSection::SignedOut);
   assert_eq!(integrations.linear, None);
+  // Collapsed, the card only says it isn't connected.
+  assert!(h.drawn("integration-card-github"));
+  assert!(!h.drawn("integrations-sign-in"));
+  h.click("integration-card-github");
+  assert!(h.drawn("integrations-sign-in"));
   h.click("integrations-sign-in");
   h.cx.run_until_parked();
   assert_eq!(
@@ -697,12 +702,35 @@ fn integrations_list_public_repositories_on_the_free_plan(cx: &mut TestAppContex
       repositories: vec![("acme/public".into(), false)],
     }
   );
+  assert!(!h.drawn("github-manage"), "collapsed");
+  h.click("integration-card-github");
   h.click("github-manage");
   h.cx.run_until_parked();
   assert_eq!(
     host.writes(),
     ["open http://localhost:3001/dashboard?tab=integrations"]
   );
+}
+
+#[gpui::test]
+fn integrations_cards_say_whether_each_is_connected(cx: &mut TestAppContext) {
+  let (mut h, _) = linear_harness(cx, false, Some("lin_api_1"));
+  let integrations = drawn_settings(&mut h).integrations.expect("integrations");
+  // Signed in with GitHub repositories still loading: connected.
+  assert!(integrations.github_connected);
+  assert!(integrations.linear.expect("linear").connected);
+  assert!(h.drawn("integration-status-github"));
+  assert!(h.drawn("integration-status-linear"));
+}
+
+#[gpui::test]
+fn integrations_card_expands_and_collapses(cx: &mut TestAppContext) {
+  let (mut h, _) = linear_harness(cx, false, None);
+  assert!(!h.drawn("linear-api-key-edit"));
+  h.click("integration-card-linear");
+  assert!(h.drawn("linear-api-key-edit"));
+  h.click("integration-card-linear");
+  assert!(!h.drawn("linear-api-key-edit"));
 }
 
 fn linear_harness(
@@ -740,9 +768,11 @@ fn linear_section(h: &mut Harness) -> settings::LinearSection {
 fn linear_saves_an_api_key_to_the_repository(cx: &mut TestAppContext) {
   let (mut h, host) = linear_harness(cx, false, None);
   let linear = linear_section(&mut h);
-  assert_eq!(linear.description, "Free plan: provide your API key");
-  assert_eq!(linear.edit_label, "Add API Key");
+  assert_eq!(linear.description, "Paste a Linear personal API key");
+  assert_eq!(linear.edit_label, "Add API key");
   assert!(!linear.oauth);
+  assert!(!linear.connected);
+  h.click("integration-card-linear");
   h.click("linear-api-key-edit");
   assert!(linear_section(&mut h).editing);
   settings_act(&mut h, field("linear.apiKey", "lin_api_1".into()));
@@ -753,13 +783,14 @@ fn linear_saves_an_api_key_to_the_repository(cx: &mut TestAppContext) {
     [
       "set repo /repo linear_api_key=lin_api_1",
       "notify repoSettingsChanged",
-      "notify toast API Key saved",
+      "notify toast API key saved",
     ]
   );
   let linear = linear_section(&mut h);
   assert!(!linear.editing);
+  assert!(linear.connected);
   assert_eq!(linear.description, "Direct API access configured");
-  assert_eq!(linear.edit_label, "Update API Key");
+  assert_eq!(linear.edit_label, "Update API key");
 }
 
 #[gpui::test]
@@ -772,6 +803,7 @@ fn linear_connects_via_oauth_on_pro(cx: &mut TestAppContext) {
     linear.oauth_description,
     "API key takes priority, but you can also connect via OAuth"
   );
+  h.click("integration-card-linear");
   h.click("linear-oauth");
   h.cx.run_until_parked();
   assert!(h.sent().is_empty());
@@ -799,6 +831,7 @@ fn linear_oauth_refused_for_want_of_pro_offers_the_upgrade(cx: &mut TestAppConte
   h.set_account(account_state(
     serde_json::json!({ "user": ada(), "subscription": pro() }),
   ));
+  h.click("integration-card-linear");
   h.click("linear-oauth");
   h.cx.run_until_parked();
   assert_eq!(

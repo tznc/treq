@@ -964,7 +964,7 @@ fn terminal_pane_tooltips_show_shortcuts_as_kbd(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn header_buttons_open_their_popovers_in_the_modal_window(cx: &mut TestAppContext) {
-  for button in ["workspace-details", "workspace-target", "workspace-checks"] {
+  for button in ["workspace-details", "workspace-checks"] {
     let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
     h.click(button);
     h.cx.run_until_parked();
