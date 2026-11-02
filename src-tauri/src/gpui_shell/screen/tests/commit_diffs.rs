@@ -176,23 +176,18 @@ fn commit_rows_open_a_context_menu(cx: &mut TestAppContext) {
   assert!(host.writes().contains(&"revert a".to_string()));
 }
 
-/// An immutable commit offers no action that rewrites it.
-#[gpui::test]
-fn immutable_commits_offer_no_rewriting_actions(cx: &mut TestAppContext) {
+/// The labels of the menu a right-click on `row` opens.
+fn row_menu(h: &mut Harness, row: &'static str) -> Vec<String> {
   use crate::gpui_shell::popup::{MenuEntry, PopupRequest};
   use gpui::{Modifiers, MouseButton};
-  let mut pushed = commit("a", 1, 0);
-  pushed["is_immutable"] = true.into();
-  let host = host_with_log(vec![pushed], "feature/login");
-  let (mut h, _) = workspace_harness(cx, host, commits_route());
   h.cx.run_until_parked();
-  let at = h.cx.debug_bounds("commit-row-a").expect("row").center();
+  let at = h.cx.debug_bounds(row).expect("row").center();
   h.cx
     .simulate_mouse_down(at, MouseButton::Right, Modifiers::none());
   h.cx
     .simulate_mouse_up(at, MouseButton::Right, Modifiers::none());
   h.cx.run_until_parked();
-  let texts: Vec<String> = match h.popups.borrow().last() {
+  match h.popups.borrow().last() {
     Some(PopupRequest::ShowMenu { entries, .. }) => entries
       .iter()
       .filter_map(|e| match e {
@@ -201,7 +196,21 @@ fn immutable_commits_offer_no_rewriting_actions(cx: &mut TestAppContext) {
       })
       .collect(),
     _ => panic!("no menu is shown"),
-  };
+  }
+}
+
+/// In the home repo, a pushed (immutable) commit offers nothing that
+/// rewrites it.
+#[gpui::test]
+fn home_offers_no_rewriting_actions_on_pushed_commits(cx: &mut TestAppContext) {
+  let mut pushed = commit("a", 1, 0);
+  pushed["is_immutable"] = true.into();
+  let host = host_with_log(vec![pushed], "main");
+  let mut route = route_json(None, "main");
+  route["code"] = true.into();
+  route["tab"] = "commits".into();
+  let (mut h, _) = workspace_harness(cx, host, serde_json::from_value(route).expect("route"));
+  let texts = row_menu(&mut h, "commit-row-a");
   for rewrite in [
     "Edit description",
     "Undo commit",
@@ -215,4 +224,18 @@ fn immutable_commits_offer_no_rewriting_actions(cx: &mut TestAppContext) {
     );
   }
   assert!(texts.iter().any(|t| t == "Revert commit"), "{texts:?}");
+}
+
+/// A commit on the workspace's own branch stays editable even when its
+/// target already holds it; core refuses only the target's own commits.
+#[gpui::test]
+fn workspace_branch_commits_stay_editable(cx: &mut TestAppContext) {
+  let mut merged = commit("a", 1, 0);
+  merged["is_immutable"] = true.into();
+  let host = host_with_log(vec![merged], "feature/login");
+  let (mut h, _) = workspace_harness(cx, host, commits_route());
+  let texts = row_menu(&mut h, "commit-row-a");
+  for edit in ["Edit description", "Stash commit", "Delete commit"] {
+    assert!(texts.iter().any(|t| t == edit), "{edit} missing: {texts:?}");
+  }
 }
