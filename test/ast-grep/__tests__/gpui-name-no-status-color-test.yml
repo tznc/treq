@@ -8,10 +8,36 @@ valid:
     fn error_banner(p: &Palette) -> Div {
       div().text_color(p.destructive)
     }
+  - |
+    fn files(p: &Palette) {
+      let name_color = match status {
+        Some(_) => p.foreground,
+        _ => p.muted_foreground,
+      };
+    }
+  - |
+    fn files(p: &Palette) {
+      let pip = Some(ui::Tone::Danger.color(p));
+    }
 invalid:
   - |
     fn tree_row(p: &Palette) -> Div {
       div().text_color(p.destructive).child(name)
+    }
+  - |
+    fn tree_row(p: &Palette) -> Div {
+      div().text_color(ui::Tone::Danger.color(p))
+    }
+  - |
+    fn files(p: &Palette) {
+      let name_color = match status {
+        Some("conflict") => ui::Tone::Danger.color(p),
+        _ => p.foreground,
+      };
+    }
+  - |
+    fn files(p: &Palette) {
+      let name_fg = if conflict { p.destructive } else { p.foreground };
     }
   - |
     fn file_row(p: &Palette) -> Div {

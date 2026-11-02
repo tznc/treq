@@ -159,17 +159,14 @@ type Fixture = ReturnType<typeof makeFixture>;
 
 /** A workspace's checkout: `.treq/workspaces/<branch with / as ->`. */
 export function workspaceDir(repo: string, branch: string): string {
+  // A new workspace's directory starts with its id: `<id>-<branch>`.
   const root = join(repo, ".treq", "workspaces");
   const name = branch.replaceAll("/", "-");
-  // New workspace directories start with the workspace's id ("3-feat-x").
-  const prefixed = existsSync(root)
-    ? readdirSync(root).find((dir) => new RegExp(`^\\d+-${escapeRegExp(name)}$`).test(dir))
-    : undefined;
-  return join(root, prefixed ?? name);
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const dirs = existsSync(root) ? readdirSync(root) : [];
+  const found = dirs.find(
+    (d) => d === name || (d.endsWith(`-${name}`) && /^\d+$/.test(d.slice(0, -name.length - 1))),
+  );
+  return join(root, found ?? name);
 }
 
 /** Writes `file` in a workspace's checkout, as an editor would. */
