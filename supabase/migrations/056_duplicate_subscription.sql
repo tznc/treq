@@ -1,7 +1,8 @@
 -- billing_record_subscription_event reports 'duplicate_subscription' when an
 -- owner has more than one live subscription of the same plan, so the
 -- webhook alerts on a double charge. The write itself is unchanged. Built on
--- 042_same_second_events.sql, whose same-second tie check it keeps.
+-- 048_spend_cap.sql's version, whose same-second tie check and
+-- current_period_start it keeps.
 --
 -- Returns 'applied', 'duplicate', 'stale', 'tie' or 'duplicate_subscription'.
 
@@ -15,7 +16,8 @@ create or replace function public.billing_record_subscription_event(
   p_status text,
   p_current_period_end timestamptz,
   p_cancel_at_period_end boolean,
-  p_trial_end timestamptz
+  p_trial_end timestamptz,
+  p_current_period_start timestamptz default null
 )
 returns text
 language plpgsql
@@ -36,10 +38,8 @@ begin
       using errcode = 'invalid_parameter_value';
   end if;
 
-  -- Stripe's event `created` has one-second resolution. Two events from the
-  -- same second that disagree cannot be ordered, so neither is trusted: the
-  -- event is not recorded and the webhook writes a fresh read from Stripe.
-  -- A deletion is final whatever its order, so it is never a tie.
+  -- 042's same-second tie: two events from one second that disagree cannot
+  -- be ordered, so the webhook writes a fresh read from Stripe instead.
   if p_event_type <> 'customer.subscription.deleted' and exists (
     select 1
     from public.billing_subscriptions s
@@ -73,12 +73,12 @@ begin
 
   insert into public.billing_subscriptions as s (
     stripe_subscription_id, stripe_customer_id, owner_type, owner_id, plan,
-    status, current_period_end, cancel_at_period_end, trial_end,
+    status, current_period_start, current_period_end, cancel_at_period_end, trial_end,
     stripe_event_created
   )
   values (
     p_subscription_id, p_customer_id, v_owner_type, v_owner_id, p_plan,
-    p_status, p_current_period_end, coalesce(p_cancel_at_period_end, false),
+    p_status, p_current_period_start, p_current_period_end, coalesce(p_cancel_at_period_end, false),
     p_trial_end, p_event_created
   )
   on conflict (stripe_subscription_id) do update set
@@ -86,19 +86,16 @@ begin
     owner_id = coalesce(excluded.owner_id, s.owner_id),
     plan = excluded.plan,
     status = excluded.status,
+    current_period_start = excluded.current_period_start,
     current_period_end = excluded.current_period_end,
     cancel_at_period_end = excluded.cancel_at_period_end,
     trial_end = excluded.trial_end,
     stripe_event_created = excluded.stripe_event_created,
     updated_at = now()
-  -- Stripe never reactivates an ended subscription, so a late event cannot
-  -- bring one back.
   where s.stripe_event_created <= excluded.stripe_event_created
     and s.status not in ('canceled', 'incomplete_expired');
   get diagnostics v_written = row_count;
 
-  -- Any event that shows a Pro trial proves the trial was used, even a stale
-  -- one.
   if p_plan = 'pro' and p_trial_end is not null then
     update public.billing_customers
     set trial_used_at = now(), updated_at = now()

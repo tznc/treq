@@ -1,6 +1,6 @@
 -- A second live subscription of the same plan for one owner is still
 -- recorded (the owner is billed for it) but reported as
--- 'duplicate_subscription' so the webhook alerts (045_duplicate_subscription.sql).
+-- 'duplicate_subscription' so the webhook alerts (056_duplicate_subscription.sql).
 begin;
 select plan(4);
 
