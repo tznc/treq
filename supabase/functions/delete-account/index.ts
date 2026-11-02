@@ -44,6 +44,10 @@ Deno.serve(async (req) => {
       stripe: stripeKey ? createStripeClient(stripeKey) : null,
       provider: placementProviders(service),
       revokeLinearToken: (token) => revokeLinearToken(token),
+      usageReporting: {
+        enabled: Deno.env.get("TREQ_USAGE_BILLING_ENABLED") === "1",
+        eventName: Deno.env.get("TREQ_STRIPE_USAGE_METER_EVENT") || undefined,
+      },
     });
     return json(result.body, result.status);
   } catch (err) {
