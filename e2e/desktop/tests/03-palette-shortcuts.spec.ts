@@ -26,9 +26,9 @@ test("Cmd+K opens the palette with Go to Home and Go to Settings", async ({
 
   await palette.getByRole("option", { name: "Go to settings" }).click();
   await expect(
-    page.getByRole("button", { name: "Save settings" }),
+    page.getByRole("button", { name: "Back", exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
 });
 
 test("the palette filters its commands as you type", async ({
