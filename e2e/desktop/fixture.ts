@@ -43,17 +43,17 @@ export function commitSubjects(): string[] {
 export const mod = process.platform === "darwin" ? "Meta" : "Control";
 
 /**
- * The palette and the other overlays open in a dialog window over the repo
- * window. Once one shows, a new page drives it: the app hands a new page
- * the active window (see `gpui_shell::e2e`).
+ * A page for another app window once it shows (a second repository
+ * window): the app hands a new page the active window (see
+ * `gpui_shell::e2e`). Dialogs draw in the repo window itself, in `page`.
  */
-export async function dialogPage(context: BrowserContext): Promise<Page> {
+export async function windowPage(context: BrowserContext): Promise<Page> {
   const deadline = Date.now() + 10_000;
   for (;;) {
     try {
       return await context.newPage();
     } catch (error) {
-      // The dialog window is not open, or not focused, yet.
+      // The window is not open, or not focused, yet.
       if (Date.now() > deadline) throw error;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }

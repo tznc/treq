@@ -62,12 +62,102 @@ fn serializes_actions_as_react_reads_them() {
 }
 
 #[gpui::test]
+fn the_file_picker_opens_on_its_query(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, workspace_route());
+  let scope = file_picker::Scope {
+    repo_path: "/repo".into(),
+    workspace_id: None,
+    workspace_path: "/repo".into(),
+    query: "zzzz".into(),
+  };
+  h.screen
+    .update(&mut h.cx, |s, cx| s.set_file_picker(Some(scope), cx));
+  assert!(h.drawn("file-picker"));
+  let query = h.screen.read_with(&h.cx, |s, cx| {
+    s.file_picker
+      .as_ref()
+      .map(|(_, picker)| picker.read(cx).query.clone())
+  });
+  assert_eq!(query.as_deref(), Some("zzzz"));
+}
+
+/// An overlay host that reads nothing.
+struct NoOverlayHost;
+
+impl crate::gpui_shell::overlay::OverlayHost for NoOverlayHost {
+  fn checks(&self, _: &str, _: i64) -> crate::gpui_shell::overlay::PaletteChecks {
+    Default::default()
+  }
+  fn pr(&self, _: &str, _: &str) -> Option<crate::gpui_shell::overlay::PrLink> {
+    None
+  }
+  fn workspaces(&self, _: &str) -> Result<Vec<crate::gpui_shell::overlay::WorkspaceRow>, String> {
+    Ok(Vec::new())
+  }
+  fn branches(&self, _: &str) -> Result<Vec<crate::jj::JjBranch>, String> {
+    Ok(Vec::new())
+  }
+  fn current_branch(&self, _: &str) -> Option<String> {
+    None
+  }
+  fn switch_branch(&self, _: &str, _: &str) -> Result<(), String> {
+    Ok(())
+  }
+  fn open_url(&self, _: &str) {}
+  fn checks_target(&self, _: &str, _: i64) -> Option<crate::core::running_checks::ChecksTarget> {
+    None
+  }
+  fn run_checks(
+    &self,
+    _: &crate::core::running_checks::ChecksTarget,
+    _: &crate::core::running_checks::CheckRun,
+  ) -> Result<Vec<crate::core::checks::JobResult>, String> {
+    Ok(Vec::new())
+  }
+  fn trust_repo(&self, _: &str) -> Result<(), String> {
+    Ok(())
+  }
+  fn notify(&self, _: crate::gpui_shell::native::NativeEvent) {}
+  fn terminal(&self, _: crate::core::palette_commands::TerminalCommand) {}
+}
+
+/// The palette draws over the dimmed app in the repo window, as the file
+/// picker does, rather than in a separate transparent window.
+#[gpui::test]
+fn the_screen_draws_the_palette_over_the_app(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, workspace_route());
+  let snapshot: crate::gpui_shell::OverlaySnapshot = serde_json::from_value(serde_json::json!({
+    "kind": "commandPalette", "dark": false, "repoPath": "/repo", "stash": true,
+    "hasSelectedWorkspace": false, "workspace": null,
+  }))
+  .expect("snapshot");
+  let sink: ActionSink = std::rc::Rc::new(|_, _| {});
+  let host: std::sync::Arc<dyn crate::gpui_shell::overlay::OverlayHost> =
+    std::sync::Arc::new(NoOverlayHost);
+  h.screen.update(&mut h.cx, |s, cx| {
+    s.set_overlay(Some(snapshot), host, sink, cx)
+  });
+  assert!(h.drawn("overlay-dialog"));
+  assert!(h.drawn("overlay-backdrop"));
+  h.screen.update(&mut h.cx, |s, cx| {
+    s.set_overlay(
+      None,
+      std::sync::Arc::new(NoOverlayHost),
+      std::rc::Rc::new(|_, _| {}),
+      cx,
+    )
+  });
+  assert!(!h.drawn("overlay-dialog"));
+}
+
+#[gpui::test]
 fn the_window_models_file_picker_reports_a_dismissal(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, workspace_route());
   let scope = file_picker::Scope {
     repo_path: "/repo".into(),
     workspace_id: None,
     workspace_path: "/repo".into(),
+    query: String::new(),
   };
   h.screen
     .update(&mut h.cx, |s, cx| s.set_file_picker(Some(scope), cx));

@@ -6,7 +6,7 @@
 // the Logs level menu.
 import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { dismissPopover, home, mod, openTab, openWorkspace, overlay, ready, row, settle } from "./helpers.ts";
+import { dismissPopover, home, mod, openTab, openWorkspace, ready, row, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
@@ -104,7 +104,7 @@ test("rows: open workspaces picker", async ({ page }) => {
 test("rows: palette", async ({ page, context }) => {
   await openWorkspace(page, "feat/empty-event-message");
   await page.keyboard.press(`${mod}+k`);
-  const palette = await overlay(page, context);
+  const palette = page;
   await expect(palette.getByRole("option", { name: "Go to home" })).toBeVisible();
   await palette.keyboard.press("ArrowDown");
   await settle(page, 800);

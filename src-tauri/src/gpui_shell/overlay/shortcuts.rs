@@ -3,10 +3,19 @@
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, SharedString};
 
 use crate::gpui_shell::{
-  keys::{PLATFORM, SECONDARY, SHIFT},
+  actions::{
+    Action, COMMAND_PALETTE, GO_TO_FILE, MAXIMIZE_TERMINAL, NEW_AGENT_SESSION,
+    NEW_AGENT_WITH_PROMPT, NEW_SHELL, NEW_WORKSPACE, STACK_ON_THIS, TOGGLE_TERMINAL,
+  },
+  keys::SECONDARY,
   theme::Palette,
   ui::{self, TextSize},
 };
+
+/// An action's row on the sheet.
+const fn row(action: Action) -> Shortcut {
+  (action.keys, action.label)
+}
 
 /// A shortcut's keys and what it does.
 type Shortcut = (&'static [&'static str], &'static str);
@@ -29,10 +38,11 @@ pub const SECTIONS: &[(&str, &[Shortcut])] = &[
   (
     "Global",
     &[
-      (&[SECONDARY, "N"], "New workspace"),
-      (&[SECONDARY, SHIFT, "N"], "Create stacked workspace"),
-      (&[SECONDARY, "K"], "Command palette"),
-      (&[SECONDARY, "P"], "File search"),
+      row(NEW_WORKSPACE),
+      row(STACK_ON_THIS),
+      row(COMMAND_PALETTE),
+      row(GO_TO_FILE),
+      row(NEW_AGENT_WITH_PROMPT),
       (&["?"], "Show keyboard shortcuts"),
       (&["Esc"], "Close dialog"),
     ],
@@ -40,10 +50,10 @@ pub const SECTIONS: &[(&str, &[Shortcut])] = &[
   (
     "Terminal",
     &[
-      (&[SECONDARY, "J"], "Toggle terminal pane"),
-      (&[PLATFORM, "Ctrl", "J"], "Maximize/restore terminal"),
-      (&[SECONDARY, "]"], "New agent terminal"),
-      (&[SECONDARY, "\\"], "New shell terminal"),
+      row(TOGGLE_TERMINAL),
+      row(MAXIMIZE_TERMINAL),
+      row(NEW_AGENT_SESSION),
+      row(NEW_SHELL),
       (&[SECONDARY, "W"], "Close selected terminal"),
       (COPY, "Copy selection (or interrupt)"),
       (PASTE, "Paste"),
@@ -57,6 +67,30 @@ pub const SECTIONS: &[(&str, &[Shortcut])] = &[
     ],
   ),
 ];
+
+/// A shortcut's keys, "Ctrl + K" style: each key a `Kbd`, joined by "+".
+/// The palette's rows show them the same way.
+pub fn keys(p: &Palette, keys: &[&str]) -> gpui::Div {
+  div()
+    .flex()
+    .flex_none()
+    .items_center()
+    .gap_1()
+    .children(keys.iter().enumerate().map(|(i, key)| {
+      div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .when(i > 0, |this| {
+          this.child(
+            ui::text(div(), TextSize::Xs)
+              .text_color(p.muted_foreground)
+              .child("+"),
+          )
+        })
+        .child(ui::Kbd::from_label(key.to_string(), p))
+    }))
+}
 
 /// A `<section>`: its uppercase heading, then one row per shortcut.
 fn section(p: &Palette, title: &str, shortcuts: &[Shortcut]) -> gpui::Div {
@@ -88,22 +122,7 @@ fn section(p: &Palette, title: &str, shortcuts: &[Shortcut]) -> gpui::Div {
                 .text_color(p.foreground)
                 .child(SharedString::from(action.to_string())),
             )
-            .child(div().flex().flex_none().items_center().gap_1().children(
-              keys.iter().enumerate().map(|(i, key)| {
-                div()
-                  .flex()
-                  .items_center()
-                  .gap_1()
-                  .when(i > 0, |this| {
-                    this.child(
-                      ui::text(div(), TextSize::Xs)
-                        .text_color(p.muted_foreground)
-                        .child("+"),
-                    )
-                  })
-                  .child(ui::Kbd::from_label(key.to_string(), p))
-              }),
-            ))
+            .child(self::keys(p, keys))
         })),
     )
 }
@@ -137,4 +156,42 @@ pub fn render(
         .overflow_y_scroll()
         .child(grid),
     )
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::gpui_shell::actions;
+
+  fn rows() -> impl Iterator<Item = &'static Shortcut> {
+    SECTIONS.iter().flat_map(|(_, rows)| rows.iter())
+  }
+
+  #[test]
+  fn the_sheet_uses_the_action_names() {
+    for action in [
+      actions::GO_TO_FILE,
+      actions::STACK_ON_THIS,
+      actions::NEW_WORKSPACE,
+      actions::NEW_AGENT_SESSION,
+      actions::NEW_AGENT_WITH_PROMPT,
+      actions::NEW_SHELL,
+      actions::TOGGLE_TERMINAL,
+      actions::MAXIMIZE_TERMINAL,
+    ] {
+      let row = rows()
+        .find(|(_, label)| *label == action.label)
+        .unwrap_or_else(|| panic!("{} is not on the sheet", action.label));
+      assert_eq!(row.0, action.keys, "{}", action.label);
+    }
+    for old in [
+      "File search",
+      "Create stacked workspace",
+      "New shell terminal",
+      "New agent terminal",
+      "Toggle terminal pane",
+    ] {
+      assert!(rows().all(|(_, label)| *label != old), "{old}");
+    }
+  }
 }

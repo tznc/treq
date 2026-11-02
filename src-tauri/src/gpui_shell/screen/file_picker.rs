@@ -26,6 +26,8 @@ pub struct Scope {
   pub workspace_id: Option<i64>,
   /// The checkout to index (workspace or repository root).
   pub workspace_path: String,
+  /// What it opens searching for.
+  pub query: String,
 }
 
 pub enum FilePickerEvent {
@@ -50,6 +52,7 @@ impl EventEmitter<FilePickerEvent> for FilePicker {}
 
 impl FilePicker {
   pub fn new(host: Arc<dyn CodeHost>, scope: Scope, dark: bool, cx: &mut Context<Self>) -> Self {
+    let query = scope.query.clone();
     let mut this = Self {
       host,
       scope,
@@ -61,7 +64,7 @@ impl FilePicker {
       _search: None,
       _subscription: None,
     };
-    this.search(String::new(), cx);
+    this.search(query, cx);
     this
   }
 
@@ -120,7 +123,12 @@ impl FilePicker {
     if let Some(input) = &self.input {
       return input.clone();
     }
-    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search files…"));
+    let query = self.query.clone();
+    let input = cx.new(|cx| {
+      let mut input = InputState::new(window, cx).placeholder("Go to file…");
+      input.set_value(query, window, cx);
+      input
+    });
     input.update(cx, |input, cx| input.focus(window, cx));
     self._subscription =
       Some(cx.subscribe(

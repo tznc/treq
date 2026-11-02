@@ -1,42 +1,29 @@
 // The delete-workspace confirmation is drawn in the repo window itself, over
 // everything in it: the title asks the question, and the buttons are Cancel
 // and "Delete workspace". Escape cancels, so nothing is deleted.
-import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { home, mod, overlay, settle } from "./helpers.ts";
+import { home, mod, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
 const BRANCH = "feat/keyvalues-cache";
 
 /** Picks Delete Workspace for `BRANCH` from the palette. */
-async function askDelete(page: Page, context: BrowserContext): Promise<void> {
+async function askDelete(page: Page): Promise<void> {
   await page.keyboard.press(`${mod}+k`);
-  const palette = await overlay(page, context);
-  await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("Delete workspace");
-  await palette.getByRole("option", { name: "Delete workspace" }).click();
-  // The picker draws in the repo window or in the shared dialog window.
-  const find = (p: Page) => p.getByRole("textbox", { name: "Search workspaces to delete…" });
-  let picker: Page | undefined;
-  await expect
-    .poll(async () => {
-      picker = (await find(page).isVisible())
-        ? page
-        : (await find(palette).isVisible())
-          ? palette
-          : undefined;
-      return !!picker;
-    })
-    .toBe(true);
-  if (!picker) throw new Error("no delete picker");
-  await find(picker).fill(BRANCH);
+  await page.getByRole("textbox", { name: "Type a command or search…" }).fill("Delete workspace");
+  await page.getByRole("option", { name: "Delete workspace" }).click();
+  const picker = page.getByRole("textbox", { name: "Search workspaces to delete…" });
+  await expect(picker).toBeVisible();
+  await picker.fill(BRANCH);
   await settle(page, 600);
-  await picker.keyboard.press("Enter").catch(() => {});
+  await page.keyboard.press("Enter");
 }
 
-test("delete-confirmation: one in-app question; Escape cancels", async ({ page, context }) => {
+test("delete-confirmation: one in-app question; Escape cancels", async ({ page }) => {
   await home(page);
-  await askDelete(page, context);
+  await askDelete(page);
   const question = page.getByRole("dialog", { name: `Delete ${BRANCH}?`, exact: true });
   await expect(question).toBeVisible();
   await expect(question).toHaveCount(1);

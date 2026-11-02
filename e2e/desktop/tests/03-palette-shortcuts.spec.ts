@@ -2,7 +2,7 @@
 // the real app: the shortcuts open their dialogs (which GPUI draws in a
 // window over the repo window) and their commands act on the window.
 import { expect, test } from "@playwright/test";
-import { dialogPage, goHome, mod } from "../fixture.ts";
+import { goHome, mod } from "../fixture.ts";
 
 test("Cmd+K opens the palette with Go to Home and Go to Settings", async ({
   page,
@@ -10,7 +10,7 @@ test("Cmd+K opens the palette with Go to Home and Go to Settings", async ({
 }) => {
   await goHome(page);
   await page.keyboard.press(`${mod}+k`);
-  const palette = await dialogPage(context);
+  const palette = page;
   await expect(
     palette.getByRole("option", { name: "Go to home" }),
   ).toBeVisible();
@@ -18,7 +18,7 @@ test("Cmd+K opens the palette with Go to Home and Go to Settings", async ({
     palette.getByRole("option", { name: "Go to settings" }),
   ).toBeVisible();
   await expect(
-    palette.getByRole("option", { name: "Search files" }),
+    palette.getByRole("option", { name: "Go to file" }),
   ).toBeVisible();
   await expect(
     palette.getByTitle("Jump to a file in the repository"),
@@ -37,7 +37,7 @@ test("the palette filters its commands as you type", async ({
 }) => {
   await goHome(page);
   await page.getByRole("button", { name: "Command palette" }).click();
-  const palette = await dialogPage(context);
+  const palette = page;
   await palette
     .getByRole("textbox", { name: "Type a command or search…" })
     .fill("branch");
@@ -53,9 +53,9 @@ test("the palette filters its commands as you type", async ({
 test("Search Files opens the file picker", async ({ page, context }) => {
   await goHome(page);
   await page.keyboard.press(`${mod}+k`);
-  const palette = await dialogPage(context);
-  await palette.getByRole("option", { name: "Search files" }).click();
-  const search = page.getByRole("textbox", { name: "Search files…" });
+  const palette = page;
+  await palette.getByRole("option", { name: "Go to file" }).click();
+  const search = page.getByRole("textbox", { name: "Go to file…" });
   await expect(search).toBeVisible();
   await search.fill("READ");
   await expect(page.getByRole("option", { name: "README.md" })).toBeVisible();
@@ -80,7 +80,7 @@ test("? opens the keyboard shortcuts, but not while typing", async ({
 
   await page.getByRole("tab", { name: "Commits" }).click();
   await page.keyboard.press("Shift+?");
-  const dialog = await dialogPage(context);
+  const dialog = page;
   await expect(
     dialog.getByRole("dialog", { name: "Keyboard shortcuts" }),
   ).toBeVisible();

@@ -1,6 +1,6 @@
 //! The palette commands GPUI runs itself ([`palette_commands`]): the
 //! workspace's checks (`useChecksCommands`) and the terminal pane's
-//! commands. The rest go to React as `palette.<id>`, whose router opens
+//! commands. The rest go to the window model as `palette.<id>`, which opens
 //! the dialog or page.
 
 use std::{cell::RefCell, rc::Rc};
@@ -26,7 +26,7 @@ impl Overlay {
   pub(super) fn run_palette(&mut self, id: &str, cx: &mut Context<Self>) {
     let command = palette_commands::parse(id);
     if let PaletteCommand::Route(id) = &command {
-      // React runs the Dashboard handler and closes the palette.
+      // The window model runs the command and closes the palette.
       return self.press(&format!("palette.{id}"), cx);
     }
     let workspace = match &self.view {
