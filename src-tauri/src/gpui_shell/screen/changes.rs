@@ -2239,8 +2239,8 @@ impl ChangesView {
       None => commit_label(self.staging.staged.len()),
     };
     let error = self.message_error;
-    let border = p.primary_foreground.opacity(0.2);
     let main = Button::new("commit-button", p)
+      .variant(Variant::Outline)
       .size(Size::Sm)
       .flex_1()
       .h_auto()
@@ -2249,7 +2249,7 @@ impl ChangesView {
       .rounded_r_none()
       .disabled(disabled || empty)
       .when(self.pending.is_some(), |b| {
-        b.child(ui::spinner("commit-spin", 16., p.primary_foreground))
+        b.child(ui::spinner("commit-spin", 16., p.muted_foreground))
       })
       .label(label)
       .on_click(
@@ -2261,19 +2261,15 @@ impl ChangesView {
       .child(
         Button::new("commit-options", p)
           .aria_label("More commit options")
+          .variant(Variant::Outline)
           .size(Size::Sm)
           .h_auto()
           .py_1p5()
           .px_1p5()
           .rounded_l_none()
-          .border_l_1()
-          .border_color(border)
+          .border_l_0()
           .disabled(disabled || empty)
-          .child(ui::icon(
-            theme::ICON_CHEVRON_DOWN,
-            16.,
-            p.primary_foreground,
-          ))
+          .icon(theme::ICON_CHEVRON_DOWN, 16.)
           .on_click(cx.listener(|view, _, _, cx| view.commit_menu(cx))),
       )
       .child(self.anchor("commit-menu".into()));
