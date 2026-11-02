@@ -43,27 +43,23 @@ it("refuses every direct write to the billing ledger and spend tables", async ()
       > = [
         [
           "usage_intervals.insert",
-          c
-            .from("usage_intervals")
-            .insert({
-              placement_id: randomUUID(),
-              owner_user_id: id,
-              kind: "running",
-              price_id: randomUUID(),
-            }),
+          c.from("usage_intervals").insert({
+            placement_id: randomUUID(),
+            owner_user_id: id,
+            kind: "running",
+            price_id: randomUUID(),
+          }),
         ],
         [
           "usage_reports.insert",
-          c
-            .from("usage_reports")
-            .insert({
-              identifier: `x-${who}`,
-              owner_user_id: id,
-              hour: new Date().toISOString(),
-              seconds: 0,
-              provider_cost_nanousd: 0,
-              billed_nanousd: -1e12,
-            }),
+          c.from("usage_reports").insert({
+            identifier: `x-${who}`,
+            owner_user_id: id,
+            hour: new Date().toISOString(),
+            seconds: 0,
+            provider_cost_nanousd: 0,
+            billed_nanousd: -1e12,
+          }),
         ],
         [
           "usage_reports.update",
@@ -82,17 +78,15 @@ it("refuses every direct write to the billing ledger and spend tables", async ()
         ],
         [
           "billing_subscriptions.insert",
-          c
-            .from("billing_subscriptions")
-            .insert({
-              stripe_subscription_id: `sub_${who}`,
-              stripe_customer_id: "cus_x",
-              owner_type: "user",
-              owner_id: id,
-              plan: "pro",
-              status: "active",
-              stripe_event_created: new Date().toISOString(),
-            }),
+          c.from("billing_subscriptions").insert({
+            stripe_subscription_id: `sub_${who}`,
+            stripe_customer_id: "cus_x",
+            owner_type: "user",
+            owner_id: id,
+            plan: "pro",
+            status: "active",
+            stripe_event_created: new Date().toISOString(),
+          }),
         ],
         [
           "subscriptions.update",
@@ -432,162 +426,279 @@ it("stops a capped owner from restarting their workspace by reprovision or ssh",
   }
 }, 90000);
 
-// Open: put_user_config has no per-user scope limit (docs/qa/byos-chaos-2026-11-01.md).
-// it.fails keeps the repro running; change to it() once scopes are bounded.
-it.fails(
-  "bounds synced config storage per user",
-  async () => {
-    const u = await createTestUser();
-    try {
-      const { client } = await signInWithEmailPassword(u.email, u.password);
-      const blob = { "f.txt": "x".repeat(200_000) };
-      const results: string[] = [];
-      for (let i = 0; i < 40; i++) {
-        const { error } = await client.rpc("put_user_config", {
-          p_scope: `repo:${randomUUID()}`,
-          p_expected_version: 0,
-          p_files: blob,
-        });
-        results.push(error ? error.message : "ok");
-      }
-      const { data: size } = await admin
-        .from("user_config_snapshots")
-        .select("scope")
-        .eq("owner_user_id", u.user.id);
-      const stored = (size ?? []).length;
-
-      await recordOutcome("billing-abuse-05-config-storage", {
-        expectations: [
-          "A Free user cannot create an unbounded number of config scopes (each up to 1 MiB × 20 versions).",
-        ],
-        details: {
-          accepted: results.filter((r) => r === "ok").length,
-          stored,
-          bytesPerScope: 200_000,
-        },
+it("bounds synced config storage per user", async () => {
+  const u = await createTestUser();
+  try {
+    const { client } = await signInWithEmailPassword(u.email, u.password);
+    const results: string[] = [];
+    for (let i = 0; i < 101; i++) {
+      const { error } = await client.rpc("put_user_config", {
+        p_scope: `repo:${randomUUID()}`,
+        p_expected_version: 0,
+        p_files: { "f.txt": "eA==" },
       });
-      // Documents the current bound; fails while scopes are unlimited.
-      expect(stored).toBeLessThan(40);
-    } finally {
-      await admin
-        .from("user_config_snapshots")
-        .delete()
-        .eq("owner_user_id", u.user.id);
-      await deleteTestUser(admin, u.user.id);
+      results.push(error ? error.message : "ok");
     }
-  },
-  120000,
-);
+    const long = await client.rpc("put_user_config", {
+      p_scope: `repo:${"x".repeat(300)}`,
+      p_expected_version: 0,
+      p_files: {},
+    });
+    const { data: rows } = await admin
+      .from("user_config_snapshots")
+      .select("scope")
+      .eq("owner_user_id", u.user.id);
 
-// Open: a Team member passes the Pro gate but has no personal Stripe customer,
-// so their usage ends as no_customer. it.fails keeps the repro; flip to it() when fixed.
-it.fails(
-  "bills a Team member's cloud usage somewhere",
-  async () => {
-    const u = await createTestUser();
-    let orgId: string | null = null;
-    try {
-      const { data: org, error } = await admin
-        .from("organizations")
-        .insert({ name: "SQA usage team" })
-        .select("id")
-        .single();
-      if (error) throw new Error(error.message);
-      orgId = (org as { id: string }).id;
-      await admin
-        .from("organization_members")
-        .insert({ org_id: orgId, user_id: u.user.id, role: "owner" });
-      const { grantTeam } = await import("../billing");
-      await grantTeam(admin, orgId);
-      const id = u.user.id;
-      expect(await userHasPro(admin, id)).toBe(true);
+    expect(results.slice(0, 100).every((r) => r === "ok")).toBe(true);
+    expect(results[100]).toContain("config_scope_limit");
+    expect(long.error?.message).toContain("config_scope_too_long");
+    expect((rows ?? []).length).toBe(100);
 
-      const r = await handleRemoteInstanceAction(
-        { action: "ensure", idempotency_key: `ensure-${randomUUID()}` },
-        {
-          supabase: admin,
-          ownerUserId: id,
-          correlationId: `sqa-${randomUUID()}`,
-          hasPro: () => userHasPro(admin, id),
-          stub: true,
-          provider: (kind) => new LocalProvider(kind),
-          spendStatus: () => spendStatusFor(admin, id),
-        },
-      );
-      expect(r.status).toBe(200);
-      const { data: inst } = await admin
-        .from("remote_instances")
-        .select("active_placement_id")
-        .eq("owner_user_id", id)
-        .single();
-      const pid = (inst as { active_placement_id: string }).active_placement_id;
-      await admin.from("usage_intervals").delete().eq("owner_user_id", id);
-      await admin
-        .from("remote_instance_placements")
-        .update({ machine_type_id: "e2b:m" })
-        .eq("id", pid);
-      await admin.rpc("set_placement_state", {
-        p_placement_id: pid,
-        p_state: "ready",
-        p_at: new Date(Date.now() - 3 * 3600_000).toISOString(),
-      });
-      await admin.rpc("set_placement_state", {
-        p_placement_id: pid,
-        p_state: "suspended",
-      });
+    await recordOutcome("billing-abuse-05-config-storage", {
+      expectations: [
+        "A user can create 100 config scopes; the 101st is refused with config_scope_limit.",
+        "A scope name over 256 characters is refused with config_scope_too_long.",
+      ],
+      details: {
+        accepted: results.filter((r) => r === "ok").length,
+        last: results[100],
+        long: long.error?.message,
+      },
+    });
+  } finally {
+    await admin
+      .from("user_config_snapshots")
+      .delete()
+      .eq("owner_user_id", u.user.id);
+    await deleteTestUser(admin, u.user.id);
+  }
+}, 120000);
 
-      const { reportUsage, supabaseUsageReportStore } =
-        await import("../../../supabase/functions/_shared/billing/usage-report");
-      const sent: unknown[] = [];
-      const result = await reportUsage({
-        store: supabaseUsageReportStore(admin),
-        stripe: {
-          request: async (_m: string, _p: string, params?: unknown) => {
-            sent.push(params);
-            return {} as never;
-          },
-        },
-        enabled: true,
-        now: () => new Date(),
-        log: () => {},
-      } as never);
-      const { data: rows } = await admin
-        .from("usage_reports")
-        .select("billed_nanousd, stripe_status")
-        .eq("owner_user_id", id);
-      const billed = (rows ?? []) as Array<{
-        billed_nanousd: number;
-        stripe_status: string;
-      }>;
-      const unbilledUsd =
-        billed
-          .filter((x) => x.stripe_status === "no_customer")
-          .reduce((a, x) => a + Number(x.billed_nanousd), 0) / 1e9;
+it("keeps cloud workspaces to personal Pro, so a Team member's usage is never unbilled", async () => {
+  const u = await createTestUser();
+  let orgId: string | null = null;
+  try {
+    const { data: org, error } = await admin
+      .from("organizations")
+      .insert({ name: "SQA usage team" })
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    orgId = (org as { id: string }).id;
+    await admin
+      .from("organization_members")
+      .insert({ org_id: orgId, user_id: u.user.id, role: "owner" });
+    const { grantTeam } = await import("../billing");
+    const { userHasCloud } =
+      await import("../../../supabase/functions/_shared/billing/entitlement");
+    await grantTeam(admin, orgId);
+    const id = u.user.id;
 
-      await recordOutcome("billing-abuse-06-team-member-usage", {
-        expectations: [
-          "A Team member who passes the Pro gate has their cloud usage reported to some Stripe customer, not dropped as no_customer.",
-        ],
-        details: {
-          reportRows: billed,
-          unbilledUsd,
-          sentEvents: sent.length,
-          result,
-        },
-      });
-      expect(unbilledUsd).toBe(0);
-    } finally {
-      await admin.from("usage_reports").delete().eq("owner_user_id", u.user.id);
-      await admin
-        .from("remote_instances")
-        .delete()
-        .eq("owner_user_id", u.user.id);
-      if (orgId) {
-        await clearBilling(admin, [orgId]);
-        await admin.from("organizations").delete().eq("id", orgId);
-      }
-      await deleteTestUser(admin, u.user.id);
+    const r = await handleRemoteInstanceAction(
+      { action: "ensure", idempotency_key: `ensure-${randomUUID()}` },
+      {
+        supabase: admin,
+        ownerUserId: id,
+        correlationId: `sqa-${randomUUID()}`,
+        hasPro: () => userHasCloud(admin, id),
+        stub: true,
+        provider: (kind) => new LocalProvider(kind),
+        spendStatus: () => spendStatusFor(admin, id),
+      },
+    );
+    const body = (await r.json()) as Record<string, unknown>;
+    const { data: instances } = await admin
+      .from("remote_instances")
+      .select("id")
+      .eq("owner_user_id", id);
+
+    expect(await userHasPro(admin, id)).toBe(true);
+    expect(await userHasCloud(admin, id)).toBe(false);
+    expect(r.status).toBe(402);
+    expect(body.code).toBe("pro_required");
+    expect(instances ?? []).toEqual([]);
+
+    await recordOutcome("billing-abuse-06-team-member-cloud", {
+      expectations: [
+        "A Team-only member keeps Pro features (has_pro) but has no cloud (has_cloud false).",
+        "ensure is refused with 402 pro_required and creates no instance, so no unbillable usage can start.",
+      ],
+      details: { status: r.status, body },
+    });
+  } finally {
+    await admin
+      .from("remote_instances")
+      .delete()
+      .eq("owner_user_id", u.user.id);
+    if (orgId) {
+      await clearBilling(admin, [orgId]);
+      await admin.from("organizations").delete().eq("id", orgId);
     }
-  },
-  90000,
-);
+    await deleteTestUser(admin, u.user.id);
+  }
+}, 90000);
+
+it("sends an account's remaining usage, then cancels with a final invoice, before deleting it", async () => {
+  const u = await createTestUser();
+  const id = u.user.id;
+  let deleted = false;
+  try {
+    const grant = await grantPro(admin, id);
+    const { deleteAccount, deleteAccountStoreFor } =
+      await import("../../../supabase/functions/delete-account/lib");
+    const { data: inst, error } = await admin
+      .from("remote_instances")
+      .insert({
+        owner_user_id: id,
+        provider_kind: "e2b",
+        provider_resource_id: `sqa-${randomUUID().slice(0, 8)}`,
+        region: "us_east",
+        size_preset: "small",
+        status: "provisioning",
+        tier_id: "s",
+        machine_type_id: "e2b:s",
+      })
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    const instanceId = (inst as { id: string }).id;
+    const { data: pl } = await admin
+      .from("remote_instance_placements")
+      .insert({
+        instance_id: instanceId,
+        owner_user_id: id,
+        provider_kind: "e2b",
+        machine_type_id: "e2b:s",
+        region: "us_east",
+        provider_resource_id: "sqa-vm",
+        state: "provisioning",
+        role: "active",
+      })
+      .select("id")
+      .single();
+    const placementId = (pl as { id: string }).id;
+    await admin
+      .from("remote_instances")
+      .update({ active_placement_id: placementId })
+      .eq("id", instanceId);
+    await admin.rpc("set_placement_state", {
+      p_placement_id: placementId,
+      p_state: "ready",
+      p_at: new Date(Date.now() - 90 * 60_000).toISOString(),
+    });
+
+    const calls: Array<{
+      method: string;
+      path: string;
+      params?: Record<string, unknown>;
+    }> = [];
+    const result = await deleteAccount({
+      method: "POST",
+      authorization: "Bearer jwt",
+      verifyUser: async () => ({ id }),
+      storeFor: (userId) => deleteAccountStoreFor(admin as never, userId),
+      stripe: {
+        request: async <T>(
+          method: string,
+          path: string,
+          params?: Record<string, unknown>,
+        ) => {
+          calls.push({ method, path, params });
+          return {
+            id: grant.subscriptionId,
+            status: method === "GET" ? "active" : "canceled",
+          } as T;
+        },
+      },
+      provider: (kind) => new LocalProvider(kind),
+      revokeLinearToken: async () => {},
+      usageReporting: { enabled: true },
+    });
+    deleted = result.status === 200;
+    const meter = calls.filter((c) => c.path === "/v1/billing/meter_events");
+    const currentHour = new Date();
+    currentHour.setUTCMinutes(0, 0, 0);
+    const currentId = `${id}:${currentHour.toISOString().slice(0, 13)}`;
+    const meterIndex = calls.findIndex(
+      (c) => c.path === "/v1/billing/meter_events",
+    );
+    const cancelIndex = calls.findIndex((c) => c.method === "DELETE");
+    const { data: gone } = await admin.auth.admin.getUserById(id);
+
+    expect(result.status).toBe(200);
+    expect(meter.map((m) => m.params?.identifier)).toContain(currentId);
+    expect(meter.length).toBeGreaterThanOrEqual(2);
+    expect(meterIndex).toBeLessThan(cancelIndex);
+    expect(calls[cancelIndex].params).toEqual({ invoice_now: true });
+    expect(gone.user).toBeNull();
+
+    await recordOutcome("billing-abuse-07-delete-account-usage", {
+      expectations: [
+        "Deleting an account sends meter events for all its unreported hours, including the current partial hour.",
+        "The meter events go out before the subscription is cancelled, and the cancel asks for invoice_now.",
+        "The auth user is gone afterwards.",
+      ],
+      details: {
+        status: result.status,
+        meterEvents: meter.map((m) => ({
+          id: m.params?.identifier,
+          value: m.params?.["payload[value]"],
+        })),
+        cancel: calls[cancelIndex],
+      },
+    });
+  } finally {
+    if (!deleted) {
+      await admin.from("remote_instances").delete().eq("owner_user_id", id);
+      await deleteTestUser(admin, id).catch(() => {});
+    }
+    await clearBilling(admin, [id]);
+  }
+}, 90000);
+
+it("gives no second trial to an email whose account was deleted", async () => {
+  const tag = randomUUID().slice(0, 8);
+  // Unique local part per run; +tag, dots and googlemail must all fold away.
+  const first = await createTestUser({
+    email: `sqa.trial.${tag}+first@gmail.com`,
+  });
+  let second: Awaited<ReturnType<typeof createTestUser>> | null = null;
+  try {
+    const grant = await grantPro(admin, first.user.id);
+    await admin
+      .from("billing_customers")
+      .update({ trial_used_at: new Date().toISOString() })
+      .eq("stripe_customer_id", grant.customerId);
+    await deleteTestUser(admin, first.user.id);
+    second = await createTestUser({
+      email: `sqatrial${tag}+again@googlemail.com`,
+    });
+    const { billingStoreFor } =
+      await import("../../../supabase/functions/_shared/billing/store");
+    const claimed = await billingStoreFor(
+      admin as never,
+      second.user.id,
+    ).trialClaimed();
+    const other = await createTestUser();
+    const otherClaimed = await billingStoreFor(
+      admin as never,
+      other.user.id,
+    ).trialClaimed();
+    await deleteTestUser(admin, other.user.id);
+
+    expect(claimed).toBe(true);
+    expect(otherClaimed).toBe(false);
+
+    await recordOutcome("billing-abuse-08-trial-reuse", {
+      expectations: [
+        "After an account that used its trial is deleted, a new account with the same Gmail address (other +tag, googlemail, no dots) has no trial.",
+        "An unrelated email still has its trial.",
+      ],
+      details: { claimed, otherClaimed },
+    });
+  } finally {
+    await clearBilling(admin, [first.user.id]);
+    await deleteTestUser(admin, first.user.id).catch(() => {});
+    if (second) await deleteTestUser(admin, second.user.id).catch(() => {});
+  }
+}, 90000);
