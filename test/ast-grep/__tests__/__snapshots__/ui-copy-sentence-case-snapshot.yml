@@ -1,6 +1,90 @@
 id: ui-copy-sentence-case
 snapshots:
   ? |
+    fn acronym_label() -> Div {
+      div().child(label("UI Zoom"))
+    }
+  : labels:
+    - source: '"UI Zoom"'
+      style: primary
+      start: 48
+      end: 57
+    - source: label
+      style: secondary
+      start: 42
+      end: 47
+    - source: label("UI Zoom")
+      style: secondary
+      start: 42
+      end: 58
+    - source: ("UI Zoom")
+      style: secondary
+      start: 47
+      end: 58
+  ? |
+    fn acronym_then_title() -> Div {
+      div().child(setting_row("API Key", "description", button, p))
+    }
+  : labels:
+    - source: '"API Key"'
+      style: primary
+      start: 59
+      end: 68
+    - source: setting_row
+      style: secondary
+      start: 47
+      end: 58
+    - source: setting_row("API Key", "description", button, p)
+      style: secondary
+      start: 47
+      end: 95
+    - source: ("API Key", "description", button, p)
+      style: secondary
+      start: 58
+      end: 95
+  ? |
+    fn product_then_title() -> Div {
+      div().child(field_block("Claude Code Model", control, None, p))
+    }
+  : labels:
+    - source: '"Claude Code Model"'
+      style: primary
+      start: 59
+      end: 78
+    - source: field_block
+      style: secondary
+      start: 47
+      end: 58
+    - source: field_block("Claude Code Model", control, None, p)
+      style: secondary
+      start: 47
+      end: 97
+    - source: ("Claude Code Model", control, None, p)
+      style: secondary
+      start: 58
+      end: 97
+  ? |
+    fn slashed_label() -> Div {
+      div().child(saved_field_block("Included Files/Directories", control, None, mark, p))
+    }
+  : labels:
+    - source: '"Included Files/Directories"'
+      style: primary
+      start: 60
+      end: 88
+    - source: saved_field_block
+      style: secondary
+      start: 42
+      end: 59
+    - source: saved_field_block("Included Files/Directories", control, None, mark, p)
+      style: secondary
+      start: 42
+      end: 113
+    - source: ("Included Files/Directories", control, None, mark, p)
+      style: secondary
+      start: 59
+      end: 113
+  ? |
     fn small_word() -> &'static str {
       "Open in Logs"
     }

@@ -53,7 +53,7 @@ function propose(line: number, comment: string, suggestion: string): void {
 
 async function codeReviewSettings(page: Page): Promise<void> {
   await ready(page);
-  const close = page.getByRole("button", { name: "Close", exact: true });
+  const close = page.getByRole("button", { name: "Back", exact: true });
   if ((await close.count()) === 0) {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(close).toBeVisible();

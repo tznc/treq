@@ -236,7 +236,7 @@ test("ssh remote: shell, Changes, Commits and agent", async () => {
   ]);
   // Away to Settings and back: the same remote shell, still attached.
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Close", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back", exact: true })).toBeVisible();
   await page.waitForTimeout(1500);
   await row.click();
   await page.waitForTimeout(3000);
@@ -277,9 +277,8 @@ async function setDefaultAgent(row: number): Promise<void> {
   // Options: Default, Claude, Codex, Cursor, Copilot.
   await page.mouse.click(box.x + 40, box.y + box.height + 26 + row * 30);
   await page.waitForTimeout(500);
-  await page.getByRole("button", { name: "Save settings" }).click();
   await page.waitForTimeout(1000);
-  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
 }
 
 // The four agent CLIs Treq starts, each with its provider's installer.

@@ -24,6 +24,8 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
+  /// Saving repository settings fails, as a full disk would.
+  fail_repo_settings: bool,
   /// The tuning agent's proposed review prompt edits.
   prompt_edits: std::sync::Mutex<Vec<crate::local_db::AgentReviewComment>>,
   /// What the folder picker returns, and why starting a dev container fails.
@@ -428,6 +430,9 @@ impl settings_data::SettingsHost for FakeHost {
   fn set_repo_settings(&self, repo_path: &str, values: &[(String, String)]) -> Result<(), String> {
     let pairs: Vec<_> = values.iter().map(|(k, v)| format!("{k}={v}")).collect();
     self.record(format!("set repo {repo_path} {}", pairs.join(" ")));
+    if self.fail_repo_settings {
+      return Err("disk full".into());
+    }
     let mut settings = self.settings.lock().unwrap();
     for (k, v) in values {
       settings.insert(format!("{repo_path}:{k}"), Some(v.clone()));
