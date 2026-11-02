@@ -1288,6 +1288,27 @@ pub(crate) mod tests {
   }
 
   #[test]
+  fn branch_deleted_asks_cloud_and_byos_hosts_too() {
+    let providers = crate::core::cloud_catalog::BYOS_PROVIDERS
+      .iter()
+      .map(|(kind, _)| *kind)
+      .chain(["treq"]);
+    for provider in providers {
+      let mut repo = repository();
+      repo.endpoint.as_mut().expect("endpoint").source =
+        crate::core::remote_control_plane::SshEndpointSource::Managed {
+          provider: provider.into(),
+          generation: 1,
+        };
+      let transport = Arc::new(FakeTransport::default());
+      transport.answer("WorkspaceBranchDeleted", serde_json::json!(true));
+      let remote = Remote::new(repo, transport.clone());
+      assert!(remote.branch_deleted(3), "{provider}");
+      assert_eq!(transport.sent().len(), 1, "{provider}");
+    }
+  }
+
+  #[test]
   fn reads_send_typed_commands_for_the_repository() {
     let (remote, transport) = remote();
     transport.answer(
