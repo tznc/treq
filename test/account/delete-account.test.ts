@@ -422,6 +422,27 @@ describe("deleteAccount cleanup", () => {
   });
 });
 
+describe("deleteAccount final invoice", () => {
+  // Cloud usage is metered on the Pro subscription. Without invoice_now,
+  // Stripe drops the period's un-invoiced usage when it cancels.
+  it("cancels with invoice_now so metered usage is billed", async () => {
+    const { store } = fakeStore({ subscriptions: ["sub_a"] });
+    const params: Array<[string, unknown]> = [];
+    const stripe: StripeClient = {
+      async request<T>(method: string, path: string, p?: unknown): Promise<T> {
+        params.push([`${method} ${path}`, p]);
+        return { id: "sub_a", status: method === "GET" ? "active" : "canceled" } as T;
+      },
+    };
+    const result = await deleteAccount(deps({ store, stripe }));
+    expect(result.status).toBe(200);
+    expect(params.find(([c]) => c.startsWith("DELETE"))).toEqual([
+      "DELETE /v1/subscriptions/sub_a",
+      { invoice_now: true },
+    ]);
+  });
+});
+
 describe("createStripeClient DELETE", () => {
   it("sends DELETE without a body", async () => {
     const seen: { url: string; init: RequestInit }[] = [];
