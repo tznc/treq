@@ -54,7 +54,8 @@ export interface CredentialMeta {
 
 export interface ByosCredentialStore {
   loadForPlacement(placementId: string): Promise<PlacementCredential | null>;
-  markInvalid(credentialId: string): Promise<void>;
+  /** Marks the key invalid only if `key` (the one that failed) is still stored. */
+  markInvalid(credentialId: string, key: string): Promise<void>;
   save(kind: ProviderKind, key: string, label: string | null): Promise<CredentialMeta>;
   list(): Promise<CredentialMeta[]>;
   /** Throws ByosError("credential_in_use") while a live workspace uses it. */
@@ -77,7 +78,7 @@ export function isOperatorMovable(p: { credential_source?: string | null }): boo
 // ── Reaching a placement's provider ───────────────────────────────────
 
 class PlacementProvider implements SandboxProvider {
-  private resolved: Promise<{ provider: SandboxProvider; credentialId: string | null }> | null = null;
+  private resolved: Promise<{ provider: SandboxProvider; credentialId: string | null; key: string | null }> | null = null;
 
   constructor(
     private readonly store: Pick<ByosCredentialStore, "loadForPlacement" | "markInvalid">,
@@ -92,12 +93,12 @@ class PlacementProvider implements SandboxProvider {
     return this.build(this.kind, { apiKey: "-" }).capabilities();
   }
 
-  private async load(): Promise<{ provider: SandboxProvider; credentialId: string | null }> {
-    if (!this.placementId) return { provider: this.build(this.kind), credentialId: null };
+  private async load(): Promise<{ provider: SandboxProvider; credentialId: string | null; key: string | null }> {
+    if (!this.placementId) return { provider: this.build(this.kind), credentialId: null, key: null };
     const row = await this.store.loadForPlacement(this.placementId);
-    if (!row || row.credential_source !== "byos") return { provider: this.build(this.kind), credentialId: null };
+    if (!row || row.credential_source !== "byos") return { provider: this.build(this.kind), credentialId: null, key: null };
     if (!row.key) throw new ProviderError("unauthorized", "the placement's BYOS credential is gone");
-    return { provider: this.build(this.kind, { apiKey: row.key }), credentialId: row.credential_id };
+    return { provider: this.build(this.kind, { apiKey: row.key }), credentialId: row.credential_id, key: row.key };
   }
 
   private async call<T>(fn: (p: SandboxProvider) => Promise<T>): Promise<T> {
@@ -105,12 +106,12 @@ class PlacementProvider implements SandboxProvider {
       this.resolved = this.load();
       this.resolved.catch(() => (this.resolved = null));
     }
-    const { provider, credentialId } = await this.resolved;
+    const { provider, credentialId, key } = await this.resolved;
     try {
       return await fn(provider);
     } catch (err) {
-      if (err instanceof ProviderError && err.kind === "unauthorized" && credentialId) {
-        await this.store.markInvalid(credentialId).catch(() => {});
+      if (err instanceof ProviderError && err.kind === "unauthorized" && credentialId && key) {
+        await this.store.markInvalid(credentialId, key).catch(() => {});
       }
       throw err;
     }
@@ -180,8 +181,11 @@ export function supabaseCredentialLoader(
       }), "load placement credential");
       return (data as PlacementCredential | null) ?? null;
     },
-    async markInvalid(credentialId) {
-      must(await supabase.rpc("provider_credential_mark_invalid", { p_credential_id: credentialId }), "mark credential invalid");
+    async markInvalid(credentialId, key) {
+      must(await supabase.rpc("provider_credential_mark_invalid", {
+        p_credential_id: credentialId,
+        p_key: key,
+      }), "mark credential invalid");
     },
   };
 }
