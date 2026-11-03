@@ -21,13 +21,17 @@ fn view(h: &mut Harness) -> gpui_testing_library::Screen {
 }
 
 fn provisions(host: &FakeHost) -> usize {
-  host.writes().iter().filter(|w| *w == "cloud Provision").count()
+  host
+    .writes()
+    .iter()
+    .filter(|w| *w == "cloud Provision")
+    .count()
 }
 
 /// Whether the create button reads as running (the spinner has no selector).
 fn creating(h: &mut Harness) -> bool {
   view(h)
-    .query_by_role(by::role(Role::Button).name("Creating..."))
+    .query_by_role(by::role(Role::Button).name("Creating…"))
     .is_some()
 }
 
@@ -36,11 +40,14 @@ fn cloud(cloud: serde_json::Value) -> serde_json::Value {
 }
 
 fn managed(cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
-  remote_harness(cx, FakeHost::default(), setup_route(false, serde_json::json!({})))
+  remote_harness(
+    cx,
+    FakeHost::default(),
+    setup_route(false, serde_json::json!({})),
+  )
 }
 
 #[gpui::test]
-#[ignore = "chaos: double click provisions twice"]
 fn a_double_click_on_create_provisions_once(cx: &mut TestAppContext) {
   let (mut h, host) = managed(cx);
   // Two clicks before the backend's first state update reaches the window,
@@ -55,7 +62,9 @@ fn a_double_click_on_create_provisions_once(cx: &mut TestAppContext) {
 #[gpui::test]
 fn create_is_inert_while_provisioning_never_resolves(cx: &mut TestAppContext) {
   let (mut h, host) = managed(cx);
-  h.set_account(cloud(serde_json::json!({ "provisioningStage": "Requesting provisioning..." })));
+  h.set_account(cloud(
+    serde_json::json!({ "provisioningStage": "Requesting provisioning..." }),
+  ));
   for _ in 0..5 {
     h.click("cloud-create");
   }
@@ -67,7 +76,9 @@ fn create_is_inert_while_provisioning_never_resolves(cx: &mut TestAppContext) {
 #[gpui::test]
 fn no_spinner_is_left_after_a_failure(cx: &mut TestAppContext) {
   let (mut h, host) = managed(cx);
-  h.set_account(cloud(serde_json::json!({ "provisioningStage": "Waiting for the cloud workspace (provisioning)..." })));
+  h.set_account(cloud(
+    serde_json::json!({ "provisioningStage": "Waiting for the cloud workspace (provisioning)..." }),
+  ));
   assert!(creating(&mut h));
   h.set_account(cloud(serde_json::json!({
     "provisioningError": "Timed out waiting for the cloud workspace.",
@@ -75,7 +86,8 @@ fn no_spinner_is_left_after_a_failure(cx: &mut TestAppContext) {
   })));
   assert!(!creating(&mut h));
   let s = view(&mut h);
-  expect(s.get_by_role(by::role(Role::Button).name("Retry cloud workspace creation"))).to_be_visible();
+  expect(s.get_by_role(by::role(Role::Button).name("Retry cloud workspace creation")))
+    .to_be_visible();
   h.click("cloud-create");
   assert_eq!(provisions(&host), 1);
 }
@@ -106,7 +118,9 @@ fn host_errors_read_as_sentences_not_codes(cx: &mut TestAppContext) {
     // What the card draws: `cloud_card`'s error line, verbatim.
     let route: settings::CloudRoute =
       serde_json::from_value(serde_json::json!({ "provisioningError": error })).unwrap();
-    let drawn = settings::account::cloud_card(&route, false).error.unwrap_or_default();
+    let drawn = settings::account::cloud_card(&route, false)
+      .error
+      .unwrap_or_default();
     if drawn == shown && shown.starts_with('[') {
       raw.push(format!("{case}: {shown:?}"));
     }
@@ -115,7 +129,11 @@ fn host_errors_read_as_sentences_not_codes(cx: &mut TestAppContext) {
       raw.push(format!("{case}: not an alert"));
     }
   }
-  assert!(raw.is_empty(), "raw / unannounced errors:\n{}", raw.join("\n"));
+  assert!(
+    raw.is_empty(),
+    "raw / unannounced errors:\n{}",
+    raw.join("\n")
+  );
 }
 
 #[gpui::test]
@@ -133,7 +151,8 @@ fn extreme_error_text_stays_inside_the_dialog(cx: &mut TestAppContext) {
     let dialog = h.cx.debug_bounds("remote-setup-dialog").expect("dialog");
     let card = h.cx.debug_bounds("cloud-workspace-card").expect("card");
     assert!(
-      card.right() <= dialog.right() + gpui::px(1.) && card.bottom() <= dialog.bottom() + gpui::px(1.),
+      card.right() <= dialog.right() + gpui::px(1.)
+        && card.bottom() <= dialog.bottom() + gpui::px(1.),
       "card {card:?} outside dialog {dialog:?} for {:?}",
       error.chars().take(30).collect::<String>()
     );
@@ -156,8 +175,15 @@ fn escape_closes_the_delete_confirmation_before_the_dialog(cx: &mut TestAppConte
   assert!(h.drawn("cloud-delete-dialog"));
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
-  assert!(!h.drawn("cloud-delete-dialog"), "Escape left the confirmation open");
-  assert!(h.sent().is_empty(), "Escape closed the setup dialog under the confirmation: {:?}", h.sent());
+  assert!(
+    !h.drawn("cloud-delete-dialog"),
+    "Escape left the confirmation open"
+  );
+  assert!(
+    h.sent().is_empty(),
+    "Escape closed the setup dialog under the confirmation: {:?}",
+    h.sent()
+  );
   assert!(!host.writes().contains(&"cloud Delete".to_string()));
 }
 
@@ -172,8 +198,12 @@ fn escape_closes_the_setup_dialog(cx: &mut TestAppContext) {
 fn reopening_mid_provision_still_shows_it_running(cx: &mut TestAppContext) {
   let (mut h, host) = managed(cx);
   h.click("cloud-create");
-  h.set_account(cloud(serde_json::json!({ "provisioningStage": "Requesting provisioning..." })));
-  let setup = h.screen.read_with(&h.cx, |s, _| s.snapshot().remote.setup.clone());
+  h.set_account(cloud(
+    serde_json::json!({ "provisioningStage": "Requesting provisioning..." }),
+  ));
+  let setup = h
+    .screen
+    .read_with(&h.cx, |s, _| s.snapshot().remote.setup.clone());
   h.update(|s| s.remote.setup = None);
   assert!(!h.drawn("remote-setup-dialog"));
   h.update(|s| s.remote.setup = setup);
@@ -191,7 +221,10 @@ fn create_is_reachable_in_tiny_and_huge_windows(cx: &mut TestAppContext) {
     h.cx.run_until_parked();
     let b = h.cx.debug_bounds("cloud-create").expect("create drawn");
     assert!(
-      b.left() >= gpui::px(0.) && b.top() >= gpui::px(0.) && b.right() <= gpui::px(w) && b.bottom() <= gpui::px(hh),
+      b.left() >= gpui::px(0.)
+        && b.top() >= gpui::px(0.)
+        && b.right() <= gpui::px(w)
+        && b.bottom() <= gpui::px(hh),
       "create {b:?} off a {w}x{hh} window"
     );
   }
@@ -219,15 +252,27 @@ fn states() -> Vec<(serde_json::Value, bool)> {
   // (account, provisioning in flight)
   vec![
     (cloud(serde_json::json!({})), false),
-    (cloud(serde_json::json!({ "provisioningStage": "Requesting provisioning..." })), true),
+    (
+      cloud(serde_json::json!({ "provisioningStage": "Requesting provisioning..." })),
+      true,
+    ),
     (cloud(serde_json::json!({ "submitting": true })), true),
-    (cloud(serde_json::json!({ "provisioningError": "[network_error] boom\nHTTP 0" })), false),
+    (
+      cloud(serde_json::json!({ "provisioningError": "[network_error] boom\nHTTP 0" })),
+      false,
+    ),
     (failed(), false),
-    (cloud(serde_json::json!({ "provisioningError": "[pro_required] Upgrade to create one." })), false),
-    (cloud(serde_json::json!({
-      "instance": { "status": "ready", "providerResourceId": "sprite-1", "diskQuotaGb": 10 },
-      "endpoint": { "username": "treq", "hostname": "vm.example", "port": 22 },
-    })), false),
+    (
+      cloud(serde_json::json!({ "provisioningError": "[pro_required] Upgrade to create one." })),
+      false,
+    ),
+    (
+      cloud(serde_json::json!({
+        "instance": { "status": "ready", "providerResourceId": "sprite-1", "diskQuotaGb": 10 },
+        "endpoint": { "username": "treq", "hostname": "vm.example", "port": 22 },
+      })),
+      false,
+    ),
     (account_state(serde_json::json!({})), false),
   ]
 }
@@ -244,44 +289,57 @@ fn step() -> impl Strategy<Value = Step> {
 
 #[test]
 fn provisioning_survives_chaos() {
-  fuzz::check("provisioning_survives_chaos", 8, vec(step(), 1..30), |cx, steps| {
-    let (mut h, host) = managed(cx);
-    let states = states();
-    let setup = h.screen.read_with(&h.cx, |s, _| s.snapshot().remote.setup.clone());
-    let mut in_flight = false;
-    let mut log = Vec::new();
-    for step in &steps {
-      log.push(format!("{step:?}"));
-      let before = provisions(&host);
-      match step {
-        Step::Click(n) => {
-          let s = view(&mut h);
-          let buttons = s.query_all_by_role(by::role(Role::Button));
-          if !buttons.is_empty() {
-            s.user().click(&buttons[n % buttons.len()]);
+  fuzz::check(
+    "provisioning_survives_chaos",
+    8,
+    vec(step(), 1..30),
+    |cx, steps| {
+      let (mut h, host) = managed(cx);
+      let states = states();
+      let setup = h
+        .screen
+        .read_with(&h.cx, |s, _| s.snapshot().remote.setup.clone());
+      let mut in_flight = false;
+      let mut log = Vec::new();
+      for step in &steps {
+        log.push(format!("{step:?}"));
+        let before = provisions(&host);
+        match step {
+          Step::Click(n) => {
+            let s = view(&mut h);
+            let buttons = s.query_all_by_role(by::role(Role::Button));
+            if !buttons.is_empty() {
+              s.user().click(&buttons[n % buttons.len()]);
+            }
+          }
+          Step::Key(k) => h.cx.simulate_keystrokes(k),
+          Step::State(n) => {
+            in_flight = states[*n].1;
+            h.set_account(states[*n].0.clone());
+          }
+          Step::Resize(w, hh) => h
+            .cx
+            .simulate_resize(gpui::size(gpui::px(*w as f32), gpui::px(*hh as f32))),
+          Step::Reopen => {
+            h.update(|s| s.remote.setup = None);
+            h.update(|s| s.remote.setup = setup.clone());
           }
         }
-        Step::Key(k) => h.cx.simulate_keystrokes(k),
-        Step::State(n) => {
-          in_flight = states[*n].1;
-          h.set_account(states[*n].0.clone());
-        }
-        Step::Resize(w, hh) => h
-          .cx
-          .simulate_resize(gpui::size(gpui::px(*w as f32), gpui::px(*hh as f32))),
-        Step::Reopen => {
-          h.update(|s| s.remote.setup = None);
-          h.update(|s| s.remote.setup = setup.clone());
-        }
+        h.cx.run_until_parked();
+        let added = provisions(&host) - before;
+        assert!(
+          added <= 1,
+          "one step provisioned {added} times after {log:#?}"
+        );
+        assert!(
+          !(in_flight && added > 0),
+          "provisioned while in flight after {log:#?}"
+        );
+        let s = view(&mut h);
+        let dialogs = s.query_all_by_role(by::role(Role::Dialog)).len();
+        // The setup dialog, and at most its delete confirmation.
+        assert!(dialogs <= 2, "{dialogs} dialogs after {log:#?}");
       }
-      h.cx.run_until_parked();
-      let added = provisions(&host) - before;
-      assert!(added <= 1, "one step provisioned {added} times after {log:#?}");
-      assert!(!(in_flight && added > 0), "provisioned while in flight after {log:#?}");
-      let s = view(&mut h);
-      let dialogs = s.query_all_by_role(by::role(Role::Dialog)).len();
-      // The setup dialog, and at most its delete confirmation.
-      assert!(dialogs <= 2, "{dialogs} dialogs after {log:#?}");
-    }
-  });
+    },
+  );
 }

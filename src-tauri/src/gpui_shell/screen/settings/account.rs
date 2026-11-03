@@ -1420,7 +1420,11 @@ impl SettingsView {
       "account.delete.confirm" => self.delete_account(cx),
       "account.farewell.dismiss" => self.account.farewell = false,
       "linear.oauth" => self.start_linear_oauth(cx),
-      "cloud.provision" => self.host.cloud_action(CloudAction::Provision),
+      "cloud.provision" => {
+        let host = self.host.clone();
+        account_data::provision_once(cx, || host.cloud_action(CloudAction::Provision));
+        self.account.rust = account_data::account(cx);
+      }
       "cloud.wake" => self.host.cloud_action(CloudAction::Wake),
       "cloud.repair" => self.host.cloud_action(CloudAction::Repair),
       "cloud.openRepositories" => {
