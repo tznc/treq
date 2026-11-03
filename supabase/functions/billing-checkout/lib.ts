@@ -155,11 +155,9 @@ async function openSession(
     }
     await expireOpenSessions(customer.stripe_customer_id, deps.stripe);
 
-    // Pro also carries the metered usage price for cloud workspaces.
-    const usageKey =
-      plan === "pro"
-        ? (deps.usagePriceLookupKey ?? DEFAULT_USAGE_PRICE_LOOKUP_KEY)
-        : null;
+    // Pro and Team both carry the metered usage price for cloud workspaces:
+    // Team members' usage on the organization profile bills the organization.
+    const usageKey = deps.usagePriceLookupKey ?? DEFAULT_USAGE_PRICE_LOOKUP_KEY;
     const query: StripeParams = { "lookup_keys[0]": LOOKUP_KEY_BY_PLAN[plan] };
     if (usageKey) query["lookup_keys[1]"] = usageKey;
     query.active = true;
