@@ -177,7 +177,7 @@ export function supabaseUsageReportStore(supabase: SupabaseClient): UsageReportS
     async pendingReports() {
       const rows = must(await supabase
         .from("usage_reports")
-        .select("identifier, owner_user_id, hour, billed_nanousd, attempts")
+        .select("identifier, owner_user_id, billing_org_id, hour, billed_nanousd, attempts")
         .is("sent_at", null)
         .or("stripe_status.is.null,stripe_status.eq.error")
         .order("created_at")
@@ -192,12 +192,26 @@ export function supabaseUsageReportStore(supabase: SupabaseClient): UsageReportS
       const byOwner = new Map(
         (customers ?? []).map((c) => [c.owner_id as string, c.stripe_customer_id as string]),
       );
+      // Usage on a Team profile bills the organization's customer.
+      const orgs = [...new Set(rows.map((r) => r.billing_org_id as string | null).filter((o): o is string => !!o))];
+      const orgCustomers = orgs.length
+        ? must(await supabase
+          .from("billing_customers")
+          .select("owner_id, stripe_customer_id")
+          .eq("owner_type", "organization")
+          .in("owner_id", orgs), "read organization billing customers")
+        : [];
+      const byOrg = new Map(
+        (orgCustomers ?? []).map((c) => [c.owner_id as string, c.stripe_customer_id as string]),
+      );
       return rows.map((r) => ({
         identifier: r.identifier as string,
         owner_user_id: r.owner_user_id as string,
         hour: r.hour as string,
         billed_nanousd: Number(r.billed_nanousd),
-        stripe_customer_id: byOwner.get(r.owner_user_id as string) ?? null,
+        stripe_customer_id: r.billing_org_id
+          ? byOrg.get(r.billing_org_id as string) ?? null
+          : byOwner.get(r.owner_user_id as string) ?? null,
         attempts: Number(r.attempts ?? 0),
       }));
     },

@@ -61,6 +61,20 @@ export async function userHasPro(
   return data === true;
 }
 
+/**
+ * has_cloud for a user: entitled to cloud where their workspace bills, i.e.
+ * personal Pro, or a Team organization whose owner allows cloud
+ * (058_team_cloud.sql). The client must use the service role.
+ */
+export async function userHasCloud(
+  client: RpcClient,
+  userId: string,
+): Promise<boolean> {
+  const { data, error } = await client.rpc("has_cloud", { p_user_id: userId });
+  if (error) throw new Error(`has_cloud failed: ${error.message}`);
+  return data === true;
+}
+
 /** installation_has_pro for a GitHub App installation (service role only). */
 export async function installationHasPro(
   client: RpcClient,

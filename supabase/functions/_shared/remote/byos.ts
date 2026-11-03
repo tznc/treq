@@ -61,6 +61,16 @@ export interface ByosCredentialStore {
   /** Throws ByosError("credential_in_use") while a live workspace uses it. */
   remove(kind: string): Promise<void>;
   byosCatalog(): Promise<unknown[]>;
+  /**
+   * An organization's key (Team). Throws ByosError("not_organization_owner")
+   * unless the caller owns the organization, ByosError("byos_not_allowed")
+   * without Team.
+   */
+  saveOrg(orgId: string, kind: ProviderKind, key: string, label: string | null): Promise<CredentialMeta>;
+  /** Metadata of an organization's keys, for its members. */
+  listOrg(orgId: string): Promise<CredentialMeta[]>;
+  /** Throws ByosError("credential_in_use") or ByosError("not_organization_owner"). */
+  removeOrg(orgId: string, kind: string): Promise<void>;
 }
 
 export class ByosError extends Error {}
@@ -203,6 +213,9 @@ export const BYOS_ACTIONS: ReadonlySet<string> = new Set([
   "list_provider_credentials",
   "delete_provider_credential",
   "byos_catalog",
+  "save_org_provider_credential",
+  "list_org_provider_credentials",
+  "delete_org_provider_credential",
 ]);
 
 export interface ByosActionDeps {
@@ -242,14 +255,46 @@ export async function handleByosAction(
     }
     case "save_provider_credential":
       return await saveCredential(body, deps);
+    case "list_org_provider_credentials": {
+      if (typeof body.org_id !== "string") return refuse(400, "validation_error", "org_id is required");
+      return { status: 200, body: { credentials: await deps.store.listOrg(body.org_id) } };
+    }
+    case "delete_org_provider_credential": {
+      if (typeof body.org_id !== "string" || typeof body.provider_kind !== "string") {
+        return refuse(400, "validation_error", "org_id and provider_kind are required");
+      }
+      try {
+        await deps.store.removeOrg(body.org_id, body.provider_kind);
+      } catch (err) {
+        const refused = orgRefusal(err);
+        if (refused) return refused;
+        throw err;
+      }
+      return { status: 200, body: { deleted: body.provider_kind } };
+    }
+    case "save_org_provider_credential":
+      return await saveOrgCredential(body, deps);
   }
   return null;
 }
 
-async function saveCredential(body: Record<string, unknown>, deps: ByosActionDeps): Promise<ActionResult> {
-  if (!(await deps.canByos())) {
-    return refuse(403, "byos_not_allowed", "Bring your own sandbox needs Pro");
+function orgRefusal(err: unknown): ActionResult | null {
+  if (!(err instanceof ByosError)) return null;
+  switch (err.message) {
+    case "credential_in_use":
+      return refuse(409, err.message, "A cloud workspace still runs on this key. Delete it first.");
+    case "not_organization_owner":
+      return refuse(403, err.message, "Only an owner of the organization can change its keys");
+    case "byos_not_allowed":
+      return refuse(403, err.message, "Organization keys need the Team plan");
   }
+  return null;
+}
+
+type ValidatedKey = { ok: true; kind: ProviderKind; key: string; label: string | null };
+
+/** The checks every saved key passes: shape, then one read-only provider call. */
+async function validateKey(body: Record<string, unknown>, deps: ByosActionDeps): Promise<ValidatedKey | ActionResult> {
   const kind = body.provider_kind;
   // A pasted key often ends in a newline; headers trim it, so store it trimmed.
   const key = typeof body.api_key === "string" ? body.api_key.trim() : body.api_key;
@@ -286,7 +331,31 @@ async function saveCredential(body: Record<string, unknown>, deps: ByosActionDep
     }
     throw err;
   }
-  const credential = await deps.store.save(kind as ProviderKind, key, (label as string | undefined) ?? null);
+  return { ok: true, kind: kind as ProviderKind, key, label: (label as string | undefined) ?? null };
+}
+
+async function saveOrgCredential(body: Record<string, unknown>, deps: ByosActionDeps): Promise<ActionResult> {
+  if (typeof body.org_id !== "string" || body.org_id.length === 0) {
+    return refuse(400, "validation_error", "org_id is required");
+  }
+  const v = await validateKey(body, deps);
+  if (!("ok" in v)) return v;
+  try {
+    return { status: 200, body: { credential: await deps.store.saveOrg(body.org_id, v.kind, v.key, v.label) } };
+  } catch (err) {
+    const refused = orgRefusal(err);
+    if (refused) return refused;
+    throw err;
+  }
+}
+
+async function saveCredential(body: Record<string, unknown>, deps: ByosActionDeps): Promise<ActionResult> {
+  if (!(await deps.canByos())) {
+    return refuse(403, "byos_not_allowed", "Bring your own sandbox needs Pro");
+  }
+  const v = await validateKey(body, deps);
+  if (!("ok" in v)) return v;
+  const credential = await deps.store.save(v.kind, v.key, v.label);
   return { status: 200, body: { credential } };
 }
 
@@ -317,13 +386,39 @@ export function supabaseByosStore(
     async byosCatalog() {
       return (must(await user.rpc("get_byos_catalog"), "read BYOS catalog") ?? []) as unknown[];
     },
-    async credentialFor(kind) {
-      return must(await service
+    async saveOrg(orgId, kind, key, label) {
+      const res = await service.rpc("provider_credential_save_org", {
+        p_org_id: orgId,
+        p_user_id: ownerUserId,
+        p_kind: kind,
+        p_key: key,
+        p_label: label,
+      });
+      for (const code of ["not_organization_owner", "byos_not_allowed"]) {
+        if (res.error?.message.includes(code)) throw new ByosError(code);
+      }
+      return must(res, "save organization credential") as CredentialMeta;
+    },
+    async listOrg(orgId) {
+      return (must(await user.rpc("list_org_provider_credentials", { p_org_id: orgId }), "list organization credentials") ??
+        []) as CredentialMeta[];
+    },
+    async removeOrg(orgId, kind) {
+      const res = await user.rpc("delete_org_provider_credential", { p_org_id: orgId, p_kind: kind });
+      for (const code of ["credential_in_use", "not_organization_owner"]) {
+        if (res.error?.message.includes(code)) throw new ByosError(code);
+      }
+      must(res, "delete organization credential");
+    },
+    async credentialFor(kind, orgId = null) {
+      const query = service
         .from("remote_provider_credentials")
         .select("id, invalid_at")
-        .eq("owner_user_id", ownerUserId)
-        .eq("provider_kind", kind)
-        .maybeSingle(), "read credential") as { id: string; invalid_at: string | null } | null;
+        .eq("provider_kind", kind);
+      const scoped = orgId
+        ? query.eq("owner_org_id", orgId)
+        : query.eq("owner_user_id", ownerUserId).is("owner_org_id", null);
+      return must(await scoped.maybeSingle(), "read credential") as { id: string; invalid_at: string | null } | null;
     },
     async machineTypes(kind) {
       return (must(await service
@@ -356,7 +451,8 @@ export interface ByosMachineType extends MachineTypeRow {
 }
 
 export interface ByosPlanStore {
-  credentialFor(kind: ProviderKind): Promise<{ id: string; invalid_at: string | null } | null>;
+  /** The personal key for `kind`, or with `orgId` that organization's key. */
+  credentialFor(kind: ProviderKind, orgId?: string | null): Promise<{ id: string; invalid_at: string | null } | null>;
   machineTypes(kind: ProviderKind): Promise<ByosMachineType[]>;
 }
 
