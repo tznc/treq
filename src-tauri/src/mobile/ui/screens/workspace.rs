@@ -1002,7 +1002,7 @@ impl WorkspaceScreen {
       )
   }
 
-  fn tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  fn tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = treq_ui::theme::current(cx);
     let running = self.sessions.read(cx).running();
     let (files, conflicts) = self.diff.ready().map_or((0, false), |diff| {
@@ -1100,7 +1100,7 @@ impl WorkspaceScreen {
       ChangeItem::Conflict(i, slot) => {
         let t = self.target.clone();
         let row = widgets::row(
-          ("conflict", i),
+          format!("conflict-{i}"),
           diff.conflicted_files[i].clone(),
           Some("Conflicted".into()),
           cx,
@@ -1216,7 +1216,7 @@ impl Render for WorkspaceScreen {
         None => div().into_any_element(),
       },
     };
-    let tabs = self.tabs(cx);
+    let tabs = self.tab_bar(cx);
     let border = cx.theme().border;
     v_flex()
       .size_full()
@@ -1323,7 +1323,7 @@ impl Render for TargetSheet {
             let name = branch.name.clone();
             let current = name == self.current;
             let screen = self.screen.clone();
-            widgets::choice(("target", i), name.clone(), None, current, cx).on_click(
+            widgets::choice(format!("target-{i}"), name.clone(), None, current, cx).on_click(
               move |_, _, cx| {
                 sheet::close(cx);
                 if !current {
@@ -1394,7 +1394,7 @@ impl Render for Switcher {
         let current = id == self.current;
         let repo = repo.clone();
         widgets::row(
-          ("switch-workspace", entry.index),
+          format!("switch-workspace-{}", entry.index),
           title.clone(),
           Some(workspace.branch_name.clone().into()),
           cx,

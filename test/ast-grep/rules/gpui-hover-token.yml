@@ -9,6 +9,7 @@ message: >
   Not a raw color, an opacity tint, a local alias or a shadow.
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"
+  - "src-tauri/src/mobile/**/*.rs"
 ignores:
   - "src-tauri/src/gpui_shell/**/tests.rs"
   - "src-tauri/src/gpui_shell/**/tests/**"

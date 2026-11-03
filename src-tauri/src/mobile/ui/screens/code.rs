@@ -282,7 +282,7 @@ impl CodeView {
       let path = entry.path.clone();
       let is_directory = entry.is_directory;
       widgets::row_full(
-        ("entry", i),
+        format!("entry-{i}"),
         Some(leading),
         entry.name.clone(),
         detail,
@@ -332,7 +332,7 @@ impl CodeView {
             .into_any_element();
           let path = path.clone();
           widgets::row_full(
-            ("match", i),
+            format!("match-{i}"),
             Some(leading),
             name.to_string(),
             (!dir.is_empty()).then(|| SharedString::from(dir.to_string())),

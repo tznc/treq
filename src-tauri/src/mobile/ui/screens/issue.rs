@@ -16,7 +16,6 @@ use gpui_kit::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Textarea, TextareaState},
-    tag::Tag,
     v_flex, ActiveTheme, IconName, Sizable, StyledExt,
   },
   div, px, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
@@ -522,13 +521,15 @@ impl IssueScreen {
           .gap_2()
           .items_center()
           .child(
-            if open {
-              Tag::success()
+            treq_ui::Badge::new(
+              issues::state_label(&issue.state),
+              &treq_ui::theme::current(cx),
+            )
+            .tone(if open {
+              treq_ui::Tone::Success
             } else {
-              Tag::secondary()
-            }
-            .small()
-            .child(issues::state_label(&issue.state)),
+              treq_ui::Tone::Neutral
+            }),
           )
           .child(widgets::muted(
             format!(
@@ -546,7 +547,7 @@ impl IssueScreen {
             issue
               .labels
               .iter()
-              .map(|l| Tag::secondary().small().child(l.name.clone())),
+              .map(|l| treq_ui::Badge::new(l.name.clone(), &treq_ui::theme::current(cx))),
           ),
         )
       })

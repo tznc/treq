@@ -19,9 +19,9 @@ use gpui_kit::{
     v_flex, ActiveTheme, IconName, Sizable,
   },
   div, px, AnyElement, App, AppContext, Context, Entity, InteractiveElement, IntoElement,
-  ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
+  ParentElement, Render, StatefulInteractiveElement, Styled, Window,
 };
-use treq_ui::{Dot, Tone};
+use treq_ui::{Dot, Row, RowDensity, Tone};
 
 use super::{issue, mutation_message, on_epoch};
 use crate::mobile::{
@@ -404,17 +404,11 @@ impl IssuesScreen {
       let labels: Vec<&str> = issue.labels.iter().map(|l| l.name.as_str()).collect();
       detail = format!("{detail} · {}", labels.join(", "));
     }
-    h_flex()
-      .id(SharedString::from(format!("issue-{number}")))
-      .min_h(px(widgets::ROW_H))
-      .px_4()
-      .py_2()
-      .gap_3()
-      .items_center()
-      .border_b_1()
-      .border_color(theme.border)
-      .active(|s| s.bg(theme.accent))
-      .child(Dot::new(
+    Row::new(format!("issue-{number}"), &palette)
+      .density(RowDensity::Touch)
+      .divider(true)
+      .label(title.clone())
+      .leading(Dot::new(
         tone,
         if tone == Tone::Neutral {
           "Closed"
@@ -425,7 +419,6 @@ impl IssuesScreen {
       ))
       .child(
         v_flex()
-          .flex_1()
           .min_w_0()
           // Long titles wrap rather than cut off.
           .child(div().child(title.clone()))
@@ -437,7 +430,7 @@ impl IssuesScreen {
               .child(detail),
           ),
       )
-      .child(
+      .trailing(
         div()
           .text_color(theme.muted_foreground)
           .child(IconName::ChevronRight),

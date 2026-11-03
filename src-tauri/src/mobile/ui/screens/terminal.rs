@@ -27,9 +27,9 @@ use gpui_kit::{
     spinner::Spinner,
     v_flex, ActiveTheme, IconName, Sizable,
   },
-  div, px, AnyElement, App, AppContext, Context, Div, ElementId, Entity, InteractiveElement,
-  IntoElement, ParentElement, Render, Result, Stateful, StatefulInteractiveElement, Styled,
-  WeakEntity, Window,
+  div, px, AnyElement, App, AppContext, Context, Entity, InteractiveElement, IntoElement,
+  ParentElement, Render, Result, SharedString, StatefulInteractiveElement, Styled, WeakEntity,
+  Window,
 };
 
 use super::workspace::Target;
@@ -106,11 +106,11 @@ fn session_title(session: &PtySessionInfo) -> String {
 
 /// A session's row: its title, and what runs in it and what it is doing.
 fn session_row(
-  id: impl Into<ElementId>,
+  id: impl Into<SharedString>,
   session: &PtySessionInfo,
   current: bool,
   cx: &App,
-) -> Stateful<Div> {
+) -> treq_ui::Row {
   let theme = cx.theme();
   let program = Program::of_label(&session.label);
   let leading = div()
@@ -147,9 +147,7 @@ fn session_row(
     trailing,
     cx,
   )
-  .when(current, |row| {
-    row.bg(treq_ui::theme::current(cx).selected())
-  })
+  .selected(current)
   .when(!session.running, |row| row.opacity(0.6))
 }
 
@@ -570,7 +568,7 @@ impl Sessions {
       Load::Ready(list) => widgets::card(cx)
         .children(list.iter().enumerate().map(|(i, session)| {
           let label = session.label.clone();
-          session_row(("session", i), session, false, cx)
+          session_row(format!("session-{i}"), session, false, cx)
             .on_click(cx.listener(move |this, _, _, cx| this.open_listed(&label, false, cx)))
         }))
         .into_any_element(),
@@ -702,7 +700,7 @@ impl Render for AgentSheet {
       .child(
         v_flex().children(self.agents.iter().enumerate().map(|(i, agent)| {
           widgets::choice(
-            ("agent", i),
+            format!("agent-{i}"),
             agent_name(*agent),
             Some(agent.binary_name().into()),
             i == selected,
@@ -1324,14 +1322,16 @@ impl Render for Switcher {
         let current = session.label == self.current;
         let label = session.label.clone();
         let sessions = self.sessions.clone();
-        session_row(("switch-session", i), session, current, cx).on_click(move |_, _, cx| {
-          sheet::close(cx);
-          if !current {
-            sessions
-              .update(cx, |list, cx| list.open_listed(&label, true, cx))
-              .ok();
-          }
-        })
+        session_row(format!("switch-session-{i}"), session, current, cx).on_click(
+          move |_, _, cx| {
+            sheet::close(cx);
+            if !current {
+              sessions
+                .update(cx, |list, cx| list.open_listed(&label, true, cx))
+                .ok();
+            }
+          },
+        )
       }))
       .into_any_element()
   }

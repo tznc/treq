@@ -1,7 +1,7 @@
 //! Home: a landing page when signed out with no machines, otherwise the
 //! machine list (Treq Cloud and SSH hosts), each with its own connection.
 
-use crate::mobile::ui::widgets::{Caption as _, TouchButton as _};
+use crate::mobile::ui::widgets::TouchButton as _;
 use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -12,10 +12,10 @@ use gpui_kit::{
     spinner::Spinner,
     v_flex, ActiveTheme, IconName, Sizable,
   },
-  div, px, AnyElement, Context, Div, FontWeight, InteractiveElement, IntoElement, ParentElement,
-  Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window,
+  div, px, AnyElement, Context, Div, InteractiveElement, IntoElement, ParentElement, Render,
+  ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window,
 };
-use treq_ui::{Count, Dot, Tone};
+use treq_ui::{Dot, Tone};
 
 use super::{model, screens, widgets, Machine, MachineState, MachineStatus};
 use crate::core::pty_remote_supervisor::PtyBackend;
@@ -275,19 +275,9 @@ impl HomeScreen {
   fn hosts(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let hosts = store::user_managed_endpoints();
     let palette = treq_ui::theme::current(cx);
-    let title = h_flex()
-      .gap_2()
-      .items_center()
-      .child(
-        div()
-          .caption()
-          .font_weight(FontWeight::SEMIBOLD)
-          .text_color(cx.theme().muted_foreground)
-          .child("SSH HOSTS"),
-      )
-      .when(!hosts.is_empty(), |t| {
-        t.child(Count::new(hosts.len(), &palette))
-      });
+    let count = hosts.len();
+    let title = treq_ui::SectionHeader::new("section-ssh-hosts", "SSH hosts", &palette)
+      .when(count > 0, |header| header.count(count));
     let list = if hosts.is_empty() {
       widgets::card(cx).child(widgets::empty(
         "hosts-empty",

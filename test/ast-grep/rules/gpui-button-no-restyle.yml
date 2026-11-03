@@ -7,6 +7,7 @@ message: >
   so hover, disabled and focus states stay in step with the design system.
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"
+  - "src-tauri/src/mobile/**/*.rs"
 ignores:
   - "src-tauri/src/gpui_shell/**/tests.rs"
   - "src-tauri/src/gpui_shell/**/tests/**"

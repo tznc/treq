@@ -20,7 +20,6 @@ use gpui_kit::{
     h_flex,
     input::{Indent, InputEvent, Outdent, Textarea, TextareaState},
     popover::Popover,
-    tag::Tag,
     v_flex, ActiveTheme, Icon, IconName, Sizable,
   },
   div, px, Anchor, AnyElement, App, AppContext, Context, Div, Entity, InteractiveElement,
@@ -384,7 +383,12 @@ impl NewWorkspacesSheet {
           h_flex()
             .gap_1p5()
             .min_w_0()
-            .when(new, |line| line.child(Tag::info().xsmall().child("New")))
+            .when(new, |line| {
+              line.child(
+                treq_ui::Badge::new("New", &treq_ui::theme::current(cx))
+                  .tone(treq_ui::Tone::Primary),
+              )
+            })
             .child(if mono {
               widgets::mono(text, cx).caption().truncate()
             } else {

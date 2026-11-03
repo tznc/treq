@@ -13,12 +13,12 @@ use gpui_kit::{
   },
   div, img, px, relative, AnyElement, App, ClickEvent, Div, ElementId, FontWeight, Image,
   ImageFormat, Img, InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement,
-  SharedString, Stateful, StatefulInteractiveElement, Styled, Window,
+  SharedString, StatefulInteractiveElement, Styled, Window,
 };
 
 use gpui_kit::base::TestSupportExt as _;
-use treq_ui::press::{self, press_overlay, pressable, Press};
-use treq_ui::EmptyState;
+use treq_ui::press::{self, pressable, Press};
+use treq_ui::{EmptyState, Row, RowDensity, SectionHeader};
 
 // The blue "T" mark, shared with the website and desktop app.
 const LOGO_PNG: &[u8] = include_bytes!("../../../../assets/logo.imageset/logo@3x.png");
@@ -43,8 +43,8 @@ pub fn wordmark(size: f32, cx: &App) -> Div {
     .child("treq")
 }
 
-/// Minimum height of a tappable row.
-pub const ROW_H: f32 = 56.;
+/// Minimum height of a tappable row: treq-ui's touch row.
+pub const ROW_H: f32 = treq_ui::TOUCH_ROW_HEIGHT;
 
 /// Height of a full-width call-to-action button (gpui-kit's large is 32px).
 pub const CTA_H: f32 = 52.;
@@ -75,14 +75,34 @@ pub fn bottom_bar(cx: &App) -> Div {
     .bg(theme.background)
 }
 
-/// A titled group of content.
+/// A titled group of content, under a [`treq_ui::SectionHeader`].
 pub fn section(title: impl Into<SharedString>, cx: &App) -> Div {
-  v_flex().gap_2().child(
-    caption(div())
-      .font_weight(FontWeight::SEMIBOLD)
-      .text_color(cx.theme().muted_foreground)
-      .child(title.into().to_uppercase()),
-  )
+  section_with(title, |header| header, cx)
+}
+
+/// [`section`] with a header `build` adds a count or an action to.
+pub fn section_with(
+  title: impl Into<SharedString>,
+  build: impl FnOnce(SectionHeader) -> SectionHeader,
+  cx: &App,
+) -> Div {
+  let title: SharedString = title.into();
+  let id = SharedString::from(format!("section-{}", slug(&title)));
+  v_flex().gap_2().child(build(SectionHeader::new(
+    id,
+    title,
+    &treq_ui::theme::current(cx),
+  )))
+}
+
+/// `title` in lowercase words joined by dashes, for an element id.
+fn slug(title: &str) -> String {
+  title
+    .split(|c: char| !c.is_alphanumeric())
+    .filter(|w| !w.is_empty())
+    .map(str::to_lowercase)
+    .collect::<Vec<_>>()
+    .join("-")
 }
 
 /// A bordered surface.
@@ -97,111 +117,82 @@ pub fn card(cx: &App) -> Div {
     .flex_shrink_0()
 }
 
-/// A tappable list row with a title, optional detail line and a chevron.
+/// A tappable list row with a title, optional detail line and a chevron:
+/// a touch [`Row`] with a divider, as the rows of a [`card`] are.
 pub fn row(
-  id: impl Into<ElementId>,
+  id: impl Into<SharedString>,
   title: impl Into<SharedString>,
   detail: Option<SharedString>,
   cx: &App,
-) -> Stateful<Div> {
+) -> Row {
   row_with(id, title, detail, None, cx)
 }
 
 /// [`row`] with an extra control before the chevron.
 pub fn row_with(
-  id: impl Into<ElementId>,
+  id: impl Into<SharedString>,
   title: impl Into<SharedString>,
   detail: Option<SharedString>,
   trailing: Option<AnyElement>,
   cx: &App,
-) -> Stateful<Div> {
+) -> Row {
   row_full(id, None, title, detail, trailing, cx)
 }
 
 /// [`row_with`] with a status (a dot or spinner) before the title.
 pub fn row_full(
-  id: impl Into<ElementId>,
+  id: impl Into<SharedString>,
   leading: Option<AnyElement>,
   title: impl Into<SharedString>,
   detail: Option<SharedString>,
   trailing: Option<AnyElement>,
   cx: &App,
-) -> Stateful<Div> {
+) -> Row {
   let chevron = div()
     .text_color(cx.theme().muted_foreground)
-    .child(IconName::ChevronRight)
-    .into_any_element();
-  row_base(id, leading, title, detail, trailing, Some(chevron), cx)
+    .child(IconName::ChevronRight);
+  touch_row(id, leading, title, detail, trailing, cx).trailing(chevron)
 }
 
 /// One option of a single choice: no chevron (it goes nowhere), a check
-/// and the selected background on the chosen one.
+/// and the selected fill on the chosen one.
 pub fn choice(
-  id: impl Into<ElementId>,
+  id: impl Into<SharedString>,
   title: impl Into<SharedString>,
   detail: Option<SharedString>,
   selected: bool,
   cx: &App,
-) -> Stateful<Div> {
+) -> Row {
   let check = div()
     .w(px(16.))
-    .when(selected, |c| c.child(IconName::Check))
-    .into_any_element();
-  row_base(id, None, title, detail, None, Some(check), cx).when(selected, |row| {
-    row.bg(treq_ui::theme::current(cx).selected())
-  })
+    .when(selected, |c| c.child(IconName::Check));
+  touch_row(id, None, title, detail, None, cx)
+    .trailing(check)
+    .selected(selected)
 }
 
-fn row_base(
-  id: impl Into<ElementId>,
+fn touch_row(
+  id: impl Into<SharedString>,
   leading: Option<AnyElement>,
   title: impl Into<SharedString>,
   detail: Option<SharedString>,
   trailing: Option<AnyElement>,
-  end: Option<AnyElement>,
   cx: &App,
-) -> Stateful<Div> {
-  let theme = cx.theme();
-  h_flex()
-    .id(id)
-    .min_h(px(ROW_H))
-    .px_4()
-    .py_2()
-    .gap_3()
-    .items_center()
-    .relative()
-    .active(|s| s.bg(theme.accent))
-    .child(press_overlay())
-    // The divider sits just below the row: on the next row's top edge, or
-    // on the card's bottom border under the last row. It stops short of
-    // the card's rounded corners, which the card's mask doesn't clip to.
-    .child(
-      div()
-        .absolute()
-        .bottom(px(-1.))
-        .left(theme.radius_lg)
-        .right(theme.radius_lg)
-        .h(px(1.))
-        .bg(theme.border),
-    )
-    .children(leading)
-    // A block column: the title and detail stack without a nested flex
-    // container, which costs far less to lay out in a long list.
-    .child(
-      div()
-        .flex_1()
-        .min_w_0()
-        .child(div().truncate().child(title.into()))
-        .children(detail.map(|d| {
-          div()
-            .text_sm()
-            .truncate()
-            .text_color(theme.muted_foreground)
-            .child(d)
-        })),
-    )
-    .children(trailing)
-    .children(end)
+) -> Row {
+  let mut row = Row::new(id, &treq_ui::theme::current(cx))
+    .density(RowDensity::Touch)
+    .divider(true)
+    .title(title);
+  if let Some(detail) = detail {
+    row = row.meta(detail);
+  }
+  if let Some(leading) = leading {
+    row = row.leading(leading);
+  }
+  if let Some(trailing) = trailing {
+    row = row.trailing(trailing);
+  }
+  row
 }
 
 /// The state of a page-long virtualized list, which only builds and lays
