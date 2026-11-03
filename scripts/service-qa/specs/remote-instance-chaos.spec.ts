@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import * as lapseSweep from "../../../supabase/functions/_shared/remote/lapse-sweep";
 import { LocalProvider } from "../../../supabase/functions/_shared/remote/local-provider";
 import type { SandboxProvider } from "../../../supabase/functions/_shared/remote/provider";
 import { handleRemoteInstanceAction } from "../../../supabase/functions/remote-instance/lib";
@@ -135,5 +136,140 @@ it("a delete during bootstrapping stays deleted", async () => {
     });
   } finally {
     await deleteTestUser(admin, u.user.id);
+  }
+}, 30_000);
+
+async function setRow(userId: string, fields: Record<string, unknown>) {
+  const { error } = await admin.from("remote_instances").update(fields).eq("owner_user_id", userId).neq("status", "deleted");
+  if (error) throw new Error(error.message);
+}
+
+const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+
+it("ensure resumes a provisioning row older than the threshold, and a degraded one", async () => {
+  const u = await createTestUser();
+  try {
+    expect((await ensure(u.user.id)).status).toBe(200);
+    await setRow(u.user.id, { status: "provisioning", updated_at: minutesAgo(60) });
+    const stuck = await ensure(u.user.id);
+    expect(stuck.status).toBe(200);
+    expect((stuck.json.instance as { status: string }).status).toBe("ready");
+
+    await setRow(u.user.id, { status: "degraded" });
+    const degraded = await ensure(u.user.id);
+    expect(degraded.status).toBe(200);
+    expect((degraded.json.instance as { status: string }).status).toBe("ready");
+
+    await setRow(u.user.id, { status: "provisioning", updated_at: new Date().toISOString() });
+    const fresh = await ensure(u.user.id);
+    expect((fresh.json.instance as { status: string }).status).toBe("provisioning");
+
+    await recordOutcome("remote-instance-chaos-03-resume-stuck", {
+      expectations: [
+        "Ensure on a 'provisioning' row untouched for an hour runs provisioning again and ends 'ready'.",
+        "Ensure on a 'degraded' row ends 'ready'; a fresh 'provisioning' row is left to its own ensure.",
+      ],
+      details: { stuck: stuck.json.status, degraded: degraded.json.status },
+    });
+  } finally {
+    await deleteTestUser(admin, u.user.id);
+  }
+}, 30_000);
+
+it("ensure refuses an empty, overlong or control-character idempotency key with validation_error", async () => {
+  const u = await createTestUser();
+  try {
+    for (const key of ["", "k".repeat(257), "a\u0000b", "line\nbreak"]) {
+      const res = await ensure(u.user.id, undefined, { idempotency_key: key });
+      expect(res.status, JSON.stringify(key)).toBe(400);
+      expect(res.json.code).toBe("validation_error");
+    }
+    expect(await rows(admin, u.user.id)).toEqual([]);
+    expect((await ensure(u.user.id, undefined, { idempotency_key: "k".repeat(256) })).status).toBe(200);
+
+    await recordOutcome("remote-instance-chaos-04-idempotency-key", {
+      expectations: [
+        "Empty, 257-character and control-character keys answer 400 validation_error and create no row.",
+        "A 256-character key is accepted.",
+      ],
+      details: {},
+    });
+  } finally {
+    await deleteTestUser(admin, u.user.id);
+  }
+}, 30_000);
+
+/** The service client, with inserts into remote_instance_operations failing. */
+function failingOperationsInsert(): SupabaseClient {
+  return new Proxy(admin, {
+    get(target, prop, receiver) {
+      if (prop !== "from") return Reflect.get(target, prop, receiver);
+      return (table: string) => {
+        const builder = target.from(table);
+        if (table !== "remote_instance_operations") return builder;
+        return new Proxy(builder, {
+          get(b, p, r) {
+            if (p !== "insert") return Reflect.get(b, p, r);
+            return () => ({
+              select: () => ({ single: async () => ({ data: null, error: { message: "connection reset" } }) }),
+            });
+          },
+        });
+      };
+    },
+  });
+}
+
+it("a failed operation insert after the instance row was created leaves no stuck provisioning row", async () => {
+  const u = await createTestUser();
+  try {
+    const response = await handleRemoteInstanceAction(
+      { action: "ensure", idempotency_key: `ensure-${randomUUID()}` },
+      {
+        supabase: failingOperationsInsert(),
+        ownerUserId: u.user.id,
+        correlationId: `sqa-${randomUUID()}`,
+        hasPro: async () => true,
+        stub: true,
+        provider: (kind) => new LocalProvider(kind),
+      },
+    );
+    expect(response.status).toBe(500);
+    const after = await rows(admin, u.user.id);
+    expect(after.map((r) => r.status)).not.toContain("provisioning");
+
+    await recordOutcome("remote-instance-chaos-05-begin-operation-fails", {
+      expectations: ["When recording the operation fails after the row was made, the row is not left 'provisioning'."],
+      details: { after },
+    });
+  } finally {
+    await deleteTestUser(admin, u.user.id);
+  }
+}, 30_000);
+
+it("the sweep marks a provisioning row untouched past the threshold failed", async () => {
+  const u = await createTestUser();
+  const fresh = await createTestUser();
+  try {
+    expect((await ensure(u.user.id)).status).toBe(200);
+    expect((await ensure(fresh.user.id)).status).toBe(200);
+    await setRow(u.user.id, { status: "provisioning", updated_at: minutesAgo(60) });
+    await setRow(fresh.user.id, { status: "provisioning", updated_at: new Date().toISOString() });
+
+    const sweep = (lapseSweep as Record<string, unknown>).sweepStaleProvisioning as (
+      supabase: SupabaseClient,
+      now: Date,
+    ) => Promise<string[]>;
+    const failed = await sweep(admin, new Date());
+    expect((await rows(admin, u.user.id)).map((r) => r.status)).toEqual(["failed"]);
+    expect((await rows(admin, fresh.user.id)).map((r) => r.status)).toEqual(["provisioning"]);
+
+    await recordOutcome("remote-instance-chaos-06-stale-sweep", {
+      expectations: ["The sweep marks a 'provisioning' row an hour old failed and leaves a fresh one alone."],
+      details: { failed },
+    });
+  } finally {
+    await deleteTestUser(admin, u.user.id);
+    await deleteTestUser(admin, fresh.user.id);
   }
 }, 30_000);

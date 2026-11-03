@@ -64,7 +64,11 @@ export interface InstanceRow {
   /** "byos" when the active placement runs on the owner's own provider account (045_provider_credentials.sql). */
   credential_source?: "managed" | "byos";
   fence: number;
+  updated_at?: string;
 }
+
+/** A 'provisioning' row with no update for this long has no live ensure behind it. */
+export const STALE_PROVISIONING_MS = 15 * 60_000;
 
 // Looks up an existing operation for this idempotency key. When found, the
 // caller must not invoke the provider again — this is what makes a repeated
