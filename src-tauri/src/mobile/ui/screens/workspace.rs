@@ -35,12 +35,13 @@ use treq_ui::{
 };
 
 use super::{
+  ask_then,
   code::CodeView,
   commits::{self, CommitsScreen},
   conflicts, mutation_message, on_epoch,
   pull_request::{self, CreateSheet},
   terminal::Sessions,
-  workspaces,
+  workspaces, Op,
 };
 use crate::mobile::{
   errors,
@@ -227,12 +228,25 @@ pub struct WorkspaceScreen {
   /// The action running from this screen, by name.
   busy: Option<&'static str>,
   message: Option<(bool, String)>,
+  /// The last mutation whose result was ambiguous, for "Check again".
+  unsure: Option<Unsure>,
   keys: IdempotencyKeys,
   /// Set once a change applied here, so the pages below (the workspace
   /// list) refetch when this one closes.
   changed: bool,
   _poll: Task<()>,
   _sessions_poll: Task<()>,
+}
+
+/// A mutation whose result was ambiguous: checked again by reading state,
+/// with its idempotency key kept, never by sending it again.
+struct Unsure {
+  name: &'static str,
+  inputs: Vec<String>,
+  request: TreqCommandRequest,
+  success: String,
+  /// Delete and archive leave the page once they are known to have applied.
+  leave: bool,
 }
 
 impl WorkspaceScreen {
@@ -316,6 +330,7 @@ impl WorkspaceScreen {
       change_rows: widgets::list_state(),
       busy: None,
       message: None,
+      unsure: None,
       keys: IdempotencyKeys::default(),
       changed: false,
       _poll: poll,
@@ -474,11 +489,11 @@ impl WorkspaceScreen {
     let (rename_repo, rename_ws) = (repo, workspace.clone());
     let reload = this.clone();
     let mut entries = vec![
-      sheet::MenuEntry::new("menu-push", "Push", on(Self::confirm_push)),
+      sheet::MenuEntry::new("menu-push", "Push", on(|s, cx| s.run(Op::Push, cx))),
       sheet::MenuEntry::new(
         "menu-rebase",
         format!("Rebase onto {target}"),
-        on(Self::confirm_rebase),
+        on(|s, cx| s.run(Op::Rebase, cx)),
       ),
       sheet::MenuEntry::new("menu-target", "Change target…", on(Self::change_target)),
       sheet::MenuEntry::new(
@@ -513,7 +528,12 @@ impl WorkspaceScreen {
         cx.write_to_clipboard(ClipboardItem::new_string(branch.clone()))
       }),
       sheet::MenuEntry::new("menu-archive", "Archive", on(Self::confirm_archive)),
-      sheet::MenuEntry::new("menu-delete", "Delete…", on(Self::confirm_delete)).danger(),
+      sheet::MenuEntry::new(
+        "menu-delete",
+        "Delete…",
+        on(|s, cx| s.run(Op::DeleteWorkspace, cx)),
+      )
+      .danger(),
     ];
     let pr_entry = match &self.pr {
       Load::Ready(RemotePullRequestStatus {
@@ -582,6 +602,7 @@ impl WorkspaceScreen {
     let key = self.keys.key_for("pr", &[&repo, &id, &title]);
     self.busy = Some("pr");
     self.message = None;
+    self.unsure = None;
     let request = TreqCommandRequest::CreatePullRequest {
       repo,
       workspace: id,
@@ -590,10 +611,20 @@ impl WorkspaceScreen {
       draft,
       idempotency_key: key,
     };
+    let unsure = Unsure {
+      name: "pr",
+      inputs: inputs.to_vec(),
+      request: request.clone(),
+      success: "Pull request created.".into(),
+      leave: false,
+    };
     load::run(cx, remote::mutate(request), move |this, outcome, cx| {
       this.busy = None;
       let refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
       this.keys.settle("pr", &refs, &outcome);
+      if matches!(outcome, Ok(Mutation::Ambiguous(_))) {
+        this.unsure = Some(unsure);
+      }
       this.message = Some(match &outcome {
         Ok(Mutation::Applied(value)) => {
           this.changed = true;
@@ -615,24 +646,6 @@ impl WorkspaceScreen {
     cx.notify();
   }
 
-  fn confirm_push(&mut self, cx: &mut Context<Self>) {
-    let Some(workspace) = self.workspace() else {
-      return;
-    };
-    let branch = workspace.branch_name.clone();
-    let this = cx.weak_entity();
-    sheet::confirm(
-      format!("Push {branch}?"),
-      format!("Pushes {branch} and its commits to the remote."),
-      "Push",
-      false,
-      move |_, cx| {
-        this.update(cx, |screen, cx| screen.push(cx)).ok();
-      },
-      cx,
-    );
-  }
-
   fn push(&mut self, cx: &mut Context<Self>) {
     let Target { repo, id, .. } = self.target.clone();
     let key = self.keys.key_for("push", &[&repo, &id]);
@@ -645,23 +658,6 @@ impl WorkspaceScreen {
         idempotency_key: key,
       },
       "Pushed.",
-      cx,
-    );
-  }
-
-  fn confirm_rebase(&mut self, cx: &mut Context<Self>) {
-    let target = self.target_branch();
-    let this = cx.weak_entity();
-    sheet::confirm(
-      format!("Rebase onto {target}?"),
-      format!(
-        "Moves this workspace's commits onto the latest {target}. Conflicts, if any, show in Changes."
-      ),
-      "Rebase",
-      false,
-      move |_, cx| {
-        this.update(cx, |screen, cx| screen.rebase(cx)).ok();
-      },
       cx,
     );
   }
@@ -724,10 +720,21 @@ impl WorkspaceScreen {
     }
     self.busy = Some(name);
     self.message = None;
+    self.unsure = None;
+    let unsure = Unsure {
+      name,
+      inputs: inputs.clone(),
+      request: request.clone(),
+      success: success.into(),
+      leave: false,
+    };
     load::run(cx, remote::mutate(request), move |this, outcome, cx| {
       this.busy = None;
       let refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
       this.keys.settle(name, &refs, &outcome);
+      if matches!(outcome, Ok(Mutation::Ambiguous(_))) {
+        this.unsure = Some(unsure);
+      }
       let (ok, text) = mutation_message(&outcome, success);
       this.changed |= ok;
       this.message = Some((
@@ -740,6 +747,48 @@ impl WorkspaceScreen {
       ));
       this.reload(cx);
     });
+    cx.notify();
+  }
+
+  /// Reads whether the ambiguous mutation applied, without resending it.
+  fn check_again(&mut self, cx: &mut Context<Self>) {
+    if self.busy.is_some() {
+      return;
+    }
+    let Some(unsure) = self.unsure.take() else {
+      return;
+    };
+    self.busy = Some("check");
+    self.message = None;
+    let request = unsure.request.clone();
+    load::run(
+      cx,
+      remote::check_again(request),
+      move |this, outcome, cx| {
+        this.busy = None;
+        let refs: Vec<&str> = unsure.inputs.iter().map(String::as_str).collect();
+        this.keys.settle(unsure.name, &refs, &outcome);
+        let applied = matches!(outcome, Ok(Mutation::Applied(_)));
+        if applied && unsure.leave {
+          this.changed = true;
+          return nav::pop(cx);
+        }
+        let (ok, text) = mutation_message(&outcome, &unsure.success);
+        this.changed |= ok;
+        this.message = Some((
+          ok,
+          if ok {
+            text
+          } else {
+            errors::describe(&text).message
+          },
+        ));
+        if matches!(outcome, Ok(Mutation::Ambiguous(_))) {
+          this.unsure = Some(unsure);
+        }
+        this.reload(cx);
+      },
+    );
     cx.notify();
   }
 
@@ -804,22 +853,38 @@ impl WorkspaceScreen {
     self.leave_after(request, "archive", cx);
   }
 
-  fn confirm_delete(&mut self, cx: &mut Context<Self>) {
+  /// Runs a menu mutation, asking first only when it is destructive.
+  fn run(&mut self, op: Op, cx: &mut Context<Self>) {
     let Some(workspace) = self.workspace() else {
       return;
     };
     let title = workspaces::title_of(workspace);
     let branch = workspace.branch_name.clone();
     let this = cx.weak_entity();
-    sheet::confirm(
-      format!("Delete {title}?"),
-      format!(
-        "Deletes the workspace's checkout and its record. The branch {branch} and its commits stay in the repository."
+    let (heading, body, label) = match op {
+      Op::DeleteWorkspace => (
+        format!("Delete {title}?"),
+        format!(
+          "Deletes the workspace's checkout and its record. The branch {branch} and its commits stay in the repository."
+        ),
+        "Delete workspace",
       ),
-      "Delete workspace",
-      true,
-      move |_, cx| {
-        this.update(cx, |screen, cx| screen.delete(cx)).ok();
+      _ => (String::new(), String::new(), ""),
+    };
+    ask_then(
+      op,
+      heading,
+      body,
+      label,
+      move |cx| {
+        this
+          .update(cx, |screen, cx| match op {
+            Op::Push => screen.push(cx),
+            Op::Rebase => screen.rebase(cx),
+            Op::DeleteWorkspace => screen.delete(cx),
+            _ => {}
+          })
+          .ok();
       },
       cx,
     );
@@ -842,6 +907,14 @@ impl WorkspaceScreen {
   ) {
     self.busy = Some(name);
     self.message = None;
+    self.unsure = None;
+    let unsure = Unsure {
+      name,
+      inputs: Vec::new(),
+      request: request.clone(),
+      success: String::new(),
+      leave: true,
+    };
     load::run(cx, remote::mutate(request), |this, outcome, cx| {
       this.busy = None;
       match outcome {
@@ -850,6 +923,9 @@ impl WorkspaceScreen {
           nav::pop(cx);
         }
         other => {
+          if matches!(other, Ok(Mutation::Ambiguous(_))) {
+            this.unsure = Some(unsure);
+          }
           this.message = Some((
             false,
             errors::describe(&mutation_message(&other, "").1).message,
@@ -1180,7 +1256,19 @@ impl Render for WorkspaceScreen {
         } else {
           widgets::error_text(text, cx)
         };
-        line.px_4().pb_2()
+        let check = self.unsure.is_some().then(|| {
+          Button::new("check-again")
+            .outline()
+            .label("Check again")
+            .on_click(cx.listener(|this, _, _, cx| this.check_again(cx)))
+            .touch()
+        });
+        v_flex()
+          .gap_2()
+          .px_4()
+          .pb_2()
+          .child(line)
+          .children(check.map(|b| h_flex().child(b)))
       }))
       .children(self.busy.map(|name| {
         widgets::muted(
@@ -1192,6 +1280,7 @@ impl Render for WorkspaceScreen {
             "archive" => "Archiving…",
             "delete" => "Deleting…",
             "pr" => "Pushing and opening the pull request…",
+            "check" => "Checking whether it applied…",
             _ => "Working…",
           },
           cx,

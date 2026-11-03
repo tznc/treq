@@ -9,8 +9,8 @@ use std::{collections::HashMap, future::Future, sync::LazyLock};
 
 use crate::core::{
   remote::{
-    execute_remote_read, retry_after_reconnect, MutationRetryOutcome, RemoteHostCheck,
-    TreqCommandRequest,
+    execute_remote_read, retry_after_reconnect, verification_for, MutationRetryOutcome,
+    MutationVerificationOutcome, RemoteHostCheck, TreqCommandRequest,
   },
   remote_control_plane::SshEndpoint,
   remote_ssh_transport::{CancellationToken, ExecLimits},
@@ -181,6 +181,41 @@ pub async fn mutate(request: TreqCommandRequest) -> Result<Mutation, String> {
   }
 }
 
+/// "Check again" after an ambiguous result: reads the state the mutation
+/// would have changed and decides from it, without sending the mutation
+/// again. Its idempotency key stays unsettled, so a retry the user starts
+/// after a "did not apply" still cannot apply twice.
+pub async fn check_again(request: TreqCommandRequest) -> Result<Mutation, String> {
+  let endpoint = backend::get().endpoint()?;
+  check_with(&request, |read| async move {
+    read_on::<serde_json::Value>(&endpoint, read).await
+  })
+  .await
+}
+
+/// [`check_again`] with the read supplied, for tests.
+pub async fn check_with<F, Fut>(request: &TreqCommandRequest, read: F) -> Result<Mutation, String>
+where
+  F: FnOnce(TreqCommandRequest) -> Fut,
+  Fut: Future<Output = Result<serde_json::Value, String>>,
+{
+  let Some(verification) = verification_for(request) else {
+    return Ok(Mutation::Ambiguous(
+      "the host has no state check for this change. The page shows its current state".into(),
+    ));
+  };
+  let value = read(verification.read_request).await?;
+  match (verification.check)(&value) {
+    MutationVerificationOutcome::AlreadyApplied => Ok(Mutation::Applied(serde_json::Value::Null)),
+    MutationVerificationOutcome::NotApplied => {
+      Err("The change did not apply. Try it again.".into())
+    }
+    MutationVerificationOutcome::Ambiguous => Ok(Mutation::Ambiguous(
+      "the host's state still does not show whether it applied".into(),
+    )),
+  }
+}
+
 /// Idempotency keys for one screen's mutations, as in the desktop client's
 /// `remote-idempotency.ts`: a key is reused for the same inputs until the
 /// outcome is known, so a retry after an ambiguous result cannot apply twice.
@@ -211,6 +246,39 @@ impl IdempotencyKeys {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// "Check again" after an ambiguous result runs the mutation's
+  /// verification read, never the mutation itself.
+  #[test]
+  fn check_again_reads_state_instead_of_resending() {
+    let delete = TreqCommandRequest::DeleteWorkspace {
+      repo: "/r".into(),
+      workspace: "7".into(),
+    };
+    let sent = std::cell::RefCell::new(Vec::new());
+    let read = |request: TreqCommandRequest, value: serde_json::Value| {
+      sent.borrow_mut().push(request.is_mutation());
+      async move { Ok::<_, String>(value) }
+    };
+    let gone = futures::executor::block_on(check_with(&delete, |r| read(r, serde_json::json!([]))));
+    assert_eq!(gone, Ok(Mutation::Applied(serde_json::Value::Null)));
+    let still = futures::executor::block_on(check_with(&delete, |r| {
+      read(r, serde_json::json!([{ "id": 7 }]))
+    }));
+    assert!(still.is_err(), "not applied: {still:?}");
+    assert_eq!(*sent.borrow(), vec![false, false]);
+
+    // With no state check for the request, nothing is sent at all.
+    let push = TreqCommandRequest::GitPush {
+      repo: "/r".into(),
+      workspace: Some("7".into()),
+      idempotency_key: "push:1".into(),
+    };
+    let unknown =
+      futures::executor::block_on(check_with(&push, |r| read(r, serde_json::Value::Null)));
+    assert!(matches!(unknown, Ok(Mutation::Ambiguous(_))));
+    assert_eq!(sent.borrow().len(), 2);
+  }
 
   #[test]
   fn keys_are_reused_until_settled() {
