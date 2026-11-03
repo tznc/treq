@@ -107,7 +107,7 @@ pub async fn wait_for_ready(
   loop {
     let status = control_plane::instance_status(supabase)
       .await
-      .map_err(|e| e.to_string())?;
+      .map_err(|e| e.friendly())?;
     progress(&status);
     let state = status
       .instance
@@ -143,7 +143,7 @@ pub async fn issue(
   let issued_at = now_ms();
   let response = control_plane::issue_certificate(supabase, instance_id, key_id, false)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.friendly())?;
   let lease = Lease {
     instance_id: instance_id.to_string(),
     key_id: key_id.to_string(),

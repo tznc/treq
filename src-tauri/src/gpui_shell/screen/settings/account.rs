@@ -279,6 +279,10 @@ pub struct CloudCard {
   pub pro_required: Option<String>,
   /// The first line of any other error.
   pub error: Option<String>,
+  /// The rest of it: the HTTP status and correlation id, for support.
+  pub error_details: Option<String>,
+  /// The error is an expired session: offer to sign in again.
+  pub sign_in: bool,
   pub submitting: bool,
   pub confirming_delete: bool,
   /// The size picker, one option per tier.
@@ -667,6 +671,9 @@ const PRO_REQUIRED_PREFIX: &str = "[pro_required] ";
 /// How a spend cap refusal reads in `provisioning_error`.
 const SPEND_CAP_PREFIX: &str = "[spend_cap_reached] ";
 
+/// How an expired session reads in `provisioning_error` (`ApiError::friendly`).
+const SESSION_EXPIRED: &str = "Your session expired.";
+
 const GIB: f64 = 1024. * 1024. * 1024.;
 const MIB: f64 = 1024. * 1024.;
 
@@ -843,6 +850,9 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
     .map(|_| {
       "Your provider rejected the saved API key. Replace it under Provider keys.".to_string()
     });
+  let other_error = error.filter(|_| {
+    pro_required.is_none() && spend_cap_reached.is_none() && credential_invalid.is_none()
+  });
   let sizes = cloud
     .tiers
     .iter()
@@ -944,9 +954,12 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
       stage,
     }),
     pro_required: pro_required.map(first_line),
-    error: error
-      .filter(|_| pro_required.is_none() && spend_cap_reached.is_none() && credential_invalid.is_none())
-      .map(first_line),
+    error: other_error.map(first_line),
+    error_details: other_error
+      .and_then(|e| e.split_once('\n'))
+      .map(|(_, rest)| rest.trim().to_string())
+      .filter(|rest| !rest.is_empty()),
+    sign_in: other_error.is_some_and(|e| e.starts_with(SESSION_EXPIRED)),
     credential_invalid,
     submitting: cloud.submitting,
     confirming_delete,
@@ -2499,9 +2512,32 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
     .when_some(c.error.clone(), |this, error| {
       this.child(
         ui::text(div().mt_3(), TextSize::Xs)
+          .id("cloud-error")
+          .role(gpui::Role::Alert)
+          .aria_label(SharedString::from(error.clone()))
           .truncate()
           .text_color(red)
-          .child(error),
+          .child(error)
+          .test_support(),
+      )
+    })
+    .when_some(c.error_details.clone(), |this, details| {
+      this.child(
+        ui::text(div().mt_1(), TextSize::Xs)
+          .truncate()
+          .text_color(p.muted_foreground)
+          .child(details),
+      )
+    })
+    .when(c.sign_in, |this| {
+      this.child(
+        div().mt_2().child(
+          Button::new("cloud-sign-in", p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .label("Sign in")
+            .on_click(press("account.signIn")),
+        ),
       )
     })
 }
