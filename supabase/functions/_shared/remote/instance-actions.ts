@@ -147,6 +147,9 @@ function requireProvisioned(instance: InstanceRow): string {
   return instance.provider_resource_id;
 }
 
+// States an ensure in flight may mark failed; not 'deleting' or 'deleted'.
+const ENSURE_FAILABLE = ["provisioning", "bootstrapping", "ready", "suspended", "degraded", "failed"];
+
 const replay = (op: OperationRow): Reply => ok({ operation_id: op.id, status: op.status });
 
 function tierUnavailable(tierId: string, region: string): Reply {
@@ -331,6 +334,18 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
     },
     async () => {
       const provider = providerOf(deps, target);
+      // Each step moves the row on only from the status the previous step
+      // left. A delete that landed meanwhile matches nothing: stop, and
+      // remove the machine this ensure made so it does not leak.
+      let createdId: string | null = null;
+      const advance = async (expect: readonly string[], status: string | null, fields: Record<string, unknown> = {}) => {
+        if (await updateInstance(supabase, target.id, fields, { expectStatus: expect })) {
+          if (status) await setInstanceStatus(supabase, target, status);
+          return;
+        }
+        if (createdId) await provider.deleteInstance(createdId, { placementId: target.active_placement_id }).catch(() => {});
+        throw new HttpError("The instance was deleted while it was being provisioned", 409, "instance_deleted");
+      };
       const created = await provider.createInstance({
         ownerUserId,
         region,
@@ -341,15 +356,15 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
         placementId: target.active_placement_id ?? undefined,
       });
       const resourceId = created.providerResourceId;
+      createdId = resourceId;
+      await advance(["provisioning"], "bootstrapping", { provider_resource_id: resourceId });
       if (target.active_placement_id) {
         await updatePlacement(supabase, target.active_placement_id, { provider_resource_id: resourceId });
       }
-      await updateInstance(supabase, target.id, { provider_resource_id: resourceId });
-      await setInstanceStatus(supabase, target, "bootstrapping");
       await runBootManifest(provider, resourceId);
 
       const observed = await provider.getInstance(resourceId);
-      await setInstanceStatus(supabase, target, observed.state, {
+      await advance(["bootstrapping"], observed.state, {
         ready_at: observed.state === "ready" ? new Date().toISOString() : null,
       });
 
@@ -364,7 +379,7 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
         username: MANAGED_SSH_USERNAME,
         existingEndpointId: null,
       });
-      await updateInstance(supabase, target.id, { endpoint_id: endpointId });
+      await advance([observed.state], null, { endpoint_id: endpointId });
       await establishSshTrust(supabase, provider, {
         ownerUserId,
         instanceId: target.id,
@@ -380,7 +395,12 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
         detail: { provider_resource_id: resourceId, observed_state: observed.state },
       };
     },
-    () => setInstanceStatus(supabase, target, "failed"),
+    // A deleted (or deleting) row stays as the delete left it.
+    async () => {
+      if (await updateInstance(supabase, target.id, {}, { expectStatus: ENSURE_FAILABLE })) {
+        await setInstanceStatus(supabase, target, "failed");
+      }
+    },
   );
   const refreshed = await getInstanceForOwner(supabase, ownerUserId);
   return ok({ operation_id: opId, status: "succeeded", instance: serializeInstance(refreshed) });
