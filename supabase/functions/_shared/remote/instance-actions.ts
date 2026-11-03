@@ -45,6 +45,7 @@ import {
   type OperationRow,
   type OperationType,
   previousHostKeyFingerprint,
+  STALE_PROVISIONING_MS,
   recordManagedEndpoint,
   updateInstance,
 } from "./instance-store.ts";
@@ -153,12 +154,29 @@ async function setInstanceStatus(
   }
 }
 
+const MAX_IDEMPOTENCY_KEY_LENGTH = 256;
+
 function requireIdempotencyKey(body: Record<string, unknown>): string {
   const key = body.idempotency_key;
   if (typeof key !== "string" || key.length === 0) {
-    throw new HttpError("idempotency_key is required", 400, undefined);
+    throw new HttpError("idempotency_key is required", 400);
+  }
+  if (key.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+    throw new HttpError(`idempotency_key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`, 400);
+  }
+  if ([...key].some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f)) {
+    throw new HttpError("idempotency_key must not contain control characters", 400);
   }
   return key;
+}
+
+// A row ensure may pick up and provision again: failed, degraded, or
+// 'provisioning' left behind by an ensure that died (no update for
+// STALE_PROVISIONING_MS).
+export function isResumable(instance: InstanceRow, now = Date.now()): boolean {
+  if (instance.status === "failed" || instance.status === "degraded") return true;
+  return instance.status === "provisioning" &&
+    now - Date.parse(instance.updated_at ?? "") >= STALE_PROVISIONING_MS;
 }
 
 // Verifies ownership server-side rather than trusting a client-supplied id.
@@ -214,12 +232,19 @@ async function tracked(
 ): Promise<string> {
   const { supabase, ownerUserId, correlationId } = deps;
   const elapsed = startTimer();
-  const row = await beginOperation(supabase, {
-    ownerUserId,
-    instanceId: instance.id,
-    operationType: op.type,
-    idempotencyKey,
-  });
+  let row: OperationRow;
+  try {
+    row = await beginOperation(supabase, {
+      ownerUserId,
+      instanceId: instance.id,
+      operationType: op.type,
+      idempotencyKey,
+    });
+  } catch (err) {
+    // Nothing was recorded, so nothing would ever finish this instance.
+    await onFailure?.().catch(() => {});
+    throw err;
+  }
   const audit = auditFor(supabase, { ownerUserId, instanceId: instance.id, correlationId });
   const event = (suffix: string) => `${op.event}_${suffix}` as RemoteAuditEventType;
   await audit(event("requested"), { detail: op.detail, idempotencyKey });
@@ -291,7 +316,7 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
   }
 
   const existingInstance = await getInstanceForOwner(supabase, ownerUserId);
-  if (existingInstance && existingInstance.status !== "failed") {
+  if (existingInstance && !isResumable(existingInstance)) {
     // One managed instance per user: ensure is a no-op once provisioned,
     // whatever the key, so a second "first open" never makes a second VM.
     const op = await beginOperation(supabase, {
@@ -350,7 +375,8 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
     });
     instance = { ...instance, active_placement_id: placement.id };
   }
-  if (instance.status === "failed") await setInstanceStatus(supabase, instance, "provisioning");
+  if (instance.status !== "provisioning") await setInstanceStatus(supabase, instance, "provisioning");
+  else if (existingInstance) await updateInstance(supabase, instance.id, {});
 
   const target = instance;
   const opId = await tracked(

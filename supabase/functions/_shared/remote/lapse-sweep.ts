@@ -31,6 +31,7 @@ import {
 } from "./placement-store.ts";
 import type { ManagedComputeProvider, ProviderKind } from "./provider.ts";
 import { must, rpc } from "./db.ts";
+import { STALE_PROVISIONING_MS } from "./instance-store.ts";
 
 export const LAPSE_GRACE_DAYS = 30;
 const DAY_MS = 86_400_000;
@@ -184,6 +185,29 @@ export async function sweepLapsedInstances(
     failed: result.failed.length,
   });
   return result;
+}
+
+/**
+ * Marks failed every 'provisioning' instance with no update for
+ * STALE_PROVISIONING_MS: the ensure that owned it died, and the owner should
+ * see a failure ensure can retry instead of a spinner. Returns their ids.
+ */
+export async function sweepStaleProvisioning(supabase: SupabaseClient, now: Date): Promise<string[]> {
+  const cutoff = new Date(now.getTime() - STALE_PROVISIONING_MS).toISOString();
+  const stale = (must(await supabase
+    .from("remote_instances")
+    .update({ status: "failed", updated_at: now.toISOString() })
+    .eq("status", "provisioning")
+    .lt("updated_at", cutoff)
+    .select("id, active_placement_id"), "fail stale provisioning instances") ?? []) as Array<{
+      id: string;
+      active_placement_id: string | null;
+    }>;
+  // set_placement_state keeps the placement (and its billing) in step.
+  for (const row of stale) {
+    if (row.active_placement_id) await setPlacementState(supabase, row.active_placement_id, "failed");
+  }
+  return stale.map((r) => r.id);
 }
 
 const stop = (instance: LapseCandidate, deps: LapseSweepDeps) =>
