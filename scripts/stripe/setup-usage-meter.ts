@@ -13,9 +13,11 @@
 //      `treq_pro_monthly` price) with lookup key `treq_sandbox_usage`, unless
 //      an active price has that key. 1 unit = 1 micro-USD, so
 //      unit_amount_decimal is 0.0001 (cents).
-//   3. With --backfill: adds that price to every live Pro subscription that
-//      lacks it. New checkouts get it from billing-checkout. Re-run with
-//      --backfill after creating the price for the first time.
+//   3. With --backfill: adds that price to every live Pro and Team
+//      subscription that lacks it (Team members' usage on the organization
+//      profile bills the organization). New checkouts get it from
+//      billing-checkout. Re-run with --backfill after creating the price for
+//      the first time.
 //
 // Optional env: TREQ_STRIPE_USAGE_METER_EVENT, TREQ_STRIPE_USAGE_PRICE_LOOKUP_KEY
 // (both default to treq_sandbox_usage).
@@ -35,6 +37,7 @@ if (!key.startsWith("sk_test_") && !key.startsWith("rk_test_")) {
 const EVENT_NAME = Deno.env.get("TREQ_STRIPE_USAGE_METER_EVENT") || "treq_sandbox_usage";
 const USAGE_LOOKUP_KEY = Deno.env.get("TREQ_STRIPE_USAGE_PRICE_LOOKUP_KEY") || "treq_sandbox_usage";
 const PRO_LOOKUP_KEY = "treq_pro_monthly";
+const TEAM_LOOKUP_KEY = "treq_team_monthly";
 const backfill = Deno.args.includes("--backfill");
 const stripe = createStripeClient(key);
 
@@ -94,30 +97,38 @@ if (usagePrice) {
 
 // 3. Backfill
 if (!backfill) {
-  console.log("subscriptions: skipped (pass --backfill to add the price to existing Pro subscriptions)");
+  console.log("subscriptions: skipped (pass --backfill to add the price to existing Pro and Team subscriptions)");
   Deno.exit(0);
 }
 const LIVE = new Set(["trialing", "active", "past_due", "unpaid", "incomplete", "paused"]);
 let added = 0;
 let present = 0;
-let startingAfter: string | undefined;
-do {
-  const params: Record<string, string | number> = { price: proPrice.id, status: "all", limit: 100 };
-  if (startingAfter) params.starting_after = startingAfter;
-  const page = await stripe.request<List<Subscription>>("GET", "/v1/subscriptions", params);
-  for (const sub of page.data) {
-    if (!LIVE.has(sub.status)) continue;
-    if (sub.items.data.some((i) => i.price.id === usagePrice.id)) {
-      present++;
-      continue;
+const teamPrice = (await stripe.request<List<Price>>("GET", "/v1/prices", {
+  "lookup_keys[0]": TEAM_LOOKUP_KEY,
+  active: true,
+  limit: 1,
+})).data[0];
+if (!teamPrice) console.log(`team: no active price with lookup key ${TEAM_LOOKUP_KEY}; only Pro is backfilled`);
+for (const planPrice of [proPrice, teamPrice].filter((p): p is Price => !!p)) {
+  let startingAfter: string | undefined;
+  do {
+    const params: Record<string, string | number> = { price: planPrice.id, status: "all", limit: 100 };
+    if (startingAfter) params.starting_after = startingAfter;
+    const page = await stripe.request<List<Subscription>>("GET", "/v1/subscriptions", params);
+    for (const sub of page.data) {
+      if (!LIVE.has(sub.status)) continue;
+      if (sub.items.data.some((i) => i.price.id === usagePrice.id)) {
+        present++;
+        continue;
+      }
+      await stripe.request("POST", "/v1/subscription_items", {
+        subscription: sub.id,
+        price: usagePrice.id,
+      }, { idempotencyKey: `treq-usage-item-${sub.id}-${usagePrice.id}` });
+      added++;
+      console.log(`subscription: added usage price to ${sub.id}`);
     }
-    await stripe.request("POST", "/v1/subscription_items", {
-      subscription: sub.id,
-      price: usagePrice.id,
-    }, { idempotencyKey: `treq-usage-item-${sub.id}-${usagePrice.id}` });
-    added++;
-    console.log(`subscription: added usage price to ${sub.id}`);
-  }
-  startingAfter = page.has_more ? page.data.at(-1)?.id : undefined;
-} while (startingAfter);
+    startingAfter = page.has_more ? page.data.at(-1)?.id : undefined;
+  } while (startingAfter);
+}
 console.log(`subscriptions: ${added} updated, ${present} already had the usage price`);
