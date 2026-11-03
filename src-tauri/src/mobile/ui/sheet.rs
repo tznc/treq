@@ -3,17 +3,22 @@
 //! any view a screen opens with [`open`].
 
 use crate::mobile::ui::widgets::TouchButton as _;
-use std::{rc::Rc, time::Duration};
+use std::{
+  cell::Cell,
+  rc::Rc,
+  time::{Duration, Instant},
+};
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
+  canvas,
   component::{
     button::{Button, ButtonVariants},
-    h_flex, v_flex, ActiveTheme, Sizable,
+    h_flex, v_flex, ActiveTheme, Sizable, StyledExt as _,
   },
-  div, px, relative, AnyView, App, AppContext, Context, Entity, Global, InteractiveElement,
-  IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled,
-  WeakEntity, Window,
+  div, px, relative, AnyView, App, AppContext, Context, DispatchPhase, Entity, Global,
+  InteractiveElement, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement,
+  Pixels, Render, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window,
 };
 
 use gpui_kit::base::TestSupportExt as _;
@@ -27,7 +32,31 @@ pub type Action = Rc<dyn Fn(&mut Window, &mut App)>;
 pub struct Sheet {
   pub title: Option<SharedString>,
   pub view: AnyView,
+  pub(super) drag: Rc<Drag>,
 }
+
+/// The drag-down-to-dismiss gesture on the grabber and title.
+#[derive(Default)]
+pub(super) struct Drag {
+  /// Where the press started (window y) and when.
+  start: Cell<Option<(f32, Instant)>>,
+  /// How far the panel follows the finger down.
+  offset: Cell<f32>,
+  /// The panel's height at the last paint.
+  height: Cell<f32>,
+}
+
+/// A drag past this fraction of the sheet's height closes it.
+const DISMISS_FRACTION: f32 = 0.25;
+/// A shorter drag closes it when this fast (px/s) and at least
+/// [`FLICK_MIN`] long.
+const FLICK_SPEED: f32 = 1000.;
+const FLICK_MIN: f32 = 32.;
+
+/// Font sizes of the sheet's title and of a confirmation's body: the title
+/// is one step up from the body.
+pub(super) const TITLE_PX: f32 = 18.;
+pub(super) const BODY_PX: f32 = 16.;
 
 struct Slot {
   root: WeakEntity<super::Root>,
@@ -58,6 +87,7 @@ pub fn open<V: Render>(
           root.sheet = Some(Sheet {
             title,
             view: view.into(),
+            drag: Rc::default(),
           });
           cx.notify();
         });
@@ -107,8 +137,20 @@ pub(super) fn tap_guard() -> impl IntoElement {
 /// The sheet over `content`: a scrim that closes it and a panel along the
 /// bottom edge.
 pub(super) fn render(sheet: &Sheet, bottom_inset: Pixels, cx: &App) -> impl IntoElement {
+  render_with(sheet, bottom_inset, Rc::new(|_, cx| close(cx)), cx)
+}
+
+/// [`render`], closing through `on_close` (the scrim tap and a drag down).
+fn render_with(
+  sheet: &Sheet,
+  bottom_inset: Pixels,
+  on_close: Action,
+  cx: &App,
+) -> impl IntoElement {
   let theme = cx.theme();
   let palette = treq_ui::theme::current(cx);
+  let drag = sheet.drag.clone();
+  let scrim_close = on_close.clone();
   div()
     .absolute()
     .inset_0()
@@ -123,44 +165,118 @@ pub(super) fn render(sheet: &Sheet, bottom_inset: Pixels, cx: &App) -> impl Into
         // The tap that closes the sheet must not reach the page below.
         .occlude()
         .bg(palette.scrim())
-        .on_click(|_, _, cx| close(cx)),
+        .on_click(move |_, window, cx| scrim_close(window, cx)),
     )
     .child(
       v_flex()
         .id("sheet")
         .occlude()
+        .relative()
+        .top(px(drag.offset.get()))
         .max_h(relative(0.85))
         .overflow_y_scroll()
         .bg(theme.background)
         .rounded_t(theme.radius_lg)
         .pb(bottom_inset + px(16.))
+        .child(drag_tracker(drag.clone(), on_close))
         .child(
-          div()
-            .flex()
+          v_flex()
+            .id("sheet-handle")
             .flex_none()
-            .justify_center()
-            .pt_2()
-            .child(div().w(px(36.)).h(px(4.)).rounded_full().bg(theme.border)),
+            // Capture phase: in the app, a press in the sheet does not reach bubble-phase handlers.
+            .capture_any_mouse_down({
+              let drag = drag.clone();
+              move |e, _, cx| {
+                if e.button == MouseButton::Left {
+                  drag
+                    .start
+                    .set(Some((f32::from(e.position.y), Instant::now())));
+                  // The drag is the sheet's, not a scroll or a tap.
+                  cx.stop_propagation();
+                }
+              }
+            })
+            .child(
+              div()
+                .flex()
+                .justify_center()
+                .pt_2()
+                .child(div().w(px(36.)).h(px(4.)).rounded_full().bg(theme.border)),
+            )
+            .when_some(sheet.title.clone(), |handle, title| {
+              handle.child(
+                div()
+                  .px_4()
+                  .pt_2()
+                  .pb_1()
+                  .text_size(px(TITLE_PX))
+                  .font_semibold()
+                  .text_color(theme.foreground)
+                  .truncate()
+                  .child(title),
+              )
+            }),
         )
-        .when_some(sheet.title.clone(), |panel, title| {
-          panel.child(
-            div()
-              .flex_none()
-              .px_4()
-              .pt_2()
-              .pb_1()
-              .text_sm()
-              .text_color(theme.muted_foreground)
-              .truncate()
-              .child(title),
-          )
-        })
         // A tall sheet scrolls; its parts keep their height.
         .child(div().flex_none().child(sheet.view.clone()))
         .role(gpui_kit::Role::Dialog)
         .when_some(sheet.title.clone(), |panel, title| panel.aria_label(title))
         .test_support(),
     )
+}
+
+/// Re-renders the root, which reads the drag offset, and repaints.
+fn redraw(window: &mut Window, cx: &mut App) {
+  if let Some(root) = cx.try_global::<Slot>().and_then(|s| s.root.upgrade()) {
+    root.update(cx, |_, cx| cx.notify());
+  }
+  window.refresh();
+}
+
+/// Records the panel's height and, while a drag runs, follows the pointer
+/// anywhere in the window and settles the drag on release. It listens in the
+/// capture phase, on every paint: in the app the bubble phase does not see
+/// these events, and a cached frame replays the listeners it was painted with.
+fn drag_tracker(drag: Rc<Drag>, on_close: Action) -> impl IntoElement {
+  let measure = drag.clone();
+  canvas(
+    move |bounds, _, _| measure.height.set(f32::from(bounds.size.height)),
+    move |_, _, window, _| {
+      let moving = drag.clone();
+      window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
+        if phase != DispatchPhase::Capture {
+          return;
+        }
+        if let Some((y, _)) = moving.start.get() {
+          moving.offset.set((f32::from(e.position.y) - y).max(0.));
+          cx.stop_propagation();
+          redraw(window, cx);
+        }
+      });
+      let on_close = on_close.clone();
+      window.on_mouse_event(move |e: &MouseUpEvent, phase, window, cx| {
+        if phase != DispatchPhase::Capture {
+          return;
+        }
+        let Some((y, at)) = drag.start.take() else {
+          return;
+        };
+        cx.stop_propagation();
+        // The panel's offset is where the last move left it.
+        let distance = (f32::from(e.position.y) - y).max(drag.offset.get()).max(0.);
+        let speed = distance / at.elapsed().as_secs_f32().max(1e-3);
+        drag.offset.set(0.);
+        redraw(window, cx);
+        let far = distance >= drag.height.get() * DISMISS_FRACTION;
+        let flick = distance >= FLICK_MIN && speed >= FLICK_SPEED;
+        if far || flick {
+          on_close(window, cx);
+        }
+      });
+    },
+  )
+  .absolute()
+  .inset_0()
 }
 
 /// One row of a [`Menu`].
@@ -262,7 +378,7 @@ impl Render for Confirm {
       .px_4()
       .pt_1()
       .gap_4()
-      .child(widgets::muted(self.message.clone(), cx).text_base())
+      .child(widgets::muted(self.message.clone(), cx).text_size(px(BODY_PX)))
       .child(
         v_flex()
           .gap_2()
@@ -295,11 +411,13 @@ impl Render for Confirm {
 
 #[cfg(test)]
 mod tests {
+  use gpui_kit::MouseButton;
   use gpui_kit::{
     div, px, size, AppContext as _, Bounds, Context, IntoElement, ParentElement as _, Point,
     Render, Styled as _, TestAppContext, Window, WindowBounds, WindowOptions,
   };
-  use gpui_testing_library::prelude::*;
+  use gpui_testing_library::{prelude::*, PointerAction};
+  use std::{cell::Cell, rc::Rc};
 
   struct Empty;
   impl Render for Empty {
@@ -308,11 +426,105 @@ mod tests {
     }
   }
 
-  struct Host(super::Sheet);
+  struct Host(super::Sheet, Rc<Cell<bool>>);
   impl Render for Host {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-      div().size_full().child(super::render(&self.0, px(0.), cx))
+      let closed = self.1.clone();
+      div().size_full().child(super::render_with(
+        &self.0,
+        px(0.),
+        Rc::new(move |_, _| closed.set(true)),
+        cx,
+      ))
     }
+  }
+
+  /// A 300px-tall sheet titled "Delete workspace?"; the flag is set when it
+  /// closes.
+  fn open_sheet(cx: &mut TestAppContext) -> (gpui_testing_library::Screen, Rc<Cell<bool>>) {
+    cx.update(super::super::theme::init);
+    let closed = Rc::new(Cell::new(false));
+    let flag = closed.clone();
+    let window = cx.update(|cx| {
+      gpui_kit::open_window(
+        WindowOptions {
+          window_bounds: Some(WindowBounds::Windowed(Bounds {
+            origin: Point::default(),
+            size: size(px(412.), px(892.)),
+          })),
+          ..Default::default()
+        },
+        cx,
+        |_, cx| {
+          let view = cx.new(|_| Tall).into();
+          cx.new(|_| {
+            Host(
+              super::Sheet {
+                title: Some("Delete workspace?".into()),
+                view,
+                drag: Rc::default(),
+              },
+              flag,
+            )
+          })
+        },
+      )
+      .expect("open test window")
+      .0
+    });
+    let screen = gpui_testing_library::Screen::new(cx, window);
+    screen.redraw();
+    (screen, closed)
+  }
+
+  struct Tall;
+  impl Render for Tall {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+      div().h(px(250.))
+    }
+  }
+
+  /// Drags from the grabber down by `dy` pixels.
+  fn drag_handle(screen: &gpui_testing_library::Screen, dy: f32) {
+    let sheet = screen.get_by_role(by::role(gpui_kit::Role::Dialog));
+    let b = sheet.bounds();
+    let start = Point::new(b.center().x, b.origin.y + px(10.));
+    let mut actions = vec![
+      PointerAction::MoveToPosition(start),
+      PointerAction::Press(MouseButton::Left),
+    ];
+    for step in 1..=4 {
+      actions.push(PointerAction::MoveToPosition(Point::new(
+        start.x,
+        start.y + px(dy * step as f32 / 4.),
+      )));
+    }
+    actions.push(PointerAction::Release(MouseButton::Left));
+    screen.user().pointer(actions);
+  }
+
+  /// The title outranks the body text it introduces.
+  #[test]
+  fn the_title_is_larger_than_the_body() {
+    const { assert!(super::TITLE_PX > super::BODY_PX) };
+  }
+
+  /// Dragging the title down past a quarter of the sheet closes it.
+  #[gpui_kit::test]
+  fn a_long_drag_down_closes_the_sheet(cx: &mut TestAppContext) {
+    let (screen, closed) = open_sheet(cx);
+    drag_handle(&screen, 200.);
+    assert!(closed.get(), "sheet should close");
+  }
+
+  /// A short, slow drag snaps back and leaves the sheet open.
+  #[gpui_kit::test]
+  fn a_short_drag_leaves_the_sheet_open(cx: &mut TestAppContext) {
+    let (screen, closed) = open_sheet(cx);
+    drag_handle(&screen, 20.);
+    assert!(!closed.get(), "sheet should stay open");
+    expect(screen.get_by_role(by::role(gpui_kit::Role::Dialog).name("Delete workspace?")))
+      .to_be_visible();
   }
 
   /// A screen reader reads the sheet as a dialog, named by its title.
@@ -332,10 +544,14 @@ mod tests {
         |_, cx| {
           let view = cx.new(|_| Empty).into();
           cx.new(|_| {
-            Host(super::Sheet {
-              title: Some("Delete workspace?".into()),
-              view,
-            })
+            Host(
+              super::Sheet {
+                title: Some("Delete workspace?".into()),
+                view,
+                drag: Rc::default(),
+              },
+              Rc::default(),
+            )
           })
         },
       )
