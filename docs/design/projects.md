@@ -190,10 +190,50 @@ RLS: enable on all three; `revoke all from anon`. Policy: `owner_user_id = (sele
 - **Opening**: the launcher lists recent repos and projects side by side. Opening a repo works as today; no project UI appears for a standalone repo beyond **Add Repository…**.
 - **Creating a project**: from a standalone repo, **Add Repository…** → pick folder / clone URL / recent repo → "Name this project" (prefilled with the current repo's name) → done. The current repo becomes the home repo (D13). A project can also be created empty from the launcher, but this is the main path.
 - **Sidebar** (project open): project name at top; under it, repos (collapsible) and project workspaces (badge: N repos). A standalone repo's sidebar is unchanged.
+- **Project home** (project with 2+ repos): replaces the single-repo home screen. Header shows the project title. Same three tabs as today's workspace screen (`gpui_shell/screen/workspace.rs`: Code, Changes, Commits), each project-wide, each drilling into today's repo-scoped screen. Detailed below.
 - **Project settings** (settings screen, new "Project" section): name, branch pattern, default agent/model, repo list with reorder/remove, per-repo overrides.
 - **New project workspace**: name → checkboxes of repos (default all) → creates workspaces in parallel; partial failure shows per-repo result with retry, never rolls back successful ones silently.
 - **Project workspace screen**: tab per repo reusing existing changes/commits screens, plus a "Summary" tab with the rolled-up status table and "Push all" / "Open PRs".
 - **Missing repo on this machine**: row greyed with "Clone" / "Locate…".
+
+### Project home
+
+Shown when a project has two or more repos. A standalone repo, or a one-repo project, keeps today's home screen.
+
+**Header**: project title (rename inline), repo count, home repo marker. Breadcrumb `Project › repo` once drilled into a repo.
+
+**Code tab**
+- Two-column grid of repo cards (one column under ~720px width). Card: repo name, home-repo badge, current branch, uncommitted/conflict counts, workspace count, last commit time, "unavailable" state for repos missing on this machine.
+- Order follows `project_repos.position`; home repo first.
+- Clicking a card opens that repo's Code tab content as today (file browser and workspace list), scoped to the repo, with a back control to the grid.
+
+**Changes tab**
+- One consolidated view of the home checkouts' uncommitted changes across all project repos (not workspace changes), grouped by repo: a collapsible section per repo with its file list and diff, using the existing `changes` screen components.
+- Repos with no changes collapse into one "No changes: a, b" line.
+- Stage, discard and commit act per repo section; "Commit all" prompts for one message and commits each repo separately (per-repo result, not atomic; see Cross-repo semantics).
+- Review comments and viewed-file state stay per repo (existing `pending_reviews` in each repo DB).
+
+**Commits tab**
+- One column per repo, side by side (horizontal scroll past ~4 columns; home repo first). Each column card shows that repo's linear commit history (first-parent of the default branch, newest at top).
+- Rows are time-aligned across columns: the vertical axis is time, grouped into bands (e.g. Today, Yesterday, then by day, then by week), so commits made at the same time line up across repos and empty bands show gaps.
+- A commit shared by a project workspace branch is marked with the workspace name so related commits across repos are easy to spot.
+- Clicking a column card opens that repo's full-width Commits list (today's `commits` screen), scoped to the repo, with a back control.
+
+**D16. Time alignment in the Commits tab**
+- A. Shared time bands (day, then week), commits stacked inside each band per column; band height = tallest column. **(Recommended)**
+- B. Continuous time axis with exact vertical positions.
+- C. No alignment; independent lists.
+
+A keeps rows readable when one repo has 30 commits a day and another has 1, and still lines up related work. B leaves large gaps and overlaps. C loses the cross-repo view the tab exists for.
+
+**D17. Changes tab scope**
+- A. Home checkouts of all project repos, grouped by repo. **(Recommended; matches the request as read)**
+- B. Home checkouts plus every workspace.
+- C. Active project workspace only.
+
+Project workspace changes stay on the project workspace screen; B would mix unrelated parallel work into one list.
+
+**Data**: each tab reads per-repo data through the existing `*_data.rs` loaders, one per repo, in parallel, rendering each repo as it arrives. A slow or missing repo shows a placeholder in its card or column, never blocks the others.
 
 ## CLI / API
 
@@ -404,6 +444,7 @@ Each step starts with a failing test.
 - `local_db` migration tests with upgrade fixtures for new columns; `db.rs` cache tables.
 - Integration (`src-tauri/tests/`): create project workspace across 2 temp jj repos; partial failure leaves successful repos intact; missing path returns defaults.
 - CLI tests in `cli/tests.rs` for each subcommand, `--json` shape snapshot.
+- GPUI `tests.rs` for project home: 2-col grid (1 col narrow), card click opens repo-scoped Code and back; Changes grouped by repo with home-checkout changes only, "No changes" collapse, per-repo commit; Commits columns per repo, band alignment for skewed commit rates (D16), column click opens full-width repo Commits; one repo slow/missing does not block others; one-repo project shows today's home.
 - GPUI `tests.rs`: sidebar switcher, new-project modal, unavailable-repo row, summary tab; QA with `app-qa`.
 - Supabase: RLS tests (other user cannot read/write; anon denied), `version_conflict`, tombstones, via `service-qa` against the local stack; `npm test` for any Edge Function.
 - Bench: status roll-up for 10 repos × 20 workspaces under `src-tauri/benches/`.
