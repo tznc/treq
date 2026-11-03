@@ -206,6 +206,7 @@ impl RenderOnce for Dialog {
     }
     let p = self.palette;
     let selector = self.id.to_string();
+    let body_selector = format!("{}-body", self.id);
     let close_on_scrim = self.on_close.clone();
     let close_on_key = self.on_close.clone();
     let primary_on_key = self.on_primary.clone().filter(|_| !self.primary_disabled);
@@ -269,42 +270,62 @@ impl RenderOnce for Dialog {
       .shadow_xl()
       // A click inside doesn't reach the scrim.
       .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-      .when_some(self.header, |el, header| {
-        el.child(div().when(x.is_some(), |el| el.pr_8()).child(header))
-      })
-      .when(
-        !has_header && (self.title.is_some() || self.description.is_some()),
-        |el| {
-          el.child(
-            div()
-              .flex()
-              .flex_col()
-              .gap_1()
-              .when(x.is_some(), |el| el.pr_8())
-              .when_some(self.title, |el, title| {
-                el.child(
-                  text(div(), TextSize::Lg)
-                    .id(SharedString::from(format!("{}-title", self.id)))
-                    .role(gpui::Role::Heading)
-                    .aria_label(title.clone())
-                    .test_support()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(title),
-                )
-              })
-              .when_some(self.description, |el, description| {
-                el.child(
-                  text(div(), TextSize::Sm)
-                    .text_color(p.muted_foreground)
-                    .child(description),
-                )
-              }),
+      .child(
+        // Everything but the footer scrolls, so the footer's actions stay
+        // on screen in a window shorter than the dialog.
+        div()
+          .id(SharedString::from(format!("{}-body", self.id)))
+          .debug_selector(move || body_selector)
+          .flex_auto()
+          .min_h_0()
+          .overflow_y_scroll()
+          .flex()
+          .flex_col()
+          .gap_4()
+          .when_some(self.header, |el, header| {
+            el.child(div().when(x.is_some(), |el| el.pr_8()).child(header))
+          })
+          .when(
+            !has_header && (self.title.is_some() || self.description.is_some()),
+            |el| {
+              el.child(
+                div()
+                  .flex()
+                  .flex_col()
+                  .gap_1()
+                  .when(x.is_some(), |el| el.pr_8())
+                  .when_some(self.title, |el, title| {
+                    el.child(
+                      text(div(), TextSize::Lg)
+                        .id(SharedString::from(format!("{}-title", self.id)))
+                        .role(gpui::Role::Heading)
+                        .aria_label(title.clone())
+                        .test_support()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child(title),
+                    )
+                  })
+                  .when_some(self.description, |el, description| {
+                    el.child(
+                      text(div(), TextSize::Sm)
+                        .text_color(p.muted_foreground)
+                        .child(description),
+                    )
+                  }),
+              )
+            },
           )
-        },
+          .children(self.children),
       )
-      .children(self.children)
       .when(!self.footer.is_empty(), |el| {
-        el.child(div().flex().justify_end().gap_2().children(self.footer))
+        el.child(
+          div()
+            .flex_none()
+            .flex()
+            .justify_end()
+            .gap_2()
+            .children(self.footer),
+        )
       })
       .when_some(x, |el, x| {
         el.child(div().absolute().top_3().right_3().child(x))
