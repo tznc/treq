@@ -337,3 +337,69 @@ it("a provider error's secrets never reach rows the owner can read", async () =>
     await deleteTestUser(admin, u.user.id);
   }
 }, 30_000);
+
+it("malformed requests answer 400 with a code and create nothing", async () => {
+  const u = await createTestUser();
+  try {
+    const key = () => `k-${randomUUID()}`;
+    const cases: Array<[string, unknown, number, string]> = [
+      ["null body", null, 400, "validation_error"],
+      ["array body", [], 400, "validation_error"],
+      ["string body", "ensure", 400, "validation_error"],
+      ["unknown region", { action: "ensure", idempotency_key: key(), region: "mars_north" }, 400, "validation_error"],
+      ["unknown size", { action: "ensure", idempotency_key: key(), size_preset: "galactic" }, 400, "validation_error"],
+      ["numeric instance_id", { action: "status", instance_id: 42 }, 400, "validation_error"],
+      ["non-uuid instance_id", { action: "wake", idempotency_key: key(), instance_id: "../etc" }, 400, "validation_error"],
+      ["missing key", { action: "wake" }, 400, "validation_error"],
+      ["unknown action", { action: "explode" }, 400, "unknown_action"],
+      ["missing action", {}, 400, "unknown_action"],
+    ];
+    for (const [name, body, status, code] of cases) {
+      const res = await call(u.user.id, body);
+      expect({ name, status: res.status, code: res.json.code }).toEqual({ name, status, code });
+    }
+    expect(await rows(admin, u.user.id)).toEqual([]);
+
+    const huge = "x".repeat(100_000);
+    const res = await call(u.user.id, { action: huge });
+    expect(res.json.code).toBe("unknown_action");
+    expect(JSON.stringify(res.json).length).toBeLessThan(500);
+
+    await recordOutcome("remote-instance-chaos-09-input-validation", {
+      expectations: [
+        "Non-object bodies, unknown region/size_preset, non-uuid instance_id and a missing key answer 400 validation_error.",
+        "An unknown or missing action answers 400 unknown_action, and a 100 kB action is not echoed back.",
+        "None of these requests creates a remote_instances row.",
+      ],
+      details: { cases: cases.map(([name]) => name) },
+    });
+  } finally {
+    await deleteTestUser(admin, u.user.id);
+  }
+}, 30_000);
+
+it("wake and reprovision before a machine exists answer 409 no_provider_resource", async () => {
+  const u = await createTestUser();
+  try {
+    const chaos = chaosProvider(() => ({
+      createInstance: async () => {
+        throw new ProviderError("unavailable", "down");
+      },
+    }));
+    await ensure(u.user.id, chaos.make);
+    for (const action of ["wake", "reprovision"]) {
+      const res = await call(u.user.id, { action, idempotency_key: `${action}-${randomUUID()}` });
+      expect({ action, status: res.status, code: res.json.code }).toEqual({
+        action,
+        status: 409,
+        code: "no_provider_resource",
+      });
+    }
+    await recordOutcome("remote-instance-chaos-10-no-provider-resource", {
+      expectations: ["Wake and reprovision on an instance with no machine answer 409 with code no_provider_resource."],
+      details: {},
+    });
+  } finally {
+    await deleteTestUser(admin, u.user.id);
+  }
+}, 30_000);

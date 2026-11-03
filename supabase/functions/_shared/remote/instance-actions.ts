@@ -165,7 +165,7 @@ async function requireOwnedInstance(deps: RemoteInstanceDeps, suppliedInstanceId
 }
 
 function requireProvisioned(instance: InstanceRow): string {
-  if (!instance.provider_resource_id) throw new HttpError("Instance has no provider resource yet", 409, undefined);
+  if (!instance.provider_resource_id) throw new HttpError("Instance has no provider resource yet", 409, "no_provider_resource");
   return instance.provider_resource_id;
 }
 
