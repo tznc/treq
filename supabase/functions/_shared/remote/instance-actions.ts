@@ -41,6 +41,8 @@ import {
   createProvisioningInstance,
   findExistingOperation,
   getInstanceForOwner,
+  InstanceExists,
+  OperationExists,
   type InstanceRow,
   type OperationRow,
   type OperationType,
@@ -210,8 +212,9 @@ async function tracked(
       idempotencyKey,
     });
   } catch (err) {
-    // Nothing was recorded, so nothing would ever finish this instance.
-    await onFailure?.().catch(() => {});
+    // Nothing was recorded, so nothing would ever finish this instance. A
+    // concurrent request with the same key owns it instead.
+    if (!(err instanceof OperationExists)) await onFailure?.().catch(() => {});
     throw err;
   }
   const audit = auditFor(supabase, { ownerUserId, instanceId: instance.id, correlationId });
@@ -266,7 +269,26 @@ export async function handleStatus(_body: Record<string, unknown>, deps: RemoteI
   return ok({ instance: serializeInstance(instance), endpoint, migration });
 }
 
+// Concurrent ensures race on the unique (owner, idempotency_key) and
+// one-live-instance-per-owner indexes. The loser answers with what the winner
+// recorded, as a sequential retry would.
 export async function handleEnsure(body: Record<string, unknown>, deps: RemoteInstanceDeps): Promise<Reply> {
+  for (let attempt = 0;; attempt++) {
+    try {
+      return await ensureOnce(body, deps);
+    } catch (err) {
+      if (err instanceof OperationExists) {
+        const instance = await getInstanceForOwner(deps.supabase, deps.ownerUserId);
+        return ok({ operation_id: err.operation.id, status: err.operation.status, instance: serializeInstance(instance) });
+      }
+      // Run again: this time ensure sees the winner's instance.
+      if (err instanceof InstanceExists && attempt === 0) continue;
+      throw err;
+    }
+  }
+}
+
+async function ensureOnce(body: Record<string, unknown>, deps: RemoteInstanceDeps): Promise<Reply> {
   const { supabase, ownerUserId, correlationId } = deps;
   const idempotencyKey = requireIdempotencyKey(body);
   const region: RegionCode = isRegionCode(body.region) ? body.region : "us_east";
