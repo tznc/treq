@@ -304,7 +304,7 @@ test("linear: a rejected key", async ({ page }) => {
   await capture(page, {
     name: "22-linear-15-rejected-key-dialog",
     title: "New workspace: Linear rejects the key",
-    expectations: ["'Could not load Linear issues' with the rejection message and a Try again button"],
+    expectations: ["'Couldn't load Linear issues' with the rejection message, Retry and Copy error"],
   });
   await page.keyboard.press("Escape");
   await settle(page, 600);

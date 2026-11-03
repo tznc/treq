@@ -2,6 +2,49 @@ id: gpui-no-adhoc-feedback
 snapshots:
   ? |
     fn body(p: &Palette) -> Div {
+      div().text_color(p.destructive).child("Failed to load comments")
+    }
+  : labels:
+    - source: '"Failed to load comments"'
+      style: primary
+      start: 70
+      end: 95
+    - source: child
+      style: secondary
+      start: 64
+      end: 69
+    - source: div().text_color(p.destructive).child
+      style: secondary
+      start: 32
+      end: 69
+    - source: div().text_color(p.destructive).child("Failed to load comments")
+      style: secondary
+      start: 32
+      end: 96
+    - source: ("Failed to load comments")
+      style: secondary
+      start: 69
+      end: 96
+  ? |
+    fn body(p: &Palette) -> Div {
+      let error_state = |err: String| div().child(err);
+      error_state("x".into())
+    }
+  : labels:
+    - source: 'let error_state = |err: String| div().child(err);'
+      style: primary
+      start: 32
+      end: 81
+    - source: error_state
+      style: secondary
+      start: 36
+      end: 47
+    - source: '|err: String| div().child(err)'
+      style: secondary
+      start: 50
+      end: 80
+  ? |
+    fn body(p: &Palette) -> Div {
       let message = |text: &'static str| div().child(text);
       message("x")
     }
@@ -34,6 +77,22 @@ snapshots:
       style: secondary
       start: 3
       end: 8
+  ? |
+    fn error_view(p: &Palette) -> Div {
+      div()
+    }
+  : labels:
+    - source: |-
+        fn error_view(p: &Palette) -> Div {
+          div()
+        }
+      style: primary
+      start: 0
+      end: 45
+    - source: error_view
+      style: secondary
+      start: 3
+      end: 13
   ? |
     fn list(p: &Palette) -> Div {
       div().child("Couldn't load commits")
@@ -150,3 +209,44 @@ snapshots:
       style: secondary
       start: 3
       end: 10
+  ? |
+    fn retry(p: &Palette) -> Button {
+      Button::new("retry", p).label("Try again")
+    }
+  : labels:
+    - source: '"Try again"'
+      style: primary
+      start: 66
+      end: 77
+    - source: label
+      style: secondary
+      start: 60
+      end: 65
+    - source: Button::new("retry", p).label
+      style: secondary
+      start: 36
+      end: 65
+    - source: Button::new("retry", p).label("Try again")
+      style: secondary
+      start: 36
+      end: 78
+    - source: ("Try again")
+      style: secondary
+      start: 65
+      end: 78
+  ? |
+    pub fn error_state(id: &str, title: &str, error: &str, p: &Palette) -> Stateful<Div> {
+      div().id(id.to_string()).child(title.to_string())
+    }
+  : labels:
+    - source: |-
+        pub fn error_state(id: &str, title: &str, error: &str, p: &Palette) -> Stateful<Div> {
+          div().id(id.to_string()).child(title.to_string())
+        }
+      style: primary
+      start: 0
+      end: 140
+    - source: error_state
+      style: secondary
+      start: 7
+      end: 18

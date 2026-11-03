@@ -334,7 +334,7 @@ fn a_failed_search_shows_its_error(cx: &mut TestAppContext) {
   let screen = self::screen(&mut h);
   assert!(!searching(&screen));
   assert!(h.cx.debug_bounds("open-workspaces-prs-error").is_some());
-  expect(screen.get_by_role(by::role(Role::Button).name("Try again"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Button).name("Retry"))).to_be_visible();
 }
 
 #[gpui::test]

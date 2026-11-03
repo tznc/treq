@@ -17,7 +17,7 @@ rule:
       has:
         field: name
         kind: identifier
-        regex: ^(message|empty|loading_text|empty_state)$
+        regex: ^(message|empty|loading_text|empty_state|error_state|error_view)$
       # A method such as a draft's `message(&self)` is data, not a helper.
       not:
         inside:
@@ -28,12 +28,25 @@ rule:
         - has:
             field: pattern
             kind: identifier
-            regex: ^(message|empty|loading_text|empty_state)$
+            regex: ^(message|empty|loading_text|empty_state|error_state|error_view)$
         - has:
             field: value
             kind: closure_expression
+    # A retry button says "Retry", as `ui::error_actions` does.
     - kind: string_literal
-      regex: ^"(No |Loading|Fetching|Couldn't)
+      regex: ^"Try again
+      inside:
+        kind: arguments
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            kind: field_expression
+            has:
+              field: field
+              regex: ^label$
+    - kind: string_literal
+      regex: ^"(No |Loading|Fetching|Couldn't|Failed to|Try again)
       inside:
         kind: arguments
         inside:

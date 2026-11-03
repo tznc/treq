@@ -1644,9 +1644,25 @@ impl FileBrowserView {
       .into_any_element();
     }
     let Some(opened) = self.opened.clone().filter(|o| !o.content.is_empty()) else {
+      let retry = path.clone();
       return Self::centered(p)
         .debug_selector(|| "file-browser-failed".into())
-        .child("Failed to load file content")
+        .child(
+          ui::EmptyState::failed(
+            "file-browser-failed-state",
+            format!("Couldn't read {}", file_name(&path)),
+            "The file may have been moved or deleted, or is not text.",
+            p,
+          )
+          .action(ui::error_actions(
+            "file-browser",
+            format!("Couldn't read {path}"),
+            Some(Box::new(
+              cx.listener(move |view, _, _, cx| view.select_file(&retry, cx)),
+            )),
+            p,
+          )),
+        )
         .into_any_element();
     };
     let markdown = is_markdown(&path);

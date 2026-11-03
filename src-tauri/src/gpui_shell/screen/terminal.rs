@@ -922,7 +922,7 @@ impl TerminalView {
     }));
   }
 
-  /// "Try again": closes the PTY and starts over.
+  /// "Retry": closes the PTY and starts over.
   fn retry(&mut self, cx: &mut Context<Self>) {
     self.host.close_pty(&self.pty).ignore_closed();
     terminal_data::detach(&self.pty);
@@ -1626,7 +1626,7 @@ impl TerminalView {
                     .child(
                       ui::Button::new("terminal-retry", p)
                         .size(ui::Size::Sm)
-                        .label("Try again")
+                        .label("Retry")
                         .on_click(cx.listener(|view, _, _, cx| view.retry(cx))),
                     )
                     .child(

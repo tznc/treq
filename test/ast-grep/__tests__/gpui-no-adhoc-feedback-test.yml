@@ -22,6 +22,15 @@ valid:
     fn hint() -> Div {
       div().child("Nothing selected yet")
     }
+  - |
+    fn failed(p: &Palette, err: String) -> ui::EmptyState {
+      ui::EmptyState::failed("list-error", "Couldn't load issues", err.clone(), p)
+        .action(ui::error_actions("list", err, None, p))
+    }
+  - |
+    fn retry(p: &Palette) -> ui::Button {
+      ui::Button::new("retry", p).label("Retry")
+    }
 invalid:
   - |
     fn list(p: &Palette) -> Div {
@@ -51,4 +60,25 @@ invalid:
     fn body(p: &Palette) -> Div {
       let message = |text: &'static str| div().child(text);
       message("x")
+    }
+  - |
+    pub fn error_state(id: &str, title: &str, error: &str, p: &Palette) -> Stateful<Div> {
+      div().id(id.to_string()).child(title.to_string())
+    }
+  - |
+    fn error_view(p: &Palette) -> Div {
+      div()
+    }
+  - |
+    fn body(p: &Palette) -> Div {
+      let error_state = |err: String| div().child(err);
+      error_state("x".into())
+    }
+  - |
+    fn body(p: &Palette) -> Div {
+      div().text_color(p.destructive).child("Failed to load comments")
+    }
+  - |
+    fn retry(p: &Palette) -> Button {
+      Button::new("retry", p).label("Try again")
     }

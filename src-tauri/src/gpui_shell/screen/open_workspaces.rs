@@ -1324,14 +1324,23 @@ impl OpenWorkspacesDialog {
       )
       .into_any_element()
     } else if let Some(err) = &self.issues.error {
-      parts::error_state(
-        "open-workspaces-issues",
-        "Could not load Linear issues",
-        err,
-        p,
-        Some(Box::new(cx.listener(|view, _, _, cx| view.load_issues(cx)))),
-      )
-      .into_any_element()
+      div()
+        .py_12()
+        .child(
+          crate::gpui_shell::ui::EmptyState::failed(
+            "open-workspaces-issues-error",
+            "Couldn't load Linear issues",
+            err.clone(),
+            p,
+          )
+          .action(crate::gpui_shell::ui::error_actions(
+            "open-workspaces-issues",
+            err.clone(),
+            Some(Box::new(cx.listener(|view, _, _, cx| view.load_issues(cx)))),
+            p,
+          )),
+        )
+        .into_any_element()
     } else if items.is_empty() {
       crate::gpui_shell::ui::EmptyState::new("open-workspaces-no-open-issues", "No open issues", p)
         .message("No open Linear issues match. Type a line on the left to start a new branch.")
@@ -1374,14 +1383,23 @@ impl OpenWorkspacesDialog {
       )
       .into_any_element()
     } else if let Some(err) = &self.prs.error {
-      parts::error_state(
-        "open-workspaces-prs",
-        "Could not load pull requests",
-        err,
-        p,
-        Some(Box::new(cx.listener(|view, _, _, cx| view.load_prs(cx)))),
-      )
-      .into_any_element()
+      div()
+        .py_12()
+        .child(
+          crate::gpui_shell::ui::EmptyState::failed(
+            "open-workspaces-prs-error",
+            "Couldn't load pull requests",
+            err.clone(),
+            p,
+          )
+          .action(crate::gpui_shell::ui::error_actions(
+            "open-workspaces-prs",
+            err.clone(),
+            Some(Box::new(cx.listener(|view, _, _, cx| view.load_prs(cx)))),
+            p,
+          )),
+        )
+        .into_any_element()
     } else if self.prs.items.is_empty() {
       let query = self.query.trim();
       let (id, title, why) = if query.is_empty() && self.assigned {

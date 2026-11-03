@@ -23,6 +23,8 @@ pub(super) struct Fixture {
   comments: Vec<(String, LinearComment)>,
   /// Whether reading issues and projects fails, as with no API key.
   failing: bool,
+  /// Whether reading comments fails.
+  comments_failing: bool,
 }
 
 impl linear_data::LinearHost for FakeHost {
@@ -62,6 +64,9 @@ impl linear_data::LinearHost for FakeHost {
     of: &linear_data::Commented,
   ) -> Result<Vec<LinearComment>, String> {
     self.record(format!("read linear comments {}", of.id()));
+    if self.linear.comments_failing {
+      return Err("network down".into());
+    }
     Ok(
       self
         .linear
@@ -243,6 +248,7 @@ fn fixture() -> Fixture {
     }],
     comments: vec![("1".into(), comment("c1", Some("the API")))],
     failing: false,
+    comments_failing: false,
   }
 }
 
@@ -871,4 +877,27 @@ fn linear_document_dialog_closes_on_escape_and_from_its_x(cx: &mut TestAppContex
   h.click("linear-document-item-d1");
   h.click("linear-document-dialog-close");
   assert!(!h.drawn("linear-document-dialog"));
+}
+
+#[gpui::test]
+fn linear_comments_that_fail_to_load_offer_retry(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.linear.comments_failing = true;
+  let (mut h, host) = linear_harness(cx, host);
+  h.click("linear-issue-1");
+  let page = screen(&mut h);
+  expect(page.get_by_role(by::role(Role::Status).name("Couldn't load comments"))).to_be_visible();
+  let reads = || {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("read linear comments"))
+      .count()
+  };
+  let before = reads();
+  page
+    .user()
+    .click(&page.get_by_role(by::role(Role::Button).name("Retry")));
+  h.cx.run_until_parked();
+  assert_eq!(reads(), before + 1);
 }

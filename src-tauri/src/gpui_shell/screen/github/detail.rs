@@ -291,14 +291,18 @@ impl GithubView {
       .into_any_element()
     } else if let (Some(err), false) = (self.detail.error.clone(), loaded) {
       let what = if issue { "issue" } else { "pull request" };
-      parts::error_state(
-        "github-detail",
-        &format!("Could not load {what} #{number}"),
-        &err,
-        p,
-        None,
-      )
-      .into_any_element()
+      div()
+        .py_12()
+        .child(
+          ui::EmptyState::failed(
+            "github-detail-error",
+            format!("Couldn't load {what} #{number}"),
+            err.clone(),
+            p,
+          )
+          .action(ui::error_actions("github-detail", err, None, p)),
+        )
+        .into_any_element()
     } else if let Some(issue) = self.detail.issue.clone().filter(|_| issue) {
       self.issue_content(&issue, p, window, cx).into_any_element()
     } else if let Some(pr) = self.detail.pr.clone().filter(|_| !issue) {

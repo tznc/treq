@@ -2,10 +2,12 @@
 
 use std::time::Duration;
 
-use gpui::{div, prelude::*, Animation, AnimationExt as _, AnyElement, App, SharedString, Window};
+use gpui::{
+  div, prelude::*, Animation, AnimationExt as _, AnyElement, App, ClickEvent, SharedString, Window,
+};
 use gpui_kit::base::TestSupportExt as _;
 
-use crate::{icon, spinner, text, theme, theme::Palette, zpx, TextSize};
+use crate::{icon, spinner, text, theme, theme::Palette, zpx, Button, Size, TextSize, Variant};
 
 /// Why a pane is empty, and what to do about it: a 24 icon, a title, one
 /// sentence and at most one action.
@@ -35,6 +37,20 @@ impl EmptyState {
       action: None,
       palette: *palette,
     }
+  }
+
+  /// A read that failed: the danger icon, what failed as the title, and
+  /// the error as the message. Add [`error_actions`] as its action.
+  pub fn failed(
+    id: impl Into<SharedString>,
+    title: impl Into<SharedString>,
+    error: impl Into<SharedString>,
+    palette: &Palette,
+  ) -> Self {
+    Self::new(id, title, palette)
+      .icon(theme::ICON_CIRCLE_ALERT)
+      .error(true)
+      .message(error)
   }
 
   /// One sentence: why it's empty, or what failed and what to do next.
@@ -110,6 +126,41 @@ impl RenderOnce for EmptyState {
       })
       .test_support()
   }
+}
+
+/// A button's click handler, boxed so callers can pass a listener.
+pub type OnClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
+/// Retry, when the read can be run again, and Copy error, so the full
+/// message can go into a bug report.
+pub fn error_actions(
+  id: &str,
+  error: impl Into<SharedString>,
+  on_retry: Option<OnClick>,
+  palette: &Palette,
+) -> gpui::Div {
+  let error: SharedString = error.into();
+  div()
+    .flex()
+    .flex_wrap()
+    .justify_center()
+    .gap_2()
+    .children(on_retry.map(|retry| {
+      Button::new(SharedString::from(format!("{id}-retry")), palette)
+        .size(Size::Sm)
+        .label("Retry")
+        .on_click(retry)
+    }))
+    .child(
+      Button::new(SharedString::from(format!("{id}-copy-error")), palette)
+        .variant(Variant::Ghost)
+        .size(Size::Sm)
+        .icon(theme::ICON_COPY, 12.)
+        .label("Copy error")
+        .on_click(move |_, _, cx| {
+          cx.write_to_clipboard(gpui::ClipboardItem::new_string(error.to_string()))
+        }),
+    )
 }
 
 /// A spinner where the result will appear, with an optional muted label.

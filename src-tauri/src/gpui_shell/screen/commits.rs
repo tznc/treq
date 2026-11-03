@@ -166,6 +166,8 @@ pub struct CommitsView {
   tips: Tooltips,
   popups: PopupSink,
   pub(super) history: Option<History>,
+  /// Why the log could not be read, while there is no history to show.
+  history_error: Option<String>,
   loading_more: bool,
   pub(super) target_limit: usize,
   pub(super) home_limit: usize,
@@ -226,6 +228,7 @@ impl CommitsView {
       tips: Tooltips::new(popups.clone(), dark),
       popups,
       history: None,
+      history_error: None,
       loading_more: false,
       target_limit: TARGET_PAGE,
       home_limit: HOME_PAGE,
@@ -286,6 +289,7 @@ impl CommitsView {
     self.parent = parent;
     if moved {
       self.history = None;
+      self.history_error = None;
       self.layout_gen += 1;
       self.target_limit = TARGET_PAGE;
       self.home_limit = HOME_PAGE;
@@ -388,11 +392,15 @@ impl CommitsView {
             let unconfirmed = &view.unconfirmed;
             view.removed.retain(|id| unconfirmed.contains(id));
             view.history = Some(history);
+            view.history_error = None;
             view.layout_gen += 1;
           }
           Err(err) => {
             log::warn!("Failed to load commits: {err}");
-            view.history.get_or_insert_with(History::default);
+            // Keep what was read before; only an empty view says it failed.
+            if view.history.is_none() {
+              view.history_error = Some(err);
+            }
             view.layout_gen += 1;
           }
         }
@@ -1563,6 +1571,28 @@ impl Render for CommitsView {
         MouseButton::Left,
         cx.listener(|view, _, _, cx| view.end_drag(cx)),
       );
+    if let (None, Some(err)) = (&self.history, self.history_error.clone()) {
+      return root.child(
+        div()
+          .size_full()
+          .flex()
+          .items_center()
+          .justify_center()
+          .child(
+            ui::EmptyState::failed("commits-error", "Couldn't load commits", err.clone(), &p)
+              .action(ui::error_actions(
+                "commits",
+                err,
+                Some(Box::new(cx.listener(|view, _, _, cx| {
+                  view.history_error = None;
+                  view.load(cx);
+                  cx.notify();
+                }))),
+                &p,
+              )),
+          ),
+      );
+    }
     if self.history.is_none() {
       return root.child(ui::delayed(
         "commits-loading-row",
@@ -2022,11 +2052,26 @@ impl CommitsView {
       .into_any_element(),
       Some(DiffState {
         error: Some(err), ..
-      }) => div()
-        .p_3()
-        .text_color(p.destructive)
-        .child(format!("Failed to load diff: {err}"))
-        .into_any_element(),
+      }) => {
+        let id = commit.commit_id.clone();
+        ui::EmptyState::failed(
+          SharedString::from(format!("diff-error-{id}")),
+          "Couldn't load the diff",
+          err.clone(),
+          p,
+        )
+        .action(ui::error_actions(
+          &format!("diff-{id}"),
+          err.clone(),
+          Some(Box::new(cx.listener(move |view, _, _, cx| {
+            view.diffs.remove(&id);
+            view.expand(&id, cx);
+            cx.notify();
+          }))),
+          p,
+        ))
+        .into_any_element()
+      }
       Some(DiffState {
         diff: Some(diff), ..
       }) => diff_message(diff, p).into_any_element(),

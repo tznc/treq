@@ -2439,26 +2439,20 @@ impl LinearView {
       })
       .when_some(self.projects.error.clone(), |this, error| {
         this.child(
-          ui::text(div(), TextSize::Sm)
-            .id("linear-projects-error")
-            .debug_selector(|| "linear-projects-error".into())
-            .role(Role::Label)
-            .aria_label(error.clone())
-            .test_support()
-            .p_4()
-            .flex()
-            .flex_col()
-            .items_start()
-            .gap_3()
-            .text_color(p.destructive)
-            .child(error)
-            .child(
-              Button::new("linear-projects-retry", p)
-                .variant(Variant::Outline)
-                .size(Size::Sm)
-                .label("Try again")
-                .on_click(cx.listener(|view, _, _, cx| view.load_projects(cx))),
-            ),
+          ui::EmptyState::failed(
+            "linear-projects-error",
+            "Couldn't load projects",
+            error.clone(),
+            p,
+          )
+          .action(ui::error_actions(
+            "linear-projects",
+            error,
+            Some(Box::new(
+              cx.listener(|view, _, _, cx| view.load_projects(cx)),
+            )),
+            p,
+          )),
         )
       })
       .when(
@@ -2903,14 +2897,21 @@ impl LinearView {
             })
             .when(fetch.failed(), |this| {
               this.child(
-                ui::EmptyState::new(
+                ui::EmptyState::failed(
                   format!("linear-comments-error-{key}"),
                   "Couldn't load comments",
+                  fetch.error.clone().unwrap_or_default(),
                   p,
                 )
-                .error(true)
-                .icon(theme::ICON_CIRCLE_ALERT)
-                .message("Linear did not answer. Check your connection and API key."),
+                .action(ui::error_actions(
+                  &format!("linear-comments-{key}"),
+                  fetch.error.clone().unwrap_or_default(),
+                  Some(Box::new(cx.listener({
+                    let of = of.clone();
+                    move |view, _, _, cx| view.load_comments(of.clone(), cx)
+                  }))),
+                  p,
+                )),
               )
             })
             .when(empty, |this| {

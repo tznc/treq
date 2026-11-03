@@ -259,14 +259,14 @@ test("open-workspaces: the pull request search shows loading, no matches and err
   });
 
   await search.fill("unreachable");
-  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
   await expect(searching).toBeHidden();
   await settle(page, 300);
   await capture(page, {
     name: "13-open-workspaces-search-error",
     title: "Pull request search failed",
     expectations: [
-      "The list shows 'Could not load pull requests' with the gh error 'HTTP 502: Bad Gateway' and a retry action",
+      "The list shows 'Couldn't load pull requests' with the gh error 'HTTP 502: Bad Gateway' and a retry action",
       "No spinner in the search input",
     ],
   });

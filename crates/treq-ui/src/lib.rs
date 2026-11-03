@@ -27,7 +27,7 @@ pub use alert::{Alert, Severity};
 pub use badge::{Badge, Count, Dot, Tone};
 pub use checkbox::{CheckState, Checkbox};
 pub use dialog::{handler, ConfirmDialog, Dialog};
-pub use empty_state::{EmptyState, Loading, Skeleton};
+pub use empty_state::{error_actions, EmptyState, Loading, Skeleton};
 pub use icon_button::{IconButton, IconButtonSize};
 pub use kbd::Kbd;
 pub use menu::{MenuItem, MenuLabel, MenuSeparator};

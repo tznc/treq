@@ -1672,14 +1672,18 @@ impl GithubView {
         let issues = self.issue_items();
         if let (Some(err), true) = (&self.issues.error, issues.is_empty()) {
           return scrolled(
-            parts::error_state(
-              "github-list",
-              "Could not load issues",
-              err,
-              p,
-              Some(retry()),
-            )
-            .into_any_element(),
+            div()
+              .py_12()
+              .child(
+                ui::EmptyState::failed("github-list-error", "Couldn't load issues", err.clone(), p)
+                  .action(ui::error_actions(
+                    "github-list",
+                    err.clone(),
+                    Some(retry()),
+                    p,
+                  )),
+              )
+              .into_any_element(),
           );
         }
         if issues.is_empty() {
@@ -1723,14 +1727,23 @@ impl GithubView {
         let prs = self.pr_items();
         if let (Some(err), true) = (&self.prs.error, prs.is_empty()) {
           return scrolled(
-            parts::error_state(
-              "github-list",
-              "Could not load pull requests",
-              err,
-              p,
-              Some(retry()),
-            )
-            .into_any_element(),
+            div()
+              .py_12()
+              .child(
+                ui::EmptyState::failed(
+                  "github-list-error",
+                  "Couldn't load pull requests",
+                  err.clone(),
+                  p,
+                )
+                .action(ui::error_actions(
+                  "github-list",
+                  err.clone(),
+                  Some(retry()),
+                  p,
+                )),
+              )
+              .into_any_element(),
           );
         }
         if prs.is_empty() {

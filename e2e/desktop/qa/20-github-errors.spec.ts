@@ -1,5 +1,5 @@
 // The GitHub view's error state when gh is signed out: a distinct
-// "not authenticated" message, Try again, and Copy error.
+// "not authenticated" message, Retry, and Copy error.
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -21,8 +21,8 @@ test("github-errors: signed-out gh", async ({ page }) => {
     title: "GitHub view: gh signed out",
     screen: true,
     expectations: [
-      "Red alert icon, 'Could not load issues', then 'gh is not authenticated. Run `gh auth login`…'",
-      "'Try again' and 'Copy error' buttons side by side, centered",
+      "Red alert icon, 'Couldn't load issues', then 'gh is not authenticated. Run `gh auth login`…'",
+      "'Retry' and 'Copy error' buttons side by side, centered",
     ],
   });
   await expect(page.getByRole("button", { name: "Copy error" })).toBeVisible();
