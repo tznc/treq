@@ -7,8 +7,7 @@ use std::{rc::Rc, time::Duration};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   div, AnyView, App, AppContext, Context, Entity, Global, InteractiveElement, IntoElement,
-  ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled, WeakEntity,
-  Window,
+  ParentElement, Pixels, Render, SharedString, Styled, WeakEntity, Window,
 };
 use treq_ui::{ConfirmDialog, Dialog, Row, RowDensity};
 

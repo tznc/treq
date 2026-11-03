@@ -22,8 +22,8 @@ use gpui_kit::{
     v_flex, ActiveTheme, IconName, Sizable,
   },
   div, list, px, AnyElement, App, AppContext, ClipboardItem, Context, Div, Entity, FontWeight,
-  IntoElement, ListState, ParentElement, Render, Result, SharedString, StatefulInteractiveElement,
-  Styled, Task, WeakEntity, Window,
+  IntoElement, ListState, ParentElement, Render, Result, SharedString, Styled, Task, WeakEntity,
+  Window,
 };
 use treq_ui::{Checkbox, Dot, Tone};
 
