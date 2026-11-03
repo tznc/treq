@@ -1437,6 +1437,8 @@ impl CodeView {
           .variant(Variant::Outline)
           .size(Size::Sm)
           .label("Archive")
+          // Apart from the header's Archive, which a merged PR shows.
+          .aria_label("Archive workspace")
           .on_click(move |_, _, cx| {
             let react = react.clone();
             cx.defer(move |cx| {

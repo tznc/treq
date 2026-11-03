@@ -258,7 +258,7 @@ test("linear: new workspace from an issue", async ({ page }) => {
 test("linear: a sub-issue nests under its parent's workspace", async ({ page }) => {
   linearKey("lin_api_qa");
   await home(page);
-  await page.getByRole("button", { name: "New workspaces" }).click();
+  await page.getByRole("button", { name: "New workspace…" }).first().click();
   await expect(page.getByRole("heading", { name: "New workspace" })).toBeVisible();
   await page.getByRole("tab", { name: "Linear" }).click();
   await expect(page.getByRole("heading", { name: "Your issues" })).toBeVisible({ timeout: 20_000 });

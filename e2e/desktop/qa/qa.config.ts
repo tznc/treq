@@ -1,4 +1,6 @@
-// The visual QA run (`npm run qa`), kept out of the e2e suite's `testDir`.
+// The visual QA run, kept out of the e2e suite's `testDir`. `npm run qa`
+// (./run-each.ts) runs it one spec file at a time, each against its own
+// app on a fresh seed.
 // It drives the app on the demo repository `launch.ts` seeds and writes a
 // PNG plus a JSON of what to check for every screen and state into
 // `QA_OUT` (default qa/.shots/). `QA_THEME=light` runs it in the light
