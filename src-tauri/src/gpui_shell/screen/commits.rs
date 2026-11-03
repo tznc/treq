@@ -1734,16 +1734,17 @@ impl CommitsView {
     // An unfolded own commit edits its description and timestamp in place.
     let own = expanded && matches!(kind, Kind::Own { .. });
     let short = &commit.change_id;
-    let edit_description = own.then(|| {
-      self.edit_icon(
-        format!("edit-description-{short}"),
-        "Edit description",
-        commit,
-        Self::edit_description,
-        p,
-        cx,
-      )
-    });
+    let edit_description =
+      (own && (self.parent.workspace.is_some() || !commit.is_immutable)).then(|| {
+        self.edit_icon(
+          format!("edit-description-{short}"),
+          "Edit description",
+          commit,
+          Self::edit_description,
+          p,
+          cx,
+        )
+      });
     let edit_timestamp =
       (own && self.parent.workspace.is_some() && !commit.is_immutable).then(|| {
         self.edit_icon(
@@ -2117,17 +2118,21 @@ impl CommitsView {
       ),
       NativeMenuItem::Separator,
     ];
-    if own {
+    // Immutable means on the workspace's target branch, or for the home repo
+    // pushed to origin: offer nothing that rewrites it. A workspace's commits
+    // pushed to its own branch stay mutable, so they stay editable.
+    let rewritable = own && !commit.is_immutable;
+    if rewritable {
       items.push(run("Edit description", Self::edit_description).icon(MenuIcon::Pencil));
     }
-    if matches!(kind, Kind::Own { first: true }) && workspace && !removing {
+    if matches!(kind, Kind::Own { first: true }) && rewritable && workspace && !removing {
       items.push(run("Undo commit", Self::undo));
     }
     items.push(run("Revert commit", Self::revert));
-    if own && workspace && !commit.is_immutable {
+    if rewritable && workspace {
       items.push(run("Edit timestamp", Self::edit_timestamp));
     }
-    if own && !removing {
+    if rewritable && !removing {
       items.push(run("Stash commit", Self::stash).icon(MenuIcon::Archive));
       items.push(NativeMenuItem::Separator);
       items.push(
