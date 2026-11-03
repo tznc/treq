@@ -103,6 +103,8 @@ export interface RelayStore {
   ): Promise<RelayClientKeyRow | null>;
   /** has_pro for the owner. */
   hasPro(ownerUserId: string): Promise<boolean>;
+  /** True when the owner reached their spend cap (get_spend_status_for). */
+  spendCapped(ownerUserId: string): Promise<boolean>;
 }
 
 export interface RelayAuthDeps {
@@ -174,6 +176,14 @@ export async function authorizeRelayRequest(
       PRO_REQUIRED_MESSAGES.cloudWorkspace,
       402,
       PRO_REQUIRED_CODE,
+    );
+  }
+  // The same wake would restart a workspace the spend cap stopped.
+  if (await deps.store.spendCapped(ownerUserId)) {
+    throw new RelayError(
+      "You reached your monthly cloud spend cap. Raise the cap to keep working.",
+      402,
+      "spend_cap_reached",
     );
   }
 

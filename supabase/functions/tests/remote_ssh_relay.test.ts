@@ -75,6 +75,7 @@ function store(
     },
     // Pro refusals are covered in test/billing/relay-pro.test.ts.
     hasPro: () => Promise.resolve(true),
+    spendCapped: () => Promise.resolve(false),
   };
 }
 
