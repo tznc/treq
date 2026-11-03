@@ -3,7 +3,10 @@ import { isResumable } from "../../supabase/functions/_shared/remote/instance-ac
 
 const NOW = Date.parse("2026-11-03T12:00:00Z");
 const row = (minutesAgo: number) =>
-  ({ status: "provisioning", updated_at: new Date(NOW - minutesAgo * 60_000).toISOString() }) as never;
+  ({
+    status: "provisioning",
+    updated_at: new Date(NOW - minutesAgo * 60_000).toISOString(),
+  }) as never;
 
 describe("a provisioning row is stuck after 5 minutes", () => {
   it("resumes a row untouched for 5 minutes", () => {
