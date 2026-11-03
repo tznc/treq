@@ -1,5 +1,5 @@
 /**
- * Team cloud (065_team_cloud.sql) against the local stack: an organization
+ * Team cloud (068_team_cloud.sql) against the local stack: an organization
  * owner's cloud settings, a member's profile, organization BYOS keys, usage
  * billed to the organization's customer, and the organization and member
  * spend caps. remote-instance runs in-process with the service-role client

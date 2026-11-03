@@ -200,7 +200,7 @@ pub struct ProviderKey {
 }
 
 /// An organization the user belongs to, with what its cloud allows
-/// (`list_my_cloud_organizations`, 065_team_cloud.sql).
+/// (`list_my_cloud_organizations`, 068_team_cloud.sql).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CloudOrganization {
   pub org_id: String,
