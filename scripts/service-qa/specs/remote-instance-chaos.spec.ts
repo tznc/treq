@@ -9,11 +9,11 @@ import { expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import * as lapseSweep from "../../../supabase/functions/_shared/remote/lapse-sweep";
 import { LocalProvider } from "../../../supabase/functions/_shared/remote/local-provider";
-import type { SandboxProvider } from "../../../supabase/functions/_shared/remote/provider";
+import { ProviderError, type SandboxProvider } from "../../../supabase/functions/_shared/remote/provider";
 import { handleRemoteInstanceAction } from "../../../supabase/functions/remote-instance/lib";
 import { getServiceClient } from "../clients";
 import { recordOutcome } from "../record";
-import { createTestUser, deleteTestUser } from "../seed";
+import { createTestUser, deleteTestUser, signInWithEmailPassword } from "../seed";
 
 const admin = getServiceClient();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -300,3 +300,40 @@ it("concurrent ensures answer 200 and leave one live instance", async () => {
     await deleteTestUser(admin, distinct.user.id);
   }
 }, 60_000);
+
+it("a provider error's secrets never reach rows the owner can read", async () => {
+  const u = await createTestUser();
+  try {
+    const secret = "sk_live_SECRET";
+    const url = "https://api.sprites.dev/internal";
+    const chaos = chaosProvider(() => ({
+      createInstance: async () => {
+        throw new ProviderError("unavailable", `upstream 500 token=${secret} at ${url}`);
+      },
+    }));
+    const res = await ensure(u.user.id, chaos.make);
+    expect(res.status).toBe(502);
+
+    const { client } = await signInWithEmailPassword(u.email, u.password);
+    const ops = await client.from("remote_instance_operations").select("*");
+    const audit = await client.from("remote_audit_events").select("*");
+    expect(ops.error).toBeNull();
+    expect(audit.error).toBeNull();
+    expect(ops.data?.length).toBeGreaterThan(0);
+    const readable = JSON.stringify({ ops: ops.data, audit: audit.data, res: res.json });
+    expect(readable).not.toContain(secret);
+    expect(readable).not.toContain("api.sprites.dev");
+    expect(ops.data?.[0].error_message).toMatch(/^provider_unavailable/);
+
+    await recordOutcome("remote-instance-chaos-08-scrubbed-errors", {
+      expectations: [
+        "A provider error carrying a token and an internal URL fails ensure with 502.",
+        "Neither the token nor the URL appears in the operation or audit rows the owner reads with their JWT.",
+        "The operation's error_message starts with the error code provider_unavailable.",
+      ],
+      details: { error_message: ops.data?.[0].error_message },
+    });
+  } finally {
+    await deleteTestUser(admin, u.user.id);
+  }
+}, 30_000);
