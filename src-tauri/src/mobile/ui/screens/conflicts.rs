@@ -14,7 +14,7 @@ use gpui_kit::{
   Render, ScrollHandle, StatefulInteractiveElement, Styled, Window,
 };
 
-use super::{mutation_message, on_epoch, workspace::Target, Confirm};
+use super::{mutation_message, on_epoch, workspace::Target};
 use crate::mobile::{
   remote::{self, IdempotencyKeys, Mutation},
   ui::{load, nav, widgets, Load, Location},
@@ -39,15 +39,14 @@ const SIDES: [(&str, &str); 3] = [
   ("both", "Keep both"),
 ];
 
-#[derive(Clone, Copy, PartialEq)]
-struct Resolve;
-
 pub struct ConflictsScreen {
   target: Target,
   files: Load<Vec<String>>,
   revision: Entity<InputState>,
   side: usize,
-  confirm: Confirm<Resolve>,
+  running: bool,
+  /// An ambiguous resolve, for "Check again" (a read, never a resend).
+  unsure: Option<(Vec<String>, TreqCommandRequest)>,
   message: Option<(bool, String)>,
   keys: IdempotencyKeys,
   scroll: ScrollHandle,
@@ -66,7 +65,8 @@ impl ConflictsScreen {
       files: Load::Idle,
       revision,
       side: 0,
-      confirm: Confirm::default(),
+      running: false,
+      unsure: None,
       message: None,
       keys: IdempotencyKeys::default(),
       scroll: ScrollHandle::new(),
@@ -95,9 +95,11 @@ impl ConflictsScreen {
     } else {
       revision
     };
-    if !self.confirm.tap(Resolve) {
+    if self.running {
       return;
     }
+    self.running = true;
+    self.unsure = None;
     let side = SIDES[self.side].0.to_string();
     let inputs = [
       self.target.repo.clone(),
@@ -112,15 +114,47 @@ impl ConflictsScreen {
       sides: vec![side],
       idempotency_key: self.keys.key_for("resolve", &refs),
     };
+    let sent = request.clone();
     load::run(cx, remote::mutate(request), move |this, outcome, cx| {
-      this.confirm.done();
+      this.running = false;
       let refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
       this.keys.settle("resolve", &refs, &outcome);
+      if matches!(outcome, Ok(Mutation::Ambiguous(_))) {
+        this.unsure = Some((inputs.to_vec(), sent));
+      }
       this.message = Some(mutation_message(&outcome, "Resolved."));
       if matches!(outcome, Ok(Mutation::Applied(_))) {
         this.reload(cx);
       }
     });
+  }
+}
+
+impl ConflictsScreen {
+  /// Reads whether the ambiguous resolve applied, without resending it.
+  fn check_again(&mut self, cx: &mut Context<Self>) {
+    if self.running {
+      return;
+    }
+    let Some((inputs, request)) = self.unsure.take() else {
+      return;
+    };
+    self.running = true;
+    let sent = request.clone();
+    load::run(
+      cx,
+      remote::check_again(request),
+      move |this, outcome, cx| {
+        this.running = false;
+        let refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
+        this.keys.settle("resolve", &refs, &outcome);
+        if matches!(outcome, Ok(Mutation::Ambiguous(_))) {
+          this.unsure = Some((inputs.clone(), sent));
+        }
+        this.message = Some(mutation_message(&outcome, "Resolved."));
+        this.reload(cx);
+      },
+    );
   }
 }
 
@@ -149,10 +183,8 @@ impl Render for ConflictsScreen {
           .child(widgets::mono(path.clone(), cx))
       })),
     };
-    let label = if self.confirm.is_running(Resolve) {
+    let label = if self.running {
       "Working…"
-    } else if self.confirm.is_armed(Resolve) {
-      "Confirm resolve"
     } else {
       "Resolve"
     };
@@ -173,7 +205,6 @@ impl Render for ConflictsScreen {
           .on_click(cx.listener(|this, selected: &Vec<usize>, _, cx| {
             if let Some(&i) = selected.first() {
               this.side = i;
-              this.confirm.disarm();
               cx.notify();
             }
           })),
@@ -184,7 +215,7 @@ impl Render for ConflictsScreen {
             .primary()
             .large()
             .label(label)
-            .loading(self.confirm.is_running(Resolve))
+            .loading(self.running)
             .on_click(cx.listener(|this, _, _, cx| {
               this.resolve(cx);
               cx.notify();
@@ -198,7 +229,21 @@ impl Render for ConflictsScreen {
         } else {
           widgets::error_text(text, cx)
         }
-      }));
+      }))
+      .when(self.unsure.is_some(), |card| {
+        card.child(
+          h_flex().child(
+            Button::new("check-again")
+              .outline()
+              .label("Check again")
+              .on_click(cx.listener(|this, _, _, cx| {
+                this.check_again(cx);
+                cx.notify();
+              }))
+              .touch(),
+          ),
+        )
+      });
     div()
       .id("conflicts")
       .size_full()
