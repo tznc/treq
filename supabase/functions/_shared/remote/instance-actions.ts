@@ -81,8 +81,38 @@ export interface RemoteInstanceDeps {
   hasPro: () => Promise<boolean>;
   /** The caller's monthly spend (get_spend_status_for); ensure/wake/resize get 402 when capped. */
   spendStatus?: () => Promise<SpendStatus | null>;
+  /**
+   * Where the caller's cloud bills and what it may run there
+   * (cloud_context_for: personal Pro, or a Team organization's settings).
+   * Absent: personal, both modes, as before Team cloud.
+   */
+  cloudContext?: () => Promise<CloudContext>;
   /** Bring your own sandbox (byos.ts). Absent: every BYOS action answers byos_disabled. */
   byos?: ByosActionDeps & { store: ByosCredentialStore & ByosPlanStore };
+}
+
+export interface CloudContext {
+  billing_org_id: string | null;
+  entitled: boolean;
+  allow_managed: boolean;
+  allow_byos: boolean;
+}
+
+const PERSONAL_CONTEXT: CloudContext = { billing_org_id: null, entitled: true, allow_managed: true, allow_byos: true };
+
+/** 403 when the billing context does not allow this kind of sandbox. */
+function modeRefusal(ctx: CloudContext, mode: "managed" | "byos"): Reply | null {
+  if (mode === "managed" ? ctx.allow_managed : ctx.allow_byos) return null;
+  const where = ctx.billing_org_id ? "Your organization does not allow" : "Your plan does not include";
+  return {
+    status: 403,
+    body: {
+      error: `${where} ${mode === "managed" ? "treq-managed sandboxes" : "your own sandbox keys"}`,
+      code: "cloud_mode_not_allowed",
+      mode,
+      billing_org_id: ctx.billing_org_id,
+    },
+  };
 }
 
 export const BYOS_DISABLED: Reply = {
@@ -156,10 +186,12 @@ function tierUnavailable(tierId: string, region: string): Reply {
   };
 }
 
-function byosPlanDeps(byos: NonNullable<RemoteInstanceDeps["byos"]>) {
+// The mode check (modeRefusal) already passed, so the plan only needs the
+// key: the organization's when the workspace bills to one.
+function byosPlanDeps(byos: NonNullable<RemoteInstanceDeps["byos"]>, ctx: CloudContext) {
   return {
-    canByos: byos.canByos,
-    credentialFor: (kind: ProviderKind) => byos.store.credentialFor(kind),
+    canByos: () => Promise.resolve(ctx.allow_byos),
+    credentialFor: (kind: ProviderKind) => byos.store.credentialFor(kind, ctx.billing_org_id),
     machineTypes: (kind: ProviderKind) => byos.store.machineTypes(kind),
   };
 }
@@ -274,11 +306,16 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
   // chosen provider's type for the tier on the user's own account.
   let machineType: MachineTypeRow | null;
   let byosCredentialId: string | null = null;
+  const ctx = deps.cloudContext ? await deps.cloudContext() : PERSONAL_CONTEXT;
+  if (!existingInstance?.machine_type_id) {
+    const refused = modeRefusal(ctx, choice.value.mode);
+    if (refused) return refused;
+  }
   if (existingInstance?.machine_type_id) {
     machineType = await getMachineType(supabase, existingInstance.machine_type_id);
   } else if (choice.value.mode === "byos") {
     if (!deps.byos) return BYOS_DISABLED;
-    const plan = await planByosPlacement(byosPlanDeps(deps.byos), choice.value, tierId, region);
+    const plan = await planByosPlacement(byosPlanDeps(deps.byos, ctx), choice.value, tierId, region);
     if (!plan.ok) return { status: plan.status, body: { error: plan.code, code: plan.code } };
     machineType = plan.machineType;
     byosCredentialId = plan.credentialId;
@@ -297,6 +334,7 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
     providerKind: mt.provider_kind,
     tierId: mt.tier_id,
     machineTypeId: mt.id,
+    billingOrgId: ctx.billing_org_id,
   });
   if (!instance.active_placement_id) {
     const placement = await createActivePlacement(supabase, {
@@ -561,12 +599,16 @@ export async function handleResize(body: Record<string, unknown>, deps: RemoteIn
   if (!instance.active_placement_id || !instance.provider_resource_id) {
     throw new HttpError("Instance is not provisioned yet", 409, "not_ready");
   }
-  // A BYOS workspace resizes on its own provider account.
+  // A BYOS workspace resizes on its own provider account. The context is
+  // the instance's billing (cloud_context_for reads the live instance).
+  const ctx = deps.cloudContext ? await deps.cloudContext() : PERSONAL_CONTEXT;
+  const refused = modeRefusal(ctx, instance.credential_source === "byos" ? "byos" : "managed");
+  if (refused) return refused;
   let resolved: MachineTypeRow | null;
   if (instance.credential_source === "byos") {
     if (!deps.byos) return BYOS_DISABLED;
     const plan = await planByosPlacement(
-      byosPlanDeps(deps.byos),
+      byosPlanDeps(deps.byos, ctx),
       { mode: "byos", kind: kindOf(instance) },
       req.tierId,
       instance.region,

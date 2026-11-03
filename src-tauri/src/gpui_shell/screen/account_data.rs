@@ -98,6 +98,13 @@ pub(crate) fn cloud_route(cloud: &CloudWorkspace) -> CloudRoute {
     provider_key_error: cloud.provider_key_error.clone(),
     byos_catalog: cloud.byos_catalog.clone(),
     selected_provider: cloud.selected_provider.clone(),
+    organizations: cloud.organizations.clone(),
+    profile: cloud.profile.clone(),
+    org_keys: cloud.org_keys.clone(),
+    team_saving: cloud.team_saving,
+    team_error: cloud.team_error.clone(),
+    selected_org_provider: cloud.selected_org_provider.clone(),
+    org_placement: None,
   }
 }
 

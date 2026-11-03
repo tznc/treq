@@ -29,7 +29,7 @@
 // lib.ts.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
-import { userHasPro } from "../_shared/billing/entitlement.ts";
+import { userHasCloud } from "../_shared/billing/entitlement.ts";
 import { spendStatusFor } from "../_shared/billing/spend-cap.ts";
 import { correlationIdFromRequest } from "../_shared/remote/correlation.ts";
 import { providerFor } from "../_shared/remote/provider-registry.ts";
@@ -38,6 +38,7 @@ import { rpc } from "../_shared/remote/db.ts";
 import { isProviderStubEnabled } from "../_shared/remote/local-provider.ts";
 import { corsHeaders, json } from "../_shared/http/json.ts";
 import { handleRemoteInstanceAction } from "./lib.ts";
+import type { CloudContext } from "../_shared/remote/instance-actions.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS")
@@ -74,7 +75,8 @@ Deno.serve(async (req) => {
     supabase,
     ownerUserId: user.id,
     correlationId: correlationIdFromRequest(req),
-    hasPro: () => userHasPro(supabase, user.id),
+    hasPro: () => userHasCloud(supabase, user.id),
+    cloudContext: async () => (await rpc(supabase, "cloud_context_for", { p_user_id: user.id })) as CloudContext,
     spendStatus: () => spendStatusFor(supabase, user.id),
     stub,
     provider: placementProviders(supabase),

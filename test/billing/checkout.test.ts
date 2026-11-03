@@ -728,7 +728,7 @@ describe("createCheckout for Team", () => {
     expect(orgStore.attachCustomer).toHaveBeenCalledWith("cus_org");
     expect(userStore.attachCustomer).not.toHaveBeenCalled();
     // Team carries the metered cloud usage price too: members' usage on the
-    // organization profile is billed to the organization (058_team_cloud.sql).
+    // organization profile is billed to the organization (068_team_cloud.sql).
     expect(calls.find((c) => c.path === "/v1/prices")?.params).toEqual({
       "lookup_keys[0]": "treq_team_monthly",
       "lookup_keys[1]": "treq_sandbox_usage",

@@ -15,7 +15,7 @@
 // exists and why its connections are expected to drop after a few minutes.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
-import { userHasPro } from "../_shared/billing/entitlement.ts";
+import { userHasCloud } from "../_shared/billing/entitlement.ts";
 import { spendStatusFor } from "../_shared/billing/spend-cap.ts";
 import {
   correlationIdFromRequest,
@@ -106,7 +106,7 @@ Deno.serve(async (req) => {
         .maybeSingle(), "read client key");
       return data;
     },
-    hasPro: (ownerUserId) => userHasPro(supabase, ownerUserId),
+    hasPro: (ownerUserId) => userHasCloud(supabase, ownerUserId),
     spendCapped: async (ownerUserId) => (await spendStatusFor(supabase, ownerUserId)).state === "capped",
   };
 
