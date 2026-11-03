@@ -148,6 +148,44 @@ pub async fn delete_provider_credential(
   .await
 }
 
+/// An organization's saved provider keys (metadata only), for its members.
+pub async fn list_org_provider_credentials(
+  supabase: &Supabase,
+  org_id: &str,
+) -> Result<Vec<super::cloud_catalog::ProviderKey>, ApiError> {
+  let mut value: Value = instance(supabase, "list_org_provider_credentials", json!({ "org_id": org_id })).await?;
+  serde_json::from_value(value["credentials"].take())
+    .map_err(|e| ApiError::new("invalid_response", e.to_string()))
+}
+
+/// Saves an organization's key; owners only, checked with the provider first.
+pub async fn save_org_provider_credential(
+  supabase: &Supabase,
+  org_id: &str,
+  provider_kind: &str,
+  api_key: &str,
+) -> Result<Value, ApiError> {
+  instance(
+    supabase,
+    "save_org_provider_credential",
+    json!({ "org_id": org_id, "provider_kind": provider_kind, "api_key": api_key }),
+  )
+  .await
+}
+
+pub async fn delete_org_provider_credential(
+  supabase: &Supabase,
+  org_id: &str,
+  provider_kind: &str,
+) -> Result<Value, ApiError> {
+  instance(
+    supabase,
+    "delete_org_provider_credential",
+    json!({ "org_id": org_id, "provider_kind": provider_kind }),
+  )
+  .await
+}
+
 /// Tiers on the providers the user has a key for, with BYOS prices.
 pub async fn byos_catalog(
   supabase: &Supabase,

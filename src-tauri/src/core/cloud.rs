@@ -17,7 +17,10 @@ use serde::Serialize;
 use super::{
   account::{self, Subscription},
   auth::{AuthStatus, Session},
-  cloud_catalog::{self, Notification, SpendState, SpendStatus, Tier, UsageTotals},
+  cloud_catalog::{
+    self, CloudOrganization, CloudProfile, Notification, OrgCloudSettings, SpendState, SpendStatus, Tier,
+    UsageTotals,
+  },
   control_plane::{self, InstanceStatus, Preflight, ProcessAction, ResizeError},
   managed::{self, Lease, RenewalHooks},
   remote::MachineUsageReport,
@@ -72,6 +75,58 @@ pub struct CloudWorkspace {
   /// The provider Create runs on with the user's own key; `None` is treq
   /// managed.
   pub selected_provider: Option<String>,
+  /// The organizations the user belongs to, with their cloud settings.
+  pub organizations: Vec<CloudOrganization>,
+  /// Where the next workspace bills: personal or an organization.
+  pub profile: Option<CloudProfile>,
+  /// Saved keys of each Team organization (metadata only).
+  pub org_keys: std::collections::BTreeMap<String, Vec<cloud_catalog::ProviderKey>>,
+  /// The organization key Create runs on when the profile is an
+  /// organization; kept apart from `selected_provider`, which is personal
+  /// and behind the `byos` preview.
+  pub selected_org_provider: Option<String>,
+  /// A profile switch, settings change or organization key change is running.
+  pub team_saving: bool,
+  /// Why the last of those was refused.
+  pub team_error: Option<String>,
+}
+
+/// The organization key a workspace on organization profile `profile` runs
+/// on: the picked one if the organization has it, else, when the
+/// organization allows only its own keys, its first key. `None` is treq
+/// managed (or nothing, if neither is allowed; the server refuses that).
+pub fn org_provider(
+  profile: &CloudProfile,
+  keys: &[cloud_catalog::ProviderKey],
+  picked: Option<&str>,
+) -> Option<String> {
+  if !profile.allow_byos {
+    return None;
+  }
+  let picked = picked.filter(|k| keys.iter().any(|key| key.provider_kind == *k));
+  match picked {
+    Some(k) => Some(k.to_string()),
+    None if !profile.allow_managed => keys.first().map(|k| k.provider_kind.clone()),
+    None => None,
+  }
+}
+
+/// The sentence for a refused Team change. Database refusals carry the
+/// reason in `message`, Edge Function refusals in `code`.
+fn team_message(error: &ApiError, kind: Option<&str>) -> String {
+  let reason = if error.code.starts_with('P') || error.code.is_empty() { error.message.as_str() } else { error.code.as_str() };
+  let provider = kind.map(cloud_catalog::provider_name).unwrap_or_default();
+  match reason {
+    "spend_cap_too_low" => "Each cap must be at least $5.".into(),
+    "spend_cap_too_high" => "That cap is above the maximum allowed.".into(),
+    "not_organization_owner" => "Only an owner of the organization can change this.".into(),
+    "not_organization_member" => "You are no longer a member of that organization.".into(),
+    "byos_not_allowed" => "Organization keys need the Team plan.".into(),
+    "provider_credential_invalid" => format!("{provider} rejected this API key. Check it and try again."),
+    "byos_kind_unsupported" => format!("{provider} doesn't take your own key yet."),
+    "credential_in_use" => "A cloud workspace still runs on this key. Delete the workspace first.".into(),
+    _ => format!("Couldn't save: {}", error.message),
+  }
 }
 
 /// Everything the account screens draw.
@@ -414,6 +469,115 @@ impl Cloud {
       .load("notifications", notes, |w, n| w.notifications = n)
       .await;
     self.load_byos().await;
+    self.load_team().await;
+  }
+
+  // -- Team cloud -------------------------------------------------------------
+
+  /// Reads the user's organizations, their profile and each Team
+  /// organization's keys. Team cloud is not behind the `byos` preview: an
+  /// owner who allows BYOS needs members to see it.
+  async fn load_team(&self) {
+    let orgs = cloud_catalog::fetch_cloud_organizations(&self.supabase);
+    self
+      .load("organizations", orgs, |w, o| w.organizations = o)
+      .await;
+    let profile = cloud_catalog::fetch_cloud_profile(&self.supabase);
+    self
+      .load("the cloud profile", profile, |w, p| w.profile = Some(p))
+      .await;
+    let teams: Vec<String> = self
+      .workspace
+      .lock_or_recover()
+      .organizations
+      .iter()
+      .filter(|o| o.has_team)
+      .map(|o| o.org_id.clone())
+      .collect();
+    for org_id in teams {
+      self.load_org_keys(&org_id).await;
+    }
+  }
+
+  async fn load_org_keys(&self, org_id: &str) {
+    let keys = control_plane::list_org_provider_credentials(&self.supabase, org_id);
+    let org = org_id.to_string();
+    self
+      .load("organization keys", keys, move |w, k| {
+        w.org_keys.insert(org, k);
+      })
+      .await;
+  }
+
+  /// Bills the next cloud workspace to `org_id`, or personally with `None`.
+  /// A workspace keeps the billing it was created with.
+  pub async fn set_cloud_profile(&self, org_id: Option<&str>) {
+    self.update_workspace(|w| {
+      w.team_saving = true;
+      w.team_error = None;
+    });
+    let result = cloud_catalog::set_cloud_profile(&self.supabase, org_id).await;
+    self.update_workspace(|w| {
+      w.team_saving = false;
+      match result {
+        Ok(profile) => w.profile = Some(profile),
+        Err(error) => w.team_error = Some(team_message(&error, None)),
+      }
+    });
+  }
+
+  /// An owner's managed/BYOS choice and caps for their organization.
+  pub async fn save_org_cloud_settings(&self, settings: OrgCloudSettings) {
+    self.update_workspace(|w| {
+      w.team_saving = true;
+      w.team_error = None;
+    });
+    let result = cloud_catalog::set_org_cloud_settings(&self.supabase, &settings).await;
+    let ok = result.is_ok();
+    self.update_workspace(|w| {
+      w.team_saving = false;
+      w.team_error = result.err().map(|e| team_message(&e, None));
+    });
+    if ok {
+      let orgs = cloud_catalog::fetch_cloud_organizations(&self.supabase);
+      self
+        .load("organizations", orgs, |w, o| w.organizations = o)
+        .await;
+    }
+  }
+
+  /// Saves an organization's key (owners only); the server checks it with
+  /// the provider first.
+  pub async fn save_org_provider_key(&self, org_id: &str, kind: &str, api_key: &str) {
+    let save = control_plane::save_org_provider_credential(&self.supabase, org_id, kind, api_key);
+    self.change_org_key(org_id, kind, save).await;
+  }
+
+  /// Removes an organization's key; refused while a workspace uses it.
+  pub async fn remove_org_provider_key(&self, org_id: &str, kind: &str) {
+    let remove = control_plane::delete_org_provider_credential(&self.supabase, org_id, kind);
+    self.change_org_key(org_id, kind, remove).await;
+  }
+
+  async fn change_org_key(
+    &self,
+    org_id: &str,
+    kind: &str,
+    change: impl std::future::Future<Output = Result<serde_json::Value, ApiError>>,
+  ) {
+    self.update_workspace(|w| {
+      w.team_saving = true;
+      w.team_error = None;
+    });
+    let error = change.await.err().map(|e| team_message(&e, Some(kind)));
+    let ok = error.is_none();
+    self.update_workspace(|w| {
+      w.team_saving = false;
+      w.team_error = error;
+    });
+    if ok {
+      self.load_org_keys(org_id).await;
+    }
   }
 
   // -- Bring your own sandbox (BYOS) ----------------------------------------
@@ -432,11 +596,18 @@ impl Cloud {
     });
   }
 
-  /// Picks the provider Create runs on with the user's key; `None` is
-  /// treq managed.
+  /// Picks the provider Create runs on with the user's key, or on an
+  /// organization profile with the organization's key; `None` is treq
+  /// managed.
   pub fn select_provider(&self, kind: Option<&str>) {
     let kind = kind.map(str::to_string);
-    self.update_workspace(|w| w.selected_provider = kind);
+    self.update_workspace(|w| {
+      if w.profile.as_ref().is_some_and(|p| p.org_id.is_some()) {
+        w.selected_org_provider = kind;
+      } else {
+        w.selected_provider = kind;
+      }
+    });
   }
 
   /// Reads the saved keys and their tier prices, with BYOS on.
@@ -753,7 +924,14 @@ impl Cloud {
       let key = format!("provision-managed-{}", uuid::Uuid::new_v4());
       let (tier, byos_kind) = {
         let w = self.workspace.lock_or_recover();
-        let byos_kind = w.selected_provider.clone().filter(|_| w.byos_enabled);
+        let byos_kind = match w.profile.as_ref().filter(|p| p.org_id.is_some()) {
+          Some(profile) => org_provider(
+            profile,
+            w.org_keys.get(profile.org_id.as_deref().unwrap_or_default()).map(Vec::as_slice).unwrap_or_default(),
+            w.selected_org_provider.as_deref(),
+          ),
+          None => w.selected_provider.clone().filter(|_| w.byos_enabled),
+        };
         (w.selected_tier.clone(), byos_kind)
       };
       control_plane::ensure(&self.supabase, &key, tier.as_deref(), byos_kind.as_deref())
@@ -1867,6 +2045,46 @@ mod tests {
     assert_eq!(ensured[0].get("provider_kind"), None);
   }
 
+  /// A workspace with the organization profile, its keys and settings.
+  fn on_org_profile(cloud: &Cloud, allow_managed: bool, allow_byos: bool) {
+    cloud.update_workspace(|w| {
+      w.profile = Some(CloudProfile { org_id: Some("o1".into()), entitled: true, allow_managed, allow_byos });
+      w.org_keys.insert(
+        "o1".into(),
+        vec![cloud_catalog::ProviderKey {
+          id: "k1".into(),
+          provider_kind: "boat".into(),
+          label: None,
+          validated_at: None,
+          invalid_at: None,
+        }],
+      );
+    });
+  }
+
+  #[tokio::test]
+  async fn an_organization_that_allows_only_its_keys_provisions_on_them_without_the_byos_preview() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    on_org_profile(&cloud, false, true);
+    let ensured = provision_with(&cloud, &server).await;
+    assert_eq!(ensured[0]["credential_source"], "byos");
+    assert_eq!(ensured[0]["provider_kind"], "boat");
+  }
+
+  #[tokio::test]
+  async fn on_an_organization_profile_the_picked_key_is_kept_and_managed_is_the_default() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    on_org_profile(&cloud, true, true);
+    cloud.set_byos_enabled(false);
+    assert_eq!(provision_with(&cloud, &server).await[0].get("credential_source"), None);
+    cloud.select_provider(Some("boat"));
+    cloud.set_byos_enabled(false);
+    let ensured = provision_with(&cloud, &server).await;
+    assert_eq!(ensured.last().unwrap()["provider_kind"], "boat");
+  }
+
   #[tokio::test]
   async fn saving_a_provider_key_rereads_the_list() {
     let server = MockServer::start().await;
@@ -1956,5 +2174,115 @@ mod tests {
     assert!(bodies(&server, "list_provider_credentials")
       .await
       .is_empty());
+  }
+
+
+  // -- Team cloud ------------------------------------------------------------
+
+  /// The JSON bodies sent to the RPC `name`.
+  async fn rpc_bodies(server: &MockServer, name: &str) -> Vec<Value> {
+    let suffix = format!("/rest/v1/rpc/{name}");
+    server
+      .received_requests()
+      .await
+      .unwrap_or_default()
+      .into_iter()
+      .filter(|r| r.url.path() == suffix)
+      .filter_map(|r| serde_json::from_slice::<Value>(&r.body).ok())
+      .collect()
+  }
+
+  fn acme(allow_managed: bool, allow_byos: bool) -> Value {
+    json!([{"org_id": "o1", "name": "Acme", "role": "owner", "has_team": true,
+      "allow_managed": allow_managed, "allow_byos": allow_byos,
+      "org_cap_usd": 500, "member_cap_usd": 50}])
+  }
+
+  #[tokio::test]
+  async fn refreshing_reads_the_teams_the_profile_and_their_keys() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    cloud.set_byos_enabled(true);
+    rpc(&server, "list_my_cloud_organizations", acme(true, true)).await;
+    rpc(&server, "get_cloud_profile", json!({"org_id": "o1", "entitled": true,
+      "allow_managed": true, "allow_byos": true})).await;
+    on_action(&server, "list_org_provider_credentials", json!({"credentials": [
+      {"id": "k1", "provider_kind": "boat", "label": "Team Boat", "validated_at": "2026-11-03T00:00:00Z", "invalid_at": null}
+    ]})).await;
+    cloud.refresh_cloud().await;
+    let w = cloud.snapshot().cloud;
+    assert_eq!(w.organizations.len(), 1);
+    assert_eq!(w.organizations[0].name, "Acme");
+    assert!(w.organizations[0].is_owner());
+    assert_eq!(w.profile.as_ref().and_then(|p| p.org_id.as_deref()), Some("o1"));
+    assert_eq!(w.org_keys.get("o1").map(|k| k[0].provider_kind.as_str()), Some("boat"));
+    assert_eq!(bodies(&server, "list_org_provider_credentials").await[0]["org_id"], "o1");
+  }
+
+  #[tokio::test]
+  async fn switching_the_cloud_profile_saves_it_and_rereads_teams() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    rpc(&server, "set_cloud_profile", json!({"org_id": "o1", "entitled": true,
+      "allow_managed": true, "allow_byos": false})).await;
+    rpc(&server, "list_my_cloud_organizations", acme(true, false)).await;
+    cloud.set_cloud_profile(Some("o1")).await;
+    cloud.set_cloud_profile(None).await;
+    let sent = rpc_bodies(&server, "set_cloud_profile").await;
+    assert_eq!(sent, [json!({"p_org_id": "o1"}), json!({"p_org_id": null})]);
+    let w = cloud.snapshot().cloud;
+    assert_eq!(w.profile.as_ref().map(|p| p.allow_byos), Some(false));
+    assert_eq!(w.team_error, None);
+  }
+
+  #[tokio::test]
+  async fn an_owner_saves_cloud_settings_and_a_refusal_says_why() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    rpc(&server, "list_my_cloud_organizations", acme(false, true)).await;
+    Mock::given(method("POST"))
+      .and(path("/rest/v1/rpc/set_organization_cloud_settings"))
+      .and(body_partial_json(json!({"p_org_cap_usd": 4.0})))
+      .respond_with(ResponseTemplate::new(400).set_body_json(json!({"code": "P0001", "message": "spend_cap_too_low"})))
+      .mount(&server)
+      .await;
+    rpc(&server, "set_organization_cloud_settings", json!({"org_id": "o1"})).await;
+    cloud
+      .save_org_cloud_settings(OrgCloudSettings { org_id: "o1".into(), allow_managed: false, allow_byos: true, org_cap_usd: 4.0, member_cap_usd: 50.0 })
+      .await;
+    assert_eq!(cloud.snapshot().cloud.team_error.as_deref(), Some("Each cap must be at least $5."));
+    cloud
+      .save_org_cloud_settings(OrgCloudSettings { org_id: "o1".into(), allow_managed: false, allow_byos: true, org_cap_usd: 400.0, member_cap_usd: 25.0 })
+      .await;
+    let sent = rpc_bodies(&server, "set_organization_cloud_settings").await;
+    assert_eq!(
+      sent.last().unwrap(),
+      &json!({"p_org_id": "o1", "p_allow_managed": false, "p_allow_byos": true, "p_org_cap_usd": 400.0, "p_member_cap_usd": 25.0})
+    );
+    let w = cloud.snapshot().cloud;
+    assert_eq!(w.team_error, None);
+    assert!(!w.team_saving);
+  }
+
+  #[tokio::test]
+  async fn an_owner_saves_and_removes_an_organization_key() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    cloud.set_byos_enabled(true);
+    rpc(&server, "list_my_cloud_organizations", acme(false, true)).await;
+    on_action(&server, "save_org_provider_credential", json!({"credential": {"id": "k1"}})).await;
+    on_action(&server, "delete_org_provider_credential", json!({"deleted": "boat"})).await;
+    on_action(&server, "list_org_provider_credentials", json!({"credentials": [
+      {"id": "k1", "provider_kind": "boat", "label": null, "validated_at": null, "invalid_at": null}
+    ]})).await;
+    cloud.save_org_provider_key("o1", "boat", "org-secret").await;
+    cloud.remove_org_provider_key("o1", "boat").await;
+    let saved = bodies(&server, "save_org_provider_credential").await;
+    assert_eq!(saved[0]["org_id"], "o1");
+    assert_eq!(saved[0]["provider_kind"], "boat");
+    assert_eq!(saved[0]["api_key"], "org-secret");
+    assert_eq!(bodies(&server, "delete_org_provider_credential").await[0]["org_id"], "o1");
+    assert_eq!(cloud.snapshot().cloud.org_keys["o1"].len(), 1);
+    assert!(!serde_json::to_string(&cloud.snapshot()).unwrap().contains("org-secret"));
   }
 }
