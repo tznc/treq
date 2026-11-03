@@ -139,6 +139,7 @@ create table public.projects (
   owner_user_id uuid not null references auth.users(id) on delete cascade,
   name text not null check (length(name) between 1 and 100),
   slug text not null,
+  home_repo_key text,                     -- orchestrator repo (D13)
   config jsonb not null default '{}',     -- branch pattern, default agent/model
   version bigint not null default 1,      -- optimistic concurrency
   deleted_at timestamptz,                 -- soft delete, tombstone for sync
