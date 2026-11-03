@@ -16,6 +16,7 @@ import { LocalProvider } from "../_shared/remote/local-provider.ts";
 import { ProviderError, type ProviderKind, type SandboxProvider } from "../_shared/remote/provider.ts";
 import { providerFor } from "../_shared/remote/provider-registry.ts";
 import {
+  ByosError,
   type ByosCredentialStore,
   handleByosAction,
   isOperatorMovable,
@@ -213,6 +214,18 @@ function fakeActionStore() {
       return Promise.resolve();
     },
     byosCatalog: () => Promise.resolve([]),
+    saveOrg: (orgId, kind, key, label) => {
+      if (orgId === "org-not-owner") return Promise.reject(new ByosError("not_organization_owner"));
+      saved.push({ kind: `${orgId}/${kind}`, key, label });
+      return Promise.resolve({ id: "oc1", provider_kind: kind, label, validated_at: "now", invalid_at: null });
+    },
+    listOrg: (orgId) =>
+      Promise.resolve([{ id: "oc1", provider_kind: `${orgId}/boat`, label: null, validated_at: "now", invalid_at: null }]),
+    removeOrg: (orgId, kind) => {
+      if (kind === "in-use") return Promise.reject(new ByosError("credential_in_use"));
+      deleted.push(`${orgId}/${kind}`);
+      return Promise.resolve();
+    },
   };
   return { store, saved, deleted };
 }
@@ -386,4 +399,49 @@ Deno.test("BYOS with no machine type for the tier or region is tier_unavailable"
 Deno.test("operator drains and cheaper-default moves skip BYOS placements", () => {
   assertEquals(isOperatorMovable({ credential_source: "managed" }), true);
   assertEquals(isOperatorMovable({ credential_source: "byos" }), false);
+});
+
+// ── Organization keys (Team) ───────────────────────────────────────────
+
+Deno.test("an organization key is validated with the provider, then stored for the organization", async () => {
+  const { store, saved } = fakeActionStore();
+  const r = await handleByosAction(
+    "save_org_provider_credential",
+    { org_id: "org-1", provider_kind: "boat", api_key: "sk-user", label: "Team" },
+    { canByos: () => Promise.resolve(false), store, build: validatingProvider("ok") },
+  );
+  assertEquals(r?.status, 200);
+  assertEquals(saved, [{ kind: "org-1/boat", key: "sk-user", label: "Team" }]);
+  assert(!JSON.stringify(r?.body).includes("sk-user"), "the key is never echoed");
+});
+
+Deno.test("an organization key the provider rejects is not stored", async () => {
+  const { store, saved } = fakeActionStore();
+  const r = await handleByosAction(
+    "save_org_provider_credential",
+    { org_id: "org-1", provider_kind: "boat", api_key: "sk-user" },
+    { canByos: () => Promise.resolve(true), store, build: validatingProvider("unauthorized") },
+  );
+  assertEquals((r?.body as { code: string }).code, "provider_credential_invalid");
+  assertEquals(saved, []);
+});
+
+Deno.test("organization key actions need an org_id and map owner and in-use refusals", async () => {
+  const { store, deleted } = fakeActionStore();
+  const deps = { canByos: () => Promise.resolve(true), store, build: validatingProvider("ok") };
+  const missing = await handleByosAction("save_org_provider_credential", { provider_kind: "boat", api_key: "sk-user" }, deps);
+  assertEquals([missing?.status, (missing?.body as { code: string }).code], [400, "validation_error"]);
+  const notOwner = await handleByosAction(
+    "save_org_provider_credential",
+    { org_id: "org-not-owner", provider_kind: "boat", api_key: "sk-user" },
+    deps,
+  );
+  assertEquals([notOwner?.status, (notOwner?.body as { code: string }).code], [403, "not_organization_owner"]);
+  const inUse = await handleByosAction("delete_org_provider_credential", { org_id: "org-1", provider_kind: "in-use" }, deps);
+  assertEquals([inUse?.status, (inUse?.body as { code: string }).code], [409, "credential_in_use"]);
+  const ok = await handleByosAction("delete_org_provider_credential", { org_id: "org-1", provider_kind: "boat" }, deps);
+  assertEquals(ok?.status, 200);
+  assertEquals(deleted, ["org-1/boat"]);
+  const listed = await handleByosAction("list_org_provider_credentials", { org_id: "org-1" }, deps);
+  assertEquals((listed?.body as { credentials: Array<{ provider_kind: string }> }).credentials[0].provider_kind, "org-1/boat");
 });
