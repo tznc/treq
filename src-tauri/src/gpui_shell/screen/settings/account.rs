@@ -1053,7 +1053,7 @@ fn team_sections(
           .map(|(_, kind)| kind.clone()),
         draft: state.team_key_draft.clone(),
         saving: cloud.team_saving,
-        error: draft.invalid.clone().or_else(|| cloud.team_error.clone()),
+        error: draft.invalid.or_else(|| cloud.team_error.clone()),
       }
     })
     .collect();
