@@ -64,7 +64,7 @@ export async function userHasPro(
 /**
  * has_cloud for a user: entitled to cloud where their workspace bills, i.e.
  * personal Pro, or a Team organization whose owner allows cloud
- * (065_team_cloud.sql). The client must use the service role.
+ * (068_team_cloud.sql). The client must use the service role.
  */
 export async function userHasCloud(
   client: RpcClient,
