@@ -388,6 +388,7 @@ impl Render for PullRequestsScreen {
                   .w(px(44.))
                   .outline()
                   .icon(IconName::Search)
+                  .accessibility_label("Search")
                   .on_click(cx.listener(|this, _, _, cx| this.search(cx)))
                   .touch(),
               ),

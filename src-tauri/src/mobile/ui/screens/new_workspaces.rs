@@ -444,6 +444,7 @@ impl NewWorkspacesSheet {
                 Button::new("outdent")
                   .outline()
                   .icon(LucideIcon::ListIndentDecrease)
+                  .accessibility_label("Outdent")
                   .tooltip("Outdent")
                   .on_click(cx.listener(|this, _, window, cx| this.indent(true, window, cx)))
                   .touch(),
@@ -452,6 +453,7 @@ impl NewWorkspacesSheet {
                 Button::new("indent")
                   .outline()
                   .icon(LucideIcon::ListIndentIncrease)
+                  .accessibility_label("Indent")
                   .tooltip("Indent")
                   .on_click(cx.listener(|this, _, window, cx| this.indent(false, window, cx)))
                   .touch(),
@@ -512,6 +514,7 @@ impl NewWorkspacesSheet {
                 .large()
                 .size(px(widgets::CTA_H - 8.))
                 .icon(IconName::ChevronLeft)
+                .accessibility_label("Back")
                 .tooltip("Back")
                 .disabled(self.running)
                 .on_click(cx.listener(|this, _, window, cx| this.back(window, cx)))
@@ -576,7 +579,8 @@ impl Render for NewWorkspacesSheet {
                   Button::new("lines-help-button")
                     .ghost()
                     .small()
-                    .icon(LucideIcon::CircleQuestionMark),
+                    .icon(LucideIcon::CircleQuestionMark)
+                    .accessibility_label("Help"),
                 )
                 .max_w(px(280.))
                 .text_sm()

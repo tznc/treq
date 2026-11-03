@@ -602,6 +602,7 @@ pub fn file_comment_button(review: &Entity<Review>, path: &str) -> Button {
   Button::new(SharedString::from(format!("comment-file-{path}")))
     .ghost()
     .icon(Icon::from(LucideIcon::MessageSquarePlus))
+    .accessibility_label("Comment on file")
     .tooltip("Comment on file")
     .on_click(move |_, _, cx| compose(review.clone(), Pending::file(&path), None, cx))
 }

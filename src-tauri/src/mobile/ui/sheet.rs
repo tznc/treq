@@ -16,6 +16,8 @@ use gpui_kit::{
   WeakEntity, Window,
 };
 
+use gpui_kit::base::TestSupportExt as _;
+
 use super::widgets;
 
 /// What a sheet action does when tapped. The sheet closes first.
@@ -154,7 +156,10 @@ pub(super) fn render(sheet: &Sheet, bottom_inset: Pixels, cx: &App) -> impl Into
           )
         })
         // A tall sheet scrolls; its parts keep their height.
-        .child(div().flex_none().child(sheet.view.clone())),
+        .child(div().flex_none().child(sheet.view.clone()))
+        .role(gpui_kit::Role::Dialog)
+        .when_some(sheet.title.clone(), |panel, title| panel.aria_label(title))
+        .test_support(),
     )
 }
 
@@ -285,5 +290,61 @@ impl Render for Confirm {
               .touch(),
           ),
       )
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use gpui_kit::{
+    div, px, size, AppContext as _, Bounds, Context, IntoElement, ParentElement as _, Point,
+    Render, Styled as _, TestAppContext, Window, WindowBounds, WindowOptions,
+  };
+  use gpui_testing_library::prelude::*;
+
+  struct Empty;
+  impl Render for Empty {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+      div()
+    }
+  }
+
+  struct Host(super::Sheet);
+  impl Render for Host {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+      div().size_full().child(super::render(&self.0, px(0.), cx))
+    }
+  }
+
+  /// A screen reader reads the sheet as a dialog, named by its title.
+  #[gpui_kit::test]
+  fn the_sheet_is_a_dialog_named_by_its_title(cx: &mut TestAppContext) {
+    cx.update(super::super::theme::init);
+    let window = cx.update(|cx| {
+      gpui_kit::open_window(
+        WindowOptions {
+          window_bounds: Some(WindowBounds::Windowed(Bounds {
+            origin: Point::default(),
+            size: size(px(412.), px(892.)),
+          })),
+          ..Default::default()
+        },
+        cx,
+        |_, cx| {
+          let view = cx.new(|_| Empty).into();
+          cx.new(|_| {
+            Host(super::Sheet {
+              title: Some("Delete workspace?".into()),
+              view,
+            })
+          })
+        },
+      )
+      .expect("open test window")
+      .0
+    });
+    let screen = gpui_testing_library::Screen::new(cx, window);
+    screen.redraw();
+    expect(screen.get_by_role(by::role(gpui_kit::Role::Dialog).name("Delete workspace?")))
+      .to_be_visible();
   }
 }

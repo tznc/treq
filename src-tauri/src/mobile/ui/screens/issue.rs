@@ -505,6 +505,7 @@ impl IssueScreen {
           .h(px(36.))
           .min_w(px(44.))
           .icon(IconName::Plus)
+          .accessibility_label("Add reaction")
           .on_click(cx.listener(move |this, _, _, cx| this.reaction_picker(id.clone(), cx)))
           .touch(),
       )

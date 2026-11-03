@@ -928,6 +928,7 @@ impl WorkspacesScreen {
               .ghost()
               .small()
               .icon(IconName::RefreshCw)
+              .accessibility_label("Refresh")
               .loading(self.list.is_loading())
               .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
               .touch(),

@@ -457,73 +457,79 @@ fn panes(width: Pixels, depth: usize) -> usize {
   }
 }
 
+/// A page's title bar: Back when `back` is set (it pops this many pages),
+/// the title, and ⋯ when the page has a menu.
+fn title_bar_for(title: SharedString, header: &nav::Header, back: Option<usize>, cx: &App) -> Div {
+  let theme = cx.theme();
+  h_flex()
+    .h(px(56.))
+    .px_2()
+    .gap_1()
+    .items_center()
+    .border_b_1()
+    .border_color(theme.border)
+    .when_some(back, |bar, count| {
+      bar.child(
+        Button::new("back")
+          .ghost()
+          .large()
+          .icon(IconName::ArrowLeft)
+          .accessibility_label("Back")
+          .on_click(move |_, _, cx| nav::pop_n(count, cx))
+          .touch(),
+      )
+    })
+    .child(
+      h_flex()
+        .id("page-title")
+        .flex_1()
+        .min_w_0()
+        .px_2()
+        .gap_1()
+        .items_center()
+        .child(
+          div()
+            .min_w_0()
+            .truncate()
+            .text_lg()
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(title),
+        )
+        .when_some(header.on_title.clone(), |title, action| {
+          title
+            .child(
+              div()
+                .flex_none()
+                .text_color(theme.muted_foreground)
+                .child(IconName::ChevronDown),
+            )
+            .on_click(move |_, window, cx| action(window, cx))
+        }),
+    )
+    .when_some(header.more.clone(), |bar, action| {
+      bar.child(
+        Button::new("page-more")
+          .ghost()
+          .large()
+          .icon(IconName::Ellipsis)
+          .accessibility_label("More")
+          .on_click(move |_, window, cx| action(window, cx))
+          .touch(),
+      )
+    })
+}
+
 impl Root {
   /// A page with its title bar. `back` pops this many pages, `None` hides
   /// Back.
   fn pane(&self, ix: usize, back: Option<usize>, title_bar: bool, cx: &App) -> Stateful<Div> {
     let page = &self.stack[ix];
-    let theme = cx.theme();
     v_flex()
       .id(("pane", ix))
       .size_full()
       .min_w_0()
       .when(title_bar, |pane| {
-        pane.child(
-          h_flex()
-            .h(px(56.))
-            .px_2()
-            .gap_1()
-            .items_center()
-            .border_b_1()
-            .border_color(theme.border)
-            .when_some(back, |bar, count| {
-              bar.child(
-                Button::new("back")
-                  .ghost()
-                  .large()
-                  .icon(IconName::ArrowLeft)
-                  .on_click(move |_, _, cx| nav::pop_n(count, cx))
-                  .touch(),
-              )
-            })
-            .child(
-              h_flex()
-                .id("page-title")
-                .flex_1()
-                .min_w_0()
-                .px_2()
-                .gap_1()
-                .items_center()
-                .child(
-                  div()
-                    .min_w_0()
-                    .truncate()
-                    .text_lg()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(page.title.clone()),
-                )
-                .when_some(page.header.on_title.clone(), |title, action| {
-                  title
-                    .child(
-                      div()
-                        .flex_none()
-                        .text_color(theme.muted_foreground)
-                        .child(IconName::ChevronDown),
-                    )
-                    .on_click(move |_, window, cx| action(window, cx))
-                }),
-            )
-            .when_some(page.header.more.clone(), |bar, action| {
-              bar.child(
-                Button::new("page-more")
-                  .ghost()
-                  .large()
-                  .icon(IconName::Ellipsis)
-                  .on_click(move |_, window, cx| action(window, cx))
-                  .touch(),
-              )
-            }),
-        )
+        pane.child(title_bar_for(page.title.clone(), &page.header, back, cx))
       })
       .child(
         div()
@@ -1103,5 +1109,53 @@ mod tests {
     assert!(!is_landing(Some("a@b.c"), false));
     assert!(!is_landing(None, true));
     assert!(!is_landing(Some("a@b.c"), true));
+  }
+
+  /// Back and ⋯ show only an icon, so a screen reader needs their names.
+  #[gpui_kit::test]
+  fn title_bar_buttons_are_named(cx: &mut gpui_kit::TestAppContext) {
+    use gpui_kit::{
+      div, size, AppContext as _, Bounds, Context, IntoElement, ParentElement as _, Point, Render,
+      Styled as _, Window, WindowBounds, WindowOptions,
+    };
+    use gpui_testing_library::prelude::*;
+    use std::rc::Rc;
+
+    struct Host;
+    impl Render for Host {
+      fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let header = super::nav::Header {
+          on_title: None,
+          more: Some(Rc::new(|_, _| {})),
+        };
+        div().size_full().child(super::title_bar_for(
+          "event-bus".into(),
+          &header,
+          Some(1),
+          cx,
+        ))
+      }
+    }
+
+    cx.update(super::theme::init);
+    let window = cx.update(|cx| {
+      gpui_kit::open_window(
+        WindowOptions {
+          window_bounds: Some(WindowBounds::Windowed(Bounds {
+            origin: Point::default(),
+            size: size(px(412.), px(892.)),
+          })),
+          ..Default::default()
+        },
+        cx,
+        |_, cx| cx.new(|_| Host),
+      )
+      .expect("open test window")
+      .0
+    });
+    let screen = gpui_testing_library::Screen::new(cx, window);
+    screen.redraw();
+    expect(screen.get_by_role(by::role(gpui_kit::Role::Button).name("Back"))).to_be_visible();
+    expect(screen.get_by_role(by::role(gpui_kit::Role::Button).name("More"))).to_be_visible();
   }
 }

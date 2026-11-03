@@ -556,6 +556,7 @@ impl PrReviewScreen {
           .w(px(TAP))
           .ghost()
           .icon(IconName::Plus)
+          .accessibility_label("Add reaction")
           .on_click(cx.listener(move |this, _, _, cx| {
             this.picker = if picker_open { None } else { Some(id.clone()) };
             cx.notify();
