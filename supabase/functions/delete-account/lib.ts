@@ -14,15 +14,18 @@
 // Order matters. Everything that holds an external resource or a charge is
 // released first, and any failure there stops the request before the auth
 // user is deleted, so the user can retry:
-//   1. Cancel the user's live Stripe subscriptions immediately.
-//   2. Destroy cloud workspace machines at the provider. The provider id is
+//   1. Destroy cloud workspace machines at the provider. The provider id is
 //      lost once the rows cascade away, so a machine left running here
-//      could never be found again.
-//   3. Revoke the Linear OAuth token. Best effort: the stored token is
+//      could never be found again. This also closes their billing.
+//   2. Send the user's remaining cloud usage to Stripe, including the
+//      current partial hour: unsent usage rows cascade away with the user.
+//   3. Cancel the user's live Stripe subscriptions immediately, with a
+//      final invoice for the metered usage.
+//   4. Revoke the Linear OAuth token. Best effort: the stored token is
 //      deleted with the user either way.
-//   4. Delete personal GitHub App installation rows. Their foreign key is
+//   5. Delete personal GitHub App installation rows. Their foreign key is
 //      SET NULL, which would otherwise leave them ownerless.
-//   5. Delete the auth user. Foreign keys cascade the remaining user rows,
+//   6. Delete the auth user. Foreign keys cascade the remaining user rows,
 //      including the user's memberships in organizations that have another
 //      owner.
 //
@@ -34,6 +37,8 @@ import {
   StripeApiError,
   type StripeClient,
 } from "../_shared/billing/stripe-api.ts";
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
+import { reportUsage, supabaseUsageReportStore, type UsageReportStore } from "../_shared/billing/usage-report.ts";
 import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
 import type { PlacementRow } from "../_shared/remote/migration-engine.ts";
 import { deleteInstanceMachines } from "../_shared/remote/placement-store.ts";
@@ -58,6 +63,12 @@ export interface DeleteAccountStore {
   /** Cancels an open migration, then lists the instance's placements not yet dead. */
   livePlacements(instanceId: string): Promise<Pick<PlacementRow, "id" | "provider_kind" | "provider_resource_id">[]>;
   markInstanceDeleted(instanceId: string): Promise<void>;
+  /**
+   * The user's usage reports, built up to now including the current partial
+   * hour (build_final_usage_reports), so none is lost when the user's rows
+   * cascade away.
+   */
+  finalUsage(): UsageReportStore;
   linearAccessToken(): Promise<string | null>;
   deletePersonalInstallations(): Promise<void>;
   /** Deletes the auth user. Succeeds when the user is already gone. */
@@ -77,6 +88,14 @@ export type DeleteAccountDeps = {
   /** The adapter for a placement (`placementProviders` in production). */
   provider(kind: ProviderKind, placementId?: string | null): ManagedComputeProvider;
   revokeLinearToken(accessToken: string): Promise<void>;
+  /** As remote-admin's report_usage: off (shadow mode) unless TREQ_USAGE_BILLING_ENABLED=1. */
+  usageReporting?: { enabled: boolean; eventName?: string };
+};
+
+// Used only when STRIPE_SECRET_KEY is unset: a row with a customer then fails
+// to send and the account is kept.
+const NO_STRIPE: StripeClient = {
+  request: () => Promise.reject(new Error("STRIPE_SECRET_KEY is not configured")),
 };
 
 // Stripe statuses after which a subscription can no longer charge.
@@ -129,6 +148,45 @@ export async function deleteAccount(
     };
   }
 
+  for (const instance of await store.liveInstances()) {
+    try {
+      // Every placement: a migration's target machine is billed too.
+      await deleteInstanceMachines(deps.provider, instance, await store.livePlacements(instance.id));
+      await store.markInstanceDeleted(instance.id);
+    } catch (err) {
+      console.error(
+        `[delete-account] delete instance ${instance.id} failed:`,
+        err instanceof Error ? err.message : String(err),
+      );
+      return {
+        status: 502,
+        body: {
+          error:
+            "Your cloud workspace could not be deleted. Your account was not deleted. Try again.",
+        },
+      };
+    }
+  }
+
+  // Usage not yet sent to Stripe is deleted with the user, and a cancel's
+  // final invoice bills only what the meter already has: send it first.
+  const flushed = await reportUsage({
+    store: store.finalUsage(),
+    stripe: deps.stripe ?? NO_STRIPE,
+    now: () => new Date(),
+    enabled: deps.usageReporting?.enabled ?? false,
+    eventName: deps.usageReporting?.eventName,
+    log: (fields) => console.log(JSON.stringify({ fn: "delete-account", ...fields })),
+  });
+  if (flushed.failed > 0 || flushed.dead > 0) {
+    return {
+      status: 502,
+      body: {
+        error: "Your final cloud usage could not be recorded. Your account was not deleted. Try again.",
+      },
+    };
+  }
+
   const subscriptions = await store.subscriptionsToCancel();
   if (subscriptions.length > 0) {
     if (!deps.stripe) {
@@ -157,26 +215,6 @@ export async function deleteAccount(
           },
         };
       }
-    }
-  }
-
-  for (const instance of await store.liveInstances()) {
-    try {
-      // Every placement: a migration's target machine is billed too.
-      await deleteInstanceMachines(deps.provider, instance, await store.livePlacements(instance.id));
-      await store.markInstanceDeleted(instance.id);
-    } catch (err) {
-      console.error(
-        `[delete-account] delete instance ${instance.id} failed:`,
-        err instanceof Error ? err.message : String(err),
-      );
-      return {
-        status: 502,
-        body: {
-          error:
-            "Your cloud workspace could not be deleted. Your account was not deleted. Try again.",
-        },
-      };
     }
   }
 
@@ -350,6 +388,10 @@ export function deleteAccountStoreFor(
           .neq("role", "dead"),
         "placement lookup",
       ) as Pick<PlacementRow, "id" | "provider_kind" | "provider_resource_id">[];
+    },
+
+    finalUsage() {
+      return supabaseUsageReportStore(client as unknown as SupabaseClient, { ownerUserId: userId });
     },
 
     async markInstanceDeleted(instanceId) {

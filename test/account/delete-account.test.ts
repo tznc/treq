@@ -26,6 +26,14 @@ function fakeStore(
     instances?: Instance[];
     linearToken?: string | null;
     lastOwnerOf?: { id: string; name: string }[];
+    usage?: {
+      identifier: string;
+      owner_user_id: string;
+      hour: string;
+      billed_nanousd: number;
+      stripe_customer_id: string | null;
+      attempts: number;
+    }[];
     placements?: Record<
       string,
       {
@@ -53,6 +61,28 @@ function fakeStore(
     },
     async markInstanceDeleted(id) {
       log.push(`instance-deleted:${id}`);
+    },
+    finalUsage() {
+      return {
+        async buildReports() {
+          if (seed.usage) log.push("usage-built");
+          return (seed.usage ?? []).length;
+        },
+        async pendingReports() {
+          return (seed.usage ?? []).filter(
+            (r) => !log.includes(`usage-sent:${r.identifier}`),
+          );
+        },
+        async markSent(identifier: string) {
+          log.push(`usage-sent:${identifier}`);
+        },
+        async markFailed(identifier: string) {
+          log.push(`usage-failed:${identifier}`);
+        },
+        async markTerminal(identifier: string, status: string) {
+          log.push(`usage-${status}:${identifier}`);
+        },
+      };
     },
     async linearAccessToken() {
       return seed.linearToken ?? null;
@@ -443,6 +473,80 @@ describe("deleteAccount final invoice", () => {
       "DELETE /v1/subscriptions/sub_a",
       { invoice_now: true },
     ]);
+  });
+});
+
+describe("deleteAccount final usage", () => {
+  const usage = [
+    {
+      identifier: `${ME}:2026-11-02T10`,
+      owner_user_id: ME,
+      hour: "2026-11-02T10:00:00Z",
+      billed_nanousd: 2_500_000_000,
+      stripe_customer_id: "cus_me",
+      attempts: 0,
+    },
+  ];
+
+  // Usage not yet sent would be cascade-deleted with the user, and the
+  // cancel's final invoice only bills what the meter already has.
+  it("stops machines, sends the remaining usage, then cancels", async () => {
+    const { store, log } = fakeStore({
+      subscriptions: ["sub_a"],
+      instances: [
+        { id: "inst-1", provider_kind: "boat", provider_resource_id: "vm-1" },
+      ],
+      usage,
+    });
+    const calls: string[] = [];
+    const stripe: StripeClient = {
+      async request<T>(
+        method: string,
+        path: string,
+        params?: Record<string, unknown>,
+      ): Promise<T> {
+        calls.push(
+          `${method} ${path}${params?.identifier ? ` ${params.identifier}` : ""}`,
+        );
+        log.push(`stripe:${method} ${path}`);
+        return {
+          id: "sub_a",
+          status: method === "GET" ? "active" : "canceled",
+        } as T;
+      },
+    };
+    const result = await deleteAccount(
+      deps({ store, stripe, usageReporting: { enabled: true } }),
+    );
+    expect(result.status).toBe(200);
+    expect(calls).toContain(
+      `POST /v1/billing/meter_events ${ME}:2026-11-02T10`,
+    );
+    const order = (entry: string) => log.indexOf(entry);
+    expect(order("instance-deleted:inst-1")).toBeLessThan(order("usage-built"));
+    expect(order(`usage-sent:${ME}:2026-11-02T10`)).toBeLessThan(
+      order("stripe:DELETE /v1/subscriptions/sub_a"),
+    );
+    expect(log.at(-1)).toBe("user-deleted");
+  });
+
+  it("keeps the account when the remaining usage cannot be sent", async () => {
+    const { store, log } = fakeStore({ subscriptions: ["sub_a"], usage });
+    const stripe: StripeClient = {
+      async request<T>(method: string, path: string): Promise<T> {
+        if (path === "/v1/billing/meter_events")
+          throw new StripeApiError(500, "Stripe is down");
+        return {
+          id: "sub_a",
+          status: method === "GET" ? "active" : "canceled",
+        } as T;
+      },
+    };
+    const result = await deleteAccount(
+      deps({ store, stripe, usageReporting: { enabled: true } }),
+    );
+    expect(result.status).toBe(502);
+    expect(log).not.toContain("user-deleted");
   });
 });
 

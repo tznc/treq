@@ -189,22 +189,36 @@ function retryable(err: unknown): boolean {
 }
 
 /** UsageReportStore over the service-role Supabase client. */
-export function supabaseUsageReportStore(supabase: SupabaseClient): UsageReportStore {
+/**
+ * With `ownerUserId`, the store covers one owner: it builds that owner's
+ * final usage up to `until`, current partial hour included
+ * (build_final_usage_reports), and lists only their rows. delete-account uses
+ * it before the user's rows cascade away.
+ */
+export function supabaseUsageReportStore(
+  supabase: SupabaseClient,
+  opts: { ownerUserId?: string } = {},
+): UsageReportStore {
   return {
     async buildReports(until) {
-      const data = await rpc(supabase, "build_usage_reports", {
-        p_until: until.toISOString(),
-      });
+      const data = opts.ownerUserId
+        ? await rpc(supabase, "build_final_usage_reports", {
+          p_user_id: opts.ownerUserId,
+          p_until: until.toISOString(),
+        })
+        : await rpc(supabase, "build_usage_reports", {
+          p_until: until.toISOString(),
+        });
       return Number(data ?? 0);
     },
     async pendingReports() {
-      const rows = must(await supabase
+      let query = supabase
         .from("usage_reports")
         .select("identifier, owner_user_id, hour, billed_nanousd, attempts, created_at")
         .is("sent_at", null)
-        .or("stripe_status.is.null,stripe_status.eq.error")
-        .order("created_at")
-        .limit(1000), "list usage reports");
+        .or("stripe_status.is.null,stripe_status.eq.error");
+      if (opts.ownerUserId) query = query.eq("owner_user_id", opts.ownerUserId);
+      const rows = must(await query.order("created_at").limit(1000), "list usage reports");
       if (!rows?.length) return [];
       const owners = [...new Set(rows.map((r) => r.owner_user_id as string))];
       const customers = must(await supabase
