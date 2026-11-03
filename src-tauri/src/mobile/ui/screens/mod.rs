@@ -121,7 +121,8 @@ pub fn ask_then(
   cx: &mut App,
 ) {
   match op.ask() {
-    Ask::OneTap => action(cx),
+    // Deferred: callers are usually inside their own screen's update.
+    Ask::OneTap => cx.defer(action),
     Ask::Sheet => super::sheet::confirm(title, body, label, true, move |_, cx| action(cx), cx),
   }
 }
@@ -153,5 +154,29 @@ mod tests {
     for op in [Op::DeleteWorkspace, Op::RemoveHost] {
       assert_eq!(op.ask(), Ask::Sheet, "{op:?}");
     }
+  }
+
+  /// A screen runs its one-tap mutation from inside its own update (a menu
+  /// entry), so the action must not re-enter that update.
+  #[gpui_kit::test]
+  fn one_tap_runs_outside_the_callers_update(cx: &mut gpui_kit::TestAppContext) {
+    use gpui_kit::AppContext as _;
+    struct Screen(u32);
+    let screen = cx.new(|_| Screen(0));
+    let weak = screen.downgrade();
+    screen.update(cx, |_, cx| {
+      ask_then(
+        Op::Push,
+        "",
+        "",
+        "",
+        move |cx| {
+          weak.update(cx, |s, _| s.0 += 1).ok();
+        },
+        cx,
+      );
+    });
+    cx.run_until_parked();
+    assert_eq!(screen.read_with(cx, |s, _| s.0), 1);
   }
 }
