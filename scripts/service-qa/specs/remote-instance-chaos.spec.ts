@@ -9,11 +9,11 @@ import { expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import * as lapseSweep from "../../../supabase/functions/_shared/remote/lapse-sweep";
 import { LocalProvider } from "../../../supabase/functions/_shared/remote/local-provider";
-import type { SandboxProvider } from "../../../supabase/functions/_shared/remote/provider";
+import { ProviderError, type SandboxProvider } from "../../../supabase/functions/_shared/remote/provider";
 import { handleRemoteInstanceAction } from "../../../supabase/functions/remote-instance/lib";
 import { getServiceClient } from "../clients";
 import { recordOutcome } from "../record";
-import { createTestUser, deleteTestUser } from "../seed";
+import { createTestUser, deleteTestUser, signInWithEmailPassword } from "../seed";
 
 const admin = getServiceClient();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -300,3 +300,106 @@ it("concurrent ensures answer 200 and leave one live instance", async () => {
     await deleteTestUser(admin, distinct.user.id);
   }
 }, 60_000);
+
+it("a provider error's secrets never reach rows the owner can read", async () => {
+  const u = await createTestUser();
+  try {
+    const secret = "sk_live_SECRET";
+    const url = "https://api.sprites.dev/internal";
+    const chaos = chaosProvider(() => ({
+      createInstance: async () => {
+        throw new ProviderError("unavailable", `upstream 500 token=${secret} at ${url}`);
+      },
+    }));
+    const res = await ensure(u.user.id, chaos.make);
+    expect(res.status).toBe(502);
+
+    const { client } = await signInWithEmailPassword(u.email, u.password);
+    const ops = await client.from("remote_instance_operations").select("*");
+    const audit = await client.from("remote_audit_events").select("*");
+    expect(ops.error).toBeNull();
+    expect(audit.error).toBeNull();
+    expect(ops.data?.length).toBeGreaterThan(0);
+    const readable = JSON.stringify({ ops: ops.data, audit: audit.data, res: res.json });
+    expect(readable).not.toContain(secret);
+    expect(readable).not.toContain("api.sprites.dev");
+    expect(ops.data?.[0].error_message).toMatch(/^provider_unavailable/);
+
+    await recordOutcome("remote-instance-chaos-08-scrubbed-errors", {
+      expectations: [
+        "A provider error carrying a token and an internal URL fails ensure with 502.",
+        "Neither the token nor the URL appears in the operation or audit rows the owner reads with their JWT.",
+        "The operation's error_message starts with the error code provider_unavailable.",
+      ],
+      details: { error_message: ops.data?.[0].error_message },
+    });
+  } finally {
+    await deleteTestUser(admin, u.user.id);
+  }
+}, 30_000);
+
+it("malformed requests answer 400 with a code and create nothing", async () => {
+  const u = await createTestUser();
+  try {
+    const key = () => `k-${randomUUID()}`;
+    const cases: Array<[string, unknown, number, string]> = [
+      ["null body", null, 400, "validation_error"],
+      ["array body", [], 400, "validation_error"],
+      ["string body", "ensure", 400, "validation_error"],
+      ["unknown region", { action: "ensure", idempotency_key: key(), region: "mars_north" }, 400, "validation_error"],
+      ["unknown size", { action: "ensure", idempotency_key: key(), size_preset: "galactic" }, 400, "validation_error"],
+      ["numeric instance_id", { action: "status", instance_id: 42 }, 400, "validation_error"],
+      ["non-uuid instance_id", { action: "wake", idempotency_key: key(), instance_id: "../etc" }, 400, "validation_error"],
+      ["missing key", { action: "wake" }, 400, "validation_error"],
+      ["unknown action", { action: "explode" }, 400, "unknown_action"],
+      ["missing action", {}, 400, "unknown_action"],
+    ];
+    for (const [name, body, status, code] of cases) {
+      const res = await call(u.user.id, body);
+      expect({ name, status: res.status, code: res.json.code }).toEqual({ name, status, code });
+    }
+    expect(await rows(admin, u.user.id)).toEqual([]);
+
+    const huge = "x".repeat(100_000);
+    const res = await call(u.user.id, { action: huge });
+    expect(res.json.code).toBe("unknown_action");
+    expect(JSON.stringify(res.json).length).toBeLessThan(500);
+
+    await recordOutcome("remote-instance-chaos-09-input-validation", {
+      expectations: [
+        "Non-object bodies, unknown region/size_preset, non-uuid instance_id and a missing key answer 400 validation_error.",
+        "An unknown or missing action answers 400 unknown_action, and a 100 kB action is not echoed back.",
+        "None of these requests creates a remote_instances row.",
+      ],
+      details: { cases: cases.map(([name]) => name) },
+    });
+  } finally {
+    await deleteTestUser(admin, u.user.id);
+  }
+}, 30_000);
+
+it("wake and reprovision before a machine exists answer 409 no_provider_resource", async () => {
+  const u = await createTestUser();
+  try {
+    const chaos = chaosProvider(() => ({
+      createInstance: async () => {
+        throw new ProviderError("unavailable", "down");
+      },
+    }));
+    await ensure(u.user.id, chaos.make);
+    for (const action of ["wake", "reprovision"]) {
+      const res = await call(u.user.id, { action, idempotency_key: `${action}-${randomUUID()}` });
+      expect({ action, status: res.status, code: res.json.code }).toEqual({
+        action,
+        status: 409,
+        code: "no_provider_resource",
+      });
+    }
+    await recordOutcome("remote-instance-chaos-10-no-provider-resource", {
+      expectations: ["Wake and reprovision on an instance with no machine answer 409 with code no_provider_resource."],
+      details: {},
+    });
+  } finally {
+    await deleteTestUser(admin, u.user.id);
+  }
+}, 30_000);

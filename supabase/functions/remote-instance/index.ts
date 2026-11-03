@@ -43,11 +43,11 @@ import type { CloudContext } from "../_shared/remote/instance-actions.ts";
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS")
     return new Response(null, { headers: corsHeaders, status: 204 });
-  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  if (req.method !== "POST") return json({ error: "Method not allowed", code: "method_not_allowed" }, 405);
 
   const authHeader = req.headers.get("authorization") ?? "";
   const userToken = authHeader.replace(/^Bearer\s+/i, "");
-  if (!userToken) return json({ error: "Unauthorized" }, 401);
+  if (!userToken) return json({ error: "Unauthorized", code: "unauthorized" }, 401);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
@@ -60,13 +60,13 @@ Deno.serve(async (req) => {
     data: { user },
     error: authError,
   } = await supabaseUser.auth.getUser();
-  if (authError || !user) return json({ error: "Unauthorized" }, 401);
+  if (authError || !user) return json({ error: "Unauthorized", code: "unauthorized" }, 401);
 
-  let body: Record<string, unknown>;
+  let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return json({ error: "Invalid JSON" }, 400);
+    return json({ error: "Invalid JSON", code: "invalid_json" }, 400);
   }
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey);

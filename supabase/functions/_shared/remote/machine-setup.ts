@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
 import { recordAuditEvent } from "./audit.ts";
+import { scrubErrorText } from "./error-scrub.ts";
 import { bootstrapCommand, CURRENT_MANIFEST_VERSION } from "./boot-manifest.ts";
 import { recordEndpointHostKey, updateInstance } from "./instance-store.ts";
 import { provisionManagedSshd, readManagedHostKeys } from "./managed-sshd.ts";
@@ -175,7 +176,7 @@ export async function recordHostKeys(
       instanceId: p.instanceId,
       endpointId: p.endpointId,
       eventType: "readiness_stage_failed",
-      detail: { stage: "host_key_read", reason: (err as Error).message },
+      detail: { stage: "host_key_read", reason: scrubErrorText((err as Error).message) },
       correlationId: p.correlationId,
     });
   }
@@ -207,7 +208,7 @@ export async function establishSshTrust(
       instanceId: p.instanceId,
       endpointId: p.endpointId,
       eventType: "ca_trust_install_failed",
-      detail: { error: (err as Error).message },
+      detail: { error: scrubErrorText((err as Error).message) },
       correlationId: p.correlationId,
     });
     return;
@@ -226,7 +227,7 @@ export async function establishSshTrust(
         instanceId: p.instanceId,
         endpointId: p.endpointId,
         eventType: "readiness_stage_failed",
-        detail: { stage: "gateway", reason: (err as Error).message },
+        detail: { stage: "gateway", reason: scrubErrorText((err as Error).message) },
         correlationId: p.correlationId,
       });
     }
