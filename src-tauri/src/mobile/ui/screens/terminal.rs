@@ -1350,14 +1350,35 @@ impl Render for TerminalScreen {
       }
       Load::Failed(error) => {
         return widgets::page()
-          .child(widgets::error_text(error.clone(), cx))
+          .size_full()
+          .items_center()
           .child(
-            Button::new("back")
-              .outline()
-              .large()
-              .label("Back to terminals")
-              .on_click(|_, _, cx| nav::pop(cx))
-              .touch(),
+            widgets::empty("attach-failed", error.clone(), cx)
+              .error(true)
+              .icon(treq_ui::theme::ICON_CIRCLE_ALERT)
+              .action(
+                h_flex()
+                  .gap_3()
+                  .child(
+                    Button::new("attach-retry")
+                      .outline()
+                      .large()
+                      .label("Retry")
+                      .on_click(cx.listener(|this, _, window, cx| {
+                        this.attach(this.program.launch(Vec::new()), window, cx);
+                        cx.notify();
+                      }))
+                      .touch(),
+                  )
+                  .child(
+                    Button::new("back")
+                      .ghost()
+                      .large()
+                      .label("Back to terminals")
+                      .on_click(|_, _, cx| nav::pop(cx))
+                      .touch(),
+                  ),
+              ),
           )
           .into_any_element();
       }
