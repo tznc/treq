@@ -14,16 +14,9 @@ use crate::{
   jj::{JjBranch, JjFileChange, JjRevisionDiff},
   local_db::Workspace,
 };
-use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-  component::{
-    button::{Button, ButtonVariants},
-    h_flex,
-    input::{Input, InputState},
-    tag::Tag,
-    v_flex, ActiveTheme, Sizable,
-  },
+  component::{button::Button, h_flex, input::InputState, v_flex, ActiveTheme},
   div, list, px, AnyElement, App, AppContext, ClipboardItem, Context, Entity, InteractiveElement,
   IntoElement, ListState, ParentElement, Render, StatefulInteractiveElement, Styled, Task,
   WeakEntity, Window,
@@ -31,7 +24,7 @@ use gpui_kit::{
 use serde::Deserialize;
 use treq_ui::{
   tabs::{Tab, Tabs},
-  Tone,
+  Badge, Tone,
 };
 
 use super::{
@@ -938,6 +931,7 @@ impl WorkspaceScreen {
 
   fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let muted = cx.theme().muted_foreground;
+    let palette = treq_ui::theme::current(cx);
     let Some(status) = self.status.ready() else {
       return match &self.status {
         Load::Failed(error) => widgets::error_text(errors::describe(error).message, cx),
@@ -974,31 +968,37 @@ impl WorkspaceScreen {
           .flex_wrap()
           .gap_2()
           .when(partial.has_conflicts, |row| {
-            row.child(Tag::danger().small().child(format!(
-              "{} conflicted",
-              status.conflicted_files.len().max(1)
-            )))
+            row.child(
+              Badge::new(
+                format!("{} conflicted", status.conflicted_files.len().max(1)),
+                &palette,
+              )
+              .tone(Tone::Danger),
+            )
           })
+          // Uncommitted work is information, not a problem: a neutral badge.
           .child(if partial.has_changes {
-            Tag::warning().small().child("Uncommitted changes")
+            Badge::new("Uncommitted changes", &palette)
           } else {
-            Tag::success().small().child("Clean")
+            Badge::new("Clean", &palette).tone(Tone::Success)
           })
           .when(partial.commits_ahead > 0, |row| {
-            row.child(
-              Tag::secondary()
-                .small()
-                .child(format!("↑{} ahead", partial.commits_ahead)),
-            )
+            row.child(Badge::new(
+              format!("↑{} ahead", partial.commits_ahead),
+              &palette,
+            ))
           })
-          .when_some(self.pr.ready().and_then(pull_request::tag), |row, tag| {
-            row.child(
-              div()
-                .id("pr-tag")
-                .child(tag)
-                .on_click(cx.listener(|this, _, _, cx| this.show_pr(cx))),
-            )
-          }),
+          .when_some(
+            self.pr.ready().and_then(|s| pull_request::tag(s, &palette)),
+            |row, tag| {
+              row.child(
+                div()
+                  .id("pr-tag")
+                  .child(tag)
+                  .on_click(cx.listener(|this, _, _, cx| this.show_pr(cx))),
+              )
+            },
+          ),
       )
   }
 
@@ -1114,27 +1114,6 @@ impl WorkspaceScreen {
           item.into_any_element()
         }
       }
-      ChangeItem::CommitBar => {
-        let committing = self.busy == Some("commit");
-        let bar = h_flex()
-          .p_3()
-          .gap_2()
-          .child(div().flex_1().child(Input::new(&self.commit_message)))
-          .child(
-            Button::new("commit")
-              .primary()
-              .label("Commit")
-              .loading(committing)
-              .disabled(self.busy.is_some())
-              .on_click(cx.listener(|this, _, window, cx| this.commit(window, cx)))
-              .touch(),
-          );
-        div()
-          .px_4()
-          .pt_2()
-          .child(widgets::card(cx).child(bar))
-          .into_any_element()
-      }
       ChangeItem::File { committed, index } => {
         let files = if committed {
           &diff.committed_files
@@ -1172,13 +1151,12 @@ enum ChangeItem {
   Title(Section),
   Empty(Section),
   Conflict(usize, Slot),
-  CommitBar,
   File { committed: bool, index: usize },
   End,
 }
 
 /// The Changes tab flattened to list items: a title per section, then its
-/// rows or file blocks, with the commit bar ahead of the uncommitted files.
+/// rows or file blocks. The commit bar sits under the list.
 fn change_items(diff: &JjRevisionDiff) -> Vec<ChangeItem> {
   let mut items = Vec::new();
   if !diff.conflicted_files.is_empty() {
@@ -1198,7 +1176,6 @@ fn change_items(diff: &JjRevisionDiff) -> Vec<ChangeItem> {
   if diff.uncommitted_files.is_empty() {
     items.push(ChangeItem::Empty(Section::Uncommitted));
   } else {
-    items.push(ChangeItem::CommitBar);
     items.extend(
       (0..diff.uncommitted_files.len()).map(|index| ChangeItem::File {
         committed: false,
@@ -1224,12 +1201,7 @@ fn change_items(diff: &JjRevisionDiff) -> Vec<ChangeItem> {
 impl Render for WorkspaceScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let body = match self.view {
-      View::Terminals => div()
-        .id("terminals")
-        .size_full()
-        .overflow_y_scroll()
-        .child(widgets::page().child(self.sessions.clone()))
-        .into_any_element(),
+      View::Terminals => self.sessions.clone().into_any_element(),
       View::Changes => v_flex()
         .size_full()
         .child(div().flex_1().min_h_0().child(self.changes(cx)))
@@ -1491,7 +1463,7 @@ mod tests {
   }
 
   #[core::prelude::v1::test]
-  fn changes_flatten_to_titled_sections_with_the_commit_bar_first() {
+  fn changes_flatten_to_titled_sections() {
     let file = |committed, index| ChangeItem::File { committed, index };
     assert_eq!(
       change_items(&revision(1, 2, 1)),
@@ -1505,7 +1477,6 @@ mod tests {
           }
         ),
         ChangeItem::Title(Section::Uncommitted),
-        ChangeItem::CommitBar,
         file(false, 0),
         file(false, 1),
         ChangeItem::Title(Section::Committed),

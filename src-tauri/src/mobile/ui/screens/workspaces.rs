@@ -2,7 +2,7 @@
 //! workspaces under their base and status dots. A tap opens a workspace;
 //! holding one starts selecting, and the title bar's ⋯ acts on the picks.
 
-use crate::mobile::ui::widgets::TouchButton as _;
+use crate::mobile::ui::widgets::{Caption as _, TouchButton as _};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -738,6 +738,10 @@ impl WorkspacesScreen {
     let theme = cx.theme();
     let selecting = self.selection.as_ref();
     let selected = selecting.is_some_and(|s| s.contains(&id));
+    let open = nav::beside(cx.entity_id(), cx)
+      .and_then(|l| l.workspace)
+      .and_then(|w| w.id.parse().ok());
+    let marked = highlighted(id, selecting, open);
     let pending = self.pending.contains(&id);
 
     let mut status: Vec<AnyElement> = Vec::new();
@@ -746,7 +750,7 @@ impl WorkspacesScreen {
         h_flex()
           .gap_0p5()
           .items_center()
-          .text_xs()
+          .caption()
           .text_color(theme.muted_foreground)
           .child(IconName::SquareTerminal)
           .child(summary.terminals.to_string())
@@ -756,16 +760,18 @@ impl WorkspacesScreen {
     if summary.commits_ahead > 0 {
       status.push(
         div()
-          .text_xs()
+          .caption()
           .text_color(theme.muted_foreground)
           .child(format!("↑{}", summary.commits_ahead))
           .into_any_element(),
       );
     }
-    if summary.has_conflicts {
-      status.push(Dot::new(Tone::Danger, "Conflict", &palette).into_any_element());
-    } else if summary.has_changes {
-      status.push(Dot::new(Tone::Warning, "Uncommitted changes", &palette).into_any_element());
+    if let Some((tone, word)) = state(summary) {
+      status.push(
+        Dot::new(tone, word, &palette)
+          .with_word()
+          .into_any_element(),
+      );
     }
 
     let trailing = h_flex()
@@ -790,7 +796,7 @@ impl WorkspacesScreen {
       cx,
     )
     .pl(px(16. + INDENT * entry.depth as f32))
-    .when(selected, |row| row.bg(palette.selected()))
+    .when(marked, |row| row.bg(palette.selected()))
     .when(pending, |row| row.opacity(0.6))
     .on_click(cx.listener(move |this, _, _, cx| {
       if this.pending.contains(&id) {
@@ -811,13 +817,7 @@ impl WorkspacesScreen {
   }
 
   fn bottom_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let theme = cx.theme();
-    let bar = h_flex()
-      .p_3()
-      .gap_2()
-      .border_t_1()
-      .border_color(theme.border)
-      .bg(theme.background);
+    let bar = widgets::bottom_bar(cx);
     match &self.selection {
       Some(_) => {
         let count = self.visible_selection(cx).len();
@@ -854,6 +854,23 @@ impl WorkspacesScreen {
           .touch(),
       ),
     }
+  }
+}
+
+/// Whether row `id` is marked: the picked rows while picking, otherwise the
+/// workspace `open` beside the list.
+fn highlighted(id: i64, selection: Option<&HashSet<i64>>, open: Option<i64>) -> bool {
+  selection.map_or(open == Some(id), |s| s.contains(&id))
+}
+
+/// The state a row's dot shows, and the word beside it.
+fn state(summary: &WorkspaceSummary) -> Option<(Tone, &'static str)> {
+  if summary.has_conflicts {
+    Some((Tone::Danger, "Conflicts"))
+  } else if summary.has_changes {
+    Some((Tone::Warning, "Uncommitted"))
+  } else {
+    None
   }
 }
 
@@ -904,7 +921,7 @@ impl WorkspacesScreen {
           .items_center()
           .child(
             div()
-              .text_xs()
+              .caption()
               .font_weight(FontWeight::SEMIBOLD)
               .text_color(cx.theme().muted_foreground)
               .child("WORKSPACES"),
@@ -1245,6 +1262,29 @@ mod tests {
     let mut indexes: Vec<usize> = stack_order(&list).into_iter().map(|e| e.index).collect();
     indexes.sort();
     assert_eq!(indexes, vec![0, 1, 2]);
+  }
+
+  /// In a split, the workspace open beside the list is marked; picking
+  /// workspaces marks only the picked ones.
+  #[core::prelude::v1::test]
+  fn the_open_workspace_is_highlighted() {
+    assert!(highlighted(1, None, Some(1)));
+    assert!(!highlighted(2, None, Some(1)));
+    assert!(!highlighted(1, None, None));
+    let picked: HashSet<i64> = [2].into_iter().collect();
+    assert!(highlighted(2, Some(&picked), Some(1)));
+    assert!(!highlighted(1, Some(&picked), Some(1)));
+  }
+
+  /// A row's state dot comes with a word naming it.
+  #[core::prelude::v1::test]
+  fn state_dots_are_named() {
+    let mut s = summary(1, "a", None);
+    assert_eq!(state(&s), None);
+    s.has_changes = true;
+    assert_eq!(state(&s), Some((Tone::Warning, "Uncommitted")));
+    s.has_conflicts = true;
+    assert_eq!(state(&s), Some((Tone::Danger, "Conflicts")));
   }
 
   #[core::prelude::v1::test]

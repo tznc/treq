@@ -4,7 +4,7 @@
 //! the title bar's ⋯ menu ([`menu_items`]), so another one is one more
 //! [`PrAction`].
 
-use crate::mobile::ui::widgets::TouchButton as _;
+use crate::mobile::ui::widgets::{Caption as _, TouchButton as _};
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
@@ -667,7 +667,7 @@ impl PrDetailScreen {
         .flex()
         .items_center()
         .justify_center()
-        .text_xs()
+        .caption()
         .text_color(theme.muted_foreground)
         .child(
           login

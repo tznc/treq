@@ -4,7 +4,7 @@
 //! there. Lines whose workspace is already open are left out: they do
 //! nothing.
 
-use crate::mobile::ui::widgets::TouchButton as _;
+use crate::mobile::ui::widgets::{Caption as _, TouchButton as _};
 use std::time::{Duration, Instant};
 
 use crate::core::{
@@ -386,7 +386,7 @@ impl NewWorkspacesSheet {
             .min_w_0()
             .when(new, |line| line.child(Tag::info().xsmall().child("New")))
             .child(if mono {
-              widgets::mono(text, cx).text_xs().truncate()
+              widgets::mono(text, cx).caption().truncate()
             } else {
               div().truncate().child(text)
             })
@@ -419,7 +419,7 @@ impl NewWorkspacesSheet {
                   .child(branch_line(branch.clone(), true)),
                 _ => rows.child(branch_line(row.line.trim().to_string(), false)),
               })
-              .children(error.map(|error| div().text_xs().text_color(theme.danger).child(error))),
+              .children(error.map(|error| div().caption().text_color(theme.danger).child(error))),
           )
       }))
       .into_any_element()

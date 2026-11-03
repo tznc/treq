@@ -4,7 +4,7 @@
 //! session, attached, full screen. Leaving it detaches; the session keeps
 //! running on the host.
 
-use crate::mobile::ui::widgets::TouchButton as _;
+use crate::mobile::ui::widgets::{Caption as _, TouchButton as _};
 use crate::result_ext::ResultExt as _;
 use std::{collections::HashMap, rc::Rc, time::Duration};
 
@@ -586,7 +586,7 @@ impl Render for Sessions {
       .is_some_and(|c| !c.holds_terminals(terminal_backend()));
     let no_agents = agents_on(check.as_ref()).is_empty();
     let ready = self.workspace.is_some() && !no_multiplexer;
-    v_flex()
+    let list = v_flex()
       .gap_3()
       .children(self.notice.clone().map(|n| widgets::muted(n, cx)))
       .when(no_multiplexer, |list| {
@@ -596,9 +596,24 @@ impl Render for Sessions {
         ))
       })
       .child(self.session_rows(cx))
+      .when(no_agents && !no_multiplexer, |list| {
+        list.child(widgets::muted(
+          "No coding agents found on this host. Install Claude Code, Codex or Cursor Agent there, then reconnect.",
+          cx,
+        ))
+      });
+    v_flex()
+      .size_full()
       .child(
-        h_flex()
-          .gap_2()
+        div()
+          .id("terminals")
+          .flex_1()
+          .min_h_0()
+          .overflow_y_scroll()
+          .child(widgets::page().child(list)),
+      )
+      .child(
+        widgets::bottom_bar(cx)
           .child(
             Button::new("new-agent")
               .primary()
@@ -607,7 +622,8 @@ impl Render for Sessions {
               .icon(IconName::Bot)
               .label("New agent")
               .disabled(!ready || no_agents)
-              .on_click(cx.listener(|this, _, _, cx| this.new_agent(cx))).touch(),
+              .on_click(cx.listener(|this, _, _, cx| this.new_agent(cx)))
+              .touch(),
           )
           .child(
             Button::new("new-shell")
@@ -617,17 +633,10 @@ impl Render for Sessions {
               .icon(IconName::SquareTerminal)
               .label("New shell")
               .disabled(!ready)
-              .on_click(cx.listener(|this, _, _, cx| {
-                this.start(Program::Shell, Vec::new(), cx)
-              })).touch(),
+              .on_click(cx.listener(|this, _, _, cx| this.start(Program::Shell, Vec::new(), cx)))
+              .touch(),
           ),
       )
-      .when(no_agents && !no_multiplexer, |list| {
-        list.child(widgets::muted(
-          "No coding agents found on this host. Install Claude Code, Codex or Cursor Agent there, then reconnect.",
-          cx,
-        ))
-      })
   }
 }
 
@@ -1392,7 +1401,7 @@ impl Render for TerminalScreen {
           .py_1()
           .border_b_1()
           .border_color(theme.border)
-          .child(widgets::mono(self.label.clone(), cx).text_xs()),
+          .child(widgets::mono(self.label.clone(), cx).caption()),
       )
       .child(div().flex_1().min_h_0().child(view.clone()))
       .when_some(self.ended, |screen, status| {

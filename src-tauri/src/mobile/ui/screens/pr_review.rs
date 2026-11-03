@@ -4,7 +4,7 @@
 //! sheet that submits the review with a verdict. The rules live in
 //! [`super::pr_review_logic`].
 
-use crate::mobile::ui::widgets::TouchButton as _;
+use crate::mobile::ui::widgets::{Caption as _, TouchButton as _};
 use std::{collections::HashSet, rc::Rc};
 
 use crate::{
@@ -658,7 +658,7 @@ impl PrReviewScreen {
               )
               .child(
                 div()
-                  .text_xs()
+                  .caption()
                   .text_color(theme.muted_foreground)
                   .child(c.created_at.get(..10).unwrap_or("").to_string()),
               ),
