@@ -1386,14 +1386,7 @@ impl SettingsView {
       "account.signIn" => self.host.open_url(&format!("{web}/sign-in?source=desktop")),
       // A failed payment goes straight to the subscription tab, where the
       // billing portal updates the card.
-      "account.manage"
-        if past_due(
-          self
-            .account_route()
-            .and_then(|a| a.subscription.clone())
-            .as_ref(),
-        ) =>
-      {
+      "account.manage" if past_due(self.account_route().and_then(|a| a.subscription).as_ref()) => {
         self
           .host
           .open_url(&format!("{web}/dashboard?tab=subscription"))
