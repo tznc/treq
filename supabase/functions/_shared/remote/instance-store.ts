@@ -88,6 +88,22 @@ export async function findExistingOperation(
     .maybeSingle(), "look up operation") as OperationRow | null;
 }
 
+const UNIQUE_VIOLATION = "23505";
+
+/** beginOperation lost a race: another request already holds this key. */
+export class OperationExists extends Error {
+  constructor(readonly operation: OperationRow) {
+    super("operation already exists");
+  }
+}
+
+/** createProvisioningInstance lost a race: the owner already has a live instance. */
+export class InstanceExists extends Error {
+  constructor(readonly instance: InstanceRow) {
+    super("instance already exists");
+  }
+}
+
 // Records the operation before the provider call, per the PRD's "The server
 // records the operation before invoking the provider" requirement. A unique
 // violation on (owner_user_id, idempotency_key) means a concurrent request
@@ -101,7 +117,7 @@ export async function beginOperation(
     idempotencyKey: string;
   },
 ): Promise<OperationRow> {
-  return must(await supabase
+  const res = await supabase
     .from("remote_instance_operations")
     .insert({
       owner_user_id: params.ownerUserId,
@@ -111,7 +127,12 @@ export async function beginOperation(
       status: "in_progress",
     })
     .select()
-    .single(), "begin operation") as OperationRow;
+    .single();
+  if (res.error?.code === UNIQUE_VIOLATION) {
+    const existing = await findExistingOperation(supabase, params.ownerUserId, params.idempotencyKey);
+    if (existing) throw new OperationExists(existing);
+  }
+  return must(res, "begin operation") as OperationRow;
 }
 
 export async function completeOperation(
@@ -172,7 +193,7 @@ export async function createProvisioningInstance(
     billingOrgId?: string | null;
   },
 ): Promise<InstanceRow> {
-  return must(await supabase
+  const res = await supabase
     .from("remote_instances")
     .insert({
       owner_user_id: params.ownerUserId,
@@ -189,7 +210,12 @@ export async function createProvisioningInstance(
       // (046_placements_and_usage.sql); there is no free base allocation.
     })
     .select()
-    .single(), "create instance record") as InstanceRow;
+    .single();
+  if (res.error?.code === UNIQUE_VIOLATION) {
+    const existing = await getInstanceForOwner(supabase, params.ownerUserId);
+    if (existing) throw new InstanceExists(existing);
+  }
+  return must(res, "create instance record") as InstanceRow;
 }
 
 /**
