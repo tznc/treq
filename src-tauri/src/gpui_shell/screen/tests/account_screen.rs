@@ -1074,7 +1074,7 @@ fn byos_adds_and_removes_provider_keys(cx: &mut TestAppContext) {
     keys.addable,
     [
       ("daytona".to_string(), "Daytona".to_string()),
-      ("fly_machines".to_string(), "Fly Machines".to_string())
+      ("e2b".to_string(), "E2B".to_string())
     ]
   );
   h.click("byos-key-add-daytona");

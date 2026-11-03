@@ -172,7 +172,7 @@ pub struct Notification {
 pub const BYOS_PROVIDERS: [(&str, &str); 3] = [
   ("boat", "Boat"),
   ("daytona", "Daytona"),
-  ("fly_machines", "Fly Machines"),
+  ("e2b", "E2B"),
 ];
 
 /// A provider's display name.
