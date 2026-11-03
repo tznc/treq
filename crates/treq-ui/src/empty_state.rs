@@ -99,6 +99,7 @@ impl RenderOnce for EmptyState {
             .role(gpui::Role::Paragraph)
             .aria_label(message.clone())
             .max_w(zpx(360.))
+            .w_full()
             .text_color(p.muted_foreground)
             .child(message)
             .test_support(),

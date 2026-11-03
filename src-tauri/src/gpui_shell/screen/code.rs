@@ -2417,7 +2417,7 @@ impl CodeView {
         Some(err) => ui::EmptyState::new("code-history-error", "Couldn't load commits", p)
           .error(true)
           .icon(theme::ICON_CIRCLE_ALERT)
-          .message("The workspace's commit history could not be read.")
+          .message("Its commit history could not be read.")
           .action(
             div()
               .flex()
