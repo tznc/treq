@@ -95,7 +95,9 @@ async function cancelSubscription(
     throw err;
   }
   if (current.status && ENDED_STATUSES.has(current.status)) return;
-  await stripe.request("DELETE", path);
+  // Cloud usage is metered on this subscription: invoice_now bills what the
+  // meter recorded this period, which Stripe otherwise drops on cancel.
+  await stripe.request("DELETE", path, { invoice_now: true });
 }
 
 export async function deleteAccount(
