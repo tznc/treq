@@ -134,8 +134,7 @@ function requireIdempotencyKey(body: Record<string, unknown>): string {
   if (key.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
     throw new HttpError(`idempotency_key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`, 400);
   }
-  // deno-lint-ignore no-control-regex
-  if (/[\u0000-\u001f\u007f]/.test(key)) {
+  if ([...key].some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f)) {
     throw new HttpError("idempotency_key must not contain control characters", 400);
   }
   return key;
