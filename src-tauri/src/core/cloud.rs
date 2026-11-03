@@ -67,9 +67,6 @@ pub struct CloudWorkspace {
   pub provider_key_error: Option<String>,
   /// Tier prices on the providers the user has a key for.
   pub byos_catalog: Vec<cloud_catalog::ByosMachineType>,
-  /// The provider Create runs on with the user's own key; `None` is treq
-  /// managed.
-  pub selected_provider: Option<String>,
 }
 
 /// Everything the account screens draw.
@@ -416,22 +413,11 @@ impl Cloud {
 
   // -- Bring your own sandbox (BYOS) ----------------------------------------
 
-  /// Picks the provider Create runs on with the user's key; `None` is
-  /// treq managed.
-  pub fn select_provider(&self, kind: Option<&str>) {
-    let kind = kind.map(str::to_string);
-    self.update_workspace(|w| w.selected_provider = kind);
-  }
-
   /// Reads the saved keys and their tier prices.
   async fn load_byos(&self) {
     let keys = control_plane::list_provider_credentials(&self.supabase);
     self
-      .load("provider keys", keys, |w, keys| {
-        let kept = |k: &String| keys.iter().any(|key| &key.provider_kind == k);
-        w.selected_provider = w.selected_provider.take().filter(kept);
-        w.provider_keys = keys;
-      })
+      .load("provider keys", keys, |w, keys| w.provider_keys = keys)
       .await;
     let types = control_plane::byos_catalog(&self.supabase);
     self
@@ -722,6 +708,16 @@ impl Cloud {
   /// "Create cloud workspace": registration, provisioning, readiness,
   /// certificate, then the repository list.
   pub async fn provision(self: &Arc<Self>) {
+    self.provision_with(None).await;
+  }
+
+  /// Creates the workspace on the user's own `kind` account (BYOS), at the
+  /// size picked on the cloud card.
+  pub async fn provision_on(self: &Arc<Self>, kind: &str) {
+    self.provision_with(Some(kind)).await;
+  }
+
+  async fn provision_with(self: &Arc<Self>, byos_kind: Option<&str>) {
     self.update_workspace(|w| {
       w.provisioning_error = None;
       w.provisioning_stage = Some("Requesting provisioning...".into());
@@ -732,12 +728,8 @@ impl Cloud {
       // One idempotency key per click, so a retry after a failure is not a
       // replay of that failure.
       let key = format!("provision-managed-{}", uuid::Uuid::new_v4());
-      let (tier, byos_kind) = {
-        let w = self.workspace.lock_or_recover();
-        let byos_kind = w.selected_provider.clone();
-        (w.selected_tier.clone(), byos_kind)
-      };
-      control_plane::ensure(&self.supabase, &key, tier.as_deref(), byos_kind.as_deref())
+      let tier = self.workspace.lock_or_recover().selected_tier.clone();
+      control_plane::ensure(&self.supabase, &key, tier.as_deref(), byos_kind)
         .await
         .map_err(|e| e.to_string())?;
       let progress = self.wait_progress();
@@ -1820,10 +1812,21 @@ mod tests {
   // -- Bring your own sandbox (BYOS) --------------------------------------
 
   async fn provision_with(cloud: &Arc<Cloud>, server: &MockServer) -> Vec<Value> {
+    provision_on_with(cloud, server, None).await
+  }
+
+  async fn provision_on_with(
+    cloud: &Arc<Cloud>,
+    server: &MockServer,
+    kind: Option<&str>,
+  ) -> Vec<Value> {
     on_action(server, "ensure", json!({})).await;
     on_action(server, "status", status("ready")).await;
     trust_mocks(server, None).await;
-    cloud.provision().await;
+    match kind {
+      Some(kind) => cloud.provision_on(kind).await,
+      None => cloud.provision().await,
+    }
     bodies(server, "ensure").await
   }
 
@@ -1831,8 +1834,7 @@ mod tests {
   async fn provisioning_on_the_users_own_provider_asks_for_byos() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    cloud.select_provider(Some("daytona"));
-    let ensured = provision_with(&cloud, &server).await;
+    let ensured = provision_on_with(&cloud, &server, Some("daytona")).await;
     assert_eq!(ensured[0]["credential_source"], "byos");
     assert_eq!(ensured[0]["provider_kind"], "daytona");
   }

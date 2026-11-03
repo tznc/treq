@@ -183,7 +183,7 @@ test.afterAll(async () => {
 
 test.describe.configure({ mode: "serial" });
 
-test("byos: Pro sees provider keys and runs Create on their own account", async () => {
+test("byos: Pro creates on their own account from Provider keys; the card names no provider", async () => {
   test.skip(!server, "needs QA_BYOS_PROXY=1, the proxy build and the local Supabase stack");
   const session = await signUp();
   makePro(session.user.id);
@@ -197,30 +197,30 @@ test("byos: Pro sees provider keys and runs Create on their own account", async 
     await expect(addDaytona).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("button", { name: "Add E2B key" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add Fly Machines key" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Create workspace on this account" })).toBeVisible();
     await page.mouse.wheel(0, 3000);
     await settle(page, 1200);
     await capture(page, {
       name: "22-byos-01-provider-keys",
       title: "Pro, no feature preview: the Provider keys section",
       expectations: [
-        "A 'Provider keys' section titled 'Bring your own sandbox' shows for this Pro user",
-        "Its copy says treq charges 5% of the provider's list price",
-        "The saved Boat key reads 'Key saved' with Remove; Add Daytona key and Add E2B key buttons show, and no Fly Machines button",
+        "A 'Provider keys / Bring your own sandbox' section says treq charges 5% of the provider's list price",
+        "The saved Boat key reads 'Key saved' with 'Create workspace on this account' and Remove",
+        "Add Daytona key and Add E2B key buttons show, and no Fly Machines button",
       ],
     });
 
-    const own = page.getByRole("button", { name: "Your Boat account" });
     await page.mouse.wheel(0, -6000);
-    await settle(page, 600);
-    await scrollTo(page, own as never);
-    await own.click();
     await settle(page, 1200);
+    await expect(page.getByRole("button", { name: "Create cloud workspace" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Your Boat account" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "treq managed" })).toHaveCount(0);
     await capture(page, {
-      name: "22-byos-02-own-account-selected",
-      title: "Create on your own Boat account",
+      name: "22-byos-02-managed-card",
+      title: "Cloud workspace card: treq managed only",
       expectations: [
-        "The cloud workspace card offers 'treq managed' and 'Your Boat account', with Your Boat account selected",
-        "A note says Boat bills you directly for the machine and treq charges 5% of Boat's list price",
+        "The cloud workspace card shows sizes and 'Create cloud workspace' only",
+        "No provider name and no 'treq managed' / 'Your … account' choice appears on the card",
       ],
     });
 
@@ -251,7 +251,7 @@ test("byos: hidden for a Free user", async () => {
       title: "Free user: no BYOS",
       expectations: [
         "The Account tab shows the signed-in Free user with an upgrade path",
-        "Scrolled to the bottom: no Provider keys section and no 'Your Boat account' option",
+        "Scrolled to the bottom: no Provider keys section",
       ],
     });
   } finally {

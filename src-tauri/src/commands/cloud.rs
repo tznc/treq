@@ -301,9 +301,9 @@ pub enum CloudAction {
   RemoveProviderKey {
     kind: String,
   },
-  /// The provider Create runs on with the user's key; `None` is treq managed.
-  SelectProvider {
-    kind: Option<String>,
+  /// Create the workspace on the user's own provider account (BYOS).
+  ProvisionOn {
+    kind: String,
   },
 }
 
@@ -342,7 +342,7 @@ pub async fn run_cloud_action(
     }
     CloudAction::SaveProviderKey { kind, key } => cloud.save_provider_key(&kind, &key.0).await,
     CloudAction::RemoveProviderKey { kind } => cloud.remove_provider_key(&kind).await,
-    CloudAction::SelectProvider { kind } => cloud.select_provider(kind.as_deref()),
+    CloudAction::ProvisionOn { kind } => cloud.provision_on(&kind).await,
   }
   Ok(())
 }

@@ -63,7 +63,9 @@ With Pro, you can run the cloud workspace on your own Boat, Daytona, or E2B acco
 1. Open Settings and choose **Account**.
 2. Under **Provider keys**, select **Add Boat key**, **Add Daytona key**, or **Add E2B key**.
 3. Paste the key into **API key** and save it. Treq checks the key with the provider before it saves it.
-4. In the **Cloud workspace** card, choose **Your Boat account** (or your Daytona or E2B account) instead of **treq managed**, then create the workspace.
+4. Pick a size in the **Cloud workspace** card, then select **Create workspace on this account** on the saved key's row.
+
+The **Create cloud workspace** button on the card always makes a Treq-managed workspace.
 
 If the provider later rejects the key, the key row reads **Rejected by** the provider, and the workspace does not start until you replace the key. Treq never falls back to its own provider account. You cannot remove a key while a workspace runs on it.
 

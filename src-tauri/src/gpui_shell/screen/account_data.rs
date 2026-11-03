@@ -97,7 +97,6 @@ pub(crate) fn cloud_route(cloud: &CloudWorkspace) -> CloudRoute {
     provider_key_saving: cloud.provider_key_saving,
     provider_key_error: cloud.provider_key_error.clone(),
     byos_catalog: cloud.byos_catalog.clone(),
-    selected_provider: cloud.selected_provider.clone(),
   }
 }
 
@@ -112,14 +111,6 @@ pub fn cloud_press(id: &str) -> Option<CloudAction> {
       acknowledged_data_loss: true,
     }),
     "cloud.resize.cancel" => Some(CloudAction::CancelResize),
-    "cloud.placement.managed" => Some(CloudAction::SelectProvider { kind: None }),
-    _ if id.starts_with("cloud.placement.") => Some(CloudAction::SelectProvider {
-      kind: Some(
-        id.strip_prefix("cloud.placement.")
-          .unwrap_or_default()
-          .to_string(),
-      ),
-    }),
     _ if id.starts_with("cloud.process.") => process_press(id),
     _ if id.starts_with("cloud.notification.dismiss.") => Some(CloudAction::DismissNotification {
       id: id
