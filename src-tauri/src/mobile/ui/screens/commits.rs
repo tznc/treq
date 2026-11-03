@@ -393,14 +393,15 @@ pub fn prefetch(target: &Target) {
 impl Render for CommitsScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let body = match &self.log {
-      Load::Idle | Load::Loading => {
-        widgets::card(cx).child(widgets::centered_message("Loading commits…", cx))
-      }
-      Load::Failed(error) => widgets::card(cx)
-        .p_4()
-        .child(widgets::error_text(error.clone(), cx)),
+      Load::Idle | Load::Loading => widgets::card(cx).child(widgets::skeleton("commits", 6, cx)),
+      Load::Failed(error) => widgets::card(cx).child(widgets::failed(
+        "commits-failed",
+        error,
+        cx.listener(|this, _, _, cx| this.reload(cx)),
+        cx,
+      )),
       Load::Ready(log) if log.commits.is_empty() => {
-        widgets::card(cx).child(widgets::centered_message("No commits.", cx))
+        widgets::card(cx).child(widgets::empty("commits-empty", "No commits.", cx))
       }
       Load::Ready(log) => {
         let shown = visible(&log.commits, &self.removing);
@@ -560,6 +561,47 @@ impl Render for DescribeSheet {
 
 #[cfg(test)]
 mod tests {
+  fn screen(log: super::Load<super::JjLogResult>) -> super::CommitsScreen {
+    super::CommitsScreen {
+      target: super::Target {
+        repo: "/r".into(),
+        id: "1".into(),
+        name: "a".into(),
+      },
+      log,
+      scroll: Default::default(),
+      removing: Default::default(),
+      notice: None,
+      keys: Default::default(),
+    }
+  }
+
+  /// A first load shows skeleton rows, not a line of text.
+  #[gpui_kit::test]
+  fn a_first_load_shows_skeleton_rows(cx: &mut gpui_kit::TestAppContext) {
+    use gpui_testing_library::prelude::*;
+    let window =
+      crate::mobile::ui::widgets::mount_for_test(cx, |_, _| screen(super::Load::Loading));
+    let screen = gpui_testing_library::Screen::new(cx, window);
+    // Hidden for its first moments (`treq_ui::delayed`), so include hidden.
+    screen.get_by_role(
+      by::role(gpui_kit::Role::ProgressIndicator)
+        .name("Loading")
+        .hidden(true),
+    );
+  }
+
+  /// A failed read says what went wrong and offers Retry.
+  #[gpui_kit::test]
+  fn a_failed_log_offers_retry(cx: &mut gpui_kit::TestAppContext) {
+    use gpui_testing_library::prelude::*;
+    let window = crate::mobile::ui::widgets::mount_for_test(cx, |_, _| {
+      screen(super::Load::Failed("unknown: fake: no jj_log".into()))
+    });
+    let screen = gpui_testing_library::Screen::new(cx, window);
+    expect(screen.get_by_role(by::role(gpui_kit::Role::Button).name("Retry"))).to_be_visible();
+  }
+
   use std::collections::HashSet;
 
   use crate::jj::JjLogCommit;

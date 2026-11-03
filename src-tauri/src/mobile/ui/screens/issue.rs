@@ -603,22 +603,15 @@ impl Render for IssueScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let content = match &self.issue {
       Load::Idle | Load::Loading => widgets::card(cx)
-        .child(widgets::centered_message("Loading issue…", cx))
+        .child(widgets::skeleton("issue", 5, cx))
         .into_any_element(),
       Load::Failed(error) => widgets::card(cx)
-        .p_4()
-        .gap_3()
-        .child(widgets::error_text(errors::describe(error).message, cx))
-        .child(
-          h_flex().child(
-            Button::new("retry")
-              .outline()
-              .large()
-              .label("Retry")
-              .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
-              .touch(),
-          ),
-        )
+        .child(widgets::failed(
+          "issue-failed",
+          error,
+          cx.listener(|this, _, _, cx| this.reload(cx)),
+          cx,
+        ))
         .into_any_element(),
       Load::Ready(issue) => {
         let issue = issue.clone();
@@ -634,7 +627,11 @@ impl Render for IssueScreen {
           .child(
             widgets::section(format!("Comments · {}", comments.len()), cx)
               .when(comments.is_empty(), |s| {
-                s.child(widgets::card(cx).child(widgets::centered_message("No comments yet.", cx)))
+                s.child(widgets::card(cx).child(widgets::empty(
+                  "issue-comments-empty",
+                  "No comments yet.",
+                  cx,
+                )))
               })
               .children(comments.iter().enumerate().map(|(i, comment)| {
                 widgets::card(cx)

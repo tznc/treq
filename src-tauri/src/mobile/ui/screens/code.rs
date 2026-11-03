@@ -20,7 +20,7 @@ use gpui_kit::{
 
 use super::{file, terminal::Sessions, workspace::Target};
 use crate::mobile::{
-  errors, remote,
+  remote,
   ui::{
     load,
     review::{self, Handler, Review},
@@ -239,13 +239,17 @@ impl CodeView {
     let entries = match &self.listing {
       Load::Idle | Load::Loading => {
         return widgets::card(cx)
-          .child(widgets::centered_message("Loading files…", cx))
+          .child(widgets::skeleton("files", 6, cx))
           .into_any_element()
       }
       Load::Failed(error) => {
         return widgets::card(cx)
-          .p_4()
-          .child(widgets::error_text(errors::describe(error).message, cx))
+          .child(widgets::failed(
+            "files-failed",
+            error,
+            cx.listener(|this, _, _, cx| this.reload(cx)),
+            cx,
+          ))
           .into_any_element()
       }
       Load::Ready(entries) => entries,
@@ -298,7 +302,7 @@ impl CodeView {
       .children(up)
       .children(rows)
       .when(empty, |card| {
-        card.child(widgets::centered_message("This folder is empty.", cx))
+        card.child(widgets::empty("files-empty", "This folder is empty.", cx))
       })
       .into_any_element()
   }
@@ -306,14 +310,18 @@ impl CodeView {
   fn matches(&self, cx: &mut Context<Self>) -> AnyElement {
     match &self.matches {
       Load::Idle | Load::Loading => widgets::card(cx)
-        .child(widgets::centered_message("Searching…", cx))
+        .child(widgets::skeleton("file-search", 4, cx))
         .into_any_element(),
       Load::Failed(error) => widgets::card(cx)
-        .p_4()
-        .child(widgets::error_text(errors::describe(error).message, cx))
+        .child(widgets::failed(
+          "file-search-failed",
+          error,
+          cx.listener(|this, _, _, cx| this.search(cx)),
+          cx,
+        ))
         .into_any_element(),
       Load::Ready(paths) if paths.is_empty() => widgets::card(cx)
-        .child(widgets::centered_message("No files match.", cx))
+        .child(widgets::empty("file-search-empty", "No files match.", cx))
         .into_any_element(),
       Load::Ready(paths) => widgets::card(cx)
         .children(paths.iter().enumerate().map(|(i, path)| {

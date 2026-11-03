@@ -266,7 +266,8 @@ impl HomeScreen {
         t.child(Count::new(hosts.len(), &palette))
       });
     let list = if hosts.is_empty() {
-      widgets::card(cx).child(widgets::centered_message(
+      widgets::card(cx).child(widgets::empty(
+        "hosts-empty",
         "No SSH hosts on this device yet.",
         cx,
       ))

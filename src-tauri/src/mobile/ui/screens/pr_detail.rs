@@ -592,13 +592,16 @@ impl PrDetailScreen {
     let open = self.checks_open;
     let card = widgets::card(cx);
     let card = match &self.checks {
-      Load::Idle | Load::Loading => card.child(widgets::centered_message("Loading checks…", cx)),
-      Load::Failed(error) => card
-        .p_4()
-        .child(widgets::error_text(errors::describe(error).message, cx)),
-      Load::Ready(None) => card.child(widgets::centered_message("No checks reported.", cx)),
+      Load::Idle | Load::Loading => card.child(widgets::skeleton("pr-checks", 3, cx)),
+      Load::Failed(error) => card.child(widgets::failed(
+        "pr-checks-failed",
+        error,
+        cx.listener(|this, _, _, cx| this.reload(cx)),
+        cx,
+      )),
+      Load::Ready(None) => card.child(widgets::empty("pr-checks-empty", "No checks reported.", cx)),
       Load::Ready(Some(checks)) if checks.checks.is_empty() => {
-        card.child(widgets::centered_message("No checks reported.", cx))
+        card.child(widgets::empty("pr-checks-empty", "No checks reported.", cx))
       }
       Load::Ready(Some(checks)) => {
         let shown: Vec<_> = if open {
@@ -784,26 +787,17 @@ impl Render for PrDetailScreen {
       Load::Ready(pr) => pr.clone(),
       Load::Failed(error) => {
         return widgets::page()
-          .child(
-            widgets::card(cx)
-              .p_4()
-              .gap_3()
-              .child(widgets::error_text(errors::describe(error).message, cx))
-              .child(
-                h_flex().child(
-                  Button::new("retry")
-                    .outline()
-                    .label("Retry")
-                    .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
-                    .touch(),
-                ),
-              ),
-          )
+          .child(widgets::card(cx).child(widgets::failed(
+            "pr-failed",
+            error,
+            cx.listener(|this, _, _, cx| this.reload(cx)),
+            cx,
+          )))
           .into_any_element()
       }
       _ => {
         return widgets::page()
-          .child(widgets::card(cx).child(widgets::centered_message("Loading pull request…", cx)))
+          .child(widgets::card(cx).child(widgets::skeleton("pr", 5, cx)))
           .into_any_element()
       }
     };
@@ -866,7 +860,11 @@ impl Render for PrDetailScreen {
     };
     let comments_section = widgets::section(heading, cx)
       .when(comment_rows.is_empty(), |s| {
-        s.child(widgets::card(cx).child(widgets::centered_message("No comments yet.", cx)))
+        s.child(widgets::card(cx).child(widgets::empty(
+          "pr-comments-empty",
+          "No comments yet.",
+          cx,
+        )))
       })
       .children(comment_rows);
     let busy = self.busy;

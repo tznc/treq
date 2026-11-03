@@ -769,7 +769,8 @@ impl PrReviewScreen {
         widgets::section(widgets_count(files.len(), "file"), cx).child(
           widgets::card(cx)
             .when(rows.is_empty(), |c| {
-              c.child(widgets::centered_message(
+              c.child(widgets::empty(
+                "pr-files-empty",
                 "No changes in this pull request.",
                 cx,
               ))
@@ -892,7 +893,8 @@ impl PrReviewScreen {
             .overflow_x_scroll()
             .child(v_flex().py_1().min_w_full().children(rows))
             .when(file.hunks.is_empty(), |d| {
-              d.child(widgets::centered_message(
+              d.child(widgets::empty(
+                "pr-diff-empty",
                 "No text changes (binary or renamed).",
                 cx,
               ))
@@ -1023,27 +1025,17 @@ impl Render for PrReviewScreen {
       Load::Ready(files) => files.clone(),
       Load::Failed(error) => {
         return widgets::page()
-          .child(
-            widgets::card(cx)
-              .p_4()
-              .gap_3()
-              .child(widgets::error_text(errors::describe(error).message, cx))
-              .child(
-                h_flex().child(
-                  Button::new("retry")
-                    .h(px(TAP))
-                    .outline()
-                    .label("Retry")
-                    .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
-                    .touch(),
-                ),
-              ),
-          )
+          .child(widgets::card(cx).child(widgets::failed(
+            "pr-review-failed",
+            error,
+            cx.listener(|this, _, _, cx| this.reload(cx)),
+            cx,
+          )))
           .into_any_element()
       }
       _ => {
         return widgets::page()
-          .child(widgets::card(cx).child(widgets::centered_message("Loading changes…", cx)))
+          .child(widgets::card(cx).child(widgets::skeleton("pr-review", 5, cx)))
           .into_any_element()
       }
     };

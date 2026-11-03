@@ -303,22 +303,16 @@ impl Render for PullRequestsScreen {
     let searching = self.searching();
     let body = match &self.list {
       Load::Idle | Load::Loading => {
-        widgets::card(cx).child(widgets::centered_message("Loading pull requests…", cx))
+        widgets::card(cx).child(widgets::skeleton("pull-requests", 6, cx))
       }
-      Load::Failed(error) => widgets::card(cx)
-        .p_4()
-        .gap_3()
-        .child(widgets::error_text(errors::describe(error).message, cx))
-        .child(
-          h_flex().child(
-            Button::new("retry")
-              .outline()
-              .label("Retry")
-              .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
-              .touch(),
-          ),
-        ),
-      Load::Ready(list) if list.is_empty() => widgets::card(cx).child(widgets::centered_message(
+      Load::Failed(error) => widgets::card(cx).child(widgets::failed(
+        "pull-requests-failed",
+        error,
+        cx.listener(|this, _, _, cx| this.reload(cx)),
+        cx,
+      )),
+      Load::Ready(list) if list.is_empty() => widgets::card(cx).child(widgets::empty(
+        "pull-requests-empty",
         if searching {
           "No open pull requests match."
         } else {

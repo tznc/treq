@@ -138,6 +138,14 @@ pub fn describe(raw: &str) -> Problem {
       None,
     );
   }
+  // The CLI failed with nothing on stdout or stderr to say why: most often
+  // a treq that is missing, broken or too old for this app.
+  if has("remote treq command failed") {
+    return Problem::new(
+      "treq on this host failed without saying why. Check that treq is installed and up to date there, then try again.",
+      Some(Fix::Retry),
+    );
+  }
   if has("connection refused") {
     return Problem::new(
       "The host refused the connection. Check the address and that SSH is running there.",
@@ -157,7 +165,20 @@ pub fn describe(raw: &str) -> Problem {
       Some(Fix::Retry),
     );
   }
-  Problem::new(strip_codes(raw), None)
+  Problem::new(strip_codes(raw), Some(Fix::Retry))
+}
+
+/// A known code, or any lowercase snake_case word, as the CLI's codes are.
+fn code_prefix(text: &str) -> Option<&str> {
+  if let Some(rest) = CODES.iter().find_map(|code| text.strip_prefix(code)) {
+    return rest.strip_prefix(':');
+  }
+  let (head, rest) = text.split_once(':')?;
+  let is_code = !head.is_empty()
+    && head
+      .chars()
+      .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+  is_code.then_some(rest)
 }
 
 /// "Unknown agent 'claude'" → "Claude".
@@ -175,17 +196,8 @@ fn unknown_agent(raw: &str) -> Option<String> {
 /// Drops the leading `code: ` prefixes and capitalizes what's left.
 fn strip_codes(raw: &str) -> String {
   let mut text = raw.trim();
-  'strip: loop {
-    for code in CODES {
-      if let Some(rest) = text
-        .strip_prefix(code)
-        .and_then(|rest| rest.strip_prefix(':'))
-      {
-        text = rest.trim_start();
-        continue 'strip;
-      }
-    }
-    break;
+  while let Some(rest) = code_prefix(text) {
+    text = rest.trim_start();
   }
   let mut chars = text.chars();
   match chars.next() {
@@ -212,7 +224,7 @@ mod tests {
   fn doubled_codes_are_dropped() {
     let problem = describe("dependency_error: dependency_error: jj is missing");
     assert_eq!(problem.message, "Jj is missing");
-    assert_eq!(problem.fix, None);
+    assert_eq!(problem.fix, Some(Fix::Retry));
   }
 
   #[test]
@@ -305,5 +317,29 @@ mod tests {
       "Workspace 7 not found"
     );
     assert_eq!(describe("").message, "");
+  }
+
+  #[test]
+  fn unrecognized_errors_offer_a_retry() {
+    assert_eq!(describe("something odd happened").fix, Some(Fix::Retry));
+  }
+
+  #[test]
+  fn any_snake_case_code_prefix_is_dropped() {
+    assert_eq!(
+      describe("unknown: fake: no repo_probe").message,
+      "No repo_probe"
+    );
+    assert_eq!(
+      describe("some_new_code: the thing broke").message,
+      "The thing broke"
+    );
+  }
+
+  #[test]
+  fn a_bare_remote_failure_says_to_check_the_install() {
+    let problem = describe("treq_command_failed: Remote treq command failed");
+    assert!(problem.message.contains("installed"), "{}", problem.message);
+    assert_eq!(problem.fix, Some(Fix::Retry));
   }
 }

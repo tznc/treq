@@ -209,7 +209,7 @@ impl WorkspaceScreen {
     };
     let body = match (hunks, uncommitted) {
       (Some([]), _) => {
-        widgets::centered_message("No diff to show (binary or empty).", cx).into_any_element()
+        widgets::empty("diff-empty", "No diff to show (binary or empty).", cx).into_any_element()
       }
       (Some(h), _) => {
         let this = cx.weak_entity();
@@ -258,7 +258,7 @@ impl WorkspaceScreen {
             .touch(),
         )
         .into_any_element(),
-      _ => widgets::centered_message("Loading diff…", cx).into_any_element(),
+      _ => widgets::skeleton(SharedString::from(format!("diff-{section}-{path}")), 3, cx),
     };
     widgets::card(cx)
       .child(header)
