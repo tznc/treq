@@ -348,6 +348,25 @@ begin
 end;
 $$;
 
+-- The caller's organizations for the desktop: role, Team, and cloud settings.
+create function public.list_my_cloud_organizations()
+returns table (org_id uuid, name text, role text, has_team boolean, allow_managed boolean,
+               allow_byos boolean, org_cap_usd numeric, member_cap_usd numeric)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select o.id, o.name, m.role, treq_internal.organization_has_team(o.id),
+         coalesce(s.allow_managed, false), coalesce(s.allow_byos, false),
+         coalesce(s.org_cap_usd, 500), coalesce(s.member_cap_usd, 50)
+    from public.organization_members m
+    join public.organizations o on o.id = m.org_id
+    left join public.organization_cloud_settings s on s.org_id = o.id
+   where m.user_id = (select auth.uid())
+   order by o.name, o.id;
+$$;
+
 -- ── Organization key RPCs ─────────────────────────────────────────────────
 
 -- Stores an organization key the caller (remote-instance) already validated
@@ -968,12 +987,14 @@ grant execute on function public.provider_credential_save_org(uuid, uuid, text, 
 revoke all on function public.get_organization_cloud_settings(uuid) from public, anon;
 revoke all on function public.set_organization_cloud_settings(uuid, boolean, boolean, numeric, numeric) from public, anon;
 revoke all on function public.get_cloud_profile() from public, anon;
+revoke all on function public.list_my_cloud_organizations() from public, anon;
 revoke all on function public.set_cloud_profile(uuid) from public, anon;
 revoke all on function public.list_org_provider_credentials(uuid) from public, anon;
 revoke all on function public.delete_org_provider_credential(uuid, text) from public, anon;
 grant execute on function public.get_organization_cloud_settings(uuid) to authenticated;
 grant execute on function public.set_organization_cloud_settings(uuid, boolean, boolean, numeric, numeric) to authenticated;
 grant execute on function public.get_cloud_profile() to authenticated;
+grant execute on function public.list_my_cloud_organizations() to authenticated;
 grant execute on function public.set_cloud_profile(uuid) to authenticated;
 grant execute on function public.list_org_provider_credentials(uuid) to authenticated;
 grant execute on function public.delete_org_provider_credential(uuid, text) to authenticated;

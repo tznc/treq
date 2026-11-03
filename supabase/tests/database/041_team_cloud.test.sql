@@ -4,7 +4,7 @@
 -- profile (personal or an organization) their workspace bills to. Usage on
 -- an organization profile is attributed to that organization.
 begin;
-select plan(36);
+select plan(38);
 
 update public.machine_type_prices set effective_from = now() - interval '30 days' where effective_to is null;
 
@@ -45,6 +45,13 @@ select throws_ok($$ select public.set_organization_cloud_settings('00000000-0000
   'P0001', 'spend_cap_too_high', 'the organization cap has a ceiling');
 select is((public.set_organization_cloud_settings('00000000-0000-0000-0000-0000000041f1', true, false, 5, 5))->>'allow_managed', 'true',
   'the owner turns on managed sandboxes');
+select results_eq(
+  $$ select org_id, name, role, has_team, allow_managed, allow_byos, org_cap_usd, member_cap_usd
+       from public.list_my_cloud_organizations() $$,
+  $$ values ('00000000-0000-0000-0000-0000000041f1'::uuid, 'Team Cloud'::text, 'owner'::text, true, true, false, 5.00::numeric, 5.00::numeric) $$,
+  'the desktop lists the caller''s organizations with role, Team and cloud settings');
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000041a3","role":"authenticated"}', true);
+select is((select count(*)::int from public.list_my_cloud_organizations()), 0, 'a non-member lists nothing');
 reset role;
 
 select is(treq_internal.cloud_access('00000000-0000-0000-0000-0000000041a2', '00000000-0000-0000-0000-0000000041f1'),
