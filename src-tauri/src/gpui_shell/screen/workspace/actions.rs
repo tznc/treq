@@ -313,7 +313,7 @@ impl WorkspaceView {
       repo: remote.repo.clone(),
       full_name: remote.full_name.clone(),
       branch: workspace.branch_name.clone(),
-      head: crate::github::pr_head_ref_impl(&self.route.repo_path, &workspace.branch_name),
+      head: crate::core::github_cli::pr_head(&self.route.repo_path, &workspace.branch_name),
       base: workspace
         .target_branch
         .clone()
