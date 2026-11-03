@@ -16,6 +16,7 @@ use gpui_kit::{
   StatefulInteractiveElement, Styled,
 };
 
+use gpui_kit::base::TestSupportExt as _;
 use treq_ui::press::{self, press_overlay, pressable, Press};
 
 // The blue "T" mark, shared with the website and desktop app.
@@ -231,11 +232,18 @@ pub fn muted(text: impl Into<SharedString>, cx: &App) -> Div {
 pub fn error_text(text: impl Into<SharedString>, cx: &App) -> Div {
   let text: SharedString = text.into();
   let id = SharedString::from(format!("error-{:x}", hash(&text)));
-  div().text_sm().text_color(cx.theme().danger).child(
-    TextView::markdown(id, escape_markdown(&text))
-      .selectable(true)
-      .selection_format(SelectionFormat::Plain),
-  )
+  // An alert, so a screen reader announces the error as it appears.
+  let alert = div()
+    .id(SharedString::from(format!("{id}-alert")))
+    .role(gpui_kit::Role::Alert)
+    .aria_label(text.clone())
+    .child(
+      TextView::markdown(id, escape_markdown(&text))
+        .selectable(true)
+        .selection_format(SelectionFormat::Plain),
+    )
+    .test_support();
+  div().text_sm().text_color(cx.theme().danger).child(alert)
 }
 
 fn hash(text: &str) -> u64 {
@@ -426,5 +434,14 @@ mod tests {
       !selected.is_empty() && ERROR.contains(selected.trim()),
       "selected {selected:?}"
     );
+  }
+
+  /// A screen reader announces an error as it appears.
+  #[gpui_kit::test]
+  fn error_text_is_an_alert_named_by_its_text(cx: &mut TestAppContext) {
+    use gpui_testing_library::prelude::*;
+    let (window, _) = mount(cx);
+    let screen = gpui_testing_library::Screen::new(cx, window);
+    expect(screen.get_by_role(by::role(gpui_kit::Role::Alert).name(ERROR))).to_be_visible();
   }
 }

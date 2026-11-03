@@ -280,6 +280,7 @@ impl HomeScreen {
             .ghost()
             .small()
             .icon(IconName::Ellipsis)
+            .accessibility_label("Edit host")
             .on_click(move |_, _, cx| {
               cx.stop_propagation();
               screens::add_host::edit(edit_record.clone(), cx);

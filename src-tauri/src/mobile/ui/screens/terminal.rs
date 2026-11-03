@@ -1413,6 +1413,7 @@ impl Render for TerminalScreen {
               Button::new("send")
                 .primary()
                 .icon(IconName::ArrowUp)
+                .accessibility_label("Send")
                 .on_click(cx.listener(|this, _, window, cx| this.send(window, cx)))
                 .touch(),
             ),

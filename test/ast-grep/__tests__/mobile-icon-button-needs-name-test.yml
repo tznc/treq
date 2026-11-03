@@ -1,0 +1,32 @@
+id: mobile-icon-button-needs-name
+valid:
+  - |
+    fn back() -> Press {
+      Button::new("back").ghost().icon(IconName::ArrowLeft).accessibility_label("Back").touch()
+    }
+  - |
+    fn labelled() -> Press {
+      Button::new("new").icon(IconName::Plus).label("New workspace").touch()
+    }
+  - |
+    fn text_only() -> Press {
+      Button::new("go").label("Go").touch()
+    }
+  - |
+    fn named_in_a_closure(busy: bool) -> Button {
+      Button::new("send").icon(IconName::Send).when(busy, |b| b.accessibility_label("Sending")).when(!busy, |b| b.accessibility_label("Send"))
+    }
+  - |
+    #[cfg(test)]
+    mod tests {
+      fn host() -> Button { Button::new("x").icon(IconName::X) }
+    }
+invalid:
+  - |
+    fn back() -> Press {
+      Button::new("back").ghost().large().icon(IconName::ArrowLeft).on_click(pop).touch()
+    }
+  - |
+    fn more() -> Button {
+      Button::new("page-more").icon(IconName::Ellipsis)
+    }
