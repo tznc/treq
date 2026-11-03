@@ -155,6 +155,7 @@ impl RenderOnce for Loading {
 pub struct Skeleton {
   id: SharedString,
   rows: usize,
+  row_height: Option<f32>,
   palette: Palette,
 }
 
@@ -163,26 +164,39 @@ impl Skeleton {
     Self {
       id: id.into(),
       rows,
+      row_height: None,
       palette: *palette,
     }
+  }
+
+  /// Each bar centred in a row this tall, so the placeholder takes the
+  /// room of the rows it stands in for.
+  pub fn row_height(mut self, height: f32) -> Self {
+    self.row_height = Some(height);
+    self
   }
 }
 
 impl RenderOnce for Skeleton {
   fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
     let fill = self.palette.hover();
+    let row_height = self.row_height;
     div()
       .flex()
       .flex_col()
-      .gap_2()
-      .children((0..self.rows).map(|row| {
+      .when(row_height.is_none(), |el| el.gap_2())
+      .children((0..self.rows).map(move |row| {
         // Ragged widths, so it reads as text rather than a table.
         let width = [0.9, 0.7, 0.8, 0.6][row % 4];
-        div()
+        let bar = div()
           .h(zpx(12.))
           .w(gpui::relative(width))
           .rounded(zpx(theme::RADIUS_SM))
-          .bg(fill)
+          .bg(fill);
+        match row_height {
+          Some(h) => div().h(zpx(h)).flex().items_center().child(bar),
+          None => bar,
+        }
       }))
       .with_animation(
         self.id,
@@ -213,5 +227,15 @@ mod tests {
       .label
       .is_some());
     assert_eq!(Skeleton::new("rows", 3, &p).rows, 3);
+  }
+
+  #[test]
+  fn test_skeleton_row_height() {
+    let p = theme::palette(false);
+    assert_eq!(Skeleton::new("rows", 3, &p).row_height, None);
+    assert_eq!(
+      Skeleton::new("rows", 3, &p).row_height(56.).row_height,
+      Some(56.)
+    );
   }
 }

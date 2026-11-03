@@ -128,15 +128,18 @@ impl Render for ConflictsScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let has_conflicts = self.files.ready().is_some_and(|f| !f.is_empty());
     let files = match &self.files {
-      Load::Idle | Load::Loading => {
-        widgets::card(cx).child(widgets::centered_message("Loading…", cx))
-      }
-      Load::Failed(error) => widgets::card(cx)
-        .p_4()
-        .child(widgets::error_text(error.clone(), cx)),
-      Load::Ready(files) if files.is_empty() => {
-        widgets::card(cx).child(widgets::centered_message("No conflicted files.", cx))
-      }
+      Load::Idle | Load::Loading => widgets::card(cx).child(widgets::skeleton("conflicts", 3, cx)),
+      Load::Failed(error) => widgets::card(cx).child(widgets::failed(
+        "conflicts-failed",
+        error,
+        cx.listener(|this, _, _, cx| this.reload(cx)),
+        cx,
+      )),
+      Load::Ready(files) if files.is_empty() => widgets::card(cx).child(widgets::empty(
+        "conflicts-empty",
+        "No conflicted files.",
+        cx,
+      )),
       Load::Ready(files) => widgets::card(cx).children(files.iter().map(|path| {
         h_flex()
           .min_h(px(widgets::ROW_H))

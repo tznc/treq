@@ -110,6 +110,17 @@ impl WorkspaceScreen {
     );
   }
 
+  /// Reads again the diffs that failed.
+  fn retry_hunks(&mut self, cx: &mut Context<Self>) {
+    self
+      .hunks
+      .files
+      .retain(|_, load| !matches!(load, Load::Failed(_)));
+    self.hunks.token = None;
+    self.load_hunks(cx);
+    cx.notify();
+  }
+
   /// Opens a large file the host held back.
   fn open_deferred(&mut self, path: String, cx: &mut Context<Self>) {
     self.opened.insert(path);
@@ -209,7 +220,7 @@ impl WorkspaceScreen {
     };
     let body = match (hunks, uncommitted) {
       (Some([]), _) => {
-        widgets::centered_message("No diff to show (binary or empty).", cx).into_any_element()
+        widgets::empty("diff-empty", "No diff to show (binary or empty).", cx).into_any_element()
       }
       (Some(h), _) => {
         let this = cx.weak_entity();
@@ -237,9 +248,13 @@ impl WorkspaceScreen {
           ))
           .into_any_element()
       }
-      (None, Some(Load::Failed(error))) => widgets::error_text(error.clone(), cx)
-        .p_3()
-        .into_any_element(),
+      (None, Some(Load::Failed(error))) => widgets::failed(
+        SharedString::from(format!("diff-failed-{section}-{path}")),
+        error,
+        cx.listener(|this, _, _, cx| this.retry_hunks(cx)),
+        cx,
+      )
+      .into_any_element(),
       (None, None) if change.diff_deferred => h_flex()
         .p_3()
         .gap_3()
@@ -258,7 +273,7 @@ impl WorkspaceScreen {
             .touch(),
         )
         .into_any_element(),
-      _ => widgets::centered_message("Loading diff…", cx).into_any_element(),
+      _ => widgets::skeleton(SharedString::from(format!("diff-{section}-{path}")), 3, cx),
     };
     widgets::card(cx)
       .child(header)

@@ -862,22 +862,10 @@ impl WorkspacesScreen {
   fn placeholder(&self, cx: &mut Context<Self>) -> Div {
     match &self.list {
       Load::Idle | Load::Loading => {
-        widgets::card(cx).child(widgets::centered_message("Loading workspaces…", cx))
+        widgets::card(cx).child(widgets::skeleton("workspaces", 6, cx))
       }
       Load::Failed(error) => {
-        let problem = errors::describe(error);
-        widgets::card(cx)
-          .p_4()
-          .gap_3()
-          .child(widgets::error_text(problem.message, cx))
-          .child(
-            h_flex().child(
-              Button::new("retry")
-                .outline()
-                .label("Retry")
-                .on_click(cx.listener(|this, _, _, cx| this.reload(cx))).touch(),
-            ),
-          )
+        widgets::card(cx).child(widgets::failed("workspaces-failed", error, cx.listener(|this, _, _, cx| this.reload(cx)), cx))
       }
       Load::Ready(all) if all.is_empty() => widgets::card(cx).p_6().gap_3().items_center().children([
         div()
@@ -891,7 +879,7 @@ impl WorkspacesScreen {
         .text_center()
         .into_any_element(),
       ]),
-      Load::Ready(_) => widgets::card(cx).child(widgets::centered_message("No workspaces match.", cx)),
+      Load::Ready(_) => widgets::card(cx).child(widgets::empty("workspaces-no-match", "No workspaces match.", cx)),
     }
   }
 

@@ -551,30 +551,27 @@ impl Sessions {
   fn session_rows(&self, cx: &mut Context<Self>) -> AnyElement {
     match &self.sessions {
       Load::Idle | Load::Loading => widgets::card(cx)
-        .child(widgets::centered_message(
-          "Checking for running sessions…",
-          cx,
-        ))
+        .child(widgets::skeleton("sessions", 3, cx))
         .into_any_element(),
       Load::Failed(error) => widgets::card(cx)
-        .p_4()
-        .child(widgets::error_text(
-          errors::describe(error).message,
+        .child(widgets::failed(
+          "sessions-failed",
+          error,
+          cx.listener(|this, _, _, cx| this.reload(cx)),
           cx,
         ))
         .into_any_element(),
       Load::Ready(list) if list.is_empty() => widgets::card(cx)
-        .child(widgets::centered_message(
-          "No terminals in this workspace. Start an agent or a shell; it keeps running on the host when you leave.",
-          cx,
-        ))
+        .child(
+          widgets::empty("sessions-empty", "No terminals in this workspace", cx)
+            .message("Start an agent or a shell; it keeps running on the host when you leave."),
+        )
         .into_any_element(),
       Load::Ready(list) => widgets::card(cx)
         .children(list.iter().enumerate().map(|(i, session)| {
           let label = session.label.clone();
-          session_row(("session", i), session, false, cx).on_click(cx.listener(
-            move |this, _, _, cx| this.open_listed(&label, false, cx),
-          ))
+          session_row(("session", i), session, false, cx)
+            .on_click(cx.listener(move |this, _, _, cx| this.open_listed(&label, false, cx)))
         }))
         .into_any_element(),
     }
@@ -1300,13 +1297,16 @@ impl Render for Switcher {
       return div().into_any_element();
     };
     let list = match &sessions.read(cx).sessions {
-      Load::Idle | Load::Loading => {
-        return widgets::centered_message("Loading…", cx).into_any_element()
-      }
+      Load::Idle | Load::Loading => return widgets::skeleton("switch-sessions", 3, cx),
       Load::Failed(error) => {
-        return widgets::error_text(errors::describe(error).message, cx)
-          .px_4()
-          .into_any_element()
+        return widgets::empty(
+          "switch-sessions-failed",
+          errors::describe(error).message,
+          cx,
+        )
+        .error(true)
+        .icon(treq_ui::theme::ICON_CIRCLE_ALERT)
+        .into_any_element()
       }
       Load::Ready(list) => list.clone(),
     };
@@ -1334,20 +1334,51 @@ impl Render for TerminalScreen {
     let view = match &self.view {
       Load::Ready(view) => view.clone(),
       Load::Idle | Load::Loading => {
-        return widgets::centered_message(format!("Attaching to {}…", self.label), cx)
+        return div()
           .size_full()
+          .flex()
+          .items_center()
+          .justify_center()
+          .child(treq_ui::delayed(
+            "attaching-delay",
+            div().id("attaching").child(
+              treq_ui::Loading::new("attaching-spinner", &treq_ui::theme::current(cx))
+                .label(format!("Attaching to {}…", self.label)),
+            ),
+          ))
           .into_any_element();
       }
       Load::Failed(error) => {
         return widgets::page()
-          .child(widgets::error_text(error.clone(), cx))
+          .size_full()
+          .items_center()
           .child(
-            Button::new("back")
-              .outline()
-              .large()
-              .label("Back to terminals")
-              .on_click(|_, _, cx| nav::pop(cx))
-              .touch(),
+            widgets::empty("attach-failed", error.clone(), cx)
+              .error(true)
+              .icon(treq_ui::theme::ICON_CIRCLE_ALERT)
+              .action(
+                h_flex()
+                  .gap_3()
+                  .child(
+                    Button::new("attach-retry")
+                      .outline()
+                      .large()
+                      .label("Retry")
+                      .on_click(cx.listener(|this, _, window, cx| {
+                        this.attach(this.program.launch(Vec::new()), window, cx);
+                        cx.notify();
+                      }))
+                      .touch(),
+                  )
+                  .child(
+                    Button::new("back")
+                      .ghost()
+                      .large()
+                      .label("Back to terminals")
+                      .on_click(|_, _, cx| nav::pop(cx))
+                      .touch(),
+                  ),
+              ),
           )
           .into_any_element();
       }

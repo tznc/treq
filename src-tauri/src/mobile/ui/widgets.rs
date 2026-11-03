@@ -11,13 +11,14 @@ use gpui_kit::{
     text::{TextView, TextViewStyle},
     v_flex, ActiveTheme, IconName,
   },
-  div, img, px, relative, AnyElement, App, Div, ElementId, FontWeight, Image, ImageFormat, Img,
-  InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement, SharedString, Stateful,
-  StatefulInteractiveElement, Styled,
+  div, img, px, relative, AnyElement, App, ClickEvent, Div, ElementId, FontWeight, Image,
+  ImageFormat, Img, InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement,
+  SharedString, Stateful, StatefulInteractiveElement, Styled, Window,
 };
 
 use gpui_kit::base::TestSupportExt as _;
 use treq_ui::press::{self, press_overlay, pressable, Press};
+use treq_ui::EmptyState;
 
 // The blue "T" mark, shared with the website and desktop app.
 const LOGO_PNG: &[u8] = include_bytes!("../../../../assets/logo.imageset/logo@3x.png");
@@ -297,8 +298,50 @@ pub fn page() -> Div {
   v_flex().gap_5().p_4()
 }
 
-pub fn centered_message(text: impl Into<SharedString>, cx: &App) -> Div {
-  div().py_6().px_4().text_center().child(muted(text, cx))
+/// A first load: skeleton rows the height of the rows they stand in for,
+/// shown only once the load runs past the spinner delay.
+pub fn skeleton(id: impl Into<SharedString>, rows: usize, cx: &App) -> AnyElement {
+  let id: SharedString = id.into();
+  let palette = treq_ui::theme::current(cx);
+  let selector = format!("{id}-skeleton");
+  treq_ui::delayed(
+    SharedString::from(format!("{id}-delay")),
+    div().debug_selector(move || selector).px_4().child(
+      div()
+        .id(SharedString::from(format!("{id}-skeleton")))
+        .role(gpui_kit::Role::ProgressIndicator)
+        .aria_label("Loading")
+        .child(treq_ui::Skeleton::new(id, rows, &palette).row_height(ROW_H))
+        .test_support(),
+    ),
+  )
+  .into_any_element()
+}
+
+/// Nothing to show: a title and, when it helps, one sentence.
+pub fn empty(id: impl Into<SharedString>, title: impl Into<SharedString>, cx: &App) -> EmptyState {
+  EmptyState::new(id, title, &treq_ui::theme::current(cx))
+}
+
+/// A failed load: the readable sentence for `raw` and a Retry button.
+pub fn failed(
+  id: impl Into<SharedString>,
+  raw: &str,
+  retry: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+  cx: &App,
+) -> EmptyState {
+  let id: SharedString = id.into();
+  let problem = crate::mobile::errors::describe(raw);
+  empty(id.clone(), problem.message, cx)
+    .error(true)
+    .icon(treq_ui::theme::ICON_CIRCLE_ALERT)
+    .action(
+      Button::new(SharedString::from(format!("{id}-retry")))
+        .outline()
+        .label("Retry")
+        .on_click(retry)
+        .touch(),
+    )
 }
 
 /// GitHub-flavoured Markdown, as issue and pull request text is written;
@@ -313,6 +356,41 @@ pub fn markdown(id: impl Into<ElementId>, text: &str, cx: &App) -> Div {
       .style(style)
       .selectable(true),
   )
+}
+
+/// A 412x892 window showing the view `build` makes, drawn once and past
+/// the spinner delay.
+#[cfg(test)]
+pub(crate) fn mount_for_test<V: gpui_kit::Render>(
+  cx: &mut gpui_kit::TestAppContext,
+  build: impl FnOnce(&mut Window, &mut gpui_kit::Context<V>) -> V + 'static,
+) -> gpui_kit::AnyWindowHandle {
+  use gpui_kit::test::TestWindowExt as _;
+  use gpui_kit::{size, AppContext as _, Bounds, Point, WindowBounds, WindowOptions};
+  cx.update(super::theme::init);
+  let window = cx.update(|cx| {
+    gpui_kit::open_window(
+      WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(Bounds {
+          origin: Point::default(),
+          size: size(px(412.), px(892.)),
+        })),
+        ..Default::default()
+      },
+      cx,
+      move |window, cx| cx.new(|cx| build(window, cx)),
+    )
+    .expect("open test window")
+    .0
+  });
+  cx.update_window(window, |_, w, cx| w.render_frame(cx))
+    .unwrap();
+  cx.executor()
+    .advance_clock(std::time::Duration::from_millis(400));
+  cx.run_until_parked();
+  cx.update_window(window, |_, w, cx| w.render_frame(cx))
+    .unwrap();
+  window
 }
 
 #[cfg(test)]

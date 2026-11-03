@@ -965,10 +965,13 @@ impl WorkspaceScreen {
   fn changes(&mut self, cx: &mut Context<Self>) -> AnyElement {
     let Load::Ready(diff) = &self.diff else {
       let message = match &self.diff {
-        Load::Failed(error) => widgets::card(cx)
-          .p_4()
-          .child(widgets::error_text(errors::describe(error).message, cx)),
-        _ => widgets::card(cx).child(widgets::centered_message("Loading changes…", cx)),
+        Load::Failed(error) => widgets::card(cx).child(widgets::failed(
+          "changes-failed",
+          error,
+          cx.listener(|this, _, _, cx| this.reload(cx)),
+          cx,
+        )),
+        _ => widgets::card(cx).child(widgets::skeleton("changes", 5, cx)),
       };
       return div()
         .id("changes")
@@ -1011,7 +1014,11 @@ impl WorkspaceScreen {
         div()
           .px_4()
           .pt_2()
-          .child(widgets::card(cx).child(widgets::centered_message(message, cx)))
+          .child(widgets::card(cx).child(widgets::empty(
+            gpui_kit::SharedString::from(format!("changes-empty-{}", section as usize)),
+            message,
+            cx,
+          )))
           .into_any_element()
       }
       ChangeItem::Conflict(i, slot) => {
@@ -1240,8 +1247,12 @@ impl TargetSheet {
 impl Render for TargetSheet {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     match &self.branches {
-      Load::Idle | Load::Loading => widgets::centered_message("Loading branches…", cx),
-      Load::Failed(error) => widgets::error_text(errors::describe(error).message, cx).px_4(),
+      Load::Idle | Load::Loading => div().child(widgets::skeleton("branches", 5, cx)),
+      Load::Failed(error) => div().child(
+        widgets::empty("branches-failed", errors::describe(error).message, cx)
+          .error(true)
+          .icon(treq_ui::theme::ICON_CIRCLE_ALERT),
+      ),
       Load::Ready(branches) => v_flex().children(
         branches
           .iter()
@@ -1302,9 +1313,13 @@ impl Render for Switcher {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = treq_ui::theme::current(cx);
     let list = match &self.list {
-      Load::Idle | Load::Loading => return widgets::centered_message("Loading…", cx),
+      Load::Idle | Load::Loading => return div().child(widgets::skeleton("switcher", 5, cx)),
       Load::Failed(error) => {
-        return widgets::error_text(errors::describe(error).message, cx).px_4()
+        return div().child(
+          widgets::empty("switcher-failed", errors::describe(error).message, cx)
+            .error(true)
+            .icon(treq_ui::theme::ICON_CIRCLE_ALERT),
+        )
       }
       Load::Ready(list) => list,
     };
