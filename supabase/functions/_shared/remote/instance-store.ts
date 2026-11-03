@@ -188,15 +188,24 @@ export async function createProvisioningInstance(
     .single(), "create instance record") as InstanceRow;
 }
 
+/**
+ * Updates the instance row. With `expectStatus`, only while its status is one
+ * of those; returns whether a row was written, so a caller can see that a
+ * concurrent delete (or another transition) got there first.
+ */
 export async function updateInstance(
   supabase: SupabaseClient,
   instanceId: string,
   fields: Record<string, unknown>,
-): Promise<void> {
-  must(await supabase
+  opts: { expectStatus?: readonly string[] } = {},
+): Promise<boolean> {
+  let query = supabase
     .from("remote_instances")
     .update({ ...fields, updated_at: new Date().toISOString() })
-    .eq("id", instanceId), "update instance");
+    .eq("id", instanceId);
+  if (opts.expectStatus) query = query.in("status", [...opts.expectStatus]);
+  const rows = must(await query.select("id"), "update instance") as unknown[] | null;
+  return (rows?.length ?? 0) > 0;
 }
 
 // Upserts the managed endpoint for an instance and records its host key
