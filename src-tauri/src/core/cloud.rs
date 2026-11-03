@@ -217,6 +217,12 @@ pub struct Cloud {
   last_token: Mutex<Option<Option<String>>>,
   /// [`Cloud::sign_out`] runs, and cuts managed access off itself.
   signing_out: std::sync::atomic::AtomicBool,
+  /// A Create runs; a second one while it does is dropped.
+  provisioning: std::sync::atomic::AtomicBool,
+  /// The idempotency key of a Create whose `ensure` may have landed (a
+  /// transport failure or 5xx): its retry reuses it, so the server sees
+  /// one attempt.
+  provision_key: Mutex<Option<String>>,
 }
 
 /// `pickDefaultKeyReference`: `id_ed25519` if present, else the first key.
@@ -246,6 +252,8 @@ impl Cloud {
       subscribed_user: Mutex::new(None),
       last_token: Mutex::new(Some(None)),
       signing_out: Default::default(),
+      provisioning: Default::default(),
+      provision_key: Mutex::new(None),
     });
     let weak = Arc::downgrade(&cloud);
     cloud.supabase.auth.subscribe(move |status| {
@@ -918,6 +926,19 @@ impl Cloud {
   /// "Create cloud workspace": registration, provisioning, readiness,
   /// certificate, then the repository list.
   pub async fn provision(self: &Arc<Self>) {
+    let flag = std::sync::atomic::Ordering::SeqCst;
+    if self
+      .provisioning
+      .compare_exchange(false, true, flag, flag)
+      .is_err()
+    {
+      return;
+    }
+    self.provision_once().await;
+    self.provisioning.store(false, flag);
+  }
+
+  async fn provision_once(self: &Arc<Self>) {
     self.update_workspace(|w| {
       w.provisioning_error = None;
       w.provisioning_stage = Some("Requesting provisioning...".into());
@@ -925,9 +946,13 @@ impl Cloud {
     let result = async {
       let key_reference = self.key_reference()?;
       self.register_key(&key_reference).await?;
-      // One idempotency key per click, so a retry after a failure is not a
-      // replay of that failure.
-      let key = format!("provision-managed-{}", uuid::Uuid::new_v4());
+      // One idempotency key per attempt: a retry after an unknown outcome
+      // reuses it, a retry after a definite refusal starts a new attempt.
+      let key = self
+        .provision_key
+        .lock_or_recover()
+        .get_or_insert_with(|| format!("provision-managed-{}", uuid::Uuid::new_v4()))
+        .clone();
       let (tier, byos_kind) = {
         let w = self.workspace.lock_or_recover();
         let byos_kind = match w.profile.as_ref().filter(|p| p.org_id.is_some()) {
@@ -943,9 +968,15 @@ impl Cloud {
         };
         (w.selected_tier.clone(), byos_kind)
       };
-      control_plane::ensure(&self.supabase, &key, tier.as_deref(), byos_kind.as_deref())
-        .await
-        .map_err(|e| e.to_string())?;
+      let ensured =
+        control_plane::ensure(&self.supabase, &key, tier.as_deref(), byos_kind.as_deref()).await;
+      if !ensured
+        .as_ref()
+        .is_err_and(|e| e.status == 0 || e.status >= 500)
+      {
+        *self.provision_key.lock_or_recover() = None;
+      }
+      ensured.map_err(|e| e.to_string())?;
       let progress = self.wait_progress();
       let status = managed::wait_for_ready(
         &self.supabase,
@@ -1868,6 +1899,48 @@ mod tests {
     let workspace = cloud.snapshot().cloud;
     assert_eq!(workspace.provisioning_stage, None);
     assert_eq!(workspace.provisioning_error, None);
+  }
+
+  #[tokio::test]
+  async fn a_second_create_while_one_runs_is_ignored() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    on_action(&server, "ensure", json!({})).await;
+    on_action(&server, "status", status("ready")).await;
+    trust_mocks(&server, None).await;
+    tokio::join!(cloud.provision(), cloud.provision());
+    assert_eq!(bodies(&server, "ensure").await.len(), 1);
+  }
+
+  #[tokio::test]
+  async fn a_retry_after_an_unknown_outcome_reuses_the_attempt_key() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-instance"))
+      .and(body_partial_json(json!({"action": "ensure"})))
+      .respond_with(ResponseTemplate::new(503).set_body_json(json!({"error": "busy"})))
+      .up_to_n_times(1)
+      .with_priority(1)
+      .mount(&server)
+      .await;
+    on_action(&server, "ensure", json!({})).await;
+    on_action(&server, "status", status("ready")).await;
+    trust_mocks(&server, None).await;
+    cloud.provision().await;
+    assert!(cloud.snapshot().cloud.provisioning_error.is_some());
+    cloud.provision().await;
+    cloud.provision().await;
+    let keys: Vec<Value> = bodies(&server, "ensure")
+      .await
+      .into_iter()
+      .map(|b| b["idempotency_key"].clone())
+      .collect();
+    assert_eq!(keys.len(), 3);
+    // The retry is the same attempt; the next create, after it went
+    // through, is a new one.
+    assert_eq!(keys[0], keys[1]);
+    assert_ne!(keys[1], keys[2]);
   }
 
   #[tokio::test]

@@ -2940,6 +2940,7 @@ mod kept_tabs;
 mod linear_view;
 mod logs_explorer;
 mod logs_screen;
+mod machines_chaos;
 mod merge_screen;
 mod onboarding_screen;
 mod open_workspaces;
