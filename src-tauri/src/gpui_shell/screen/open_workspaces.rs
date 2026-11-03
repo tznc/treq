@@ -953,9 +953,10 @@ impl OpenWorkspacesDialog {
                   TextSize::Sm,
                 )),
                 None => this.child(
-                  ui::text(div(), TextSize::Sm)
-                    .text_color(p.muted_foreground)
-                    .child("Loading branches…"),
+                  div().flex().child(
+                    ui::Loading::new("open-workspaces-stack-on-loading", p)
+                      .label("Loading branches…"),
+                  ),
                 ),
               }),
           )
@@ -1332,7 +1333,8 @@ impl OpenWorkspacesDialog {
       )
       .into_any_element()
     } else if items.is_empty() {
-      crate::gpui_shell::ui::EmptyState::new("open-workspaces-no-open-issues", "No open issues.", p)
+      crate::gpui_shell::ui::EmptyState::new("open-workspaces-no-open-issues", "No open issues", p)
+        .message("No open Linear issues match. Type a line on the left to start a new branch.")
         .icon(theme::ICON_LINEAR)
         .into_any_element()
     } else {
@@ -1382,23 +1384,27 @@ impl OpenWorkspacesDialog {
       .into_any_element()
     } else if self.prs.items.is_empty() {
       let query = self.query.trim();
-      let (id, message) = if query.is_empty() && self.assigned {
+      let (id, title, why) = if query.is_empty() && self.assigned {
         (
           "open-workspaces-no-assigned-pull-requests",
-          "No open pull requests are assigned to you.".to_string(),
+          "No pull requests assigned to you".to_string(),
+          "Turn off Assigned to me to see everyone's open pull requests.",
         )
       } else if query.is_empty() {
         (
           "open-workspaces-no-open-pull-requests",
-          "No open pull requests.".to_string(),
+          "No open pull requests".to_string(),
+          "This repository has no open pull requests. Type a line on the left to start a new branch.",
         )
       } else {
         (
           "open-workspaces-no-matching-pull-requests",
-          format!("No pull requests match \"{query}\"."),
+          format!("No pull requests match \"{query}\""),
+          "Try another title, number or branch name.",
         )
       };
-      crate::gpui_shell::ui::EmptyState::new(id, message, p)
+      crate::gpui_shell::ui::EmptyState::new(id, title, p)
+        .message(why)
         .icon(theme::ICON_PR)
         .into_any_element()
     } else {

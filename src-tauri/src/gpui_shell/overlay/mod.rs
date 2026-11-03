@@ -726,16 +726,6 @@ fn footer(p: &Palette, hints: &[(&str, &str)], right: Option<&'static str>) -> g
     .children(right)
 }
 
-/// A centred `px-4 py-8 text-sm text-muted-foreground` message.
-fn message(p: &Palette, text: impl Into<SharedString>) -> gpui::Div {
-  ui::text(div(), TextSize::Sm)
-    .px_4()
-    .py_8()
-    .text_center()
-    .text_color(p.muted_foreground)
-    .child(text.into())
-}
-
 impl Overlay {
   /// One row's content and its look, by dialog.
   fn row(&self, p: &Palette, index: usize, selected: bool, cx: &mut Context<Self>) -> ui::Row {
@@ -873,24 +863,35 @@ impl Overlay {
   fn messages(&mut self, p: &Palette, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
     let listing = self.listing();
     let mut children: Vec<gpui::AnyElement> = Vec::new();
-    let empty = |p: &Palette, text: &'static str| message(p, text).into_any_element();
+    let mut failed = false;
     if let Body::Branches {
       branches, error, ..
     } = &self.body
     {
       if branches.is_none() && error.is_none() {
-        children.push(empty(p, "Loading branches…"));
+        children.push(
+          ui::delayed(
+            "overlay-loading",
+            div()
+              .py_8()
+              .child(ui::Loading::new("overlay-loading-spinner", p).label("Loading branches…")),
+          )
+          .into_any_element(),
+        );
       }
       if let Some(error) = error {
+        failed = true;
         children.push(
-          ui::text(div(), TextSize::Sm)
-            .px_4()
-            .py_3()
-            .text_center()
-            .text_color(p.destructive)
-            .border_b_1()
-            .border_color(p.border)
-            .child(SharedString::from(format!("Error: {error}")))
+          ui::EmptyState::new("overlay-branches-error", "Couldn't load branches", p)
+            .error(true)
+            .icon(theme::ICON_CIRCLE_ALERT)
+            .message(error.clone())
+            .action(
+              ui::Button::new("overlay-branches-retry", p)
+                .size(ui::Size::Sm)
+                .label("Retry")
+                .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
+            )
             .into_any_element(),
         );
       }
@@ -900,9 +901,14 @@ impl Overlay {
     if listing.order.is_empty() && matches!(self.body, Body::Palette { .. }) && !query.is_empty() {
       // Nothing to run: say so, and offer the file picker on the same text.
       children.push(
-        message(p, format!("No commands match \"{query}\""))
-          .py_4()
-          .into_any_element(),
+        ui::EmptyState::new(
+          "overlay-no-commands",
+          format!("No commands match \"{query}\""),
+          p,
+        )
+        .icon(theme::ICON_SEARCH)
+        .message("Press Enter to look for a file with this name instead.")
+        .into_any_element(),
       );
       children.push(
         ui::Row::new("overlay-go-to-file", p)
@@ -923,15 +929,20 @@ impl Overlay {
           .on_click(cx.listener(|this, _, _, cx| this.go_to_file(cx)))
           .into_any_element(),
       );
-    } else if listing.order.is_empty() && loaded {
-      children.push(empty(
-        p,
-        match self.body {
-          Body::Workspaces(_) => "No workspaces found",
-          Body::Branches { .. } => "No branches found",
-          _ => "No results found",
-        },
-      ));
+    } else if listing.order.is_empty() && loaded && !failed {
+      let (title, why) = match (&self.body, query.is_empty()) {
+        (Body::Workspaces(_), true) => ("No workspaces", "This repository has no workspaces yet."),
+        (Body::Workspaces(_), false) => ("No workspaces match", "Try another name or branch."),
+        (Body::Branches { .. }, true) => ("No branches", "This repository has no branches yet."),
+        (Body::Branches { .. }, false) => ("No branches match", "Try another branch name."),
+        _ => ("No results", "Try another search."),
+      };
+      children.push(
+        ui::EmptyState::new("overlay-empty", title, p)
+          .icon(theme::ICON_SEARCH)
+          .message(why)
+          .into_any_element(),
+      );
     }
     children
   }

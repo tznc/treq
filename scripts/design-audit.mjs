@@ -30,6 +30,7 @@ const RULES = [
   "gpui-no-local-row",
   "gpui-no-adhoc-tabs",
   "gpui-no-local-dialog",
+  "gpui-no-adhoc-feedback",
   "gpui-name-no-status-color",
   "ui-copy-no-yes-no",
   "ui-copy-sentence-case",

@@ -12,7 +12,7 @@ use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, uniform_list, ClipboardItem, Context, FontWeight, SharedString, Window,
 };
 
-use super::{message, Env};
+use super::Env;
 use crate::{
   gpui_shell::{
     native::ToastTone,
@@ -338,11 +338,10 @@ impl PromptHistoryView {
       .min_w_0()
       .h_full();
     let Some(entry) = entries.iter().find(|e| Some(e.id) == self.selected) else {
-      return pane.child(message(
-        "prompt-history-select",
-        "Select a prompt to view its full text.",
-        p,
-      ));
+      return pane.child(
+        ui::EmptyState::new("prompt-history-select", "No prompt selected", p)
+          .message("Select a prompt to view its full text."),
+      );
     };
     let text = entry.prompt_text.clone();
     let header = ui::text(div(), TextSize::Xs)
@@ -465,11 +464,15 @@ impl Render for PromptHistoryView {
     let body = match &entries {
       None => ui::delayed(
         "prompt-history-loading",
-        message("prompt-history-loading", "Loading prompt history…", &p),
+        div()
+          .py_8()
+          .child(ui::Loading::new("prompt-history-loading", &p).label("Loading prompt history…")),
       )
       .into_any_element(),
       Some(entries) if entries.is_empty() => {
-        message("prompt-history-empty", "No prompts sent yet.", &p).into_any_element()
+        ui::EmptyState::new("prompt-history-empty", "No prompts sent yet", &p)
+          .message("Prompts you send to agents in this repository appear here.")
+          .into_any_element()
       }
       Some(entries) => div()
         .flex_1()

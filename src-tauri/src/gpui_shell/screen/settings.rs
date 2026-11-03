@@ -2505,9 +2505,7 @@ impl SettingsView {
         "settings-loading",
         div()
           .py_8()
-          .text_center()
-          .text_color(p.muted_foreground)
-          .child("Loading settings…"),
+          .child(ui::Loading::new("settings-loading-spinner", p).label("Loading settings…")),
       )
       .into_any_element()
     } else {
@@ -2892,27 +2890,28 @@ impl SettingsView {
       .when(tab.loading, |this| {
         this.child(ui::delayed(
           "skills-loading",
-          ui::text(div(), TextSize::Sm)
-            .flex()
-            .items_center()
-            .gap_2()
-            .text_color(p.muted_foreground)
-            .child(ui::spinner("skills-loading", 16., p.muted_foreground))
-            .child("Loading skill registry…"),
+          div().child(ui::Skeleton::new("skills-loading", 3, p).row_height(56.)),
         ))
       })
       .when_some(tab.error.clone(), |this, err| {
         this.child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.destructive)
-            .child(err),
+          ui::EmptyState::new("skills-error", "Couldn't load the skill registry", p)
+            .error(true)
+            .icon(theme::ICON_CIRCLE_ALERT)
+            .message(err)
+            .action(
+              ui::Button::new("skills-retry", p)
+                .size(ui::Size::Sm)
+                .label("Retry")
+                .on_click(cx.listener(|view, _, _, cx| view.load_skills(cx))),
+            ),
         )
       })
       .when(!tab.loading && tab.error.is_none() && tab.rows.is_empty(), |this| {
         this.child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.muted_foreground)
-            .child("No skills match this search and filter."),
+          ui::EmptyState::new("skills-empty", "No skills match", p)
+            .icon(theme::ICON_SEARCH)
+            .message("Clear the search or pick another filter to see more skills."),
         )
       })
       .child(div().flex().flex_col().gap_3().children(rows))

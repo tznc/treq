@@ -1173,10 +1173,8 @@ impl WorkspaceDialog {
           .gap_1p5()
           .child(label_xs("Target workspace"))
           .child(match select {
-            None => ui::text(div(), TextSize::Xs)
-              .debug_selector(|| "no-other-workspaces".into())
-              .text_color(p.muted_foreground)
-              .child("No other workspaces available.")
+            None => ui::EmptyState::new("no-other-workspaces", "No other workspaces", &p)
+              .message("Create another workspace to move changes into.")
               .into_any_element(),
             Some(state) => div()
               .id("target-workspace")
@@ -1346,12 +1344,8 @@ impl WorkspaceDialog {
         .map(|b| b.name.clone())
         .collect();
       let list = if branches.is_empty() {
-        ui::text(div(), TextSize::Sm)
-          .px_2()
-          .py_4()
-          .text_center()
-          .text_color(p.muted_foreground)
-          .child("No branches found")
+        ui::EmptyState::new("workspace-dialog-no-branches", "No branches match", &p)
+          .message("Try another branch name.")
           .into_any_element()
       } else {
         div()
@@ -1610,20 +1604,9 @@ impl WorkspaceDialog {
     if self.data_loading && locked.is_none() {
       return div()
         .flex()
-        .items_center()
         .justify_center()
         .py_6()
-        .child(ui::spinner(
-          "workspace-dialog-loading",
-          20.,
-          p.muted_foreground,
-        ))
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .ml_2()
-            .text_color(p.muted_foreground)
-            .child("Loading…"),
-        )
+        .child(ui::Loading::new("workspace-dialog-loading", &p).label("Loading workspace…"))
         .into_any_element();
     }
     let mut commits: Vec<WorkspaceCommit> = Vec::new();
@@ -1688,11 +1671,8 @@ impl WorkspaceDialog {
     let p = *p;
     let count = commits.len();
     let rows = if commits.is_empty() {
-      ui::text(div(), TextSize::Sm)
-        .p_4()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child("No mutable commits in this workspace")
+      ui::EmptyState::new("workspace-dialog-no-commits", "No mutable commits", &p)
+        .message("This workspace has no commits that can be moved yet.")
         .into_any_element()
     } else {
       div()
@@ -1807,11 +1787,8 @@ impl WorkspaceDialog {
     let p = *p;
     let count = self.changed_files.len();
     let rows = if self.changed_files.is_empty() {
-      ui::text(div(), TextSize::Sm)
-        .p_4()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child("No uncommitted changes")
+      ui::EmptyState::new("workspace-dialog-no-changes", "No uncommitted changes", &p)
+        .message("The working copy matches the last commit.")
         .into_any_element()
     } else {
       div()
@@ -1945,20 +1922,10 @@ impl WorkspaceDialog {
     let muted_bg = p.muted.opacity(0.1);
     let data = self.hunks.get(path);
     match data {
-      Some(data) if data.loading => ui::text(div(), TextSize::Xs)
-        .flex()
-        .items_center()
-        .gap_2()
-        .px_8()
-        .py_2()
-        .bg(muted_bg)
-        .text_color(p.muted_foreground)
-        .child(ui::spinner(
-          SharedString::from(format!("hunks-loading-{file}")),
-          12.,
-          p.muted_foreground,
-        ))
-        .child("Loading hunks…"),
+      Some(data) if data.loading => div().flex().px_8().py_2().bg(muted_bg).child(
+        ui::Loading::new(SharedString::from(format!("hunks-loading-{file}")), &p)
+          .label("Loading hunks…"),
+      ),
       Some(data) if !data.hunks.is_empty() => {
         div().children(data.hunks.iter().enumerate().map(|(i, hunk)| {
           let key = hunk_key(path, &hunk.id);
@@ -2024,12 +1991,14 @@ impl WorkspaceDialog {
             .on_click(cx.listener(move |view, _, _, cx| view.toggle_hunk(&key, cx)))
         }))
       }
-      _ => ui::text(div(), TextSize::Xs)
-        .px_8()
-        .py_1p5()
-        .bg(muted_bg)
-        .text_color(p.muted_foreground)
-        .child("No hunks"),
+      _ => div().bg(muted_bg).child(
+        ui::EmptyState::new(
+          SharedString::from(format!("hunks-none-{file}")),
+          "No hunks",
+          &p,
+        )
+        .message("This change has no text lines to pick, such as a binary file."),
+      ),
     }
   }
 }

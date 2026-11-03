@@ -1153,7 +1153,7 @@ impl Render for CodeView {
           .child(self.action_row(&p, cx))
           .children(self.stack_panel(&p, cx))
           .child(self.files(&p, cx))
-          .child(self.readme(&p)),
+          .children(self.readme(&p)),
       );
     div()
       .debug_selector(|| "workspace-code".into())
@@ -1610,9 +1610,8 @@ impl CodeView {
           .child(title),
       )
       .child(if body.is_empty() {
-        ui::text(div(), TextSize::Sm)
-          .text_color(p.muted_foreground)
-          .child("No description")
+        ui::EmptyState::new("workspace-about-no-description", "No description", p)
+          .message("The pull request has no description.")
           .into_any_element()
       } else if looks_like_markdown(&body) {
         markdown("workspace-about-github-md", &body, 14., self.dark).into_any_element()
@@ -2233,27 +2232,23 @@ impl CodeView {
     if shown.end < count {
       list = list.child(div().h(pitch * (count - shown.end) as f32));
     }
-    if loaded && empty {
+    let error = self.overview.as_ref().and_then(|o| o.error.clone());
+    if let Some(err) = error {
       list = list.child(
-        ui::text(div(), TextSize::Sm)
-          .debug_selector(move || {
-            if unavailable {
-              "code-files-unavailable"
-            } else {
-              "code-files-empty"
-            }
-            .into()
-          })
-          .px_4()
-          .py_8()
-          .text_center()
-          .text_color(p.muted_foreground)
-          .child(if unavailable {
-            REMOTE_FILE_TREE_REASON
-          } else {
-            "No files found"
-          }),
+        ui::EmptyState::new("code-files-error", "Couldn't read the files", p)
+          .error(true)
+          .icon(theme::ICON_CIRCLE_ALERT)
+          .message(err)
+          .action(retry_button("code-files-retry", p, cx)),
       );
+    } else if loaded && empty {
+      list = list.child(if unavailable {
+        ui::EmptyState::new("code-files-unavailable", "No file tree", p)
+          .message(REMOTE_FILE_TREE_REASON)
+      } else {
+        ui::EmptyState::new("code-files-empty", "No files", p)
+          .message("This workspace's checkout has no files yet.")
+      });
     }
     list
   }
@@ -2307,28 +2302,33 @@ impl CodeView {
       }))
   }
 
-  fn readme(&self, p: &Palette) -> impl IntoElement {
-    let readme = self.overview.as_ref().and_then(|o| o.readme.clone());
-    section(p)
-      .debug_selector(|| "code-readme".into())
-      .p_6()
-      .child(match readme {
-        Some(text) => div()
-          .child(
-            ui::text(div(), TextSize::Lg)
-              .font_weight(FontWeight::SEMIBOLD)
-              .mb_4()
-              .child("README.md"),
-          )
-          .child(markdown("code-readme-md", &text, 16., self.dark))
-          .into_any_element(),
-        None => ui::text(div(), TextSize::Sm)
-          .text_color(p.muted_foreground)
-          .text_center()
-          .py_4()
-          .child("No README.md found")
-          .into_any_element(),
-      })
+  fn readme(&self, p: &Palette) -> Option<impl IntoElement> {
+    let overview = self.overview.as_ref()?;
+    // A failed read says so above; it is not a missing README.
+    if overview.error.is_some() {
+      return None;
+    }
+    let readme = overview.readme.clone();
+    Some(
+      section(p)
+        .debug_selector(|| "code-readme".into())
+        .p_6()
+        .child(match readme {
+          Some(text) => div()
+            .child(
+              ui::text(div(), TextSize::Lg)
+                .font_weight(FontWeight::SEMIBOLD)
+                .mb_4()
+                .child("README.md"),
+            )
+            .child(markdown("code-readme-md", &text, 16., self.dark))
+            .into_any_element(),
+          None => ui::EmptyState::new("code-readme-none", "No README.md", p)
+            .icon(theme::ICON_FILE_MARKDOWN)
+            .message("Add a README.md at the root to describe this repository.")
+            .into_any_element(),
+        }),
+    )
   }
 
   /// The read-only, wrapping text area that shows a failed commit read.
@@ -2414,44 +2414,40 @@ impl CodeView {
   ) -> impl IntoElement {
     let Some(log) = self.history.clone() else {
       let status = match self.history_error.clone() {
-        Some(err) => div()
-          .id("code-history-error")
-          .debug_selector(|| "code-history-error".into())
-          .role(gpui::Role::Status)
-          .aria_label("Couldn't load commits")
-          .test_support()
-          .w_full()
-          .flex()
-          .flex_col()
-          .items_center()
-          .gap_1()
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child("Couldn't load commits"),
-          )
-          .child(
+        Some(err) => ui::EmptyState::new("code-history-error", "Couldn't load commits", p)
+          .error(true)
+          .icon(theme::ICON_CIRCLE_ALERT)
+          .message("The workspace's commit history could not be read.")
+          .action(
             div()
+              .flex()
+              .gap_2()
+              .child(retry_button("code-history-retry", p, cx))
               .child(
-                Button::new("code-history-show-error", p)
-                  .variant(Variant::Outline)
-                  .size(Size::Sm)
-                  .label("Show error")
-                  // A press outside the open popover closes it, so this only opens.
-                  .on_click(cx.listener(|view, _, _, cx| {
-                    view.history_error_open = true;
-                    cx.notify();
-                  })),
-              )
-              .when(self.history_error_open, |el| {
-                el.child(self.history_error_popover(&err, p, window, cx))
-              }),
+                div()
+                  .child(
+                    Button::new("code-history-show-error", p)
+                      .variant(Variant::Outline)
+                      .size(Size::Sm)
+                      .label("Show error")
+                      // A press outside the open popover closes it, so this only opens.
+                      .on_click(cx.listener(|view, _, _, cx| {
+                        view.history_error_open = true;
+                        cx.notify();
+                      })),
+                  )
+                  .when(self.history_error_open, |el| {
+                    el.child(self.history_error_popover(&err, p, window, cx))
+                  }),
+              ),
           )
           .into_any_element(),
-        None => ui::text(div(), TextSize::Sm)
-          .text_color(p.muted_foreground)
-          .child("Loading commits…")
-          .into_any_element(),
+        None => ui::delayed(
+          "code-history-loading",
+          div()
+            .child(ui::Loading::new("code-history-loading-spinner", p).label("Loading commits…")),
+        )
+        .into_any_element(),
       };
       return div()
         .size_full()
@@ -2479,16 +2475,9 @@ impl CodeView {
         .p_4()
         .child(heading)
         .child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.muted_foreground)
-            .text_center()
-            .child("No commits yet."),
-        )
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.muted_foreground)
-            .text_center()
-            .child("Changes you commit will appear here."),
+          ui::EmptyState::new("code-history-empty", "No commits yet", p)
+            .icon(theme::ICON_COMMIT)
+            .message("Changes you commit will appear here."),
         )
         .into_any_element();
     }
@@ -2860,4 +2849,17 @@ fn loc_indicator(
         ),
     )
     .child(count(format!("-{deletions}"), removed.text(p), minus_ch))
+}
+
+/// Reads the whole tab again after a failed read.
+fn retry_button(id: &'static str, p: &Palette, cx: &mut Context<CodeView>) -> Button {
+  Button::new(id, p)
+    .size(Size::Sm)
+    .label("Retry")
+    .on_click(cx.listener(|view, _, _, cx| {
+      view.history_error = None;
+      view.history_error_open = false;
+      view.load(cx);
+      cx.notify();
+    }))
 }

@@ -11,7 +11,7 @@ use tauri_plugin_gpui::gpui::{
   Subscription, Window,
 };
 
-use super::{message, Env};
+use super::Env;
 use crate::{
   gpui_shell::{
     native::ToastTone,
@@ -517,11 +517,10 @@ impl StashView {
       .flex()
       .flex_col();
     let Some(entry) = self.selected_entry() else {
-      return pane.child(message(
-        "stash-select",
-        "Select a stash to view its changes.",
-        p,
-      ));
+      return pane.child(
+        ui::EmptyState::new("stash-select", "No stash selected", p)
+          .message("Select a stash to view its changes."),
+      );
     };
     let busy = self.pending.is_some();
     let applying = self
@@ -649,7 +648,9 @@ impl StashView {
       },
       _ => ui::delayed(
         "stash-diff-loading",
-        message("stash-diff-loading", "Loading diff…", p),
+        div()
+          .py_8()
+          .child(ui::Loading::new("stash-diff-loading", p).label("Loading diff…")),
       )
       .into_any_element(),
     };
@@ -706,12 +707,8 @@ impl StashView {
       .rounded(radius::MD)
     };
     let list = if filtered.is_empty() {
-      ui::text(div(), TextSize::Xs)
-        .debug_selector(|| "stash-apply-empty".into())
-        .p_3()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child("No workspaces found")
+      ui::EmptyState::new("stash-apply-empty", "No workspaces match", p)
+        .message("Try another workspace name.")
         .into_any_element()
     } else {
       div()
@@ -840,18 +837,19 @@ impl StashView {
     cx: &mut Context<Self>,
   ) -> gpui::AnyElement {
     if diff.too_large_to_render {
-      return message(
-        "stash-diff-too-large",
-        diff
-          .render_block_reason
-          .clone()
-          .unwrap_or_else(|| "Diff is too large to render.".into()),
-        p,
-      )
-      .into_any_element();
+      return ui::EmptyState::new("stash-diff-too-large", "Diff too large to show", p)
+        .message(
+          diff
+            .render_block_reason
+            .clone()
+            .unwrap_or_else(|| "Diff is too large to render.".into()),
+        )
+        .into_any_element();
     }
     if diff.hunks_by_file.is_empty() {
-      return message("stash-diff-empty", "No file changes in this stash.", p).into_any_element();
+      return ui::EmptyState::new("stash-diff-empty", "No file changes", p)
+        .message("This stash holds no file changes.")
+        .into_any_element();
     }
     div()
       .debug_selector(|| "stash-diff-pane".into())
@@ -955,15 +953,17 @@ impl Render for StashView {
     let body = match &entries {
       None => ui::delayed(
         "stash-loading",
-        message("stash-loading", "Loading stashes…", &p),
+        div()
+          .py_8()
+          .child(ui::Loading::new("stash-loading", &p).label("Loading stashes…")),
       )
       .into_any_element(),
-      Some(entries) if entries.is_empty() => message(
-        "stash-empty",
-        "No stashed changes yet. Stash working-copy changes from the Changes panel to save them here.",
-        &p,
-      )
-      .into_any_element(),
+      Some(entries) if entries.is_empty() => {
+        ui::EmptyState::new("stash-empty", "No stashed changes yet", &p)
+          .icon(theme::ICON_ARCHIVE)
+          .message("Stash working-copy changes from the Changes panel to save them here.")
+          .into_any_element()
+      }
       Some(entries) => div()
         .flex_1()
         .min_h_0()

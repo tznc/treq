@@ -628,3 +628,27 @@ fn the_deleted_branch_alert_names_its_archive_button(cx: &mut TestAppContext) {
   expect(screen.get_by_role(by::role(gpui::Role::Button).name("Archive workspace")))
     .to_be_visible();
 }
+
+#[gpui::test]
+fn a_failed_read_shows_errors_with_retry_not_empty_boxes(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let host = FakeHost {
+    history: None,
+    failing: vec!["overview"],
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Status).name("Couldn't load commits"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Status).name("Couldn't read the files")))
+    .to_be_visible();
+  assert!(screen.query_by_text("No files found").is_none());
+  assert!(screen.query_by_text("No README.md found").is_none());
+  let retries = screen.get_all_by_role(by::role(Role::Button).name("Retry"));
+  assert!(!retries.is_empty());
+  let before = host.calls().len();
+  screen.user().click(&retries[0]);
+  h.cx.run_until_parked();
+  assert!(host.calls().len() > before, "Retry reads again");
+}

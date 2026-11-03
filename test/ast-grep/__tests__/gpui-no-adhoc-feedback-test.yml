@@ -1,0 +1,54 @@
+id: gpui-no-adhoc-feedback
+valid:
+  - |
+    fn empty_list(p: &Palette) -> ui::EmptyState {
+      ui::EmptyState::new("prs-empty", "No pull requests", p).message("Push a branch to open one.")
+    }
+  - |
+    fn loading(p: &Palette) -> ui::Loading {
+      ui::Loading::new("prs-loading", p).label("Loading pull requests…")
+    }
+  - |
+    fn badge(p: &Palette) -> ui::Badge {
+      ui::Badge::new("No upstream", p)
+    }
+  - |
+    impl Draft {
+      fn message(&self) -> String {
+        self.text.clone()
+      }
+    }
+  - |
+    fn hint() -> Div {
+      div().child("Nothing selected yet")
+    }
+invalid:
+  - |
+    fn list(p: &Palette) -> Div {
+      div().text_color(p.muted_foreground).child("No files found")
+    }
+  - |
+    fn list(p: &Palette) -> Div {
+      ui::text(div(), TextSize::Sm).child("Loading commits…")
+    }
+  - |
+    fn list(p: &Palette) -> Div {
+      div().child("Fetching branches…")
+    }
+  - |
+    fn list(p: &Palette) -> Div {
+      div().child("Couldn't load commits")
+    }
+  - |
+    fn message(p: &Palette, text: impl Into<SharedString>) -> Div {
+      div().child(text.into())
+    }
+  - |
+    fn empty(p: &Palette, label: String) -> Div {
+      div().child(label)
+    }
+  - |
+    fn body(p: &Palette) -> Div {
+      let message = |text: &'static str| div().child(text);
+      message("x")
+    }

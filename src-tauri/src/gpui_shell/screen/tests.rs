@@ -761,6 +761,9 @@ impl code_data::CodeHost for FakeHost {
         "Browsing the file tree",
       ));
     }
+    if self.failing.contains(&"overview") {
+      return Err("No such file or directory (os error 2)".into());
+    }
     Ok(self.overview.clone())
   }
 
@@ -2293,6 +2296,7 @@ fn code_host() -> FakeHost {
       entries: vec![entry("src", true), entry("README.md", false)],
       readme: Some("# Login".into()),
       unavailable: false,
+      error: None,
     },
     history: serde_json::from_value(serde_json::json!({
       "commits": [commit("a", 10, 4), commit("b", 2, 0)],

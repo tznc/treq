@@ -253,7 +253,7 @@ test("open-workspaces: the pull request search shows loading, no matches and err
     name: "13-open-workspaces-search-empty",
     title: "Pull request search with no matches",
     expectations: [
-      "The list shows a PR icon and 'No pull requests match \"zzz\".', not 'No open pull requests.'",
+      "The list shows a PR icon, 'No pull requests match \"zzz\"' and one line saying what to try, not 'No open pull requests'",
       "No spinner in the search input",
     ],
   });

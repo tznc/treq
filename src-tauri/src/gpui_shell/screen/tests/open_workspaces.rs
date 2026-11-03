@@ -129,19 +129,23 @@ fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
   screen
 }
 
+/// The footer's status line, not a pane's empty state.
 fn status(screen: &gpui_testing_library::Screen) -> String {
+  footer_status(screen).name().unwrap_or_default()
+}
+
+fn footer_status(screen: &gpui_testing_library::Screen) -> gpui_testing_library::Node {
   screen
-    .get_by_role(by::role(Role::Status))
-    .name()
-    .unwrap_or_default()
+    .get_all_by_role(by::role(Role::Status))
+    .into_iter()
+    .find(|node| format!("{:?}", node.element_id()).contains("open-workspaces-status"))
+    .expect("the footer status")
 }
 
 /// Opens the popover that lists each line.
 fn show_lines(h: &mut Harness) -> gpui_testing_library::Screen {
   let screen = screen(h);
-  screen
-    .user()
-    .click(&screen.get_by_role(by::role(Role::Status)));
+  screen.user().click(&footer_status(&screen));
   self::screen(h)
 }
 
@@ -873,4 +877,17 @@ fn secondary_enter_in_the_lines_creates_the_workspaces(cx: &mut TestAppContext) 
     "{:?}",
     host.calls()
   );
+}
+
+#[gpui::test]
+fn an_empty_pull_request_pane_says_why(cx: &mut TestAppContext) {
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  let (mut h, _) = dialog(host, cx);
+  let screen = screen(&mut h);
+  let pane = screen.get_by_role(by::role(Role::Status).name("No open pull requests"));
+  expect(within(&pane).get_by_text(
+    "This repository has no open pull requests. Type a line on the left to start a new branch.",
+  ))
+  .to_be_visible();
 }

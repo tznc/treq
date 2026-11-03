@@ -1420,3 +1420,17 @@ fn an_organization_key_creates_only_while_its_profile_is_selected(cx: &mut TestA
   assert!(!org.keys[0].can_create);
   assert!(!h.drawn("team-o1-key-create-boat"));
 }
+
+#[gpui::test]
+fn account_loading_is_a_progress_indicator(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let mut h = Harness::new(cx, account_route("account"));
+  h.set_account(account_state(serde_json::json!({ "loading": true })));
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(Role::ProgressIndicator).name("Loading account…")))
+    .to_be_visible();
+}

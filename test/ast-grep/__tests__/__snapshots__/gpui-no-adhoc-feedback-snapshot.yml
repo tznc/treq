@@ -1,0 +1,152 @@
+id: gpui-no-adhoc-feedback
+snapshots:
+  ? |
+    fn body(p: &Palette) -> Div {
+      let message = |text: &'static str| div().child(text);
+      message("x")
+    }
+  : labels:
+    - source: 'let message = |text: &''static str| div().child(text);'
+      style: primary
+      start: 32
+      end: 85
+    - source: message
+      style: secondary
+      start: 36
+      end: 43
+    - source: '|text: &''static str| div().child(text)'
+      style: secondary
+      start: 46
+      end: 84
+  ? |
+    fn empty(p: &Palette, label: String) -> Div {
+      div().child(label)
+    }
+  : labels:
+    - source: |-
+        fn empty(p: &Palette, label: String) -> Div {
+          div().child(label)
+        }
+      style: primary
+      start: 0
+      end: 68
+    - source: empty
+      style: secondary
+      start: 3
+      end: 8
+  ? |
+    fn list(p: &Palette) -> Div {
+      div().child("Couldn't load commits")
+    }
+  : labels:
+    - source: '"Couldn''t load commits"'
+      style: primary
+      start: 44
+      end: 67
+    - source: child
+      style: secondary
+      start: 38
+      end: 43
+    - source: div().child
+      style: secondary
+      start: 32
+      end: 43
+    - source: div().child("Couldn't load commits")
+      style: secondary
+      start: 32
+      end: 68
+    - source: ("Couldn't load commits")
+      style: secondary
+      start: 43
+      end: 68
+  ? |
+    fn list(p: &Palette) -> Div {
+      div().child("Fetching branches…")
+    }
+  : labels:
+    - source: '"Fetching branches…"'
+      style: primary
+      start: 44
+      end: 66
+    - source: child
+      style: secondary
+      start: 38
+      end: 43
+    - source: div().child
+      style: secondary
+      start: 32
+      end: 43
+    - source: div().child("Fetching branches…")
+      style: secondary
+      start: 32
+      end: 67
+    - source: ("Fetching branches…")
+      style: secondary
+      start: 43
+      end: 67
+  ? |
+    fn list(p: &Palette) -> Div {
+      div().text_color(p.muted_foreground).child("No files found")
+    }
+  : labels:
+    - source: '"No files found"'
+      style: primary
+      start: 75
+      end: 91
+    - source: child
+      style: secondary
+      start: 69
+      end: 74
+    - source: div().text_color(p.muted_foreground).child
+      style: secondary
+      start: 32
+      end: 74
+    - source: div().text_color(p.muted_foreground).child("No files found")
+      style: secondary
+      start: 32
+      end: 92
+    - source: ("No files found")
+      style: secondary
+      start: 74
+      end: 92
+  ? |
+    fn list(p: &Palette) -> Div {
+      ui::text(div(), TextSize::Sm).child("Loading commits…")
+    }
+  : labels:
+    - source: '"Loading commits…"'
+      style: primary
+      start: 68
+      end: 88
+    - source: child
+      style: secondary
+      start: 62
+      end: 67
+    - source: ui::text(div(), TextSize::Sm).child
+      style: secondary
+      start: 32
+      end: 67
+    - source: ui::text(div(), TextSize::Sm).child("Loading commits…")
+      style: secondary
+      start: 32
+      end: 89
+    - source: ("Loading commits…")
+      style: secondary
+      start: 67
+      end: 89
+  ? |
+    fn message(p: &Palette, text: impl Into<SharedString>) -> Div {
+      div().child(text.into())
+    }
+  : labels:
+    - source: |-
+        fn message(p: &Palette, text: impl Into<SharedString>) -> Div {
+          div().child(text.into())
+        }
+      style: primary
+      start: 0
+      end: 92
+    - source: message
+      style: secondary
+      start: 3
+      end: 10

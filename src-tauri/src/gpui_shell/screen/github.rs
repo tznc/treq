@@ -1255,18 +1255,17 @@ impl GithubView {
   ) -> impl IntoElement {
     let remote = self.remote.clone();
     let title = match &remote {
-      None => ui::text(div(), TextSize::Sm)
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(p.muted_foreground)
-        .child("Loading…"),
+      None => div()
+        .flex()
+        .child(ui::Loading::new("github-remote-loading", p).label("Reading the remote…")),
       Some(Some(info)) => ui::text(div(), TextSize::Sm)
         .font_weight(FontWeight::SEMIBOLD)
         .font_family(theme::MONO_FONT)
         .child(info.full_name.clone()),
+      // The body says why; the header only names the screen.
       Some(None) => ui::text(div(), TextSize::Sm)
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(p.destructive)
-        .child("No GitHub remote"),
+        .child("GitHub"),
     };
     let header = div()
       .flex()
@@ -1642,17 +1641,14 @@ impl GithubView {
         return div()
           .size_full()
           .flex()
-          .flex_col()
           .items_center()
           .justify_center()
-          .p_8()
-          .gap_3()
-          .text_center()
-          .child(ui::icon(theme::ICON_CIRCLE_ALERT, 32., p.muted_foreground))
           .child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child("No GitHub remote detected for this repository."),
+            ui::EmptyState::new("github-no-remote", "No GitHub remote", p)
+              .icon(theme::ICON_GITHUB)
+              .message(
+                "Add a github.com remote to this repository to see its pull requests and issues.",
+              ),
           )
           .into_any_element()
       }

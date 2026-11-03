@@ -2142,20 +2142,13 @@ impl ChangesView {
       SideRow::Empty => div()
         .size_full()
         .flex()
-        .flex_col()
         .items_center()
         .justify_center()
-        .py_12()
-        .child(ui::icon(
-          theme::ICON_CIRCLE_CHECK,
-          48.,
-          p.muted_foreground.opacity(0.4),
-        ))
+        .py_4()
         .child(
-          div()
-            .mt_3()
-            .text_color(p.muted_foreground)
-            .child("No changes"),
+          ui::EmptyState::new("changes-empty", "No changes", p)
+            .icon(theme::ICON_CIRCLE_CHECK)
+            .message("The working copy matches the last commit. Edit a file to see it here."),
         )
         .into_any_element(),
     }
@@ -2998,16 +2991,13 @@ impl ChangesView {
         div()
           .size_full()
           .flex()
-          .flex_col()
           .items_center()
           .justify_center()
-          .text_color(p.muted_foreground)
-          .child(ui::icon(
-            theme::ICON_CIRCLE_CHECK,
-            48.,
-            p.muted_foreground.opacity(0.4),
-          ))
-          .child(div().mt_3().child("No changes to review")),
+          .child(
+            ui::EmptyState::new("changes-review-empty", "No changes to review", p)
+              .icon(theme::ICON_CIRCLE_CHECK)
+              .message("This workspace has no uncommitted or committed changes yet."),
+          ),
       );
     }
     if self.large_changeset_gated() {

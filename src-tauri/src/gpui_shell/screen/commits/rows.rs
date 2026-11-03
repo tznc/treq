@@ -652,10 +652,10 @@ impl CommitsView {
       _ => div()
         .border_t_1()
         .border_color(p.border)
-        .px_3()
-        .py_3()
-        .text_color(p.muted_foreground)
-        .child("No diff content available.")
+        .child(
+          ui::EmptyState::new("commit-diff-no-content", "No diff content", p)
+            .message("This change has no lines to show, such as a mode or rename change."),
+        )
         .into_any_element(),
     }
   }

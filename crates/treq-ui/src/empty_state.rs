@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use gpui::{div, prelude::*, Animation, AnimationExt as _, AnyElement, App, SharedString, Window};
+use gpui_kit::base::TestSupportExt as _;
 
 use crate::{icon, spinner, text, theme, theme::Palette, zpx, TextSize};
 
@@ -69,9 +70,12 @@ impl RenderOnce for EmptyState {
       p.muted_foreground
     };
     let selector = self.id.to_string();
+    let message_id = format!("{}-message", self.id);
     div()
       .id(self.id)
       .debug_selector(move || selector)
+      .role(gpui::Role::Status)
+      .aria_label(self.title.clone())
       .flex()
       .flex_col()
       .items_center()
@@ -90,14 +94,20 @@ impl RenderOnce for EmptyState {
       .when_some(self.message, |el, message| {
         el.child(
           text(div(), TextSize::Sm)
+            .id(message_id)
+            // Readable on its own, so tests and assistive tech find the why.
+            .role(gpui::Role::Paragraph)
+            .aria_label(message.clone())
             .max_w(zpx(360.))
             .text_color(p.muted_foreground)
-            .child(message),
+            .child(message)
+            .test_support(),
         )
       })
       .when_some(self.action, |el, action| {
         el.child(div().pt_2().child(action))
       })
+      .test_support()
   }
 }
 
@@ -146,6 +156,7 @@ impl RenderOnce for Loading {
         el.aria_label(label.clone())
           .child(text(div(), TextSize::Sm).child(label))
       })
+      .test_support()
   }
 }
 

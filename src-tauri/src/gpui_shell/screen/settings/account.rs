@@ -2196,9 +2196,8 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           .text_color(red)
           .child(error.clone())
           .into_any_element(),
-        CloudUsage::Loading => div()
-          .text_color(p.muted_foreground)
-          .child("Loading usage…")
+        CloudUsage::Loading => ui::Loading::new("cloud-usage-loading", p)
+          .label("Loading usage…")
           .into_any_element(),
         CloudUsage::Report {
           summary,
@@ -2449,7 +2448,7 @@ impl SettingsView {
   ) -> AnyElement {
     match tab {
       AccountTab::Loading => centered(0.)
-        .child(ui::spinner("account-loading", 24., p.muted_foreground))
+        .child(ui::Loading::new("account-loading", p).label("Loading account…"))
         .into_any_element(),
       AccountTab::SigningIn => centered(12.)
         .debug_selector(|| "account-signing-in".into())
@@ -3377,7 +3376,7 @@ impl SettingsView {
         .flex()
         .justify_center()
         .py_6()
-        .child(ui::spinner("github-loading", 24., p.muted_foreground))
+        .child(ui::Loading::new("github-loading", p).label("Loading GitHub…"))
         .into_any_element(),
       GithubSection::SignedOut => div()
         .flex()

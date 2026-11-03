@@ -1412,9 +1412,7 @@ impl LinearView {
     };
     div()
       .id("linear-connection")
-      .role(Role::Label)
-      .aria_label(SharedString::from(error.clone()))
-      .test_support()
+      // The empty state names itself and reads out its message.
       .flex_1()
       .min_h_0()
       .flex()
@@ -1611,24 +1609,6 @@ impl LinearView {
         }),
       );
 
-    let message = |id: &'static str, text: SharedString, color: Hsla| {
-      ui::text(div(), TextSize::Sm)
-        .id(id)
-        .debug_selector(move || id.into())
-        .role(Role::Label)
-        .aria_label(text.clone())
-        .test_support()
-        .size_full()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .text_center()
-        .p_8()
-        .gap_3()
-        .text_color(color)
-        .child(text)
-    };
     // The list and each Kanban column are virtual lists that scroll
     // themselves.
     let mut content = div()
@@ -1646,22 +1626,41 @@ impl LinearView {
       })
       .when_some(fetch.error.clone(), |this, error| {
         this.child(
-          message("linear-issues-error", error.into(), p.destructive).child(
-            Button::new("linear-issues-retry", p)
-              .variant(Variant::Outline)
-              .size(Size::Sm)
-              .label("Try again")
-              .on_click(cx.listener(|view, _, _, cx| view.load_issues(cx))),
-          ),
+          div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+              ui::EmptyState::new("linear-issues-error", "Couldn't load Linear issues", p)
+                .error(true)
+                .icon(theme::ICON_CIRCLE_ALERT)
+                .message(error)
+                .action(
+                  Button::new("linear-issues-retry", p)
+                    .size(Size::Sm)
+                    .label("Retry")
+                    .on_click(cx.listener(|view, _, _, cx| view.load_issues(cx))),
+                ),
+            ),
         )
       });
     if !loading && !fetch.failed() {
       content = if shown.is_empty() {
-        content.child(message(
-          "linear-no-issues",
-          "No issues found".into(),
-          p.muted_foreground,
-        ))
+        content.child(
+          div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+              ui::EmptyState::new("linear-no-issues", "No issues", p)
+                .icon(theme::ICON_LINEAR)
+                .message(
+                  "No issues match this view and search. Try another view or clear the search.",
+                ),
+            ),
+        )
       } else {
         match self.mode {
           IssueMode::List => content.child(self.issue_list(&shown, &all, window, cx)),
@@ -2466,11 +2465,8 @@ impl LinearView {
         !loading && !self.projects.failed() && shown.is_empty(),
         |this| {
           this.child(
-            ui::text(div(), TextSize::Sm)
-              .debug_selector(|| "linear-no-projects".into())
-              .p_4()
-              .text_color(p.muted_foreground)
-              .child("No projects found"),
+            ui::EmptyState::new("linear-no-projects", "No projects", p)
+              .message("No Linear projects match. Try another search."),
           )
         },
       )
@@ -2611,9 +2607,8 @@ impl LinearView {
         !docs.is_loading() && docs.data.as_ref().is_none_or(Vec::is_empty),
         |this| {
           this.child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child("No documents"),
+            ui::EmptyState::new("linear-no-documents", "No documents", p)
+              .message("This project has no documents yet."),
           )
         },
       )
@@ -2899,24 +2894,29 @@ impl LinearView {
           this
             .child(heading("COMMENTS"))
             .when(fetch.is_loading(), |this| {
-              this.child(ui::spinner(
-                format!("linear-comments-loading-{key}"),
-                16.,
-                p.muted_foreground,
-              ))
+              this.child(
+                div().flex().child(
+                  ui::Loading::new(format!("linear-comments-loading-{key}"), p)
+                    .label("Loading comments…"),
+                ),
+              )
             })
             .when(fetch.failed(), |this| {
               this.child(
-                ui::text(div(), TextSize::Sm)
-                  .text_color(p.destructive)
-                  .child("Failed to load comments"),
+                ui::EmptyState::new(
+                  format!("linear-comments-error-{key}"),
+                  "Couldn't load comments",
+                  p,
+                )
+                .error(true)
+                .icon(theme::ICON_CIRCLE_ALERT)
+                .message("Linear did not answer. Check your connection and API key."),
               )
             })
             .when(empty, |this| {
               this.child(
-                ui::text(div(), TextSize::Sm)
-                  .text_color(p.muted_foreground)
-                  .child("No comments"),
+                ui::EmptyState::new(format!("linear-no-comments-{key}"), "No comments", p)
+                  .message("Nobody has commented yet."),
               )
             })
             .children(

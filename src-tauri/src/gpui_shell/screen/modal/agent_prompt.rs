@@ -828,11 +828,8 @@ impl AgentPromptView {
       let accent = p.menu_accent;
       let index = picker.index;
       let list = if rows.is_empty() {
-        ui::text(div(), TextSize::Sm)
-          .p_4()
-          .text_center()
-          .text_color(p.muted_foreground)
-          .child("No workspaces found")
+        ui::EmptyState::new("agent-prompt-no-workspaces", "No workspaces match", p)
+          .message("Try another workspace name.")
           .into_any_element()
       } else {
         div()

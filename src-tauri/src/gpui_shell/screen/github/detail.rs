@@ -1206,9 +1206,8 @@ impl GithubView {
   /// `PrWorkspaceChecks`: the workflow checks of the PR's workspace.
   fn treq_section(&self, ws: &Workspace, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
     if self.detail.treq.as_ref().is_some_and(|c| !c.configured()) {
-      return ui::text(named(div(), "github-treq-none"), TextSize::Sm)
-        .text_color(p.muted_foreground)
-        .child("No Treq checks configured for this repository.")
+      return ui::EmptyState::new("github-treq-none", "No Treq checks", p)
+        .message("This repository has no checks configured in .treq/workflows/.")
         .into_any_element();
     }
     let id = ws.id;
@@ -1260,18 +1259,10 @@ impl GithubView {
   /// `WorkspaceChecksPanel`.
   fn checks_panel(&self, ws: &Workspace, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
     let Some(checks) = self.detail.treq.clone() else {
-      return ui::text(div(), TextSize::Sm)
+      return div()
         .flex()
-        .items_center()
-        .gap_2()
         .p_4()
-        .text_color(p.muted_foreground)
-        .child(ui::spinner(
-          "github-checks-loading",
-          16.,
-          p.muted_foreground,
-        ))
-        .child("Loading checks…")
+        .child(ui::Loading::new("github-checks-loading", p).label("Loading checks…"))
         .into_any_element();
     };
     let running = &self.running_keys(cx);
@@ -1336,17 +1327,8 @@ impl GithubView {
     if checks.workflows.is_empty() {
       return panel
         .child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.muted_foreground)
-            .child("No workflows found. Add YAML files to ")
-            .child(
-              div()
-                .font_family(theme::MONO_FONT)
-                .child(".treq/workflows/"),
-            )
-            .child(" to define checks.")
-            .flex()
-            .flex_wrap(),
+          ui::EmptyState::new("github-no-workflows", "No workflows", p)
+            .message("Add YAML files to .treq/workflows/ to define checks."),
         )
         .into_any_element();
     }
@@ -1599,10 +1581,13 @@ impl GithubView {
     p: &Palette,
   ) -> impl IntoElement {
     let body = if !job.has_logs {
-      ui::text(div(), TextSize::Xs)
-        .text_color(p.muted_foreground)
-        .child("No logs recorded.")
-        .into_any_element()
+      ui::EmptyState::new(
+        SharedString::from(format!("github-logs-{run_id}-{}-none", job.job_id)),
+        "No logs recorded",
+        p,
+      )
+      .message("There are no logs saved for this job.")
+      .into_any_element()
     } else {
       match self.detail.logs.get(&(run_id, job.job_id.clone())) {
         None => ui::spinner(

@@ -1,0 +1,55 @@
+id: gpui-no-adhoc-feedback
+language: rust
+severity: error
+message: >
+  Build empty, loading and error bodies from `ui::EmptyState` (title, why,
+  at most one action), `ui::Loading` or `ui::Skeleton`, and errors from
+  `ui::Alert` or `EmptyState::error` with Retry, not hand-written text or a
+  local helper, so an error is never shown as "empty".
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  any:
+    - kind: function_item
+      has:
+        field: name
+        kind: identifier
+        regex: ^(message|empty|loading_text|empty_state)$
+      # A method such as a draft's `message(&self)` is data, not a helper.
+      not:
+        inside:
+          kind: impl_item
+          stopBy: end
+    - kind: let_declaration
+      all:
+        - has:
+            field: pattern
+            kind: identifier
+            regex: ^(message|empty|loading_text|empty_state)$
+        - has:
+            field: value
+            kind: closure_expression
+    - kind: string_literal
+      regex: ^"(No |Loading|Fetching|Couldn't)
+      inside:
+        kind: arguments
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            any:
+              - kind: field_expression
+                has:
+                  field: field
+                  regex: ^child$
+              - regex: ^(ui::)?text$
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end
