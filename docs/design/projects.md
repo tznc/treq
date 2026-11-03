@@ -25,7 +25,7 @@ Work that spans repos (API + client, service + infra, lib + consumer) is done as
 - Create one *project workspace* that creates a workspace per selected repo with one shared branch name.
 - Run agents/sessions scoped to a project workspace (cwd = a project root holding each repo's workspace).
 - Show linked status: per-repo diff/conflict/check/PR state rolled up.
-- Open and track linked PRs across repos.
+- Open and track a project workspace's PRs across repos, inside Treq.
 - Sync the project definition across the user's machines.
 
 ## Non-goals
@@ -42,7 +42,7 @@ Work that spans repos (API + client, service + infra, lib + consumer) is done as
 3. Open a project: sidebar lists its repos and project workspaces.
 4. Start "feature X" across repos A and B: one action creates `treq/feature-x` in both.
 5. Launch one agent with all repos of the workspace in view, or one agent per repo.
-6. Commit per repo; push all; open linked PRs that reference each other.
+6. Commit per repo; push all; open one PR per repo, grouped in Treq.
 7. See one status row: "A: 2 ahead, PR open, checks green · B: conflict".
 8. On a second machine, the project appears; repos not cloned there show "Clone" / "Locate".
 
@@ -77,18 +77,18 @@ B gives agents one cwd that sees every repo, without moving repo state. C duplic
 A makes linking trivial (match by name). Per-repo override allowed only as explicit opt-out (D6).
 
 ### D5. Coordinated PRs
-- A. Independent PRs, no linking.
-- B. Independent PRs, each body carries a managed "Linked PRs" block, kept in sync by Treq. **(Recommended)**
+- A. Independent PRs, grouped only inside Treq (matched by project workspace branch); PR descriptions untouched. **(Recommended)**
+- B. Independent PRs, each body carries a managed "Linked PRs" block, kept in sync by Treq.
 - C. Merge-train / ordered merge enforcement.
 
-B is cheap and visible on GitHub. C is a later phase: optional "merge order" hint, no enforcement.
+A keeps PR descriptions owned by the author and needs no sync of PR bodies. B adds noise reviewers did not ask for. C is a later phase: optional "merge order" hint, no enforcement.
 
 ### D6. Config overrides
 - A. Project config only.
 - B. Repo `.treq/config.yaml` wins over project defaults, per key. **(Recommended)**
 - C. Project wins over repo.
 
-Repo config is checked in and shared with teammates; a personal project must not override it. Project config adds defaults (pattern, agent, model) and project-only keys (agent scope, PR linking).
+Repo config is checked in and shared with teammates; a personal project must not override it. Project config adds defaults (pattern, agent, model) and project-only keys (agent scope).
 
 ### D7. Sessions/agents scope
 - A. Session belongs to one repo workspace (today).
@@ -112,7 +112,7 @@ create table public.projects (
   owner_user_id uuid not null references auth.users(id) on delete cascade,
   name text not null check (length(name) between 1 and 100),
   slug text not null,
-  config jsonb not null default '{}',     -- branch pattern, default agent/model, pr_linking
+  config jsonb not null default '{}',     -- branch pattern, default agent/model
   version bigint not null default 1,      -- optimistic concurrency
   deleted_at timestamptz,                 -- soft delete, tombstone for sync
   created_at timestamptz not null default now(),
@@ -160,9 +160,9 @@ RLS: enable on all three; `revoke all from anon`. Policy: `owner_user_id = (sele
 
 - **Sidebar**: project switcher at top; under it, repos (collapsible) and project workspaces (badge: N repos).
 - **New project**: modal → name → add repos (pick folder / clone URL / recent repos) → done.
-- **Project settings** (settings screen, new "Project" section): name, branch pattern, default agent/model, PR linking toggle, repo list with reorder/remove, per-repo overrides.
+- **Project settings** (settings screen, new "Project" section): name, branch pattern, default agent/model, repo list with reorder/remove, per-repo overrides.
 - **New project workspace**: name → checkboxes of repos (default all) → creates workspaces in parallel; partial failure shows per-repo result with retry, never rolls back successful ones silently.
-- **Project workspace screen**: tab per repo reusing existing changes/commits screens, plus a "Summary" tab with the rolled-up status table and "Push all" / "Open linked PRs".
+- **Project workspace screen**: tab per repo reusing existing changes/commits screens, plus a "Summary" tab with the rolled-up status table and "Push all" / "Open PRs".
 - **Missing repo on this machine**: row greyed with "Clone" / "Locate…".
 
 ## CLI / API
@@ -184,7 +184,7 @@ treq project ws pr <project> <name> [--draft]
 
 - **Branch naming**: one bookmark per project workspace (D4). Create fails fast if the bookmark exists in any repo, listing which.
 - **Commits**: per repo. "Commit all" with one message is a convenience that runs per-repo commits; reported per repo, not atomic.
-- **PRs**: open per repo; managed `<!-- treq:linked-prs -->` block lists siblings; refreshed when any sibling PR is created/closed (uses existing `pr_status.rs`).
+- **PRs**: open per repo with the repo's normal title/body; Treq groups them in the Summary tab by project workspace (uses existing `pr_status.rs`). Treq does not edit PR descriptions.
 - **Linked status**: summary = worst of per-repo states (conflict > failing checks > behind > clean).
 - **Rebase**: existing auto-rebase runs per repo; no cross-repo ordering.
 - **Overrides**: resolution order repo config.yaml > project repo override > project config > app default (D6).
@@ -291,7 +291,7 @@ treq project prompt preview <project> [--repo r]   # prints the final system pro
 ## Edge cases
 
 - **Same repo in multiple projects**: allowed; repo state stays in the repo's `.treq`. A workspace belongs to at most one project workspace. Removing a repo from one project does not touch others.
-- **Missing access** (no clone, no GitHub permission, auth expired): repo shown as unavailable; project workspace ops skip it with a visible warning; PR linking omits PRs we cannot read.
+- **Missing access** (no clone, no GitHub permission, auth expired): repo shown as unavailable; project workspace ops skip it with a visible warning; the Summary tab omits PRs we cannot read.
 - **Renamed repo**: match on `github_node_id`, update `repo_key`; local detection via remote URL change on fetch.
 - **Deleted repo / missing path**: mark unavailable, keep row; user removes explicitly. `jj.rs` path-validating functions already return defaults on missing paths.
 - **Monorepo**: a project with one repo is valid. Optional `sparse_patterns` per project repo (workspaces already support them) to scope a project to subdirs; no virtual "sub-repos".
@@ -304,14 +304,14 @@ treq project prompt preview <project> [--repo r]   # prints the final system pro
 1. **Model + sync**: Supabase tables/RLS/RPCs, local cache, auto-migration (one project per repo), sidebar switcher. Behind `projects` flag.
 2. **Project prompts and context** (D9–D12): injection in `system_prompt()`, settings section, CLI.
 3. **Project workspaces**: shared-branch creation, project root symlinks, project-scoped sessions/agents, summary tab, CLI.
-4. **Linked PRs + push all**, rolled-up checks.
+4. **Grouped PRs + push all**, rolled-up checks.
 5. **Polish**: merge-order hint, sparse monorepo scoping, remove flag.
 
 ## Test strategy (TDD)
 
 Each step starts with a failing test.
 
-- `core/projects/` unit tests: repo_key normalisation (ssh/https/.git suffix), override resolution order, branch-name collision detection, status roll-up, linked-PR block render/parse (idempotent), sync merge rules. Proptests for normalisation and merge.
+- `core/projects/` unit tests: repo_key normalisation (ssh/https/.git suffix), override resolution order, branch-name collision detection, status roll-up, PR grouping by project workspace, sync merge rules. Proptests for normalisation and merge.
 - Prompt assembly: `system_prompt()` with project prompts in D11 order, repo scoping, disabled prompts skipped, missing context path skipped with warning, size cap, Claude settings/`--add-dir` include context dirs read-only, Cursor prompt file includes them; extend the existing tests in `agent_command.rs`.
 - `local_db` migration tests with upgrade fixtures for new columns; `db.rs` cache tables.
 - Integration (`src-tauri/tests/`): create project workspace across 2 temp jj repos; partial failure leaves successful repos intact; missing path returns defaults.
