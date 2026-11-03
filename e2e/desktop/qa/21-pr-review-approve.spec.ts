@@ -3,8 +3,8 @@
 // says so in one line under its checks. The fake `gh` signs in as octocat,
 // so #421 (alice's) can be approved.
 //
-// List rows, the view's tabs and the finish popover's verdicts are not
-// observable; they are clicked at their place in the 1400x900 window.
+// List rows are list items named by their title, and the finish popover's
+// verdicts radio buttons named by their label.
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
@@ -14,20 +14,18 @@ import { ready, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
-const PRS_TAB = { x: 422, y: 62 };
-const ROW_418 = { x: 700, y: 147 };
-const ROW_421 = { x: 700, y: 214 };
-const ROW_415 = { x: 700, y: 348 };
-const ROW_401 = { x: 700, y: 482 };
-const APPROVE = { x: 1064, y: 265 };
+const ROW_418 = "feat: handle empty event messages";
+const ROW_421 = "fix: retry Slack webhooks on 429";
+const ROW_415 = "feat(spool): fail readiness when the spool queue is unreachable";
+const ROW_401 = "feat: keyvalues cache";
 
-async function openPr(page: Page, at: { x: number; y: number }): Promise<void> {
+async function openPr(page: Page, title: string): Promise<void> {
   await ready(page);
   await page.getByRole("button", { name: "Github", exact: true }).click();
   await settle(page, 2000);
-  await page.mouse.click(PRS_TAB.x, PRS_TAB.y);
+  await page.getByRole("tab", { name: "Pull requests" }).click();
   await settle(page, 1500);
-  await page.mouse.click(at.x, at.y);
+  await page.getByRole("listitem", { name: title, exact: true }).click();
   await settle(page, 2500);
 }
 
@@ -56,7 +54,7 @@ test("pr review approve: back on the PR detail", async ({ page }) => {
     expectations: ["The finish popover with Comment, Approve and Request changes"],
     screen: true,
   });
-  await page.mouse.click(APPROVE.x, APPROVE.y);
+  await page.getByRole("radio", { name: "Approve", exact: true }).click();
   await settle(page, 500);
   // GitHub records the approval: the PR's next read reports it.
   writeFileSync(

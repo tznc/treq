@@ -722,6 +722,7 @@ impl OnboardingView {
       .relative()
       .child(
         Row::new(row_id, &p)
+          .role(gpui::Role::ListItem)
           .density(if machine.detail.is_empty() {
             RowDensity::Default
           } else {
@@ -1059,6 +1060,7 @@ impl OnboardingView {
       None => press(format!("machines.openLocal:{}", recent.path)),
     };
     Row::new(format!("recent-{}-{i}", recent.machine_id), &p)
+      .role(gpui::Role::ListItem)
       .density(RowDensity::Default)
       .icon(theme::ICON_FOLDER_GIT)
       .title(recent.name.clone())

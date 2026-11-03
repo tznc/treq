@@ -439,3 +439,31 @@ fn pr_review_file_list_scrolls_to_the_file(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   assert!(h.drawn("file-card-b.rs"));
 }
+
+/// The finish popover's verdicts are radio buttons named by their label,
+/// checked when chosen, so a user (and the QA specs) pick one by name.
+#[gpui::test]
+fn the_finish_popover_verdicts_are_named_radio_buttons(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let (mut h, host) = workspace_harness(cx, pr_host(), pr_route());
+  h.click("pr-review-finish");
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(Role::RadioButton).name("Comment"))).to_be_checked();
+  let approve = screen.get_by_role(by::role(Role::RadioButton).name("Approve"));
+  expect(&approve).not().to_be_checked();
+  screen.user().click(&approve);
+  h.cx.run_until_parked();
+  screen.redraw();
+  expect(screen.get_by_role(by::role(Role::RadioButton).name("Approve"))).to_be_checked();
+  h.click("pr-review-submit");
+  h.cx.run_until_parked();
+  assert!(
+    host.writes().iter().any(|w| w.contains(" APPROVE ")),
+    "{:?}",
+    host.writes()
+  );
+}

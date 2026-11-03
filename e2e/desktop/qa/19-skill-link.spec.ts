@@ -7,8 +7,8 @@
 //
 // The link reaches the running app the way the OS delivers it on Linux: a
 // second `treq <url>` process, which the single-instance plugin hands to the
-// first over D-Bus (run the QA under `dbus-run-session`). The skill is a
-// real one from the live catalog, so the run needs network access. The app
+// first over D-Bus (the session bus `launch.ts` starts, or the run's own).
+// The catalog is the local one `launch.ts` writes (./fake-skills.ts). The app
 // finds agents on the login shell's PATH: where that shell's profile puts a
 // real `claude` ahead of the fixture's, point SHELL at a shell that skips
 // profiles (`exec bash --noprofile --norc "$@"`).
@@ -36,9 +36,12 @@ function mark(label: string): void {
 
 /** Delivers `url` to the running app as a second process would. */
 function openLink(url: string): void {
-  const f = fixture();
+  const f = fixture() as ReturnType<typeof fixture> & { dbus?: string };
   const child = spawn(appBinary, [url], {
-    env: appEnv({ ...f, bin: `${f.root}/bin` }),
+    env: {
+      ...appEnv({ ...f, bin: `${f.root}/bin` }),
+      ...(f.dbus ? { DBUS_SESSION_BUS_ADDRESS: f.dbus } : {}),
+    },
     stdio: "ignore",
     detached: true,
   });

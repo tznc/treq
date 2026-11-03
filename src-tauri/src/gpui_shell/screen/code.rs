@@ -1437,6 +1437,8 @@ impl CodeView {
           .variant(Variant::Outline)
           .size(Size::Sm)
           .label("Archive")
+          // Apart from the header's Archive, which a merged PR shows.
+          .aria_label("Archive workspace")
           .on_click(move |_, _, cx| {
             let react = react.clone();
             cx.defer(move |cx| {
@@ -1940,7 +1942,9 @@ impl CodeView {
     );
     let (ins, del) = row.stats;
     let workspace = row.workspace.clone();
+    // A stack entry: the sidebar row is the button that opens it.
     ui::Row::new(id, p)
+      .role(Role::ListItem)
       .label(title.clone())
       .selected(row.current)
       .relative()

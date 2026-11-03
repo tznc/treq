@@ -1445,3 +1445,34 @@ fn a_viewed_file_without_diff_lines_unmarks_when_it_changes(cx: &mut TestAppCont
     host.writes()
   );
 }
+
+/// The Changes header's buttons are named for what they do, so a user (and
+/// the QA specs) find discard all by its name rather than by place.
+#[gpui::test]
+fn the_changes_header_buttons_are_named(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  let screen = a11y_screen(&mut h);
+  for name in ["Discard all changes…", "Stash all changes"] {
+    expect(screen.get_by_role(by::role(gpui::Role::Button).name(name))).to_be_visible();
+  }
+  let user = screen.user();
+  user.click(&screen.get_by_role(by::role(gpui::Role::Button).name("Discard all changes…")));
+  assert!(h.drawn("discard-all-dialog"));
+}
+
+/// A review thread's fold toggle is a button named for what a click does.
+#[gpui::test]
+fn a_review_thread_folds_from_a_named_button(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, true)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  let screen = a11y_screen(&mut h);
+  let show = screen.get_by_role(by::role(gpui::Role::Button).name("Show review thread"));
+  screen.user().click(&show);
+  let screen = a11y_screen(&mut h);
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Hide review thread")))
+    .to_be_visible();
+  assert!(!h.drawn("github-thread-collapsed-preview"));
+}

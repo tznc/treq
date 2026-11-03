@@ -7,7 +7,7 @@
     "test": "playwright test",
     "landing": "playwright test -c landing/landing.config.ts",
     "typecheck": "tsc -p .",
-    "qa": "playwright test -c qa/qa.config.ts"
+    "qa": "node qa/run-each.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

@@ -309,6 +309,7 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
     .flat_map(|listing| listing.shown(show_hidden))
     .map(|folder| {
       ui::Row::new(format!("remote-browse-folder-{}", folder.name), p)
+        .role(gpui::Role::ListItem)
         .icon(if folder.is_repo {
           theme::ICON_FOLDER_GIT
         } else {
