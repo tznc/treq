@@ -26,7 +26,8 @@ export interface BillingStore {
 /** Team checkout and the Team billing portal, for one signed-in user. */
 export interface OrganizationBilling {
   /** Whether the user owns the organization. */
-  isOwner(organizationId: string): Promise<boolean>;
+  /** Owners and admins manage the team's billing account. */
+  canManageBilling(organizationId: string): Promise<boolean>;
   /** Team is billed per member beyond the included seats. */
   memberCount(organizationId: string): Promise<number>;
   store(organizationId: string): BillingStore;
@@ -102,7 +103,7 @@ export function organizationBillingFor(
   userId: string,
 ): OrganizationBilling {
   return {
-    async isOwner(organizationId) {
+    async canManageBilling(organizationId) {
       const { data, error }: QueryResult = await client
         .from("organization_members")
         .select("role")
@@ -110,7 +111,8 @@ export function organizationBillingFor(
         .eq("user_id", userId)
         .maybeSingle();
       if (error) throw new Error(`membership lookup failed: ${error.message}`);
-      return (data as { role?: string } | null)?.role === "owner";
+      const role = (data as { role?: string } | null)?.role;
+      return role === "owner" || role === "admin";
     },
     async memberCount(organizationId) {
       const { count, error } = await client

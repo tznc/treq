@@ -509,7 +509,10 @@ describe("handleStripeWebhook", () => {
     );
     expect(result.status).toBe(200);
     expect(log).toHaveBeenCalledWith(
-      expect.objectContaining({ level: "error", result: "owner_plan_mismatch" }),
+      expect.objectContaining({
+        level: "error",
+        result: "owner_plan_mismatch",
+      }),
     );
   });
 });

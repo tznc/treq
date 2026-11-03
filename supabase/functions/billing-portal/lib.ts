@@ -59,13 +59,13 @@ async function portalOwner(
   }
   if (!deps.organizations)
     throw new Error("organization billing is not configured");
-  if (!(await deps.organizations.isOwner(organizationId))) {
+  if (!(await deps.organizations.canManageBilling(organizationId))) {
     return {
       ok: false,
       result: {
         status: 403,
         body: {
-          error: "Only an owner of this organization can manage its billing.",
+          error: "Only an owner or admin of this organization can manage its billing.",
         },
       },
     };
