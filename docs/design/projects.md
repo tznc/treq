@@ -8,6 +8,26 @@ Status: draft spec, no implementation. Date: 2026-11-03.
 - **Personal only**: a project belongs to one user; no team sharing.
 - **Project is the top-level entity; repos are many-to-many with projects**: a repo is added to one or more projects (like Claude Code projects). The repo itself is not owned by any one project: its checkout, `.treq` state and workspaces are shared, and each project adds its own grouping, prompts and context on top. A single-repo user gets an implicit one-repo project.
 
+## Relationship to supporting repositories
+
+Projects are **v2 of supporting repositories** and replace them. The current feature (v1):
+
+- `supporting_repos(repo_path, added_at)` in the home repo's `.treq` DB (`local_db::list_supporting_repo_paths`, `add_supporting_repo_path`); linked via **File > Add Repository…**.
+- CLI `-r <repo>` on `add`, `set`, `st`, `diff`, `agent`, `commit` (`--repo` on `mv`) to act on a linked repo.
+- `agent_command::system_prompt()` lists supporting repos; `claude_filesystem_settings()` grants read on them. The agent is told to write only via `treq add -r` + `treq agent -r`, and to check with `treq st -r`.
+
+What v1 lacks and Projects add:
+
+| v1 supporting repos | v2 projects |
+|---|---|
+| Links are local to one home repo's DB, one direction | Project is a synced, first-class group; repos are many-to-many |
+| No shared prompts or context | Project prompts and context (D9–D12) |
+| Sub-agents are fire-and-forget, checked one at a time with `st -r` | Orchestration: the home agent spawns, tracks and reads all sub-agents' workspaces in one call |
+| No cross-repo grouping of work | Project workspaces, shared branch, grouped PRs |
+| Repo identity = local path | `repo_key`, synced, path per machine |
+
+**Superseding plan**: keep the `-r` flag and the agent's read-only rule; resolve `-r` against the project's repos instead of `supporting_repos`. Migrate each home repo with supporting repos into one project (home repo + its supporting repos), then stop reading `supporting_repos` (table kept one release for rollback, then dropped). The UI's **Add Repository…** becomes "Add repository to project".
+
 ## Current model (what this builds on)
 
 - Repo = a path on disk. Per-repo state lives in `<repo>/.treq/` (`local_db.rs`: `workspaces`, `sessions`, reviews, stashes; `.treq/config.yaml` via `repo_config.rs`).
@@ -286,7 +306,60 @@ treq project context list|rm <project> ...
 treq project prompt preview <project> [--repo r]   # prints the final system prompt
 ```
 
-### Edge cases
+### Agent orchestration across project repos
+
+A terminal agent in the project's **home repo** is the orchestrator. It can start several terminal agents across the project's repos, each in its own workspace, stacked where needed, and read the state of every workspace in the project.
+
+### Home repo
+
+**D13. What the orchestrator runs in**
+- A. A designated home repo per project (`projects.home_repo_key`), defaulting to the first repo added. **(Recommended)**
+- B. The project root folder (D3) with no repo of its own.
+- C. Any repo in the project.
+
+A matches v1 (the agent starts in a real repo, with its own `AGENTS.md`/skills) and gives `treq` a repo to resolve against. B has no git state to commit plans or notes into. C makes "which project context applies" ambiguous for repos in several projects. Per-machine override allowed if the home repo is not cloned locally.
+
+### Spawning sub-agents
+
+- Same commands as v1, resolved against the project: `treq add -r <repo> <branch> [-s <parent>]` then `treq agent -r <repo> <branch> "<prompt>"`.
+- **Stacking**: `-s/--source-branch` stacks a workspace on another workspace's branch in the same repo, as today. Stacks never cross repos; cross-repo ordering is expressed as a dependency note in the workspace description, not as a jj parent.
+- One call for fan-out: `treq project spawn --plan plan.json` (or stdin) creates N workspaces and agents. Plan entries: `{repo, branch, source_branch?, prompt, mode?}`. Each entry succeeds or fails on its own; the result lists per-entry status.
+- Every sub-agent gets the project's prompts and context (D11), plus a short parent note: "Started by the orchestrator in <home repo> for project <name>; report progress with `treq set -d`."
+- Sub-agents record `sessions.parent_session_id` (new, nullable) so the UI shows the tree and the orchestrator can list its own children.
+
+**D14. Can sub-agents spawn agents?**
+- A. No: only the home-repo agent orchestrates. **(Recommended for v2)**
+- B. Yes, to a depth limit.
+- C. Yes, unlimited.
+
+A keeps cost and blast radius visible and the session tree one level deep. B can follow once usage shows a need.
+
+### Reading project workspaces
+
+- `treq project st [--repo r] [--json]`: every workspace in every project repo: repo, branch, stack parent/children, uncommitted/conflict/commit counts, PR state, agent state (running, waiting for input, exited), description. Same fields as `treq st`, one call.
+- `treq st -r <repo> <branch>` and `treq diff -r <repo> <branch>` keep working for detail.
+- Any agent in the project (not only the orchestrator) may run these reads; they are read-only.
+- Agent state comes from `agent_supervisor` / `pty_daemon`; workspace state from each repo's `.treq` DB and jj. Repos missing on this machine show as unavailable, not an error.
+
+**D15. How agents learn about sibling progress**
+- A. Pull: agents run `treq project st` when they need it. **(Recommended)**
+- B. Push: Treq sends a message into the orchestrator's terminal when a sub-agent exits or asks for input (existing `treq send`/notify path).
+- C. Shared log file all agents append to.
+
+A is simple and works for every agent CLI. B is a Phase-3 addition behind a setting, reusing `send_dispatch`; it must never type into a terminal that is mid-input. C goes stale and conflicts.
+
+### Permissions
+
+- Orchestrator: write only in its own cwd (home repo or its workspace), read on all project repos (v1 rule, now over project repos). Writes elsewhere only through sub-agents.
+- Sub-agent: write in its own workspace; read on other project repos.
+- `claude_filesystem_settings()` takes the project repo list instead of `supporting_repo_paths`.
+- Limits: per-project cap on concurrent agents (default 8, in project config); `spawn` refuses beyond it.
+
+### UI
+
+- Orchestrator session shows a child list (repo, branch, agent state) with jump-to-terminal.
+- Sidebar marks workspaces started by an orchestrator.
+
 
 - Context path missing on this machine: skipped, listed as "unavailable" in the preview, agent still launches.
 - Repo-relative ref to a repo not cloned here: skipped with the same warning.
@@ -309,10 +382,12 @@ treq project prompt preview <project> [--repo r]   # prints the final system pro
 ## Phased rollout
 
 1. **Model + sync**: Supabase tables/RLS/RPCs, local cache, auto-migration (one project per repo), sidebar switcher. Behind `projects` flag.
-2. **Project prompts and context** (D9–D12): injection in `system_prompt()`, settings section, CLI.
-3. **Project workspaces**: shared-branch creation, project root symlinks, project-scoped sessions/agents, summary tab, CLI.
-4. **Grouped PRs + push all**, rolled-up checks.
-5. **Polish**: merge-order hint, sparse monorepo scoping, remove flag.
+2. **Supersede supporting repos**: migrate `supporting_repos` to projects, resolve `-r` against project repos, `treq project st`.
+3. **Project prompts and context** (D9–D12): injection in `system_prompt()`, settings section, CLI.
+4. **Project workspaces**: shared-branch creation, project root symlinks, project-scoped sessions/agents, summary tab, CLI.
+5. **Grouped PRs + push all**, rolled-up checks.
+6. **Orchestration**: `treq project spawn`, `parent_session_id`, child list UI, concurrency cap, optional push notifications (D15 B).
+7. **Polish**: merge-order hint, sparse monorepo scoping, remove flag.
 
 ## Test strategy (TDD)
 
@@ -320,6 +395,8 @@ Each step starts with a failing test.
 
 - `core/projects/` unit tests: repo_key normalisation (ssh/https/.git suffix), override resolution order, branch-name collision detection, status roll-up, PR grouping by project workspace, sync merge rules. Proptests for normalisation and merge.
 - Prompt assembly: `system_prompt()` with project prompts in D11 order, repo scoping, disabled prompts skipped, missing context path skipped with warning, size cap, Claude settings/`--add-dir` include context dirs read-only, Cursor prompt file includes them; extend the existing tests in `agent_command.rs`.
+- Supporting-repos migration: fixture DB with `supporting_repos` → one project with the same repos; `-r` resolves the same names before and after (extend `cli/tests.rs` `-r` cases).
+- Orchestration: `spawn` plan parsing and per-entry partial failure; concurrency cap; sub-agent spawn refused (D14); `project st --json` shape across 2 temp repos with stacked workspaces; filesystem settings use project repos.
 - `local_db` migration tests with upgrade fixtures for new columns; `db.rs` cache tables.
 - Integration (`src-tauri/tests/`): create project workspace across 2 temp jj repos; partial failure leaves successful repos intact; missing path returns defaults.
 - CLI tests in `cli/tests.rs` for each subcommand, `--json` shape snapshot.
