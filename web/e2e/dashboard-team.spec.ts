@@ -65,7 +65,12 @@ window.Stripe = function (key) {
 };
 `;
 
-type Membership = { org_id: string; user_id: string; role: 'owner' | 'member'; created_at: string };
+type Membership = {
+  org_id: string;
+  user_id: string;
+  role: 'owner' | 'admin' | 'member';
+  created_at: string;
+};
 type Team = {
   organizations: { id: string; name: string }[];
   memberships: Membership[];
@@ -187,6 +192,13 @@ function handleOrganizations(team: Team, body: Record<string, unknown>) {
         body: { ok: true, result: role === 'owner' ? 'promoted' : 'demoted' },
       };
     }
+    case 'set_role':
+      for (const m of team.memberships) {
+        if (m.org_id === body.organization_id && m.user_id === body.user_id) {
+          m.role = body.role as 'admin' | 'member';
+        }
+      }
+      return { status: 200, body: { ok: true, result: 'updated' } };
     case 'delete_organization':
       team.memberships = team.memberships.filter((m) => m.org_id !== body.organization_id);
       team.organizations = team.organizations.filter((o) => o.id !== body.organization_id);
@@ -489,6 +501,43 @@ test.describe('Dashboard team tab', () => {
     await acme.getByRole('button', { name: 'Leave Acme' }).click();
     await expect(orgCard(page, 'Acme')).toHaveCount(0);
     expect(calls.organizations).toContainEqual({ action: 'leave', organization_id: ORG });
+    await close();
+  });
+
+  test('an owner makes a member an admin and back', async ({ browser }) => {
+    const { page, calls, close } = await openTeamTab(browser, acmeTeam());
+    const acme = orgCard(page, 'Acme');
+    await acme.getByRole('button', { name: 'Make Mia Member an admin' }).click();
+    await expect(acme.getByRole('list', { name: 'Members' })).toContainText('Admin');
+    expect(calls.organizations).toContainEqual({
+      action: 'set_role',
+      organization_id: ORG,
+      user_id: MIA,
+      role: 'admin',
+    });
+    await acme.getByRole('button', { name: 'Remove admin from Mia Member' }).click();
+    expect(calls.organizations).toContainEqual({
+      action: 'set_role',
+      organization_id: ORG,
+      user_id: MIA,
+      role: 'member',
+    });
+    await close();
+  });
+
+  test('an admin invites and manages billing but cannot remove, delete or change owners', async ({
+    browser,
+  }) => {
+    const team = acmeTeam('member');
+    team.memberships[0].role = 'admin';
+    const { page, close } = await openTeamTab(browser, team);
+    const acme = orgCard(page, 'Acme');
+    await expect(acme.getByRole('group', { name: 'Your role' })).toContainText('Admin');
+    await expect(acme.getByRole('textbox', { name: 'Email to invite' })).toHaveCount(1);
+    await expect(acme.getByRole('button', { name: 'Buy Team' })).toHaveCount(1);
+    await expect(acme.getByRole('button', { name: /^Remove / })).toHaveCount(0);
+    await expect(acme.getByRole('button', { name: /^Make / })).toHaveCount(0);
+    await expect(acme.getByRole('button', { name: 'Delete Acme' })).toHaveCount(0);
     await close();
   });
 

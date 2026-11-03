@@ -441,6 +441,12 @@ fn execute(request: &TreqCommandRequest) -> Result<serde_json::Value, String> {
         working_copy_change_id: crate::jj::jj_get_change_id(&workspace_path, "@").ok(),
       }))
     }
+    TreqCommandRequest::WorkspaceBranchDeleted { repo, workspace } => {
+      let id = workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
+      json(Ok::<_, String>(
+        crate::core::workspaces::workspace_branch_deleted(repo, id),
+      ))
+    }
     TreqCommandRequest::WorkspaceDiff { repo, workspace } => {
       let id = workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
       // A host has no app settings database, so the diff takes the default

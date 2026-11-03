@@ -1869,7 +1869,9 @@ impl GithubView {
     cx: &mut Context<Self>,
     on_click: impl Fn(&mut Self, &mut Context<Self>) + 'static,
   ) -> ui::Row {
+    // A list entry that opens on a click, marked selected while open.
     ui::Row::new(id, p)
+      .role(gpui::Role::ListItem)
       .density(ui::RowDensity::Default)
       .label(label.to_string())
       .selected(selected)

@@ -609,3 +609,22 @@ fn code_tab_groups_trunk_commits_under_a_read_only_divider(cx: &mut TestAppConte
   assert!(screen.query_by_text("Recent on main").is_none());
   assert!(screen.query_by_text("Immutable").is_none());
 }
+
+/// The deleted-branch alert's Archive has a name of its own, apart from
+/// the header's Archive for a merged pull request.
+#[gpui::test]
+fn the_deleted_branch_alert_names_its_archive_button(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let host = FakeHost {
+    branch_deleted: true,
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("code-status");
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Archive workspace")))
+    .to_be_visible();
+}

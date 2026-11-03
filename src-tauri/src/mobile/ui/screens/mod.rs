@@ -80,52 +80,50 @@ pub fn on_epoch<V: 'static>(
   .detach();
 }
 
-/// The two-tap confirmation used for every remote mutation: the first tap
-/// arms the action, the second runs it.
-pub struct Confirm<A: PartialEq + Copy> {
-  armed: Option<A>,
-  pub running: Option<A>,
+/// How a mutation asks before it runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ask {
+  /// Runs on the tap and reports its result inline.
+  OneTap,
+  /// Destructive: asks in a confirmation sheet first.
+  Sheet,
 }
 
-impl<A: PartialEq + Copy> Default for Confirm<A> {
-  fn default() -> Self {
-    Self {
-      armed: None,
-      running: None,
+/// The mutations that go through [`ask_then`], by how they ask. Other screens'
+/// destructive actions (commit delete and undo, issue delete, PR close,
+/// session stop, archive with changes) already confirm in a sheet; routine
+/// ones (commit, resolve, create workspace or PR) run on their button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Op {
+  Push,
+  Rebase,
+  DeleteWorkspace,
+  RemoveHost,
+}
+
+impl Op {
+  pub fn ask(self) -> Ask {
+    match self {
+      Op::Push | Op::Rebase => Ask::OneTap,
+      Op::DeleteWorkspace | Op::RemoveHost => Ask::Sheet,
     }
   }
 }
 
-impl<A: PartialEq + Copy> Confirm<A> {
-  /// Returns `true` when the tap should run `action` now.
-  pub fn tap(&mut self, action: A) -> bool {
-    if self.running.is_some() {
-      return false;
-    }
-    if self.armed == Some(action) {
-      self.armed = None;
-      self.running = Some(action);
-      true
-    } else {
-      self.armed = Some(action);
-      false
-    }
-  }
-
-  pub fn is_armed(&self, action: A) -> bool {
-    self.armed == Some(action)
-  }
-
-  pub fn is_running(&self, action: A) -> bool {
-    self.running == Some(action)
-  }
-
-  pub fn done(&mut self) {
-    self.running = None;
-  }
-
-  pub fn disarm(&mut self) {
-    self.armed = None;
+/// Runs `action` as `op` asks: at once for a routine mutation (its result
+/// shows inline), or after a danger confirmation sheet for a destructive one.
+pub fn ask_then(
+  op: Op,
+  title: impl Into<gpui_kit::SharedString>,
+  body: impl Into<gpui_kit::SharedString>,
+  label: impl Into<gpui_kit::SharedString>,
+  action: impl Fn(&mut App) + 'static,
+  cx: &mut App,
+) {
+  match op.ask() {
+    // Deferred: callers are usually inside their own screen's update.
+    Ask::OneTap => cx.defer(action),
+    Ask::Sheet => super::sheet::confirm(title, body, label, true, move |_, cx| action(cx), cx),
   }
 }
 
@@ -149,17 +147,36 @@ mod tests {
   use super::*;
 
   #[test]
-  fn confirm_needs_two_taps_and_blocks_while_running() {
-    let mut confirm = Confirm::default();
-    assert!(!confirm.tap(1));
-    assert!(confirm.is_armed(1));
-    assert!(confirm.tap(1));
-    assert!(confirm.is_running(1));
-    assert!(!confirm.tap(2));
-    confirm.done();
-    assert!(!confirm.tap(2));
-    // Tapping another action re-arms instead of running.
-    assert!(!confirm.tap(1));
-    assert!(confirm.is_armed(1));
+  fn routine_mutations_run_on_one_tap_and_destructive_ones_ask_in_a_sheet() {
+    for op in [Op::Push, Op::Rebase] {
+      assert_eq!(op.ask(), Ask::OneTap, "{op:?}");
+    }
+    for op in [Op::DeleteWorkspace, Op::RemoveHost] {
+      assert_eq!(op.ask(), Ask::Sheet, "{op:?}");
+    }
+  }
+
+  /// A screen runs its one-tap mutation from inside its own update (a menu
+  /// entry), so the action must not re-enter that update.
+  #[gpui_kit::test]
+  fn one_tap_runs_outside_the_callers_update(cx: &mut gpui_kit::TestAppContext) {
+    use gpui_kit::AppContext as _;
+    struct Screen(u32);
+    let screen = cx.new(|_| Screen(0));
+    let weak = screen.downgrade();
+    screen.update(cx, |_, cx| {
+      ask_then(
+        Op::Push,
+        "",
+        "",
+        "",
+        move |cx| {
+          weak.update(cx, |s, _| s.0 += 1).ok();
+        },
+        cx,
+      );
+    });
+    cx.run_until_parked();
+    assert_eq!(screen.read_with(cx, |s, _| s.0), 1);
   }
 }

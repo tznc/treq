@@ -56,7 +56,7 @@ test("branch deleted: Code tab offers Archive, the diff still reads", async ({ p
     ],
   });
 
-  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await page.getByRole("button", { name: "Archive workspace", exact: true }).click();
   await settle(page, 2500);
   await expect(row(page, ALERTING)).toHaveCount(0);
   await capture(page, {

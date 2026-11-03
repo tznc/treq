@@ -438,8 +438,27 @@ pub fn jj_git_fetch(repo_path: &str) -> Result<String, JjError> {
   fetched
 }
 
+/// The remote the default branch and rebase targets come from: `upstream`
+/// in a fork clone that has one, else `origin`. Pushes always go to origin.
+pub fn jj_base_remote(repo_path: &str) -> &'static str {
+  if get_git_remotes(repo_path).contains("upstream") {
+    "upstream"
+  } else {
+    "origin"
+  }
+}
+
+/// Fetches origin, then upstream when a fork clone has one.
 pub(super) fn fetch_origin(repo_path: &str) -> Result<String, JjError> {
-  if !get_git_remotes(repo_path).contains("origin") {
+  fetch_remote(repo_path, "origin")?;
+  if jj_base_remote(repo_path) == "upstream" {
+    fetch_remote(repo_path, "upstream")?;
+  }
+  Ok(String::new())
+}
+
+fn fetch_remote(repo_path: &str, remote_name: &str) -> Result<String, JjError> {
+  if !get_git_remotes(repo_path).contains(remote_name) {
     return Ok(String::new());
   }
   let repo_lock = repo_op_lock(repo_path);
@@ -453,7 +472,7 @@ pub(super) fn fetch_origin(repo_path: &str) -> Result<String, JjError> {
     abandon_unreachable_commits: true,
     remote_auto_track_bookmarks: HashMap::new(),
   };
-  let remote = RemoteName::new("origin");
+  let remote = RemoteName::new(remote_name);
   let refspecs = git::expand_fetch_refspecs(
     remote,
     git::GitFetchRefExpression {

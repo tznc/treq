@@ -953,6 +953,10 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       repo: repo(),
       workspace: Some("1".into()),
     },
+    R::WorkspaceBranchDeleted {
+      repo: repo(),
+      workspace: "1".into(),
+    },
     R::WorkspaceSummaries { repo: repo() },
     R::PlanNewWorkspaces {
       repo: repo(),

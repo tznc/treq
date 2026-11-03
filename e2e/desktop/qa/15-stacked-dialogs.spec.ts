@@ -1,12 +1,13 @@
-// One dialog at a time: with the Stack dialog open, Ctrl+I opens no agent
-// prompt over it, and Escape then closes the Stack dialog.
+// One dialog at a time: with the stack dialog open (Ctrl+Shift+N, the New
+// workspace dialog stacking on the open workspace, as in 09-dialogs),
+// Ctrl+I opens no agent prompt over it, and Escape then closes it.
 import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { mod, openWorkspace, settle } from "./helpers.ts";
 
 test("stacked dialogs: Ctrl+I over the Stack dialog, then Escape", async ({ page }) => {
   await openWorkspace(page, "feat/keyvalues-cache");
-  const stack = page.getByRole("heading", { name: "Stack a new Workspace" });
+  const stack = page.getByRole("dialog", { name: "New workspace" });
   const prompt = page.getByRole("dialog", { name: "Start a new agent session" });
   await page.keyboard.press(`${mod}+Shift+N`);
   await expect(stack).toBeVisible();

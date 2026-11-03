@@ -64,7 +64,10 @@ async function customerFor(owner: Owner, deps: CheckoutDeps) {
 
   const params: StripeParams = {};
   // The email is for Stripe receipts only. Ownership never depends on it.
-  if (deps.user.email) params.email = deps.user.email;
+  // An organization's customer is the team's billing account, shared by all
+  // its owners, so the buyer's personal email stays off it: Checkout asks for
+  // a billing email, and any owner changes it in Manage billing.
+  if (owner.type === "user" && deps.user.email) params.email = deps.user.email;
   params["metadata[owner_type]"] = owner.type;
   params["metadata[owner_id]"] = owner.id;
   const created = await deps.stripe.request<{ id: string }>(
@@ -155,11 +158,9 @@ async function openSession(
     }
     await expireOpenSessions(customer.stripe_customer_id, deps.stripe);
 
-    // Pro also carries the metered usage price for cloud workspaces.
-    const usageKey =
-      plan === "pro"
-        ? (deps.usagePriceLookupKey ?? DEFAULT_USAGE_PRICE_LOOKUP_KEY)
-        : null;
+    // Pro and Team both carry the metered usage price for cloud workspaces:
+    // Team members' usage on the organization profile bills the organization.
+    const usageKey = deps.usagePriceLookupKey ?? DEFAULT_USAGE_PRICE_LOOKUP_KEY;
     const query: StripeParams = { "lookup_keys[0]": LOOKUP_KEY_BY_PLAN[plan] };
     if (usageKey) query["lookup_keys[1]"] = usageKey;
     query.active = true;
@@ -195,7 +196,7 @@ async function openSession(
         priceId,
         ownerId: owner.id,
         ownerType: owner.type,
-        trialEligible: plan === "pro" && customer.trial_used_at === null,
+        trialEligible: plan === "pro" && customer.trial_used_at === null && !(await owner.store.trialClaimed()),
         webUrl: deps.webUrl,
         quantity: owner.quantity,
         usagePriceId,
@@ -222,10 +223,10 @@ export async function createCheckout(
   if (parsed.plan === "team") {
     if (!deps.organizations)
       throw new Error("organization billing is not configured");
-    if (!(await deps.organizations.isOwner(parsed.organizationId))) {
+    if (!(await deps.organizations.canManageBilling(parsed.organizationId))) {
       return {
         status: 403,
-        body: { error: "Only an owner of this organization can buy Team." },
+        body: { error: "Only an owner or admin of this organization can buy Team." },
       };
     }
     const store = deps.organizations.store(parsed.organizationId);

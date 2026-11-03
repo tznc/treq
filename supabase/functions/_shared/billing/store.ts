@@ -16,12 +16,18 @@ export interface BillingStore {
   getCustomer(): Promise<BillingCustomer | null>;
   /** Records the customer unless the owner has one, and returns the owner's customer. */
   attachCustomer(stripeCustomerId: string): Promise<string>;
+  /**
+   * Whether the owner's email already had a Pro trial, on this account or a
+   * deleted one (billing_trial_claimed). Always false for an organization.
+   */
+  trialClaimed(): Promise<boolean>;
 }
 
 /** Team checkout and the Team billing portal, for one signed-in user. */
 export interface OrganizationBilling {
   /** Whether the user owns the organization. */
-  isOwner(organizationId: string): Promise<boolean>;
+  /** Owners and admins manage the team's billing account. */
+  canManageBilling(organizationId: string): Promise<boolean>;
   /** Team is billed per member beyond the included seats. */
   memberCount(organizationId: string): Promise<number>;
   store(organizationId: string): BillingStore;
@@ -63,6 +69,12 @@ function ownerStore(
         throw new Error(`billing customer lookup failed: ${error.message}`);
       return (data as BillingCustomer | null) ?? null;
     },
+    async trialClaimed() {
+      if (ownerType !== "user") return false;
+      const { data, error } = await client.rpc("billing_trial_claimed", { p_user_id: ownerId });
+      if (error) throw new Error(`trial claim check failed: ${error.message}`);
+      return data === true;
+    },
     async attachCustomer(stripeCustomerId) {
       const { data, error } = await client.rpc("billing_attach_customer", {
         p_owner_type: ownerType,
@@ -91,7 +103,7 @@ export function organizationBillingFor(
   userId: string,
 ): OrganizationBilling {
   return {
-    async isOwner(organizationId) {
+    async canManageBilling(organizationId) {
       const { data, error }: QueryResult = await client
         .from("organization_members")
         .select("role")
@@ -99,7 +111,8 @@ export function organizationBillingFor(
         .eq("user_id", userId)
         .maybeSingle();
       if (error) throw new Error(`membership lookup failed: ${error.message}`);
-      return (data as { role?: string } | null)?.role === "owner";
+      const role = (data as { role?: string } | null)?.role;
+      return role === "owner" || role === "admin";
     },
     async memberCount(organizationId) {
       const { count, error } = await client

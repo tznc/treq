@@ -659,6 +659,8 @@ pub fn compare_pr_url(
       .replace("%28", "(")
       .replace("%29", ")")
       .replace("%2A", "*")
+      // A fork head is `owner:branch`.
+      .replace("%3A", ":")
   };
   let query = url::form_urlencoded::Serializer::new(String::new())
     .append_pair("expand", "1")

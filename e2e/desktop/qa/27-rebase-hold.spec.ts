@@ -29,6 +29,8 @@ test("rebase hold: a child of a dirty parent says why it was not rebased", async
   await openWorkspace(page, MARKETING);
   await openTab(page, "Code");
   await settle(page, 1500);
+  // Code tab alerts wait in the alerts popover (see 98-branch-deleted).
+  await page.getByRole("button", { name: /^Alerts: / }).click();
   await expect(page.getByText(`Rebase skipped: ${STACK_PARENT} has uncommitted changes`)).toBeVisible();
   await capture(page, {
     name: "27-01-rebase-held-parent-dirty",
@@ -36,7 +38,7 @@ test("rebase hold: a child of a dirty parent says why it was not rebased", async
     expectations: [
       `An amber alert reads 'Rebase skipped: ${STACK_PARENT} has uncommitted changes'`,
       `The alert tells the user to commit or discard the changes in ${STACK_PARENT}`,
-      "The rest of the Code tab (task box, stack, files, history) renders below it normally",
+      "The alert sits in the alerts popover; the rest of the Code tab renders normally behind it",
     ],
   });
 

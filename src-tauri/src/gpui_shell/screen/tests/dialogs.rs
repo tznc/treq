@@ -502,7 +502,7 @@ fn setup_dialog_asks_to_sign_in_before_the_cloud_workspace(cx: &mut TestAppConte
   assert!(h.drawn("cloud-create"));
 }
 
-fn ssh_key(label: &str) -> crate::core::remote_local_keys::LocalSshIdentity {
+pub(super) fn ssh_key(label: &str) -> crate::core::remote_local_keys::LocalSshIdentity {
   crate::core::remote_local_keys::LocalSshIdentity {
     reference: format!("/home/me/.ssh/{label}.pub"),
     label: label.into(),

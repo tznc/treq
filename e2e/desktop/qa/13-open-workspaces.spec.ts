@@ -161,12 +161,14 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
   ).toBeHidden({
     timeout: 30_000,
   });
-  for (const branch of [
-    "treq/retry-flaky-webhook-tests",
+  // A sidebar row is named by the title it shows: the typed line, the
+  // pull request's title, or the branch when there is neither.
+  for (const name of [
+    "Retry flaky webhook tests",
     "chore/bump-deps",
-    "fix/slack-retry",
+    "fix: retry Slack webhooks on 429",
   ]) {
-    await expect(row(page, branch)).toBeVisible({ timeout: 20_000 });
+    await expect(row(page, name)).toBeVisible({ timeout: 20_000 });
   }
   await settle(page, 1500);
   await capture(page, {
@@ -174,8 +176,8 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     title: "After opening: new rows in the sidebar",
     screen: true,
     expectations: [
-      "Sidebar lists treq/retry-flaky-webhook-tests, chore/bump-deps, fix/slack-retry and the ENG-142 branch as new workspaces",
-      "treq/retry-flaky-webhook-tests (the first line) is selected",
+      "Sidebar lists Retry flaky webhook tests, chore/bump-deps, fix: retry Slack webhooks on 429 and the ENG-142 issue as new workspaces",
+      "Retry flaky webhook tests (the first line) is selected",
       "A one-line toast (\"Created N workspaces\") reports what was created",
     ],
   });
@@ -389,12 +391,8 @@ test("open-workspaces: indented lines stack on the line above", async ({
   ).toBeHidden({
     timeout: 30_000,
   });
-  for (const branch of [
-    "treq/add-the-audit-log",
-    "treq/audit-log-api",
-    "treq/audit-log-page",
-  ]) {
-    await expect(row(page, branch)).toBeVisible({ timeout: 20_000 });
+  for (const name of ["Add the audit log", "Audit log API", "Audit log page"]) {
+    await expect(row(page, name)).toBeVisible({ timeout: 20_000 });
   }
   await settle(page, 1500);
   await capture(page, {
@@ -402,7 +400,7 @@ test("open-workspaces: indented lines stack on the line above", async ({
     title: "The stack in the sidebar",
     clip: { x: 0, y: 0, width: 300, height: 520 },
     expectations: [
-      "The sidebar shows treq/audit-log-api stacked under treq/add-the-audit-log, and treq/audit-log-page under treq/audit-log-api",
+      "The sidebar shows Audit log API stacked under Add the audit log, and Audit log page under Audit log API",
     ],
   });
 });

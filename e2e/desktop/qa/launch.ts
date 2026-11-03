@@ -6,8 +6,8 @@
 // uncommitted edits for the Changes tab, and a fake Linear (./fake-linear.ts)
 // that a repository reaches once it has a Linear API key. `QA_THEME` (dark|light) picks the
 // theme the app starts in.
-import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,7 @@ import { appBinary } from "../env.ts";
 import { gitIn, makeFixture, startApp, writeBin } from "../harness.ts";
 import { ALERTING, seedLandingRepo, STACK_PARENT, workspaceDir } from "../landing/seed.ts";
 import { startFakeLinear } from "./fake-linear.ts";
+import { writeFakeSkills } from "./fake-skills.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = makeFixture("treq-qa-", "event-bus");
@@ -50,6 +51,11 @@ rule
 while :; do sleep 0.2; done
 `,
 );
+
+// The app reads agents' PATH from the login shell, whose system profile
+// can put a real `claude` ahead of the fixture's: a shell that skips the
+// profiles keeps the run on the fake agent.
+const shell = writeBin(fixture.bin, "qa-shell", '#!/bin/sh\nexec bash --noprofile --norc "$@"\n');
 
 const { treq } = seedLandingRepo(fixture);
 const { repo, home } = fixture;
@@ -142,7 +148,26 @@ writeFileSync(join(fixture.root, "qa-extra.json"), JSON.stringify({ docs, theme,
 const linearPort = Number(process.env.TREQ_E2E_PORT ?? 9333) + 2;
 startFakeLinear(linearPort);
 
-startApp(fixture, {
+// A session bus of the run's own, so a second `treq <url>` process (a
+// deep link, as Linux delivers one) reaches this app through the
+// single-instance plugin. The specs read its address from the fixture.
+let dbus = process.env.DBUS_SESSION_BUS_ADDRESS;
+if (!dbus) {
+  // In the foreground, so it stops with the run's process group.
+  const socket = join(fixture.root, "session-bus");
+  const daemon = spawn("dbus-daemon", ["--session", "--nofork", "--nopidfile", `--address=unix:path=${socket}`], {
+    stdio: "ignore",
+  });
+  daemon.on("error", (error) => console.error("qa: no session bus; deep links open a second app", error));
+  process.on("exit", () => daemon.kill());
+  for (let i = 0; i < 50 && !existsSync(socket); i++) execFileSync("sleep", ["0.1"]);
+  if (existsSync(socket)) dbus = `unix:path=${socket}`;
+}
+
+startApp({ ...fixture, ...(dbus ? { dbus } : {}) }, {
+  ...(dbus ? { DBUS_SESSION_BUS_ADDRESS: dbus } : {}),
+  TREQ_SKILLS_CATALOG_URL: writeFakeSkills(fixture.root),
+  SHELL: shell,
   GDK_SCALE: process.env.GDK_SCALE ?? "2",
   TREQ_E2E_LINEAR_URL: `http://127.0.0.1:${linearPort}/graphql`,
   TREQ_FAKE_GH_LOG: join(fixture.root, "gh-calls.log"),

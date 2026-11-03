@@ -169,8 +169,10 @@ pub fn tab_for_key(key: &str, current: usize, disabled: &[bool]) -> Option<usize
 }
 
 impl RenderOnce for Tabs {
-  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+  fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = self.palette;
+    // A phone is tapped, so every tab is at least the 44pt touch minimum.
+    let touch = cx.try_global::<theme::Density>().copied() == Some(theme::Density::Touch);
     let segmented = self.style == TabsStyle::Segmented;
     let selected = self.selected;
     let disabled: Vec<bool> = self.tabs.iter().map(|tab| tab.disabled).collect();
@@ -178,7 +180,7 @@ impl RenderOnce for Tabs {
     let selector = self.id.to_string();
     let selected_fill = self.segment_fill(true);
     let segment_hover = self.segment_hover();
-    div()
+    let strip = div()
       .id(self.id)
       .debug_selector(move || selector)
       .role(gpui::Role::TabList)
@@ -233,12 +235,13 @@ impl RenderOnce for Tabs {
           .text_color(fg)
           .map(|el| {
             if segmented {
-              el.h(zpx(24.))
+              el.h(zpx(if touch { 44. } else { 24. }))
+                .when(touch, |el| el.flex_1().justify_center())
                 .px_2()
                 .rounded(zpx(theme::RADIUS_MD - 2.))
                 .when_some(selected_fill.filter(|_| active), |el, fill| el.bg(fill))
             } else {
-              el.h(zpx(32.))
+              el.h(zpx(if touch { 44. } else { 32. }))
                 .border_b_2()
                 .mb(zpx(-1.))
                 .border_color(if active {
@@ -282,7 +285,14 @@ impl RenderOnce for Tabs {
           .when_some(on_select, move |el, f| {
             el.on_click(move |_, window, cx| f(ix, window, cx))
           })
-      }))
+      }));
+    // A segmented track is as wide as its tabs: the row around it takes
+    // the stretch a column parent gives its children.
+    if segmented {
+      div().flex().child(strip).into_any_element()
+    } else {
+      strip.into_any_element()
+    }
   }
 }
 
@@ -336,5 +346,90 @@ mod tests {
     assert_eq!(tab_for_key("home", 3, &[true, false]), Some(1));
     assert_eq!(tab_for_key("end", 0, &disabled), Some(3));
     assert_eq!(tab_for_key("enter", 0, &disabled), None);
+  }
+
+  mod gpui_tests {
+    use gpui::{
+      div, Context, IntoElement, ParentElement as _, Render, TestAppContext, VisualTestContext,
+      Window,
+    };
+
+    use crate::{theme, theme::Density, Tab, Tabs, TabsStyle};
+
+    struct Host;
+
+    impl Render for Host {
+      fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let p = theme::palette(false);
+        div()
+          .child(
+            Tabs::segmented("seg", &p)
+              .tab(Tab::new("seg-a", "A"))
+              .tab(Tab::new("seg-b", "B")),
+          )
+          .child(
+            Tabs::new("line", &p)
+              .style(TabsStyle::Underline)
+              .tab(Tab::new("line-a", "A")),
+          )
+      }
+    }
+
+    fn heights(cx: &mut TestAppContext, density: Option<Density>) -> (f32, f32) {
+      if let Some(density) = density {
+        cx.update(|cx| cx.set_global(density));
+      }
+      let window = cx.add_window(|_, _| Host);
+      let mut cx = VisualTestContext::from_window(*window, cx);
+      cx.update(|window, cx| window.draw(cx).clear(cx));
+      let seg = cx.debug_bounds("seg-a").expect("segment").size.height;
+      let line = cx
+        .debug_bounds("line-a")
+        .expect("underline tab")
+        .size
+        .height;
+      (f32::from(seg), f32::from(line))
+    }
+
+    struct Column;
+
+    impl Render for Column {
+      fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let p = theme::palette(false);
+        gpui::Styled::flex_col(gpui::Styled::flex(gpui::Styled::w(div(), gpui::px(800.)))).child(
+          Tabs::segmented("seg", &p)
+            .tab(Tab::new("seg-a", "Hourly"))
+            .tab(Tab::new("seg-b", "Monthly")),
+        )
+      }
+    }
+
+    #[gpui::test]
+    fn segmented_tabs_fit_their_tabs_in_a_wide_column(cx: &mut TestAppContext) {
+      let window = cx.add_window(|_, _| Column);
+      let mut cx = VisualTestContext::from_window(*window, cx);
+      cx.update(|window, cx| window.draw(cx).clear(cx));
+      let track = f32::from(cx.debug_bounds("seg").expect("track").size.width);
+      let a = cx.debug_bounds("seg-a").expect("segment a");
+      let b = cx.debug_bounds("seg-b").expect("segment b");
+      let tabs = f32::from(b.origin.x + b.size.width - a.origin.x);
+      assert!(track < 400., "track is {track}px wide in an 800px column");
+      assert!(
+        track - tabs < 8.,
+        "track {track}px hugs its tabs ({tabs}px)"
+      );
+    }
+
+    #[gpui::test]
+    fn desktop_tabs_keep_their_height(cx: &mut TestAppContext) {
+      assert_eq!(heights(cx, None), (24., 32.));
+    }
+
+    #[gpui::test]
+    fn touch_tabs_are_at_least_44pt_tall(cx: &mut TestAppContext) {
+      let (seg, line) = heights(cx, Some(Density::Touch));
+      assert!(seg >= 44., "segment is {seg}pt");
+      assert!(line >= 44., "underline tab is {line}pt");
+    }
   }
 }

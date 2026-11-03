@@ -743,6 +743,17 @@ impl Remote {
     }
   }
 
+  /// `core::workspace_branch_deleted` on the host; false when the host
+  /// cannot say, as an older one cannot.
+  pub fn branch_deleted(&self, workspace_id: i64) -> bool {
+    self
+      .read(TreqCommandRequest::WorkspaceBranchDeleted {
+        repo: self.repo_arg(),
+        workspace: workspace_id.to_string(),
+      })
+      .unwrap_or(false)
+  }
+
   pub fn workspace_diff(&self, workspace_id: i64) -> Result<JjRevisionDiff, String> {
     self.read(TreqCommandRequest::WorkspaceDiff {
       repo: self.repo_arg(),
@@ -1260,6 +1271,41 @@ pub(crate) mod tests {
     );
     set_window("remote-test-window", None);
     assert!(for_window("remote-test-window").is_none());
+  }
+
+  #[test]
+  fn branch_deleted_asks_the_host() {
+    let (remote, transport) = remote();
+    transport.answer("WorkspaceBranchDeleted", serde_json::json!(true));
+    assert!(remote.branch_deleted(3));
+    assert_eq!(
+      transport.sent(),
+      [TreqCommandRequest::WorkspaceBranchDeleted {
+        repo: "/srv/app".into(),
+        workspace: "3".into()
+      }]
+    );
+  }
+
+  #[test]
+  fn branch_deleted_asks_cloud_and_byos_hosts_too() {
+    let providers = crate::core::cloud_catalog::BYOS_PROVIDERS
+      .iter()
+      .map(|(kind, _)| *kind)
+      .chain(["treq"]);
+    for provider in providers {
+      let mut repo = repository();
+      repo.endpoint.as_mut().expect("endpoint").source =
+        crate::core::remote_control_plane::SshEndpointSource::Managed {
+          provider: provider.into(),
+          generation: 1,
+        };
+      let transport = Arc::new(FakeTransport::default());
+      transport.answer("WorkspaceBranchDeleted", serde_json::json!(true));
+      let remote = Remote::new(repo, transport.clone());
+      assert!(remote.branch_deleted(3), "{provider}");
+      assert_eq!(transport.sent().len(), 1, "{provider}");
+    }
   }
 
   #[test]

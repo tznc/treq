@@ -3,24 +3,21 @@
 // and the same row under a review thread's comment in the Changes tab.
 //
 // The fake `gh` reports octocat as having reacted 👍 to bob's comment and
-// 🚀 to the review comment. List rows and diff rows are not observable, so
-// those steps click their place in the 1400x900 window.
+// 🚀 to the review comment.
 import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { openTab, openWorkspace, ready, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
-const ISSUES_TAB = { x: 332, y: 62 };
-const FIRST_ROW = { x: 700, y: 147 };
 
 async function issueDetail(page: Page): Promise<void> {
   await ready(page);
   await page.getByRole("button", { name: "Github", exact: true }).click();
   await settle(page, 2000);
-  await page.mouse.click(ISSUES_TAB.x, ISSUES_TAB.y);
+  await page.getByRole("tab", { name: "Issues" }).click();
   await settle(page, 1500);
-  await page.mouse.click(FIRST_ROW.x, FIRST_ROW.y);
+  await page.getByRole("listitem", { name: "Empty event payloads drop the Discord body", exact: true }).click();
   await settle(page, 2500);
 }
 
@@ -74,9 +71,9 @@ test("comment-reactions: review thread", async ({ page }) => {
   await openWorkspace(page, "feat/empty-event-message");
   await openTab(page, "Changes");
   await settle(page, 1500);
-  await page.mouse.click(326, 383); // client.ts under Committed
+  await page.getByRole("button", { name: "packages/web/src/lib/client.ts", exact: true }).click();
   await settle(page, 1500);
-  await page.mouse.click(910, 426); // unfold the resolved GitHub thread
+  await page.getByRole("button", { name: "Show review thread" }).first().click(); // the resolved one
   await settle(page, 800);
   await expect(page.getByRole("button", { name: "Rocket (1, you reacted)" })).toBeVisible();
   await capture(page, {

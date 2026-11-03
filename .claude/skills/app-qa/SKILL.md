@@ -17,7 +17,7 @@ proves the change, and always look at the pixels for anything visual.
 | Layer | Tool | Runs | Use for |
 |---|---|---|---|
 | Screen tests and fuzzing | gpui-testing-library (`#[gpui::test]`) | headless, parallel, in `cargo test --lib` | one screen's behavior, invariants under random input |
-| Screenshot QA | gpui-playwright, `e2e/desktop/qa/` (`npm run qa`) | the real binary under Xvfb, one app | what a change looks like, before/after captures |
+| Screenshot QA | gpui-playwright, `e2e/desktop/qa/` (`npm run qa`) | the real binary under Xvfb, one app per spec file | what a change looks like, before/after captures |
 | Chaos QA | gpui-playwright monkey script | the real binary under Xvfb | crashes, hangs and stale state across the whole app |
 
 ## When to use

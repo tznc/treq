@@ -279,13 +279,14 @@ function fakeStore(overrides: Partial<BillingStore> = {}): BillingStore {
     hasPro: vi.fn(async () => false),
     getCustomer: vi.fn(async () => null),
     attachCustomer: vi.fn(async (id: string) => id),
+    trialClaimed: vi.fn(async () => false),
     ...overrides,
   };
 }
 
 function fakeOrganizations(store: BillingStore, owner = true, members = 7) {
   return {
-    isOwner: vi.fn(async (_organizationId: string) => owner),
+    canManageBilling: vi.fn(async (_organizationId: string) => owner),
     memberCount: vi.fn(async (_organizationId: string) => members),
     store: vi.fn((_organizationId: string) => store),
   } satisfies OrganizationBilling;
@@ -498,6 +499,27 @@ describe("createCheckout", () => {
     );
   });
 
+  // A deleted account's trial is remembered by email, so deleting and
+  // signing up again (new user, new Stripe customer) gets no second trial.
+  it("offers no trial when the email already had one", async () => {
+    const { stripe, calls } = fakeStripe(STRIPE_OK);
+    const store = fakeStore({
+      getCustomer: vi.fn(async () => ({
+        stripe_customer_id: "cus_new_account",
+        trial_used_at: null,
+      })),
+      trialClaimed: vi.fn(async () => true),
+    });
+    const result = await createCheckout(
+      { plan: "pro" },
+      { user, store, stripe, webUrl: WEB_URL },
+    );
+    expect(result.status).toBe(200);
+    expect(sessionParams(calls)).not.toHaveProperty(
+      "subscription_data[trial_period_days]",
+    );
+  });
+
   it("resolves the price by lookup key", async () => {
     const { stripe, calls } = fakeStripe(STRIPE_OK);
     const store = fakeStore({
@@ -613,7 +635,10 @@ describe("createCheckout for Team", () => {
     ...STRIPE_OK,
     "POST /v1/customers": { id: "cus_org" },
     "GET /v1/prices": {
-      data: [{ id: "price_team", lookup_key: "treq_team_monthly" }],
+      data: [
+        { id: "price_team", lookup_key: "treq_team_monthly" },
+        { id: "price_usage", lookup_key: "treq_sandbox_usage" },
+      ],
     },
   };
   const body = { plan: "team", organization_id: ORG_ID };
@@ -630,9 +655,11 @@ describe("createCheckout for Team", () => {
     });
     expect(result).toEqual({
       status: 403,
-      body: { error: "Only an owner of this organization can buy Team." },
+      body: {
+        error: "Only an owner or admin of this organization can buy Team.",
+      },
     });
-    expect(organizations.isOwner).toHaveBeenCalledWith(ORG_ID);
+    expect(organizations.canManageBilling).toHaveBeenCalledWith(ORG_ID);
     expect(calls).toEqual([]);
   });
 
@@ -692,8 +719,9 @@ describe("createCheckout for Team", () => {
     expect(calls[0]).toEqual({
       method: "POST",
       path: "/v1/customers",
+      // The Team customer is the organization's billing account: the buyer's
+      // personal email stays off it, and Checkout asks for a billing email.
       params: {
-        email: "owner@example.com",
         "metadata[owner_type]": "organization",
         "metadata[owner_id]": ORG_ID,
       },
@@ -701,16 +729,20 @@ describe("createCheckout for Team", () => {
     });
     expect(orgStore.attachCustomer).toHaveBeenCalledWith("cus_org");
     expect(userStore.attachCustomer).not.toHaveBeenCalled();
+    // Team carries the metered cloud usage price too: members' usage on the
+    // organization profile is billed to the organization (068_team_cloud.sql).
     expect(calls.find((c) => c.path === "/v1/prices")?.params).toEqual({
       "lookup_keys[0]": "treq_team_monthly",
+      "lookup_keys[1]": "treq_sandbox_usage",
       active: true,
-      limit: 1,
+      limit: 2,
     });
     // One unit per member: the graduated price bills 2 seats beyond 5.
     expect(sessionParams(calls)).toMatchObject({
       customer: "cus_org",
       "line_items[0][price]": "price_team",
       "line_items[0][quantity]": 7,
+      "line_items[1][price]": "price_usage",
       client_reference_id: ORG_ID,
       "metadata[owner_type]": "organization",
       "metadata[owner_id]": ORG_ID,

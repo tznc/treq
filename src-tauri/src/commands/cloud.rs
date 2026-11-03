@@ -301,9 +301,36 @@ pub enum CloudAction {
   RemoveProviderKey {
     kind: String,
   },
-  /// The provider Create runs on with the user's key; `None` is treq managed.
-  SelectProvider {
-    kind: Option<String>,
+  /// Create the workspace on the user's own provider account (BYOS).
+  ProvisionOn {
+    kind: String,
+  },
+  /// Team cloud: bill the next workspace to an organization, or `None` for
+  /// personal.
+  #[serde(rename_all = "camelCase")]
+  SetCloudProfile {
+    org_id: Option<String>,
+  },
+  /// An owner's managed/BYOS choice and caps for their organization.
+  #[serde(rename_all = "camelCase")]
+  SaveOrgCloudSettings {
+    org_id: String,
+    allow_managed: bool,
+    allow_byos: bool,
+    org_cap_usd: f64,
+    member_cap_usd: f64,
+  },
+  /// An owner saves an organization key (checked by the server).
+  #[serde(rename_all = "camelCase")]
+  SaveOrgProviderKey {
+    org_id: String,
+    kind: String,
+    key: ApiKey,
+  },
+  #[serde(rename_all = "camelCase")]
+  RemoveOrgProviderKey {
+    org_id: String,
+    kind: String,
   },
 }
 
@@ -318,9 +345,6 @@ pub async fn run_cloud_action(
     .ok_or("The account is not available in this window.")?;
   *state.effects.window.lock_or_recover() = Some(label.to_string());
   let cloud = state.cloud.clone();
-  cloud.set_byos_enabled(crate::core::feature_preview::is_enabled_in_app_db(
-    crate::core::feature_preview::PreviewFeature::Byos,
-  ));
   use crate::core::control_plane::ProcessAction;
   match action {
     CloudAction::Refresh => cloud.refresh_cloud().await,
@@ -345,7 +369,31 @@ pub async fn run_cloud_action(
     }
     CloudAction::SaveProviderKey { kind, key } => cloud.save_provider_key(&kind, &key.0).await,
     CloudAction::RemoveProviderKey { kind } => cloud.remove_provider_key(&kind).await,
-    CloudAction::SelectProvider { kind } => cloud.select_provider(kind.as_deref()),
+    CloudAction::ProvisionOn { kind } => cloud.provision_on(&kind).await,
+    CloudAction::SetCloudProfile { org_id } => cloud.set_cloud_profile(org_id.as_deref()).await,
+    CloudAction::SaveOrgCloudSettings {
+      org_id,
+      allow_managed,
+      allow_byos,
+      org_cap_usd,
+      member_cap_usd,
+    } => {
+      cloud
+        .save_org_cloud_settings(crate::core::cloud_catalog::OrgCloudSettings {
+          org_id,
+          allow_managed,
+          allow_byos,
+          org_cap_usd,
+          member_cap_usd,
+        })
+        .await
+    }
+    CloudAction::SaveOrgProviderKey { org_id, kind, key } => {
+      cloud.save_org_provider_key(&org_id, &kind, &key.0).await
+    }
+    CloudAction::RemoveOrgProviderKey { org_id, kind } => {
+      cloud.remove_org_provider_key(&org_id, &kind).await
+    }
   }
   Ok(())
 }

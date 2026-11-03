@@ -118,6 +118,8 @@ struct Form {
   trust: Option<String>,
   probing: bool,
   probe_error: String,
+  /// The probe error is shown in full rather than clamped.
+  error_expanded: bool,
   resolving: bool,
   resolve_error: String,
   /// The confirmed values went to the window, which is registering them.
@@ -266,6 +268,9 @@ fn words(parts: &[(&str, bool)], p: &Palette) -> Div {
 }
 
 /// `Number(port) || 22`.
+/// The longest hostname DNS allows.
+const MAX_HOSTNAME: usize = 253;
+
 fn port_number(port: &str) -> u16 {
   port
     .trim()
@@ -431,7 +436,14 @@ impl RemoteView {
       });
       // The Continue button follows what is typed, and the suggestions
       // follow the focus.
-      subscriptions.push(cx.subscribe(&state, |_, _, event: &InputEvent, cx| {
+      subscriptions.push(cx.subscribe(&state, |view, _, event: &InputEvent, cx| {
+        // An edit makes the last probe's error stale.
+        if matches!(event, InputEvent::Change) {
+          if let Some(form) = view.setup.as_mut().and_then(|s| s.form.as_mut()) {
+            form.probe_error.clear();
+            form.error_expanded = false;
+          }
+        }
         if matches!(
           event,
           InputEvent::Change | InputEvent::Focus | InputEvent::Blur
@@ -473,6 +485,7 @@ impl RemoteView {
       trust: None,
       probing: false,
       probe_error: String::new(),
+      error_expanded: false,
       resolving: false,
       resolve_error: String::new(),
       submitting: false,
@@ -654,7 +667,10 @@ impl RemoteView {
           self.host.cloud_action(action);
         }
       }
-      "cloud.provision" => self.host.cloud_action(CloudAction::Provision),
+      "cloud.provision" => {
+        let host = self.host.clone();
+        account_data::provision_once(cx, || host.cloud_action(CloudAction::Provision));
+      }
       "cloud.wake" => self.host.cloud_action(CloudAction::Wake),
       "cloud.repair" => self.host.cloud_action(CloudAction::Repair),
       // The repository list opens once the endpoint connects.
@@ -1005,7 +1021,9 @@ impl RemoteView {
       .identities
       .iter()
       .any(|identity| identity.reference == form.key_reference);
-    let valid = !hostname.trim().is_empty() && !username.trim().is_empty() && key_selected;
+    let too_long = hostname.trim().len() > MAX_HOSTNAME;
+    let valid =
+      !hostname.trim().is_empty() && !too_long && !username.trim().is_empty() && key_selected;
     let busy = form.submitting;
 
     let key = div()
@@ -1213,19 +1231,50 @@ impl RemoteView {
           .into_any_element()
       }))
       .collect();
-    let content =
-      div()
-        .child(grid(cells, two_columns))
-        .children(trust)
-        .when(!probe_error.is_empty(), |this| {
-          this.child(
-            div().mt_4().child(
+    let expanded = form.error_expanded;
+    // A long error is clamped to about three lines until asked for.
+    let clamp = !expanded && probe_error.chars().count() > 240;
+    let more = (probe_error.chars().count() > 240).then(|| {
+      Button::new("remote-probe-error-more", p)
+        .variant(Variant::Ghost)
+        .size(Size::Sm)
+        .label(if expanded { "Show less" } else { "Show more" })
+        .on_click(cx.listener(|view, _, _, cx| {
+          if let Some(form) = view.form() {
+            form.error_expanded = !form.error_expanded;
+          }
+          cx.notify();
+        }))
+    });
+    let content = div()
+      .child(grid(cells, two_columns))
+      .when(too_long, |this| {
+        this.child(
+          ui::text(div(), TextSize::Sm)
+            .debug_selector(|| "remote-hostname-too-long".into())
+            .mt_2()
+            .text_color(ui::Tone::Danger.text(p))
+            .child(format!("Hostnames are at most {MAX_HOSTNAME} characters.")),
+        )
+      })
+      .children(trust)
+      .when(!probe_error.is_empty(), |this| {
+        this.child(
+          div()
+            .mt_4()
+            .child(
               ui::Alert::new("remote-probe-error", "Couldn't reach the host", p)
                 .severity(ui::Severity::Danger)
-                .message(probe_error),
-            ),
-          )
-        });
+                .message(if clamp {
+                  let cut: String = probe_error.chars().take(240).collect();
+                  format!("{cut}…")
+                } else {
+                  probe_error
+                }),
+            )
+            .children(more),
+        )
+      });
     (content, footer, can_continue)
   }
 

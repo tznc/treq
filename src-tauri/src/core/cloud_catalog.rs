@@ -169,11 +169,8 @@ pub struct Notification {
 // -- Bring your own sandbox (BYOS) ----------------------------------------
 
 /// The providers a user can bring their own key for: kind and name.
-pub const BYOS_PROVIDERS: [(&str, &str); 3] = [
-  ("boat", "Boat"),
-  ("daytona", "Daytona"),
-  ("fly_machines", "Fly Machines"),
-];
+pub const BYOS_PROVIDERS: [(&str, &str); 3] =
+  [("boat", "Boat"), ("daytona", "Daytona"), ("e2b", "E2B")];
 
 /// A provider's display name.
 pub fn provider_name(kind: &str) -> String {
@@ -197,6 +194,93 @@ pub struct ProviderKey {
   /// The provider refused it (401/403) since it was saved.
   #[serde(default)]
   pub invalid_at: Option<String>,
+}
+
+/// An organization the user belongs to, with what its cloud allows
+/// (`list_my_cloud_organizations`, 068_team_cloud.sql).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CloudOrganization {
+  pub org_id: String,
+  pub name: String,
+  /// `owner` or `member`.
+  pub role: String,
+  /// The organization has a live Team subscription.
+  pub has_team: bool,
+  pub allow_managed: bool,
+  pub allow_byos: bool,
+  #[serde(deserialize_with = "number")]
+  pub org_cap_usd: f64,
+  #[serde(deserialize_with = "number")]
+  pub member_cap_usd: f64,
+}
+
+impl CloudOrganization {
+  pub fn is_owner(&self) -> bool {
+    self.role == "owner"
+  }
+}
+
+/// Where the user's next cloud workspace bills (`get_cloud_profile`):
+/// `org_id` null is personal.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CloudProfile {
+  #[serde(default)]
+  pub org_id: Option<String>,
+  #[serde(default)]
+  pub entitled: bool,
+  #[serde(default)]
+  pub allow_managed: bool,
+  #[serde(default)]
+  pub allow_byos: bool,
+}
+
+/// What an owner sets for an organization's cloud.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrgCloudSettings {
+  pub org_id: String,
+  pub allow_managed: bool,
+  pub allow_byos: bool,
+  pub org_cap_usd: f64,
+  pub member_cap_usd: f64,
+}
+
+pub async fn fetch_cloud_organizations(
+  supabase: &Supabase,
+) -> Result<Vec<CloudOrganization>, ApiError> {
+  supabase
+    .rpc("list_my_cloud_organizations", &json!({}))
+    .await
+}
+
+pub async fn fetch_cloud_profile(supabase: &Supabase) -> Result<CloudProfile, ApiError> {
+  supabase.rpc("get_cloud_profile", &json!({})).await
+}
+
+pub async fn set_cloud_profile(
+  supabase: &Supabase,
+  org_id: Option<&str>,
+) -> Result<CloudProfile, ApiError> {
+  supabase
+    .rpc("set_cloud_profile", &json!({ "p_org_id": org_id }))
+    .await
+}
+
+pub async fn set_org_cloud_settings(
+  supabase: &Supabase,
+  s: &OrgCloudSettings,
+) -> Result<Value, ApiError> {
+  supabase
+    .rpc(
+      "set_organization_cloud_settings",
+      &json!({
+        "p_org_id": s.org_id,
+        "p_allow_managed": s.allow_managed,
+        "p_allow_byos": s.allow_byos,
+        "p_org_cap_usd": s.org_cap_usd,
+        "p_member_cap_usd": s.member_cap_usd,
+      }),
+    )
+    .await
 }
 
 /// One tier on a provider the user has a key for (`get_byos_catalog`).

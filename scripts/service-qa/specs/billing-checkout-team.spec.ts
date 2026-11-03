@@ -38,7 +38,15 @@ function stubStripe(customerId: string) {
     request: async (method: string, path: string, params?: StripeParams) => {
       calls.push({ method, path, params });
       if (path === "/v1/customers") return { id: customerId };
-      if (path === "/v1/prices") return { data: [{ id: "price_sqa_team" }] };
+      // Checkout looks prices up by key: the plan and the metered usage price.
+      if (path === "/v1/prices") {
+        return {
+          data: [
+            { id: "price_sqa_team", lookup_key: "treq_team_monthly" },
+            { id: "price_sqa_usage", lookup_key: "treq_sandbox_usage" },
+          ],
+        };
+      }
       if (method === "GET" && path === "/v1/subscriptions") return { data: [] };
       if (method === "GET" && path === "/v1/checkout/sessions") {
         return { data: [] };

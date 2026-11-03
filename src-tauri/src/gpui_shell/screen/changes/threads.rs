@@ -4,6 +4,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::TestSupportExt as _;
 use std::time::Duration;
 
 use gpui::{AnyElement, StrikethroughStyle, StyledText, Task};
@@ -395,6 +396,13 @@ impl ChangesView {
     let mut toggle = div()
       .id(SharedString::from(format!("github-thread-{}", thread.id)))
       .debug_selector(|| "github-thread-toggle".into())
+      .role(gpui::Role::Button)
+      .aria_label(if collapsed {
+        "Show review thread"
+      } else {
+        "Hide review thread"
+      })
+      .aria_expanded(!collapsed)
       .w_full()
       .min_w_0()
       .flex()
@@ -461,7 +469,7 @@ impl ChangesView {
       .bg(sky(p, 0.05))
       .overflow_hidden()
       .font_family(theme::SANS_FONT)
-      .child(toggle);
+      .child(toggle.test_support());
     if !collapsed {
       let mut body = div().px_3().pb_3().flex().flex_col().gap_2();
       for comment in &thread.comments {

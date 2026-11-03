@@ -16,7 +16,6 @@ use gpui_kit::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Textarea, TextareaState},
-    tag::Tag,
     v_flex, ActiveTheme, IconName, Sizable, StyledExt,
   },
   div, px, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
@@ -505,6 +504,7 @@ impl IssueScreen {
           .h(px(36.))
           .min_w(px(44.))
           .icon(IconName::Plus)
+          .accessibility_label("Add reaction")
           .on_click(cx.listener(move |this, _, _, cx| this.reaction_picker(id.clone(), cx)))
           .touch(),
       )
@@ -521,13 +521,15 @@ impl IssueScreen {
           .gap_2()
           .items_center()
           .child(
-            if open {
-              Tag::success()
+            treq_ui::Badge::new(
+              issues::state_label(&issue.state),
+              &treq_ui::theme::current(cx),
+            )
+            .tone(if open {
+              treq_ui::Tone::Success
             } else {
-              Tag::secondary()
-            }
-            .small()
-            .child(issues::state_label(&issue.state)),
+              treq_ui::Tone::Neutral
+            }),
           )
           .child(widgets::muted(
             format!(
@@ -545,7 +547,7 @@ impl IssueScreen {
             issue
               .labels
               .iter()
-              .map(|l| Tag::secondary().small().child(l.name.clone())),
+              .map(|l| treq_ui::Badge::new(l.name.clone(), &treq_ui::theme::current(cx))),
           ),
         )
       })
@@ -602,22 +604,15 @@ impl Render for IssueScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let content = match &self.issue {
       Load::Idle | Load::Loading => widgets::card(cx)
-        .child(widgets::centered_message("Loading issue…", cx))
+        .child(widgets::skeleton("issue", 5, cx))
         .into_any_element(),
       Load::Failed(error) => widgets::card(cx)
-        .p_4()
-        .gap_3()
-        .child(widgets::error_text(errors::describe(error).message, cx))
-        .child(
-          h_flex().child(
-            Button::new("retry")
-              .outline()
-              .large()
-              .label("Retry")
-              .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
-              .touch(),
-          ),
-        )
+        .child(widgets::failed(
+          "issue-failed",
+          error,
+          cx.listener(|this, _, _, cx| this.reload(cx)),
+          cx,
+        ))
         .into_any_element(),
       Load::Ready(issue) => {
         let issue = issue.clone();
@@ -633,7 +628,11 @@ impl Render for IssueScreen {
           .child(
             widgets::section(format!("Comments · {}", comments.len()), cx)
               .when(comments.is_empty(), |s| {
-                s.child(widgets::card(cx).child(widgets::centered_message("No comments yet.", cx)))
+                s.child(widgets::card(cx).child(widgets::empty(
+                  "issue-comments-empty",
+                  "No comments yet.",
+                  cx,
+                )))
               })
               .children(comments.iter().enumerate().map(|(i, comment)| {
                 widgets::card(cx)

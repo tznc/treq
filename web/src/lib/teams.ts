@@ -122,5 +122,11 @@ export type OrganizationAction =
   | { action: "leave"; organization_id: string }
   | { action: "promote_member"; organization_id: string; user_id: string }
   | { action: "demote_owner"; organization_id: string; user_id: string }
+  | {
+      action: "set_role";
+      organization_id: string;
+      user_id: string;
+      role: "admin" | "member";
+    }
   | { action: "delete_organization"; organization_id: string }
   | { action: "attach_installation"; organization_id: string; installation_id: number };

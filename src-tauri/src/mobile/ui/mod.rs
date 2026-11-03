@@ -264,6 +264,17 @@ pub mod nav {
       == Some(view)
   }
 
+  /// Where the page open beside `view` is, when `view` is the list of a
+  /// split.
+  pub fn beside(view: EntityId, cx: &App) -> Option<Location> {
+    let root = cx.try_global::<Nav>()?.root.upgrade()?;
+    let root = root.read(cx);
+    let [.., list, open] = root.stack.as_slice() else {
+      return None;
+    };
+    (root.split && list.view.entity_id() == view).then(|| open.location.clone())
+  }
+
   /// Retitles the page showing `view` (a renamed terminal).
   pub fn set_title(view: EntityId, title: impl Into<SharedString>, cx: &mut App) {
     let title = title.into();
@@ -380,6 +391,10 @@ impl Root {
     if let Some(page) = self.stack.last() {
       App::notify(cx, page.view.entity_id());
     }
+    // The list beside it marks the page open next to it.
+    if let Some(page) = self.stack.iter().rev().nth(1) {
+      App::notify(cx, page.view.entity_id());
+    }
     cx.notify();
   }
 
@@ -457,73 +472,84 @@ fn panes(width: Pixels, depth: usize) -> usize {
   }
 }
 
+/// Back on each pane of a split of a `depth`-page stack, as pages popped.
+fn split_backs(depth: usize) -> (Option<usize>, Option<usize>) {
+  ((depth > 2).then_some(2), None)
+}
+
+/// A page's title bar: Back when `back` is set (it pops this many pages),
+/// the title, and ⋯ when the page has a menu.
+fn title_bar_for(title: SharedString, header: &nav::Header, back: Option<usize>, cx: &App) -> Div {
+  let theme = cx.theme();
+  h_flex()
+    .h(px(56.))
+    .px_2()
+    .gap_1()
+    .items_center()
+    .border_b_1()
+    .border_color(theme.border)
+    .when_some(back, |bar, count| {
+      bar.child(
+        Button::new("back")
+          .ghost()
+          .large()
+          .icon(IconName::ArrowLeft)
+          .accessibility_label("Back")
+          .on_click(move |_, _, cx| nav::pop_n(count, cx))
+          .touch(),
+      )
+    })
+    .child(
+      h_flex()
+        .id("page-title")
+        .flex_1()
+        .min_w_0()
+        .px_2()
+        .gap_1()
+        .items_center()
+        .child(
+          div()
+            .min_w_0()
+            .truncate()
+            .text_lg()
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(title),
+        )
+        .when_some(header.on_title.clone(), |title, action| {
+          title
+            .child(
+              div()
+                .flex_none()
+                .text_color(theme.muted_foreground)
+                .child(IconName::ChevronDown),
+            )
+            .on_click(move |_, window, cx| action(window, cx))
+        }),
+    )
+    .when_some(header.more.clone(), |bar, action| {
+      bar.child(
+        Button::new("page-more")
+          .ghost()
+          .large()
+          .icon(IconName::Ellipsis)
+          .accessibility_label("More")
+          .on_click(move |_, window, cx| action(window, cx))
+          .touch(),
+      )
+    })
+}
+
 impl Root {
   /// A page with its title bar. `back` pops this many pages, `None` hides
   /// Back.
   fn pane(&self, ix: usize, back: Option<usize>, title_bar: bool, cx: &App) -> Stateful<Div> {
     let page = &self.stack[ix];
-    let theme = cx.theme();
     v_flex()
       .id(("pane", ix))
       .size_full()
       .min_w_0()
       .when(title_bar, |pane| {
-        pane.child(
-          h_flex()
-            .h(px(56.))
-            .px_2()
-            .gap_1()
-            .items_center()
-            .border_b_1()
-            .border_color(theme.border)
-            .when_some(back, |bar, count| {
-              bar.child(
-                Button::new("back")
-                  .ghost()
-                  .large()
-                  .icon(IconName::ArrowLeft)
-                  .on_click(move |_, _, cx| nav::pop_n(count, cx))
-                  .touch(),
-              )
-            })
-            .child(
-              h_flex()
-                .id("page-title")
-                .flex_1()
-                .min_w_0()
-                .px_2()
-                .gap_1()
-                .items_center()
-                .child(
-                  div()
-                    .min_w_0()
-                    .truncate()
-                    .text_lg()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(page.title.clone()),
-                )
-                .when_some(page.header.on_title.clone(), |title, action| {
-                  title
-                    .child(
-                      div()
-                        .flex_none()
-                        .text_color(theme.muted_foreground)
-                        .child(IconName::ChevronDown),
-                    )
-                    .on_click(move |_, window, cx| action(window, cx))
-                }),
-            )
-            .when_some(page.header.more.clone(), |bar, action| {
-              bar.child(
-                Button::new("page-more")
-                  .ghost()
-                  .large()
-                  .icon(IconName::Ellipsis)
-                  .on_click(move |_, window, cx| action(window, cx))
-                  .touch(),
-              )
-            }),
-        )
+        pane.child(title_bar_for(page.title.clone(), &page.header, back, cx))
       })
       .child(
         div()
@@ -568,8 +594,7 @@ impl Render for Root {
           weak.update(cx, |root, _| root.list_focus = list).ok();
         }
       };
-      // Back on the list closes it and the page beside it.
-      let list_back = (depth > 2).then_some(2);
+      let (list_back, detail_back) = split_backs(depth);
       h_flex()
         .flex_1()
         .min_h_0()
@@ -589,7 +614,7 @@ impl Render for Root {
             .min_w_0()
             .h_full()
             .on_any_mouse_down(focus(false))
-            .child(self.pane(depth - 1, Some(1), true, cx)),
+            .child(self.pane(depth - 1, detail_back, true, cx)),
         )
     } else {
       let back = (depth > 1).then_some(1);
@@ -1079,7 +1104,7 @@ impl Root {
 
 #[cfg(test)]
 mod tests {
-  use super::{is_landing, panes};
+  use super::{is_landing, panes, split_backs};
   use gpui_kit::px;
 
   #[test]
@@ -1097,11 +1122,67 @@ mod tests {
     assert_eq!(panes(px(1366.), 4), 2);
   }
 
+  /// A split shows one Back, on the list: it closes the list and the page
+  /// beside it. The page beside the list has none.
+  #[test]
+  fn a_split_shows_one_back_on_the_list() {
+    assert_eq!(split_backs(2), (None, None));
+    assert_eq!(split_backs(3), (Some(2), None));
+  }
+
   #[test]
   fn landing_only_when_signed_out_and_unconnected() {
     assert!(is_landing(None, false));
     assert!(!is_landing(Some("a@b.c"), false));
     assert!(!is_landing(None, true));
     assert!(!is_landing(Some("a@b.c"), true));
+  }
+
+  /// Back and ⋯ show only an icon, so a screen reader needs their names.
+  #[gpui_kit::test]
+  fn title_bar_buttons_are_named(cx: &mut gpui_kit::TestAppContext) {
+    use gpui_kit::{
+      div, size, AppContext as _, Bounds, Context, IntoElement, ParentElement as _, Point, Render,
+      Styled as _, Window, WindowBounds, WindowOptions,
+    };
+    use gpui_testing_library::prelude::*;
+    use std::rc::Rc;
+
+    struct Host;
+    impl Render for Host {
+      fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let header = super::nav::Header {
+          on_title: None,
+          more: Some(Rc::new(|_, _| {})),
+        };
+        div().size_full().child(super::title_bar_for(
+          "event-bus".into(),
+          &header,
+          Some(1),
+          cx,
+        ))
+      }
+    }
+
+    cx.update(super::theme::init);
+    let window = cx.update(|cx| {
+      gpui_kit::open_window(
+        WindowOptions {
+          window_bounds: Some(WindowBounds::Windowed(Bounds {
+            origin: Point::default(),
+            size: size(px(412.), px(892.)),
+          })),
+          ..Default::default()
+        },
+        cx,
+        |_, cx| cx.new(|_| Host),
+      )
+      .expect("open test window")
+      .0
+    });
+    let screen = gpui_testing_library::Screen::new(cx, window);
+    screen.redraw();
+    expect(screen.get_by_role(by::role(gpui_kit::Role::Button).name("Back"))).to_be_visible();
+    expect(screen.get_by_role(by::role(gpui_kit::Role::Button).name("More"))).to_be_visible();
   }
 }

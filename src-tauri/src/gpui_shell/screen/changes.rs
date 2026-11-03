@@ -25,6 +25,10 @@ use std::{
   time::{Duration, Instant},
 };
 
+/// Prefix of a viewed hash taken from a file's content id, for files with
+/// no diff lines to hash (binary, empty, mode-only, or not yet loaded).
+const CONTENT_ID_MARK: &str = "id:";
+
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use serde::Deserialize;
@@ -938,6 +942,11 @@ impl ChangesView {
     );
   }
 
+  /// The content id the latest snapshot lists for `path`.
+  fn content_id(&self, path: &str) -> Option<String> {
+    self.snapshot.as_ref()?.content_ids.get(path).cloned()
+  }
+
   /// The diff a file card shows: the working copy's, else the branch's.
   fn file_hunks(&self, path: &str) -> Option<FileHunks> {
     self.shown_hunks(path).cloned()
@@ -989,6 +998,10 @@ impl ChangesView {
       .viewed
       .iter()
       .filter(|(path, hash)| {
+        // Files with no diff lines to hash were marked by their content.
+        if let Some(id) = hash.strip_prefix(CONTENT_ID_MARK) {
+          return self.content_id(path).is_some_and(|now| now != id);
+        }
         !hash.is_empty()
           && read.is_none_or(|read| read.contains(*path))
           && self
@@ -1393,6 +1406,11 @@ impl ChangesView {
         .file_hunks(&path)
         .filter(|d| !d.loading && !d.hunks.is_empty())
         .map(|d| hunks_hash(&d.hunks))
+        .or_else(|| {
+          self
+            .content_id(&path)
+            .map(|id| format!("{CONTENT_ID_MARK}{id}"))
+        })
         .unwrap_or_default();
       self.viewed.insert(path.clone(), hash.clone());
       self.collapsed_files.insert(path.clone());
@@ -1784,10 +1802,12 @@ impl ChangesView {
   }
 }
 
-/// A `p-1 rounded` icon button of the section headers.
+/// A `p-1 rounded` icon button of the section headers, named `label`;
+/// the caller ends it with `.test_support()`, after its handlers.
 fn header_button(
   id: impl Into<SharedString>,
   icon: &'static str,
+  label: impl Into<SharedString>,
   fg: Hsla,
   p: &Palette,
 ) -> Stateful<Div> {
@@ -1796,6 +1816,8 @@ fn header_button(
   div()
     .id(id)
     .debug_selector(move || selector)
+    .role(gpui::Role::Button)
+    .aria_label(label.into())
     .p_1()
     .rounded(radius::SM)
     .cursor_pointer()
@@ -2158,6 +2180,7 @@ impl ChangesView {
     let filter = header_button(
       "changes-filter",
       theme::ICON_FILTER,
+      "Filter changes",
       if filtering {
         primary
       } else {
@@ -2167,8 +2190,6 @@ impl ChangesView {
     )
     .relative()
     .when(filtering, |b| b.bg(primary.opacity(0.1)))
-    .role(gpui::Role::Button)
-    .aria_label("Filter changes")
     .on_click(cx.listener(|view, _, _, cx| view.filter_menu(cx)))
     .test_support()
     .child(self.anchor("changes-filter".into()));
@@ -2469,12 +2490,18 @@ impl ChangesView {
     if count > 0 {
       // `onStashAll` is left out for a remote repository.
       if !staged && !self.parent.remote {
-        let stash = header_button("stash-all-changes", theme::ICON_ARCHIVE, muted, p).on_click(
-          cx.listener(|view, _, _, cx| {
-            cx.stop_propagation();
-            view.stash_all(cx);
-          }),
-        );
+        let stash = header_button(
+          "stash-all-changes",
+          theme::ICON_ARCHIVE,
+          "Stash all changes",
+          muted,
+          p,
+        )
+        .on_click(cx.listener(|view, _, _, cx| {
+          cx.stop_propagation();
+          view.stash_all(cx);
+        }))
+        .test_support();
         buttons = buttons.child(self.tips.wrap(
           "stash-all-tip",
           Side::Bottom,
@@ -2490,6 +2517,8 @@ impl ChangesView {
           "discard-all-changes"
         },
         theme::ICON_UNDO,
+        // It opens the "Discard all changes" confirmation.
+        "Discard all changes…",
         muted,
         p,
       )
@@ -2497,7 +2526,8 @@ impl ChangesView {
         cx.stop_propagation();
         view.discard_dialog = true;
         cx.notify();
-      }));
+      }))
+      .test_support();
       buttons = buttons.child(self.tips.wrap(
         if staged {
           "discard-selected-tip"
@@ -2511,14 +2541,14 @@ impl ChangesView {
       ));
       if !staged {
         let label = select_all_label(selected_len, count);
-        let select = header_button("select-all-changes", theme::ICON_PLUS, muted, p).on_click(
-          cx.listener(|view, _, _, cx| {
+        let select = header_button("select-all-changes", theme::ICON_PLUS, label, muted, p)
+          .on_click(cx.listener(|view, _, _, cx| {
             cx.stop_propagation();
             let files = view.listed();
             view.staging.toggle_all_unstaged(&files);
             cx.notify();
-          }),
-        );
+          }))
+          .test_support();
         buttons = buttons.child(self.tips.wrap(
           "select-all-tip",
           Side::Bottom,
@@ -2561,13 +2591,19 @@ impl ChangesView {
         ));
       }
       if staged {
-        let minus = header_button("unselect-all-changes", theme::ICON_MINUS, muted, p).on_click(
-          cx.listener(|view, _, _, cx| {
-            cx.stop_propagation();
-            view.staging.unstage_all();
-            cx.notify();
-          }),
-        );
+        let minus = header_button(
+          "unselect-all-changes",
+          theme::ICON_MINUS,
+          "Unselect all changes",
+          muted,
+          p,
+        )
+        .on_click(cx.listener(|view, _, _, cx| {
+          cx.stop_propagation();
+          view.staging.unstage_all();
+          cx.notify();
+        }))
+        .test_support();
         buttons = buttons.child(self.tips.wrap(
           "unselect-all-tip",
           Side::Bottom,

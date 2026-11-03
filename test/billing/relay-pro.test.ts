@@ -7,7 +7,7 @@ import {
 
 const OWNER = "user-1";
 
-function store(pro: boolean): RelayStore {
+function store(pro: boolean, capped = false): RelayStore {
   return {
     getEndpoint: async () => ({
       id: "ep-1",
@@ -23,6 +23,7 @@ function store(pro: boolean): RelayStore {
     }),
     getClientKey: async () => ({ id: "key-1", revoked_at: null }),
     hasPro: vi.fn(async () => pro),
+    spendCapped: vi.fn(async () => capped),
   };
 }
 
@@ -59,5 +60,22 @@ describe("authorizeRelayRequest and Pro", () => {
       instanceId: "inst-1",
       providerResourceId: "dev-treq-user-1",
     });
+  });
+});
+
+// Connecting wakes a stopped machine, so a capped owner could restart the
+// workspace the spend cap stopped just by opening ssh.
+describe("authorizeRelayRequest and the spend cap", () => {
+  it("refuses a capped owner with 402 spend_cap_reached", async () => {
+    const s = store(true, true);
+    const error = await authorizeRelayRequest(relayRequest(), {
+      store: s,
+      getUserId: async () => OWNER,
+    }).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(RelayError);
+    expect((error as RelayError).status).toBe(402);
+    expect((error as RelayError).code).toBe("spend_cap_reached");
+    expect(s.spendCapped).toHaveBeenCalledWith(OWNER);
   });
 });

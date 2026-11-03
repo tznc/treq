@@ -511,10 +511,16 @@ function SubscriptionTab({
 // seats"). Reads go through RLS. Every change goes through the organizations
 // Edge Function, whose SQL enforces the rules; this tab only shows them.
 
+function roleLabel(role: OrgMembership["role"] | undefined): string {
+  if (role === "owner") return "Owner";
+  if (role === "admin") return "Admin";
+  return "Member";
+}
+
 interface OrgMembership {
   org_id: string;
   user_id: string;
-  role: "owner" | "member";
+  role: "owner" | "admin" | "member";
   created_at: string;
   organizations: { id: string; name: string } | null;
 }
@@ -632,7 +638,10 @@ function OrganizationCard({
   onChanged: () => Promise<unknown>;
 }) {
   const members = data.memberships.filter((m) => m.org_id === org.id);
-  const isOwner = members.some((m) => m.user_id === userId && m.role === "owner");
+  const myRole = members.find((m) => m.user_id === userId)?.role;
+  const isOwner = myRole === "owner";
+  // Owners and admins manage the team's billing account and its invites.
+  const isManager = isOwner || myRole === "admin";
   const ownerCount = members.filter((m) => m.role === "owner").length;
   const invites = data.invites.filter((i) => i.org_id === org.id);
   const subscription = data.subscriptions.find((s) => s.owner_id === org.id);
@@ -694,7 +703,7 @@ function OrganizationCard({
   return (
     <section aria-label={org.name} style={styles.orgCard}>
       <div style={styles.orgName}>{org.name}</div>
-      <Field label="Your role">{isOwner ? "Owner" : "Member"}</Field>
+      <Field label="Your role">{roleLabel(myRole)}</Field>
       <Field label="Plan">
         {subscription ? (
           <span>
@@ -714,7 +723,7 @@ function OrganizationCard({
           {formatPeriodEnd(subscription.current_period_end)}
         </Field>
       )}
-      {isOwner ? (
+      {isManager ? (
         <Field label="Seats">
           {members.length} of {TEAM_INCLUDED_SEATS} included
           {extraSeats(members.length) > 0 &&
@@ -724,7 +733,7 @@ function OrganizationCard({
         <Field label="Members">{members.length}</Field>
       )}
 
-      {isOwner && (
+      {isManager && (
         <div style={styles.billingActions}>
           {!subscription && !checkoutOpen && (
             <div>
@@ -796,9 +805,33 @@ function OrganizationCard({
               </span>
               <span style={styles.teamRowActions}>
                 <span style={styles.teamMuted}>
-                  {m.role === "owner" ? "Owner" : "Member"}
+                  {roleLabel(m.role)}
                 </span>
-                {isOwner && m.user_id !== userId && m.role === "member" && (
+                {isManager && m.user_id !== userId && m.role !== "owner" && (
+                  <button
+                    type="button"
+                    aria-label={
+                      m.role === "admin"
+                        ? `Remove admin from ${name}`
+                        : `Make ${name} an admin`
+                    }
+                    disabled={pending}
+                    style={styles.linkButton}
+                    onClick={() =>
+                      void run(() =>
+                        organizationsRequest({
+                          action: "set_role",
+                          organization_id: org.id,
+                          user_id: m.user_id,
+                          role: m.role === "admin" ? "member" : "admin",
+                        }),
+                      )
+                    }
+                  >
+                    {m.role === "admin" ? "Remove admin" : "Make admin"}
+                  </button>
+                )}
+                {isOwner && m.user_id !== userId && m.role !== "owner" && (
                   <button
                     type="button"
                     aria-label={`Make ${name} an owner`}
@@ -875,7 +908,7 @@ function OrganizationCard({
         })}
       </ul>
 
-      {isOwner && (
+      {isManager && (
         <>
           <div style={styles.teamSubheading}>Pending invites</div>
           {invites.length === 0 ? (
@@ -1124,7 +1157,7 @@ function TeamTab({
       latest.memberships.some(
         (m) =>
           m.user_id === userId &&
-          m.role === "owner" &&
+          (m.role === "owner" || m.role === "admin") &&
           latest.subscriptions.some((s) => s.owner_id === m.org_id),
       );
     const finish = (outcome: "timed_out" | null) => {

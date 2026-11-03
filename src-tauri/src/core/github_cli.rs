@@ -221,6 +221,11 @@ pub fn create_pr(
   github::gh_create_pr_impl(&gh, repo, title, body, base, head, draft, &path)
 }
 
+/// The `--head` for a PR from `branch`: `owner:branch` in a fork clone.
+pub fn pr_head(repo_path: &str, branch: &str) -> String {
+  github::pr_head_ref_impl(repo_path, branch)
+}
+
 pub fn comment_on_pr(repo: &str, number: u64, body: &str) -> Result<(), String> {
   let (gh, path) = gh()?;
   github::gh_create_pr_comment_impl(&gh, repo, number, body, &path)
@@ -316,5 +321,11 @@ mod tests {
   #[test]
   fn lists_no_review_threads_for_a_name_without_an_owner() {
     assert!(pr_review_threads("no-slash", 1).unwrap().is_empty());
+  }
+
+  #[test]
+  fn pr_head_is_the_bare_branch_outside_a_fork() {
+    let dir = tempfile::TempDir::new().unwrap();
+    assert_eq!(pr_head(dir.path().to_str().unwrap(), "feat"), "feat");
   }
 }

@@ -4,7 +4,7 @@
 //! session, attached, full screen. Leaving it detaches; the session keeps
 //! running on the host.
 
-use crate::mobile::ui::widgets::TouchButton as _;
+use crate::mobile::ui::widgets::{Caption as _, TouchButton as _};
 use crate::result_ext::ResultExt as _;
 use std::{collections::HashMap, rc::Rc, time::Duration};
 
@@ -27,9 +27,9 @@ use gpui_kit::{
     spinner::Spinner,
     v_flex, ActiveTheme, IconName, Sizable,
   },
-  div, px, AnyElement, App, AppContext, Context, Div, ElementId, Entity, InteractiveElement,
-  IntoElement, ParentElement, Render, Result, Stateful, StatefulInteractiveElement, Styled,
-  WeakEntity, Window,
+  div, px, AnyElement, App, AppContext, Context, Entity, InteractiveElement, IntoElement,
+  ParentElement, Render, Result, SharedString, StatefulInteractiveElement, Styled, WeakEntity,
+  Window,
 };
 
 use super::workspace::Target;
@@ -106,11 +106,11 @@ fn session_title(session: &PtySessionInfo) -> String {
 
 /// A session's row: its title, and what runs in it and what it is doing.
 fn session_row(
-  id: impl Into<ElementId>,
+  id: impl Into<SharedString>,
   session: &PtySessionInfo,
   current: bool,
   cx: &App,
-) -> Stateful<Div> {
+) -> treq_ui::Row {
   let theme = cx.theme();
   let program = Program::of_label(&session.label);
   let leading = div()
@@ -147,9 +147,7 @@ fn session_row(
     trailing,
     cx,
   )
-  .when(current, |row| {
-    row.bg(treq_ui::theme::current(cx).selected())
-  })
+  .selected(current)
   .when(!session.running, |row| row.opacity(0.6))
 }
 
@@ -551,30 +549,27 @@ impl Sessions {
   fn session_rows(&self, cx: &mut Context<Self>) -> AnyElement {
     match &self.sessions {
       Load::Idle | Load::Loading => widgets::card(cx)
-        .child(widgets::centered_message(
-          "Checking for running sessions…",
-          cx,
-        ))
+        .child(widgets::skeleton("sessions", 3, cx))
         .into_any_element(),
       Load::Failed(error) => widgets::card(cx)
-        .p_4()
-        .child(widgets::error_text(
-          errors::describe(error).message,
+        .child(widgets::failed(
+          "sessions-failed",
+          error,
+          cx.listener(|this, _, _, cx| this.reload(cx)),
           cx,
         ))
         .into_any_element(),
       Load::Ready(list) if list.is_empty() => widgets::card(cx)
-        .child(widgets::centered_message(
-          "No terminals in this workspace. Start an agent or a shell; it keeps running on the host when you leave.",
-          cx,
-        ))
+        .child(
+          widgets::empty("sessions-empty", "No terminals in this workspace", cx)
+            .message("Start an agent or a shell; it keeps running on the host when you leave."),
+        )
         .into_any_element(),
       Load::Ready(list) => widgets::card(cx)
         .children(list.iter().enumerate().map(|(i, session)| {
           let label = session.label.clone();
-          session_row(("session", i), session, false, cx).on_click(cx.listener(
-            move |this, _, _, cx| this.open_listed(&label, false, cx),
-          ))
+          session_row(format!("session-{i}"), session, false, cx)
+            .on_click(cx.listener(move |this, _, _, cx| this.open_listed(&label, false, cx)))
         }))
         .into_any_element(),
     }
@@ -589,7 +584,7 @@ impl Render for Sessions {
       .is_some_and(|c| !c.holds_terminals(terminal_backend()));
     let no_agents = agents_on(check.as_ref()).is_empty();
     let ready = self.workspace.is_some() && !no_multiplexer;
-    v_flex()
+    let list = v_flex()
       .gap_3()
       .children(self.notice.clone().map(|n| widgets::muted(n, cx)))
       .when(no_multiplexer, |list| {
@@ -599,9 +594,24 @@ impl Render for Sessions {
         ))
       })
       .child(self.session_rows(cx))
+      .when(no_agents && !no_multiplexer, |list| {
+        list.child(widgets::muted(
+          "No coding agents found on this host. Install Claude Code, Codex or Cursor Agent there, then reconnect.",
+          cx,
+        ))
+      });
+    v_flex()
+      .size_full()
       .child(
-        h_flex()
-          .gap_2()
+        div()
+          .id("terminals")
+          .flex_1()
+          .min_h_0()
+          .overflow_y_scroll()
+          .child(widgets::page().child(list)),
+      )
+      .child(
+        widgets::bottom_bar(cx)
           .child(
             Button::new("new-agent")
               .primary()
@@ -610,7 +620,8 @@ impl Render for Sessions {
               .icon(IconName::Bot)
               .label("New agent")
               .disabled(!ready || no_agents)
-              .on_click(cx.listener(|this, _, _, cx| this.new_agent(cx))).touch(),
+              .on_click(cx.listener(|this, _, _, cx| this.new_agent(cx)))
+              .touch(),
           )
           .child(
             Button::new("new-shell")
@@ -620,17 +631,10 @@ impl Render for Sessions {
               .icon(IconName::SquareTerminal)
               .label("New shell")
               .disabled(!ready)
-              .on_click(cx.listener(|this, _, _, cx| {
-                this.start(Program::Shell, Vec::new(), cx)
-              })).touch(),
+              .on_click(cx.listener(|this, _, _, cx| this.start(Program::Shell, Vec::new(), cx)))
+              .touch(),
           ),
       )
-      .when(no_agents && !no_multiplexer, |list| {
-        list.child(widgets::muted(
-          "No coding agents found on this host. Install Claude Code, Codex or Cursor Agent there, then reconnect.",
-          cx,
-        ))
-      })
   }
 }
 
@@ -696,7 +700,7 @@ impl Render for AgentSheet {
       .child(
         v_flex().children(self.agents.iter().enumerate().map(|(i, agent)| {
           widgets::choice(
-            ("agent", i),
+            format!("agent-{i}"),
             agent_name(*agent),
             Some(agent.binary_name().into()),
             i == selected,
@@ -1300,13 +1304,16 @@ impl Render for Switcher {
       return div().into_any_element();
     };
     let list = match &sessions.read(cx).sessions {
-      Load::Idle | Load::Loading => {
-        return widgets::centered_message("Loading…", cx).into_any_element()
-      }
+      Load::Idle | Load::Loading => return widgets::skeleton("switch-sessions", 3, cx),
       Load::Failed(error) => {
-        return widgets::error_text(errors::describe(error).message, cx)
-          .px_4()
-          .into_any_element()
+        return widgets::empty(
+          "switch-sessions-failed",
+          errors::describe(error).message,
+          cx,
+        )
+        .error(true)
+        .icon(treq_ui::theme::ICON_CIRCLE_ALERT)
+        .into_any_element()
       }
       Load::Ready(list) => list.clone(),
     };
@@ -1315,14 +1322,16 @@ impl Render for Switcher {
         let current = session.label == self.current;
         let label = session.label.clone();
         let sessions = self.sessions.clone();
-        session_row(("switch-session", i), session, current, cx).on_click(move |_, _, cx| {
-          sheet::close(cx);
-          if !current {
-            sessions
-              .update(cx, |list, cx| list.open_listed(&label, true, cx))
-              .ok();
-          }
-        })
+        session_row(format!("switch-session-{i}"), session, current, cx).on_click(
+          move |_, _, cx| {
+            sheet::close(cx);
+            if !current {
+              sessions
+                .update(cx, |list, cx| list.open_listed(&label, true, cx))
+                .ok();
+            }
+          },
+        )
       }))
       .into_any_element()
   }
@@ -1334,20 +1343,51 @@ impl Render for TerminalScreen {
     let view = match &self.view {
       Load::Ready(view) => view.clone(),
       Load::Idle | Load::Loading => {
-        return widgets::centered_message(format!("Attaching to {}…", self.label), cx)
+        return div()
           .size_full()
+          .flex()
+          .items_center()
+          .justify_center()
+          .child(treq_ui::delayed(
+            "attaching-delay",
+            div().id("attaching").child(
+              treq_ui::Loading::new("attaching-spinner", &treq_ui::theme::current(cx))
+                .label(format!("Attaching to {}…", self.label)),
+            ),
+          ))
           .into_any_element();
       }
       Load::Failed(error) => {
         return widgets::page()
-          .child(widgets::error_text(error.clone(), cx))
+          .size_full()
+          .items_center()
           .child(
-            Button::new("back")
-              .outline()
-              .large()
-              .label("Back to terminals")
-              .on_click(|_, _, cx| nav::pop(cx))
-              .touch(),
+            widgets::empty("attach-failed", error.clone(), cx)
+              .error(true)
+              .icon(treq_ui::theme::ICON_CIRCLE_ALERT)
+              .action(
+                h_flex()
+                  .gap_3()
+                  .child(
+                    Button::new("attach-retry")
+                      .outline()
+                      .large()
+                      .label("Retry")
+                      .on_click(cx.listener(|this, _, window, cx| {
+                        this.attach(this.program.launch(Vec::new()), window, cx);
+                        cx.notify();
+                      }))
+                      .touch(),
+                  )
+                  .child(
+                    Button::new("back")
+                      .ghost()
+                      .large()
+                      .label("Back to terminals")
+                      .on_click(|_, _, cx| nav::pop(cx))
+                      .touch(),
+                  ),
+              ),
           )
           .into_any_element();
       }
@@ -1361,7 +1401,7 @@ impl Render for TerminalScreen {
           .py_1()
           .border_b_1()
           .border_color(theme.border)
-          .child(widgets::mono(self.label.clone(), cx).text_xs()),
+          .child(widgets::mono(self.label.clone(), cx).caption()),
       )
       .child(div().flex_1().min_h_0().child(view.clone()))
       .when_some(self.ended, |screen, status| {
@@ -1413,6 +1453,7 @@ impl Render for TerminalScreen {
               Button::new("send")
                 .primary()
                 .icon(IconName::ArrowUp)
+                .accessibility_label("Send")
                 .on_click(cx.listener(|this, _, window, cx| this.send(window, cx)))
                 .touch(),
             ),

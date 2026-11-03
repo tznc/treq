@@ -13,7 +13,8 @@ import { appEnv, makeFixture, writeFakeAgent } from "../harness.ts";
 import { capture, theme } from "./capture.ts";
 import { popupBox, xPointer } from "./helpers.ts";
 
-const plainPort = port + 2;
+// port + 2 is the fake Linear `launch.ts` starts.
+const plainPort = port + 3;
 
 type App = { app: ChildProcess; browser: Browser; page: Page; folder: string };
 

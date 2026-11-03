@@ -1410,3 +1410,69 @@ fn file_statuses_are_named_and_committed_cards_carry_no_pill(cx: &mut TestAppCon
   }
   assert!(!h.drawn("committed-file-label"));
 }
+
+/// A file with no diff lines (here a binary) is marked viewed by its
+/// content, so it is viewed no longer once that content changes.
+#[gpui::test]
+fn a_viewed_file_without_diff_lines_unmarks_when_it_changes(cx: &mut TestAppContext) {
+  let diff = |id: &str| -> crate::jj::JjRevisionDiff {
+    serde_json::from_value(serde_json::json!({
+      "committed_files": [],
+      "uncommitted_files": [
+        {"path": "img.png", "status": "M", "previous_path": null, "changed_line_count": 0,
+         "diff_deferred": false, "content_id": id}
+      ],
+      "hunks_by_file": [{"path": "img.png", "hunks": []}],
+      "too_large_to_render": false
+    }))
+    .expect("diff")
+  };
+  let mut host = changes_host();
+  host.working = Some(diff("v1"));
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.click("viewed-img.png");
+  h.cx.run_until_parked();
+  *host.edited.lock().unwrap() = Some(diff("v2"));
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.changes_revision += 1;
+    }
+  });
+  h.cx.run_until_parked();
+  assert!(
+    host.writes().contains(&"unmark viewed img.png".to_string()),
+    "{:?}",
+    host.writes()
+  );
+}
+
+/// The Changes header's buttons are named for what they do, so a user (and
+/// the QA specs) find discard all by its name rather than by place.
+#[gpui::test]
+fn the_changes_header_buttons_are_named(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  let screen = a11y_screen(&mut h);
+  for name in ["Discard all changes…", "Stash all changes"] {
+    expect(screen.get_by_role(by::role(gpui::Role::Button).name(name))).to_be_visible();
+  }
+  let user = screen.user();
+  user.click(&screen.get_by_role(by::role(gpui::Role::Button).name("Discard all changes…")));
+  assert!(h.drawn("discard-all-dialog"));
+}
+
+/// A review thread's fold toggle is a button named for what a click does.
+#[gpui::test]
+fn a_review_thread_folds_from_a_named_button(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, true)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  let screen = a11y_screen(&mut h);
+  let show = screen.get_by_role(by::role(gpui::Role::Button).name("Show review thread"));
+  screen.user().click(&show);
+  let screen = a11y_screen(&mut h);
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Hide review thread")))
+    .to_be_visible();
+  assert!(!h.drawn("github-thread-collapsed-preview"));
+}

@@ -56,6 +56,26 @@ pub trait AccountHost: Send + Sync {
   fn cloud_action(&self, action: CloudAction);
 }
 
+/// Starts Create once: marks the cloud workspace submitting in the account
+/// before `start` runs, so a second click that lands before the backend's
+/// first update finds the button busy. Does nothing while one runs.
+pub fn provision_once(cx: &mut App, start: impl FnOnce()) {
+  let mut account = cx.try_global::<Account>().and_then(|a| a.0.clone());
+  if let Some(cloud) = account
+    .as_mut()
+    .map(|a| a.cloud.get_or_insert_with(Default::default))
+  {
+    if cloud.submitting || cloud.provisioning_stage.is_some() {
+      return;
+    }
+    cloud.submitting = true;
+  }
+  if let Some(account) = account {
+    cx.set_global(Account(Some(account)));
+  }
+  start();
+}
+
 pub(crate) fn cloud_route(cloud: &CloudWorkspace) -> CloudRoute {
   let status = cloud.instance_status.as_ref();
   CloudRoute {
@@ -97,7 +117,11 @@ pub(crate) fn cloud_route(cloud: &CloudWorkspace) -> CloudRoute {
     provider_key_saving: cloud.provider_key_saving,
     provider_key_error: cloud.provider_key_error.clone(),
     byos_catalog: cloud.byos_catalog.clone(),
-    selected_provider: cloud.selected_provider.clone(),
+    organizations: cloud.organizations.clone(),
+    profile: cloud.profile.clone(),
+    org_keys: cloud.org_keys.clone(),
+    team_saving: cloud.team_saving,
+    team_error: cloud.team_error.clone(),
   }
 }
 
@@ -112,14 +136,6 @@ pub fn cloud_press(id: &str) -> Option<CloudAction> {
       acknowledged_data_loss: true,
     }),
     "cloud.resize.cancel" => Some(CloudAction::CancelResize),
-    "cloud.placement.managed" => Some(CloudAction::SelectProvider { kind: None }),
-    _ if id.starts_with("cloud.placement.") => Some(CloudAction::SelectProvider {
-      kind: Some(
-        id.strip_prefix("cloud.placement.")
-          .unwrap_or_default()
-          .to_string(),
-      ),
-    }),
     _ if id.starts_with("cloud.process.") => process_press(id),
     _ if id.starts_with("cloud.notification.dismiss.") => Some(CloudAction::DismissNotification {
       id: id

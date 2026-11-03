@@ -45,6 +45,7 @@ import {
   type OperationRow,
   type OperationType,
   previousHostKeyFingerprint,
+  STALE_PROVISIONING_MS,
   recordManagedEndpoint,
   updateInstance,
 } from "./instance-store.ts";
@@ -81,8 +82,38 @@ export interface RemoteInstanceDeps {
   hasPro: () => Promise<boolean>;
   /** The caller's monthly spend (get_spend_status_for); ensure/wake/resize get 402 when capped. */
   spendStatus?: () => Promise<SpendStatus | null>;
+  /**
+   * Where the caller's cloud bills and what it may run there
+   * (cloud_context_for: personal Pro, or a Team organization's settings).
+   * Absent: personal, both modes, as before Team cloud.
+   */
+  cloudContext?: () => Promise<CloudContext>;
   /** Bring your own sandbox (byos.ts). Absent: every BYOS action answers byos_disabled. */
   byos?: ByosActionDeps & { store: ByosCredentialStore & ByosPlanStore };
+}
+
+export interface CloudContext {
+  billing_org_id: string | null;
+  entitled: boolean;
+  allow_managed: boolean;
+  allow_byos: boolean;
+}
+
+const PERSONAL_CONTEXT: CloudContext = { billing_org_id: null, entitled: true, allow_managed: true, allow_byos: true };
+
+/** 403 when the billing context does not allow this kind of sandbox. */
+function modeRefusal(ctx: CloudContext, mode: "managed" | "byos"): Reply | null {
+  if (mode === "managed" ? ctx.allow_managed : ctx.allow_byos) return null;
+  const where = ctx.billing_org_id ? "Your organization does not allow" : "Your plan does not include";
+  return {
+    status: 403,
+    body: {
+      error: `${where} ${mode === "managed" ? "treq-managed sandboxes" : "your own sandbox keys"}`,
+      code: "cloud_mode_not_allowed",
+      mode,
+      billing_org_id: ctx.billing_org_id,
+    },
+  };
 }
 
 export const BYOS_DISABLED: Reply = {
@@ -123,12 +154,29 @@ async function setInstanceStatus(
   }
 }
 
+const MAX_IDEMPOTENCY_KEY_LENGTH = 256;
+
 function requireIdempotencyKey(body: Record<string, unknown>): string {
   const key = body.idempotency_key;
   if (typeof key !== "string" || key.length === 0) {
-    throw new HttpError("idempotency_key is required", 400, undefined);
+    throw new HttpError("idempotency_key is required", 400);
+  }
+  if (key.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+    throw new HttpError(`idempotency_key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`, 400);
+  }
+  if ([...key].some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f)) {
+    throw new HttpError("idempotency_key must not contain control characters", 400);
   }
   return key;
+}
+
+// A row ensure may pick up and provision again: failed, degraded, or
+// 'provisioning' left behind by an ensure that died (no update for
+// STALE_PROVISIONING_MS).
+export function isResumable(instance: InstanceRow, now = Date.now()): boolean {
+  if (instance.status === "failed" || instance.status === "degraded") return true;
+  return instance.status === "provisioning" &&
+    now - Date.parse(instance.updated_at ?? "") >= STALE_PROVISIONING_MS;
 }
 
 // Verifies ownership server-side rather than trusting a client-supplied id.
@@ -147,6 +195,9 @@ function requireProvisioned(instance: InstanceRow): string {
   return instance.provider_resource_id;
 }
 
+// States an ensure in flight may mark failed; not 'deleting' or 'deleted'.
+const ENSURE_FAILABLE = ["provisioning", "bootstrapping", "ready", "suspended", "degraded", "failed"];
+
 const replay = (op: OperationRow): Reply => ok({ operation_id: op.id, status: op.status });
 
 function tierUnavailable(tierId: string, region: string): Reply {
@@ -156,10 +207,12 @@ function tierUnavailable(tierId: string, region: string): Reply {
   };
 }
 
-function byosPlanDeps(byos: NonNullable<RemoteInstanceDeps["byos"]>) {
+// The mode check (modeRefusal) already passed, so the plan only needs the
+// key: the organization's when the workspace bills to one.
+function byosPlanDeps(byos: NonNullable<RemoteInstanceDeps["byos"]>, ctx: CloudContext) {
   return {
-    canByos: byos.canByos,
-    credentialFor: (kind: ProviderKind) => byos.store.credentialFor(kind),
+    canByos: () => Promise.resolve(ctx.allow_byos),
+    credentialFor: (kind: ProviderKind) => byos.store.credentialFor(kind, ctx.billing_org_id),
     machineTypes: (kind: ProviderKind) => byos.store.machineTypes(kind),
   };
 }
@@ -179,12 +232,19 @@ async function tracked(
 ): Promise<string> {
   const { supabase, ownerUserId, correlationId } = deps;
   const elapsed = startTimer();
-  const row = await beginOperation(supabase, {
-    ownerUserId,
-    instanceId: instance.id,
-    operationType: op.type,
-    idempotencyKey,
-  });
+  let row: OperationRow;
+  try {
+    row = await beginOperation(supabase, {
+      ownerUserId,
+      instanceId: instance.id,
+      operationType: op.type,
+      idempotencyKey,
+    });
+  } catch (err) {
+    // Nothing was recorded, so nothing would ever finish this instance.
+    await onFailure?.().catch(() => {});
+    throw err;
+  }
   const audit = auditFor(supabase, { ownerUserId, instanceId: instance.id, correlationId });
   const event = (suffix: string) => `${op.event}_${suffix}` as RemoteAuditEventType;
   await audit(event("requested"), { detail: op.detail, idempotencyKey });
@@ -256,7 +316,7 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
   }
 
   const existingInstance = await getInstanceForOwner(supabase, ownerUserId);
-  if (existingInstance && existingInstance.status !== "failed") {
+  if (existingInstance && !isResumable(existingInstance)) {
     // One managed instance per user: ensure is a no-op once provisioned,
     // whatever the key, so a second "first open" never makes a second VM.
     const op = await beginOperation(supabase, {
@@ -274,11 +334,16 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
   // chosen provider's type for the tier on the user's own account.
   let machineType: MachineTypeRow | null;
   let byosCredentialId: string | null = null;
+  const ctx = deps.cloudContext ? await deps.cloudContext() : PERSONAL_CONTEXT;
+  if (!existingInstance?.machine_type_id) {
+    const refused = modeRefusal(ctx, choice.value.mode);
+    if (refused) return refused;
+  }
   if (existingInstance?.machine_type_id) {
     machineType = await getMachineType(supabase, existingInstance.machine_type_id);
   } else if (choice.value.mode === "byos") {
     if (!deps.byos) return BYOS_DISABLED;
-    const plan = await planByosPlacement(byosPlanDeps(deps.byos), choice.value, tierId, region);
+    const plan = await planByosPlacement(byosPlanDeps(deps.byos, ctx), choice.value, tierId, region);
     if (!plan.ok) return { status: plan.status, body: { error: plan.code, code: plan.code } };
     machineType = plan.machineType;
     byosCredentialId = plan.credentialId;
@@ -297,6 +362,7 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
     providerKind: mt.provider_kind,
     tierId: mt.tier_id,
     machineTypeId: mt.id,
+    billingOrgId: ctx.billing_org_id,
   });
   if (!instance.active_placement_id) {
     const placement = await createActivePlacement(supabase, {
@@ -309,7 +375,8 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
     });
     instance = { ...instance, active_placement_id: placement.id };
   }
-  if (instance.status === "failed") await setInstanceStatus(supabase, instance, "provisioning");
+  if (instance.status !== "provisioning") await setInstanceStatus(supabase, instance, "provisioning");
+  else if (existingInstance) await updateInstance(supabase, instance.id, {});
 
   const target = instance;
   const opId = await tracked(
@@ -331,6 +398,18 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
     },
     async () => {
       const provider = providerOf(deps, target);
+      // Each step moves the row on only from the status the previous step
+      // left. A delete that landed meanwhile matches nothing: stop, and
+      // remove the machine this ensure made so it does not leak.
+      let createdId: string | null = null;
+      const advance = async (expect: readonly string[], status: string | null, fields: Record<string, unknown> = {}) => {
+        if (await updateInstance(supabase, target.id, fields, { expectStatus: expect })) {
+          if (status) await setInstanceStatus(supabase, target, status);
+          return;
+        }
+        if (createdId) await provider.deleteInstance(createdId, { placementId: target.active_placement_id }).catch(() => {});
+        throw new HttpError("The instance was deleted while it was being provisioned", 409, "instance_deleted");
+      };
       const created = await provider.createInstance({
         ownerUserId,
         region,
@@ -341,15 +420,15 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
         placementId: target.active_placement_id ?? undefined,
       });
       const resourceId = created.providerResourceId;
+      createdId = resourceId;
+      await advance(["provisioning"], "bootstrapping", { provider_resource_id: resourceId });
       if (target.active_placement_id) {
         await updatePlacement(supabase, target.active_placement_id, { provider_resource_id: resourceId });
       }
-      await updateInstance(supabase, target.id, { provider_resource_id: resourceId });
-      await setInstanceStatus(supabase, target, "bootstrapping");
       await runBootManifest(provider, resourceId);
 
       const observed = await provider.getInstance(resourceId);
-      await setInstanceStatus(supabase, target, observed.state, {
+      await advance(["bootstrapping"], observed.state, {
         ready_at: observed.state === "ready" ? new Date().toISOString() : null,
       });
 
@@ -364,7 +443,7 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
         username: MANAGED_SSH_USERNAME,
         existingEndpointId: null,
       });
-      await updateInstance(supabase, target.id, { endpoint_id: endpointId });
+      await advance([observed.state], null, { endpoint_id: endpointId });
       await establishSshTrust(supabase, provider, {
         ownerUserId,
         instanceId: target.id,
@@ -380,7 +459,12 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
         detail: { provider_resource_id: resourceId, observed_state: observed.state },
       };
     },
-    () => setInstanceStatus(supabase, target, "failed"),
+    // A deleted (or deleting) row stays as the delete left it.
+    async () => {
+      if (await updateInstance(supabase, target.id, {}, { expectStatus: ENSURE_FAILABLE })) {
+        await setInstanceStatus(supabase, target, "failed");
+      }
+    },
   );
   const refreshed = await getInstanceForOwner(supabase, ownerUserId);
   return ok({ operation_id: opId, status: "succeeded", instance: serializeInstance(refreshed) });
@@ -561,12 +645,16 @@ export async function handleResize(body: Record<string, unknown>, deps: RemoteIn
   if (!instance.active_placement_id || !instance.provider_resource_id) {
     throw new HttpError("Instance is not provisioned yet", 409, "not_ready");
   }
-  // A BYOS workspace resizes on its own provider account.
+  // A BYOS workspace resizes on its own provider account. The context is
+  // the instance's billing (cloud_context_for reads the live instance).
+  const ctx = deps.cloudContext ? await deps.cloudContext() : PERSONAL_CONTEXT;
+  const refused = modeRefusal(ctx, instance.credential_source === "byos" ? "byos" : "managed");
+  if (refused) return refused;
   let resolved: MachineTypeRow | null;
   if (instance.credential_source === "byos") {
     if (!deps.byos) return BYOS_DISABLED;
     const plan = await planByosPlacement(
-      byosPlanDeps(deps.byos),
+      byosPlanDeps(deps.byos, ctx),
       { mode: "byos", kind: kindOf(instance) },
       req.tierId,
       instance.region,

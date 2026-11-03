@@ -10,6 +10,8 @@ const BRANCH = "feat/empty-event-message";
 
 test("code-git: the Code tab hides version control directories", async ({ page }) => {
   await home(page);
+  // Untouched entries fold behind this toggle; on main every entry is.
+  await page.getByRole("button", { name: /^Show \d+ unchanged files?$/ }).click();
   await settle(page, 2000);
   await capture(page, {
     name: "15-code-git-hidden",
