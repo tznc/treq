@@ -796,7 +796,7 @@ impl WorkspacesScreen {
       cx,
     )
     .pl(px(16. + INDENT * entry.depth as f32))
-    .when(marked, |row| row.bg(palette.selected()))
+    .selected(marked)
     .when(pending, |row| row.opacity(0.6))
     .on_click(cx.listener(move |this, _, _, cx| {
       if this.pending.contains(&id) {
@@ -1150,7 +1150,7 @@ impl Render for Switcher {
         let path = repo.canonical_remote_path;
         let current = path == self.current;
         widgets::row(
-          ("switch-repo", i),
+          format!("switch-repo-{i}"),
           repo_name(&path).to_string(),
           Some(path.clone().into()),
           cx,
@@ -1189,11 +1189,18 @@ impl Render for Switcher {
                 .justify_center()
                 .children(tone.map(|(t, label)| Dot::new(t, label, &palette)))
                 .into_any_element();
-              widgets::row_full(("switch-machine", i), Some(leading), name, None, None, cx)
-                .on_click(move |_, _, cx| {
-                  sheet::close(cx);
-                  ui::open_machine(machine.clone(), cx);
-                })
+              widgets::row_full(
+                format!("switch-machine-{i}"),
+                Some(leading),
+                name,
+                None,
+                None,
+                cx,
+              )
+              .on_click(move |_, _, cx| {
+                sheet::close(cx);
+                ui::open_machine(machine.clone(), cx);
+              })
             },
           ))
       })

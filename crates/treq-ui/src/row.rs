@@ -5,7 +5,7 @@
 //! ([`Palette::selected`]), with no shadow and the text left its own colour.
 
 use gpui::{
-  div, prelude::*, AnyElement, App, Div, Hsla, Interactivity, Role, SharedString, Stateful,
+  div, prelude::*, px, AnyElement, App, Div, Hsla, Interactivity, Role, SharedString, Stateful,
   StyleRefinement, Window,
 };
 
@@ -23,7 +23,14 @@ pub enum RowDensity {
   Default,
   /// At least 48, with the meta on a second line: commits, PRs, issues.
   TwoLine,
+  /// At least [`TOUCH_ROW_HEIGHT`] (56), for a finger: body-size title, the
+  /// meta on a second line, touch padding, and a press fill instead of a
+  /// hover fill, which would stay on after a tap.
+  Touch,
 }
+
+/// The height of a [`RowDensity::Touch`] row.
+pub const TOUCH_ROW_HEIGHT: f32 = 56.;
 
 impl RowDensity {
   pub fn min_height(self) -> f32 {
@@ -31,6 +38,7 @@ impl RowDensity {
       RowDensity::Compact => theme::ROW_HEIGHT_COMPACT,
       RowDensity::Default => theme::ROW_HEIGHT,
       RowDensity::TwoLine => 48.,
+      RowDensity::Touch => TOUCH_ROW_HEIGHT,
     }
   }
 }
@@ -63,6 +71,7 @@ pub struct Row {
   disabled: bool,
   interactive: bool,
   centered: bool,
+  divider: bool,
 }
 
 impl Row {
@@ -88,6 +97,7 @@ impl Row {
       disabled: false,
       interactive: true,
       centered: false,
+      divider: false,
     }
   }
 
@@ -201,6 +211,14 @@ impl Row {
     self
   }
 
+  /// A hairline under the row, as between the rows of a card. It sits on
+  /// the next row's top edge (or the card's border under the last row) and
+  /// stops short of rounded corners.
+  pub fn divider(mut self, divider: bool) -> Self {
+    self.divider = divider;
+    self
+  }
+
   /// False for a row that takes no click, such as a line of results: no
   /// hover and no pointer cursor.
   pub fn interactive(mut self, interactive: bool) -> Self {
@@ -211,7 +229,8 @@ impl Row {
   /// The fill under the pointer: [`Palette::hover`], on a row that takes a
   /// click and isn't already selected.
   pub fn hover_fill(&self) -> Option<Hsla> {
-    (self.interactive && !self.disabled && !self.selected).then(|| self.palette.hover())
+    let touch = self.density == RowDensity::Touch;
+    (self.interactive && !self.disabled && !self.selected && !touch).then(|| self.palette.hover())
   }
 
   /// The accessible name: [`Row::label`], else the title.
@@ -259,7 +278,9 @@ impl Styled for Row {
 impl RenderOnce for Row {
   fn render(mut self, _: &mut Window, _: &mut App) -> impl IntoElement {
     let p = self.palette;
-    let two_line = self.density == RowDensity::TwoLine;
+    let touch = self.density == RowDensity::Touch;
+    let two_line = self.density == RowDensity::TwoLine || touch;
+    let (body_px, _) = theme::Density::Touch.font_sizes();
     let hover = self.hover_fill();
     let fg = self.title_color();
     let fill = self.fill();
@@ -271,6 +292,9 @@ impl RenderOnce for Row {
     let centered = self.centered;
     let title = self.title.map(|title| {
       text(div(), TextSize::Sm)
+        .when(touch, |el| {
+          el.text_size(px(body_px)).line_height(px(body_px + 5.))
+        })
         .min_w_0()
         .truncate()
         .text_color(fg)
@@ -278,6 +302,9 @@ impl RenderOnce for Row {
     });
     let meta = self.meta.map(|meta| {
       text(div(), if two_line { TextSize::Xs } else { TextSize::Sm })
+        .when(touch, |el| {
+          el.text_size(px(body_px - 1.)).line_height(px(body_px + 4.))
+        })
         .min_w_0()
         .truncate()
         .text_color(p.muted_foreground)
@@ -286,6 +313,9 @@ impl RenderOnce for Row {
     // The row's defaults go first, so styles set on it win.
     let user: StyleRefinement = std::mem::take(self.base.style());
     let mut base = text(self.base, TextSize::Sm)
+      .when(touch, |el| {
+        el.text_size(px(body_px)).line_height(px(body_px + 5.))
+      })
       .role(role)
       .when_some(name, |el, name| el.aria_label(name))
       .when(selectable, |el| el.aria_selected(self.selected))
@@ -294,12 +324,17 @@ impl RenderOnce for Row {
       .items_center()
       .gap_2()
       .px_2()
-      .min_h(zpx(self.density.min_height()))
+      .when(touch, |el| el.gap_3().px_4().py_2().relative())
+      // A finger's target is in points: a touch row doesn't follow the rem.
+      .map(|el| match touch {
+        true => el.min_h(px(TOUCH_ROW_HEIGHT)),
+        false => el.min_h(zpx(self.density.min_height())),
+      })
       // An explicit min height drops flex's content minimum: without this a
       // row in a short column would shrink to it and spill its content.
       .flex_shrink_0()
-      .when(two_line, |el| el.py_1p5())
-      .rounded(zpx(theme::RADIUS_SM))
+      .when(two_line && !touch, |el| el.py_1p5())
+      .when(!touch, |el| el.rounded(zpx(theme::RADIUS_SM)))
       .text_color(p.foreground)
       .when(centered, |el| el.justify_center())
       .when(interactive, |el| el.cursor_pointer());
@@ -307,6 +342,22 @@ impl RenderOnce for Row {
     base
       .when_some(fill, |el, fill| el.bg(fill))
       .when_some(hover, |el, hover| el.hover(move |s| s.bg(hover)))
+      .when(touch && interactive, |el| {
+        let pressed = p.hover();
+        el.active(move |s| s.bg(pressed))
+          .child(crate::press::press_overlay())
+      })
+      .when(self.divider, |el| {
+        el.child(
+          div()
+            .absolute()
+            .bottom(px(-1.))
+            .left(px(theme::RADIUS_LG))
+            .right(px(theme::RADIUS_LG))
+            .h(px(1.))
+            .bg(p.border),
+        )
+      })
       .when_some(self.icon, |el, path| {
         el.child(icon(path, 16., p.muted_foreground))
       })
@@ -364,6 +415,22 @@ mod tests {
     assert_eq!(RowDensity::Default.min_height(), theme::ROW_HEIGHT);
     assert_eq!(theme::ROW_HEIGHT_COMPACT, 28.);
     assert_eq!(theme::ROW_HEIGHT, 32.);
+  }
+
+  /// A phone row is at least as tall as the 56pt touch row.
+  #[test]
+  fn touch_rows_are_at_least_56_tall() {
+    assert!(RowDensity::Touch.min_height() >= 56.);
+  }
+
+  /// A phone row darkens while pressed instead of keeping a hover fill,
+  /// which would stay on after a tap.
+  #[test]
+  fn touch_rows_have_no_hover_fill() {
+    let p = theme::palette(false);
+    let row = Row::new("a", &p).density(RowDensity::Touch).divider(true);
+    assert_eq!(row.hover_fill(), None);
+    assert!(row.divider);
   }
 
   #[test]
@@ -497,6 +564,12 @@ mod tests {
             ),
           )
           .child(
+            Row::new("touch", &p)
+              .density(RowDensity::Touch)
+              .title("touch")
+              .meta("detail"),
+          )
+          .child(
             Row::load_more("more", false, &p).on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
           )
       }
@@ -520,6 +593,22 @@ mod tests {
       let default = cx.debug_bounds("default").expect("default row");
       assert_eq!(compact.size.height, px(28.));
       assert_eq!(default.size.height, px(32.));
+    }
+
+    #[gpui::test]
+    fn a_touch_row_is_56_tall_with_its_detail_below(cx: &mut TestAppContext) {
+      let (mut cx, _) = mount(cx);
+      let touch = cx.debug_bounds("touch").expect("touch row");
+      assert!(touch.size.height >= px(56.), "{:?}", touch.size.height);
+      // A finger's target is in points, not rems: a phone's 15px rem
+      // doesn't shrink it.
+      cx.update(|window, cx| {
+        window.set_rem_size(px(15.));
+        window.refresh();
+        window.draw(cx).clear(cx);
+      });
+      let touch = cx.debug_bounds("touch").expect("touch row");
+      assert!(touch.size.height >= px(56.), "{:?}", touch.size.height);
     }
 
     #[gpui::test]

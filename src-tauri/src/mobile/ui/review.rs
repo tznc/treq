@@ -25,7 +25,6 @@ use gpui_kit::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputState, Textarea, TextareaState},
-    tag::Tag,
     v_flex, ActiveTheme, Icon, IconName, Sizable,
   },
   div, px, AnyElement, App, AppContext, Context, Div, Entity, FontWeight, Hsla, InteractiveElement,
@@ -449,7 +448,10 @@ pub fn comment_card(
         .gap_2()
         .child(widgets::muted(place(comment), cx))
         .when(outdated, |row| {
-          row.child(Tag::warning().small().child("Outdated"))
+          row.child(
+            treq_ui::Badge::new("Outdated", &treq_ui::theme::current(cx))
+              .tone(treq_ui::Tone::Warning),
+          )
         }),
     )
     .child(body)
@@ -503,7 +505,7 @@ pub type OnTap = Rc<dyn Fn(LineRef, &mut Window, &mut App)>;
 
 /// The selected rows' background, as the file viewer uses.
 pub fn picked_bg(cx: &App) -> Hsla {
-  cx.theme().primary.opacity(0.15)
+  treq_ui::theme::current(cx).selected()
 }
 
 /// File `path`'s diff, each line tappable, with its comments under their
@@ -878,7 +880,7 @@ impl Render for SendSheet {
             ),
           };
           let selected = chosen.as_ref() == Some(&d);
-          widgets::choice(("destination", i), title, Some(detail.into()), selected, cx)
+          widgets::choice(format!("destination-{i}"), title, Some(detail.into()), selected, cx)
             .on_click(cx.listener(move |this, _, _, cx| {
               this.picked = Some(d.clone());
               cx.notify();

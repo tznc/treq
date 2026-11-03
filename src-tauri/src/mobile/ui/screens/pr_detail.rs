@@ -17,7 +17,6 @@ use gpui_kit::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Textarea, TextareaState},
-    tag::Tag,
     v_flex, ActiveTheme, IconName, Sizable, StyledExt,
   },
   div, img, px, AnyElement, App, AppContext, ClipboardItem, Context, Div, Entity, FontWeight,
@@ -616,7 +615,7 @@ impl PrDetailScreen {
           .children(shown.into_iter().enumerate().map(|(i, check)| {
             let link = check.link.clone();
             widgets::row_full(
-              ("check", i),
+              format!("check-{i}"),
               Some(check_icon(check, cx)),
               check.name.clone(),
               check.duration_secs.map(|s| duration(s).into()),
@@ -678,10 +677,10 @@ impl PrDetailScreen {
         )
         .into_any_element(),
     };
-    let tag = if approved {
-      Tag::success()
+    let tone = if approved {
+      treq_ui::Tone::Success
     } else {
-      Tag::danger()
+      treq_ui::Tone::Danger
     };
     h_flex()
       .gap_2()
@@ -691,7 +690,13 @@ impl PrDetailScreen {
       .flex_wrap()
       .child(avatar)
       .child(div().font_weight(FontWeight::MEDIUM).child(login))
-      .child(tag.small().child(review.verdict().unwrap_or_default()))
+      .child(
+        treq_ui::Badge::new(
+          review.verdict().unwrap_or_default(),
+          &treq_ui::theme::current(cx),
+        )
+        .tone(tone),
+      )
       .child(widgets::muted(day(&review.submitted_at), cx))
   }
 
@@ -811,8 +816,8 @@ impl Render for PrDetailScreen {
         h_flex()
           .gap_2()
           .flex_wrap()
-          .child(state_tag(&pr))
-          .children(review_tag(&pr))
+          .child(state_tag(&pr, cx))
+          .children(review_tag(&pr, cx))
           .child(widgets::muted(
             format!("#{} by {}", pr.number, pr.author.login),
             cx,
@@ -831,7 +836,7 @@ impl Render for PrDetailScreen {
           h_flex().gap_1().flex_wrap().children(
             pr.labels
               .iter()
-              .map(|l| Tag::secondary().small().child(l.name.clone())),
+              .map(|l| treq_ui::Badge::new(l.name.clone(), &treq_ui::theme::current(cx))),
           ),
         )
       });

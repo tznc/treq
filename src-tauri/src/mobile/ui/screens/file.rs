@@ -168,7 +168,9 @@ impl FileScreen {
     h_flex()
       .id(("line", index))
       .px_2()
-      .when(selected, |row| row.bg(review::picked_bg(cx)))
+      .when(selected, |row| {
+        row.bg(treq_ui::theme::current(cx).selected())
+      })
       .child(
         widgets::mono(format!("{number:>5}  "), cx).text_color(if selected {
           theme.primary

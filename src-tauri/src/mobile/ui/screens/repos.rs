@@ -134,7 +134,7 @@ impl Render for ReposScreen {
       widgets::card(cx).children(saved.into_iter().enumerate().map(|(i, repo)| {
         let path = repo.canonical_remote_path;
         let name = workspaces::repo_name(&path).to_string();
-        widgets::row(("repo", i), name, Some(path.clone().into()), cx)
+        widgets::row(format!("repo-{i}"), name, Some(path.clone().into()), cx)
           .on_click(cx.listener(move |this, _, _, cx| this.open_repository(path.clone(), cx)))
       }))
     };

@@ -205,7 +205,7 @@ impl RenderOnce for Dot {
 }
 
 /// `el` at caption size for the app's density.
-fn caption<E: Styled>(el: E, cx: &App) -> E {
+pub(crate) fn caption<E: Styled>(el: E, cx: &App) -> E {
   match cx
     .try_global::<crate::theme::Density>()
     .copied()

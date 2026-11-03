@@ -2,28 +2,15 @@
 //! closes it. Menus (a list of actions) and confirmations are sheets; so is
 //! any view a screen opens with [`open`].
 
-use crate::mobile::ui::widgets::TouchButton as _;
-use std::{
-  cell::Cell,
-  rc::Rc,
-  time::{Duration, Instant},
-};
+use std::{rc::Rc, time::Duration};
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-  canvas,
-  component::{
-    button::{Button, ButtonVariants},
-    h_flex, v_flex, ActiveTheme, Sizable, StyledExt as _,
-  },
-  div, px, relative, AnyView, App, AppContext, Context, DispatchPhase, Entity, Global,
-  InteractiveElement, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement,
-  Pixels, Render, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window,
+  div, AnyView, App, AppContext, Context, Entity, Global, InteractiveElement, IntoElement,
+  ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled, WeakEntity,
+  Window,
 };
-
-use gpui_kit::base::TestSupportExt as _;
-
-use super::widgets;
+use treq_ui::{ConfirmDialog, Dialog, Row, RowDensity};
 
 /// What a sheet action does when tapped. The sheet closes first.
 pub type Action = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -31,32 +18,14 @@ pub type Action = Rc<dyn Fn(&mut Window, &mut App)>;
 /// The open sheet, owned by the root view.
 pub struct Sheet {
   pub title: Option<SharedString>,
-  pub view: AnyView,
-  pub(super) drag: Rc<Drag>,
+  pub(super) body: Body,
 }
 
-/// The drag-down-to-dismiss gesture on the grabber and title.
-#[derive(Default)]
-pub(super) struct Drag {
-  /// Where the press started (window y) and when.
-  start: Cell<Option<(f32, Instant)>>,
-  /// How far the panel follows the finger down.
-  offset: Cell<f32>,
-  /// The panel's height at the last paint.
-  height: Cell<f32>,
+/// What a sheet holds: a screen's view, or a confirmation.
+pub(super) enum Body {
+  View(AnyView),
+  Confirm(Confirm),
 }
-
-/// A drag past this fraction of the sheet's height closes it.
-const DISMISS_FRACTION: f32 = 0.25;
-/// A shorter drag closes it when this fast (px/s) and at least
-/// [`FLICK_MIN`] long.
-const FLICK_SPEED: f32 = 1000.;
-const FLICK_MIN: f32 = 32.;
-
-/// Font sizes of the sheet's title and of a confirmation's body: the title
-/// is one step up from the body.
-pub(super) const TITLE_PX: f32 = 18.;
-pub(super) const BODY_PX: f32 = 16.;
 
 struct Slot {
   root: WeakEntity<super::Root>,
@@ -86,8 +55,7 @@ pub fn open<V: Render>(
         entity.update(cx, |root, cx| {
           root.sheet = Some(Sheet {
             title,
-            view: view.into(),
-            drag: Rc::default(),
+            body: Body::View(view.into()),
           });
           cx.notify();
         });
@@ -140,143 +108,43 @@ pub(super) fn render(sheet: &Sheet, bottom_inset: Pixels, cx: &App) -> impl Into
   render_with(sheet, bottom_inset, Rc::new(|_, cx| close(cx)), cx)
 }
 
-/// [`render`], closing through `on_close` (the scrim tap and a drag down).
+/// [`render`], closing through `on_close` (the scrim tap, a drag down and
+/// a confirmation's Cancel).
 fn render_with(
   sheet: &Sheet,
   bottom_inset: Pixels,
   on_close: Action,
   cx: &App,
 ) -> impl IntoElement {
-  let theme = cx.theme();
   let palette = treq_ui::theme::current(cx);
-  let drag = sheet.drag.clone();
-  let scrim_close = on_close.clone();
-  div()
-    .absolute()
-    .inset_0()
-    .flex()
-    .flex_col()
-    .justify_end()
-    .child(
-      div()
-        .id("sheet-scrim")
-        .absolute()
-        .inset_0()
-        // The tap that closes the sheet must not reach the page below.
-        .occlude()
-        .bg(palette.scrim())
-        .on_click(move |_, window, cx| scrim_close(window, cx)),
-    )
-    .child(
-      v_flex()
-        .id("sheet")
-        .occlude()
-        .relative()
-        .top(px(drag.offset.get()))
-        .max_h(relative(0.85))
-        .overflow_y_scroll()
-        .bg(theme.background)
-        .rounded_t(theme.radius_lg)
-        .pb(bottom_inset + px(16.))
-        .child(drag_tracker(drag.clone(), on_close))
-        .child(
-          v_flex()
-            .id("sheet-handle")
-            .flex_none()
-            // Capture phase: in the app, a press in the sheet does not reach bubble-phase handlers.
-            .capture_any_mouse_down({
-              let drag = drag.clone();
-              move |e, _, cx| {
-                if e.button == MouseButton::Left {
-                  drag
-                    .start
-                    .set(Some((f32::from(e.position.y), Instant::now())));
-                  // The drag is the sheet's, not a scroll or a tap.
-                  cx.stop_propagation();
-                }
-              }
-            })
-            .child(
-              div()
-                .flex()
-                .justify_center()
-                .pt_2()
-                .child(div().w(px(36.)).h(px(4.)).rounded_full().bg(theme.border)),
-            )
-            .when_some(sheet.title.clone(), |handle, title| {
-              handle.child(
-                div()
-                  .px_4()
-                  .pt_2()
-                  .pb_1()
-                  .text_size(px(TITLE_PX))
-                  .font_semibold()
-                  .text_color(theme.foreground)
-                  .truncate()
-                  .child(title),
-              )
-            }),
-        )
-        // A tall sheet scrolls; its parts keep their height.
-        .child(div().flex_none().child(sheet.view.clone()))
-        .role(gpui_kit::Role::Dialog)
-        .when_some(sheet.title.clone(), |panel, title| panel.aria_label(title))
-        .test_support(),
-    )
-}
-
-/// Re-renders the root, which reads the drag offset, and repaints.
-fn redraw(window: &mut Window, cx: &mut App) {
-  if let Some(root) = cx.try_global::<Slot>().and_then(|s| s.root.upgrade()) {
-    root.update(cx, |_, cx| cx.notify());
-  }
-  window.refresh();
-}
-
-/// Records the panel's height and, while a drag runs, follows the pointer
-/// anywhere in the window and settles the drag on release. It listens in the
-/// capture phase, on every paint: in the app the bubble phase does not see
-/// these events, and a cached frame replays the listeners it was painted with.
-fn drag_tracker(drag: Rc<Drag>, on_close: Action) -> impl IntoElement {
-  let measure = drag.clone();
-  canvas(
-    move |bounds, _, _| measure.height.set(f32::from(bounds.size.height)),
-    move |_, _, window, _| {
-      let moving = drag.clone();
-      window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
-        if phase != DispatchPhase::Capture {
-          return;
-        }
-        if let Some((y, _)) = moving.start.get() {
-          moving.offset.set((f32::from(e.position.y) - y).max(0.));
-          cx.stop_propagation();
-          redraw(window, cx);
-        }
-      });
-      let on_close = on_close.clone();
-      window.on_mouse_event(move |e: &MouseUpEvent, phase, window, cx| {
-        if phase != DispatchPhase::Capture {
-          return;
-        }
-        let Some((y, at)) = drag.start.take() else {
-          return;
-        };
-        cx.stop_propagation();
-        // The panel's offset is where the last move left it.
-        let distance = (f32::from(e.position.y) - y).max(drag.offset.get()).max(0.);
-        let speed = distance / at.elapsed().as_secs_f32().max(1e-3);
-        drag.offset.set(0.);
-        redraw(window, cx);
-        let far = distance >= drag.height.get() * DISMISS_FRACTION;
-        let flick = distance >= FLICK_MIN && speed >= FLICK_SPEED;
-        if far || flick {
-          on_close(window, cx);
-        }
-      });
-    },
-  )
-  .absolute()
-  .inset_0()
+  let content = match &sheet.body {
+    Body::View(view) => Dialog::new("sheet", &palette)
+      .sheet(bottom_inset)
+      .when_some(sheet.title.clone(), |d, title| d.title(title))
+      .on_close(move |window, cx| on_close(window, cx))
+      .child(view.clone())
+      .into_any_element(),
+    Body::Confirm(c) => {
+      let action = c.action.clone();
+      let cancel = on_close.clone();
+      ConfirmDialog::new(
+        "sheet",
+        sheet.title.clone().unwrap_or_default(),
+        c.confirm_label.clone(),
+        &palette,
+      )
+      .sheet(bottom_inset)
+      .message(c.message.clone())
+      .when(c.danger, |d| d.destructive())
+      .on_confirm(move |window, cx| {
+        close(cx);
+        action(window, cx);
+      })
+      .on_cancel(move |window, cx| cancel(window, cx))
+      .into_any_element()
+    }
+  };
+  div().absolute().inset_0().child(content)
 }
 
 /// One row of a [`Menu`].
@@ -322,16 +190,16 @@ pub fn menu(title: impl Into<SharedString>, entries: Vec<MenuEntry>, cx: &mut Ap
 
 impl Render for Menu {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let theme = cx.theme();
-    v_flex().children(self.entries.iter().map(|entry| {
+    let palette = treq_ui::theme::current(cx);
+    gpui_kit::component::v_flex().children(self.entries.iter().map(|entry| {
       let action = entry.action.clone();
-      h_flex()
-        .id(entry.id.clone())
-        .min_h(px(widgets::ROW_H - 8.))
-        .px_4()
-        .items_center()
-        .active(|s| s.bg(theme.accent))
-        .when(entry.danger, |row| row.text_color(theme.danger))
+      Row::new(entry.id.clone(), &palette)
+        .density(RowDensity::Touch)
+        .role(gpui_kit::Role::MenuItem)
+        .label(entry.label.clone())
+        // A menu is shorter than a list: its rows are actions, not records.
+        .min_h(gpui_kit::px(48.))
+        .when(entry.danger, |row| row.text_color(palette.destructive))
         .child(entry.label.clone())
         .on_click(move |_, window, cx| {
           close(cx);
@@ -342,7 +210,7 @@ impl Render for Menu {
 }
 
 /// A confirmation: what will happen, and the one button that does it.
-pub struct Confirm {
+pub(super) struct Confirm {
   message: SharedString,
   confirm_label: SharedString,
   danger: bool,
@@ -359,54 +227,27 @@ pub fn confirm(
   action: impl Fn(&mut Window, &mut App) + 'static,
   cx: &mut App,
 ) {
-  let (message, confirm_label) = (message.into(), confirm_label.into());
-  let action: Action = Rc::new(action);
-  open(Some(title.into()), cx, move |_, cx| {
-    cx.new(|_| Confirm {
-      message,
-      confirm_label,
+  let Some(root) = cx.try_global::<Slot>().map(|s| s.root.clone()) else {
+    return;
+  };
+  let sheet = Sheet {
+    title: Some(title.into()),
+    body: Body::Confirm(Confirm {
+      message: message.into(),
+      confirm_label: confirm_label.into(),
       danger,
-      action,
-    })
+      action: Rc::new(action),
+    }),
+  };
+  // Deferred: callers are usually inside another entity's update.
+  cx.defer(move |cx| {
+    root
+      .update(cx, |root, cx| {
+        root.sheet = Some(sheet);
+        cx.notify();
+      })
+      .ok();
   });
-}
-
-impl Render for Confirm {
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let action = self.action.clone();
-    v_flex()
-      .px_4()
-      .pt_1()
-      .gap_4()
-      .child(widgets::muted(self.message.clone(), cx).text_size(px(BODY_PX)))
-      .child(
-        v_flex()
-          .gap_2()
-          .child(
-            Button::new("confirm")
-              .large()
-              .w_full()
-              .h(px(widgets::CTA_H - 8.))
-              .label(self.confirm_label.clone())
-              .map(|b| if self.danger { b.danger() } else { b.primary() })
-              .on_click(move |_, window, cx| {
-                close(cx);
-                action(window, cx);
-              })
-              .touch(),
-          )
-          .child(
-            Button::new("cancel")
-              .outline()
-              .large()
-              .w_full()
-              .h(px(widgets::CTA_H - 8.))
-              .label("Cancel")
-              .on_click(|_, _, cx| close(cx))
-              .touch(),
-          ),
-      )
-  }
 }
 
 #[cfg(test)]
@@ -461,8 +302,7 @@ mod tests {
             Host(
               super::Sheet {
                 title: Some("Delete workspace?".into()),
-                view,
-                drag: Rc::default(),
+                body: super::Body::View(view),
               },
               flag,
             )
@@ -506,7 +346,7 @@ mod tests {
   /// The title outranks the body text it introduces.
   #[test]
   fn the_title_is_larger_than_the_body() {
-    const { assert!(super::TITLE_PX > super::BODY_PX) };
+    const { assert!(treq_ui::dialog::SHEET_TITLE_PX > treq_ui::dialog::SHEET_BODY_PX) };
   }
 
   /// Dragging the title down past a quarter of the sheet closes it.
@@ -547,8 +387,7 @@ mod tests {
             Host(
               super::Sheet {
                 title: Some("Delete workspace?".into()),
-                view,
-                drag: Rc::default(),
+                body: super::Body::View(view),
               },
               Rc::default(),
             )

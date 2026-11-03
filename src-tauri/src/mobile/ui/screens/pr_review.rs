@@ -21,7 +21,6 @@ use gpui_kit::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Textarea, TextareaState},
-    tag::Tag,
     v_flex, ActiveTheme, IconName, Sizable, StyledExt,
   },
   div, point, px, AnyElement, App, AppContext, Context, Div, Entity, InteractiveElement,
@@ -615,10 +614,16 @@ impl PrReviewScreen {
           .child(title),
       )
       .when(thread.is_outdated, |h| {
-        h.child(Tag::warning().small().child("Outdated"))
+        h.child(
+          treq_ui::Badge::new("Outdated", &treq_ui::theme::current(cx))
+            .tone(treq_ui::Tone::Warning),
+        )
       })
       .when(thread.is_resolved, |h| {
-        h.child(Tag::secondary().small().child("Resolved"))
+        h.child(treq_ui::Badge::new(
+          "Resolved",
+          &treq_ui::theme::current(cx),
+        ))
       })
       .on_click(cx.listener(move |this, _, _, cx| {
         if !this.toggled.remove(&id) {
@@ -705,7 +710,10 @@ impl PrReviewScreen {
       .child(
         h_flex()
           .gap_2()
-          .child(Tag::primary().small().child("Pending"))
+          .child(
+            treq_ui::Badge::new("Pending", &treq_ui::theme::current(cx))
+              .tone(treq_ui::Tone::Primary),
+          )
           .child(widgets::muted(
             format!("{} {}", c.path, line_label(c.start_line, c.end_line)),
             cx,
@@ -752,9 +760,14 @@ impl PrReviewScreen {
         if pending > 0 {
           detail.push_str(&format!(" · {pending} pending"));
         }
-        widgets::row(("pr-file", i), f.path.clone(), Some(detail.into()), cx)
-          .on_click(cx.listener(move |this, _, _, cx| this.show_file(Some(i), cx)))
-          .into_any_element()
+        widgets::row(
+          format!("pr-file-{i}"),
+          f.path.clone(),
+          Some(detail.into()),
+          cx,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| this.show_file(Some(i), cx)))
+        .into_any_element()
       })
       .collect();
     let pending: Vec<Div> = self

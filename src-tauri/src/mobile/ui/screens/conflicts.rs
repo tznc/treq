@@ -10,9 +10,10 @@ use gpui_kit::{
     input::{Input, InputState},
     Sizable,
   },
-  div, px, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-  Render, ScrollHandle, StatefulInteractiveElement, Styled, Window,
+  div, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
+  ScrollHandle, StatefulInteractiveElement, Styled, Window,
 };
+use treq_ui::{Row, RowDensity};
 
 use super::{mutation_message, on_epoch, workspace::Target};
 use crate::mobile::{
@@ -174,14 +175,17 @@ impl Render for ConflictsScreen {
         "No conflicted files.",
         cx,
       )),
-      Load::Ready(files) => widgets::card(cx).children(files.iter().map(|path| {
-        h_flex()
-          .min_h(px(widgets::ROW_H))
-          .px_4()
-          .items_center()
-          .border_b_1()
-          .child(widgets::mono(path.clone(), cx))
-      })),
+      Load::Ready(files) => {
+        let palette = treq_ui::theme::current(cx);
+        widgets::card(cx).children(files.iter().enumerate().map(|(i, path)| {
+          Row::new(format!("conflict-{i}"), &palette)
+            .density(RowDensity::Touch)
+            .divider(true)
+            .interactive(false)
+            .label(path.clone())
+            .child(widgets::mono(path.clone(), cx))
+        }))
+      }
     };
     let label = if self.running {
       "Working…"

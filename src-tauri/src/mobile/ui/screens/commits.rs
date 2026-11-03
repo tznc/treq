@@ -19,10 +19,11 @@ use gpui_kit::{
     tag::Tag,
     v_flex, ActiveTheme, Sizable,
   },
-  div, App, AppContext, Context, Div, Entity, EventEmitter, InteractiveElement, IntoElement,
-  ParentElement, Render, Result, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement,
-  Styled, WeakEntity, Window,
+  div, App, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
+  ParentElement, Render, Result, ScrollHandle, StatefulInteractiveElement, Styled, WeakEntity,
+  Window,
 };
+use treq_ui::{Row, RowDensity};
 
 use super::{mutation_message, workspace::Target};
 use crate::mobile::{
@@ -409,13 +410,11 @@ impl Render for CommitsScreen {
           .map(|ix| {
             let actions = actions(&shown, ix, &self.removing);
             let commit = shown[ix].clone();
-            commit_row(&commit, cx)
-              .id(SharedString::from(format!("commit-{}", commit.commit_id)))
-              .when(!actions.is_empty(), |row| {
-                row.active(|s| s.bg(cx.theme().accent)).on_click(
-                  cx.listener(move |this, _, _, cx| this.menu(commit.clone(), actions.clone(), cx)),
-                )
-              })
+            commit_row(&commit, !actions.is_empty(), cx).when(!actions.is_empty(), |row| {
+              row.on_click(
+                cx.listener(move |this, _, _, cx| this.menu(commit.clone(), actions.clone(), cx)),
+              )
+            })
           })
           .collect();
         widgets::card(cx).children(rows)
@@ -458,16 +457,11 @@ impl Render for CommitsScreen {
   }
 }
 
-fn commit_row(commit: &JjLogCommit, cx: &App) -> Stateful<Div> {
+fn commit_row(commit: &JjLogCommit, interactive: bool, cx: &App) -> Row {
   let description = commit.description.lines().next().unwrap_or("").to_string();
-  v_flex()
-    .id("commit")
-    .px_4()
-    .py_3()
+  let lines = v_flex()
+    .py_1()
     .gap_1()
-    .border_b_1()
-    .border_color(cx.theme().border)
-    .when(commit.on_target_only, |c| c.opacity(0.6))
     .child(
       h_flex()
         .gap_2()
@@ -495,7 +489,21 @@ fn commit_row(commit: &JjLogCommit, cx: &App) -> Stateful<Div> {
         commit.author_name, commit.timestamp, commit.insertions, commit.deletions
       ),
       cx,
-    ))
+    ));
+  Row::new(
+    format!("commit-{}", commit.commit_id),
+    &treq_ui::theme::current(cx),
+  )
+  .density(RowDensity::Touch)
+  .divider(true)
+  .interactive(interactive)
+  .label(format!(
+    "{} {}",
+    commit.short_id,
+    commit.description.lines().next().unwrap_or("")
+  ))
+  .when(commit.on_target_only, |c| c.opacity(0.6))
+  .child(lines)
 }
 
 /// Editing a commit's description.
