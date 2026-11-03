@@ -31,6 +31,14 @@ use super::{
 };
 use crate::lock_ext::LockExt;
 
+/// How long a background status read may take. Far below the client's
+/// 160 s limit, which is sized for Edge Functions that do real work, so a
+/// hung read does not hold up the card.
+#[cfg(not(test))]
+const STATUS_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+#[cfg(test)]
+const STATUS_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// The comment the desktop app registers its SSH key with.
 const KEY_COMMENT: &str = "treq-managed-vm";
 
@@ -735,7 +743,8 @@ impl Cloud {
   }
 
   async fn refresh_status(&self) {
-    if let Ok(status) = control_plane::instance_status(&self.supabase).await {
+    let read = control_plane::instance_status(&self.supabase);
+    if let Ok(Ok(status)) = tokio::time::timeout(STATUS_READ_TIMEOUT, read).await {
       self.update_workspace(|w| w.instance_status = Some(status));
     }
   }
@@ -962,13 +971,18 @@ impl Cloud {
         .map(drop)
     }
     .await;
-    if let Err(error) = result {
-      self.fail(error);
+    let failed = result.err();
+    self.update_workspace(|w| {
+      w.provisioning_stage = None;
+      if let Some(error) = &failed {
+        w.provisioning_error = Some(error.clone());
+      }
+    });
+    if failed.is_some() {
       // The control plane records the failure; reload so the card offers
       // a retry instead of a fresh create.
       self.refresh_status().await;
     }
-    self.update_workspace(|w| w.provisioning_stage = None);
   }
 
   /// Wake, wait for readiness, then a fresh certificate.
@@ -1908,6 +1922,39 @@ mod tests {
     // through, is a new one.
     assert_eq!(keys[0], keys[1]);
     assert_ne!(keys[1], keys[2]);
+  }
+
+  #[tokio::test]
+  async fn a_failed_create_stops_its_spinner_without_waiting_on_a_hung_status_read() {
+    let server = MockServer::start().await;
+    let (cloud, fake) = signed_in(&server).await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-instance"))
+      .and(body_partial_json(json!({"action": "ensure"})))
+      .respond_with(ResponseTemplate::new(400).set_body_json(json!({"error": "nope"})))
+      .mount(&server)
+      .await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-instance"))
+      .and(body_partial_json(json!({"action": "status"})))
+      .respond_with(
+        ResponseTemplate::new(200)
+          .set_body_json(status("failed"))
+          .set_delay(std::time::Duration::from_secs(10)),
+      )
+      .mount(&server)
+      .await;
+    trust_mocks(&server, None).await;
+    let started = std::time::Instant::now();
+    cloud.provision().await;
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    // The error never shows beside a running spinner.
+    assert!(!fake
+      .snapshots
+      .lock()
+      .unwrap()
+      .iter()
+      .any(|s| s.cloud.provisioning_error.is_some() && s.cloud.provisioning_stage.is_some()));
   }
 
   #[tokio::test]
