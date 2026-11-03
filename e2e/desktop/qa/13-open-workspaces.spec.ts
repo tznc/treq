@@ -259,7 +259,7 @@ test("open-workspaces: the pull request search shows loading, no matches and err
   });
 
   await search.fill("unreachable");
-  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
   await expect(searching).toBeHidden();
   await settle(page, 300);
   await capture(page, {

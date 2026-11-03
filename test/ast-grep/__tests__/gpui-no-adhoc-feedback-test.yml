@@ -82,3 +82,7 @@ invalid:
     fn retry(p: &Palette) -> Button {
       Button::new("retry", p).label("Try again")
     }
+  - |
+    fn list(p: &Palette, empty: bool) -> Div {
+      div().child(if empty { "No files found" } else { "Type to search" })
+    }

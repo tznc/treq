@@ -49,6 +49,17 @@ rule:
       regex: ^"(No |Loading|Fetching|Couldn't|Failed to|Try again)
       inside:
         kind: arguments
+        # Through an `if`/`match` that picks the text, as in
+        # `.child(if empty { "No files" } else { .. })`.
+        stopBy:
+          not:
+            any:
+              - kind: if_expression
+              - kind: else_clause
+              - kind: block
+              - kind: match_expression
+              - kind: match_block
+              - kind: match_arm
         inside:
           kind: call_expression
           has:

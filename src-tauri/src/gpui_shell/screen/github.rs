@@ -136,7 +136,7 @@ enum ListRow {
     sig: u64,
     branches: bool,
   },
-  /// "No loaded pull requests match the filters."
+  /// "No pull requests match", among those loaded.
   NoMatch,
   LoadMore,
 }
@@ -1688,7 +1688,8 @@ impl GithubView {
         }
         if issues.is_empty() {
           return scrolled(
-            ui::EmptyState::new("github-no-issues", "No issues found.", p)
+            ui::EmptyState::new("github-no-issues", "No issues", p)
+              .message("This repository has no issues in this state.")
               .icon(theme::ICON_CIRCLE_DOT)
               .into_any_element(),
           );
@@ -1748,7 +1749,8 @@ impl GithubView {
         }
         if prs.is_empty() {
           return scrolled(
-            ui::EmptyState::new("github-no-prs", "No pull requests found.", p)
+            ui::EmptyState::new("github-no-prs", "No pull requests", p)
+              .message("This repository has no pull requests in this state.")
               .icon(theme::ICON_PR)
               .into_any_element(),
           );
@@ -1847,10 +1849,11 @@ impl GithubView {
       }
       ListRow::NoMatch => ui::EmptyState::new(
         "github-no-matching-prs",
-        "No loaded pull requests match the filters.",
+        "No pull requests match",
         &p,
       )
       .icon(theme::ICON_PR)
+      .message("Only loaded pull requests are searched. Clear the search, change the filters or load more.")
       .into_any_element(),
       ListRow::LoadMore => self.load_more_row(&p, cx),
     }

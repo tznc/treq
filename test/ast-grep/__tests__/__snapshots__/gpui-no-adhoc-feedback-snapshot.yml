@@ -194,6 +194,31 @@ snapshots:
       start: 67
       end: 89
   ? |
+    fn list(p: &Palette, empty: bool) -> Div {
+      div().child(if empty { "No files found" } else { "Type to search" })
+    }
+  : labels:
+    - source: '"No files found"'
+      style: primary
+      start: 68
+      end: 84
+    - source: child
+      style: secondary
+      start: 51
+      end: 56
+    - source: div().child
+      style: secondary
+      start: 45
+      end: 56
+    - source: div().child(if empty { "No files found" } else { "Type to search" })
+      style: secondary
+      start: 45
+      end: 113
+    - source: (if empty { "No files found" } else { "Type to search" })
+      style: secondary
+      start: 56
+      end: 113
+  ? |
     fn message(p: &Palette, text: impl Into<SharedString>) -> Div {
       div().child(text.into())
     }

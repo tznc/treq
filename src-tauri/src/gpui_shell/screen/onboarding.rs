@@ -1022,19 +1022,20 @@ impl OnboardingView {
               .when(
                 empty && !(section == containers && self.container.is_some()),
                 |d| {
-                  d.child(
-                    ui::text(div(), TextSize::Sm)
-                      .px_2()
-                      .py_1()
-                      .text_color(p.muted_foreground)
-                      .child(if section == ssh {
-                        "No hosts yet."
-                      } else if section == OTHER_MACHINES {
-                        "No SSH hosts or dev containers yet."
-                      } else {
-                        "No containers yet."
-                      }),
-                  )
+                  d.child(if section == ssh {
+                    ui::EmptyState::new("onboarding-no-hosts", "No hosts yet", &p)
+                      .message("Add a host from your SSH config to open repositories on it.")
+                  } else if section == OTHER_MACHINES {
+                    ui::EmptyState::new(
+                      "onboarding-no-machines",
+                      "No SSH hosts or dev containers yet",
+                      &p,
+                    )
+                    .message("Add an SSH host or a dev container to work on another machine.")
+                  } else {
+                    ui::EmptyState::new("onboarding-no-containers", "No containers yet", &p)
+                      .message("Start a dev container to open repositories inside it.")
+                  })
                 },
               )
           })),

@@ -2224,6 +2224,7 @@ impl CommitsView {
     };
     let busy = state.deferred_loading.contains(&file.path);
     let (id, path) = (commit.commit_id.clone(), file.path.clone());
+    let spin = SharedString::from(format!("load-diff-{id}-spin"));
     let muted = p.muted_foreground;
     let fg = p.foreground;
     div()
@@ -2264,7 +2265,10 @@ impl CommitsView {
                   .hover(move |s| s.bg(p.hover()).text_color(fg))
                   .on_click(cx.listener(move |view, _, _, cx| view.load_file_diff(&id, &path, cx)))
               })
-              .child(if busy { "Loading…" } else { "Load diff" }),
+              .when(busy, |this| {
+                this.child(ui::Loading::new(spin, p).label("Loading diff…"))
+              })
+              .when(!busy, |this| this.child("Load diff")),
           ),
       )
       .into_any_element()

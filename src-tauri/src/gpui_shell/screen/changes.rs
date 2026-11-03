@@ -3134,15 +3134,16 @@ impl ChangesView {
       Body::Empty => card.child(
         div()
           .debug_selector(|| "empty-diff-placeholder".into())
-          .px_3()
-          .py_6()
-          .flex()
-          .justify_center()
-          .text_color(muted)
           .child(if conflicted_file {
-            "No diff available for this conflicted file (possibly deleted)"
+            ui::EmptyState::new(
+              "empty-diff-conflicted",
+              "No diff for this conflicted file",
+              p,
+            )
+            .message("The file may have been deleted on one side of the conflict.")
           } else {
-            "No diff hunks available"
+            ui::EmptyState::new("empty-diff-none", "No diff hunks", p)
+              .message("This change has no text lines to show, such as a mode change.")
           }),
       ),
       Body::Generated => {

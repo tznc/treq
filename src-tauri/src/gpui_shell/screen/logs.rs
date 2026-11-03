@@ -1038,22 +1038,33 @@ impl LogsView {
       .child(ui::Loading::new("logs-loading", p).label(text))
   }
 
-  fn empty_message(&self) -> &'static str {
+  /// The empty feed's title and why it is empty.
+  fn empty_message(&self) -> (&'static str, &'static str) {
     match self.source {
-      Source::Checks if !self.checks.is_empty() => "No logs recorded for the selected checks yet.",
-      Source::Checks => {
-        "No check logs recorded yet. Run checks from the Checks button in a workspace header to populate this table."
-      }
-      Source::Agent => {
-        "No agent chat logs yet. Open an agent terminal (not a shell) to start recording the conversation."
-      }
-      Source::AppSetup => {
-        "No app setup script runs yet. Set a script in Application settings and click Run."
-      }
-      Source::System => "No system logs recorded yet.",
-      Source::Reviews => {
-        "No code reviews in the last 30 days. Review agent comments and reviews you send to an agent show here."
-      }
+      Source::Checks if !self.checks.is_empty() => (
+        "No logs for these checks",
+        "The selected checks have not written any logs yet.",
+      ),
+      Source::Checks => (
+        "No check logs yet",
+        "Run checks from the Checks button in a workspace header to fill this table.",
+      ),
+      Source::Agent => (
+        "No agent chat logs yet",
+        "Open an agent terminal (not a shell) to start recording the conversation.",
+      ),
+      Source::AppSetup => (
+        "No app setup runs yet",
+        "Set a script in Application settings and click Run.",
+      ),
+      Source::System => (
+        "No system logs yet",
+        "Treq has not written any system logs yet.",
+      ),
+      Source::Reviews => (
+        "No code reviews in the last 30 days",
+        "Review agent comments and reviews you send to an agent show here.",
+      ),
     }
   }
 
@@ -1061,13 +1072,15 @@ impl LogsView {
   fn feed(&mut self, records: Rc<Vec<LogRecordView>>, p: &Palette, cx: &mut Context<Self>) -> Div {
     let spec = feed_spec(self.source);
     if records.is_empty() {
-      return ui::text(div(), TextSize::Xs)
+      let (title, why) = self.empty_message();
+      return div()
         .debug_selector(move || spec.output.into())
         .flex_1()
-        .font_family(theme::MONO_FONT)
-        .p_3()
-        .text_color(p.muted_foreground)
-        .child(self.empty_message());
+        .child(
+          ui::EmptyState::new("logs-empty", title, p)
+            .icon(theme::ICON_FILE_TEXT)
+            .message(why),
+        );
     }
     let selected = self.selection.selected.len();
     let multi = self.selection.multi;
