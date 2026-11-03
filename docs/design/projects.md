@@ -142,7 +142,7 @@ create table public.project_workspaces (
 );
 ```
 
-RLS: enable on all three; `revoke all from anon`. Policy: `owner_user_id = (select auth.uid())` on `projects`; child tables check `exists (select 1 from projects p where p.id = project_id and p.owner_user_id = (select auth.uid()))`. Writes go through security-definer RPCs (`put_project(p_id, p_expected_version, ...)`) like `put_user_config`, so version conflicts raise `version_conflict`. Never store local paths server-side.
+RLS: enable on all three; `revoke all from anon`. Policy: `owner_user_id = (select auth.uid())` on `projects`; child tables check `exists (select 1 from projects p where p.id = project_id and p.owner_user_id = (select auth.uid()))`. Writes go through security-definer RPCs (`put_project(p_id, p_expected_version, ...)`, `put_project_prompt`, `put_project_context_ref`) like `put_user_config`, so version conflicts raise `version_conflict`. Never store local paths server-side.
 
 ### Local (app-level `db.rs`)
 
@@ -189,6 +189,105 @@ treq project ws pr <project> <name> [--draft]
 - **Rebase**: existing auto-rebase runs per repo; no cross-repo ordering.
 - **Overrides**: resolution order repo config.yaml > project repo override > project config > app default (D6).
 
+## Project prompts and context
+
+A project carries **common prompts** and **context references** that Treq adds to every terminal agent it launches in any of the project's repos: per-repo workspaces, the home repo, and project workspaces.
+
+### Today's injection point
+
+`core/agent_command.rs::system_prompt()` builds the Treq system prompt; `prepare_auto_command()` writes it to a temp file passed as `--append-system-prompt-file` (Claude) or prepended to the prompt file (Cursor). Claude filesystem scope comes from `claude_filesystem_settings()`. Project prompts and context plug in here; nothing else in the launch path changes.
+
+### Model
+
+- **Prompt**: `{id, title, body (markdown), enabled, position, applies_to: all | repo_keys[]}`.
+- **Context ref**: `{id, kind: file | dir | url, target, label, applies_to}`.
+  - `url`: synced as is.
+  - `file`/`dir` inside a project repo: stored as `{repo_key, relative_path}`, so it syncs and resolves on every machine.
+  - `file`/`dir` elsewhere on disk: stored per machine (local table, like `repo_locations`), never synced. Shown as "this machine only".
+
+### Decisions
+
+**D9. How prompts reach the agent**
+- A. Append to the Treq system prompt file. **(Recommended)**
+- B. Write a generated `CLAUDE.md`/`AGENTS.md` into each workspace.
+- C. Send as the first user message.
+
+A reuses the existing file and flag, leaves the repo tree untouched (B would show up in diffs and fight checked-in agent files), and does not take up the user's first turn (C).
+
+**D10. How context files reach the agent**
+- A. List resolved paths/URLs in the system prompt and grant read access to them. **(Recommended)**
+- B. Inline file contents into the prompt.
+- C. Copy files into the workspace.
+
+A keeps prompts small and current; the agent reads on demand. Read access: Claude gets `--add-dir` for each dir and read allow rules in the generated settings; the scope text in `system_prompt()` gains "You may read these project context paths: …" so the existing "do not read outside this directory" rule has an explicit exception. Read only; never write. B is an opt-in per file (`inline: true`, capped at 32 KiB) for short files such as a style guide. C goes stale.
+
+**D11. Layering with repo and app prompts**
+- A. Order: Treq base → project prompts → repo prompt (if added later) → task prompt; all concatenated. **(Recommended)**
+- B. Project replaces repo.
+- C. User-chosen order per prompt.
+
+A follows D6: more specific comes later, so it reads as an override to the model, and nothing is silently dropped.
+
+**D12. Where prompts are stored**
+- A. Rows in Supabase (`project_prompts`, `project_context_refs`). **(Recommended)**
+- B. Inside `projects.config` jsonb.
+- C. Markdown files in a chosen repo.
+
+A allows per-item edits without whole-project version conflicts and keeps the `projects` row small. C couples a personal concept to a shared repo (non-goal: team sharing).
+
+### Schema addition
+
+```sql
+create table public.project_prompts (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects(id) on delete cascade,
+  title text not null,
+  body text not null check (octet_length(body) <= 32768),
+  enabled boolean not null default true,
+  position int not null default 0,
+  repo_keys text[],                      -- null = all repos
+  updated_at timestamptz not null default now()
+);
+
+create table public.project_context_refs (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects(id) on delete cascade,
+  kind text not null check (kind in ('file','dir','url')),
+  repo_key text,                         -- set for repo-relative refs
+  relative_path text,
+  url text,
+  label text,
+  inline boolean not null default false,
+  repo_keys text[],
+  check ((kind = 'url') = (url is not null)),
+  check ((kind = 'url') or (repo_key is not null and relative_path is not null))
+);
+```
+
+Same owner RLS as other child tables. Local: `project_context_local(id, project_id, kind, machine_path, label, inline, repo_keys)`.
+
+### UX and CLI
+
+- Project settings → "Agent context" section: prompt list (add, edit in a markdown editor, reorder, toggle, scope to repos) and context list (add file/dir via picker, add URL).
+- Agent launch shows a "Project context: 3 prompts, 4 files" chip; clicking previews the final system prompt.
+- Agents already running keep their prompt; edits apply to the next launch (stated in the UI).
+
+```
+treq project prompt list|add|edit|rm|toggle <project> ...
+treq project context add <project> <path|url> [--inline] [--repos a,b]
+treq project context list|rm <project> ...
+treq project prompt preview <project> [--repo r]   # prints the final system prompt
+```
+
+### Edge cases
+
+- Context path missing on this machine: skipped, listed as "unavailable" in the preview, agent still launches.
+- Repo-relative ref to a repo not cloned here: skipped with the same warning.
+- Context path that contains secrets (`.env`, keys): refuse to add paths matching a deny list; warn on dirs that contain them.
+- Huge prompts: total injected text capped (64 KiB); launch warns and truncates lowest-priority prompts last-first.
+- Same repo in two projects: an agent launched from a repo workspace uses the project of that workspace's project workspace; for a plain repo workspace, the user picks a primary project for the repo (default: first added). Never merges two projects' prompts silently.
+- Non-Claude agents without `--add-dir`: paths are listed in the prompt only; the preview says read access is not enforced for that agent.
+
 ## Edge cases
 
 - **Same repo in multiple projects**: allowed; repo state stays in the repo's `.treq`. A workspace belongs to at most one project workspace. Removing a repo from one project does not touch others.
@@ -203,15 +302,17 @@ treq project ws pr <project> <name> [--draft]
 ## Phased rollout
 
 1. **Model + sync**: Supabase tables/RLS/RPCs, local cache, auto-migration (one project per repo), sidebar switcher. Behind `projects` flag.
-2. **Project workspaces**: shared-branch creation, project root symlinks, project-scoped sessions/agents, summary tab, CLI.
-3. **Linked PRs + push all**, rolled-up checks.
-4. **Polish**: merge-order hint, sparse monorepo scoping, remove flag.
+2. **Project prompts and context** (D9–D12): injection in `system_prompt()`, settings section, CLI.
+3. **Project workspaces**: shared-branch creation, project root symlinks, project-scoped sessions/agents, summary tab, CLI.
+4. **Linked PRs + push all**, rolled-up checks.
+5. **Polish**: merge-order hint, sparse monorepo scoping, remove flag.
 
 ## Test strategy (TDD)
 
 Each step starts with a failing test.
 
 - `core/projects/` unit tests: repo_key normalisation (ssh/https/.git suffix), override resolution order, branch-name collision detection, status roll-up, linked-PR block render/parse (idempotent), sync merge rules. Proptests for normalisation and merge.
+- Prompt assembly: `system_prompt()` with project prompts in D11 order, repo scoping, disabled prompts skipped, missing context path skipped with warning, size cap, Claude settings/`--add-dir` include context dirs read-only, Cursor prompt file includes them; extend the existing tests in `agent_command.rs`.
 - `local_db` migration tests with upgrade fixtures for new columns; `db.rs` cache tables.
 - Integration (`src-tauri/tests/`): create project workspace across 2 temp jj repos; partial failure leaves successful repos intact; missing path returns defaults.
 - CLI tests in `cli/tests.rs` for each subcommand, `--json` shape snapshot.
