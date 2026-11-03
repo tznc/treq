@@ -146,7 +146,7 @@ function requireIdempotencyKey(body: Record<string, unknown>): string {
 // A row ensure may pick up and provision again: failed, degraded, or
 // 'provisioning' left behind by an ensure that died (no update for
 // STALE_PROVISIONING_MS).
-function isResumable(instance: InstanceRow, now = Date.now()): boolean {
+export function isResumable(instance: InstanceRow, now = Date.now()): boolean {
   if (instance.status === "failed" || instance.status === "degraded") return true;
   return instance.status === "provisioning" &&
     now - Date.parse(instance.updated_at ?? "") >= STALE_PROVISIONING_MS;
