@@ -234,7 +234,7 @@ fn init_kit_theme(cx: &mut App) {
   set_kit_metrics(cx);
 }
 
-/// How big gpui-kit's widgets draw text: 13 on the desktop, 15 on a phone,
+/// How big gpui-kit's widgets and treq's badges draw text: 13 on the desktop, 15 on a phone,
 /// which is read at arm's length and tapped rather than clicked.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Density {
@@ -250,7 +250,16 @@ impl Density {
   pub fn font_sizes(self) -> (f32, f32) {
     match self {
       Density::Desktop => (13., 13.),
-      Density::Touch => (15., 12.),
+      Density::Touch => (15., 13.),
+    }
+  }
+
+  /// Captions, badges and counts: 11 on the desktop, 13 on a phone, the
+  /// smallest text read at arm's length.
+  pub fn caption(self) -> f32 {
+    match self {
+      Density::Desktop => 11.,
+      Density::Touch => 13.,
     }
   }
 }
@@ -630,6 +639,17 @@ pub fn palette(dark: bool) -> Palette {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// The desktop keeps its sizes; a phone reads nothing under 13px.
+  #[test]
+  fn touch_raises_small_text_and_desktop_keeps_its_sizes() {
+    assert_eq!(Density::Desktop.font_sizes(), (13., 13.));
+    assert_eq!(Density::Desktop.caption(), 11.);
+    let (body, mono) = Density::Touch.font_sizes();
+    assert_eq!(body, 15.);
+    assert!(mono >= 13.);
+    assert!(Density::Touch.caption() >= 13.);
+  }
 
   #[test]
   fn hover_tokens_differ_from_their_resting_fill() {

@@ -9,7 +9,12 @@ use crate::{
   jj::{JjDiffHunk, JjFileChange, JjRevisionDiff},
 };
 use gpui_kit::{
-  component::{button::Button, h_flex, v_flex, ActiveTheme, Sizable},
+  component::{
+    button::{Button, ButtonVariants},
+    h_flex,
+    input::Input,
+    v_flex, ActiveTheme, Disableable as _, Sizable,
+  },
   div, AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
   StatefulInteractiveElement, Styled,
 };
@@ -282,11 +287,11 @@ impl WorkspaceScreen {
       .into_any_element()
   }
 
-  /// What sits under the Changes tab: the picked lines' actions, or the
-  /// review.
+  /// What sits under the Changes tab: the picked lines' actions, the
+  /// review, or the commit bar while there is something to commit.
   pub(super) fn changes_footer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
     let Some(((path, committed), picked)) = &self.picked else {
-      return review::bar(&self.review, &self.sessions, cx);
+      return review::bar(&self.review, &self.sessions, cx).or_else(|| self.commit_bar(cx));
     };
     let hunks = self.picked_hunks(path, *committed);
     let pending =
@@ -306,6 +311,31 @@ impl WorkspaceScreen {
       }),
       cx,
     ))
+  }
+
+  /// The commit message and Commit, under the uncommitted changes.
+  fn commit_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    let diff = self.diff.ready()?;
+    if diff.uncommitted_files.is_empty() {
+      return None;
+    }
+    let committing = self.busy == Some("commit");
+    Some(
+      widgets::bottom_bar(cx)
+        .items_center()
+        .child(div().flex_1().child(Input::new(&self.commit_message)))
+        .child(
+          Button::new("commit")
+            .primary()
+            .large()
+            .label("Commit")
+            .loading(committing)
+            .disabled(self.busy.is_some())
+            .on_click(cx.listener(|this, _, window, cx| this.commit(window, cx)))
+            .touch(),
+        )
+        .into_any_element(),
+    )
   }
 
   /// The hunks the picked lines index into.

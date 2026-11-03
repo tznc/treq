@@ -49,11 +49,36 @@ pub const ROW_H: f32 = 56.;
 /// Height of a full-width call-to-action button (gpui-kit's large is 32px).
 pub const CTA_H: f32 = 52.;
 
+/// `el` at caption size, the smallest text on a phone (13px).
+pub fn caption<E: Styled>(el: E) -> E {
+  let size = treq_ui::theme::Density::Touch.caption();
+  el.text_size(px(size)).line_height(px(size + 5.))
+}
+
+/// [`caption`] as a method, for builder chains.
+pub trait Caption: Styled + Sized {
+  fn caption(self) -> Self {
+    caption(self)
+  }
+}
+impl<E: Styled> Caption for E {}
+
+/// The bar pinned under a page that holds its main action.
+pub fn bottom_bar(cx: &App) -> Div {
+  let theme = cx.theme();
+  h_flex()
+    .flex_none()
+    .p_3()
+    .gap_2()
+    .border_t_1()
+    .border_color(theme.border)
+    .bg(theme.background)
+}
+
 /// A titled group of content.
 pub fn section(title: impl Into<SharedString>, cx: &App) -> Div {
   v_flex().gap_2().child(
-    div()
-      .text_xs()
+    caption(div())
       .font_weight(FontWeight::SEMIBOLD)
       .text_color(cx.theme().muted_foreground)
       .child(title.into().to_uppercase()),

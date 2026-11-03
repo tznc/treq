@@ -264,6 +264,17 @@ pub mod nav {
       == Some(view)
   }
 
+  /// Where the page open beside `view` is, when `view` is the list of a
+  /// split.
+  pub fn beside(view: EntityId, cx: &App) -> Option<Location> {
+    let root = cx.try_global::<Nav>()?.root.upgrade()?;
+    let root = root.read(cx);
+    let [.., list, open] = root.stack.as_slice() else {
+      return None;
+    };
+    (root.split && list.view.entity_id() == view).then(|| open.location.clone())
+  }
+
   /// Retitles the page showing `view` (a renamed terminal).
   pub fn set_title(view: EntityId, title: impl Into<SharedString>, cx: &mut App) {
     let title = title.into();
@@ -380,6 +391,10 @@ impl Root {
     if let Some(page) = self.stack.last() {
       App::notify(cx, page.view.entity_id());
     }
+    // The list beside it marks the page open next to it.
+    if let Some(page) = self.stack.iter().rev().nth(1) {
+      App::notify(cx, page.view.entity_id());
+    }
     cx.notify();
   }
 
@@ -455,6 +470,11 @@ fn panes(width: Pixels, depth: usize) -> usize {
   } else {
     1
   }
+}
+
+/// Back on each pane of a split of a `depth`-page stack, as pages popped.
+fn split_backs(depth: usize) -> (Option<usize>, Option<usize>) {
+  ((depth > 2).then_some(2), None)
 }
 
 /// A page's title bar: Back when `back` is set (it pops this many pages),
@@ -574,8 +594,7 @@ impl Render for Root {
           weak.update(cx, |root, _| root.list_focus = list).ok();
         }
       };
-      // Back on the list closes it and the page beside it.
-      let list_back = (depth > 2).then_some(2);
+      let (list_back, detail_back) = split_backs(depth);
       h_flex()
         .flex_1()
         .min_h_0()
@@ -595,7 +614,7 @@ impl Render for Root {
             .min_w_0()
             .h_full()
             .on_any_mouse_down(focus(false))
-            .child(self.pane(depth - 1, Some(1), true, cx)),
+            .child(self.pane(depth - 1, detail_back, true, cx)),
         )
     } else {
       let back = (depth > 1).then_some(1);
@@ -1085,7 +1104,7 @@ impl Root {
 
 #[cfg(test)]
 mod tests {
-  use super::{is_landing, panes};
+  use super::{is_landing, panes, split_backs};
   use gpui_kit::px;
 
   #[test]
@@ -1101,6 +1120,14 @@ mod tests {
     assert_eq!(panes(px(768.), 1), 1);
     assert_eq!(panes(px(768.), 2), 2);
     assert_eq!(panes(px(1366.), 4), 2);
+  }
+
+  /// A split shows one Back, on the list: it closes the list and the page
+  /// beside it. The page beside the list has none.
+  #[test]
+  fn a_split_shows_one_back_on_the_list() {
+    assert_eq!(split_backs(2), (None, None));
+    assert_eq!(split_backs(3), (Some(2), None));
   }
 
   #[test]
