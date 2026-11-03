@@ -61,6 +61,9 @@ pub enum Shortcut {
 /// action to `sidebar_actions` (a menu or drag) or to nobody.
 pub type Handled = Option<Vec<Effect>>;
 
+/// The session name an AI review's agent runs under.
+const REVIEW_SESSION: &str = "AI Review";
+
 fn done() -> Handled {
   Some(Vec::new())
 }
@@ -87,7 +90,7 @@ impl Model {
       Shortcut::Stack if repo && free => return self.stack(data),
       Shortcut::Palette if free => self.dialogs.palette = true,
       Shortcut::AgentPrompt if repo && free => self.open_agent_prompt(),
-      Shortcut::FilePicker if repo && free => self.dialogs.file_picker = true,
+      Shortcut::FilePicker if repo && free => self.open_file_picker(String::new()),
       Shortcut::ToggleShortcuts if free || self.dialogs.shortcuts => {
         self.dialogs.shortcuts = !self.dialogs.shortcuts;
       }
@@ -262,7 +265,8 @@ impl Model {
       "workspace.branchSwitcher" => self.dialogs.branch_switcher = true,
       "workspace.stack" => return Some(self.stack(data)),
       "workspace.merge" => self.open_merge_preview(),
-      "code.filePicker" => self.dialogs.file_picker = true,
+      "code.filePicker" => self.open_file_picker(String::new()),
+      "code.agentPrompt" => self.open_agent_prompt(),
       "fileBrowser.back" => self.view.file_browser = None,
       // The dialogs.
       "workspaceDialog.close" => self.dialogs.workspace_dialog = None,
@@ -552,6 +556,33 @@ impl Model {
     done()
   }
 
+  /// `ReviewDone` for each AI Review agent whose turn just ended, for the
+  /// workspace it reviews.
+  fn reviews_done(&self, previous: &[TerminalSummary], data: &Data) -> Vec<Effect> {
+    self
+      .terminals
+      .iter()
+      .filter(|t| t.agent && !t.streaming && t.name.as_deref() == Some(REVIEW_SESSION))
+      .filter(|t| {
+        previous
+          .iter()
+          .any(|p| p.id.is_some() && p.id == t.id && p.streaming)
+      })
+      .filter_map(|t| {
+        let (repo, branch) = (t.repo_path.as_deref()?, t.branch.as_deref()?);
+        let workspace = data
+          .workspaces(repo)
+          .iter()
+          .find(|w| w.branch_name == branch)?;
+        Some(Effect::ReviewDone {
+          repo_path: repo.to_string(),
+          workspace_id: workspace.id,
+          branch: branch.to_string(),
+        })
+      })
+      .collect()
+  }
+
   /// The selected workspace's checkout, else the repository's.
   fn working_directory(&self, data: &Data) -> String {
     self
@@ -691,12 +722,15 @@ impl Model {
           terminals.iter().filter(|t| t.agent && t.streaming).count()
         };
         let was = streaming(&self.terminals);
+        let previous = std::mem::take(&mut self.terminals);
         self.terminals = value
           .as_array()
           .map(|list| {
             list
               .iter()
               .map(|s| TerminalSummary {
+                id: s["id"].as_str().map(str::to_string),
+                name: s["name"].as_str().map(str::to_string),
                 agent: s["kind"] == "agent",
                 branch: s["branchName"].as_str().map(str::to_string),
                 repo_path: s["repoPath"].as_str().map(str::to_string),
@@ -709,6 +743,10 @@ impl Model {
         // treq, so the tab counts and the Changes tab read again.
         if streaming(&self.terminals) < was {
           self.view.changes_revision += 1;
+        }
+        let effects = self.reviews_done(&previous, data);
+        if !effects.is_empty() {
+          return Some(effects);
         }
       }
       "terminal.dismissAsset" => {
@@ -765,6 +803,22 @@ impl Model {
             None => done(),
           }
         }
+        "palette.goToFile" => {
+          self.dialogs.palette = false;
+          self.open_file_picker(value.as_str().unwrap_or_default().to_string());
+          done()
+        }
+        "branchSwitcher.openWorkspace" => {
+          let repo = self.repo().to_string();
+          if let Some(workspace) = value
+            .as_i64()
+            .and_then(|id| self.workspace_in(&repo, id, data))
+          {
+            self.set_selected(Some(workspace.id));
+          }
+          self.dialogs.branch_switcher = false;
+          done()
+        }
         "workspacePicker.select" => {
           let repo = self.repo().to_string();
           if let Some(workspace) = value
@@ -785,6 +839,12 @@ impl Model {
       },
       _ => None,
     }
+  }
+
+  /// Opens the file picker searching for `query`.
+  fn open_file_picker(&mut self, query: String) {
+    self.dialogs.file_picker = true;
+    self.dialogs.file_query = query;
   }
 
   fn close_top_overlay(&mut self) {
@@ -815,7 +875,7 @@ impl Model {
         Vec::new()
       }
       "search-files" => {
-        self.dialogs.file_picker = true;
+        self.open_file_picker(String::new());
         Vec::new()
       }
       "go-to-workspace" => {
@@ -949,6 +1009,15 @@ impl Model {
         }
       }
       OpenRequest::PrReview { number, state } => self.open_github_pr(*number, state),
+      OpenRequest::WorkspaceChanges {
+        repo_path,
+        workspace_id,
+      } => {
+        if let Some(workspace) = self.workspace_in(repo_path, *workspace_id, data) {
+          self.select_workspace(Some(&workspace), data);
+          self.view.tab = Tab::Changes;
+        }
+      }
     }
     Vec::new()
   }
@@ -1291,6 +1360,30 @@ mod tests {
   }
 
   #[test]
+  fn goes_to_file_with_the_palette_query() {
+    let (mut model, data) = (model(), data());
+    model.dialogs.palette = true;
+    model.overlay_action(&field("palette.goToFile", "zzzz".into()), &data);
+    assert!(!model.dialogs.palette);
+    assert!(model.dialogs.file_picker);
+    assert_eq!(model.dialogs.file_query, "zzzz");
+    model.overlay_action(&press("filePicker.close"), &data);
+    model.screen_action(&press("filePicker.close"), &data);
+    assert!(!model.dialogs.file_picker);
+    model.shortcut(Shortcut::FilePicker, &data);
+    assert_eq!(model.dialogs.file_query, "", "Cmd+P opens empty");
+  }
+
+  #[test]
+  fn opens_the_workspace_that_holds_a_branch() {
+    let (mut model, data) = (model(), data());
+    model.dialogs.branch_switcher = true;
+    model.overlay_action(&field("branchSwitcher.openWorkspace", 4.into()), &data);
+    assert_eq!(model.selected, Some(4));
+    assert!(!model.dialogs.branch_switcher);
+  }
+
+  #[test]
   fn runs_the_palette_command_table() {
     let (mut model, data) = (model(), data());
     model.dialogs.palette = true;
@@ -1345,6 +1438,69 @@ mod tests {
     assert_eq!(model.selected, Some(1));
     model.screen_action(&field("terminal.shortcut", "k".into()), &data);
     assert!(model.dialogs.palette);
+  }
+
+  /// The AI Review agent's turn ending is the review done: the controller
+  /// counts its comments for a toast. Other agents' turns are not.
+  #[test]
+  fn an_ai_review_turn_ending_reports_the_review_done() {
+    let (mut model, data) = (model(), data());
+    let summary = |name: &str, streaming: bool| json!([{"id": "agent-5", "kind": "agent", "name": name, "branchName": "b", "repoPath": "/repo", "isStreaming": streaming}]);
+    model.screen_action(
+      &field("terminal.summaries", summary("AI Review", true)),
+      &data,
+    );
+    let effects = model
+      .screen_action(
+        &field("terminal.summaries", summary("AI Review", false)),
+        &data,
+      )
+      .unwrap_or_default();
+    assert_eq!(
+      effects,
+      vec![Effect::ReviewDone {
+        repo_path: "/repo".into(),
+        workspace_id: 2,
+        branch: "b".into(),
+      }]
+    );
+    model.screen_action(
+      &field("terminal.summaries", summary("Claude 1", true)),
+      &data,
+    );
+    let effects = model
+      .screen_action(
+        &field("terminal.summaries", summary("Claude 1", false)),
+        &data,
+      )
+      .unwrap_or_default();
+    assert!(effects.is_empty(), "{effects:?}");
+  }
+
+  #[test]
+  fn review_done_titles_count_the_comments() {
+    use super::super::model::review_done_title;
+    assert_eq!(review_done_title(0), "Review done · no comments");
+    assert_eq!(review_done_title(1), "Review done · 1 comment");
+    assert_eq!(review_done_title(3), "Review done · 3 comments");
+  }
+
+  /// A review-done toast's Show comments opens that workspace's Changes tab.
+  #[test]
+  fn showing_a_reviews_comments_opens_its_changes_tab() {
+    let (mut model, data) = (model(), data());
+    model.native_event(
+      &NativeEvent::Open {
+        what: OpenRequest::WorkspaceChanges {
+          repo_path: "/repo".into(),
+          workspace_id: 3,
+        },
+      },
+      &data,
+    );
+    assert_eq!(model.selected, Some(3));
+    assert_eq!(model.view.tab, Tab::Changes);
+    assert!(matches!(model.page, Page::Workspace));
   }
 
   /// An agent's turn ends when its terminal stops streaming: it may have

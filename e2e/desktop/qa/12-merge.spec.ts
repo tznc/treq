@@ -8,23 +8,15 @@
 // window (the header row at y=24).
 import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { execFileSync } from "node:child_process";
-import { dismissPopover, openWorkspace, settle, xPointer } from "./helpers.ts";
+import { dismissPopover, openWorkspace, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
 const BRANCH = "feat/keyvalues-cache";
-const HEADER_Y = 24;
 
-/** Whether a window besides the repo window shows: the popover's. */
-function popoverShown(): boolean {
-  return (
-    execFileSync("xdotool", ["search", "--onlyvisible", "--name", "."])
-      .toString()
-      .trim()
-      .split("\n")
-      .filter(Boolean).length > 1
-  );
+/** Whether a header popover shows, drawn in the repo window. */
+async function popoverShown(page: Page): Promise<boolean> {
+  return (await page.getByTestId("header-popover").count()) > 0;
 }
 
 async function popupShot(
@@ -44,11 +36,12 @@ test("merge: header popovers and menus", async ({ page }) => {
     name: "12-merge-header",
     title: "Workspace header with an open PR and green checks",
     expectations: [
-      "Branch → base picker, Details (info icon); Checks 3/3, View PR + external link, Merge…, ⋮",
+      "Workspace title with its pencil, Details (info icon); Checks 3/3, View PR + external link, Merge…, ⋮",
+      "The Code tab's stack card starts with the branch → base picker and an outlined Stack on this…",
       "Buttons share one height and baseline; nothing wraps",
     ],
   });
-  await popupShot(page, () => page.mouse.click(552, HEADER_Y), {
+  await popupShot(page, () => page.getByRole("button", { name: "Workspace target" }).click(), {
     name: "12-merge-base-picker",
     title: "Base branch picker",
     expectations: ["Branches searchable; the current base (main) marked"],
@@ -81,49 +74,50 @@ test("merge: header popovers and menus", async ({ page }) => {
   });
 });
 
-test("merge: popovers close with Escape and let the next click through", async ({ page }) => {
+test("merge: popovers close with Escape and on an outside click", async ({ page }) => {
   await openWorkspace(page, BRANCH);
   // Escape in the repo window closes each popover.
   const open = {
-    "base-picker": () => page.mouse.click(552, HEADER_Y),
+    "base-picker": () => page.getByRole("button", { name: "Workspace target" }).click(),
     checks: () => page.getByRole("button", { name: /^Checks:/ }).click(),
     details: () => page.getByRole("button", { name: "Workspace details" }).click(),
   };
   for (const [what, click] of Object.entries(open)) {
     await click();
     await settle(page, 1200);
-    expect(popoverShown(), `${what} popover open`).toBe(true);
+    expect(await popoverShown(page), `${what} popover open`).toBe(true);
     await page.keyboard.press("Escape");
     await settle(page, 800);
     await capture(page, {
       name: `12-merge-escape-${what}`,
       title: `After Escape on the ${what} popover`,
-      screen: true,
       rest: false,
       expectations: ["The popover is closed; the workspace header shows unchanged"],
     });
-    expect.soft(popoverShown(), `${what} popover closed by Escape`).toBe(false);
+    expect.soft(await popoverShown(page), `${what} popover closed by Escape`).toBe(false);
   }
-  // A click outside the Details popover closes it and still reaches the tab.
+  // A click outside the Details popover lands on its in-window backdrop and
+  // only closes it: the tab under it stays as it was.
   await page.getByRole("button", { name: "Workspace details" }).click();
   await settle(page, 1200);
-  expect(popoverShown()).toBe(true);
-  const changes = await page.getByRole("tab", { name: "Changes" }).boundingBox();
-  if (!changes) throw new Error("no Changes tab");
-  await xPointer(page, changes.x + changes.width / 2, changes.y + changes.height / 2, 1);
+  expect(await popoverShown(page)).toBe(true);
+  // The Commits tab, well below where Details opens: the popover sits under
+  // the title, so its left edge moves with the title's width.
+  const commits = await page.getByRole("tab", { name: "Commits" }).boundingBox();
+  if (!commits) throw new Error("no Commits tab");
+  await page.mouse.click(commits.x + 8, commits.y + commits.height / 2);
   await settle(page, 1500);
   await capture(page, {
     name: "12-merge-outside-click",
-    title: "After clicking the Changes tab with Details open",
-    screen: true,
+    title: "After clicking outside the Details popover",
     rest: false,
     expectations: [
       "The Details popover is closed",
-      "The Changes tab is selected and its file list shows",
+      "The Code tab is still selected",
     ],
   });
-  expect.soft(popoverShown()).toBe(false);
-  await expect(page.getByRole("tab", { name: "Changes", selected: true })).toBeVisible();
+  expect.soft(await popoverShown(page)).toBe(false);
+  await expect(page.getByRole("tab", { name: "Code", selected: true })).toBeVisible();
 });
 
 test("merge: merge preview and strategies", async ({ page }) => {

@@ -112,6 +112,9 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn remove_supporting(&self, main_repo: &str, path: &str) -> Result<(), String>;
   fn launch(&self, request: &LaunchRequest, select: bool) -> Result<(), String>;
   fn toast(&self, tone: ToastTone, title: &str, description: &str);
+  /// An AI review of workspace `workspace_id` finished: toasts how many
+  /// open comments it left, with Show comments opening its Changes tab.
+  fn review_done(&self, repo_path: &str, workspace_id: i64);
   fn open_url(&self, url: &str);
   fn open_log_dir(&self);
   /// Watches a local checkout for edits on disk (an agent's, an editor's):
@@ -509,6 +512,36 @@ impl WindowHost for Backend {
 
   fn toast(&self, tone: ToastTone, title: &str, description: &str) {
     Backend::toast(self, tone, title, description);
+  }
+
+  fn review_done(&self, repo_path: &str, workspace_id: i64) {
+    use crate::gpui_shell::native::{register_toast_action, NativeEvent, OpenRequest, ToastAction};
+    // `changes_threads::WORKSPACE_DIFF`: the review's target type.
+    let comments = crate::core::agent_review::list_comments(
+      &self.state_scope(repo_path),
+      "workspace_diff",
+      &workspace_id.to_string(),
+    )
+    .map(|list| list.iter().filter(|c| c.status != "resolved").count())
+    .unwrap_or(0);
+    let (backend, repo) = (self.clone(), repo_path.to_string());
+    let id = register_toast_action(move || {
+      backend.notify(NativeEvent::Open {
+        what: OpenRequest::WorkspaceChanges {
+          repo_path: repo,
+          workspace_id,
+        },
+      });
+    });
+    self.notify(NativeEvent::Toast {
+      title: super::model::review_done_title(comments),
+      description: String::new(),
+      tone: ToastTone::Success,
+      action: Some(ToastAction {
+        label: "Show comments".into(),
+        id,
+      }),
+    });
   }
 
   fn open_url(&self, url: &str) {

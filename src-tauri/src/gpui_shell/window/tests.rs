@@ -249,6 +249,10 @@ impl WindowHost for FakeHost {
     self.record(format!("toast {title}"));
   }
 
+  fn review_done(&self, repo_path: &str, workspace_id: i64) {
+    self.record(format!("review done {repo_path} {workspace_id}"));
+  }
+
   fn open_url(&self, url: &str) {
     self.record(format!("url {url}"));
   }
@@ -1041,6 +1045,7 @@ fn opens_the_dialogs_and_file_picker_from_shortcuts(cx: &mut TestAppContext) {
     .update(cx, |c, cx| c.shortcut(Shortcut::FilePicker, cx));
   let picker = window.last().file_picker.expect("no file picker");
   assert_eq!(picker.workspace_path, "/repo");
+  assert_eq!(picker.query, "");
   window.screen(
     cx,
     ScreenAction::Press {
@@ -1110,6 +1115,10 @@ fn the_agent_prompt_starts_on_the_open_workspace(cx: &mut TestAppContext) {
   });
   cx.run_until_parked();
   assert_eq!(initial(&window), Some(2), "the palette's command");
+  window.press(cx, "agentPrompt.close");
+
+  window.press(cx, "code.agentPrompt");
+  assert_eq!(initial(&window), Some(2), "the Code tab's Agent button");
 }
 
 #[gpui::test]

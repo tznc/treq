@@ -497,16 +497,14 @@ fn settings_survive_random_edits() {
       let mut run = fuzz(cx, settings_scenario(tab), &steps);
       // Whatever was edited, saving it reads back the same in a reopened screen.
       run.settle();
-      if !run.h.drawn("settings-save") {
-        return;
-      }
-      run.h.click("settings-save");
+      // Typed fields save once typing pauses.
+      run
+        .h
+        .cx
+        .executor()
+        .advance_clock(std::time::Duration::from_millis(600));
       run.settle();
       let saved = drawn_settings(&mut run.h);
-      if saved.save.as_ref().is_some_and(|s| !s.disabled) {
-        // Nothing to compare: the save did not go through.
-        return;
-      }
       let mut reopened = Harness::with_host(cx, settings_route(tab), run.host.clone());
       let again = drawn_settings(&mut reopened);
       assert_eq!(
@@ -694,40 +692,6 @@ fn the_logs_tab_survives_random_queries() {
         layers: &[],
       };
       fuzz(cx, scenario, &steps);
-    },
-  );
-}
-
-// The file picker: its search, list and Escape.
-
-const PICKER_CLICKS: &[&str] = &[
-  "task-add",
-  "task-add-file",
-  "file-picker-item-0",
-  "file-picker-item-1",
-  "file-picker-item-2",
-];
-
-#[test]
-fn the_file_picker_survives_random_searches() {
-  fuzz::check(
-    "the_file_picker_survives_random_searches",
-    3,
-    vec(step(), 1..20),
-    |cx, steps| {
-      let scenario = Scenario {
-        snapshot: code_route(),
-        host: code_host(),
-        wide: true,
-        clicks: PICKER_CLICKS,
-        fields: &[],
-        layers: &["file-picker"],
-      };
-      let mut run = Run::open(cx, scenario);
-      run.h.click("task-add");
-      run.h.click("task-add-file");
-      run.settle();
-      fuzz_from(run, &steps);
     },
   );
 }

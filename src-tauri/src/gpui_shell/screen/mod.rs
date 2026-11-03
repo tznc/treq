@@ -35,7 +35,7 @@ mod changes_review;
 mod changes_threads;
 pub(super) mod checklist;
 mod code;
-mod code_data;
+pub(crate) mod code_data;
 pub(super) use code_data::display_title;
 mod commits;
 mod commits_data;
@@ -85,6 +85,7 @@ mod workspace_dialog;
 mod workspace_dialog_data;
 mod workspace_modal;
 pub(super) mod workspace_ops;
+mod workspace_title;
 
 #[cfg(test)]
 mod tests;
@@ -219,6 +220,13 @@ pub struct Screen {
   /// Cmd+P's "Jump to File", while the window model keeps it open.
   file_picker: Option<(file_picker::Scope, Entity<file_picker::FilePicker>)>,
   _file_picker: Option<gpui::Subscription>,
+  /// The window-wide dialog (palette, shortcuts sheet, workspace picker,
+  /// branch switcher), drawn over everything else.
+  overlay: Option<Entity<crate::gpui_shell::overlay::Overlay>>,
+  /// What had focus before the overlay opened, given it back on close.
+  focus_before_overlay: Option<gpui::FocusHandle>,
+  /// Whether [`Self::focus_before_overlay`] was taken for the open overlay.
+  overlay_focus_taken: bool,
   /// The open confirmation (the palette's Delete Workspace).
   confirm: Option<confirm::Pending<Self>>,
   /// Draws the screen again each minute, for its relative times ("3
@@ -282,8 +290,58 @@ impl Screen {
       workspace_modal: None,
       file_picker: None,
       _file_picker: None,
+      overlay: None,
+      focus_before_overlay: None,
+      overlay_focus_taken: false,
       confirm: None,
       _clock: clock,
+    }
+  }
+
+  /// Shows `snapshot`'s dialog over the screen, keeping what was typed when
+  /// it is the same dialog, or closes it for `None`. `host` and `sink` are
+  /// what a new dialog reads through and reports to.
+  pub fn set_overlay(
+    &mut self,
+    snapshot: Option<crate::gpui_shell::OverlaySnapshot>,
+    host: Arc<dyn crate::gpui_shell::overlay::OverlayHost>,
+    sink: ActionSink,
+    cx: &mut Context<Self>,
+  ) {
+    use crate::gpui_shell::overlay::Overlay;
+    let Some(snapshot) = snapshot else {
+      if self.overlay.take().is_some() {
+        cx.notify();
+      }
+      return;
+    };
+    let same = self
+      .overlay
+      .as_ref()
+      .filter(|o| o.read(cx).view().same_dialog(&snapshot.view))
+      .cloned();
+    match same {
+      Some(overlay) => overlay.update(cx, |o, cx| o.set_snapshot(snapshot, cx)),
+      None => self.overlay = Some(cx.new(|cx| Overlay::new(snapshot, host, sink, cx))),
+    }
+    cx.notify();
+  }
+
+  /// Notes what had focus when an overlay opens, and gives it back when
+  /// the last one closes.
+  fn track_overlay_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    match (&self.overlay, self.overlay_focus_taken) {
+      (Some(_), false) => {
+        self.focus_before_overlay = window.focused(cx);
+        self.overlay_focus_taken = true;
+      }
+      (None, true) => {
+        self.overlay_focus_taken = false;
+        if let Some(focus) = self.focus_before_overlay.take() {
+          focus.focus(window, cx);
+        }
+      }
+      _ => {}
     }
   }
 
@@ -495,6 +553,7 @@ impl Ctx<'_> {
 impl Render for Screen {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let dark = self.snapshot.dark;
+    self.track_overlay_focus(window, cx);
     let confirm = confirm::render(Self::confirm_slot, self, window, &theme::palette(dark), cx);
     if !matches!(self.snapshot.view, View::Onboarding(_)) {
       self.onboarding = None;
@@ -701,11 +760,31 @@ impl Render for Screen {
       .capture_any_mouse_down(|_, window, cx| window.blur(cx))
       .child(body)
       .children(remote)
-      .children(workspace_modal)
-      .children(modal)
+      .children(workspace_modal.map(|m| window_layer(m, 1, window)))
+      .children(modal.map(|m| window_layer(m, 1, window)))
       .children(self.file_picker.as_ref().map(|(_, picker)| picker.clone()))
-      .children(confirm)
+      .children(self.overlay.clone().map(|o| window_layer(o, 3, window)))
+      .children(confirm.map(|c| window_layer(c, 4, window)))
   }
+}
+
+/// Draws `layer` over the whole window, sidebar included, rather than over
+/// the screen beside it: a box the window's size at the window's origin,
+/// painted after the rest of the window. A dialog that centres itself in
+/// its parent is centred on the window. Higher `priority` draws on top.
+fn window_layer(layer: impl IntoElement, priority: usize, window: &Window) -> gpui::AnyElement {
+  let viewport = window.viewport_size();
+  gpui::deferred(
+    gpui::anchored().position(gpui::Point::default()).child(
+      div()
+        .relative()
+        .w(viewport.width)
+        .h(viewport.height)
+        .child(layer),
+    ),
+  )
+  .with_priority(priority)
+  .into_any_element()
 }
 
 impl Screen {

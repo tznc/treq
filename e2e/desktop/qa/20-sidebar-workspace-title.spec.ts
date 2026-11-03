@@ -3,36 +3,21 @@
 // tooltip. Untitled rows keep their mono branch. The test creates the
 // titled workspace through the New workspace dialog and deletes it again,
 // so the sidebar is back to the seed for later areas.
-import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { home, mod, overlay, ready, row, settle } from "./helpers.ts";
+import { home, mod, ready, row, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
 const TITLE = "Fail readiness when the spool queue is unreachable for longer than a minute";
-
-/** The page a dialog renders in: the repo window, else the shared dialog window. */
-async function dialogIn(
-  page: Page,
-  context: BrowserContext,
-  find: (p: Page) => Locator,
-): Promise<Page> {
-  try {
-    await expect(find(page)).toBeVisible({ timeout: 4000 });
-    return page;
-  } catch {
-    const other = await overlay(page, context);
-    await expect(find(other)).toBeVisible();
-    return other;
-  }
-}
 
 const heading = (p: Page) => p.getByRole("heading", { name: "New workspace" });
 
 test("sidebar-workspace-title: a titled row shows its title", async ({ page, context }) => {
   await home(page);
   await page.keyboard.press(`${mod}+n`);
-  const d = await dialogIn(page, context, heading);
+  await expect(heading(page)).toBeVisible();
+  const d = page;
   await d.getByLabel("Workspaces", { exact: true }).fill(TITLE);
   await settle(page, 1200);
   await d.getByRole("button", { name: "Create workspace" }).click();
@@ -71,11 +56,12 @@ test("sidebar-workspace-title: a titled row shows its title", async ({ page, con
   // Back to the seed.
   await home(page);
   await page.keyboard.press(`${mod}+k`);
-  const palette = await overlay(page, context);
+  const palette = page;
   await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("Delete workspace");
   await palette.getByRole("option", { name: "Delete workspace" }).click();
   const search = (p: Page) => p.getByRole("textbox", { name: "Search workspaces to delete…" });
-  const picker = await dialogIn(page, context, search);
+  await expect(search(page)).toBeVisible();
+  const picker = page;
   await search(picker).fill("fail-readiness");
   await settle(page, 800);
   await picker.keyboard.press("Enter").catch(() => {});

@@ -69,11 +69,6 @@ impl Agent {
     }
   }
 
-  /// Offers "Plan" next to Edit.
-  pub fn has_plan_mode(self) -> bool {
-    matches!(self, Agent::Claude | Agent::Cursor)
-  }
-
   /// `toAgentKind`: a stored setting, dropping anything unrecognized.
   pub fn parse(value: Option<&str>) -> Option<Self> {
     Self::ALL.into_iter().find(|a| Some(a.id()) == value)
@@ -197,10 +192,6 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
   fn devcontainers_enabled(&self) -> bool;
   fn devcontainer_status(&self, repo_path: &str) -> DevcontainerStatus;
   fn devcontainer_up(&self, repo_path: &str) -> Result<DevcontainerStatus, String>;
-  /// Taken branch names: workspaces' and local branches'.
-  fn branch_names(&self, repo_path: &str) -> Result<HashSet<String>, String>;
-  /// `create_workspace`, with the repository's copy files and setup script.
-  fn create_workspace(&self, repo_path: &str, branch: &str, title: &str) -> Result<i64, String>;
   fn create_session(
     &self,
     repo_path: &str,
@@ -398,56 +389,6 @@ impl CodeHost for Backend {
     devcontainer::up(repo_path, claude_code)
   }
 
-  fn branch_names(&self, repo_path: &str) -> Result<HashSet<String>, String> {
-    let (workspaces, branches) = match self.remote_containing(repo_path) {
-      Some(remote) => {
-        let (workspaces, branches) = std::thread::scope(|scope| {
-          let branches = scope.spawn(|| remote.branches());
-          (remote.workspaces(), super::joined(branches))
-        });
-        (workspaces?, branches?)
-      }
-      None => (
-        core::list_workspaces(repo_path)?,
-        core::list_repo_branches(repo_path)?,
-      ),
-    };
-    Ok(
-      workspaces
-        .into_iter()
-        .map(|w| w.branch_name)
-        .chain(branches.into_iter().map(|b| b.name))
-        .collect(),
-    )
-  }
-
-  fn create_workspace(&self, repo_path: &str, branch: &str, title: &str) -> Result<i64, String> {
-    if let Some(remote) = self.remote_containing(repo_path) {
-      // Copy files and the setup script are local repository settings,
-      // which a remote repository has none of.
-      let metadata = core::WorkspaceMetadata {
-        title: Some(title.trim().to_string()).filter(|t| !t.is_empty()),
-        ..Default::default()
-      };
-      let metadata = serde_json::to_string(&metadata).map_err(|e| e.to_string())?;
-      return remote.create_workspace(branch, None, Some(metadata));
-    }
-    let copy_files = self.with_db(|db| {
-      let raw = db
-        .get_repo_setting(repo_path, "included_copy_files")
-        .ok()
-        .flatten();
-      core::parse_included_copy_files(raw.as_deref())
-    });
-    let metadata = core::WorkspaceMetadata {
-      title: Some(title.trim().to_string()).filter(|t| !t.is_empty()),
-      ..Default::default()
-    };
-    let workspace = core::create_new_workspace(repo_path, branch, None, metadata, copy_files)?;
-    crate::commands::workspace::spawn_setup_script_if_configured(&workspace);
-    Ok(workspace.id)
-  }
-
   fn create_session(
     &self,
     repo_path: &str,
@@ -537,45 +478,6 @@ pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
 }
 
 pub use crate::core::new_workspaces::apply_branch_name_pattern;
-
-/// `taskBranchSlug`: lowercase ASCII words joined by `-`, cut on a word.
-#[expect(
-  clippy::string_slice,
-  reason = "the slug holds only [a-z0-9-], so every byte is a char boundary"
-)]
-#[expect(clippy::expect_used, reason = "constant pattern")]
-fn task_branch_slug(prompt: &str) -> String {
-  const MAX: usize = 48;
-  static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new("[a-z0-9]+").expect("regex"));
-  let slug = WORD
-    .find_iter(&prompt.to_lowercase())
-    .map(|m| m.as_str().to_string())
-    .collect::<Vec<_>>()
-    .join("-");
-  if slug.len() <= MAX {
-    return slug;
-  }
-  let cut = &slug[..MAX];
-  match cut.rfind('-') {
-    Some(dash) if dash > 0 => cut[..dash].to_string(),
-    _ => cut.to_string(),
-  }
-}
-
-/// `taskBranchName`: a branch for the task no workspace or branch uses yet.
-pub fn task_branch_name(prompt: &str, taken: &HashSet<String>, pattern: &str) -> String {
-  let slug = task_branch_slug(prompt);
-  let base = apply_branch_name_pattern(pattern, if slug.is_empty() { "task" } else { &slug });
-  let mut name = base.clone();
-  let mut n = 2;
-  while taken.contains(&name) {
-    name = format!("{base}-{n}");
-    n += 1;
-  }
-  name
-}
-
-pub use crate::core::agent_launch::session_name;
 
 /// `text` with the bytes from `start` to `end` replaced by `insertion`. Both
 /// offsets are clamped to the text and moved back to a char boundary, so a
@@ -851,9 +753,222 @@ pub fn conflict_count(paths: &[String]) -> usize {
     .len()
 }
 
+/// What the Code tab's alerts are read from.
+pub struct AlertState<'a> {
+  pub conflicted_files: &'a [String],
+  pub rebase_hold: Option<&'a core::rebase_guard::RebaseHold>,
+  pub setup: Option<&'a core::SetupScriptStatus>,
+  /// A workspace, not the home repository: only a workspace has a setup run.
+  pub in_workspace: bool,
+  /// A re-run of the setup script is in flight.
+  pub setup_rerunning: bool,
+  /// The workspace's branch, when it was deleted on the remote.
+  pub branch_deleted: Option<&'a str>,
+}
+
+/// One alert the Code tab's status button gathers.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CodeAlert {
+  Conflicts {
+    count: usize,
+  },
+  BranchDeleted {
+    branch: String,
+  },
+  Rebase(core::rebase_guard::RebaseHold),
+  Setup {
+    status: String,
+    running: bool,
+    run_id: Option<i64>,
+  },
+}
+
+impl CodeAlert {
+  pub fn severity(&self) -> crate::gpui_shell::ui::Severity {
+    use crate::gpui_shell::ui::Severity;
+    use core::rebase_guard::RebaseHold;
+    match self {
+      CodeAlert::Conflicts { .. } => Severity::Danger,
+      CodeAlert::BranchDeleted { .. } => Severity::Warning,
+      CodeAlert::Rebase(RebaseHold::StaleTarget { .. }) => Severity::Info,
+      CodeAlert::Rebase(_) => Severity::Warning,
+      CodeAlert::Setup {
+        status, running, ..
+      } if !running && status == "failed" => Severity::Danger,
+      CodeAlert::Setup { .. } => Severity::Info,
+    }
+  }
+}
+
+/// The Code tab's alerts, in the order they show.
+pub fn code_alerts(state: &AlertState) -> Vec<CodeAlert> {
+  let mut alerts = Vec::new();
+  let count = conflict_count(state.conflicted_files);
+  if count > 0 {
+    alerts.push(CodeAlert::Conflicts { count });
+  }
+  if let Some(branch) = state.branch_deleted {
+    alerts.push(CodeAlert::BranchDeleted {
+      branch: branch.to_string(),
+    });
+  }
+  if let Some(hold) = state.rebase_hold {
+    alerts.push(CodeAlert::Rebase(hold.clone()));
+  }
+  if let Some(setup) = state.setup.filter(|s| s.configured && state.in_workspace) {
+    alerts.push(CodeAlert::Setup {
+      status: setup.status.clone(),
+      running: state.setup_rerunning || matches!(setup.status.as_str(), "pending" | "running"),
+      run_id: setup.run_id,
+    });
+  }
+  alerts
+}
+
+/// How many alerts of each severity there are, most serious first, leaving
+/// out the severities with none.
+pub fn severity_counts(alerts: &[CodeAlert]) -> Vec<(crate::gpui_shell::ui::Severity, usize)> {
+  use crate::gpui_shell::ui::Severity;
+  [Severity::Danger, Severity::Warning, Severity::Info]
+    .into_iter()
+    .map(|level| {
+      (
+        level,
+        alerts.iter().filter(|a| a.severity() == level).count(),
+      )
+    })
+    .filter(|(_, n)| *n > 0)
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::core::{rebase_guard::RebaseHold, SetupScriptStatus};
+  use crate::gpui_shell::ui::Severity;
+
+  fn setup(status: &str) -> SetupScriptStatus {
+    SetupScriptStatus {
+      configured: true,
+      status: status.into(),
+      run_id: Some(3),
+    }
+  }
+
+  fn alerts_state<'a>(
+    conflicted: &'a [String],
+    hold: Option<&'a RebaseHold>,
+    setup: Option<&'a SetupScriptStatus>,
+  ) -> AlertState<'a> {
+    AlertState {
+      conflicted_files: conflicted,
+      rebase_hold: hold,
+      setup,
+      in_workspace: true,
+      setup_rerunning: false,
+      branch_deleted: None,
+    }
+  }
+
+  #[test]
+  fn code_alerts_puts_a_deleted_branch_after_conflicts() {
+    let files = vec!["a.rs".to_string()];
+    let hold = RebaseHold::StaleTarget {
+      error: "offline".into(),
+    };
+    let mut state = alerts_state(&files, Some(&hold), None);
+    state.branch_deleted = Some("feat/x");
+    let alerts = code_alerts(&state);
+    assert_eq!(
+      alerts,
+      vec![
+        CodeAlert::Conflicts { count: 1 },
+        CodeAlert::BranchDeleted {
+          branch: "feat/x".into()
+        },
+        CodeAlert::Rebase(hold.clone()),
+      ]
+    );
+    assert_eq!(
+      alerts[1].severity(),
+      crate::gpui_shell::ui::Severity::Warning
+    );
+  }
+
+  #[test]
+  fn code_alerts_is_empty_for_a_clean_workspace() {
+    assert!(code_alerts(&alerts_state(&[], None, None)).is_empty());
+  }
+
+  #[test]
+  fn code_alerts_lists_conflicts_rebase_and_setup_in_order() {
+    let files = vec!["a.rs".to_string(), "b.rs".to_string()];
+    let hold = RebaseHold::StaleTarget {
+      error: "offline".into(),
+    };
+    let failed = setup("failed");
+    let alerts = code_alerts(&alerts_state(&files, Some(&hold), Some(&failed)));
+    assert_eq!(
+      alerts,
+      vec![
+        CodeAlert::Conflicts { count: 2 },
+        CodeAlert::Rebase(hold),
+        CodeAlert::Setup {
+          status: "failed".into(),
+          running: false,
+          run_id: Some(3),
+        },
+      ]
+    );
+    let levels: Vec<Severity> = alerts.iter().map(CodeAlert::severity).collect();
+    assert_eq!(levels, [Severity::Danger, Severity::Info, Severity::Danger]);
+  }
+
+  #[test]
+  fn code_alerts_skips_an_unconfigured_setup_script_and_the_home_repo() {
+    let unconfigured = SetupScriptStatus {
+      configured: false,
+      ..setup("passed")
+    };
+    assert!(code_alerts(&alerts_state(&[], None, Some(&unconfigured))).is_empty());
+    let passed = setup("passed");
+    let home = AlertState {
+      in_workspace: false,
+      ..alerts_state(&[], None, Some(&passed))
+    };
+    assert!(code_alerts(&home).is_empty());
+  }
+
+  #[test]
+  fn code_alerts_marks_a_rerunning_setup_script_running() {
+    let passed = setup("passed");
+    let state = AlertState {
+      setup_rerunning: true,
+      ..alerts_state(&[], None, Some(&passed))
+    };
+    assert_eq!(
+      code_alerts(&state),
+      vec![CodeAlert::Setup {
+        status: "passed".into(),
+        running: true,
+        run_id: Some(3),
+      }]
+    );
+  }
+
+  #[test]
+  fn severity_counts_lists_each_present_severity_most_serious_first() {
+    let alerts = vec![
+      CodeAlert::Rebase(RebaseHold::StaleTarget { error: "x".into() }),
+      CodeAlert::Conflicts { count: 1 },
+      CodeAlert::Rebase(RebaseHold::StaleTarget { error: "y".into() }),
+    ];
+    assert_eq!(
+      severity_counts(&alerts),
+      vec![(Severity::Danger, 1), (Severity::Info, 2)]
+    );
+    assert!(severity_counts(&[]).is_empty());
+  }
 
   fn workspace(id: i64, branch: &str, target: Option<&str>) -> Workspace {
     Workspace {
@@ -896,23 +1011,6 @@ mod tests {
   }
 
   #[test]
-  fn branch_names_follow_the_pattern_and_skip_taken_ones() {
-    let taken = HashSet::from(["treq/fix-the-login-bug".to_string()]);
-    assert_eq!(
-      task_branch_name("Fix the login bug!", &HashSet::new(), "treq/{name}"),
-      "treq/fix-the-login-bug"
-    );
-    assert_eq!(
-      task_branch_name("Fix the login bug!", &taken, "treq/{name}"),
-      "treq/fix-the-login-bug-2"
-    );
-    assert_eq!(task_branch_name("???", &HashSet::new(), "{name}"), "task");
-    let long = "word ".repeat(20);
-    let name = task_branch_name(&long, &HashSet::new(), "{name}");
-    assert!(name.len() <= 48 && !name.ends_with('-'), "{name}");
-  }
-
-  #[test]
   fn branch_patterns_drop_trailing_single_letters() {
     assert_eq!(
       apply_branch_name_pattern("{name}", "feat thing r"),
@@ -929,13 +1027,6 @@ mod tests {
   fn branch_patterns_keep_a_one_letter_name() {
     assert_eq!(apply_branch_name_pattern("treq/{name}", "a"), "treq/a");
     assert_eq!(apply_branch_name_pattern("{name}-wip", "a"), "a-wip");
-  }
-
-  #[test]
-  fn session_names_cut_long_prompts() {
-    assert_eq!(session_name("short"), "short");
-    let long = "x".repeat(60);
-    assert_eq!(session_name(&long), format!("{}...", "x".repeat(47)));
   }
 
   #[test]

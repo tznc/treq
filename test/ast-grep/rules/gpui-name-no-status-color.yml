@@ -11,16 +11,28 @@ ignores:
   - "src-tauri/src/gpui_shell/**/tests.rs"
   - "src-tauri/src/gpui_shell/**/tests/**"
 rule:
-  all:
-    - kind: call_expression
-    - any:
-        - pattern: $R.text_color($P.destructive)
-        - pattern: $R.text_color($P.warning)
-        - pattern: $R.text_color($P.success)
-        - pattern: $R.text_color($T.text($P))
-    - inside:
-        stopBy: end
-        kind: function_item
-        has:
-          field: name
-          regex: ^(tree_row|file_row|file_list_row|conflict_list_row|file_name_row|tree_name|file_name)$
+  any:
+    # A status color on a row's name, inside a tree or file-list row.
+    - all:
+        - kind: call_expression
+        - any:
+            - pattern: $R.text_color($P.destructive)
+            - pattern: $R.text_color($P.warning)
+            - pattern: $R.text_color($P.success)
+            - pattern: $R.text_color($T.text($P))
+            - pattern: $R.text_color($T.color($P))
+        - inside:
+            stopBy: end
+            kind: function_item
+            has:
+              field: name
+              regex: ^(tree_row|file_row|file_list_row|conflict_list_row|file_name_row|tree_name|file_name)$
+    # A name's color binding that picks a status tone or palette color.
+    - all:
+        - kind: let_declaration
+        - has:
+            field: pattern
+            regex: ^name_(color|colour|fg)$
+        - has:
+            field: value
+            regex: Tone::(Danger|Warning|Success)|\.(destructive|warning|success)\b

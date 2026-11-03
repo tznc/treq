@@ -18,7 +18,7 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
     expectations: [
       "Sidebar: event-bus and docs-site home rows, Github, Linear, then WORKSPACES grouped by repo",
       "Stacked feat/empty-event-message is indented under feat/event-ingest; status dots aligned right",
-      "Code tab: prompt box, Go to file, file tree, README preview and the Commits rail",
+      "Code tab: Agent and Go to file in one row, file tree, README preview and the Commits rail; no prompt box",
     ],
     issue: "Shortcut hints read '⌘ + K' / '⌘ + P' on Linux; the home file tree lists .git",
   });

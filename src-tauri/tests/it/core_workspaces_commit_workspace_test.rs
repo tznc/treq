@@ -333,7 +333,7 @@ fn test_create_commit_keeps_empty_working_copy_when_self_targeted() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let workspace = treq_lib::core::create_workspace(
     &repo.repo_path,
-    "feat/sync-clobber",
+    repo.default_branch(),
     Some("sync clobber test".to_string()),
     None,
     None,

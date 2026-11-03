@@ -1119,9 +1119,11 @@ impl Sidebar {
             .child("missing"),
         )
       })
-      .when(repo.active, |this| {
-        this.child(self.row_actions("home", None, palette, cx))
-      })
+      // Like a workspace row's, the actions show only while hovered.
+      .when(
+        repo.active && self.hovered_row.as_ref() == Some(&key),
+        |this| this.child(self.row_actions("home", None, palette, cx)),
+      )
       .on_hover(cx.listener({
         let key = key.clone();
         move |this, hovered: &bool, _, cx| this.hover_row_tooltip(key.clone(), *hovered, cx)

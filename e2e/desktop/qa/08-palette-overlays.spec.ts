@@ -1,18 +1,17 @@
 // The command palette (Ctrl+K), its filtered list, the file picker
 // (Ctrl+P), the keyboard shortcuts overlay (?), Go to workspace, the
-// prompt history and the branch switcher. The palette and the other
-// overlays are dialog windows over the repo window, so they are grabbed
-// from the X screen.
+// prompt history and the branch switcher, all drawn over the dimmed repo
+// window.
 import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { home, mod, openWorkspace, overlay, settle } from "./helpers.ts";
+import { home, mod, openWorkspace, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
 test("palette-overlays: command palette", async ({ page, context }) => {
   await openWorkspace(page, "feat/empty-event-message");
   await page.keyboard.press(`${mod}+k`);
-  const palette = await overlay(page, context);
+  const palette = page;
   await expect(palette.getByRole("option", { name: "Go to home" })).toBeVisible();
   await settle(page, 800);
   await capture(page, {
@@ -73,7 +72,7 @@ test("palette-overlays: command palette", async ({ page, context }) => {
 test("palette-overlays: file picker", async ({ page }) => {
   await openWorkspace(page, "feat/empty-event-message");
   await page.keyboard.press(`${mod}+p`);
-  const search = page.getByRole("textbox", { name: "Search files…" });
+  const search = page.getByRole("textbox", { name: "Go to file…" });
   await expect(search).toBeVisible();
   await settle(page, 800);
   await capture(page, {
@@ -115,7 +114,7 @@ test("palette-overlays: shortcuts, go to workspace, prompt history, branch switc
   await home(page);
   await page.getByRole("tab", { name: "Commits" }).click();
   await page.keyboard.press("Shift+?");
-  const dialog = await overlay(page, context);
+  const dialog = page;
   await expect(dialog.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeVisible();
   await settle(page, 800);
   await capture(page, {
@@ -160,7 +159,7 @@ test("palette-overlays: shortcuts, go to workspace, prompt history, branch switc
     ],
   ] as const) {
     await page.keyboard.press(`${mod}+k`);
-    const palette = await overlay(page, context);
+    const palette = page;
     await palette.getByRole("textbox", { name: "Type a command or search…" }).fill(command);
     await settle(page, 400);
     const option = palette.getByRole("option", { name: command });
@@ -171,8 +170,7 @@ test("palette-overlays: shortcuts, go to workspace, prompt history, branch switc
     await option.click();
     await settle(page, 1500);
     await capture(page, { name, title, screen: true, rest: false, expectations: [...expectations] });
-    // The overlay's dialog window has the keys.
-    await (await overlay(page, context)).keyboard.press("Escape");
+    await page.keyboard.press("Escape");
     await settle(page, 400);
     await page.keyboard.press("Escape");
     await settle(page, 600);

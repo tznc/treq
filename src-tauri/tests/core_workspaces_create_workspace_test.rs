@@ -44,8 +44,9 @@ fn test_can_create_workspace() {
     "Repo path should match"
   );
   assert_eq!(
-    workspace.workspace_path, "feat-test",
-    "Workspace path should be generated and sanitised correctly"
+    workspace.workspace_path,
+    format!("{}-feat-test", workspace.id),
+    "Workspace path should be the id followed by the sanitised branch"
   );
 
   assert!(
@@ -1214,4 +1215,174 @@ fn test_create_workspace_materializes_installed_library_skills() {
     "library skill should be copied into the workspace"
   );
   assert!(ws.join(".claude/skills/demo/SKILL.md").exists());
+}
+
+#[test]
+fn branches_that_sanitize_alike_get_distinct_workspace_dirs() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+
+  let slash =
+    treq_lib::core::create_workspace(&repo.repo_path, "feat/x", None, None, None, None, None)
+      .expect("create feat/x");
+  let dash =
+    treq_lib::core::create_workspace(&repo.repo_path, "feat-x", None, None, None, None, None)
+      .expect("create feat-x after feat/x");
+
+  assert_ne!(slash.workspace_path, dash.workspace_path);
+  assert_ne!(slash.workspace_name, dash.workspace_name);
+  assert!(repo
+    .workspaces_dir()
+    .join(&slash.workspace_path)
+    .join(".jj")
+    .exists());
+  assert!(repo
+    .workspaces_dir()
+    .join(&dash.workspace_path)
+    .join(".jj")
+    .exists());
+}
+
+#[test]
+fn new_workspace_dir_and_jj_name_start_with_its_id() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+
+  let workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/prefixed",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("create workspace");
+
+  let expected = format!("{}-feat-prefixed", workspace.id);
+  assert_eq!(workspace.workspace_path, expected);
+  assert_eq!(workspace.workspace_name, expected);
+  assert!(repo.workspaces_dir().join(&expected).join(".jj").exists());
+  let jj_workspaces = JjVerifier::list_workspaces(&repo.repo_path).expect("list jj workspaces");
+  assert!(jj_workspaces.contains(&expected), "{jj_workspaces:?}");
+
+  let statuses =
+    treq_lib::core::list_workspace_statuses(&repo.repo_path).expect("list workspace statuses");
+  let status = statuses
+    .iter()
+    .find(|s| s.current.id == workspace.id)
+    .expect("status for the new workspace");
+  assert_eq!(status.current.branch_name, "feat/prefixed");
+}
+
+#[test]
+fn workspace_with_old_style_dir_still_lists_and_deletes() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  // A workspace made before ids were prefixed: dir and jj name are the bare sanitized branch.
+  treq_lib::jj::create_workspace(
+    &repo.repo_path,
+    "feat/legacy",
+    "feat/legacy",
+    true,
+    None,
+    Some("main"),
+    None,
+  )
+  .expect("create legacy jj workspace");
+  let id = treq_lib::local_db::add_workspace(
+    &repo.repo_path,
+    "feat-legacy".to_string(),
+    "feat-legacy".to_string(),
+    "feat/legacy".to_string(),
+    None,
+    None,
+    None,
+  )
+  .expect("insert legacy row");
+  let legacy_dir = repo.workspaces_dir().join("feat-legacy");
+  assert!(legacy_dir.join(".jj").exists());
+
+  let statuses =
+    treq_lib::core::list_workspace_statuses(&repo.repo_path).expect("list workspace statuses");
+  let status = statuses
+    .iter()
+    .find(|s| s.current.id == id)
+    .expect("legacy workspace listed");
+  assert_eq!(status.current.workspace_path, "feat-legacy");
+  assert_eq!(status.current.branch_name, "feat/legacy");
+
+  // A new workspace for another branch does not disturb the legacy dir.
+  let other =
+    treq_lib::core::create_workspace(&repo.repo_path, "feat/other", None, None, None, None, None)
+      .expect("create another workspace");
+  assert_eq!(other.workspace_path, format!("{}-feat-other", other.id));
+  assert!(legacy_dir.join(".jj").exists());
+
+  treq_lib::core::delete_workspace(&repo.repo_path, &id).expect("delete legacy workspace");
+  assert!(!legacy_dir.exists());
+  assert!(
+    treq_lib::local_db::get_workspace_by_branch(&repo.repo_path, "feat/legacy")
+      .expect("query")
+      .is_none()
+  );
+  assert!(!JjVerifier::list_workspaces(&repo.repo_path)
+    .expect("list jj workspaces")
+    .contains(&"feat-legacy".to_string()));
+}
+
+#[test]
+fn failed_create_leaves_no_row_and_no_dir() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+
+  // Symlinking a tracked file fails after the workspace dir exists.
+  treq_lib::core::create_workspace_with_symlinked_dirs(
+    &repo.repo_path,
+    "feat/fails",
+    None,
+    None,
+    None,
+    None,
+    None,
+    Some(vec!["README.md".to_string()]),
+  )
+  .expect_err("symlink over a tracked file must fail");
+
+  assert!(treq_lib::core::list_workspaces(&repo.repo_path)
+    .expect("list workspaces")
+    .is_empty());
+  let leftover: Vec<_> = fs::read_dir(repo.workspaces_dir())
+    .expect("read workspaces dir")
+    .map(|entry| entry.expect("entry").file_name())
+    .collect();
+  assert!(leftover.is_empty(), "leftover dirs: {leftover:?}");
+}
+
+#[test]
+fn create_recovers_a_row_left_by_a_create_killed_before_its_dir_was_made() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  // A create killed after reserving its row but before jj made the workspace.
+  let stale = treq_lib::local_db::add_workspace(
+    &repo.repo_path,
+    "1-feat-killed".to_string(),
+    "1-feat-killed".to_string(),
+    "feat/killed".to_string(),
+    None,
+    None,
+    None,
+  )
+  .expect("insert stale row");
+
+  let created =
+    treq_lib::core::create_workspace(&repo.repo_path, "feat/killed", None, None, None, None, None)
+      .expect("retry replaces the stale row");
+
+  assert_ne!(created.id, stale);
+  assert_eq!(
+    created.workspace_path,
+    format!("{}-feat-killed", created.id)
+  );
+  assert_eq!(
+    treq_lib::core::list_workspaces(&repo.repo_path)
+      .expect("list")
+      .len(),
+    1
+  );
 }

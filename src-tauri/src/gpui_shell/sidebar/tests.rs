@@ -323,10 +323,14 @@ fn clicking_home_selects_its_repository(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn home_actions_show_without_hover_and_do_not_select_home(cx: &mut TestAppContext) {
+fn home_actions_show_on_hover_and_do_not_select_home(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![]));
+  assert!(h.bounds("home-start-agent").is_none(), "hidden until hover");
+  h.hover("home");
   h.click("home-start-agent");
+  h.hover("home");
   h.click("home-open-shell");
+  h.hover("home");
   h.click("home-stack");
   assert_eq!(
     h.sent(),
@@ -438,7 +442,9 @@ fn unavailable_actions_do_nothing(cx: &mut TestAppContext) {
   s.agent_unavailable = Some("Agents are not supported here".into());
   s.shell_unavailable = Some("Shells are not supported here".into());
   let mut h = Harness::new(cx, s);
+  h.hover("home");
   h.click("home-start-agent");
+  h.hover("home");
   h.click("home-open-shell");
   h.hover("workspace-7");
   h.click("workspace-7-start-agent");
@@ -535,6 +541,7 @@ fn tooltip_shows_after_a_short_rest(cx: &mut TestAppContext) {
 #[gpui::test]
 fn row_button_tooltip_wins_over_its_row(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![]));
+  h.hover("home");
   h.hover("home-stack");
   h.cx.executor().advance_clock(TOOLTIP_DELAY);
   h.cx.run_until_parked();

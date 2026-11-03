@@ -41,6 +41,7 @@ mod core_stash_test;
 mod core_workspaces_archive_workspace_test;
 mod core_workspaces_auto_push_test;
 mod core_workspaces_commit_workspace_test;
+mod core_workspaces_default_branch_remote_proptest;
 mod core_workspaces_default_branch_sync_test;
 mod core_workspaces_delete_workspace_test;
 mod core_workspaces_files_test;

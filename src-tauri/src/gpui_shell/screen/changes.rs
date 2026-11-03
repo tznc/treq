@@ -123,6 +123,16 @@ enum SideRow {
   /// By index into [`SideData::conflicted`].
   Conflict(usize),
   Header(List),
+  /// The message and Commit button, under the first uncommitted group's
+  /// header. What changes its height is in the key, so a change re-measures
+  /// the row.
+  CommitBox {
+    lines: usize,
+    error: bool,
+    pending: bool,
+  },
+  /// Where the uncommitted groups would be, when nothing is uncommitted.
+  NothingToCommit,
   /// By index into the list's files in [`SideData`].
   File(List, usize),
   CommittedHeader,
@@ -242,6 +252,7 @@ impl ChangesView {
   ) -> Self {
     let mut this = Self::blank(parent, options, host, react, popups, dark, cx);
     this.hydrate_review(cx);
+    this.hydrate_viewed(cx);
     this.load(cx);
     this.watch_threads(cx);
     this.load_pr(cx);
@@ -361,6 +372,7 @@ impl ChangesView {
       self.close_search(cx);
       self.watch_threads(cx);
       self.hydrate_review(cx);
+      self.hydrate_viewed(cx);
       self.load_pr(cx);
     }
     if reread {
@@ -929,6 +941,32 @@ impl ChangesView {
   /// The diff a file card shows: the working copy's, else the branch's.
   fn file_hunks(&self, path: &str) -> Option<FileHunks> {
     self.shown_hunks(path).cloned()
+  }
+
+  /// The files kept as viewed, folded as when they were marked; the stale
+  /// ones go once the diff is read.
+  fn hydrate_viewed(&mut self, cx: &mut Context<Self>) {
+    if self.read_only() {
+      return;
+    }
+    let workspace = self.parent.working_directory();
+    self.run(
+      move |host, _| host.viewed_files(&workspace),
+      |view, result, cx| match result {
+        Ok(files) => {
+          for (path, hash) in files {
+            view.collapsed_files.insert(path.clone());
+            view.viewed.entry(path).or_insert(hash);
+          }
+          if view.snapshot.is_some() {
+            view.unmark_stale(None, cx);
+          }
+          cx.notify();
+        }
+        Err(err) => log::warn!("Failed to load viewed files: {err}"),
+      },
+      cx,
+    );
   }
 
   /// Viewed files whose diff changed since are viewed no longer. `read`
@@ -1922,16 +1960,27 @@ impl ChangesView {
       Some(false) => 0,
       _ => snapshot.committed.len(),
     };
-    if listed.is_empty() && committed == 0 {
+    let commit_box = SideRow::CommitBox {
+      lines: self.message.lines().count().max(1),
+      error: self.message_error.is_some(),
+      pending: self.pending.is_some(),
+    };
+    if listed.is_empty() && committed == 0 && data.conflicted.is_empty() {
       rows.push(SideRow::Empty);
-    } else if !listed.is_empty() {
+    } else if listed.is_empty() {
+      rows.push(SideRow::NothingToCommit);
+    } else {
       if !data.staged.is_empty() {
         rows.push(SideRow::Header(List::Selected));
+        rows.push(commit_box);
         if !self.collapsed_sections.contains(&Section::Selected) {
           rows.extend((0..data.staged.len()).map(|k| SideRow::File(List::Selected, k)));
         }
       }
       rows.push(SideRow::Header(List::Changes));
+      if data.staged.is_empty() {
+        rows.push(commit_box);
+      }
       if !self.collapsed_sections.contains(&Section::Changes) {
         rows.extend((0..data.unstaged.len()).map(|k| SideRow::File(List::Changes, k)));
       }
@@ -2012,7 +2061,6 @@ impl ChangesView {
       .border_r_1()
       .border_color(p.border)
       .bg(p.sidebar)
-      .child(self.commit_box(p, cx))
       .child(list)
   }
 
@@ -2060,6 +2108,13 @@ impl ChangesView {
           .child(self.file_row(list, &file, selected, last, p, cx))
           .into_any_element()
       }
+      SideRow::CommitBox { .. } => self.commit_box(p, cx).into_any_element(),
+      SideRow::NothingToCommit => ui::text(div(), TextSize::Sm)
+        .debug_selector(|| "changes-nothing-to-commit".into())
+        .py_2()
+        .text_color(p.muted_foreground)
+        .child("Nothing to commit")
+        .into_any_element(),
       SideRow::CommittedHeader => self.committed_header(p, cx).into_any_element(),
       SideRow::Committed(i) => self.committed_row(i, p, cx).into_any_element(),
       SideRow::Empty => div()
@@ -2184,8 +2239,8 @@ impl ChangesView {
       None => commit_label(self.staging.staged.len()),
     };
     let error = self.message_error;
-    let border = p.primary_foreground.opacity(0.2);
     let main = Button::new("commit-button", p)
+      .variant(Variant::Outline)
       .size(Size::Sm)
       .flex_1()
       .h_auto()
@@ -2194,7 +2249,7 @@ impl ChangesView {
       .rounded_r_none()
       .disabled(disabled || empty)
       .when(self.pending.is_some(), |b| {
-        b.child(ui::spinner("commit-spin", 16., p.primary_foreground))
+        b.child(ui::spinner("commit-spin", 16., p.muted_foreground))
       })
       .label(label)
       .on_click(
@@ -2206,27 +2261,22 @@ impl ChangesView {
       .child(
         Button::new("commit-options", p)
           .aria_label("More commit options")
+          .variant(Variant::Outline)
           .size(Size::Sm)
           .h_auto()
           .py_1p5()
           .px_1p5()
           .rounded_l_none()
-          .border_l_1()
-          .border_color(border)
+          .border_l_0()
           .disabled(disabled || empty)
-          .child(ui::icon(
-            theme::ICON_CHEVRON_DOWN,
-            16.,
-            p.primary_foreground,
-          ))
+          .icon(theme::ICON_CHEVRON_DOWN, 16.)
           .on_click(cx.listener(|view, _, _, cx| view.commit_menu(cx))),
       )
       .child(self.anchor("commit-menu".into()));
     div()
-      .px_4()
-      .py_3()
-      .border_b_1()
-      .border_color(p.border)
+      .w_full()
+      .pt_1()
+      .pb_3()
       .flex()
       .flex_col()
       .gap_2()
@@ -2647,7 +2697,7 @@ impl ChangesView {
           )
         }),
     )
-    .trailing(div().text_color(muted).child(file.status))
+    .trailing(self.status_letter(format!("committed-{}", file.path), &file.status, muted, cx))
     .on_mouse_down(
       MouseButton::Right,
       cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
@@ -2656,6 +2706,30 @@ impl ChangesView {
     )
     .on_click(cx.listener(move |view, _, _, cx| view.show_file(&path, cx)));
     div().when(i == 0, |this| this.pt_2()).child(row)
+  }
+
+  /// A file's status letter, named in words for its tooltip and readers.
+  fn status_letter(
+    &self,
+    key: String,
+    status: &str,
+    color: Hsla,
+    cx: &mut Context<Self>,
+  ) -> Stateful<Div> {
+    let word = super::file_browser_data::status_title(status);
+    self.tip(
+      format!("status-tip-{key}"),
+      word,
+      div()
+        .id(SharedString::from(format!("status-{key}")))
+        .role(gpui::Role::Label)
+        .aria_label(word)
+        .test_support()
+        .min_w(zpx(8.))
+        .text_color(color)
+        .child(status.to_string()),
+      cx,
+    )
   }
 
   /// `el` with a tooltip of `text` above it.
@@ -2696,12 +2770,17 @@ impl ChangesView {
       |id: String, icon: &'static str, fg: Hsla, hidden: bool| file_action(id, icon, fg, hidden, p);
     let red = Tone::Danger.text(p);
     let status_color = p.muted_foreground;
-    let mut actions = div().flex().items_center().gap_1().flex_none().child(
-      div()
-        .min_w(zpx(8.))
-        .text_color(status_color)
-        .child(file.status.clone()),
-    );
+    let mut actions = div()
+      .flex()
+      .items_center()
+      .gap_1()
+      .flex_none()
+      .child(self.status_letter(
+        format!("{list:?}-{}", file.path),
+        &file.status,
+        status_color,
+        cx,
+      ));
     if last && selected && !staged {
       let target = path.clone();
       let tip_key = format!("discard-tip-{}", file.path);
@@ -3185,14 +3264,7 @@ impl ChangesView {
               },
             ),
             cx,
-          ))
-          .when(committed, |this| {
-            this.child(
-              div()
-                .debug_selector(|| "committed-file-label".into())
-                .child(badge("Committed", Tone::Primary)),
-            )
-          }),
+          )),
       );
     let mut right = div().flex().items_center().gap_2();
     if !committed && !self.read_only() {

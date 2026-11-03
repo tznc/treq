@@ -125,8 +125,8 @@ function fakeCredentialStore(
       loads.push(placementId);
       return Promise.resolve(rows[placementId] ?? null);
     },
-    markInvalid: (id) => {
-      invalid.push(id);
+    markInvalid: (id, key) => {
+      invalid.push(`${id}:${key}`);
       return Promise.resolve();
     },
   };
@@ -184,7 +184,8 @@ Deno.test("an unauthorized answer marks the credential invalid and is rethrown",
   const { build } = recordingBuild(new ProviderError("unauthorized", "revoked"));
   const err = await assertRejects(() => providerForPlacement(store, "boat", "p4", build).getInstance("x"), ProviderError);
   assertEquals(err.kind, "unauthorized");
-  assertEquals(invalid, ["c4"]);
+  // The key that failed goes along, so a 401 racing a rotation spares the new key.
+  assertEquals(invalid, ["c4:k"]);
 });
 
 Deno.test("unauthorized surfaces to the app as provider_credential_invalid", () => {
@@ -251,6 +252,20 @@ Deno.test("an invalid key is refused and not stored", async () => {
   assertEquals(r?.status, 400);
   assertEquals((r?.body as { code: string }).code, "provider_credential_invalid");
   assertEquals(saved, []);
+});
+
+Deno.test("a key with characters no HTTP header can carry is a validation error, not a retry", async () => {
+  for (const key of ["ключ", "a\nb", "tab\tkey", "😀"]) {
+    const { store, saved } = fakeActionStore();
+    const r = await handleByosAction("save_provider_credential", { provider_kind: "boat", api_key: key }, {
+      canByos: () => Promise.resolve(true),
+      store,
+      build: validatingProvider("ok"),
+    });
+    assertEquals(r?.status, 400, JSON.stringify(key));
+    assertEquals((r?.body as { code: string }).code, "validation_error");
+    assertEquals(saved, []);
+  }
 });
 
 Deno.test("a user the gate refuses cannot save a key", async () => {

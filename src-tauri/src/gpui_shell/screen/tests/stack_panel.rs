@@ -34,16 +34,61 @@ fn the_home_view_draws_no_stack_panel(cx: &mut TestAppContext) {
   let mut route = route_json(None, "main");
   route["code"] = true.into();
   let (mut h, _) = workspace_harness(cx, host, serde_json::from_value(route).expect("route"));
-  assert!(h.drawn("task-new-workspace"), "the home Code tab");
+  assert!(h.drawn("code-action-row"), "the home Code tab");
   assert!(!h.drawn("workspace-stack-panel"));
 }
 
 #[gpui::test]
-fn a_lone_workspace_draws_no_stack_panel(cx: &mut TestAppContext) {
+fn a_lone_workspace_draws_a_one_row_stack_panel(cx: &mut TestAppContext) {
   let host = stack_host(&[(7, "feat/alpha", "main"), (8, "feat/other", "main")]);
   let (mut h, _) = workspace_harness(cx, host, code_route());
-  assert!(h.drawn("workspace-code"));
-  assert!(!h.drawn("workspace-stack-panel"));
+  assert!(h.drawn("workspace-stack-panel"));
+  assert!(h.drawn(item(7)));
+  assert!(!h.drawn(item(8)), "not in its stack");
+}
+
+/// The branch, its target picker and Stack on this… sit at the top of the
+/// stack card, not in the header.
+#[gpui::test]
+fn the_stack_panel_holds_the_target_picker_and_stack_button(cx: &mut TestAppContext) {
+  let host = stack_host(&[(6, "feat/alpha", "main"), (7, "feat/beta", "feat/alpha")]);
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.cx.run_until_parked();
+  let panel = h.cx.debug_bounds("workspace-stack-panel").expect("panel");
+  let header = h.cx.debug_bounds("workspace-header").expect("header");
+  for id in ["workspace-target", "workspace-stack"] {
+    let b = h
+      .cx
+      .debug_bounds(id)
+      .unwrap_or_else(|| panic!("{id} drawn"));
+    assert!(panel.contains(&b.center()), "{id} in the stack card");
+    assert!(!header.intersects(&b), "{id} not in the header");
+  }
+}
+
+#[gpui::test]
+fn the_stack_panel_target_picker_opens_the_target_popover(cx: &mut TestAppContext) {
+  let host = stack_host(&[(6, "feat/alpha", "main"), (7, "feat/beta", "feat/alpha")]);
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("workspace-target");
+  h.cx.run_until_parked();
+  assert!(
+    h.drawn("header-popover-backdrop"),
+    "the target popover opens over the window"
+  );
+}
+
+#[gpui::test]
+fn the_stack_panel_stack_button_stacks_on_the_workspace(cx: &mut TestAppContext) {
+  let host = stack_host(&[(7, "feat/alpha", "main")]);
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("workspace-stack");
+  h.cx.run_until_parked();
+  assert!(
+    h.sent().contains(&press("workspace.stack")),
+    "{:?}",
+    h.sent()
+  );
 }
 
 #[gpui::test]

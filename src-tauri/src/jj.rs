@@ -976,8 +976,28 @@ fn build_text_hunks(before: &str, after: &str) -> Vec<JjDiffHunk> {
   let mut hunks = parse_git_diff_hunks(&patch).unwrap_or_default();
   for hunk in &mut hunks {
     rewrite_no_newline_marker(hunk);
+    hunk.header = empty_side_from_zero(&hunk.header);
   }
   hunks
+}
+
+/// Git starts an empty range at the line before it (`-0,0` for an empty
+/// file); imara-diff starts it at the line after.
+fn empty_side_from_zero(header: &str) -> String {
+  let Some((ranges, rest)) = header.strip_prefix("@@ ").and_then(|h| h.split_once(" @@")) else {
+    return header.to_string();
+  };
+  let fix = |range: &str| match range[1..].split_once(',') {
+    Some((start, "0")) => {
+      let start = start.parse::<usize>().map_or(0, |s| s.saturating_sub(1));
+      format!("{}{start},0", &range[..1])
+    }
+    _ => range.to_string(),
+  };
+  let Some((old, new)) = ranges.split_once(' ') else {
+    return header.to_string();
+  };
+  format!("@@ {} {} @@{rest}", fix(old), fix(new))
 }
 
 /// Turns the marker line [`build_text_hunks`] diffs into git's form and
@@ -2879,8 +2899,31 @@ pub fn jj_commit(workspace_path: &str, message: &str) -> Result<String, JjError>
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
 
   let ref_name = RefName::new(&branch);
-  tx.repo_mut()
-    .set_local_bookmark_target(ref_name, RefTarget::normal(committed.id().clone()));
+  let branch_target = tx.repo().view().get_local_bookmark(ref_name).clone();
+  let committed_target = RefTarget::normal(committed.id().clone());
+  let grown_side = branch_target
+    .added_ids()
+    .find(|id| *id == wc_commit.id() || wc_commit.parent_ids().contains(id))
+    .cloned();
+  let fast_forward = match (&grown_side, branch_target.as_normal()) {
+    (Some(_), Some(_)) => true,
+    (Some(_), None) => false,
+    (None, Some(tip)) => tx
+      .repo()
+      .index()
+      .is_ancestor(tip, committed.id())
+      .map_err(|e| JjError::IoError(format!("Failed ancestry check: {}", e)))?,
+    (None, None) => branch_target.is_absent(),
+  };
+  if fast_forward {
+    tx.repo_mut()
+      .set_local_bookmark_target(ref_name, committed_target);
+  } else if let Some(base) = grown_side.or_else(|| wc_commit.parent_ids().first().cloned()) {
+    // A diverged branch, or one a fetch moved past this checkout: keep both sides for a pull to heal.
+    tx.repo_mut()
+      .merge_local_bookmark(ref_name, &RefTarget::normal(base), &committed_target)
+      .map_err(|e| JjError::IoError(format!("Failed to advance bookmark: {}", e)))?;
+  }
 
   if !workspace_names.is_empty() {
     let new_wc = block_on(
@@ -4238,7 +4281,7 @@ fn validate_commit_message(message: &str) -> Result<(), JjError> {
   if message.contains('\0') {
     return Err(JjError::IoError("Invalid commit message".to_string()));
   }
-  if message.len() > 10000 {
+  if message.chars().count() > 10000 {
     return Err(JjError::IoError(
       "Commit message too long (max 10000 characters)".to_string(),
     ));
@@ -4730,6 +4773,20 @@ pub use merge_commits::*;
 
 #[cfg(test)]
 mod tests {
+
+  #[test]
+  fn sanitize_workspace_name_never_yields_empty_or_hidden_names() {
+    for raw in ["..", " ..", ".", "", " ", ". .", " .a", "..a"] {
+      let name = sanitize_workspace_name(raw);
+      assert!(!name.is_empty(), "{raw:?} sanitized to an empty name");
+      assert!(
+        !name.starts_with('.'),
+        "{raw:?} sanitized to hidden {name:?}"
+      );
+    }
+    assert_eq!(sanitize_workspace_name(" .a"), "a");
+    assert_eq!(sanitize_workspace_name("feat/x"), "feat-x");
+  }
   use super::*;
 
   /// A workspace path that does not exist, under a temp dir that does.
@@ -4737,6 +4794,13 @@ mod tests {
     let temp = TempDir::new().expect("tempdir");
     let path = temp.path().join(".treq/workspaces/gone");
     (temp, path.to_string_lossy().into_owned())
+  }
+
+  #[test]
+  fn validate_commit_message_counts_characters_not_bytes() {
+    // 4000 characters, 12000 bytes: under the 10000-character limit.
+    assert!(validate_commit_message(&"漢".repeat(4000)).is_ok());
+    assert!(validate_commit_message(&"漢".repeat(10_001)).is_err());
   }
 
   #[test]
@@ -4921,6 +4985,12 @@ mod tests {
     let hunks = build_text_hunks("x\r\r\n", "x\r\n");
     assert_eq!(hunks.len(), 1);
     assert_eq!(hunks[0].lines, ["-x\r", "+x"]);
+  }
+
+  #[test]
+  fn text_hunks_number_an_empty_side_from_zero_as_git_does() {
+    assert_eq!(build_text_hunks("", "x\n")[0].header, "@@ -0,0 +1,1 @@");
+    assert_eq!(build_text_hunks("x\n", "")[0].header, "@@ -1,1 +0,0 @@");
   }
 
   #[test]

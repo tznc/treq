@@ -24,7 +24,31 @@ valid:
     }
   - |
     const BRANCH_GROUPS: [&str; 1] = ["Current Branch"];
+  - |
+    fn field_labels() -> Div {
+      div()
+        .child(label("UI zoom"))
+        .child(field_block("Claude Code model", control, None, p))
+        .child(setting_row("API key", "Paste a Linear personal API key", button, p))
+        .child(label("Included files and directories"))
+    }
 invalid:
+  - |
+    fn acronym_label() -> Div {
+      div().child(label("UI Zoom"))
+    }
+  - |
+    fn product_then_title() -> Div {
+      div().child(field_block("Claude Code Model", control, None, p))
+    }
+  - |
+    fn acronym_then_title() -> Div {
+      div().child(setting_row("API Key", "description", button, p))
+    }
+  - |
+    fn slashed_label() -> Div {
+      div().child(saved_field_block("Included Files/Directories", control, None, mark, p))
+    }
   - |
     fn title() -> Button {
       ui::Button::new("merge", p).label("Merge Preview")
