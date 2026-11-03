@@ -16,6 +16,11 @@ export interface BillingStore {
   getCustomer(): Promise<BillingCustomer | null>;
   /** Records the customer unless the owner has one, and returns the owner's customer. */
   attachCustomer(stripeCustomerId: string): Promise<string>;
+  /**
+   * Whether the owner's email already had a Pro trial, on this account or a
+   * deleted one (billing_trial_claimed). Always false for an organization.
+   */
+  trialClaimed(): Promise<boolean>;
 }
 
 /** Team checkout and the Team billing portal, for one signed-in user. */
@@ -62,6 +67,12 @@ function ownerStore(
       if (error)
         throw new Error(`billing customer lookup failed: ${error.message}`);
       return (data as BillingCustomer | null) ?? null;
+    },
+    async trialClaimed() {
+      if (ownerType !== "user") return false;
+      const { data, error } = await client.rpc("billing_trial_claimed", { p_user_id: ownerId });
+      if (error) throw new Error(`trial claim check failed: ${error.message}`);
+      return data === true;
     },
     async attachCustomer(stripeCustomerId) {
       const { data, error } = await client.rpc("billing_attach_customer", {
