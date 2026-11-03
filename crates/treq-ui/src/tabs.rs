@@ -180,7 +180,7 @@ impl RenderOnce for Tabs {
     let selector = self.id.to_string();
     let selected_fill = self.segment_fill(true);
     let segment_hover = self.segment_hover();
-    div()
+    let strip = div()
       .id(self.id)
       .debug_selector(move || selector)
       .role(gpui::Role::TabList)
@@ -285,7 +285,14 @@ impl RenderOnce for Tabs {
           .when_some(on_select, move |el, f| {
             el.on_click(move |_, window, cx| f(ix, window, cx))
           })
-      }))
+      }));
+    // A segmented track is as wide as its tabs: the row around it takes
+    // the stretch a column parent gives its children.
+    if segmented {
+      div().flex().child(strip).into_any_element()
+    } else {
+      strip.into_any_element()
+    }
   }
 }
 
@@ -382,6 +389,35 @@ mod tests {
         .size
         .height;
       (f32::from(seg), f32::from(line))
+    }
+
+    struct Column;
+
+    impl Render for Column {
+      fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let p = theme::palette(false);
+        gpui::Styled::flex_col(gpui::Styled::flex(gpui::Styled::w(div(), gpui::px(800.)))).child(
+          Tabs::segmented("seg", &p)
+            .tab(Tab::new("seg-a", "Hourly"))
+            .tab(Tab::new("seg-b", "Monthly")),
+        )
+      }
+    }
+
+    #[gpui::test]
+    fn segmented_tabs_fit_their_tabs_in_a_wide_column(cx: &mut TestAppContext) {
+      let window = cx.add_window(|_, _| Column);
+      let mut cx = VisualTestContext::from_window(*window, cx);
+      cx.update(|window, cx| window.draw(cx).clear(cx));
+      let track = f32::from(cx.debug_bounds("seg").expect("track").size.width);
+      let a = cx.debug_bounds("seg-a").expect("segment a");
+      let b = cx.debug_bounds("seg-b").expect("segment b");
+      let tabs = f32::from(b.origin.x + b.size.width - a.origin.x);
+      assert!(track < 400., "track is {track}px wide in an 800px column");
+      assert!(
+        track - tabs < 8.,
+        "track {track}px hugs its tabs ({tabs}px)"
+      );
     }
 
     #[gpui::test]
