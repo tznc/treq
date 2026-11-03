@@ -35,7 +35,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import { correlationIdFromRequest, logWithCorrelation } from "../_shared/remote/correlation.ts";
-import { supabaseLapseSweepStore, sweepLapsedInstances } from "../_shared/remote/lapse-sweep.ts";
+import { supabaseLapseSweepStore, sweepLapsedInstances, sweepStaleProvisioning } from "../_shared/remote/lapse-sweep.ts";
 import { placementProviders } from "../_shared/remote/byos.ts";
 import { enforceIdle, idleTimeoutMinutes, supabaseIdleStore } from "../_shared/remote/idle-controller.ts";
 import { reportUsage, supabaseUsageReportStore } from "../_shared/billing/usage-report.ts";
@@ -64,13 +64,15 @@ const ACTIONS: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   recover_instance: ops.recoverInstance,
   list_recent_failures: ops.listRecentFailures,
   prune_audit_events: ops.pruneAuditEvents,
-  sweep_lapsed_instances: (ctx) =>
-    sweepLapsedInstances({
+  sweep_lapsed_instances: async (ctx) => ({
+    ...await sweepLapsedInstances({
       store: supabaseLapseSweepStore(ctx.supabase, ctx.correlationId),
       providers: ctx.providers,
       now: () => new Date(),
       log: ctx.log,
     }),
+    stale_provisioning_failed: await sweepStaleProvisioning(ctx.supabase, new Date()),
+  }),
   reconcile_stale_subscriptions: async (ctx) => {
     const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
     if (!stripeKey) throw new Error("STRIPE_SECRET_KEY is not configured");
