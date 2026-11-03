@@ -717,8 +717,9 @@ describe("createCheckout for Team", () => {
     expect(calls[0]).toEqual({
       method: "POST",
       path: "/v1/customers",
+      // The Team customer is the organization's billing account: the buyer's
+      // personal email stays off it, and Checkout asks for a billing email.
       params: {
-        email: "owner@example.com",
         "metadata[owner_type]": "organization",
         "metadata[owner_id]": ORG_ID,
       },
