@@ -58,6 +58,15 @@ describe("handleOrganizationsRequest", () => {
     [{ action: "promote_member", organization_id: ORG_ID }],
     [{ action: "promote_member", organization_id: ORG_ID, user_id: "mia" }],
     [{ action: "demote_owner", user_id: OTHER_ID }],
+    [{ action: "set_role", organization_id: ORG_ID, user_id: OTHER_ID }],
+    [
+      {
+        action: "set_role",
+        organization_id: ORG_ID,
+        user_id: OTHER_ID,
+        role: "owner",
+      },
+    ],
     [{ action: "delete_organization" }],
     [{ action: "delete_organization", organization_id: "acme" }],
     [
@@ -200,6 +209,37 @@ describe("handleOrganizationsRequest", () => {
     expect(result).toEqual({
       status: 200,
       body: { ok: true, result: outcome },
+    });
+  });
+
+  it.each([
+    "admin",
+    "member",
+  ])("sets a member's role to %s as the caller", async (role) => {
+    const { calls, deps: d } = deps({ data: "updated", error: null });
+    const result = await handleOrganizationsRequest(
+      {
+        action: "set_role",
+        organization_id: ORG_ID,
+        user_id: OTHER_ID,
+        role,
+      },
+      d,
+    );
+    expect(calls).toEqual([
+      {
+        fn: "organization_set_role",
+        args: {
+          p_actor: USER_ID,
+          p_org_id: ORG_ID,
+          p_user_id: OTHER_ID,
+          p_role: role,
+        },
+      },
+    ]);
+    expect(result).toEqual({
+      status: 200,
+      body: { ok: true, result: "updated" },
     });
   });
 

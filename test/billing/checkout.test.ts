@@ -286,7 +286,7 @@ function fakeStore(overrides: Partial<BillingStore> = {}): BillingStore {
 
 function fakeOrganizations(store: BillingStore, owner = true, members = 7) {
   return {
-    isOwner: vi.fn(async (_organizationId: string) => owner),
+    canManageBilling: vi.fn(async (_organizationId: string) => owner),
     memberCount: vi.fn(async (_organizationId: string) => members),
     store: vi.fn((_organizationId: string) => store),
   } satisfies OrganizationBilling;
@@ -655,9 +655,11 @@ describe("createCheckout for Team", () => {
     });
     expect(result).toEqual({
       status: 403,
-      body: { error: "Only an owner of this organization can buy Team." },
+      body: {
+        error: "Only an owner or admin of this organization can buy Team.",
+      },
     });
-    expect(organizations.isOwner).toHaveBeenCalledWith(ORG_ID);
+    expect(organizations.canManageBilling).toHaveBeenCalledWith(ORG_ID);
     expect(calls).toEqual([]);
   });
 

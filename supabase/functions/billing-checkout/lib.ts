@@ -223,10 +223,10 @@ export async function createCheckout(
   if (parsed.plan === "team") {
     if (!deps.organizations)
       throw new Error("organization billing is not configured");
-    if (!(await deps.organizations.isOwner(parsed.organizationId))) {
+    if (!(await deps.organizations.canManageBilling(parsed.organizationId))) {
       return {
         status: 403,
-        body: { error: "Only an owner of this organization can buy Team." },
+        body: { error: "Only an owner or admin of this organization can buy Team." },
       };
     }
     const store = deps.organizations.store(parsed.organizationId);
