@@ -15,7 +15,7 @@ env:
 
 on:
   pull_request:
-    # ready_for_review runs the heavy jobs that drafts skip.
+    # ready_for_review runs the desktop e2e suite, which drafts skip.
     types: [opened, synchronize, reopened, ready_for_review]
 
 # A new push supersedes the previous run; free its runners for other PRs.
@@ -157,7 +157,8 @@ jobs:
         if: ${{ !cancelled() && env.RUST == 'true' }}
         run: cargo machete
 
-  # Heavy jobs skip draft PRs; marking the PR ready for review runs them.
+  # The e2e suite skips draft PRs; marking the PR ready for review runs it.
+  # clippy, the Rust tests and cargo-deny run on drafts too.
   #
   # The end-to-end suite (e2e/desktop): the app built with the `e2e`
   # feature, which embeds a Playwright server (gpui-playwright), driven by
@@ -240,7 +241,7 @@ jobs:
   # Advisories, licenses, crate sources and duplicates (deny.toml).
   cargo-deny:
     needs: detect-changes
-    if: ${{ !github.event.pull_request.draft && needs.detect-changes.outputs.rust_changed == 'true' }}
+    if: ${{ needs.detect-changes.outputs.rust_changed == 'true' }}
     timeout-minutes: 10
     name: cargo-deny / ubuntu-22.04
     runs-on: ubuntu-22.04
@@ -257,7 +258,7 @@ jobs:
 
   test-rust:
     needs: detect-changes
-    if: ${{ !github.event.pull_request.draft && needs.detect-changes.outputs.rust_changed == 'true' }}
+    if: ${{ needs.detect-changes.outputs.rust_changed == 'true' }}
     timeout-minutes: 20
     # macOS runs after merge in warm-caches.yml: macOS runners are the
     # scarcest and slowest, and the tests rarely differ by platform.
