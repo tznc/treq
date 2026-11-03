@@ -2946,6 +2946,7 @@ mod onboarding_screen;
 mod open_workspaces;
 mod pr_review;
 mod prefetch;
+mod remote_dialog_overflow;
 mod review_comments;
 mod settings_screen;
 mod skills_screen;

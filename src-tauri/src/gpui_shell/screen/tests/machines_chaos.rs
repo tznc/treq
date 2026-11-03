@@ -213,11 +213,22 @@ fn reopening_mid_provision_still_shows_it_running(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-#[ignore = "chaos: create button off-screen in small window"]
 fn create_is_reachable_in_tiny_and_huge_windows(cx: &mut TestAppContext) {
   let (mut h, host) = managed(cx);
   for (w, hh) in [(320., 240.), (200., 150.), (4000., 3000.)] {
     h.cx.simulate_resize(gpui::size(gpui::px(w), gpui::px(hh)));
+    h.cx.run_until_parked();
+    // The dialog body scrolls: the user scrolls to the button.
+    let body = h
+      .cx
+      .debug_bounds("remote-setup-dialog-body")
+      .expect("body drawn");
+    h.cx.simulate_event(gpui::ScrollWheelEvent {
+      position: body.center(),
+      delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-5000.))),
+      modifiers: gpui::Modifiers::none(),
+      touch_phase: gpui::TouchPhase::Moved,
+    });
     h.cx.run_until_parked();
     let b = h.cx.debug_bounds("cloud-create").expect("create drawn");
     assert!(
