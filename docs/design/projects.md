@@ -6,7 +6,7 @@ Status: draft spec, no implementation. Date: 2026-11-03.
 
 - **Synced from day one** via Supabase.
 - **Personal only**: a project belongs to one user; no team sharing.
-- **Project is the top-level entity; repos are many-to-many with projects**: a repo is added to one or more projects (like Claude Code projects). The repo itself is not owned by any one project: its checkout, `.treq` state and workspaces are shared, and each project adds its own grouping, prompts and context on top. A single-repo user gets an implicit one-repo project.
+- **Repos stay standalone; projects are opt-in**: users open a repo directly, as today, with no project. A project is created and named only when the user adds a second repo to work on alongside the first. Repos are many-to-many with projects (like Claude Code projects): a repo can be in zero, one or more projects. The repo itself is not owned by any project: its checkout, `.treq` state and workspaces are shared, and each project adds its own grouping, prompts and context on top.
 
 ## Relationship to supporting repositories
 
@@ -26,7 +26,7 @@ What v1 lacks and Projects add:
 | No cross-repo grouping of work | Project workspaces, shared branch, grouped PRs |
 | Repo identity = local path | `repo_key`, synced, path per machine |
 
-**Superseding plan**: keep the `-r` flag and the agent's read-only rule; resolve `-r` against the project's repos instead of `supporting_repos`. Migrate each home repo with supporting repos into one project (home repo + its supporting repos), then stop reading `supporting_repos` (table kept one release for rollback, then dropped). The UI's **Add Repository…** becomes "Add repository to project".
+**Superseding plan**: keep the `-r` flag and the agent's read-only rule; resolve `-r` against the project's repos instead of `supporting_repos`. Migrate each home repo with supporting repos into one project (home repo + its supporting repos), then stop reading `supporting_repos` (table kept one release for rollback, then dropped). **Add Repository…** on a standalone repo now creates a project (see "Creating a project" under UX); on a repo opened inside a project it adds to that project.
 
 ## Current model (what this builds on)
 
@@ -41,7 +41,8 @@ Work that spans repos (API + client, service + infra, lib + consumer) is done as
 
 ## Goals
 
-- Group repos under a named project; the project is the unit the sidebar, launcher and CLI open.
+- Keep opening a single repo exactly as today; no project needed.
+- When work needs a second repo, create a named project in that same flow; the project then becomes the unit the sidebar, launcher and CLI open.
 - Create one *project workspace* that creates a workspace per selected repo with one shared branch name.
 - Run agents/sessions scoped to a project workspace (cwd = a project root holding each repo's workspace).
 - Show linked status: per-repo diff/conflict/check/PR state rolled up.
@@ -112,7 +113,7 @@ Repo config is checked in and shared with teammates; a personal project must not
 
 ### D7a. Repo membership
 - A. A repo belongs to exactly one project.
-- B. Many-to-many: a repo can be in one or more projects, sharing one checkout. **(Recommended, matches Claude Code projects)**
+- B. Many-to-many: a repo can be standalone or in one or more projects, sharing one checkout. **(Recommended, matches Claude Code projects)**
 - C. Many-to-many with a separate checkout per project.
 
 B lets "payments" and "platform" both include the same shared library without duplicate clones or diverging state. C wastes disk and splits workspaces.
@@ -123,11 +124,11 @@ B lets "payments" and "platform" both include the same shared library without du
 - C. Only project-level sessions.
 
 ### D8. Migrating existing users
-- A. Auto-create one project per repo. **(Recommended)**
-- B. One "Default" project containing all repos.
-- C. Prompt on first launch.
+- A. No change for plain repos; only home repos with `supporting_repos` become a project (home repo + its supporting repos, named after the home repo, renameable). **(Recommended)**
+- B. Auto-create one project per repo.
+- C. One "Default" project containing all repos.
 
-A preserves today's mental model; the user merges projects later.
+A keeps standalone repos exactly as they are and creates projects only where v1 already grouped repos. B and C force a concept on users who work in one repo.
 
 ## Data model
 
@@ -181,13 +182,14 @@ RLS: enable on all three; `revoke all from anon`. Policy: `owner_user_id = (sele
 ### Migration
 
 - Local DB migration adds columns (tested with an upgrade fixture in `local_db/upgrade_fixtures`).
-- First launch after upgrade: for each known repo, create a one-repo project (D8); push when signed in, stay `dirty` while offline/signed out.
+- First launch after upgrade: for each home repo with `supporting_repos` rows, create a project (D8); other repos stay standalone. Push when signed in, stay `dirty` while offline/signed out.
 - Signed-out users: projects work locally; sync on sign-in, merge by `repo_key`.
 
 ## UX (GPUI shell)
 
-- **Sidebar**: project switcher at top; under it, repos (collapsible) and project workspaces (badge: N repos).
-- **New project**: modal → name → add repos (pick folder / clone URL / recent repos) → done.
+- **Opening**: the launcher lists recent repos and projects side by side. Opening a repo works as today; no project UI appears for a standalone repo beyond **Add Repository…**.
+- **Creating a project**: from a standalone repo, **Add Repository…** → pick folder / clone URL / recent repo → "Name this project" (prefilled with the current repo's name) → done. The current repo becomes the home repo (D13). A project can also be created empty from the launcher, but this is the main path.
+- **Sidebar** (project open): project name at top; under it, repos (collapsible) and project workspaces (badge: N repos). A standalone repo's sidebar is unchanged.
 - **Project settings** (settings screen, new "Project" section): name, branch pattern, default agent/model, repo list with reorder/remove, per-repo overrides.
 - **New project workspace**: name → checkboxes of repos (default all) → creates workspaces in parallel; partial failure shows per-repo result with retry, never rolls back successful ones silently.
 - **Project workspace screen**: tab per repo reusing existing changes/commits screens, plus a "Summary" tab with the rolled-up status table and "Push all" / "Open PRs".
@@ -371,11 +373,11 @@ A is simple and works for every agent CLI. B is a Phase-3 addition behind a sett
 
 ## Edge cases
 
-- **Same repo in multiple projects**: the normal case (many-to-many through `project_repos`). One checkout per machine, shared by all its projects; repo state stays in the repo's `.treq`. Each project lists all of the repo's workspaces, tagged with the project they were created from; a filter shows "this project only". A workspace belongs to at most one project workspace. Removing a repo from one project does not touch others; removing it from its last project asks whether to remove it from Treq (files are never deleted).
+- **Same repo in multiple projects**: the normal case (many-to-many through `project_repos`). One checkout per machine, shared by all its projects; repo state stays in the repo's `.treq`. Each project lists all of the repo's workspaces, tagged with the project they were created from; a filter shows "this project only". A workspace belongs to at most one project workspace. Removing a repo from one project does not touch others; a repo removed from its last project stays a standalone repo. Removing the second-to-last repo leaves a one-repo project, which stays (it keeps its prompts and context) until the user deletes it; deleting a project never touches its repos.
 - **Missing access** (no clone, no GitHub permission, auth expired): repo shown as unavailable; project workspace ops skip it with a visible warning; the Summary tab omits PRs we cannot read.
 - **Renamed repo**: match on `github_node_id`, update `repo_key`; local detection via remote URL change on fetch.
 - **Deleted repo / missing path**: mark unavailable, keep row; user removes explicitly. `jj.rs` path-validating functions already return defaults on missing paths.
-- **Monorepo**: a project with one repo is valid. Optional `sparse_patterns` per project repo (workspaces already support them) to scope a project to subdirs; no virtual "sub-repos".
+- **Monorepo**: open standalone, as today. A one-repo project is allowed when the user wants project prompts/context for it. Optional `sparse_patterns` per project repo (workspaces already support them) to scope a project to subdirs; no virtual "sub-repos".
 - **Local-only repo (no remote)**: syncs as `local:<uuid>`, shown "available on <machine> only".
 - **Sync conflicts**: version mismatch → refetch, field-level merge for repo list (union adds, honour tombstones), last-write-wins for name/config with a toast.
 - **Repo path moved on disk**: "Locate…" updates `repo_locations`.
@@ -396,6 +398,7 @@ Each step starts with a failing test.
 
 - `core/projects/` unit tests: repo_key normalisation (ssh/https/.git suffix), override resolution order, branch-name collision detection, status roll-up, PR grouping by project workspace, sync merge rules. Proptests for normalisation and merge.
 - Prompt assembly: `system_prompt()` with project prompts in D11 order, repo scoping, disabled prompts skipped, missing context path skipped with warning, size cap, Claude settings/`--add-dir` include context dirs read-only, Cursor prompt file includes them; extend the existing tests in `agent_command.rs`.
+- Standalone: opening a repo with no project shows today's UI; **Add Repository…** on a standalone repo creates a named project with it as home; removing from the last project leaves a standalone repo. Plain repos create no project on upgrade.
 - Supporting-repos migration: fixture DB with `supporting_repos` → one project with the same repos; `-r` resolves the same names before and after (extend `cli/tests.rs` `-r` cases).
 - Orchestration: `spawn` plan parsing and per-entry partial failure; concurrency cap; sub-agent spawn refused (D14); `project st --json` shape across 2 temp repos with stacked workspaces; filesystem settings use project repos.
 - `local_db` migration tests with upgrade fixtures for new columns; `db.rs` cache tables.
