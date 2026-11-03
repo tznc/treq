@@ -4,7 +4,7 @@
 // Run with: `deno test --allow-env supabase/functions/tests/usage_report.test.ts`
 
 import { defined } from "./remote_fakes.ts";
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { StripeApiError, type StripeClient, type StripeParams } from "../_shared/billing/stripe-api.ts";
 import {
   MAX_USAGE_REPORT_ATTEMPTS,
@@ -24,6 +24,7 @@ function row(overrides: Partial<PendingUsageReport> = {}): PendingUsageReport {
     billed_nanousd: 21_600_400, // $0.0216004 -> 21600 micro-USD
     stripe_customer_id: "cus_1",
     attempts: 0,
+    created_at: "2026-10-28T11:07:00Z",
     ...overrides,
   };
 }
@@ -187,6 +188,30 @@ Deno.test("the last allowed attempt failing marks the row dead", async () => {
   const { stripe } = fakeStripe(1);
   await reportUsage({ store, stripe, now: () => NOW, enabled: true, log });
   assertEquals(rows[0].terminal, "dead");
+});
+
+// Stripe dedupes meter events by identifier for about 24 hours only. A row
+// already tried may have reached Stripe (a timeout after delivery), so
+// resending it after that window could bill twice: it goes dead with an
+// alert for a person to reconcile instead.
+Deno.test("a row tried before and older than 23 hours is not resent", async () => {
+  logs.length = 0;
+  const old = new Date(NOW.getTime() - 24 * 3_600_000).toISOString();
+  const { store, rows } = fakeStore([row({ attempts: 1, created_at: old })]);
+  const { stripe, calls } = fakeStripe();
+  await reportUsage({ store, stripe, now: () => NOW, enabled: true, log });
+  assertEquals(calls.length, 0);
+  assertEquals(rows[0].terminal, "dead");
+  assert(logs.some((l) => l.alert === true && l.msg === "usage report past dedupe window"));
+});
+
+Deno.test("a row never tried is sent however old it is", async () => {
+  const old = new Date(NOW.getTime() - 30 * 3_600_000).toISOString();
+  const { store, rows } = fakeStore([row({ attempts: 0, created_at: old })]);
+  const { stripe, calls } = fakeStripe();
+  await reportUsage({ store, stripe, now: () => NOW, enabled: true, log });
+  assertEquals(calls.length, 1);
+  assertEquals(rows[0].terminal, null);
 });
 
 Deno.test("a row unsent more than an hour after its hour ends is logged as late", async () => {
