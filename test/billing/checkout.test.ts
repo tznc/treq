@@ -635,7 +635,10 @@ describe("createCheckout for Team", () => {
     ...STRIPE_OK,
     "POST /v1/customers": { id: "cus_org" },
     "GET /v1/prices": {
-      data: [{ id: "price_team", lookup_key: "treq_team_monthly" }],
+      data: [
+        { id: "price_team", lookup_key: "treq_team_monthly" },
+        { id: "price_usage", lookup_key: "treq_sandbox_usage" },
+      ],
     },
   };
   const body = { plan: "team", organization_id: ORG_ID };
@@ -723,16 +726,20 @@ describe("createCheckout for Team", () => {
     });
     expect(orgStore.attachCustomer).toHaveBeenCalledWith("cus_org");
     expect(userStore.attachCustomer).not.toHaveBeenCalled();
+    // Team carries the metered cloud usage price too: members' usage on the
+    // organization profile is billed to the organization (058_team_cloud.sql).
     expect(calls.find((c) => c.path === "/v1/prices")?.params).toEqual({
       "lookup_keys[0]": "treq_team_monthly",
+      "lookup_keys[1]": "treq_sandbox_usage",
       active: true,
-      limit: 1,
+      limit: 2,
     });
     // One unit per member: the graduated price bills 2 seats beyond 5.
     expect(sessionParams(calls)).toMatchObject({
       customer: "cus_org",
       "line_items[0][price]": "price_team",
       "line_items[0][quantity]": 7,
+      "line_items[1][price]": "price_usage",
       client_reference_id: ORG_ID,
       "metadata[owner_type]": "organization",
       "metadata[owner_id]": ORG_ID,
