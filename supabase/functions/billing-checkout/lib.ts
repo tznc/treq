@@ -64,7 +64,10 @@ async function customerFor(owner: Owner, deps: CheckoutDeps) {
 
   const params: StripeParams = {};
   // The email is for Stripe receipts only. Ownership never depends on it.
-  if (deps.user.email) params.email = deps.user.email;
+  // An organization's customer is the team's billing account, shared by all
+  // its owners, so the buyer's personal email stays off it: Checkout asks for
+  // a billing email, and any owner changes it in Manage billing.
+  if (owner.type === "user" && deps.user.email) params.email = deps.user.email;
   params["metadata[owner_type]"] = owner.type;
   params["metadata[owner_id]"] = owner.id;
   const created = await deps.stripe.request<{ id: string }>(
