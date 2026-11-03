@@ -29,7 +29,9 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   account_data::{self, CloudAction},
   remote_data::{default_key, RemoteHost},
-  settings::account::{cloud_card, cloud_card_element, cloud_delete_dialog_element, ClickFn},
+  settings::account::{
+    cloud_card, cloud_card_element, cloud_delete_dialog_element, is_pro, ClickFn,
+  },
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -838,7 +840,8 @@ impl RemoteView {
     let press = Self::cloud_press(cx);
     let card = if account.user.is_some() {
       let cloud = account.cloud.unwrap_or_default();
-      let card = cloud_card(&cloud, confirming);
+      let pro = is_pro(account.subscription.as_ref());
+      let card = cloud_card(&cloud, confirming, pro);
       cloud_card_element(&card, p, &self.tips, &press, cx).into_any_element()
     } else {
       Self::sign_in(&account, &press, p).into_any_element()

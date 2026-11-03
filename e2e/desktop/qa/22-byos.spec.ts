@@ -219,8 +219,21 @@ test("byos: Pro creates on their own account from Provider keys; the card names 
       name: "22-byos-02-managed-card",
       title: "Cloud workspace card: treq managed only",
       expectations: [
-        "The cloud workspace card shows sizes and 'Create cloud workspace' only",
+        "The cloud workspace card shows an Hourly / Monthly toggle (Hourly selected), sizes priced per hour, and 'Create cloud workspace'",
         "No provider name and no 'treq managed' / 'Your … account' choice appears on the card",
+      ],
+    });
+
+    await page.getByRole("tab", { name: "Monthly" }).click();
+    await expect(page.getByRole("tab", { name: "Monthly", selected: true })).toBeVisible();
+    await page.mouse.move(1300, 980);
+    await settle(page, 1200);
+    await capture(page, {
+      name: "22-byos-02b-monthly-prices",
+      title: "Prices per month",
+      expectations: [
+        "Monthly is selected in the toggle",
+        "Each size shows a /month price, 730 times its hourly price (Small $0.19872/hour -> $145.07/month)",
       ],
     });
 
@@ -237,7 +250,7 @@ test("byos: Pro creates on their own account from Provider keys; the card names 
   }
 });
 
-test("byos: hidden for a Free user", async () => {
+test("byos: Free sees a Pro upsell on the cloud card and no BYOS", async () => {
   test.skip(!server, "needs QA_BYOS_PROXY=1, the proxy build and the local Supabase stack");
   const run = await launch(await signUp());
   const { page } = run;
@@ -245,13 +258,15 @@ test("byos: hidden for a Free user", async () => {
     await openAccount(page);
     await scrollTo(page, page.getByRole("button", { name: "Delete Account" }) as never);
     await expect(page.getByRole("button", { name: "Add Daytona key" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Your Boat account" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Create cloud workspace" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Monthly" })).toHaveCount(0);
     await capture(page, {
       name: "22-byos-04-free-user",
       title: "Free user: no BYOS",
       expectations: [
-        "The Account tab shows the signed-in Free user with an upgrade path",
-        "Scrolled to the bottom: no Provider keys section",
+        "The Cloud workspace card shows a PRO badge, 'Cloud workspaces are part of Pro. Upgrade to create one.' and an 'Upgrade to Pro' button",
+        "No sizes, price toggle, Create button, monthly total or spend cap row",
+        "No Provider keys section",
       ],
     });
   } finally {

@@ -301,6 +301,10 @@ pub enum CloudAction {
   RemoveProviderKey {
     kind: String,
   },
+  /// Show prices per month (730 hours) or per hour.
+  SetPriceMonthly {
+    monthly: bool,
+  },
   /// Create the workspace on the user's own provider account (BYOS).
   ProvisionOn {
     kind: String,
@@ -342,6 +346,7 @@ pub async fn run_cloud_action(
     }
     CloudAction::SaveProviderKey { kind, key } => cloud.save_provider_key(&kind, &key.0).await,
     CloudAction::RemoveProviderKey { kind } => cloud.remove_provider_key(&kind).await,
+    CloudAction::SetPriceMonthly { monthly } => cloud.set_price_monthly(monthly),
     CloudAction::ProvisionOn { kind } => cloud.provision_on(&kind).await,
   }
   Ok(())

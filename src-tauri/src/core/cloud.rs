@@ -67,6 +67,8 @@ pub struct CloudWorkspace {
   pub provider_key_error: Option<String>,
   /// Tier prices on the providers the user has a key for.
   pub byos_catalog: Vec<cloud_catalog::ByosMachineType>,
+  /// Prices show per month (730 hours) instead of per hour.
+  pub price_monthly: bool,
 }
 
 /// Everything the account screens draw.
@@ -409,6 +411,11 @@ impl Cloud {
       .load("notifications", notes, |w, n| w.notifications = n)
       .await;
     self.load_byos().await;
+  }
+
+  /// Shows prices per month (730 hours) or per hour.
+  pub fn set_price_monthly(&self, monthly: bool) {
+    self.update_workspace(|w| w.price_monthly = monthly);
   }
 
   // -- Bring your own sandbox (BYOS) ----------------------------------------

@@ -347,6 +347,7 @@ fn cloud_workspace_creates_through_rust(cx: &mut TestAppContext) {
 
   h.set_account(account_state(serde_json::json!({
     "user": ada(),
+    "subscription": pro(),
     "cloud": cloud(serde_json::json!({ "provisioningStage": "Requesting provisioning..." })),
   })));
   let create = cloud_card(&mut h).create.expect("create");
@@ -451,6 +452,7 @@ fn cloud_workspace_repairs_and_upsells_pro(cx: &mut TestAppContext) {
 
   h.set_account(account_state(serde_json::json!({
     "user": ada(),
+    "subscription": pro(),
     "cloud": cloud(serde_json::json!({
       "instance": { "status": "failed", "providerResourceId": null, "diskQuotaGb": 5 },
       "provisioningError": "[http_502] exec failed\nstack",
@@ -1166,4 +1168,66 @@ fn byos_create_is_offered_only_without_a_workspace_and_with_a_valid_key(cx: &mut
     serde_json::json!({ "providerKeys": [{ "id": "c1", "provider_kind": "boat", "invalid_at": "2026-11-01T00:00:00Z" }] }),
   );
   assert!(!provider_keys(&mut h).unwrap().rows[0].can_create);
+}
+
+// -- Free plan and the price period -----------------------------------------
+
+#[gpui::test]
+fn the_cloud_card_upsells_pro_to_a_free_user(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, account_route("account"), host.clone());
+  h.set_account(account_state(serde_json::json!({
+    "user": ada(),
+    "cloud": cloud(serde_json::json!({
+      "tiers": tiers(), "selectedTier": "s",
+      "spend": { "cap_usd": 50, "spent_usd": 0, "month_start": "2026-11-01", "state": "ok" },
+      "billing": { "billedUsd": 0, "hours": 0, "byosBilledUsd": 0 },
+    })),
+  })));
+  let card = cloud_card(&mut h);
+  assert_eq!(
+    card.pro_required.as_deref(),
+    Some("Cloud workspaces are part of Pro. Upgrade to create one.")
+  );
+  assert!(card.sizes.is_empty());
+  assert!(!h.drawn("cloud-create"));
+  assert!(!h.drawn("cloud-price-period"));
+  assert_eq!(card.billing, None);
+  assert!(!h.drawn("cloud-spend-cap-edit"));
+  h.click("cloud-upgrade");
+  h.cx.run_until_parked();
+  assert_eq!(host.writes(), ["open http://localhost:3001/dashboard"]);
+}
+
+#[gpui::test]
+fn the_price_toggle_switches_between_hourly_and_monthly(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    cloud(serde_json::json!({ "tiers": tiers(), "selectedTier": "s" })),
+  );
+  let card = cloud_card(&mut h);
+  assert!(!card.price_monthly);
+  assert_eq!(card.sizes[0].price.as_deref(), Some("$0.0216/hour"));
+  h.click("cloud-price-monthly");
+  assert_eq!(host.writes(), ["cloud SetPriceMonthly { monthly: true }"]);
+
+  set_cloud(
+    &mut h,
+    serde_json::json!({ "tiers": tiers(), "selectedTier": "s", "priceMonthly": true }),
+  );
+  let card = cloud_card(&mut h);
+  assert!(card.price_monthly);
+  // 730 hours: the average month.
+  assert_eq!(card.sizes[0].price.as_deref(), Some("$15.77/month"));
+  assert_eq!(card.sizes[1].price.as_deref(), Some("$43.80/month"));
+  h.click("cloud-price-hourly");
+  assert_eq!(
+    host.writes(),
+    [
+      "cloud SetPriceMonthly { monthly: true }",
+      "cloud SetPriceMonthly { monthly: false }"
+    ]
+  );
 }

@@ -97,6 +97,7 @@ pub(crate) fn cloud_route(cloud: &CloudWorkspace) -> CloudRoute {
     provider_key_saving: cloud.provider_key_saving,
     provider_key_error: cloud.provider_key_error.clone(),
     byos_catalog: cloud.byos_catalog.clone(),
+    price_monthly: cloud.price_monthly,
   }
 }
 
@@ -111,6 +112,8 @@ pub fn cloud_press(id: &str) -> Option<CloudAction> {
       acknowledged_data_loss: true,
     }),
     "cloud.resize.cancel" => Some(CloudAction::CancelResize),
+    "cloud.price.monthly" => Some(CloudAction::SetPriceMonthly { monthly: true }),
+    "cloud.price.hourly" => Some(CloudAction::SetPriceMonthly { monthly: false }),
     _ if id.starts_with("cloud.process.") => process_press(id),
     _ if id.starts_with("cloud.notification.dismiss.") => Some(CloudAction::DismissNotification {
       id: id

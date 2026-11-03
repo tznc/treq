@@ -70,6 +70,14 @@ pub fn format_hourly(usd: f64) -> String {
   format!("${usd:.4}/hour")
 }
 
+/// Hours in the average month (24 × 365 / 12), as cloud pricing counts it.
+pub const HOURS_PER_MONTH: f64 = 730.;
+
+/// A per-hour price as a month of running time, `$15.77/month`.
+pub fn format_monthly(hourly_usd: f64) -> String {
+  format!("${:.2}/month", hourly_usd * HOURS_PER_MONTH)
+}
+
 /// A row of `get_usage_summary`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct UsageRow {
@@ -94,10 +102,12 @@ pub struct UsageTotals {
 
 impl UsageTotals {
   pub fn of(rows: &[UsageRow]) -> Self {
+    // Fold from +0.0: `Sum` starts at -0.0, which prints as "-0.00".
+    let sum = |f: fn(&UsageRow) -> f64| rows.iter().map(f).fold(0., |a, b| a + b);
     Self {
-      billed_usd: rows.iter().map(|r| r.billed_usd).sum(),
-      byos_billed_usd: rows.iter().map(|r| r.byos_billed_usd).sum(),
-      hours: rows.iter().map(|r| r.seconds as f64).sum::<f64>() / 3600.,
+      billed_usd: sum(|r| r.billed_usd),
+      byos_billed_usd: sum(|r| r.byos_billed_usd),
+      hours: sum(|r| r.seconds as f64) / 3600.,
     }
   }
 }
@@ -233,6 +243,19 @@ pub async fn dismiss_notification(supabase: &Supabase, id: &str) -> Result<(), A
 
 #[cfg(test)]
 mod tests {
+  #[test]
+  fn no_usage_totals_positive_zero() {
+    // An empty f64 sum is -0.0, which prints as "-0.00".
+    let totals = super::UsageTotals::of(&[]);
+    assert_eq!(
+      format!(
+        "{:.2} {:.1} {:.2}",
+        totals.billed_usd, totals.hours, totals.byos_billed_usd
+      ),
+      "0.00 0.0 0.00"
+    );
+  }
+
   use super::*;
 
   fn catalog() -> Value {

@@ -119,6 +119,8 @@ pub struct CloudRoute {
   pub provider_key_error: Option<String>,
   /// Tier prices on the providers the user has a key for.
   pub byos_catalog: Vec<crate::core::cloud_catalog::ByosMachineType>,
+  /// Prices show per month (730 hours) instead of per hour.
+  pub price_monthly: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -240,6 +242,8 @@ pub struct CloudCard {
   pub instance: Option<CloudInstanceView>,
   /// The create flow, when there is none.
   pub create: Option<CloudCreate>,
+  /// Prices show per month (730 hours) instead of per hour.
+  pub price_monthly: bool,
   /// The server's sentence when it refused for want of Pro.
   pub pro_required: Option<String>,
   /// The first line of any other error.
@@ -446,7 +450,7 @@ struct Linear {
 }
 
 /// `isProSubscription`: statuses that still carry Pro.
-fn is_pro(subscription: Option<&Subscription>) -> bool {
+pub(in crate::gpui_shell::screen) fn is_pro(subscription: Option<&Subscription>) -> bool {
   subscription.is_some_and(|s| {
     s.plan == "pro" && ["trialing", "active", "past_due", "canceled"].contains(&s.status.as_str())
   })
@@ -635,6 +639,7 @@ fn process_rows(cloud: &CloudRoute, running: bool) -> (Vec<ProcessRow>, Option<S
 pub(in crate::gpui_shell::screen) fn cloud_card(
   cloud: &CloudRoute,
   confirming_delete: bool,
+  pro: bool,
 ) -> CloudCard {
   let record = cloud.instance.as_ref();
   // A deleted instance keeps its provider resource id, but there is nothing
@@ -643,7 +648,11 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
   let creation_retry =
     record.is_some_and(|i| i.status == "failed" && i.provider_resource_id.is_none());
   let error = cloud.provisioning_error.as_deref();
-  let pro_required = error.and_then(|e| e.strip_prefix(PRO_REQUIRED_PREFIX));
+  // Free has no cloud workspace to create: the card upsells Pro.
+  let upsell = !pro && instance.is_none();
+  let pro_required = error
+    .and_then(|e| e.strip_prefix(PRO_REQUIRED_PREFIX))
+    .or(upsell.then_some("Cloud workspaces are part of Pro. Upgrade to create one."));
   let spend_cap_reached = error.and_then(|e| e.strip_prefix(SPEND_CAP_PREFIX));
   let spend = cloud.spend.as_ref();
 
@@ -664,6 +673,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
   let sizes = cloud
     .tiers
     .iter()
+    .filter(|_| !upsell)
     .map(|tier| SizeOption {
       id: tier.id.clone(),
       label: tier.label.clone(),
@@ -673,9 +683,13 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
         js_number(tier.ram_gib),
         tier.disk_gb
       ),
-      price: tier
-        .hourly_usd(region)
-        .map(crate::core::cloud_catalog::format_hourly),
+      price: tier.hourly_usd(region).map(|usd| {
+        if cloud.price_monthly {
+          crate::core::cloud_catalog::format_monthly(usd)
+        } else {
+          crate::core::cloud_catalog::format_hourly(usd)
+        }
+      }),
       selected: selected.as_deref() == Some(tier.id.as_str()),
       current: current_tier.as_deref() == Some(tier.id.as_str()),
     })
@@ -688,10 +702,11 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
     resize: instance.is_some()
       && cloud.selected_tier.is_some()
       && cloud.selected_tier != current_tier,
-    billing: match spend {
+    billing: match spend.filter(|_| !upsell) {
       Some(s) => Some(format!("This month: ${:.2} of ${:.2}", s.spent_usd, s.cap_usd)),
       None => cloud
         .billing
+        .filter(|_| !upsell)
         .map(|b| format!("This month: ${:.2} for {:.1} hours", b.billed_usd, b.hours)),
     },
     spend_state: spend.map(|s| s.state),
@@ -744,7 +759,8 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
         deletion: instance.lapsed_at.as_deref().and_then(deletion_notice),
       }
     }),
-    create: instance.is_none().then(|| CloudCreate {
+    price_monthly: cloud.price_monthly,
+    create: (instance.is_none() && !upsell).then(|| CloudCreate {
       label: if creating || stage.is_some() {
         "Creating..."
       } else if creation_retry {
@@ -883,10 +899,11 @@ impl SettingsView {
       .into(),
       cloud: cloud_route
         .as_ref()
-        .map(|cloud| cloud_card(cloud, state.confirming_delete)),
+        .map(|cloud| cloud_card(cloud, state.confirming_delete, pro)),
       spend_cap: account
         .cloud
         .as_ref()
+        .filter(|_| pro)
         .and_then(|cloud| cloud.spend.as_ref().map(|s| (cloud, s)))
         .map(|(cloud, s)| SpendCapEditor {
           label: format!("Monthly spend cap: ${:.2}", s.cap_usd),
@@ -1595,6 +1612,20 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       .child(delete)
   });
 
+  let period = (!c.sizes.is_empty()).then(|| {
+    let hourly = press("cloud.price.hourly");
+    let monthly = press("cloud.price.monthly");
+    div().debug_selector(|| "cloud-price-period".into()).child(
+      ui::Tabs::segmented("cloud-price-period", p)
+        .tab(ui::Tab::new("cloud-price-hourly", "Hourly"))
+        .tab(ui::Tab::new("cloud-price-monthly", "Monthly"))
+        .selected(usize::from(c.price_monthly))
+        .on_select(move |ix, window, cx| {
+          let click = if ix == 1 { &monthly } else { &hourly };
+          click(&gpui::ClickEvent::default(), window, cx)
+        }),
+    )
+  });
   let sizes = (!c.sizes.is_empty()).then(|| {
     div()
       .debug_selector(|| "cloud-size-picker".into())
@@ -1884,6 +1915,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
         .children(deletion)
         .children(usage)
         .children(processes)
+        .children(period)
         .children(sizes)
         .children(resize)
         .children(resize_confirm)
@@ -1900,6 +1932,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           .text_color(p.muted_foreground)
           .child("Treq creates one persistent cloud workspace for your account, with Treq, JJ, Git, and agents installed. Pick a size: usage is billed by the second at its hourly price."),
       )
+      .children(period)
       .children(sizes)
       .child(
         Button::new("cloud-create", p)
