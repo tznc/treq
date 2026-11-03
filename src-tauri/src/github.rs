@@ -1863,20 +1863,14 @@ pub struct PrListing {
   pub truncated: bool,
 }
 
-/// Parses `gh pr list --json` output into one PR per head branch, picking the
-/// PR `gh pr view <branch>` would: an open one, else the newest. Fork PRs are
-/// skipped because `gh pr view` only matches the repository's own branches.
-fn parse_pr_list(stdout: &[u8]) -> Result<PrListing, String> {
-  parse_pr_list_for(stdout, None)
-}
-
 #[derive(serde::Deserialize)]
 struct GhLogin {
   login: String,
 }
 
-/// [`parse_pr_list`], also keeping fork PRs whose head is `fork_owner`'s: in a
-/// fork clone those are this checkout's own branches.
+/// Parses `gh pr list --json` output into one PR per head branch, picking the
+/// PR `gh pr view <branch>` would: an open one, else the newest. Fork PRs are
+/// skipped, except `fork_owner`'s: in a fork clone those are this checkout's.
 fn parse_pr_list_for(stdout: &[u8], fork_owner: Option<&str>) -> Result<PrListing, String> {
   let raw: Vec<GhListedPr> =
     serde_json::from_slice(stdout).map_err(|e| format!("Failed to parse gh output: {e}"))?;
@@ -1990,7 +1984,11 @@ pub fn list_pr_for_head_via_gh_impl(
       String::from_utf8_lossy(&output.stderr).trim()
     ));
   }
-  Ok(parse_pr_list_for(&output.stdout, fork_owner_impl(repo_path).as_deref())?.by_branch.remove(branch))
+  Ok(
+    parse_pr_list_for(&output.stdout, fork_owner_impl(repo_path).as_deref())?
+      .by_branch
+      .remove(branch),
+  )
 }
 
 // ── GitHub PR review comment threads (read-only) ────────────────────────────
@@ -2339,7 +2337,7 @@ mod tests {
       ]
       .join(",")
     );
-    let listing = super::parse_pr_list(json.as_bytes()).unwrap();
+    let listing = super::parse_pr_list_for(json.as_bytes(), None).unwrap();
     assert!(!listing.truncated);
     assert_eq!(listing.by_branch["feat/a"].0.number, 7);
     assert_eq!(listing.by_branch["feat/b"].0.number, 8);
@@ -2349,10 +2347,14 @@ mod tests {
 
   #[test]
   fn pr_list_keeps_fork_prs_from_our_own_fork() {
-    let mine = listed_pr(11, "feat/d", "OPEN", true, "[]")
-      .replace("\"isCrossRepository\"", "\"headRepositoryOwner\":{\"login\":\"me\"},\"isCrossRepository\"");
-    let theirs = listed_pr(12, "feat/e", "OPEN", true, "[]")
-      .replace("\"isCrossRepository\"", "\"headRepositoryOwner\":{\"login\":\"other\"},\"isCrossRepository\"");
+    let mine = listed_pr(11, "feat/d", "OPEN", true, "[]").replace(
+      "\"isCrossRepository\"",
+      "\"headRepositoryOwner\":{\"login\":\"me\"},\"isCrossRepository\"",
+    );
+    let theirs = listed_pr(12, "feat/e", "OPEN", true, "[]").replace(
+      "\"isCrossRepository\"",
+      "\"headRepositoryOwner\":{\"login\":\"other\"},\"isCrossRepository\"",
+    );
     let json = format!("[{mine},{theirs}]");
     let listing = super::parse_pr_list_for(json.as_bytes(), Some("me")).unwrap();
     assert_eq!(listing.by_branch["feat/d"].0.number, 11);
@@ -2368,7 +2370,7 @@ mod tests {
       {"__typename":"StatusContext","context":"ci/legacy","state":"FAILURE","targetUrl":"https://x/4"}
     ]"#;
     let json = format!("[{}]", listed_pr(1, "feat/a", "OPEN", false, rollup));
-    let listing = super::parse_pr_list(json.as_bytes()).unwrap();
+    let listing = super::parse_pr_list_for(json.as_bytes(), None).unwrap();
     let ci = listing.by_branch["feat/a"].1.clone().unwrap();
     assert_eq!(ci.state, "failure");
     assert_eq!((ci.total, ci.passed, ci.failed, ci.pending), (4, 2, 1, 1));
@@ -2383,7 +2385,7 @@ mod tests {
   #[test]
   fn pr_list_carries_the_pr_body() {
     let json = r#"[{"number":1,"title":"t","state":"OPEN","url":"u","headRefName":"feat/a","baseRefName":"main","mergeStateStatus":"CLEAN","isDraft":false,"isCrossRepository":false,"statusCheckRollup":[],"body":"**Why**"}]"#;
-    let listing = super::parse_pr_list(json.as_bytes()).unwrap();
+    let listing = super::parse_pr_list_for(json.as_bytes(), None).unwrap();
     assert_eq!(listing.by_branch["feat/a"].0.body, "**Why**");
   }
 
@@ -2396,7 +2398,11 @@ mod tests {
         .collect::<Vec<_>>()
         .join(",")
     );
-    assert!(super::parse_pr_list(json.as_bytes()).unwrap().truncated);
+    assert!(
+      super::parse_pr_list_for(json.as_bytes(), None)
+        .unwrap()
+        .truncated
+    );
   }
 
   #[cfg(unix)]
@@ -2661,7 +2667,9 @@ mod tests {
   fn base_repo_is_upstream_when_a_fork_has_one() {
     let dir = TempDir::new().unwrap();
     write_git_config(&dir, FORK_CONFIG);
-    let info = get_git_remote_url_impl(dir.path().to_str().unwrap()).unwrap().unwrap();
+    let info = get_git_remote_url_impl(dir.path().to_str().unwrap())
+      .unwrap()
+      .unwrap();
     assert_eq!(info.full_name, "owner/repo");
   }
 
@@ -2669,7 +2677,9 @@ mod tests {
   fn push_repo_is_origin_even_with_an_upstream() {
     let dir = TempDir::new().unwrap();
     write_git_config(&dir, FORK_CONFIG);
-    let info = get_push_remote_info_impl(dir.path().to_str().unwrap()).unwrap().unwrap();
+    let info = get_push_remote_info_impl(dir.path().to_str().unwrap())
+      .unwrap()
+      .unwrap();
     assert_eq!(info.full_name, "me/repo");
   }
 
@@ -2677,10 +2687,19 @@ mod tests {
   fn pr_head_names_the_fork_owner_only_for_a_fork() {
     let dir = TempDir::new().unwrap();
     write_git_config(&dir, FORK_CONFIG);
-    assert_eq!(pr_head_ref_impl(dir.path().to_str().unwrap(), "feat"), "me:feat");
+    assert_eq!(
+      pr_head_ref_impl(dir.path().to_str().unwrap(), "feat"),
+      "me:feat"
+    );
     let plain = TempDir::new().unwrap();
-    write_git_config(&plain, "[remote \"origin\"]\n url = git@github.com:owner/repo.git\n");
-    assert_eq!(pr_head_ref_impl(plain.path().to_str().unwrap(), "feat"), "feat");
+    write_git_config(
+      &plain,
+      "[remote \"origin\"]\n url = git@github.com:owner/repo.git\n",
+    );
+    assert_eq!(
+      pr_head_ref_impl(plain.path().to_str().unwrap(), "feat"),
+      "feat"
+    );
   }
 
   #[test]

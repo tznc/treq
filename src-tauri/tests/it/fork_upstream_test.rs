@@ -8,7 +8,13 @@ fn fork_with_upstream_ahead() -> (TestRepo, tempfile::TempDir) {
   let upstream = dir.path().join("upstream.git");
   TestRepo::run_git(
     &repo.repo_path,
-    &["clone", "-q", "--bare", &repo.remote_path().to_string_lossy(), &upstream.to_string_lossy()],
+    &[
+      "clone",
+      "-q",
+      "--bare",
+      &repo.remote_path().to_string_lossy(),
+      &upstream.to_string_lossy(),
+    ],
   )
   .expect("clone upstream");
   TestRepo::gix_commit_file_on_ref(
@@ -51,8 +57,9 @@ fn fetch_brings_in_upstream_default_branch() {
 fn rebase_target_follows_upstream_when_it_is_ahead() {
   let (fork, _dir) = fork_with_upstream_ahead();
   treq_lib::jj::jj_git_fetch(&fork.repo_path).expect("fetch");
-  let target = treq_lib::jj::resolve_branch_revision_for_rebase(&fork.repo_path, fork.default_branch())
-    .expect("resolve target");
+  let target =
+    treq_lib::jj::resolve_branch_revision_for_rebase(&fork.repo_path, fork.default_branch())
+      .expect("resolve target");
   let resolved = TestRepo::jj_commit_ids_in_revset(&fork.repo_path, &target).unwrap();
   let upstream = format!("{}@upstream", fork.default_branch());
   let upstream_ids = TestRepo::jj_commit_ids_in_revset(&fork.repo_path, &upstream).unwrap();

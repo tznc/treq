@@ -78,8 +78,19 @@ fn upstream_tip_ahead_of(
     name: RefName::new(target_branch),
     remote: RemoteName::new("upstream"),
   };
-  let remote = loaded.repo.view().get_remote_bookmark(symbol).target.as_normal()?.clone();
-  let ahead = remote != *local && loaded.repo.index().is_ancestor(local, &remote).unwrap_or(false);
+  let remote = loaded
+    .repo
+    .view()
+    .get_remote_bookmark(symbol)
+    .target
+    .as_normal()?
+    .clone();
+  let ahead = remote != *local
+    && loaded
+      .repo
+      .index()
+      .is_ancestor(local, &remote)
+      .unwrap_or(false);
   ahead.then(|| remote.hex())
 }
 

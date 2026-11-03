@@ -15,7 +15,6 @@
 mod common;
 
 mod auto_rebase_test;
-mod fork_upstream_test;
 mod bookmark_off_working_copy_test;
 mod checks_test;
 mod cli_parallel_commit_test;
@@ -57,6 +56,7 @@ mod core_workspaces_sync_after_commit_test;
 mod core_workspaces_test;
 mod core_workspaces_workspace_diff_test;
 mod file_indexer_test;
+mod fork_upstream_test;
 mod jj_bookmark_track_test;
 mod jj_home_git_head_sync_test;
 mod jj_home_repo_target_test;
