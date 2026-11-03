@@ -18,6 +18,7 @@ pub mod picker;
 pub mod popover;
 pub mod press;
 pub mod row;
+pub mod section_header;
 pub mod split_button;
 pub mod tabs;
 pub mod theme;
@@ -32,7 +33,8 @@ pub use kbd::Kbd;
 pub use menu::{MenuItem, MenuLabel, MenuSeparator};
 pub use picker::{Picker, PickerPlacement};
 pub use popover::{floating, Popover};
-pub use row::{Row, RowDensity};
+pub use row::{Row, RowDensity, TOUCH_ROW_HEIGHT};
+pub use section_header::SectionHeader;
 pub use split_button::SplitButton;
 pub use tabs::{Tab, Tabs, TabsStyle};
 

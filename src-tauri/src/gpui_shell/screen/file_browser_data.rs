@@ -258,6 +258,10 @@ pub fn status_title(status: &str) -> &'static str {
     "M" => "Modified",
     "A" => "Added",
     "D" => "Deleted",
+    "R" => "Renamed",
+    "C" => "Copied",
+    "U" => "Conflicted",
+    "??" => "Untracked",
     _ => "Changed",
   }
 }
@@ -462,7 +466,17 @@ mod tests {
   #[test]
   fn status_titles_match_react() {
     assert_eq!(status_title("M"), "Modified");
-    assert_eq!(status_title("R"), "Changed");
+    assert_eq!(status_title("X"), "Changed");
+  }
+
+  #[test]
+  fn status_titles_name_every_change_kind() {
+    assert_eq!(status_title("A"), "Added");
+    assert_eq!(status_title("D"), "Deleted");
+    assert_eq!(status_title("R"), "Renamed");
+    assert_eq!(status_title("C"), "Copied");
+    assert_eq!(status_title("U"), "Conflicted");
+    assert_eq!(status_title("??"), "Untracked");
   }
 
   #[test]

@@ -2,11 +2,11 @@
 // height per density, the hover token on hover and the light selected tint
 // (no shadow, text not recoloured) on the selected row. One capture per
 // list: the sidebar, the Changes file list, commits, GitHub's pull
-// requests, the New Workspaces picker, the palette, the Skills settings and
+// requests, the New workspace picker, the palette, the Skills settings and
 // the Logs level menu.
 import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { dismissPopover, home, mod, openTab, openWorkspace, overlay, ready, row, settle } from "./helpers.ts";
+import { dismissPopover, home, mod, openTab, openWorkspace, ready, row, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
@@ -85,14 +85,14 @@ test("rows: github pull requests", async ({ page }) => {
 
 test("rows: open workspaces picker", async ({ page }) => {
   await home(page);
-  await page.getByRole("button", { name: "New workspaces" }).click();
+  await page.getByRole("button", { name: "New workspace…" }).first().click();
   await expect(page.getByRole("heading", { name: "Your pull requests" })).toBeVisible();
   await page.getByRole("checkbox", { name: /^#418/ }).click();
   await page.mouse.move(1000, 860);
   await settle(page, 800);
   await capture(page, {
     name: "22-rows-open-workspaces",
-    title: "New Workspaces: a checked pull request",
+    title: "New workspace: a checked pull request",
     expectations: [
       `#418 is checked. ${SELECTED}`,
       "Pull request rows share one height, each with its checkbox on the left",
@@ -104,8 +104,8 @@ test("rows: open workspaces picker", async ({ page }) => {
 test("rows: palette", async ({ page, context }) => {
   await openWorkspace(page, "feat/empty-event-message");
   await page.keyboard.press(`${mod}+k`);
-  const palette = await overlay(page, context);
-  await expect(palette.getByRole("option", { name: "Go to Home" })).toBeVisible();
+  const palette = page;
+  await expect(palette.getByRole("option", { name: "Go to home" })).toBeVisible();
   await palette.keyboard.press("ArrowDown");
   await settle(page, 800);
   await capture(page, {

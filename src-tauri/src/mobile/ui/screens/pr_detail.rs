@@ -4,7 +4,7 @@
 //! the title bar's ⋯ menu ([`menu_items`]), so another one is one more
 //! [`PrAction`].
 
-use crate::mobile::ui::widgets::TouchButton as _;
+use crate::mobile::ui::widgets::{Caption as _, TouchButton as _};
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
@@ -17,7 +17,6 @@ use gpui_kit::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Textarea, TextareaState},
-    tag::Tag,
     v_flex, ActiveTheme, IconName, Sizable, StyledExt,
   },
   div, img, px, AnyElement, App, AppContext, ClipboardItem, Context, Div, Entity, FontWeight,
@@ -592,13 +591,16 @@ impl PrDetailScreen {
     let open = self.checks_open;
     let card = widgets::card(cx);
     let card = match &self.checks {
-      Load::Idle | Load::Loading => card.child(widgets::centered_message("Loading checks…", cx)),
-      Load::Failed(error) => card
-        .p_4()
-        .child(widgets::error_text(errors::describe(error).message, cx)),
-      Load::Ready(None) => card.child(widgets::centered_message("No checks reported.", cx)),
+      Load::Idle | Load::Loading => card.child(widgets::skeleton("pr-checks", 3, cx)),
+      Load::Failed(error) => card.child(widgets::failed(
+        "pr-checks-failed",
+        error,
+        cx.listener(|this, _, _, cx| this.reload(cx)),
+        cx,
+      )),
+      Load::Ready(None) => card.child(widgets::empty("pr-checks-empty", "No checks reported.", cx)),
       Load::Ready(Some(checks)) if checks.checks.is_empty() => {
-        card.child(widgets::centered_message("No checks reported.", cx))
+        card.child(widgets::empty("pr-checks-empty", "No checks reported.", cx))
       }
       Load::Ready(Some(checks)) => {
         let shown: Vec<_> = if open {
@@ -613,7 +615,7 @@ impl PrDetailScreen {
           .children(shown.into_iter().enumerate().map(|(i, check)| {
             let link = check.link.clone();
             widgets::row_full(
-              ("check", i),
+              format!("check-{i}"),
               Some(check_icon(check, cx)),
               check.name.clone(),
               check.duration_secs.map(|s| duration(s).into()),
@@ -664,7 +666,7 @@ impl PrDetailScreen {
         .flex()
         .items_center()
         .justify_center()
-        .text_xs()
+        .caption()
         .text_color(theme.muted_foreground)
         .child(
           login
@@ -675,10 +677,10 @@ impl PrDetailScreen {
         )
         .into_any_element(),
     };
-    let tag = if approved {
-      Tag::success()
+    let tone = if approved {
+      treq_ui::Tone::Success
     } else {
-      Tag::danger()
+      treq_ui::Tone::Danger
     };
     h_flex()
       .gap_2()
@@ -688,7 +690,13 @@ impl PrDetailScreen {
       .flex_wrap()
       .child(avatar)
       .child(div().font_weight(FontWeight::MEDIUM).child(login))
-      .child(tag.small().child(review.verdict().unwrap_or_default()))
+      .child(
+        treq_ui::Badge::new(
+          review.verdict().unwrap_or_default(),
+          &treq_ui::theme::current(cx),
+        )
+        .tone(tone),
+      )
       .child(widgets::muted(day(&review.submitted_at), cx))
   }
 
@@ -730,6 +738,7 @@ impl PrDetailScreen {
           .w(px(44.))
           .ghost()
           .icon(IconName::Plus)
+          .accessibility_label("Add reaction")
           .on_click(cx.listener(move |this, _, _, cx| {
             this.picker = if picker_open { None } else { Some(id.clone()) };
             cx.notify();
@@ -783,26 +792,17 @@ impl Render for PrDetailScreen {
       Load::Ready(pr) => pr.clone(),
       Load::Failed(error) => {
         return widgets::page()
-          .child(
-            widgets::card(cx)
-              .p_4()
-              .gap_3()
-              .child(widgets::error_text(errors::describe(error).message, cx))
-              .child(
-                h_flex().child(
-                  Button::new("retry")
-                    .outline()
-                    .label("Retry")
-                    .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
-                    .touch(),
-                ),
-              ),
-          )
+          .child(widgets::card(cx).child(widgets::failed(
+            "pr-failed",
+            error,
+            cx.listener(|this, _, _, cx| this.reload(cx)),
+            cx,
+          )))
           .into_any_element()
       }
       _ => {
         return widgets::page()
-          .child(widgets::card(cx).child(widgets::centered_message("Loading pull request…", cx)))
+          .child(widgets::card(cx).child(widgets::skeleton("pr", 5, cx)))
           .into_any_element()
       }
     };
@@ -816,8 +816,8 @@ impl Render for PrDetailScreen {
         h_flex()
           .gap_2()
           .flex_wrap()
-          .child(state_tag(&pr))
-          .children(review_tag(&pr))
+          .child(state_tag(&pr, cx))
+          .children(review_tag(&pr, cx))
           .child(widgets::muted(
             format!("#{} by {}", pr.number, pr.author.login),
             cx,
@@ -836,7 +836,7 @@ impl Render for PrDetailScreen {
           h_flex().gap_1().flex_wrap().children(
             pr.labels
               .iter()
-              .map(|l| Tag::secondary().small().child(l.name.clone())),
+              .map(|l| treq_ui::Badge::new(l.name.clone(), &treq_ui::theme::current(cx))),
           ),
         )
       });
@@ -865,7 +865,11 @@ impl Render for PrDetailScreen {
     };
     let comments_section = widgets::section(heading, cx)
       .when(comment_rows.is_empty(), |s| {
-        s.child(widgets::card(cx).child(widgets::centered_message("No comments yet.", cx)))
+        s.child(widgets::card(cx).child(widgets::empty(
+          "pr-comments-empty",
+          "No comments yet.",
+          cx,
+        )))
       })
       .children(comment_rows);
     let busy = self.busy;

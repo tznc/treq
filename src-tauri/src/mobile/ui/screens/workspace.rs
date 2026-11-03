@@ -14,16 +14,9 @@ use crate::{
   jj::{JjBranch, JjFileChange, JjRevisionDiff},
   local_db::Workspace,
 };
-use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-  component::{
-    button::{Button, ButtonVariants},
-    h_flex,
-    input::{Input, InputState},
-    tag::Tag,
-    v_flex, ActiveTheme, Sizable,
-  },
+  component::{button::Button, h_flex, input::InputState, v_flex, ActiveTheme},
   div, list, px, AnyElement, App, AppContext, ClipboardItem, Context, Entity, InteractiveElement,
   IntoElement, ListState, ParentElement, Render, StatefulInteractiveElement, Styled, Task,
   WeakEntity, Window,
@@ -31,16 +24,17 @@ use gpui_kit::{
 use serde::Deserialize;
 use treq_ui::{
   tabs::{Tab, Tabs},
-  Tone,
+  Badge, Tone,
 };
 
 use super::{
+  ask_then,
   code::CodeView,
   commits::{self, CommitsScreen},
   conflicts, mutation_message, on_epoch,
   pull_request::{self, CreateSheet},
   terminal::Sessions,
-  workspaces,
+  workspaces, Op,
 };
 use crate::mobile::{
   errors,
@@ -227,12 +221,25 @@ pub struct WorkspaceScreen {
   /// The action running from this screen, by name.
   busy: Option<&'static str>,
   message: Option<(bool, String)>,
+  /// The last mutation whose result was ambiguous, for "Check again".
+  unsure: Option<Unsure>,
   keys: IdempotencyKeys,
   /// Set once a change applied here, so the pages below (the workspace
   /// list) refetch when this one closes.
   changed: bool,
   _poll: Task<()>,
   _sessions_poll: Task<()>,
+}
+
+/// A mutation whose result was ambiguous: checked again by reading state,
+/// with its idempotency key kept, never by sending it again.
+struct Unsure {
+  name: &'static str,
+  inputs: Vec<String>,
+  request: TreqCommandRequest,
+  success: String,
+  /// Delete and archive leave the page once they are known to have applied.
+  leave: bool,
 }
 
 impl WorkspaceScreen {
@@ -316,6 +323,7 @@ impl WorkspaceScreen {
       change_rows: widgets::list_state(),
       busy: None,
       message: None,
+      unsure: None,
       keys: IdempotencyKeys::default(),
       changed: false,
       _poll: poll,
@@ -474,11 +482,11 @@ impl WorkspaceScreen {
     let (rename_repo, rename_ws) = (repo, workspace.clone());
     let reload = this.clone();
     let mut entries = vec![
-      sheet::MenuEntry::new("menu-push", "Push", on(Self::confirm_push)),
+      sheet::MenuEntry::new("menu-push", "Push", on(|s, cx| s.run(Op::Push, cx))),
       sheet::MenuEntry::new(
         "menu-rebase",
         format!("Rebase onto {target}"),
-        on(Self::confirm_rebase),
+        on(|s, cx| s.run(Op::Rebase, cx)),
       ),
       sheet::MenuEntry::new("menu-target", "Change target…", on(Self::change_target)),
       sheet::MenuEntry::new(
@@ -513,7 +521,12 @@ impl WorkspaceScreen {
         cx.write_to_clipboard(ClipboardItem::new_string(branch.clone()))
       }),
       sheet::MenuEntry::new("menu-archive", "Archive", on(Self::confirm_archive)),
-      sheet::MenuEntry::new("menu-delete", "Delete…", on(Self::confirm_delete)).danger(),
+      sheet::MenuEntry::new(
+        "menu-delete",
+        "Delete…",
+        on(|s, cx| s.run(Op::DeleteWorkspace, cx)),
+      )
+      .danger(),
     ];
     let pr_entry = match &self.pr {
       Load::Ready(RemotePullRequestStatus {
@@ -582,6 +595,7 @@ impl WorkspaceScreen {
     let key = self.keys.key_for("pr", &[&repo, &id, &title]);
     self.busy = Some("pr");
     self.message = None;
+    self.unsure = None;
     let request = TreqCommandRequest::CreatePullRequest {
       repo,
       workspace: id,
@@ -590,10 +604,20 @@ impl WorkspaceScreen {
       draft,
       idempotency_key: key,
     };
+    let unsure = Unsure {
+      name: "pr",
+      inputs: inputs.to_vec(),
+      request: request.clone(),
+      success: "Pull request created.".into(),
+      leave: false,
+    };
     load::run(cx, remote::mutate(request), move |this, outcome, cx| {
       this.busy = None;
       let refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
       this.keys.settle("pr", &refs, &outcome);
+      if matches!(outcome, Ok(Mutation::Ambiguous(_))) {
+        this.unsure = Some(unsure);
+      }
       this.message = Some(match &outcome {
         Ok(Mutation::Applied(value)) => {
           this.changed = true;
@@ -615,24 +639,6 @@ impl WorkspaceScreen {
     cx.notify();
   }
 
-  fn confirm_push(&mut self, cx: &mut Context<Self>) {
-    let Some(workspace) = self.workspace() else {
-      return;
-    };
-    let branch = workspace.branch_name.clone();
-    let this = cx.weak_entity();
-    sheet::confirm(
-      format!("Push {branch}?"),
-      format!("Pushes {branch} and its commits to the remote."),
-      "Push",
-      false,
-      move |_, cx| {
-        this.update(cx, |screen, cx| screen.push(cx)).ok();
-      },
-      cx,
-    );
-  }
-
   fn push(&mut self, cx: &mut Context<Self>) {
     let Target { repo, id, .. } = self.target.clone();
     let key = self.keys.key_for("push", &[&repo, &id]);
@@ -645,23 +651,6 @@ impl WorkspaceScreen {
         idempotency_key: key,
       },
       "Pushed.",
-      cx,
-    );
-  }
-
-  fn confirm_rebase(&mut self, cx: &mut Context<Self>) {
-    let target = self.target_branch();
-    let this = cx.weak_entity();
-    sheet::confirm(
-      format!("Rebase onto {target}?"),
-      format!(
-        "Moves this workspace's commits onto the latest {target}. Conflicts, if any, show in Changes."
-      ),
-      "Rebase",
-      false,
-      move |_, cx| {
-        this.update(cx, |screen, cx| screen.rebase(cx)).ok();
-      },
       cx,
     );
   }
@@ -724,10 +713,21 @@ impl WorkspaceScreen {
     }
     self.busy = Some(name);
     self.message = None;
+    self.unsure = None;
+    let unsure = Unsure {
+      name,
+      inputs: inputs.clone(),
+      request: request.clone(),
+      success: success.into(),
+      leave: false,
+    };
     load::run(cx, remote::mutate(request), move |this, outcome, cx| {
       this.busy = None;
       let refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
       this.keys.settle(name, &refs, &outcome);
+      if matches!(outcome, Ok(Mutation::Ambiguous(_))) {
+        this.unsure = Some(unsure);
+      }
       let (ok, text) = mutation_message(&outcome, success);
       this.changed |= ok;
       this.message = Some((
@@ -740,6 +740,48 @@ impl WorkspaceScreen {
       ));
       this.reload(cx);
     });
+    cx.notify();
+  }
+
+  /// Reads whether the ambiguous mutation applied, without resending it.
+  fn check_again(&mut self, cx: &mut Context<Self>) {
+    if self.busy.is_some() {
+      return;
+    }
+    let Some(unsure) = self.unsure.take() else {
+      return;
+    };
+    self.busy = Some("check");
+    self.message = None;
+    let request = unsure.request.clone();
+    load::run(
+      cx,
+      remote::check_again(request),
+      move |this, outcome, cx| {
+        this.busy = None;
+        let refs: Vec<&str> = unsure.inputs.iter().map(String::as_str).collect();
+        this.keys.settle(unsure.name, &refs, &outcome);
+        let applied = matches!(outcome, Ok(Mutation::Applied(_)));
+        if applied && unsure.leave {
+          this.changed = true;
+          return nav::pop(cx);
+        }
+        let (ok, text) = mutation_message(&outcome, &unsure.success);
+        this.changed |= ok;
+        this.message = Some((
+          ok,
+          if ok {
+            text
+          } else {
+            errors::describe(&text).message
+          },
+        ));
+        if matches!(outcome, Ok(Mutation::Ambiguous(_))) {
+          this.unsure = Some(unsure);
+        }
+        this.reload(cx);
+      },
+    );
     cx.notify();
   }
 
@@ -804,22 +846,38 @@ impl WorkspaceScreen {
     self.leave_after(request, "archive", cx);
   }
 
-  fn confirm_delete(&mut self, cx: &mut Context<Self>) {
+  /// Runs a menu mutation, asking first only when it is destructive.
+  fn run(&mut self, op: Op, cx: &mut Context<Self>) {
     let Some(workspace) = self.workspace() else {
       return;
     };
     let title = workspaces::title_of(workspace);
     let branch = workspace.branch_name.clone();
     let this = cx.weak_entity();
-    sheet::confirm(
-      format!("Delete {title}?"),
-      format!(
-        "Deletes the workspace's checkout and its record. The branch {branch} and its commits stay in the repository."
+    let (heading, body, label) = match op {
+      Op::DeleteWorkspace => (
+        format!("Delete {title}?"),
+        format!(
+          "Deletes the workspace's checkout and its record. The branch {branch} and its commits stay in the repository."
+        ),
+        "Delete workspace",
       ),
-      "Delete workspace",
-      true,
-      move |_, cx| {
-        this.update(cx, |screen, cx| screen.delete(cx)).ok();
+      _ => (String::new(), String::new(), ""),
+    };
+    ask_then(
+      op,
+      heading,
+      body,
+      label,
+      move |cx| {
+        this
+          .update(cx, |screen, cx| match op {
+            Op::Push => screen.push(cx),
+            Op::Rebase => screen.rebase(cx),
+            Op::DeleteWorkspace => screen.delete(cx),
+            _ => {}
+          })
+          .ok();
       },
       cx,
     );
@@ -842,6 +900,14 @@ impl WorkspaceScreen {
   ) {
     self.busy = Some(name);
     self.message = None;
+    self.unsure = None;
+    let unsure = Unsure {
+      name,
+      inputs: Vec::new(),
+      request: request.clone(),
+      success: String::new(),
+      leave: true,
+    };
     load::run(cx, remote::mutate(request), |this, outcome, cx| {
       this.busy = None;
       match outcome {
@@ -850,6 +916,9 @@ impl WorkspaceScreen {
           nav::pop(cx);
         }
         other => {
+          if matches!(other, Ok(Mutation::Ambiguous(_))) {
+            this.unsure = Some(unsure);
+          }
           this.message = Some((
             false,
             errors::describe(&mutation_message(&other, "").1).message,
@@ -862,6 +931,7 @@ impl WorkspaceScreen {
 
   fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let muted = cx.theme().muted_foreground;
+    let palette = treq_ui::theme::current(cx);
     let Some(status) = self.status.ready() else {
       return match &self.status {
         Load::Failed(error) => widgets::error_text(errors::describe(error).message, cx),
@@ -898,35 +968,41 @@ impl WorkspaceScreen {
           .flex_wrap()
           .gap_2()
           .when(partial.has_conflicts, |row| {
-            row.child(Tag::danger().small().child(format!(
-              "{} conflicted",
-              status.conflicted_files.len().max(1)
-            )))
+            row.child(
+              Badge::new(
+                format!("{} conflicted", status.conflicted_files.len().max(1)),
+                &palette,
+              )
+              .tone(Tone::Danger),
+            )
           })
+          // Uncommitted work is information, not a problem: a neutral badge.
           .child(if partial.has_changes {
-            Tag::warning().small().child("Uncommitted changes")
+            Badge::new("Uncommitted changes", &palette)
           } else {
-            Tag::success().small().child("Clean")
+            Badge::new("Clean", &palette).tone(Tone::Success)
           })
           .when(partial.commits_ahead > 0, |row| {
-            row.child(
-              Tag::secondary()
-                .small()
-                .child(format!("↑{} ahead", partial.commits_ahead)),
-            )
+            row.child(Badge::new(
+              format!("↑{} ahead", partial.commits_ahead),
+              &palette,
+            ))
           })
-          .when_some(self.pr.ready().and_then(pull_request::tag), |row, tag| {
-            row.child(
-              div()
-                .id("pr-tag")
-                .child(tag)
-                .on_click(cx.listener(|this, _, _, cx| this.show_pr(cx))),
-            )
-          }),
+          .when_some(
+            self.pr.ready().and_then(|s| pull_request::tag(s, &palette)),
+            |row, tag| {
+              row.child(
+                div()
+                  .id("pr-tag")
+                  .child(tag)
+                  .on_click(cx.listener(|this, _, _, cx| this.show_pr(cx))),
+              )
+            },
+          ),
       )
   }
 
-  fn tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  fn tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = treq_ui::theme::current(cx);
     let running = self.sessions.read(cx).running();
     let (files, conflicts) = self.diff.ready().map_or((0, false), |diff| {
@@ -944,7 +1020,7 @@ impl WorkspaceScreen {
         .tab({
           let tab = counted(Tab::new("tab-changes", "Changes"), files);
           if conflicts {
-            tab.dot(Tone::Danger)
+            tab.dot(Tone::Danger, "Conflict")
           } else {
             tab
           }
@@ -965,10 +1041,13 @@ impl WorkspaceScreen {
   fn changes(&mut self, cx: &mut Context<Self>) -> AnyElement {
     let Load::Ready(diff) = &self.diff else {
       let message = match &self.diff {
-        Load::Failed(error) => widgets::card(cx)
-          .p_4()
-          .child(widgets::error_text(errors::describe(error).message, cx)),
-        _ => widgets::card(cx).child(widgets::centered_message("Loading changes…", cx)),
+        Load::Failed(error) => widgets::card(cx).child(widgets::failed(
+          "changes-failed",
+          error,
+          cx.listener(|this, _, _, cx| this.reload(cx)),
+          cx,
+        )),
+        _ => widgets::card(cx).child(widgets::skeleton("changes", 5, cx)),
       };
       return div()
         .id("changes")
@@ -1011,13 +1090,17 @@ impl WorkspaceScreen {
         div()
           .px_4()
           .pt_2()
-          .child(widgets::card(cx).child(widgets::centered_message(message, cx)))
+          .child(widgets::card(cx).child(widgets::empty(
+            gpui_kit::SharedString::from(format!("changes-empty-{}", section as usize)),
+            message,
+            cx,
+          )))
           .into_any_element()
       }
       ChangeItem::Conflict(i, slot) => {
         let t = self.target.clone();
         let row = widgets::row(
-          ("conflict", i),
+          format!("conflict-{i}"),
           diff.conflicted_files[i].clone(),
           Some("Conflicted".into()),
           cx,
@@ -1030,27 +1113,6 @@ impl WorkspaceScreen {
         } else {
           item.into_any_element()
         }
-      }
-      ChangeItem::CommitBar => {
-        let committing = self.busy == Some("commit");
-        let bar = h_flex()
-          .p_3()
-          .gap_2()
-          .child(div().flex_1().child(Input::new(&self.commit_message)))
-          .child(
-            Button::new("commit")
-              .primary()
-              .label("Commit")
-              .loading(committing)
-              .disabled(self.busy.is_some())
-              .on_click(cx.listener(|this, _, window, cx| this.commit(window, cx)))
-              .touch(),
-          );
-        div()
-          .px_4()
-          .pt_2()
-          .child(widgets::card(cx).child(bar))
-          .into_any_element()
       }
       ChangeItem::File { committed, index } => {
         let files = if committed {
@@ -1089,13 +1151,12 @@ enum ChangeItem {
   Title(Section),
   Empty(Section),
   Conflict(usize, Slot),
-  CommitBar,
   File { committed: bool, index: usize },
   End,
 }
 
 /// The Changes tab flattened to list items: a title per section, then its
-/// rows or file blocks, with the commit bar ahead of the uncommitted files.
+/// rows or file blocks. The commit bar sits under the list.
 fn change_items(diff: &JjRevisionDiff) -> Vec<ChangeItem> {
   let mut items = Vec::new();
   if !diff.conflicted_files.is_empty() {
@@ -1115,7 +1176,6 @@ fn change_items(diff: &JjRevisionDiff) -> Vec<ChangeItem> {
   if diff.uncommitted_files.is_empty() {
     items.push(ChangeItem::Empty(Section::Uncommitted));
   } else {
-    items.push(ChangeItem::CommitBar);
     items.extend(
       (0..diff.uncommitted_files.len()).map(|index| ChangeItem::File {
         committed: false,
@@ -1141,12 +1201,7 @@ fn change_items(diff: &JjRevisionDiff) -> Vec<ChangeItem> {
 impl Render for WorkspaceScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let body = match self.view {
-      View::Terminals => div()
-        .id("terminals")
-        .size_full()
-        .overflow_y_scroll()
-        .child(widgets::page().child(self.sessions.clone()))
-        .into_any_element(),
+      View::Terminals => self.sessions.clone().into_any_element(),
       View::Changes => v_flex()
         .size_full()
         .child(div().flex_1().min_h_0().child(self.changes(cx)))
@@ -1161,7 +1216,7 @@ impl Render for WorkspaceScreen {
         None => div().into_any_element(),
       },
     };
-    let tabs = self.tabs(cx);
+    let tabs = self.tab_bar(cx);
     let border = cx.theme().border;
     v_flex()
       .size_full()
@@ -1173,7 +1228,19 @@ impl Render for WorkspaceScreen {
         } else {
           widgets::error_text(text, cx)
         };
-        line.px_4().pb_2()
+        let check = self.unsure.is_some().then(|| {
+          Button::new("check-again")
+            .outline()
+            .label("Check again")
+            .on_click(cx.listener(|this, _, _, cx| this.check_again(cx)))
+            .touch()
+        });
+        v_flex()
+          .gap_2()
+          .px_4()
+          .pb_2()
+          .child(line)
+          .children(check.map(|b| h_flex().child(b)))
       }))
       .children(self.busy.map(|name| {
         widgets::muted(
@@ -1185,6 +1252,7 @@ impl Render for WorkspaceScreen {
             "archive" => "Archiving…",
             "delete" => "Deleting…",
             "pr" => "Pushing and opening the pull request…",
+            "check" => "Checking whether it applied…",
             _ => "Working…",
           },
           cx,
@@ -1240,8 +1308,12 @@ impl TargetSheet {
 impl Render for TargetSheet {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     match &self.branches {
-      Load::Idle | Load::Loading => widgets::centered_message("Loading branches…", cx),
-      Load::Failed(error) => widgets::error_text(errors::describe(error).message, cx).px_4(),
+      Load::Idle | Load::Loading => div().child(widgets::skeleton("branches", 5, cx)),
+      Load::Failed(error) => div().child(
+        widgets::empty("branches-failed", errors::describe(error).message, cx)
+          .error(true)
+          .icon(treq_ui::theme::ICON_CIRCLE_ALERT),
+      ),
       Load::Ready(branches) => v_flex().children(
         branches
           .iter()
@@ -1251,7 +1323,7 @@ impl Render for TargetSheet {
             let name = branch.name.clone();
             let current = name == self.current;
             let screen = self.screen.clone();
-            widgets::choice(("target", i), name.clone(), None, current, cx).on_click(
+            widgets::choice(format!("target-{i}"), name.clone(), None, current, cx).on_click(
               move |_, _, cx| {
                 sheet::close(cx);
                 if !current {
@@ -1302,9 +1374,13 @@ impl Render for Switcher {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = treq_ui::theme::current(cx);
     let list = match &self.list {
-      Load::Idle | Load::Loading => return widgets::centered_message("Loading…", cx),
+      Load::Idle | Load::Loading => return div().child(widgets::skeleton("switcher", 5, cx)),
       Load::Failed(error) => {
-        return widgets::error_text(errors::describe(error).message, cx).px_4()
+        return div().child(
+          widgets::empty("switcher-failed", errors::describe(error).message, cx)
+            .error(true)
+            .icon(treq_ui::theme::ICON_CIRCLE_ALERT),
+        )
       }
       Load::Ready(list) => list,
     };
@@ -1318,7 +1394,7 @@ impl Render for Switcher {
         let current = id == self.current;
         let repo = repo.clone();
         widgets::row(
-          ("switch-workspace", entry.index),
+          format!("switch-workspace-{}", entry.index),
           title.clone(),
           Some(workspace.branch_name.clone().into()),
           cx,
@@ -1387,7 +1463,7 @@ mod tests {
   }
 
   #[core::prelude::v1::test]
-  fn changes_flatten_to_titled_sections_with_the_commit_bar_first() {
+  fn changes_flatten_to_titled_sections() {
     let file = |committed, index| ChangeItem::File { committed, index };
     assert_eq!(
       change_items(&revision(1, 2, 1)),
@@ -1401,7 +1477,6 @@ mod tests {
           }
         ),
         ChangeItem::Title(Section::Uncommitted),
-        ChangeItem::CommitBar,
         file(false, 0),
         file(false, 1),
         ChangeItem::Title(Section::Committed),

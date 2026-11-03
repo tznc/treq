@@ -12,10 +12,10 @@ use gpui_kit::{
     spinner::Spinner,
     v_flex, ActiveTheme, IconName, Sizable,
   },
-  div, px, AnyElement, Context, Div, FontWeight, InteractiveElement, IntoElement, ParentElement,
-  Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window,
+  div, px, AnyElement, Context, Div, InteractiveElement, IntoElement, ParentElement, Render,
+  ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window,
 };
-use treq_ui::{Count, Dot, Tone};
+use treq_ui::{Dot, Tone};
 
 use super::{model, screens, widgets, Machine, MachineState, MachineStatus};
 use crate::core::pty_remote_supervisor::PtyBackend;
@@ -46,6 +46,18 @@ fn status(state: &MachineState) -> (Option<Tone>, Option<String>) {
     ),
     MachineStatus::CutOff(_) => (Some(Tone::Warning), Some("Access ended".into())),
   }
+}
+
+/// The state named in the row's detail line, beside its dot or spinner.
+fn status_word(state: &MachineState) -> Option<String> {
+  let shown = state.status.is_connecting() || state.status == MachineStatus::Ready;
+  status(state).1.filter(|_| shown)
+}
+
+/// Whether machine `id` is the one open beside the list (`beside`), as
+/// the active connection.
+fn is_open(id: &str, beside: bool, active: Option<&str>) -> bool {
+  beside && active == Some(id)
 }
 
 /// Repository folder name, for the row's detail line.
@@ -105,9 +117,9 @@ impl HomeScreen {
         Machine::Managed => None,
       });
     let detail = [
+      // Beside the dot, so the word is never cut off.
+      status_word(&state),
       address,
-      // A failure is explained under the row; only progress goes here.
-      status_text.filter(|_| state.status.is_connecting()),
       last_repo.as_deref().map(|r| repo_name(r).to_string()),
     ]
     .into_iter()
@@ -123,10 +135,24 @@ impl HomeScreen {
       .justify_center()
       .map(|slot| match (connecting, tone) {
         (true, _) => slot.child(Spinner::new().small()),
-        (false, Some(tone)) => slot.child(Dot::new(tone, &palette)),
+        (false, Some(tone)) => slot.child(Dot::new(
+          tone,
+          status_text.clone().unwrap_or_default(),
+          &palette,
+        )),
         (false, None) => slot,
       })
       .into_any_element();
+    let active = model(cx)
+      .read(cx)
+      .connection
+      .as_ref()
+      .map(|c| c.machine().to_string());
+    let open = is_open(
+      &id,
+      super::nav::beside(cx.entity_id(), cx).is_some(),
+      active.as_deref(),
+    );
     let row = widgets::row_full(
       SharedString::from(format!("machine-{id}")),
       Some(leading),
@@ -135,6 +161,7 @@ impl HomeScreen {
       trailing,
       cx,
     )
+    .when(open, |row| row.bg(palette.selected()))
     .when(!connecting, |row| {
       let machine = machine.clone();
       row.on_click(move |_, _, cx| super::open_machine(machine.clone(), cx))
@@ -248,21 +275,12 @@ impl HomeScreen {
   fn hosts(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let hosts = store::user_managed_endpoints();
     let palette = treq_ui::theme::current(cx);
-    let title = h_flex()
-      .gap_2()
-      .items_center()
-      .child(
-        div()
-          .text_xs()
-          .font_weight(FontWeight::SEMIBOLD)
-          .text_color(cx.theme().muted_foreground)
-          .child("SSH HOSTS"),
-      )
-      .when(!hosts.is_empty(), |t| {
-        t.child(Count::new(hosts.len(), &palette))
-      });
+    let count = hosts.len();
+    let title = treq_ui::SectionHeader::new("section-ssh-hosts", "SSH hosts", &palette)
+      .when(count > 0, |header| header.count(count));
     let list = if hosts.is_empty() {
-      widgets::card(cx).child(widgets::centered_message(
+      widgets::card(cx).child(widgets::empty(
+        "hosts-empty",
         "No SSH hosts on this device yet.",
         cx,
       ))
@@ -276,6 +294,7 @@ impl HomeScreen {
             .ghost()
             .small()
             .icon(IconName::Ellipsis)
+            .accessibility_label("Edit host")
             .on_click(move |_, _, cx| {
               cx.stop_propagation();
               screens::add_host::edit(edit_record.clone(), cx);
@@ -432,6 +451,28 @@ mod tests {
         agents,
       }),
     }
+  }
+
+  /// The row says its state in words beside the dot: progress, and that it
+  /// is connected. A failure is explained under the row instead.
+  #[core::prelude::v1::test]
+  fn the_status_dot_has_a_word() {
+    let mut state = MachineState::default();
+    assert_eq!(status_word(&state), None);
+    state.status = MachineStatus::Ready;
+    assert_eq!(status_word(&state).as_deref(), Some("Connected"));
+    state.status = MachineStatus::Connecting("Connecting");
+    assert_eq!(status_word(&state).as_deref(), Some("Connecting…"));
+  }
+
+  /// In a split, the machine whose repositories show beside the list is
+  /// marked.
+  #[core::prelude::v1::test]
+  fn the_open_machine_is_highlighted() {
+    assert!(is_open("host-1", true, Some("host-1")));
+    assert!(!is_open("host-2", true, Some("host-1")));
+    assert!(!is_open("host-1", false, Some("host-1")));
+    assert!(!is_open("host-1", true, None));
   }
 
   #[core::prelude::v1::test]

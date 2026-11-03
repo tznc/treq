@@ -158,3 +158,17 @@ fn logs_tab_sends_a_result_set_to_an_agent(cx: &mut TestAppContext) {
   let prompt = launches[0].0.prompt.clone().unwrap_or_default();
   assert!(prompt.contains("Result (1 row):"), "{prompt}");
 }
+
+/// The source picker is a combo box named for what it picks and its
+/// current value, so a user (and the QA specs) find it by name.
+#[gpui::test]
+fn the_log_source_picker_is_a_named_combo_box(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(cx, logs_host(), logs_route(None));
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(gpui::Role::ComboBox).name("Log source: Checks")))
+    .to_be_visible();
+}

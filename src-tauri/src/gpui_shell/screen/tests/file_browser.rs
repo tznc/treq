@@ -153,6 +153,19 @@ fn file_browser_marks_the_working_copy_changes(cx: &mut TestAppContext) {
   assert_eq!(added, [2, 3]);
 }
 
+/// A changed file keeps its name in the neutral text color and gets a
+/// named dot after it.
+#[gpui::test]
+fn file_browser_marks_a_changed_file_with_a_named_dot(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = harness(cx, serde_json::json!({}));
+  assert!(h.drawn("file-tree-a.rs"));
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(gpui::Role::Image).name("Modified"))).to_be_visible();
+}
+
 #[gpui::test]
 fn file_browser_shows_binary_and_unreadable_files(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, serde_json::json!({}));
@@ -217,7 +230,7 @@ fn file_browser_keeps_comments_and_finishes_the_review(cx: &mut TestAppContext) 
   assert!(fields(&h, "fileBrowser.review").is_empty());
   let launches = host.launches.lock().unwrap().clone();
   assert_eq!(launches.len(), 1);
-  assert_eq!(launches[0].0.session_name.as_deref(), Some("Code Review"));
+  assert_eq!(launches[0].0.session_name.as_deref(), Some("Code review"));
   assert_eq!(launches[0].0.mode.as_deref(), Some("plan"));
   let markdown = launches[0].0.prompt.clone().unwrap_or_default();
   assert!(markdown.contains("README.md"), "{markdown}");

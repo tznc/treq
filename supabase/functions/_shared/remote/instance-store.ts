@@ -63,6 +63,8 @@ export interface InstanceRow {
   active_placement_id: string | null;
   /** "byos" when the active placement runs on the owner's own provider account (045_provider_credentials.sql). */
   credential_source?: "managed" | "byos";
+  /** The organization this workspace bills to (Team), or null for its owner. */
+  billing_org_id?: string | null;
   fence: number;
 }
 
@@ -162,6 +164,8 @@ export async function createProvisioningInstance(
     providerKind: ProviderKind;
     tierId?: string;
     machineTypeId?: string;
+    /** The organization to bill (Team profile); null bills the owner. */
+    billingOrgId?: string | null;
   },
 ): Promise<InstanceRow> {
   return must(await supabase
@@ -176,6 +180,7 @@ export async function createProvisioningInstance(
       status: "provisioning",
       generation: 0,
       image_manifest_version: params.manifestVersion,
+      billing_org_id: params.billingOrgId ?? null,
       // disk_quota_gb is set from the machine type's disk_gb by a trigger
       // (046_placements_and_usage.sql); there is no free base allocation.
     })
@@ -183,15 +188,24 @@ export async function createProvisioningInstance(
     .single(), "create instance record") as InstanceRow;
 }
 
+/**
+ * Updates the instance row. With `expectStatus`, only while its status is one
+ * of those; returns whether a row was written, so a caller can see that a
+ * concurrent delete (or another transition) got there first.
+ */
 export async function updateInstance(
   supabase: SupabaseClient,
   instanceId: string,
   fields: Record<string, unknown>,
-): Promise<void> {
-  must(await supabase
+  opts: { expectStatus?: readonly string[] } = {},
+): Promise<boolean> {
+  let query = supabase
     .from("remote_instances")
     .update({ ...fields, updated_at: new Date().toISOString() })
-    .eq("id", instanceId), "update instance");
+    .eq("id", instanceId);
+  if (opts.expectStatus) query = query.in("status", [...opts.expectStatus]);
+  const rows = must(await query.select("id"), "update instance") as unknown[] | null;
+  return (rows?.length ?? 0) > 0;
 }
 
 // Upserts the managed endpoint for an instance and records its host key

@@ -4,7 +4,7 @@
 //! sheet that submits the review with a verdict. The rules live in
 //! [`super::pr_review_logic`].
 
-use crate::mobile::ui::widgets::TouchButton as _;
+use crate::mobile::ui::widgets::{Caption as _, TouchButton as _};
 use std::{collections::HashSet, rc::Rc};
 
 use crate::{
@@ -21,7 +21,6 @@ use gpui_kit::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Textarea, TextareaState},
-    tag::Tag,
     v_flex, ActiveTheme, IconName, Sizable, StyledExt,
   },
   div, point, px, AnyElement, App, AppContext, Context, Div, Entity, InteractiveElement,
@@ -556,6 +555,7 @@ impl PrReviewScreen {
           .w(px(TAP))
           .ghost()
           .icon(IconName::Plus)
+          .accessibility_label("Add reaction")
           .on_click(cx.listener(move |this, _, _, cx| {
             this.picker = if picker_open { None } else { Some(id.clone()) };
             cx.notify();
@@ -614,10 +614,16 @@ impl PrReviewScreen {
           .child(title),
       )
       .when(thread.is_outdated, |h| {
-        h.child(Tag::warning().small().child("Outdated"))
+        h.child(
+          treq_ui::Badge::new("Outdated", &treq_ui::theme::current(cx))
+            .tone(treq_ui::Tone::Warning),
+        )
       })
       .when(thread.is_resolved, |h| {
-        h.child(Tag::secondary().small().child("Resolved"))
+        h.child(treq_ui::Badge::new(
+          "Resolved",
+          &treq_ui::theme::current(cx),
+        ))
       })
       .on_click(cx.listener(move |this, _, _, cx| {
         if !this.toggled.remove(&id) {
@@ -657,7 +663,7 @@ impl PrReviewScreen {
               )
               .child(
                 div()
-                  .text_xs()
+                  .caption()
                   .text_color(theme.muted_foreground)
                   .child(c.created_at.get(..10).unwrap_or("").to_string()),
               ),
@@ -704,7 +710,10 @@ impl PrReviewScreen {
       .child(
         h_flex()
           .gap_2()
-          .child(Tag::primary().small().child("Pending"))
+          .child(
+            treq_ui::Badge::new("Pending", &treq_ui::theme::current(cx))
+              .tone(treq_ui::Tone::Primary),
+          )
           .child(widgets::muted(
             format!("{} {}", c.path, line_label(c.start_line, c.end_line)),
             cx,
@@ -751,9 +760,14 @@ impl PrReviewScreen {
         if pending > 0 {
           detail.push_str(&format!(" · {pending} pending"));
         }
-        widgets::row(("pr-file", i), f.path.clone(), Some(detail.into()), cx)
-          .on_click(cx.listener(move |this, _, _, cx| this.show_file(Some(i), cx)))
-          .into_any_element()
+        widgets::row(
+          format!("pr-file-{i}"),
+          f.path.clone(),
+          Some(detail.into()),
+          cx,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| this.show_file(Some(i), cx)))
+        .into_any_element()
       })
       .collect();
     let pending: Vec<Div> = self
@@ -768,7 +782,8 @@ impl PrReviewScreen {
         widgets::section(widgets_count(files.len(), "file"), cx).child(
           widgets::card(cx)
             .when(rows.is_empty(), |c| {
-              c.child(widgets::centered_message(
+              c.child(widgets::empty(
+                "pr-files-empty",
                 "No changes in this pull request.",
                 cx,
               ))
@@ -891,7 +906,8 @@ impl PrReviewScreen {
             .overflow_x_scroll()
             .child(v_flex().py_1().min_w_full().children(rows))
             .when(file.hunks.is_empty(), |d| {
-              d.child(widgets::centered_message(
+              d.child(widgets::empty(
+                "pr-diff-empty",
                 "No text changes (binary or renamed).",
                 cx,
               ))
@@ -1022,27 +1038,17 @@ impl Render for PrReviewScreen {
       Load::Ready(files) => files.clone(),
       Load::Failed(error) => {
         return widgets::page()
-          .child(
-            widgets::card(cx)
-              .p_4()
-              .gap_3()
-              .child(widgets::error_text(errors::describe(error).message, cx))
-              .child(
-                h_flex().child(
-                  Button::new("retry")
-                    .h(px(TAP))
-                    .outline()
-                    .label("Retry")
-                    .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
-                    .touch(),
-                ),
-              ),
-          )
+          .child(widgets::card(cx).child(widgets::failed(
+            "pr-review-failed",
+            error,
+            cx.listener(|this, _, _, cx| this.reload(cx)),
+            cx,
+          )))
           .into_any_element()
       }
       _ => {
         return widgets::page()
-          .child(widgets::card(cx).child(widgets::centered_message("Loading changes…", cx)))
+          .child(widgets::card(cx).child(widgets::skeleton("pr-review", 5, cx)))
           .into_any_element()
       }
     };

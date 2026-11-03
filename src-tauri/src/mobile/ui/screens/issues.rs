@@ -19,9 +19,9 @@ use gpui_kit::{
     v_flex, ActiveTheme, IconName, Sizable,
   },
   div, px, AnyElement, App, AppContext, Context, Entity, InteractiveElement, IntoElement,
-  ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
+  ParentElement, Render, StatefulInteractiveElement, Styled, Window,
 };
-use treq_ui::{Dot, Tone};
+use treq_ui::{Dot, Row, RowDensity, Tone};
 
 use super::{issue, mutation_message, on_epoch};
 use crate::mobile::{
@@ -404,20 +404,21 @@ impl IssuesScreen {
       let labels: Vec<&str> = issue.labels.iter().map(|l| l.name.as_str()).collect();
       detail = format!("{detail} · {}", labels.join(", "));
     }
-    h_flex()
-      .id(SharedString::from(format!("issue-{number}")))
-      .min_h(px(widgets::ROW_H))
-      .px_4()
-      .py_2()
-      .gap_3()
-      .items_center()
-      .border_b_1()
-      .border_color(theme.border)
-      .active(|s| s.bg(theme.accent))
-      .child(Dot::new(tone, &palette))
+    Row::new(format!("issue-{number}"), &palette)
+      .density(RowDensity::Touch)
+      .divider(true)
+      .label(title.clone())
+      .leading(Dot::new(
+        tone,
+        if tone == Tone::Neutral {
+          "Closed"
+        } else {
+          "Open"
+        },
+        &palette,
+      ))
       .child(
         v_flex()
-          .flex_1()
           .min_w_0()
           // Long titles wrap rather than cut off.
           .child(div().child(title.clone()))
@@ -429,7 +430,7 @@ impl IssuesScreen {
               .child(detail),
           ),
       )
-      .child(
+      .trailing(
         div()
           .text_color(theme.muted_foreground)
           .child(IconName::ChevronRight),
@@ -474,32 +475,21 @@ impl Render for IssuesScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let query = self.query.read(cx).value().to_string();
     let body = match &self.list {
-      Load::Idle | Load::Loading => {
-        widgets::card(cx).child(widgets::centered_message("Loading issues…", cx))
-      }
-      Load::Failed(error) => widgets::card(cx)
-        .p_4()
-        .gap_3()
-        .child(widgets::error_text(errors::describe(error).message, cx))
-        .child(
-          h_flex().child(
-            Button::new("retry")
-              .outline()
-              .large()
-              .label("Retry")
-              .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
-              .touch(),
-          ),
-        ),
-      Load::Ready(listed) if listed.items.is_empty() => {
-        widgets::card(cx).child(widgets::centered_message(
-          match self.filter {
-            Filter::Open => "No open issues.",
-            Filter::Closed => "No closed issues.",
-          },
-          cx,
-        ))
-      }
+      Load::Idle | Load::Loading => widgets::card(cx).child(widgets::skeleton("issues", 6, cx)),
+      Load::Failed(error) => widgets::card(cx).child(widgets::failed(
+        "issues-failed",
+        error,
+        cx.listener(|this, _, _, cx| this.reload(cx)),
+        cx,
+      )),
+      Load::Ready(listed) if listed.items.is_empty() => widgets::card(cx).child(widgets::empty(
+        "issues-empty",
+        match self.filter {
+          Filter::Open => "No open issues.",
+          Filter::Closed => "No closed issues.",
+        },
+        cx,
+      )),
       Load::Ready(listed) => {
         let shown: Vec<GhIssue> = listed
           .items
@@ -508,7 +498,11 @@ impl Render for IssuesScreen {
           .cloned()
           .collect();
         if shown.is_empty() {
-          widgets::card(cx).child(widgets::centered_message("No loaded issues match.", cx))
+          widgets::card(cx).child(widgets::empty(
+            "issues-no-match",
+            "No loaded issues match.",
+            cx,
+          ))
         } else {
           let rows: Vec<AnyElement> = shown.iter().map(|i| self.row(i, cx)).collect();
           widgets::card(cx).children(rows)

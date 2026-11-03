@@ -6,14 +6,13 @@
 //
 // The create test makes a scratch workspace and the delete test removes
 // it again, so the sidebar is back to the seed for later areas.
-import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
 import {
   focusMain,
   home,
   mod,
   openWorkspace,
-  overlay,
   popupBox,
   ready,
   row,
@@ -25,40 +24,22 @@ test.describe.configure({ mode: "serial" });
 
 const SCRATCH_TITLE = "QA scratch space";
 
-/**
- * The page a dialog renders in: the repo window when it draws the dialog
- * itself, else the shared dialog window.
- */
-async function dialogIn(
-  page: Page,
-  context: BrowserContext,
-  find: (p: Page) => Locator,
-): Promise<Page> {
-  try {
-    await expect(find(page)).toBeVisible({ timeout: 4000 });
-    return page;
-  } catch {
-    const other = await overlay(page, context);
-    await expect(find(other)).toBeVisible();
-    return other;
-  }
-}
-
-const heading = (p: Page) => p.getByRole("heading", { name: "New Workspaces" });
+const heading = (p: Page) => p.getByRole("heading", { name: "New workspace" });
 
 test("dialogs: create workspace", async ({ page, context }) => {
   await home(page);
   await page.keyboard.press(`${mod}+n`);
-  const dialog = await dialogIn(page, context, heading);
+  await expect(heading(page)).toBeVisible();
+  const dialog = page;
   await settle(page, 800);
   await capture(page, {
     name: "09-create-workspace-dialog",
-    title: "New Workspaces dialog (Ctrl+N) from home",
+    title: "New workspace dialog (Ctrl+N) from home",
     screen: true,
     rest: false,
     expectations: [
       "'Workspaces' textarea focused; Stack on reads the default branch",
-      "Cancel and a disabled Create Workspaces at the bottom right",
+      "Cancel and a disabled Create workspace at the bottom right",
       "Backdrop dims the window evenly",
     ],
   });
@@ -71,7 +52,7 @@ test("dialogs: create workspace", async ({ page, context }) => {
     expect((await heading(dialog).boundingBox())?.x).toBe(before?.x);
     await capture(page, {
       name: "09-create-workspace-advanced",
-      title: "New Workspaces: Advanced section open",
+      title: "New workspace: Advanced section open",
       screen: true,
       rest: false,
       expectations: [
@@ -86,13 +67,13 @@ test("dialogs: create workspace", async ({ page, context }) => {
   await settle(page, 500);
   await capture(page, {
     name: "09-create-workspace-title",
-    title: "New Workspaces: branch named from the title",
+    title: "New workspace: branch named from the title",
     screen: true,
     rest: false,
     expectations: ["The popover lists prefix/qa-scratch-space as a new branch"],
   });
   await dialog.keyboard.press("Escape");
-  await dialog.getByRole("button", { name: "Create 1 Workspace" }).click();
+  await dialog.getByRole("button", { name: "Create workspace" }).click();
   await expect(heading(dialog)).toHaveCount(0, { timeout: 30_000 });
   await settle(page, 1500);
   await capture(page, {
@@ -110,11 +91,12 @@ test("dialogs: create workspace", async ({ page, context }) => {
 test("dialogs: delete workspace", async ({ page, context }) => {
   await home(page);
   await page.keyboard.press(`${mod}+k`);
-  const palette = await overlay(page, context);
-  await palette.getByRole("textbox", { name: "Type a command or search..." }).fill("Delete Workspace");
-  await palette.getByRole("option", { name: "Delete Workspace" }).click();
-  const search = (p: Page) => p.getByRole("textbox", { name: "Search workspaces to delete..." });
-  const dialog = await dialogIn(page, context, search);
+  const palette = page;
+  await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("Delete workspace");
+  await palette.getByRole("option", { name: "Delete workspace" }).click();
+  const search = (p: Page) => p.getByRole("textbox", { name: "Search workspaces to delete…" });
+  await expect(search(page)).toBeVisible();
+  const dialog = page;
   await settle(page, 800);
   await capture(page, {
     name: "09-delete-workspace-search",
@@ -169,12 +151,13 @@ test("dialogs: delete workspace", async ({ page, context }) => {
 test("dialogs: stack workspace", async ({ page, context }) => {
   await openWorkspace(page, "feat/keyvalues-cache");
   await row(page, "feat/keyvalues-cache").hover();
-  await row(page, "feat/keyvalues-cache").getByRole("button", { name: "Stack workspace" }).click();
-  const dialog = await dialogIn(page, context, heading);
+  await row(page, "feat/keyvalues-cache").getByRole("button", { name: "Stack on this…" }).click();
+  await expect(heading(page)).toBeVisible();
+  const dialog = page;
   await settle(page, 1200);
   await capture(page, {
     name: "09-stack-dialog",
-    title: "Stack on feat/keyvalues-cache opens New Workspaces",
+    title: "Stack on feat/keyvalues-cache opens New workspace",
     screen: true,
     rest: false,
     expectations: [
@@ -187,11 +170,12 @@ test("dialogs: stack workspace", async ({ page, context }) => {
 
   // Ctrl+Shift+N stacks on the open workspace.
   await page.keyboard.press(`${mod}+Shift+N`);
-  const again = await dialogIn(page, context, heading);
+  await expect(heading(page)).toBeVisible();
+  const again = page;
   await settle(page, 1000);
   await capture(page, {
     name: "09-stack-dialog-shortcut",
-    title: "New Workspaces from Ctrl+Shift+N",
+    title: "New workspace from Ctrl+Shift+N",
     screen: true,
     rest: false,
     expectations: ["Same dialog, 'Stack on' reads the open workspace"],
@@ -206,7 +190,7 @@ test("dialogs: rename workspace from the context menu", async ({ page, context }
   focusMain();
   const menu = popupBox();
   if (!menu) throw new Error("no context menu");
-  // "Open in..." (the sixth row) opens a submenu on hover.
+  // "Open in…" (the sixth row) opens a submenu on hover.
   await xPointer(page, menu.x + 100, menu.y + 190);
   await settle(page, 900);
   await capture(page, {
@@ -219,10 +203,11 @@ test("dialogs: rename workspace from the context menu", async ({ page, context }
       "Editors listed with icons; nothing clipped at the screen edge",
     ],
   });
-  // "Rename Workspace" is the third row.
+  // "Rename workspace" is the third row.
   await xPointer(page, menu.x + 100, menu.y + 85, 1);
   const name = (p: Page) => p.getByRole("textbox", { name: "e.g., feat/new-name" });
-  const dialog = await dialogIn(page, context, name);
+  await expect(name(page)).toBeVisible();
+  const dialog = page;
   await settle(page, 800);
   await capture(page, {
     name: "09-rename-dialog",
@@ -260,7 +245,8 @@ test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page, context })
   await openWorkspace(page, "feat/keyvalues-cache");
   await page.keyboard.press(`${mod}+i`);
   const title = (p: Page) => p.getByRole("dialog", { name: "Start a new agent session" });
-  const dialog = await dialogIn(page, context, title);
+  await expect(title(page)).toBeVisible();
+  const dialog = page;
   await settle(page, 1000);
   // Opened from a workspace, the prompt targets it rather than main.
   await expect(
@@ -274,10 +260,10 @@ test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page, context })
     expectations: [
       "Prompt field focused; workspace and agent pickers in the footer",
       "The workspace picker shows feat/keyvalues-cache, the open workspace",
-      "Submit split button and its shortcut hint readable",
+      "A Send icon button ends the footer; no Edit/Plan split menu",
     ],
   });
-  await dialog.getByRole("textbox", { name: "Describe a task..." }).last().fill(
+  await dialog.getByRole("textbox", { name: "Describe a task…" }).last().fill(
     "Add a TTL to the key-value cache and cover expiry in tests",
   );
   await settle(page, 500);
@@ -286,9 +272,9 @@ test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page, context })
     title: "Agent prompt with a task typed",
     screen: true,
     rest: false,
-    expectations: ["Text wraps in the field; submit enabled"],
+    expectations: ["Text wraps in the field; the Send button is enabled"],
   });
-  // The agent select (Claude) beside Edit, at its place in the dialog.
+  // The agent select (Claude) beside Send, at its place in the dialog.
   {
     await page.mouse.click(829, 526);
     await settle(page, 900);

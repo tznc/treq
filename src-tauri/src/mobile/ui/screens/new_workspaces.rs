@@ -4,7 +4,7 @@
 //! there. Lines whose workspace is already open are left out: they do
 //! nothing.
 
-use crate::mobile::ui::widgets::TouchButton as _;
+use crate::mobile::ui::widgets::{Caption as _, TouchButton as _};
 use std::time::{Duration, Instant};
 
 use crate::core::{
@@ -20,7 +20,6 @@ use gpui_kit::{
     h_flex,
     input::{Indent, InputEvent, Outdent, Textarea, TextareaState},
     popover::Popover,
-    tag::Tag,
     v_flex, ActiveTheme, Icon, IconName, Sizable,
   },
   div, px, Anchor, AnyElement, App, AppContext, Context, Div, Entity, InteractiveElement,
@@ -384,9 +383,14 @@ impl NewWorkspacesSheet {
           h_flex()
             .gap_1p5()
             .min_w_0()
-            .when(new, |line| line.child(Tag::info().xsmall().child("New")))
+            .when(new, |line| {
+              line.child(
+                treq_ui::Badge::new("New", &treq_ui::theme::current(cx))
+                  .tone(treq_ui::Tone::Primary),
+              )
+            })
             .child(if mono {
-              widgets::mono(text, cx).text_xs().truncate()
+              widgets::mono(text, cx).caption().truncate()
             } else {
               div().truncate().child(text)
             })
@@ -419,7 +423,7 @@ impl NewWorkspacesSheet {
                   .child(branch_line(branch.clone(), true)),
                 _ => rows.child(branch_line(row.line.trim().to_string(), false)),
               })
-              .children(error.map(|error| div().text_xs().text_color(theme.danger).child(error))),
+              .children(error.map(|error| div().caption().text_color(theme.danger).child(error))),
           )
       }))
       .into_any_element()
@@ -444,6 +448,7 @@ impl NewWorkspacesSheet {
                 Button::new("outdent")
                   .outline()
                   .icon(LucideIcon::ListIndentDecrease)
+                  .accessibility_label("Outdent")
                   .tooltip("Outdent")
                   .on_click(cx.listener(|this, _, window, cx| this.indent(true, window, cx)))
                   .touch(),
@@ -452,6 +457,7 @@ impl NewWorkspacesSheet {
                 Button::new("indent")
                   .outline()
                   .icon(LucideIcon::ListIndentIncrease)
+                  .accessibility_label("Indent")
                   .tooltip("Indent")
                   .on_click(cx.listener(|this, _, window, cx| this.indent(false, window, cx)))
                   .touch(),
@@ -512,6 +518,7 @@ impl NewWorkspacesSheet {
                 .large()
                 .size(px(widgets::CTA_H - 8.))
                 .icon(IconName::ChevronLeft)
+                .accessibility_label("Back")
                 .tooltip("Back")
                 .disabled(self.running)
                 .on_click(cx.listener(|this, _, window, cx| this.back(window, cx)))
@@ -576,7 +583,8 @@ impl Render for NewWorkspacesSheet {
                   Button::new("lines-help-button")
                     .ghost()
                     .small()
-                    .icon(LucideIcon::CircleQuestionMark),
+                    .icon(LucideIcon::CircleQuestionMark)
+                    .accessibility_label("Help"),
                 )
                 .max_w(px(280.))
                 .text_sm()

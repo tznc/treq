@@ -1,5 +1,5 @@
 // TREQ-257 in the Merge Preview: merging locally or on GitHub, the landing
-// panel and syncing a PR already merged on GitHub. (The demo's only stacked
+// panel, and a PR already merged on GitHub (Archive, not Merge…). (The demo's only stacked
 // child has conflicts, so rollup is covered by the screen tests instead.)
 // The fake gh serves the PRs (#401 open, #388 merged) and the repository's
 // merge settings (squash by default, rebase off). Nothing is merged.
@@ -11,7 +11,7 @@ test.describe.configure({ mode: "serial" });
 
 async function openPreview(page: Page, branch: string): Promise<void> {
   await openWorkspace(page, branch);
-  await page.getByRole("button", { name: "Merge..." }).click();
+  await page.getByRole("button", { name: "Merge…" }).click();
   await expect(page.getByRole("button", { name: "Back" })).toBeVisible();
   await settle(page, 2500);
 }
@@ -45,15 +45,18 @@ test("merge github: locally or on GitHub", async ({ page }) => {
 });
 
 test("merge github: a PR already merged", async ({ page }) => {
-  await openPreview(page, "feat/alerting-logs");
-  await expect(page.getByRole("button", { name: "Sync merged PR" })).toBeVisible();
+  // #1254: once the PR merged on GitHub, the header offers Archive in
+  // place of Merge…, so the work is not merged again.
+  await openWorkspace(page, "feat/alerting-logs");
+  await expect(page.getByRole("button", { name: "Archive", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Merge…" })).toHaveCount(0);
+  await settle(page, 1500);
   await capture(page, {
     name: "19-merge-github-03-merged",
     title: "PR #388 already merged on GitHub",
     expectations: [
-      "A banner says PR #388 was already merged on GitHub, with Sync merged PR",
-      "No On GitHub toggle: the PR is no longer open",
+      "The header's PR button reads Merged; an outline Archive button stands where Merge… was",
+      "No Merge… button: the PR is no longer open",
     ],
   });
-  await page.getByRole("button", { name: "Back" }).click();
 });

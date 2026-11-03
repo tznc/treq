@@ -77,7 +77,7 @@ impl Tab {
       Tab::Account => "Account",
       Tab::Integrations => "Integrations",
       Tab::Skills => "Skills",
-      Tab::Preview => "Feature Preview",
+      Tab::Preview => "Feature preview",
     }
   }
 
@@ -122,7 +122,6 @@ pub struct Route {
 pub struct Settings {
   pub tab: Tab,
   pub tabs: Vec<Tab>,
-  pub save: Option<SaveButton>,
   pub application: Option<Application>,
   pub repository: Option<Repository>,
   pub preview: Option<Preview>,
@@ -234,12 +233,6 @@ pub struct SkillDialog {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SaveButton {
-  pub label: String,
-  pub disabled: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct Application {
   pub theme: String,
   pub theme_options: Vec<SelectOption>,
@@ -272,6 +265,9 @@ pub struct SetupScript {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Repository {
+  /// The repository's folder name, the page's title; its full path under it.
+  pub name: String,
+  pub path: String,
   pub yaml_card: Option<YamlCard>,
   pub current_branch: Option<String>,
   pub loading: bool,
@@ -387,7 +383,7 @@ impl Setup {
       .is_some_and(|s| !s.running && !self.starting && !unsaved && !s.script.trim().is_empty());
     let (status, status_error) = match (&self.error, &self.status) {
       (Some(error), _) => (format!("Could not load the setup script: {error}"), true),
-      (None, _) if unsaved => ("Save settings to run the edited script.".into(), false),
+      (None, _) if unsaved => ("Saving the edited script…".into(), false),
       (None, Some(status)) => (data::setup_status_text(status), false),
       (None, None) => (String::new(), false),
     };
@@ -482,6 +478,26 @@ pub struct SettingsView {
   skills: Option<Skills>,
   account: account::State,
   tips: Tooltips,
+  /// Auto-save: each field's "Saved" tick or save error.
+  marks: std::collections::HashMap<String, FieldMark>,
+  /// Typed fields waiting for a pause, with the edit generation that started
+  /// each wait: a newer edit restarts it.
+  pending: std::collections::HashMap<String, u64>,
+  edits: u64,
+  /// An Application save is running; `app_again` holds fields edited
+  /// meanwhile, which save once it finishes.
+  app_saving: bool,
+  app_again: Vec<String>,
+  /// Fields edited while a Repository save ran.
+  repo_again: Vec<String>,
+}
+
+/// What a field shows next to its label after auto-saving.
+#[derive(Debug, Clone, PartialEq)]
+enum FieldMark {
+  /// Saved at this time; the tick shows for [`data::SAVED_TICK`].
+  Saved(std::time::Instant),
+  Error(String),
 }
 
 impl HasTooltips for SettingsView {
@@ -526,6 +542,12 @@ impl SettingsView {
       skills: None,
       account: account::State::default(),
       tips: Tooltips::new(popups, dark),
+      marks: Default::default(),
+      pending: Default::default(),
+      edits: 0,
+      app_saving: false,
+      app_again: Vec::new(),
+      repo_again: Vec::new(),
     };
     this.load_app(cx);
     this.load_setup(cx);
@@ -561,6 +583,10 @@ impl SettingsView {
     if self.route != route || self.dark != dark {
       let repo_moved = self.route.repo_path != route.repo_path;
       let tab_moved = self.route.tab != route.tab;
+      // Leaving a tab or repository saves what is still waiting to.
+      if repo_moved || tab_moved {
+        self.flush_pending(cx);
+      }
       if repo_moved {
         self.set_repo(route.repo_path.clone(), cx);
         self.skills = None;
@@ -1161,10 +1187,17 @@ impl SettingsView {
     );
   }
 
-  fn save_application(&mut self, cx: &mut Context<Self>) {
+  /// Saves the Application tab for the edited `fields`, which get the
+  /// "Saved" tick or the error.
+  fn save_application(&mut self, fields: Vec<String>, cx: &mut Context<Self>) {
     let Some(app) = self.app.clone() else {
       return;
     };
+    if self.app_saving {
+      self.app_again.extend(fields);
+      return;
+    }
+    self.app_saving = true;
     // Unedited, the script may be the "" of an unloaded status.
     let script = (self.setup.script.is_some() || self.setup.always_run.is_some())
       .then(|| (self.setup.script(), self.setup.always_run()));
@@ -1177,17 +1210,99 @@ impl SettingsView {
             Some((script, always_run)) => host.save_setup_script(script, *always_run),
             None => Ok(()),
           });
-        match &result {
-          Ok(()) => {
-            host.notify(NativeEvent::SettingsChanged);
-            host.notify(toast(ToastTone::Success, "Settings saved", ""));
-          }
-          Err(err) => host.notify(toast(ToastTone::Error, "Error", err)),
+        if result.is_ok() {
+          host.notify(NativeEvent::SettingsChanged);
         }
         (result, host.setup_script())
       },
-      |view, (_, status), cx| view.set_setup_status(status, cx),
+      move |view, (result, status), cx| {
+        view.app_saving = false;
+        view.set_setup_status(status, cx);
+        view.mark(fields, result, cx);
+        let again = std::mem::take(&mut view.app_again);
+        if !again.is_empty() {
+          view.save_application(again, cx);
+        }
+      },
     );
+  }
+
+  /// Shows the "Saved" tick, or the error, next to each of `fields`, and
+  /// hides the tick again after [`data::SAVED_TICK`].
+  fn mark(&mut self, fields: Vec<String>, result: Result<(), String>, cx: &mut Context<Self>) {
+    let now = cx.background_executor().now();
+    for field in fields {
+      let mark = match &result {
+        Ok(()) => FieldMark::Saved(now),
+        Err(err) => FieldMark::Error(format!("Couldn't save: {err}")),
+      };
+      self.marks.insert(field, mark);
+    }
+    if result.is_ok() {
+      cx.spawn(async move |this, cx| {
+        cx.background_executor().timer(data::SAVED_TICK).await;
+        this
+          .update(cx, |view, cx| {
+            let now = cx.background_executor().now();
+            view.marks.retain(|_, mark| match mark {
+              FieldMark::Saved(at) => now.duration_since(*at) < data::SAVED_TICK,
+              FieldMark::Error(_) => true,
+            });
+            cx.notify();
+          })
+          .ignore_closed();
+      })
+      .detach();
+    }
+  }
+
+  /// A field was edited: save it now, or once typing pauses.
+  fn schedule_save(&mut self, field: &str, cx: &mut Context<Self>) {
+    let Some(timing) = data::save_timing(field) else {
+      return;
+    };
+    match timing {
+      data::SaveTiming::Now => self.save_fields(vec![field.to_string()], cx),
+      data::SaveTiming::Debounced => {
+        self.edits += 1;
+        let edit = self.edits;
+        self.pending.insert(field.to_string(), edit);
+        let field = field.to_string();
+        cx.spawn(async move |this, cx| {
+          cx.background_executor().timer(data::SAVE_DEBOUNCE).await;
+          this
+            .update(cx, |view, cx| {
+              // A newer edit restarted the wait, or a flush saved it already.
+              if view.pending.get(&field) == Some(&edit) {
+                view.pending.remove(&field);
+                view.save_fields(vec![field], cx);
+              }
+            })
+            .ignore_closed();
+        })
+        .detach();
+      }
+    }
+  }
+
+  /// Saves the typed fields still waiting for a pause, as leaving does.
+  fn flush_pending(&mut self, cx: &mut Context<Self>) {
+    let fields: Vec<String> = self.pending.drain().map(|(field, _)| field).collect();
+    if !fields.is_empty() {
+      self.save_fields(fields, cx);
+    }
+  }
+
+  /// Saves `fields`, split by the tab that owns them.
+  fn save_fields(&mut self, fields: Vec<String>, cx: &mut Context<Self>) {
+    let (repo, app): (Vec<String>, Vec<String>) =
+      fields.into_iter().partition(|f| f.starts_with("repo."));
+    if !repo.is_empty() {
+      self.save_repository(repo, cx);
+    }
+    if !app.is_empty() {
+      self.save_application(app, cx);
+    }
   }
 
   /// Tune with agent: exports the review history, then asks the window for
@@ -1275,10 +1390,16 @@ impl SettingsView {
       }))
   }
 
-  fn save_repository(&mut self, cx: &mut Context<Self>) {
-    let Some(repo) = self.repo.as_mut().filter(|repo| !repo.saving) else {
+  /// Saves the Repository tab for the edited `fields`, which get the
+  /// "Saved" tick or the error.
+  fn save_repository(&mut self, fields: Vec<String>, cx: &mut Context<Self>) {
+    let Some(repo) = self.repo.as_mut() else {
       return;
     };
+    if repo.saving {
+      self.repo_again.extend(fields);
+      return;
+    }
     repo.saving = true;
     let (path, values) = (repo.path.clone(), repo.fields().to_values());
     self.spawn(
@@ -1287,27 +1408,22 @@ impl SettingsView {
         let path = path.clone();
         move |host| {
           let result = host.set_repo_settings(&path, &values);
-          match &result {
-            Ok(()) => {
-              host.notify(NativeEvent::RepoSettingsChanged { repo_path: path });
-              host.notify(toast(ToastTone::Success, "Settings saved", ""));
-            }
-            Err(err) => host.notify(toast(
-              ToastTone::Error,
-              "Error",
-              format!("Failed to save settings: {err}"),
-            )),
+          if result.is_ok() {
+            host.notify(NativeEvent::RepoSettingsChanged { repo_path: path });
           }
           result
         }
       },
-      move |view, result, _| {
+      move |view, result, cx| {
         let Some(repo) = view.repo.as_mut().filter(|repo| repo.path == path) else {
           return;
         };
         repo.saving = false;
-        if let Err(err) = result {
-          repo.save_error = Some(format!("Failed to save settings: {err}"));
+        repo.save_error = None;
+        view.mark(fields, result, cx);
+        let again = std::mem::take(&mut view.repo_again);
+        if !again.is_empty() {
+          view.save_repository(again, cx);
         }
       },
     );
@@ -1355,11 +1471,11 @@ impl SettingsView {
           }
         }
         _ => match id.as_str() {
-          "settings.save" => match self.route.tab {
-            Tab::Application => self.save_application(cx),
-            Tab::Repository => self.save_repository(cx),
-            _ => {}
-          },
+          "settings.close" => {
+            // Typed edits still waiting for a pause save on the way out.
+            self.flush_pending(cx);
+            (self.react)(ScreenAction::Press { id }, cx);
+          }
           "app.setupScript.run" => self.run_setup(cx),
           "repo.reviewPrompt.tune" => self.tune_review_prompt(cx),
           "repo.promptEdits.dismissAll" => self.dismiss_all_prompt_edits(cx),
@@ -1407,6 +1523,8 @@ impl SettingsView {
         let mut fields = repo.fields();
         fields.set(name, &value);
         repo.draft = Some(fields);
+        self.marks.remove(&field);
+        self.schedule_save(&field, cx);
       }
       return;
     }
@@ -1435,7 +1553,10 @@ impl SettingsView {
     match field.as_str() {
       "app.setupScript" => self.setup.script = Some(text),
       "app.setupScriptAlwaysRun" => self.setup.always_run = value.as_bool(),
-      "settings.tab" => (self.react)(ScreenAction::Field { field, value }, cx),
+      "settings.tab" => {
+        (self.react)(ScreenAction::Field { field, value }, cx);
+        return;
+      }
       _ => {
         let Some(app) = &mut self.app else {
           return;
@@ -1459,6 +1580,24 @@ impl SettingsView {
         }
       }
     }
+    if field.starts_with("app.") {
+      self.marks.remove(&field);
+      self.schedule_save(&field, cx);
+    }
+  }
+
+  /// The tick or error `key`'s field shows.
+  fn mark_of(&self, key: &str) -> Mark {
+    let (saved, error) = match self.marks.get(key) {
+      Some(FieldMark::Saved(_)) => (true, None),
+      Some(FieldMark::Error(err)) => (false, Some(err.clone())),
+      None => (false, None),
+    };
+    Mark {
+      key: key.to_string(),
+      saved,
+      error,
+    }
   }
 
   fn preview_on(&self, feature: PreviewFeature) -> bool {
@@ -1478,22 +1617,6 @@ impl SettingsView {
       tabs.push(Tab::Skills);
     }
     tabs.push(Tab::Preview);
-    let save = match tab {
-      Tab::Application => Some(SaveButton {
-        label: "Save Settings".into(),
-        disabled: false,
-      }),
-      Tab::Repository => self.repo.as_ref().map(|repo| SaveButton {
-        label: if repo.saving {
-          "Saving..."
-        } else {
-          "Save Settings"
-        }
-        .into(),
-        disabled: repo.saving,
-      }),
-      _ => None,
-    };
     let application = (tab == Tab::Application).then(|| {
       let app = self
         .app
@@ -1550,6 +1673,8 @@ impl SettingsView {
           .and_then(|l| l.as_ref().err())
           .map(|err| format!("Failed to load settings: {err}"));
         Repository {
+          name: data::repo_name(&repo.path),
+          path: repo.path.clone(),
           yaml_card: (config_error.is_some() || config.is_some_and(data::sets_any_value))
             .then_some(YamlCard {
               error: config_error,
@@ -1559,9 +1684,9 @@ impl SettingsView {
           loading: repo.loaded.is_none() || repo.config_loading,
           fields: repo.fields(),
           managed: config.map(data::managed_fields).unwrap_or_default(),
-          model_options: model_options("Use Application Default"),
-          agent_options: agent_options("Use Application Default"),
-          review_agent_options: agent_options("Use Default Agent"),
+          model_options: model_options("Use application default"),
+          agent_options: agent_options("Use application default"),
+          review_agent_options: agent_options("Use default agent"),
           trigger_options: options(&[
             ("off", "Off"),
             ("on-commit", "On commit"),
@@ -1735,7 +1860,6 @@ impl SettingsView {
     Settings {
       tab,
       tabs,
-      save,
       application,
       repository,
       preview,
@@ -1808,16 +1932,79 @@ fn field_block(
   help_text: Option<&str>,
   p: &Palette,
 ) -> gpui::Div {
+  saved_field_block(name, control, help_text, Mark::default(), p)
+}
+
+/// What an auto-saving field shows: the "Saved" tick by its label, or why
+/// it didn't save under it.
+#[derive(Debug, Clone, Default)]
+struct Mark {
+  key: String,
+  saved: bool,
+  error: Option<String>,
+}
+
+impl Mark {
+  /// "✓ Saved", muted, next to the label.
+  fn tick(&self, p: &Palette) -> Option<gpui::Div> {
+    self.saved.then(|| {
+      let id = format!("settings-saved-{}", self.key);
+      ui::text(div(), TextSize::Sm)
+        .debug_selector(move || id)
+        .flex()
+        .items_center()
+        .gap_1()
+        .text_color(p.muted_foreground)
+        .child(ui::icon(theme::ICON_CHECK, 12., p.muted_foreground))
+        .child("Saved")
+    })
+  }
+
+  /// The save error, under the control.
+  fn error(&self, p: &Palette) -> Option<gpui::Div> {
+    self.error.clone().map(|text| {
+      let id = format!("settings-error-{}", self.key);
+      ui::text(div().mt_1(), TextSize::Sm)
+        .debug_selector(move || id)
+        .text_color(ui::Tone::Danger.text(p))
+        .child(text)
+    })
+  }
+}
+
+/// A label (with its "Saved" tick) above a control, with a help line and
+/// any save error under it.
+fn saved_field_block(
+  name: &str,
+  control: impl IntoElement,
+  help_text: Option<&str>,
+  mark: Mark,
+  p: &Palette,
+) -> gpui::Div {
   div()
-    .child(label(name.to_string()))
+    .child(
+      div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(label(name.to_string()))
+        .children(mark.tick(p)),
+    )
     .child(div().mt_2().child(control))
+    .children(mark.error(p))
     .when_some(help_text, |this, text| {
       this.child(help(text.to_string(), p, 4.))
     })
 }
 
 /// A label and help text on the left, a switch on the right.
-fn switch_row(name: &str, help_text: &str, switch: impl IntoElement, p: &Palette) -> gpui::Div {
+fn switch_row(
+  name: &str,
+  help_text: &str,
+  switch: impl IntoElement,
+  mark: Mark,
+  p: &Palette,
+) -> gpui::Div {
   div()
     .flex()
     .items_center()
@@ -1825,8 +2012,16 @@ fn switch_row(name: &str, help_text: &str, switch: impl IntoElement, p: &Palette
     .gap_4()
     .child(
       div()
-        .child(label(name.to_string()))
-        .child(help(help_text.to_string(), p, 4.)),
+        .child(
+          div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(label(name.to_string()))
+            .children(mark.tick(p)),
+        )
+        .child(help(help_text.to_string(), p, 4.))
+        .children(mark.error(p)),
     )
     .child(switch)
 }
@@ -1837,40 +2032,24 @@ impl Render for SettingsView {
     let p = theme::palette(self.dark);
     let s = self.screen();
 
+    // Every field saves as it changes, so the header only needs a way back.
     let header = div()
       .flex()
       .items_center()
-      .justify_between()
+      .gap_2()
+      .min_h(zpx(48.))
       .border_b_1()
       .border_color(p.border)
       .px_6()
       .py_2()
       .child(
+        ui::IconButton::new("settings-back", theme::ICON_ARROW_LEFT, "Back", &p)
+          .on_click(self.press("settings.close")),
+      )
+      .child(
         ui::text(div(), TextSize::Lg)
           .font_weight(FontWeight::SEMIBOLD)
           .child("Settings"),
-      )
-      .child(
-        div()
-          .flex()
-          .items_center()
-          .gap_2()
-          .child(
-            Button::new("settings-close", &p)
-              .variant(Variant::Outline)
-              .size(Size::Sm)
-              .label("Close")
-              .on_click(self.press("settings.close")),
-          )
-          .when_some(s.save.clone(), |this, save| {
-            this.child(
-              Button::new("settings-save", &p)
-                .size(Size::Sm)
-                .disabled(save.disabled)
-                .label(save.label)
-                .on_click(self.press("settings.save")),
-            )
-          }),
       );
 
     let tabs = div()
@@ -2084,7 +2263,7 @@ impl SettingsView {
               .flex()
               .items_center()
               .justify_between()
-              .child(label("UI Zoom"))
+              .child(label("UI zoom"))
               .child(
                 ui::text(div(), TextSize::Sm)
                   .text_color(p.muted_foreground)
@@ -2104,11 +2283,18 @@ impl SettingsView {
       )
       .child(
         div()
-          .child(label("Font Size"))
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .child(label("Font size"))
+              .children(self.mark_of("app.fontSize").tick(p)),
+          )
           .child(
             div()
               .mt_2()
-              .child(form::select_field("settings-font-size", "Font Size", &font, false)),
+              .child(form::select_field("settings-font-size", "Font size", &font, false)),
           )
           .child(help(
             "Font size for terminal, code diff display, and overview files",
@@ -2116,23 +2302,26 @@ impl SettingsView {
             8.,
           )),
       )
-      .child(field_block(
-        "Claude Code Model",
-        form::select_field("settings-default-model", "Claude Code Model", &model, false),
+      .child(saved_field_block(
+        "Claude Code model",
+        form::select_field("settings-default-model", "Claude Code model", &model, false),
         Some("Default model for new Claude Code sessions"),
+        self.mark_of("app.defaultModel"),
         p,
       ))
-      .child(field_block(
-        "Default Agent",
-        form::select_field("settings-default-agent", "Default Agent", &agent, false),
+      .child(saved_field_block(
+        "Default agent",
+        form::select_field("settings-default-agent", "Default agent", &agent, false),
         Some("Default agent for new sessions"),
+        self.mark_of("app.defaultAgent"),
         p,
       ))
       .child(checklist::render(&app.checklist, &ctx))
-      .child(field_block(
-        "Conflict Marker Style",
-        form::select_field("settings-conflict-marker-style", "Conflict Marker Style", &conflict, false),
+      .child(saved_field_block(
+        "Conflict marker style",
+        form::select_field("settings-conflict-marker-style", "Conflict marker style", &conflict, false),
         Some("Style of conflict markers written to files during rebase. Git Diff3 is compatible with most editors."),
+        self.mark_of("app.conflictMarkerStyle"),
         p,
       ))
       .child(
@@ -2143,7 +2332,14 @@ impl SettingsView {
           .gap_4()
           .child(
             div()
-              .child(label("Notify when an agent finishes"))
+              .child(
+                div()
+                  .flex()
+                  .items_center()
+                  .gap_2()
+                  .child(label("Notify when an agent finishes"))
+                  .children(self.mark_of("app.notifyAgentFinished").tick(p)),
+              )
               .child(help(
                 "Show an OS notification when an agent finishes or asks for input while no Treq window is focused.",
                 p,
@@ -2161,12 +2357,20 @@ impl SettingsView {
       )
       .child(
         div()
-          .child(label("Application Setup Script"))
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .child(label("Application setup script"))
+              .children(self.mark_of("app.setupScript").tick(p)),
+          )
           .child(
             div()
               .mt_2()
               .child(form::textarea_field(&script, true, setup.loading)),
           )
+          .children(self.mark_of("app.setupScript").error(p))
           .child(help(
             "Shell script run from your home directory when you click Run. Its output is in the Logs tab under App setup.",
             p,
@@ -2237,7 +2441,7 @@ impl SettingsView {
         .size(Size::Sm)
         .disabled(card.loading)
         .label(if card.loading {
-          "Reloading..."
+          "Reloading…"
         } else {
           "Reload"
         })
@@ -2278,7 +2482,7 @@ impl SettingsView {
         .child(
           ui::text(div(), TextSize::Sm)
             .text_color(p.muted_foreground)
-            .child("Current Branch"),
+            .child("Current branch"),
         )
         .child(
           ui::text(div(), TextSize::Sm)
@@ -2303,7 +2507,7 @@ impl SettingsView {
           .py_8()
           .text_center()
           .text_color(p.muted_foreground)
-          .child("Loading settings..."),
+          .child("Loading settings…"),
       )
       .into_any_element()
     } else {
@@ -2362,30 +2566,58 @@ impl SettingsView {
         .flex()
         .flex_col()
         .gap_6()
-        .child(field_block(
-          "Branch Name Pattern",
+        .child(saved_field_block(
+          "Branch name pattern",
           form::input_field("settings-branch-pattern", &pattern, true, managed("branchNamePattern")),
           Some(&branch_preview(&f.branch_name_pattern)),
+          self.mark_of("repo.branchNamePattern"),
           p,
         ))
-        .child(field_block(
-          "Included Files/Directories",
+        .child(saved_field_block(
+          "Included files and directories",
           form::textarea_field(&included, true, managed("includedFiles")),
           Some("Paths to copy into each new workspace (e.g. .env). For heavy dirs like node_modules, use Symlink from home repo under Advanced when creating a workspace."),
+          self.mark_of("repo.includedFiles"),
           p,
         ))
-        .child(field_block(
-          "Claude Code Model",
-          form::select_field("settings-repo-default-model", "Claude Code Model", &model, managed("defaultModel")),
-          Some("Default model for new Claude Code sessions in this repository (overrides application default)"),
-          p,
-        ))
-        .child(field_block(
-          "Default Agent",
-          form::select_field("settings-repo-default-agent", "Default Agent", &agent, managed("defaultAgent")),
-          Some("Default agent for new sessions in this repository (overrides application default)"),
-          p,
-        ))
+        .child(
+          // The repository's own choices over the Application tab's.
+          div()
+            .debug_selector(|| "settings-repo-overrides".into())
+            .flex()
+            .flex_col()
+            .gap_4()
+            .border_t_1()
+            .border_color(p.border)
+            .pt_6()
+            .child(
+              div()
+                .child(
+                  ui::text(div(), TextSize::Sm)
+                    .font_weight(FontWeight::MEDIUM)
+                    .child("Overrides for this repository"),
+                )
+                .child(help(
+                  "Leave on 'Use application default' to follow Application settings.",
+                  p,
+                  4.,
+                )),
+            )
+            .child(saved_field_block(
+              "Claude Code model",
+              form::select_field("settings-repo-default-model", "Claude Code model", &model, managed("defaultModel")),
+              Some("Default model for new Claude Code sessions in this repository"),
+              self.mark_of("repo.defaultModel"),
+              p,
+            ))
+            .child(saved_field_block(
+              "Default agent",
+              form::select_field("settings-repo-default-agent", "Default agent", &agent, managed("defaultAgent")),
+              Some("Default agent for new sessions in this repository"),
+              self.mark_of("repo.defaultAgent"),
+              p,
+            )),
+        )
         .child(switch_row(
           "Auto-push to remote",
           "Automatically push to the remote after every commit in this repository",
@@ -2397,6 +2629,7 @@ impl SettingsView {
             p,
             self.field("repo.autoPush"),
           ),
+          self.mark_of("repo.autoPush"),
           p,
         ))
         .child(
@@ -2412,7 +2645,7 @@ impl SettingsView {
                 .child(
                   ui::text(div(), TextSize::Sm)
                     .font_weight(FontWeight::MEDIUM)
-                    .child("Code Review"),
+                    .child("Code review"),
                 )
                 .child(help(
                   "Settings for the AI review agent. Its comments stay local to this machine and are never pushed to GitHub.",
@@ -2420,10 +2653,11 @@ impl SettingsView {
                   4.,
                 )),
             )
-            .child(field_block(
-              "Custom Review Prompt",
+            .child(saved_field_block(
+              "Custom review prompt",
               form::textarea_field(&review_prompt, true, managed("reviewPrompt")),
               Some("Overrides the built-in prompt. {target_type}, {target_id} and {diff_summary} are substituted before the prompt is sent."),
+              self.mark_of("repo.reviewPrompt"),
               p,
             ))
             .child(
@@ -2447,16 +2681,18 @@ impl SettingsView {
             .when(!edits.is_empty(), |this| {
               this.child(self.prompt_edits(&edits, &edits_busy, p))
             })
-            .child(field_block(
-              "Review Agent",
-              form::select_field("settings-review-agent", "Review Agent", &review_agent, managed("reviewAgent")),
+            .child(saved_field_block(
+              "Review agent",
+              form::select_field("settings-review-agent", "Review agent", &review_agent, managed("reviewAgent")),
               Some("Agent launched by Start Review (overrides the default agent)"),
+              self.mark_of("repo.reviewAgent"),
               p,
             ))
-            .child(field_block(
-              "Automatic Review",
-              form::select_field("settings-auto-review-trigger", "Automatic Review", &trigger, managed("autoReviewTrigger")),
+            .child(saved_field_block(
+              "Automatic review",
+              form::select_field("settings-auto-review-trigger", "Automatic review", &trigger, managed("autoReviewTrigger")),
               Some("Opens a review terminal on its own after the chosen operation finishes in a workspace of this repository."),
+              self.mark_of("repo.autoReviewTrigger"),
               p,
             )),
         )
@@ -2470,10 +2706,26 @@ impl SettingsView {
         .into_any_element()
     };
 
+    // Which repository these settings belong to.
+    let title = div()
+      .debug_selector(|| "settings-repo-name".into())
+      .child(
+        ui::text(div(), TextSize::Xl)
+          .font_weight(FontWeight::SEMIBOLD)
+          .child(repo.name.clone()),
+      )
+      .child(
+        ui::text(div().mt_1(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .truncate()
+          .child(repo.path.clone()),
+      );
+
     div()
       .flex()
       .flex_col()
       .gap_6()
+      .child(title)
       .children(yaml_card)
       .children(branch)
       .child(body)
@@ -2489,7 +2741,7 @@ impl SettingsView {
           .child(
             ui::text(div(), TextSize::Sm)
               .font_weight(FontWeight::SEMIBOLD)
-              .child("Feature Preview"),
+              .child("Feature preview"),
           )
           .child(help(
             "Turn on experimental features. Off hides them in the UI and blocks the matching backend commands. Dev builds start with every preview flag on. Release builds use the shipped default until you change a switch.",

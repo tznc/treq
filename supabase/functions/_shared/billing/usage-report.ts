@@ -26,6 +26,11 @@ import { must, rpc } from "../remote/db.ts";
 
 export const DEFAULT_USAGE_METER_EVENT = "treq_sandbox_usage";
 export const MAX_USAGE_REPORT_ATTEMPTS = 10;
+/**
+ * Stripe dedupes meter events by identifier for about 24 hours. A row tried
+ * before may already be in Stripe, so past this age it is not resent.
+ */
+export const RESEND_WINDOW_MS = 23 * 60 * 60_000;
 /** A row still unsent this long after its hour ended misses the invoice it belongs to. */
 const LATE_AFTER_MS = 60 * 60_000;
 
@@ -36,6 +41,8 @@ export interface PendingUsageReport {
   hour: string;
   billed_nanousd: number;
   stripe_customer_id: string | null;
+  /** When the row was built; its first send follows within minutes. */
+  created_at: string;
   /** Failed send attempts so far. */
   attempts: number;
 }
@@ -106,6 +113,22 @@ export async function reportUsage(deps: UsageReportDeps): Promise<UsageReportRes
       await deps.store.markSent(row.identifier, "zero");
       continue;
     }
+    if (row.attempts > 0 && nowMs - Date.parse(row.created_at) > RESEND_WINDOW_MS) {
+      result.dead++;
+      await deps.store.markTerminal(
+        row.identifier,
+        "dead",
+        "past Stripe's identifier dedupe window after a failed send; reconcile by hand",
+      );
+      deps.log({
+        level: "error",
+        alert: true,
+        msg: "usage report past dedupe window",
+        identifier: row.identifier,
+        attempts: row.attempts,
+      });
+      continue;
+    }
     if (!row.stripe_customer_id) {
       result.skipped++;
       await deps.store.markTerminal(row.identifier, "no_customer", "owner has no Stripe customer");
@@ -166,22 +189,36 @@ function retryable(err: unknown): boolean {
 }
 
 /** UsageReportStore over the service-role Supabase client. */
-export function supabaseUsageReportStore(supabase: SupabaseClient): UsageReportStore {
+/**
+ * With `ownerUserId`, the store covers one owner: it builds that owner's
+ * final usage up to `until`, current partial hour included
+ * (build_final_usage_reports), and lists only their rows. delete-account uses
+ * it before the user's rows cascade away.
+ */
+export function supabaseUsageReportStore(
+  supabase: SupabaseClient,
+  opts: { ownerUserId?: string } = {},
+): UsageReportStore {
   return {
     async buildReports(until) {
-      const data = await rpc(supabase, "build_usage_reports", {
-        p_until: until.toISOString(),
-      });
+      const data = opts.ownerUserId
+        ? await rpc(supabase, "build_final_usage_reports", {
+          p_user_id: opts.ownerUserId,
+          p_until: until.toISOString(),
+        })
+        : await rpc(supabase, "build_usage_reports", {
+          p_until: until.toISOString(),
+        });
       return Number(data ?? 0);
     },
     async pendingReports() {
-      const rows = must(await supabase
+      let query = supabase
         .from("usage_reports")
-        .select("identifier, owner_user_id, hour, billed_nanousd, attempts")
+        .select("identifier, owner_user_id, billing_org_id, hour, billed_nanousd, attempts, created_at")
         .is("sent_at", null)
-        .or("stripe_status.is.null,stripe_status.eq.error")
-        .order("created_at")
-        .limit(1000), "list usage reports");
+        .or("stripe_status.is.null,stripe_status.eq.error");
+      if (opts.ownerUserId) query = query.eq("owner_user_id", opts.ownerUserId);
+      const rows = must(await query.order("created_at").limit(1000), "list usage reports");
       if (!rows?.length) return [];
       const owners = [...new Set(rows.map((r) => r.owner_user_id as string))];
       const customers = must(await supabase
@@ -192,13 +229,28 @@ export function supabaseUsageReportStore(supabase: SupabaseClient): UsageReportS
       const byOwner = new Map(
         (customers ?? []).map((c) => [c.owner_id as string, c.stripe_customer_id as string]),
       );
+      // Usage on a Team profile bills the organization's customer.
+      const orgs = [...new Set(rows.map((r) => r.billing_org_id as string | null).filter((o): o is string => !!o))];
+      const orgCustomers = orgs.length
+        ? must(await supabase
+          .from("billing_customers")
+          .select("owner_id, stripe_customer_id")
+          .eq("owner_type", "organization")
+          .in("owner_id", orgs), "read organization billing customers")
+        : [];
+      const byOrg = new Map(
+        (orgCustomers ?? []).map((c) => [c.owner_id as string, c.stripe_customer_id as string]),
+      );
       return rows.map((r) => ({
         identifier: r.identifier as string,
         owner_user_id: r.owner_user_id as string,
         hour: r.hour as string,
         billed_nanousd: Number(r.billed_nanousd),
-        stripe_customer_id: byOwner.get(r.owner_user_id as string) ?? null,
+        stripe_customer_id: r.billing_org_id
+          ? byOrg.get(r.billing_org_id as string) ?? null
+          : byOwner.get(r.owner_user_id as string) ?? null,
         attempts: Number(r.attempts ?? 0),
+        created_at: r.created_at as string,
       }));
     },
     async markSent(identifier, stripeStatus) {

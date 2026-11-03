@@ -435,7 +435,7 @@ impl WorkspaceDialog {
 
   pub(super) fn submit_label(&self) -> String {
     if self.loading {
-      return "Creating...".into();
+      return "Creating…".into();
     }
     if self.route.defaults.apply_stash_id.is_some() {
       return "Create & apply stash".into();
@@ -448,7 +448,7 @@ impl WorkspaceDialog {
       return if count > 0 {
         format!("Move {count} to Existing Workspace")
       } else {
-        "Move to Existing Workspace".into()
+        "Move to existing workspace".into()
       };
     }
     let has_selection = !self.selected_commits.is_empty() || !self.selected_hunks.is_empty();
@@ -459,7 +459,7 @@ impl WorkspaceDialog {
     if self.is_home() && !self.selected_hunks.is_empty() {
       return format!("Create with {} file(s)", self.selected_files().len());
     }
-    "Create Workspace".into()
+    "Create workspace".into()
   }
 
   fn other_workspaces(&self) -> Vec<&Workspace> {
@@ -681,7 +681,7 @@ impl WorkspaceDialog {
   }
 
   fn open_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search branches..."));
+    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search branches…"));
     input.update(cx, |input, cx| input.focus(window, cx));
     let subscription = cx.subscribe(&input, |view, input, event: &InputEvent, cx| match event {
       InputEvent::Change => {
@@ -1324,7 +1324,7 @@ impl WorkspaceDialog {
           .font_family(theme::MONO_FONT)
           .min_w_0()
           .truncate()
-          .child(target.clone().unwrap_or_else(|| "Select...".into())),
+          .child(target.clone().unwrap_or_else(|| "Select…".into())),
       )
       .child(ui::icon(
         theme::ICON_CHEVRON_DOWN,
@@ -1504,7 +1504,7 @@ impl WorkspaceDialog {
                 .w_full()
                 .child(
                   ui::text(
-                    Styled::h(Input::new(branch).aria_label("Branch Name"), zpx(32.)),
+                    Styled::h(Input::new(branch).aria_label("Branch name"), zpx(32.)),
                     TextSize::Sm,
                   )
                   .font_family(theme::MONO_FONT)
@@ -1622,7 +1622,7 @@ impl WorkspaceDialog {
           ui::text(div(), TextSize::Sm)
             .ml_2()
             .text_color(p.muted_foreground)
-            .child("Loading..."),
+            .child("Loading…"),
         )
         .into_any_element();
     }
@@ -1958,7 +1958,7 @@ impl WorkspaceDialog {
           12.,
           p.muted_foreground,
         ))
-        .child("Loading hunks..."),
+        .child("Loading hunks…"),
       Some(data) if !data.hunks.is_empty() => {
         div().children(data.hunks.iter().enumerate().map(|(i, hunk)| {
           let key = hunk_key(path, &hunk.id);

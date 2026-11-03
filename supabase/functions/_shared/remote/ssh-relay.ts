@@ -60,6 +60,8 @@ export interface RelayTarget {
   providerKind: ProviderKind;
   /** The active placement, whose gateway secret signs the gateway token. */
   placementId: string | null;
+  /** The instance status when authorized; `suspended` means wake first. */
+  instanceStatus: string;
   host: string;
   port: number;
 }
@@ -103,6 +105,8 @@ export interface RelayStore {
   ): Promise<RelayClientKeyRow | null>;
   /** has_pro for the owner. */
   hasPro(ownerUserId: string): Promise<boolean>;
+  /** True when the owner reached their spend cap (get_spend_status_for). */
+  spendCapped(ownerUserId: string): Promise<boolean>;
 }
 
 export interface RelayAuthDeps {
@@ -176,6 +180,14 @@ export async function authorizeRelayRequest(
       PRO_REQUIRED_CODE,
     );
   }
+  // The same wake would restart a workspace the spend cap stopped.
+  if (await deps.store.spendCapped(ownerUserId)) {
+    throw new RelayError(
+      "You reached your monthly cloud spend cap. Raise the cap to keep working.",
+      402,
+      "spend_cap_reached",
+    );
+  }
 
   // sshd checks the certificate, but a revoked key should lose the relay
   // too, so a stolen certificate cannot outlive the revocation by reaching
@@ -191,9 +203,22 @@ export async function authorizeRelayRequest(
     providerResourceId: instance.provider_resource_id,
     providerKind: instance.provider_kind as ProviderKind,
     placementId: instance.active_placement_id ?? null,
+    instanceStatus: instance.status,
     host: endpoint.hostname,
     port: endpoint.port,
   };
+}
+
+/**
+ * Wakes a suspended machine through `wake` (wakeRecorded: waking -> ready, so
+ * billing opens) before the relay connects. Each adapter's gatewayEndpoint
+ * also resumes a suspended machine, but without recording it.
+ */
+export async function wakeBeforeConnect(
+  target: Pick<RelayTarget, "instanceStatus" | "providerResourceId">,
+  wake: (providerResourceId: string) => Promise<void>,
+): Promise<void> {
+  if (target.instanceStatus === "suspended") await wake(target.providerResourceId);
 }
 
 /// Public relay URL for an endpoint. `REMOTE_SSH_RELAY_URL` overrides the

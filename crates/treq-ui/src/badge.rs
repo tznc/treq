@@ -2,6 +2,7 @@
 //! neutral, and a problem shows once, as a dot.
 
 use gpui::{div, prelude::*, App, Hsla, SharedString, Window};
+use gpui_kit::base::TestSupportExt as _;
 
 use crate::{text, theme::Palette, zpx, TextSize};
 
@@ -86,7 +87,7 @@ impl Badge {
 }
 
 impl RenderOnce for Badge {
-  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+  fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = &self.palette;
     let (fg, bg) = match self.tone {
       Tone::Neutral => (p.foreground, p.muted),
@@ -95,7 +96,7 @@ impl RenderOnce for Badge {
         (color, color.opacity(if p.dark { 0.2 } else { 0.12 }))
       }
     };
-    pill().px(zpx(6.)).bg(bg).text_color(fg).child(self.label)
+    pill(cx).px(zpx(6.)).bg(bg).text_color(fg).child(self.label)
   }
 }
 
@@ -126,9 +127,9 @@ impl Count {
 }
 
 impl RenderOnce for Count {
-  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+  fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = &self.palette;
-    pill()
+    pill(cx)
       .min_w(zpx(20.))
       .px(zpx(6.))
       .justify_center()
@@ -139,35 +140,87 @@ impl RenderOnce for Count {
   }
 }
 
-/// A 6px status dot, one per object, after its name. Give its holder a
-/// tooltip saying what it means.
+/// A 6px status dot, one per object, after its name. `label` names the
+/// state ("Conflict", "Uncommitted changes"): hovering the dot shows it as
+/// a tooltip, and screen readers read it, since a color alone says nothing.
 #[derive(IntoElement)]
 pub struct Dot {
   tone: Tone,
+  label: SharedString,
   palette: Palette,
+  word: bool,
 }
 
 impl Dot {
-  pub fn new(tone: Tone, palette: &Palette) -> Self {
+  pub fn new(tone: Tone, label: impl Into<SharedString>, palette: &Palette) -> Self {
     Self {
       tone,
+      label: label.into(),
       palette: *palette,
+      word: false,
     }
+  }
+
+  /// Shows the label as a word after the dot, where nothing can hover
+  /// (a phone).
+  pub fn with_word(mut self) -> Self {
+    self.word = true;
+    self
   }
 }
 
 impl RenderOnce for Dot {
-  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-    div()
+  fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    let label = self.label.clone();
+    let word = self.word.then(|| {
+      caption(div(), cx)
+        .text_color(self.tone.text(&self.palette))
+        .whitespace_nowrap()
+        .child(self.label.clone())
+    });
+    let dot = div()
+      .id(gpui::ElementId::Name(format!("dot-{}", self.label).into()))
+      .role(gpui::Role::Image)
+      .aria_label(self.label)
       .flex_none()
       .size(zpx(6.))
       .rounded_full()
       .bg(self.tone.color(&self.palette))
+      .tooltip(move |window, cx| {
+        gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
+      })
+      .test_support();
+    match word {
+      Some(word) => div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(zpx(4.))
+        .child(dot)
+        .child(word)
+        .into_any_element(),
+      None => dot.into_any_element(),
+    }
   }
 }
 
-fn pill() -> gpui::Div {
-  text(div(), TextSize::Xs)
+/// `el` at caption size for the app's density.
+pub(crate) fn caption<E: Styled>(el: E, cx: &App) -> E {
+  match cx
+    .try_global::<crate::theme::Density>()
+    .copied()
+    .unwrap_or_default()
+  {
+    crate::theme::Density::Desktop => text(el, TextSize::Xs),
+    density => {
+      let size = density.caption();
+      el.text_size(zpx(size)).line_height(zpx(size + 5.))
+    }
+  }
+}
+
+fn pill(cx: &App) -> gpui::Div {
+  caption(div(), cx)
     .flex()
     .flex_none()
     .items_center()
@@ -194,6 +247,17 @@ mod tests {
       Tone::Danger.text(&theme::palette(false)),
       theme::tw::color(theme::tw::RED_700)
     );
+  }
+
+  #[test]
+  fn test_dot_builder() {
+    let p = theme::palette(false);
+    let dot = Dot::new(Tone::Danger, "Conflict", &p);
+    assert_eq!(dot.tone, Tone::Danger);
+    assert_eq!(dot.label.as_ref(), "Conflict");
+    assert!(!dot.word);
+    // A dot on a phone shows its label as a word beside it.
+    assert!(Dot::new(Tone::Danger, "Conflicts", &p).with_word().word);
   }
 
   #[test]

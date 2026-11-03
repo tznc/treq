@@ -19,10 +19,11 @@ use gpui_kit::{
     tag::Tag,
     v_flex, ActiveTheme, Sizable,
   },
-  div, App, AppContext, Context, Div, Entity, EventEmitter, InteractiveElement, IntoElement,
-  ParentElement, Render, Result, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement,
-  Styled, WeakEntity, Window,
+  div, App, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
+  ParentElement, Render, Result, ScrollHandle, StatefulInteractiveElement, Styled, WeakEntity,
+  Window,
 };
+use treq_ui::{Row, RowDensity};
 
 use super::{mutation_message, workspace::Target};
 use crate::mobile::{
@@ -393,14 +394,15 @@ pub fn prefetch(target: &Target) {
 impl Render for CommitsScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let body = match &self.log {
-      Load::Idle | Load::Loading => {
-        widgets::card(cx).child(widgets::centered_message("Loading commits…", cx))
-      }
-      Load::Failed(error) => widgets::card(cx)
-        .p_4()
-        .child(widgets::error_text(error.clone(), cx)),
+      Load::Idle | Load::Loading => widgets::card(cx).child(widgets::skeleton("commits", 6, cx)),
+      Load::Failed(error) => widgets::card(cx).child(widgets::failed(
+        "commits-failed",
+        error,
+        cx.listener(|this, _, _, cx| this.reload(cx)),
+        cx,
+      )),
       Load::Ready(log) if log.commits.is_empty() => {
-        widgets::card(cx).child(widgets::centered_message("No commits.", cx))
+        widgets::card(cx).child(widgets::empty("commits-empty", "No commits.", cx))
       }
       Load::Ready(log) => {
         let shown = visible(&log.commits, &self.removing);
@@ -408,13 +410,11 @@ impl Render for CommitsScreen {
           .map(|ix| {
             let actions = actions(&shown, ix, &self.removing);
             let commit = shown[ix].clone();
-            commit_row(&commit, cx)
-              .id(SharedString::from(format!("commit-{}", commit.commit_id)))
-              .when(!actions.is_empty(), |row| {
-                row.active(|s| s.bg(cx.theme().accent)).on_click(
-                  cx.listener(move |this, _, _, cx| this.menu(commit.clone(), actions.clone(), cx)),
-                )
-              })
+            commit_row(&commit, !actions.is_empty(), cx).when(!actions.is_empty(), |row| {
+              row.on_click(
+                cx.listener(move |this, _, _, cx| this.menu(commit.clone(), actions.clone(), cx)),
+              )
+            })
           })
           .collect();
         widgets::card(cx).children(rows)
@@ -457,16 +457,11 @@ impl Render for CommitsScreen {
   }
 }
 
-fn commit_row(commit: &JjLogCommit, cx: &App) -> Stateful<Div> {
+fn commit_row(commit: &JjLogCommit, interactive: bool, cx: &App) -> Row {
   let description = commit.description.lines().next().unwrap_or("").to_string();
-  v_flex()
-    .id("commit")
-    .px_4()
-    .py_3()
+  let lines = v_flex()
+    .py_1()
     .gap_1()
-    .border_b_1()
-    .border_color(cx.theme().border)
-    .when(commit.on_target_only, |c| c.opacity(0.6))
     .child(
       h_flex()
         .gap_2()
@@ -494,7 +489,21 @@ fn commit_row(commit: &JjLogCommit, cx: &App) -> Stateful<Div> {
         commit.author_name, commit.timestamp, commit.insertions, commit.deletions
       ),
       cx,
-    ))
+    ));
+  Row::new(
+    format!("commit-{}", commit.commit_id),
+    &treq_ui::theme::current(cx),
+  )
+  .density(RowDensity::Touch)
+  .divider(true)
+  .interactive(interactive)
+  .label(format!(
+    "{} {}",
+    commit.short_id,
+    commit.description.lines().next().unwrap_or("")
+  ))
+  .when(commit.on_target_only, |c| c.opacity(0.6))
+  .child(lines)
 }
 
 /// Editing a commit's description.
@@ -560,6 +569,47 @@ impl Render for DescribeSheet {
 
 #[cfg(test)]
 mod tests {
+  fn screen(log: super::Load<super::JjLogResult>) -> super::CommitsScreen {
+    super::CommitsScreen {
+      target: super::Target {
+        repo: "/r".into(),
+        id: "1".into(),
+        name: "a".into(),
+      },
+      log,
+      scroll: Default::default(),
+      removing: Default::default(),
+      notice: None,
+      keys: Default::default(),
+    }
+  }
+
+  /// A first load shows skeleton rows, not a line of text.
+  #[gpui_kit::test]
+  fn a_first_load_shows_skeleton_rows(cx: &mut gpui_kit::TestAppContext) {
+    use gpui_testing_library::prelude::*;
+    let window =
+      crate::mobile::ui::widgets::mount_for_test(cx, |_, _| screen(super::Load::Loading));
+    let screen = gpui_testing_library::Screen::new(cx, window);
+    // Hidden for its first moments (`treq_ui::delayed`), so include hidden.
+    screen.get_by_role(
+      by::role(gpui_kit::Role::ProgressIndicator)
+        .name("Loading")
+        .hidden(true),
+    );
+  }
+
+  /// A failed read says what went wrong and offers Retry.
+  #[gpui_kit::test]
+  fn a_failed_log_offers_retry(cx: &mut gpui_kit::TestAppContext) {
+    use gpui_testing_library::prelude::*;
+    let window = crate::mobile::ui::widgets::mount_for_test(cx, |_, _| {
+      screen(super::Load::Failed("unknown: fake: no jj_log".into()))
+    });
+    let screen = gpui_testing_library::Screen::new(cx, window);
+    expect(screen.get_by_role(by::role(gpui_kit::Role::Button).name("Retry"))).to_be_visible();
+  }
+
   use std::collections::HashSet;
 
   use crate::jj::JjLogCommit;

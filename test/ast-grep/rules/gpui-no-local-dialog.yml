@@ -8,6 +8,7 @@ message: >
   dialog, so every dialog shares one look and one behavior.
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"
+  - "src-tauri/src/mobile/**/*.rs"
 ignores:
   - "src-tauri/src/gpui_shell/**/tests.rs"
   - "src-tauri/src/gpui_shell/**/tests/**"

@@ -2,13 +2,15 @@
 // conflicts dialog, an unfolded commit's diff, a commit's context menu and
 // a commit large enough to defer its diff behind "Load diff".
 //
-// Commit rows are not observable elements: steps click their place in the
-// 1400x900 window (the list starts under the conflict card).
+// Commit rows are buttons named by their headline.
 import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { openTab, openWorkspace, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
+
+/** A point on a commit row's headline: an unfolded row also holds its diff. */
+const TITLE = { x: 80, y: 12 };
 
 test("commits: conflicted stack, resolve dialog, unfolded diff", async ({ page }) => {
   await openWorkspace(page, "feat/empty-event-message");
@@ -19,8 +21,8 @@ test("commits: conflicted stack, resolve dialog, unfolded diff", async ({ page }
     title: "Commits tab: conflicted commit in a stack",
     expectations: [
       "Red '1 conflicted commit' card with Resolve conflicts…",
-      "Top commit carries a red Conflict badge; base commits marked Immutable",
-      "'Recent on feat/event-ingest' divider separates the base's commits",
+      "Top commit carries a red Conflict badge; base commits carry no per-row Immutable pill",
+      "'On feat/event-ingest (read-only)' divider groups the base's commits",
     ],
   });
 
@@ -52,11 +54,9 @@ test("commits: conflicted stack, resolve dialog, unfolded diff", async ({ page }
   // Unfold the conflicted commit: its chevron, left of the first title. A
   // commit's fold state outlives the tab; "Edit description" shows unfolded.
   const editDescription = page.getByRole("button", { name: "Edit description" });
-  // The first row sits a fixed distance under the banner's Resolve button.
-  const resolve = await page.getByRole("button", { name: "Resolve conflicts…" }).boundingBox();
-  if (!resolve) throw new Error("no Resolve conflicts… button");
-  const firstRow = resolve.y + resolve.height + 73;
-  if ((await editDescription.count()) === 0) await page.mouse.click(329, firstRow);
+  // A commit row is a button named by its headline; a click folds it.
+  const conflicted = page.getByRole("button", { name: "feat: wire event feed on the home page", exact: true });
+  if ((await editDescription.count()) === 0) await conflicted.click({ position: TITLE });
   await expect(editDescription).toBeVisible();
   await settle(page, 2000);
   await capture(page, {
@@ -87,11 +87,11 @@ test("commits: conflicted stack, resolve dialog, unfolded diff", async ({ page }
     expectations: ["Hovering the pencil beside the timestamp shows an 'Edit timestamp' tooltip"],
   });
   await page.mouse.move(700, 700);
-  await page.mouse.click(329, firstRow);
+  await conflicted.click({ position: TITLE });
   await expect(editDescription).toHaveCount(0);
   await settle(page, 800);
 
-  await page.mouse.click(600, firstRow, { button: "right" });
+  await conflicted.click({ position: TITLE, button: "right" });
   await settle(page, 1000);
   await capture(page, {
     name: "04-commits-context-menu",
@@ -126,13 +126,16 @@ test("commits: large commit defers its diff", async ({ page }) => {
   // #388 is merged: its button reads Merged, Create PR doesn't show.
   await expect(page.getByRole("button", { name: "View PR" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create PR" })).toHaveCount(0);
+  // The work landed: the header offers Archive, not Merge….
+  await expect(page.getByRole("button", { name: "Archive", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Merge…" })).toHaveCount(0);
   await capture(page, {
     name: "04-commits-plain-workspace",
     title: "Commits tab of a workspace without conflicts",
     expectations: [
       "Working copy row (uncommitted, amber) above two commits; newest +642",
       "No conflict card",
-      "Header's PR button reads 'Merged' in purple with the merge icon; no 'Create PR'",
+      "Header's PR button reads 'Merged' in purple with the merge icon, no 'Create PR', and an outline Archive button stands where Merge… was",
     ],
   });
   // The working copy row, at the top of the list. Its fold state outlives

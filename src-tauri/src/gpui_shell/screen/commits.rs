@@ -720,7 +720,7 @@ impl CommitsView {
                 Self::changed(host.as_ref(), &parent);
                 toast_event(ToastTone::Success, &format!("Restored commit {short}"), "")
               }
-              Err(err) => toast_event(ToastTone::Error, "Undo Failed", err),
+              Err(err) => toast_event(ToastTone::Error, "Undo failed", err),
             };
             tell(host.as_ref(), event);
           });
@@ -900,7 +900,7 @@ impl CommitsView {
                 Self::changed(host.as_ref(), &parent);
                 toast_event(ToastTone::Success, "Changes restored", "")
               }
-              Err(err) => toast_event(ToastTone::Error, "Undo Failed", err),
+              Err(err) => toast_event(ToastTone::Error, "Undo failed", err),
             };
             tell(host.as_ref(), event);
           });
@@ -1073,7 +1073,7 @@ impl CommitsView {
     let mode = if plan { "plan" } else { "acceptEdits" };
     self.run(
       move |host, parent| {
-        let name = "Code Comment";
+        let name = "Code comment";
         let id = host.create_session(&parent.repo_path, parent.workspace_id(), name)?;
         let repo = if parent.repo_path.is_empty() {
           parent.working_directory()
@@ -1440,7 +1440,7 @@ impl CommitsView {
   fn ensure_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     if self.comment.as_ref().is_some_and(|c| c.input.is_none()) {
       let input = self.textarea(
-        "Add a comment...",
+        "Add a comment…",
         3,
         "",
         |view, text| {
@@ -1464,7 +1464,7 @@ impl CommitsView {
       }) => {
         let text = text.clone();
         let state = self.textarea(
-          "Describe this commit...",
+          "Describe this commit…",
           7,
           &text,
           |view, value| {
@@ -1587,7 +1587,7 @@ impl Render for CommitsView {
           .child(
             div()
               .text_color(p.muted_foreground)
-              .child("Loading commits..."),
+              .child("Loading commits…"),
           ),
       ));
     }
@@ -1734,16 +1734,17 @@ impl CommitsView {
     // An unfolded own commit edits its description and timestamp in place.
     let own = expanded && matches!(kind, Kind::Own { .. });
     let short = &commit.change_id;
-    let edit_description = own.then(|| {
-      self.edit_icon(
-        format!("edit-description-{short}"),
-        "Edit description",
-        commit,
-        Self::edit_description,
-        p,
-        cx,
-      )
-    });
+    let edit_description =
+      (own && (self.parent.workspace.is_some() || !commit.is_immutable)).then(|| {
+        self.edit_icon(
+          format!("edit-description-{short}"),
+          "Edit description",
+          commit,
+          Self::edit_description,
+          p,
+          cx,
+        )
+      });
     let edit_timestamp =
       (own && self.parent.workspace.is_some() && !commit.is_immutable).then(|| {
         self.edit_icon(
@@ -1822,9 +1823,6 @@ impl CommitsView {
                   })
                   .child(ui::Badge::new("Conflict", p).tone(ui::Tone::Danger)),
               )
-            })
-            .when(commit.is_immutable, |this| {
-              this.child(ui::Badge::new("Immutable", p))
             })
             .child(time)
             .children(edit_timestamp)
@@ -1946,11 +1944,11 @@ impl CommitsView {
           .shadow_md()
           .occlude()
           .child(
-            ui::MenuItem::new("move-commit-new", "Move to New Workspace", p)
+            ui::MenuItem::new("move-commit-new", "Move to new workspace", p)
               .on_click(cx.listener(move |view, _, _, cx| view.move_commit(&to_new, false, cx))),
           )
           .child(
-            ui::MenuItem::new("move-commit-existing", "Move to Existing Workspace", p).on_click(
+            ui::MenuItem::new("move-commit-existing", "Move to existing workspace", p).on_click(
               cx.listener(move |view, _, _, cx| view.move_commit(&to_existing, true, cx)),
             ),
           )
@@ -2049,7 +2047,7 @@ impl CommitsView {
             16.,
             p.muted_foreground,
           ))
-          .child("Loading diff..."),
+          .child("Loading diff…"),
       )
       .into_any_element(),
       Some(DiffState {
@@ -2120,17 +2118,21 @@ impl CommitsView {
       ),
       NativeMenuItem::Separator,
     ];
-    if own {
+    // Immutable means on the workspace's target branch, or for the home repo
+    // pushed to origin: offer nothing that rewrites it. A workspace's commits
+    // pushed to its own branch stay mutable, so they stay editable.
+    let rewritable = own && !commit.is_immutable;
+    if rewritable {
       items.push(run("Edit description", Self::edit_description).icon(MenuIcon::Pencil));
     }
-    if matches!(kind, Kind::Own { first: true }) && workspace && !removing {
+    if matches!(kind, Kind::Own { first: true }) && rewritable && workspace && !removing {
       items.push(run("Undo commit", Self::undo));
     }
     items.push(run("Revert commit", Self::revert));
-    if own && workspace && !commit.is_immutable {
+    if rewritable && workspace {
       items.push(run("Edit timestamp", Self::edit_timestamp));
     }
-    if own && !removing {
+    if rewritable && !removing {
       items.push(run("Stash commit", Self::stash).icon(MenuIcon::Archive));
       items.push(NativeMenuItem::Separator);
       items.push(
@@ -2247,7 +2249,7 @@ impl CommitsView {
                   .hover(move |s| s.bg(p.hover()).text_color(fg))
                   .on_click(cx.listener(move |view, _, _, cx| view.load_file_diff(&id, &path, cx)))
               })
-              .child(if busy { "Loading..." } else { "Load diff" }),
+              .child(if busy { "Loading…" } else { "Load diff" }),
           ),
       )
       .into_any_element()
@@ -2402,7 +2404,7 @@ impl CommitsView {
         let error = loaded.as_ref().and_then(|l| l.as_ref().err()).cloned();
         ui::Dialog::new("edit-description-dialog", p)
           .width(560.)
-          .title("Edit Commit Description")
+          .title("Edit commit description")
           .description(format!("Editing {}", commit.short_id))
           .on_primary(ui::handler(cx, |view, _, cx| view.save_description(cx)))
           .primary_disabled(!can_submit)
@@ -2418,7 +2420,7 @@ impl CommitsView {
                   .gap_2()
                   .text_color(p.muted_foreground)
                   .child(ui::spinner("description-spin", 16., p.muted_foreground))
-                  .child("Loading description...")
+                  .child("Loading description…")
                   .into_any_element()
               } else {
                 div()
@@ -2442,7 +2444,7 @@ impl CommitsView {
               .into_any_element(),
             Button::new("description-save", p)
               .disabled(!can_submit)
-              .label(if *saving { "Saving..." } else { "Save" })
+              .label(if *saving { "Saving…" } else { "Save" })
               .on_click(cx.listener(|view, _, _, cx| view.save_description(cx)))
               .into_any_element(),
           ])
@@ -2568,7 +2570,7 @@ impl CommitsView {
               .when(*saving, |this| {
                 this
                   .child(ui::spinner("timestamp-spin", 16., p.primary_foreground))
-                  .label("Saving...")
+                  .label("Saving…")
               })
               .when(!*saving, |this| this.label("Apply"))
               .on_click(cx.listener(|view, _, _, cx| view.apply_timestamp(cx)))

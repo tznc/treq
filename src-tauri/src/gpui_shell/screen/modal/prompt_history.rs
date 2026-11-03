@@ -416,7 +416,7 @@ impl PromptHistoryView {
             Button::new("prompt-history-run", p)
               .size(Size::Sm)
               .child(ui::icon(theme::ICON_PLAY, 14., p.primary_foreground).mr_1p5())
-              .label("Run prompt...")
+              .label("Run prompt…")
               .on_click(cx.listener(move |view, _, _, cx| view.run(&entry, cx))),
           ),
         ),
@@ -459,13 +459,13 @@ impl Render for PromptHistoryView {
           .items_center()
           .gap_2()
           .child(ui::icon(theme::ICON_HISTORY, 16., p.popover_foreground))
-          .child("Prompt History"),
+          .child("Prompt history"),
       )
       .children(copy_all);
     let body = match &entries {
       None => ui::delayed(
         "prompt-history-loading",
-        message("prompt-history-loading", "Loading prompt history...", &p),
+        message("prompt-history-loading", "Loading prompt history…", &p),
       )
       .into_any_element(),
       Some(entries) if entries.is_empty() => {
@@ -484,7 +484,7 @@ impl Render for PromptHistoryView {
     ui::Dialog::new("prompt-history-modal", &p)
       .overlay(viewport)
       .relative_size(0.65, Some(0.75))
-      .title("Prompt History")
+      .title("Prompt history")
       .header(header)
       .focus(&self.focus)
       .on_close(ui::handler(cx, |view, _, cx| view.close(cx)))

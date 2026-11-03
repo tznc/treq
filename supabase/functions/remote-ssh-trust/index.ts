@@ -29,7 +29,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.9
 import {
   PRO_REQUIRED_MESSAGES,
   refuseGatedAction,
-  userHasPro,
+  userHasCloud,
 } from "../_shared/billing/entitlement.ts";
 import { recordAuditEvent, startTimer } from "../_shared/remote/audit.ts";
 import { correlationIdFromRequest, logWithCorrelation } from "../_shared/remote/correlation.ts";
@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
     const refused = await refuseGatedAction(
       action,
       PRO_GATED_TRUST_ACTIONS,
-      () => userHasPro(supabase, user.id),
+      () => userHasCloud(supabase, user.id),
       PRO_REQUIRED_MESSAGES.cloudWorkspace,
     );
     if (refused) return json(refused.body, refused.status, correlationId);

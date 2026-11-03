@@ -26,13 +26,13 @@ use crate::{
 const PR_TYPES: [(bool, &str, &str, &str); 2] = [
   (
     false,
-    "Create Pull Request",
+    "Create pull request",
     "Create pull request",
     "Open a pull request that is ready for review",
   ),
   (
     true,
-    "Draft Pull Request",
+    "Draft pull request",
     "Create draft pull request",
     "Cannot be merged until marked ready for review",
   ),
@@ -218,7 +218,8 @@ impl GithubView {
       move |host| {
         // gh needs the branch on the remote; an in-sync push does nothing.
         host.push_workspace(&repo_path, ws.id)?;
-        let number = host.create_pr(&repo, &title, &body, &base, &branch, draft)?;
+        let head = crate::core::github_cli::pr_head(&repo_path, &branch);
+        let number = host.create_pr(&repo, &title, &body, &base, &head, draft)?;
         // Pending until the PR is cached, or a second click makes another.
         host.refresh_pr_status(&repo_path, &branch);
         Ok((repo, number))
@@ -343,7 +344,7 @@ impl GithubView {
     ui::Dialog::new("github-new-pr-dialog", p)
       .overlay(window.viewport_size())
       .width(576.)
-      .title("New Pull Request")
+      .title("New pull request")
       .focus(self.dialog_focus())
       // Escape closes the open menu first.
       .on_close(ui::handler(cx, |view, _, cx| {

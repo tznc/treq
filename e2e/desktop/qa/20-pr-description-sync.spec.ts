@@ -26,8 +26,8 @@ function prEdits(): string[][] {
 
 test("pr-description-sync: synced, local draft, Sync, save to PR", async ({ page }) => {
   await home(page);
-  await page.getByRole("button", { name: "New workspaces" }).click();
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeVisible();
+  await page.getByRole("button", { name: "New workspace…" }).first().click();
+  await expect(page.getByRole("heading", { name: "New workspace" })).toBeVisible();
   await page.getByLabel("Search pull requests").fill("spool");
   await page
     .getByRole("checkbox", {
@@ -35,7 +35,7 @@ test("pr-description-sync: synced, local draft, Sync, save to PR", async ({ page
     })
     .click();
   await page.getByRole("button", { name: /^Create/ }).click();
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeHidden({
+  await expect(page.getByRole("heading", { name: "New workspace" })).toBeHidden({
     timeout: 30_000,
   });
   await expect(row(page, ROW)).toBeVisible({ timeout: 20_000 });

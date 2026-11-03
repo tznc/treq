@@ -13,7 +13,6 @@ use gpui_kit::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputState, Textarea, TextareaState},
-    tag::Tag,
     v_flex, ActiveTheme, IconName, Sizable,
   },
   div, AnyElement, App, AppContext, Context, Entity, IntoElement, ParentElement, Render, Result,
@@ -63,25 +62,29 @@ pub fn checks_summary(checks: &PrCiStatus) -> String {
 }
 
 /// The header's tag for the branch's pull request.
-pub fn tag(status: &RemotePullRequestStatus) -> Option<Tag> {
+pub fn tag(
+  status: &RemotePullRequestStatus,
+  palette: &treq_ui::theme::Palette,
+) -> Option<treq_ui::Badge> {
   let pr = status.pull_request.as_ref()?;
   let open = pr.state == "OPEN";
   let mut label = format!("#{} {}", pr.number, state_label(pr));
   if let (true, Some(checks)) = (open, &status.checks) {
     label = format!("{label} · {}", checks_summary(checks));
   }
-  let tag = match (
+  use treq_ui::Tone;
+  let tone = match (
     pr.state.as_str(),
     status.checks.as_ref().map(|c| c.state.as_str()),
   ) {
-    ("MERGED", _) => Tag::info(),
-    ("CLOSED", _) => Tag::secondary(),
-    (_, Some("failure")) => Tag::danger(),
-    (_, Some("pending")) => Tag::warning(),
-    (_, Some(_)) => Tag::success(),
-    _ => Tag::secondary(),
+    ("MERGED", _) => Tone::GitMerged,
+    ("CLOSED", _) => Tone::Neutral,
+    (_, Some("failure")) => Tone::Danger,
+    (_, Some("pending")) => Tone::Warning,
+    (_, Some(_)) => Tone::Success,
+    _ => Tone::Neutral,
   };
-  Some(tag.small().child(label))
+  Some(treq_ui::Badge::new(label, palette).tone(tone))
 }
 
 pub fn check_icon(check: &PrCheckEntry, cx: &App) -> AnyElement {

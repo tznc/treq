@@ -23,7 +23,6 @@ use gpui_kit::{
   Window,
 };
 
-use super::Confirm;
 use crate::mobile::{
   managed,
   store::{self, UserManagedEndpoint},
@@ -158,11 +157,6 @@ fn probe_on_backend(cx: &mut Context<AddHostScreen>, endpoint: UserManagedEndpoi
   );
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum Action {
-  Remove,
-}
-
 pub struct AddHostScreen {
   /// The saved host being edited; `None` when adding one.
   saved: Option<UserManagedEndpoint>,
@@ -177,7 +171,6 @@ pub struct AddHostScreen {
   key_unchanged: bool,
   /// Starts reading the host key; tests swap in one that needs no backend.
   start_probe: fn(&mut Context<Self>, UserManagedEndpoint),
-  confirm: Confirm<Action>,
   error: Option<String>,
   public_key: load::Load<String>,
   scroll: ScrollHandle,
@@ -227,7 +220,6 @@ impl AddHostScreen {
       probing: false,
       key_unchanged: false,
       start_probe: probe_on_backend,
-      confirm: Confirm::default(),
       error: None,
       public_key: load::Load::Idle,
       scroll: ScrollHandle::new(),
@@ -312,14 +304,22 @@ impl AddHostScreen {
     nav::pop(cx);
   }
 
+  /// Removing a host is destructive (its saved address and key pinning go),
+  /// so it asks in a sheet.
   fn remove(&mut self, cx: &mut Context<Self>) {
-    if !self.confirm.tap(Action::Remove) {
-      return cx.notify();
-    }
-    if let Some(saved) = &self.saved {
-      ui::forget_host(&saved.id, cx);
-    }
-    nav::home(cx);
+    let Some(saved) = &self.saved else { return };
+    let (id, name) = (saved.id.clone(), saved.display_name.clone());
+    super::ask_then(
+      super::Op::RemoveHost,
+      format!("Remove {name}?"),
+      "Forgets this host's address and pinned host key on this device. The machine itself is not changed.",
+      "Remove host",
+      move |cx| {
+        ui::forget_host(&id, cx);
+        nav::home(cx);
+      },
+      cx,
+    );
   }
 
   fn device_key(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -531,11 +531,7 @@ impl Render for AddHostScreen {
           h_flex().child(
             Button::new("remove")
               .danger()
-              .label(if self.confirm.is_armed(Action::Remove) {
-                "Tap again to remove"
-              } else {
-                "Remove host"
-              })
+              .label("Remove host…")
               .on_click(cx.listener(|this, _, _, cx| this.remove(cx)))
               .touch(),
           ),

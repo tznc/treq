@@ -106,10 +106,10 @@ test("pr review drafts: agent draft, your draft, moved and outdated after a push
   // Not observable, so by its place in the 1400x900 window.
   await page.mouse.click(600, 243);
   await page.keyboard.press("ArrowLeft");
-  const input = page.getByRole("textbox", { name: "Add a comment..." });
+  const input = page.getByRole("textbox", { name: "Add a comment…" });
   await expect(input).toBeVisible();
   await input.fill("Lower-casing here changes matching for mixed-case names.");
-  await page.getByRole("button", { name: "Add Comment", exact: true }).click();
+  await page.getByRole("button", { name: "Add comment", exact: true }).click();
   await expect(page.getByRole("button", { name: "Finish review (2)" })).toBeVisible({ timeout: 10_000 });
   await settle(page, 800);
   await capture(page, {

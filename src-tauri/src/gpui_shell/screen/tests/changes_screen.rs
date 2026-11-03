@@ -164,6 +164,56 @@ fn changes_tab_hides_the_committed_group_when_filtered_out(cx: &mut TestAppConte
   assert!(!h.drawn("file-card-c.rs"));
 }
 
+fn changes_host_committed_only() -> FakeHost {
+  let mut host = changes_host();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [
+      {"path": "c.rs", "status": "M", "previous_path": null, "changed_line_count": 1, "diff_deferred": false}
+    ],
+    "uncommitted_files": [],
+    "hunks_by_file": [
+      {"path": "c.rs", "hunks": [{"id": "h", "header": "@@ -1 +1 @@", "lines": ["-c", "+d"], "patch": ""}]}
+    ],
+    "too_large_to_render": false
+  }))
+  .ok();
+  host
+}
+
+/// With nothing uncommitted there is nothing to commit: no commit box, one
+/// muted line where the Changes group would be.
+#[gpui::test]
+fn changes_tab_offers_no_commit_box_with_nothing_to_commit(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_committed_only(), committed_route(true));
+  assert!(h.drawn("committed-section-toggle"));
+  assert!(!h.drawn("commit-button"));
+  assert!(!h.drawn("commit-message"));
+  assert!(h.drawn("changes-nothing-to-commit"));
+}
+
+/// The commit box sits in the Changes group: under its header, above its
+/// files.
+#[gpui::test]
+fn changes_tab_draws_the_commit_box_inside_the_changes_group(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(true));
+  assert!(!h.drawn("changes-nothing-to-commit"));
+  let mut top = |s: &'static str| {
+    h.cx.run_until_parked();
+    h.cx
+      .debug_bounds(s)
+      .unwrap_or_else(|| panic!("{s} not drawn"))
+      .origin
+      .y
+  };
+  let header = top("changes-section-toggle");
+  let message = top("commit-message");
+  let file = top("file-row-a.rs");
+  let committed = top("committed-section-toggle");
+  assert!(header < message, "header above the commit box");
+  assert!(message < file, "commit box above the group's files");
+  assert!(file < committed, "the Committed group follows");
+}
+
 #[gpui::test]
 fn changes_tab_asks_for_a_commit_message(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
@@ -226,6 +276,46 @@ fn changes_tab_marks_files_viewed(cx: &mut TestAppContext) {
   h.click("viewed-a.rs");
   h.cx.run_until_parked();
   assert!(host.writes().contains(&"unmark viewed a.rs".to_string()));
+}
+
+/// Viewed marks are kept, so reopening the tab (or the app) shows them
+/// again, except on a file whose diff changed since.
+#[gpui::test]
+fn reopening_the_tab_restores_viewed_files(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  let hunks = host.working.as_ref().expect("working").hunks_by_file[0]
+    .hunks
+    .clone();
+  host.viewed = vec![
+    (
+      "a.rs".into(),
+      crate::gpui_shell::screen::changes_data::hunks_hash(&hunks),
+    ),
+    ("b.rs".into(), "stale".into()),
+  ];
+  if let Some(diff) = host.working.as_mut() {
+    let mut b = diff.uncommitted_files[0].clone();
+    b.path = "b.rs".into();
+    diff.uncommitted_files.push(b);
+    let mut b = diff.hunks_by_file[0].clone();
+    b.path = "b.rs".into();
+    diff.hunks_by_file.push(b);
+  }
+  let (h, host) = workspace_harness(cx, host, changes_route());
+  h.cx.run_until_parked();
+  let viewed = h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
+    let mut viewed: Vec<String> = changes.viewed.keys().cloned().collect();
+    viewed.sort();
+    viewed
+  });
+  assert_eq!(viewed, vec!["a.rs".to_string()], "{:?}", host.writes());
+  assert!(
+    host.writes().contains(&"unmark viewed b.rs".to_string()),
+    "{:?}",
+    host.writes()
+  );
 }
 
 #[gpui::test]
@@ -780,15 +870,23 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
   h.click("gutter-a.rs-0-1");
   h.cx.simulate_keystrokes("shift-down left");
   h.click("suggest-change");
-  assert_eq!(
-    h.screen.read_with(&h.cx, |screen, cx| {
-      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-      let changes = workspace.changes().expect("changes").read(cx);
-      changes.review.draft_text.clone()
-    }),
-    "```suggestion\nb\nc\n```\n"
-  );
+  // A code editor with the lines and a preview, not fences in the comment.
+  assert!(h.drawn("suggestion-editor"));
+  assert!(h.drawn("suggestion-preview"));
+  let (comment, suggestion) = h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
+    (
+      changes.review.draft_text.clone(),
+      changes.review.suggestion_text.clone(),
+    )
+  });
+  assert_eq!(comment, "");
+  assert_eq!(suggestion.as_deref(), Some("b\nc"));
   h.cx.simulate_keystrokes("secondary-enter");
+  settle_save(&mut h);
+  let saved = host.review.lock().unwrap().clone().unwrap_or_default();
+  assert!(saved.contains(r"```suggestion\nb\nc\n```"), "{saved}");
   assert!(h.drawn("agent-review-suggestion"), "drawn as a diff");
   // The write changes a.rs on disk; that read is not stale.
   let mut applied = host.working.clone().expect("working");
@@ -885,7 +983,7 @@ fn changes_tab_sends_the_review_to_an_agent(cx: &mut TestAppContext) {
   let launches = host.launches.lock().unwrap().clone();
   assert_eq!(launches.len(), 1);
   let (request, select) = &launches[0];
-  assert_eq!(request.session_name.as_deref(), Some("Code Review"));
+  assert_eq!(request.session_name.as_deref(), Some("Code review"));
   assert_eq!(request.mode.as_deref(), Some("plan"));
   assert_eq!(request.workspace_id, Some(7));
   let recorded: Vec<String> = host
@@ -921,6 +1019,20 @@ fn changes_tab_starts_an_ai_review_in_a_new_terminal(cx: &mut TestAppContext) {
   let prompt = request.prompt.clone().unwrap_or_default();
   assert!(prompt.contains("--target-type workspace_diff"), "{prompt}");
   assert!(prompt.contains("--target-id 7"), "{prompt}");
+}
+
+#[gpui::test]
+fn starting_an_ai_review_says_so_in_a_toast(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("start-agent-review");
+  h.cx.run_until_parked();
+  let calls = host.calls();
+  assert!(
+    calls
+      .iter()
+      .any(|c| c.starts_with("notify toast Review started on ")),
+    "{calls:?}"
+  );
 }
 
 #[gpui::test]
@@ -1184,7 +1296,7 @@ fn changes_tab_starts_an_agent_for_a_comment_without_an_idle_one(cx: &mut TestAp
   let launches = host.launches.lock().unwrap().clone();
   assert_eq!(launches.len(), 1, "{:?}", host.calls());
   let request = &launches[0].0;
-  assert_eq!(request.session_name.as_deref(), Some("Review Comment"));
+  assert_eq!(request.session_name.as_deref(), Some("Review comment"));
   assert_eq!(request.mode.as_deref(), Some("acceptEdits"));
   assert_eq!(
     request.prompt.as_deref(),
@@ -1232,4 +1344,135 @@ fn the_discard_review_confirmation_keeps_on_escape_and_discards_on_enter(cx: &mu
   h.cx.simulate_keystrokes("enter");
   assert!(!h.drawn("discard-review-dialog"));
   assert!(!h.drawn("review-action-bar"));
+}
+
+fn a11y_screen(h: &mut Harness) -> gpui_testing_library::Screen {
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  screen
+}
+
+/// The review toolbar's discard says what it discards, and its
+/// confirmation counts the comments it drops.
+#[gpui::test]
+fn discarding_pending_comments_names_what_it_discards(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  let screen = a11y_screen(&mut h);
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Discard pending comments…")))
+    .to_be_visible();
+  h.click("discard-review");
+  let screen = a11y_screen(&mut h);
+  expect(screen.get_by_role(by::role(gpui::Role::Heading).name("Discard 1 pending comment?")))
+    .to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Cancel"))).to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Discard comments"))).to_be_visible();
+}
+
+fn changes_host_with_named_statuses() -> FakeHost {
+  let mut host = changes_host();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [
+      {"path": "c.rs", "status": "R", "previous_path": "old.rs", "changed_line_count": 1, "diff_deferred": false}
+    ],
+    "uncommitted_files": [
+      {"path": "a.rs", "status": "M", "previous_path": null, "changed_line_count": 2, "diff_deferred": false},
+      {"path": "b.rs", "status": "A", "previous_path": null, "changed_line_count": 1, "diff_deferred": false}
+    ],
+    "hunks_by_file": [
+      {"path": "a.rs", "hunks": [{"id": "h", "header": "@@ -1,2 +1,3 @@", "lines": [" a", "+b", "+c"], "patch": ""}]},
+      {"path": "b.rs", "hunks": [{"id": "h", "header": "@@ -0,0 +1,1 @@", "lines": ["+d"], "patch": ""}]},
+      {"path": "c.rs", "hunks": [{"id": "h", "header": "@@ -1,1 +1,1 @@", "lines": ["-x", "+y"], "patch": ""}]}
+    ],
+    "too_large_to_render": false
+  }))
+  .ok();
+  host
+}
+
+/// The file list's status letters name their status, and a committed file's
+/// card no longer repeats "Committed": the list's group label says it.
+#[gpui::test]
+fn file_statuses_are_named_and_committed_cards_carry_no_pill(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(
+    cx,
+    changes_host_with_named_statuses(),
+    committed_route(true),
+  );
+  assert!(h.drawn("file-card-c.rs"), "the committed file's card");
+  let screen = a11y_screen(&mut h);
+  for name in ["Modified", "Added", "Renamed"] {
+    expect(screen.get_by_role(by::role(gpui::Role::Label).name(name))).to_be_visible();
+  }
+  assert!(!h.drawn("committed-file-label"));
+}
+
+/// A file with no diff lines (here a binary) is marked viewed by its
+/// content, so it is viewed no longer once that content changes.
+#[gpui::test]
+fn a_viewed_file_without_diff_lines_unmarks_when_it_changes(cx: &mut TestAppContext) {
+  let diff = |id: &str| -> crate::jj::JjRevisionDiff {
+    serde_json::from_value(serde_json::json!({
+      "committed_files": [],
+      "uncommitted_files": [
+        {"path": "img.png", "status": "M", "previous_path": null, "changed_line_count": 0,
+         "diff_deferred": false, "content_id": id}
+      ],
+      "hunks_by_file": [{"path": "img.png", "hunks": []}],
+      "too_large_to_render": false
+    }))
+    .expect("diff")
+  };
+  let mut host = changes_host();
+  host.working = Some(diff("v1"));
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.click("viewed-img.png");
+  h.cx.run_until_parked();
+  *host.edited.lock().unwrap() = Some(diff("v2"));
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.changes_revision += 1;
+    }
+  });
+  h.cx.run_until_parked();
+  assert!(
+    host.writes().contains(&"unmark viewed img.png".to_string()),
+    "{:?}",
+    host.writes()
+  );
+}
+
+/// The Changes header's buttons are named for what they do, so a user (and
+/// the QA specs) find discard all by its name rather than by place.
+#[gpui::test]
+fn the_changes_header_buttons_are_named(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  let screen = a11y_screen(&mut h);
+  for name in ["Discard all changes…", "Stash all changes"] {
+    expect(screen.get_by_role(by::role(gpui::Role::Button).name(name))).to_be_visible();
+  }
+  let user = screen.user();
+  user.click(&screen.get_by_role(by::role(gpui::Role::Button).name("Discard all changes…")));
+  assert!(h.drawn("discard-all-dialog"));
+}
+
+/// A review thread's fold toggle is a button named for what a click does.
+#[gpui::test]
+fn a_review_thread_folds_from_a_named_button(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, true)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  let screen = a11y_screen(&mut h);
+  let show = screen.get_by_role(by::role(gpui::Role::Button).name("Show review thread"));
+  screen.user().click(&show);
+  let screen = a11y_screen(&mut h);
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Hide review thread")))
+    .to_be_visible();
+  assert!(!h.drawn("github-thread-collapsed-preview"));
 }

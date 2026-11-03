@@ -417,7 +417,7 @@ fn linear_team_selector_reads_that_teams_issues(cx: &mut TestAppContext) {
   );
   assert!(matches!(
     &entries[2],
-    MenuEntry::Item { text, radio: Some(true), .. } if text == "All Teams"
+    MenuEntry::Item { text, radio: Some(true), .. } if text == "All teams"
   ));
   h.pick("Backend");
   assert!(host
@@ -578,7 +578,7 @@ fn linear_without_a_key_says_how_to_connect(cx: &mut TestAppContext) {
   expect(page.get_by_text(crate::linear::NOT_CONNECTED)).to_be_visible();
   page
     .user()
-    .click(&page.get_by_role(by::role(Role::Button).name("Open Settings")));
+    .click(&page.get_by_role(by::role(Role::Button).name("Open settings")));
   h.cx.run_until_parked();
   assert_eq!(
     h.sent(),

@@ -12,12 +12,12 @@ use gpui_kit::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
-    tag::Tag,
     IconName, Sizable,
   },
-  div, px, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
-  ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window,
+  div, px, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
+  Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window,
 };
+use treq_ui::{Badge, Tone};
 
 use super::{on_epoch, pr_detail};
 use crate::mobile::{
@@ -112,26 +112,26 @@ pub fn state_label(pr: &GhPullRequest) -> &'static str {
 }
 
 /// A tag for `pr`'s state.
-pub fn state_tag(pr: &GhPullRequest) -> Tag {
-  let tag = match state_label(pr) {
-    "Merged" => Tag::info(),
-    "Closed" => Tag::danger(),
-    "Draft" => Tag::secondary(),
-    _ => Tag::success(),
+pub fn state_tag(pr: &GhPullRequest, cx: &App) -> Badge {
+  let tone = match state_label(pr) {
+    "Merged" => Tone::GitMerged,
+    "Closed" => Tone::GitClosed,
+    "Draft" => Tone::Neutral,
+    _ => Tone::GitOpen,
   };
-  tag.small().child(state_label(pr))
+  Badge::new(state_label(pr), &treq_ui::theme::current(cx)).tone(tone)
 }
 
 /// Where `pr`'s review stands, when it stands anywhere.
-pub fn review_tag(pr: &GhPullRequest) -> Option<Tag> {
+pub fn review_tag(pr: &GhPullRequest, cx: &App) -> Option<Badge> {
   use crate::github::ReviewState;
   let state = crate::core::pr_view::review_state(pr)?;
-  let tag = match state {
-    ReviewState::Approved => Tag::success(),
-    ReviewState::ChangesRequested => Tag::danger(),
-    ReviewState::ReviewRequired => Tag::warning(),
+  let tone = match state {
+    ReviewState::Approved => Tone::Success,
+    ReviewState::ChangesRequested => Tone::Danger,
+    ReviewState::ReviewRequired => Tone::Warning,
   };
-  Some(tag.small().child(state.label()))
+  Some(Badge::new(state.label(), &treq_ui::theme::current(cx)).tone(tone))
 }
 
 /// The row's second line: number, author and branches.
@@ -303,22 +303,16 @@ impl Render for PullRequestsScreen {
     let searching = self.searching();
     let body = match &self.list {
       Load::Idle | Load::Loading => {
-        widgets::card(cx).child(widgets::centered_message("Loading pull requests…", cx))
+        widgets::card(cx).child(widgets::skeleton("pull-requests", 6, cx))
       }
-      Load::Failed(error) => widgets::card(cx)
-        .p_4()
-        .gap_3()
-        .child(widgets::error_text(errors::describe(error).message, cx))
-        .child(
-          h_flex().child(
-            Button::new("retry")
-              .outline()
-              .label("Retry")
-              .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
-              .touch(),
-          ),
-        ),
-      Load::Ready(list) if list.is_empty() => widgets::card(cx).child(widgets::centered_message(
+      Load::Failed(error) => widgets::card(cx).child(widgets::failed(
+        "pull-requests-failed",
+        error,
+        cx.listener(|this, _, _, cx| this.reload(cx)),
+        cx,
+      )),
+      Load::Ready(list) if list.is_empty() => widgets::card(cx).child(widgets::empty(
+        "pull-requests-empty",
         if searching {
           "No open pull requests match."
         } else {
@@ -330,11 +324,11 @@ impl Render for PullRequestsScreen {
         let repo = self.repo.clone();
         let number = pr.number;
         widgets::row_full(
-          ("pr", i),
+          format!("pr-{i}"),
           None,
           pr.title.clone(),
           Some(detail_line(pr).into()),
-          Some(state_tag(pr).into_any_element()),
+          Some(state_tag(pr, cx).into_any_element()),
           cx,
         )
         .on_click(move |_, _, cx| pr_detail::open(repo.clone(), number, cx))
@@ -388,6 +382,7 @@ impl Render for PullRequestsScreen {
                   .w(px(44.))
                   .outline()
                   .icon(IconName::Search)
+                  .accessibility_label("Search")
                   .on_click(cx.listener(|this, _, _, cx| this.search(cx)))
                   .touch(),
               ),

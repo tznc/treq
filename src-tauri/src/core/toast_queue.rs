@@ -112,7 +112,7 @@ mod tests {
       "Created",
       Some("#4"),
       ToastKind::Success,
-      Some("Open in Web"),
+      Some("Open in web"),
     );
     assert_eq!(plain.duration(), Duration::from_secs(5));
     assert_eq!(action.duration(), Duration::from_secs(12));

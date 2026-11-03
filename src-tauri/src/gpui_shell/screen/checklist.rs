@@ -127,7 +127,7 @@ fn tool_row(tool: &Tool, ctx: &Ctx) -> impl IntoElement {
       .into_any_element()
   };
   let trailing = match tool.installed {
-    None => muted("Checking..."),
+    None => muted("Checking…"),
     Some(true) => muted("Installed"),
     Some(false) => {
       let id = SharedString::from(format!("install-{}", tool.binary));
@@ -266,7 +266,7 @@ const GROUPS: [(Kind, &str); 3] = [
 ];
 
 /// The checklist for `statuses` from `core::check_prerequisites`, or every
-/// tool still "Checking..." before the first check returns.
+/// tool still "Checking…" before the first check returns.
 pub fn from_statuses(
   title: &str,
   statuses: Option<&[PrerequisiteStatus]>,

@@ -168,7 +168,9 @@ impl FileScreen {
     h_flex()
       .id(("line", index))
       .px_2()
-      .when(selected, |row| row.bg(review::picked_bg(cx)))
+      .when(selected, |row| {
+        row.bg(treq_ui::theme::current(cx).selected())
+      })
       .child(
         widgets::mono(format!("{number:>5}  "), cx).text_color(if selected {
           theme.primary
@@ -193,16 +195,23 @@ impl FileScreen {
   fn body(&self, cx: &mut Context<Self>) -> AnyElement {
     if is_binary(self.path()) {
       return widgets::card(cx)
-        .child(widgets::centered_message("Binary file, not shown.", cx))
+        .child(widgets::empty("file-binary", "Binary file, not shown.", cx))
         .into_any_element();
     }
     if self.lines.is_empty() {
       return widgets::card(cx)
-        .p_4()
         .child(match (&self.error, self.loading) {
-          (Some(error), _) => widgets::error_text(error.clone(), cx),
-          (None, true) => widgets::centered_message("Loading…", cx),
-          (None, false) => widgets::centered_message("This file is empty.", cx),
+          (Some(error), _) => widgets::failed(
+            "file-failed",
+            error,
+            cx.listener(|this, _, _, cx| this.read_from(0, cx)),
+            cx,
+          )
+          .into_any_element(),
+          (None, true) => widgets::skeleton("file", 8, cx),
+          (None, false) => {
+            widgets::empty("file-empty", "This file is empty.", cx).into_any_element()
+          }
         })
         .into_any_element();
     }

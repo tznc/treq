@@ -652,17 +652,30 @@ pub fn commented_text(line_content: &[String]) -> Vec<String> {
     .collect()
 }
 
-/// The ```` ```suggestion ```` block "Suggest change" starts a comment with:
-/// the lines as they are, to edit. Only lines on the new side can be
-/// replaced.
-pub fn suggestion_block(pending: &Pending) -> Option<String> {
+/// The lines "Suggest change" opens its editor with: the commented lines as
+/// they are, to edit. Only lines on the new side can be replaced.
+pub fn suggestion_lines(pending: &Pending) -> Option<String> {
   if pending.side != Side::New || pending.at.is_none() || pending.line_content.is_empty() {
     return None;
   }
-  Some(format!(
-    "```suggestion\n{}\n```\n",
-    commented_text(&pending.line_content).join("\n")
-  ))
+  Some(commented_text(&pending.line_content).join("\n"))
+}
+
+/// The ```` ```suggestion ```` block a comment starts with when its box
+/// takes the suggestion as text (mobile).
+pub fn suggestion_block(pending: &Pending) -> Option<String> {
+  suggestion_lines(pending).map(|lines| format!("```suggestion\n{lines}\n```\n"))
+}
+
+/// A comment's text with its suggestion appended as GitHub's
+/// ```` ```suggestion ```` block, the format comments are kept and sent in.
+pub fn compose_suggestion_comment(text: &str, suggestion: Option<&str>) -> String {
+  let text = text.trim();
+  match suggestion {
+    None => text.to_string(),
+    Some(lines) if text.is_empty() => format!("```suggestion\n{lines}\n```"),
+    Some(lines) => format!("{text}\n\n```suggestion\n{lines}\n```"),
+  }
 }
 
 /// A comment's text around its first suggestion block.
@@ -891,18 +904,37 @@ mod tests {
   fn suggest_change_quotes_the_new_side_lines() {
     let hunks = vec![hunk("h", "@@ -1,2 +1,3 @@", &[" a", "+b", "+c"])];
     let pending = pending_for_selection("a.rs", &hunks, &[(0, 1), (0, 2)]).unwrap();
-    assert_eq!(
-      suggestion_block(&pending).as_deref(),
-      Some("```suggestion\nb\nc\n```\n")
-    );
+    assert_eq!(suggestion_lines(&pending).as_deref(), Some("b\nc"));
     let removed = vec![hunk("h", "@@ -1,1 +1,0 @@", &["-gone"])];
     let pending = pending_for_line("a.rs", &removed, (0, 0)).unwrap();
     assert_eq!(
-      suggestion_block(&pending),
+      suggestion_lines(&pending),
       None,
       "old lines cannot be replaced"
     );
-    assert_eq!(suggestion_block(&Pending::file("a.rs")), None);
+    assert_eq!(suggestion_lines(&Pending::file("a.rs")), None);
+  }
+
+  #[test]
+  fn a_suggestion_joins_the_comment_as_a_github_block() {
+    assert_eq!(
+      compose_suggestion_comment("Use B", Some("B")),
+      "Use B\n\n```suggestion\nB\n```"
+    );
+    assert_eq!(
+      compose_suggestion_comment("  ", Some("b\nc")),
+      "```suggestion\nb\nc\n```"
+    );
+    assert_eq!(
+      compose_suggestion_comment("", Some("")),
+      "```suggestion\n\n```",
+      "an empty suggestion deletes the lines"
+    );
+    assert_eq!(compose_suggestion_comment(" Nit ", None), "Nit");
+    let composed = compose_suggestion_comment("Use B", Some("B\nC"));
+    let parsed = parse_suggestion(&composed).expect("parses back");
+    assert_eq!(parsed.before, "Use B");
+    assert_eq!(parsed.suggested, "B\nC");
   }
 
   #[test]

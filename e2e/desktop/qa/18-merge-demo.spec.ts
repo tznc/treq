@@ -49,7 +49,7 @@ test("merge demo: merging a stacked parent retargets its child", async ({ page }
     ],
   });
 
-  await page.getByRole("button", { name: "Merge..." }).click();
+  await page.getByRole("button", { name: "Merge…" }).click();
   await expect(page.getByRole("button", { name: "Back" })).toBeVisible();
   await settle(page, 3000);
   await capture(page, {

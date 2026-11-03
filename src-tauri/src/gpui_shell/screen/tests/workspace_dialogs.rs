@@ -467,7 +467,7 @@ fn the_title_names_the_branch_and_creates(cx: &mut TestAppContext) {
       view.branch_state(),
       Some(workspace_dialog::BranchState::New)
     );
-    assert_eq!(view.submit_label(), "Create Workspace");
+    assert_eq!(view.submit_label(), "Create workspace");
   });
   assert!(host
     .calls()
@@ -577,7 +577,7 @@ fn moves_a_picked_commit_to_a_new_workspace(cx: &mut TestAppContext) {
   h.click("dialog-commits-clear");
   assert_eq!(
     h.cx.read(|cx| view.read(cx).submit_label()),
-    "Create Workspace"
+    "Create workspace"
   );
   h.click("dialog-commit-0");
 

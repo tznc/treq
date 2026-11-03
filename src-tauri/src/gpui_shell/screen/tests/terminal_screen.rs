@@ -461,6 +461,28 @@ fn terminal_pane_runs_dashboard_commands(cx: &mut TestAppContext) {
   assert!(h.drawn("terminal-expand"));
 }
 
+/// A session that becomes active (a review that just started, say) shows:
+/// a collapsed pane expands so its column is on screen.
+#[gpui::test]
+fn terminal_pane_expands_for_a_newly_active_session(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "activeSessionId": 3,
+      "commands": [{ "nonce": 1, "kind": "toggleCollapse" }],
+    }),
+  );
+  assert!(h.drawn("terminal-expand"), "collapsed");
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 4 }));
+  assert!(
+    !h.drawn("terminal-expand"),
+    "the new session's column shows"
+  );
+  assert!(h.drawn("terminal-column-active"));
+}
+
 #[gpui::test]
 fn terminal_pane_activates_the_selected_workspaces_terminal(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
@@ -483,6 +505,58 @@ fn terminal_pane_activates_the_selected_workspaces_terminal(cx: &mut TestAppCont
   assert!(!h.drawn("terminal-column-shell"));
   assert!(h.drawn("terminal-column-agent"));
   assert!(!host.calls().contains(&format!("close {}", agent_pty())));
+}
+
+/// The pane shows every workspace's terminals: the shown workspace's are
+/// highlighted, the others dimmed, and switching workspace swaps them.
+#[gpui::test]
+fn terminal_pane_highlights_the_shown_workspaces_terminals(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "activeSessionId": 3,
+      "commands": [{ "nonce": 1, "kind": "newShell", "dir": "/repo" }],
+    }),
+  );
+  // Workspace 7 on screen: its agent is current, the home shell dimmed.
+  assert!(h.drawn("terminal-current-agent"));
+  assert!(h.drawn("terminal-dimmed-shell"));
+  assert!(!h.drawn("terminal-dimmed-agent"));
+  h.update(|s| {
+    if let View::Workspace(route) = &mut s.view {
+      route.workspace_id = None;
+    }
+  });
+  h.cx.run_until_parked();
+  assert!(
+    h.drawn("terminal-current-shell"),
+    "the home shell is current"
+  );
+  assert!(h.drawn("terminal-dimmed-agent"), "workspace 7's agent dims");
+  assert!(h.drawn("terminal-column-shell") && h.drawn("terminal-column-agent"));
+}
+
+/// A dimmed column stays usable: hovering it undims it.
+#[gpui::test]
+fn terminal_pane_undims_a_hovered_column(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "activeSessionId": 3,
+      "commands": [{ "nonce": 1, "kind": "newShell", "dir": "/repo" }],
+    }),
+  );
+  assert!(h.drawn("terminal-dimmed-shell"));
+  let at = h
+    .cx
+    .debug_bounds("terminal-column-shell")
+    .expect("shell column")
+    .center();
+  h.cx.simulate_mouse_move(at, None, Modifiers::none());
+  h.cx.run_until_parked();
+  assert!(!h.drawn("terminal-dimmed-shell"), "hovered, so not dimmed");
 }
 
 /// Double-clicks the element `selector` names.
@@ -963,18 +1037,13 @@ fn terminal_pane_tooltips_show_shortcuts_as_kbd(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn header_buttons_open_their_popovers_in_the_modal_window(cx: &mut TestAppContext) {
-  for button in ["workspace-details", "workspace-target", "workspace-checks"] {
+fn header_buttons_open_their_popovers_over_the_window(cx: &mut TestAppContext) {
+  for button in ["workspace-details", "workspace-checks"] {
     let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
     h.click(button);
     h.cx.run_until_parked();
-    let opened = h
-      .popups
-      .borrow()
-      .iter()
-      .any(|p| matches!(p, PopupRequest::ShowPopover { .. }));
-    assert!(opened, "{button}: {:?}", h.popups.borrow());
-    // The screen stays: nothing is handed to React to draw.
+    // Drawn in the repo window itself, over an in-window backdrop.
+    assert!(h.drawn("header-popover-backdrop"), "{button}");
     assert!(h.drawn("workspace-header"));
     assert!(h.sent().is_empty(), "{button}");
   }
@@ -1021,9 +1090,8 @@ fn opening_details_hides_its_tooltip(cx: &mut TestAppContext) {
     matches!(last_tooltip, Some(PopupRequest::HideTooltip)),
     "{popups:?}"
   );
-  assert!(popups
-    .iter()
-    .any(|p| matches!(p, PopupRequest::ShowPopover { .. })));
+  drop(popups);
+  assert!(h.drawn("header-popover-backdrop"));
 }
 
 fn send_assets() -> serde_json::Value {

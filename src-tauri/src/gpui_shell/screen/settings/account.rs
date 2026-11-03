@@ -37,6 +37,20 @@ use crate::gpui_shell::{
 
 /// The repository setting the Linear API key is stored under.
 const LINEAR_API_KEY: &str = "linear_api_key";
+/// Where Linear users create a personal API key.
+const LINEAR_API_KEYS_URL: &str = "https://linear.app/settings/account/security";
+
+/// The header an Integrations card draws.
+struct IntegrationCard {
+  /// "github", "linear": its selector and toggle id.
+  id: &'static str,
+  icon: &'static str,
+  name: &'static str,
+  /// One line on what connecting it does.
+  purpose: &'static str,
+  connected: bool,
+  open: bool,
+}
 
 /// The account as the tabs draw it: Rust's [`Account`], with what the tabs
 /// load and run themselves.
@@ -119,6 +133,14 @@ pub struct CloudRoute {
   pub provider_key_error: Option<String>,
   /// Tier prices on the providers the user has a key for.
   pub byos_catalog: Vec<crate::core::cloud_catalog::ByosMachineType>,
+  /// Team cloud: the user's organizations and their cloud settings.
+  pub organizations: Vec<crate::core::cloud_catalog::CloudOrganization>,
+  /// Where the next workspace bills: personal or an organization.
+  pub profile: Option<crate::core::cloud_catalog::CloudProfile>,
+  /// Each Team organization's saved keys (never the keys).
+  pub org_keys: std::collections::BTreeMap<String, Vec<crate::core::cloud_catalog::ProviderKey>>,
+  pub team_saving: bool,
+  pub team_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -211,6 +233,11 @@ pub struct SignedIn {
   pub spend_cap: Option<SpendCapEditor>,
   /// "Provider keys", for Pro.
   pub provider_keys: Option<ProviderKeysSection>,
+  /// "Cloud billing": personal or a Team organization. Only for members of
+  /// a Team organization.
+  pub cloud_profile: Option<CloudProfileSection>,
+  /// The cloud settings of each Team organization the user owns.
+  pub org_cloud: Vec<OrgCloudSection>,
   /// The delete-account confirmation, while it is open.
   pub delete_account: Option<DeleteAccountDialog>,
 }
@@ -281,6 +308,55 @@ pub struct ProviderKeysSection {
   pub draft: String,
   pub saving: bool,
   pub error: Option<String>,
+}
+
+/// Where the next cloud workspace bills.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CloudProfileSection {
+  pub options: Vec<ProfileOption>,
+  pub saving: bool,
+  pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProfileOption {
+  /// The organization, or `None` for personal.
+  pub org_id: Option<String>,
+  pub label: String,
+  /// Who pays and what it may run.
+  pub note: String,
+  pub selected: bool,
+}
+
+/// An owner's cloud settings for one Team organization.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrgCloudSection {
+  pub org_id: String,
+  pub name: String,
+  pub allow_managed: bool,
+  pub allow_byos: bool,
+  /// The cap fields' text: the draft, or the saved cap.
+  pub org_cap: String,
+  pub member_cap: String,
+  /// The organization's keys, and providers that have none yet.
+  pub keys: Vec<ProviderKeyRow>,
+  pub addable: Vec<(String, String)>,
+  /// The provider whose key field is open, and its draft.
+  pub editing: Option<String>,
+  pub draft: String,
+  pub saving: bool,
+  pub error: Option<String>,
+}
+
+/// An owner's unsaved changes to an organization's cloud settings.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct OrgDraft {
+  allow_managed: Option<bool>,
+  allow_byos: Option<bool>,
+  org_cap: Option<String>,
+  member_cap: Option<String>,
+  /// Why the last Save was not sent.
+  invalid: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -368,8 +444,12 @@ pub struct CloudCreate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct IntegrationsTab {
   pub github: GithubSection,
+  /// Signed in to Treq Cloud, which connects GitHub.
+  pub github_connected: bool,
   /// While the Linear integration preview is on.
   pub linear: Option<LinearSection>,
+  /// The cards shown expanded ("github", "linear").
+  pub expanded: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -388,6 +468,8 @@ pub enum GithubSection {
 pub struct LinearSection {
   /// False when no repository is open, which the key belongs to.
   pub repo: bool,
+  /// An API key is set for the repository.
+  pub connected: bool,
   pub description: String,
   pub editing: bool,
   pub draft: String,
@@ -403,6 +485,8 @@ pub struct LinearSection {
 /// The tabs' own state.
 #[derive(Default)]
 pub(super) struct State {
+  /// The Integrations cards the user expanded.
+  expanded: std::collections::BTreeSet<String>,
   /// Rust's account, as of the last change.
   rust: AccountRoute,
   /// The pasted token being exchanged, and why the last exchange failed.
@@ -427,6 +511,12 @@ pub(super) struct State {
   byos_key_editing: Option<String>,
   byos_key_draft: String,
   byos_key_focus: bool,
+  /// Team cloud: unsaved organization settings, and the open organization
+  /// key field (organization and provider), its draft and focus.
+  team_drafts: std::collections::BTreeMap<String, OrgDraft>,
+  team_key_editing: Option<(String, String)>,
+  team_key_draft: String,
+  team_key_focus: bool,
   /// The account was deleted here; the signed-out tab says goodbye.
   farewell: bool,
   /// The avatar URL, and its image once loaded.
@@ -452,12 +542,17 @@ fn is_pro(subscription: Option<&Subscription>) -> bool {
   })
 }
 
+/// A renewal payment failed and Stripe is retrying it.
+fn past_due(subscription: Option<&Subscription>) -> bool {
+  subscription.is_some_and(|s| s.status == "past_due")
+}
+
 /// `subscriptionStatusLabel`.
 fn status_label(status: &str) -> String {
   match status {
     "trialing" => "Trial",
     "active" => "Active",
-    "past_due" => "Past due",
+    "past_due" => "Payment failed",
     "canceled" => "Canceling",
     "inactive" => "Inactive",
     other => other,
@@ -469,7 +564,8 @@ fn status_label(status: &str) -> String {
 fn period_label(status: &str) -> &'static str {
   match status {
     "trialing" => "Trial ends",
-    "active" | "past_due" => "Renews on",
+    "active" => "Renews on",
+    "past_due" => "Billing period ends",
     "canceled" => "Pro until",
     _ => "Period ends",
   }
@@ -477,7 +573,7 @@ fn period_label(status: &str) -> &'static str {
 
 /// `toLocaleDateString()` in an en-US locale.
 /// Days a lapsed cloud workspace is kept before the sweep deletes it
-/// (supabase/migrations/038_lapse_grace_30_days.sql).
+/// (supabase/migrations/057_lapse_grace_30_days.sql).
 const LAPSE_GRACE_DAYS: i64 = 30;
 
 /// The warning for a workspace whose owner's Pro ended at `lapsed_at`.
@@ -530,17 +626,17 @@ fn callback_token(pasted: &str) -> Result<String, String> {
 fn stage_label(status: &str) -> String {
   match status {
     "unprovisioned" => "Not provisioned",
-    "provisioning" => "Creating cloud workspace...",
-    "bootstrapping" => "Installing Treq, JJ, Git, and agents...",
-    "installing_access" => "Configuring access...",
-    "verifying" => "Verifying readiness...",
+    "provisioning" => "Creating cloud workspace…",
+    "bootstrapping" => "Installing Treq, JJ, Git, and agents…",
+    "installing_access" => "Configuring access…",
+    "verifying" => "Verifying readiness…",
     "ready" => "Ready",
     "suspended" => "Suspended (idle)",
-    "waking" => "Waking...",
-    "reprovisioning" => "Reprovisioning...",
+    "waking" => "Waking…",
+    "reprovisioning" => "Reprovisioning…",
     "degraded" => "Degraded",
     "failed" => "Failed",
-    "deleting" => "Deleting...",
+    "deleting" => "Deleting…",
     "deleted" => "Deleted",
     other => other,
   }
@@ -746,7 +842,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
     }),
     create: instance.is_none().then(|| CloudCreate {
       label: if creating || stage.is_some() {
-        "Creating..."
+        "Creating…"
       } else if creation_retry {
         "Retry cloud workspace creation"
       } else {
@@ -765,6 +861,122 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
     submitting: cloud.submitting,
     confirming_delete,
   }
+}
+
+/// What an organization's cloud lets members run, as a sentence.
+fn org_cloud_note(org: &crate::core::cloud_catalog::CloudOrganization) -> String {
+  let name = &org.name;
+  match (org.allow_managed, org.allow_byos) {
+    (true, true) => format!("Bills {name}. treq-managed sandboxes or {name}'s own keys."),
+    (true, false) => format!("Bills {name}. treq-managed sandboxes."),
+    (false, true) => format!("Bills {name}. {name}'s own keys."),
+    (false, false) => format!("Cloud is off for {name}. An owner can turn it on."),
+  }
+}
+
+/// The profile switcher (members of a Team organization) and the owner's
+/// settings for each Team organization they own.
+fn team_sections(
+  cloud: Option<&CloudRoute>,
+  state: &State,
+  pro: bool,
+) -> (Option<CloudProfileSection>, Vec<OrgCloudSection>) {
+  let Some(cloud) = cloud else {
+    return (None, Vec::new());
+  };
+  let teams: Vec<_> = cloud.organizations.iter().filter(|o| o.has_team).collect();
+  if teams.is_empty() {
+    return (None, Vec::new());
+  }
+  let current = cloud.profile.as_ref().and_then(|p| p.org_id.as_deref());
+  let no_workspace = cloud
+    .instance
+    .as_ref()
+    .filter(|i| i.provider_resource_id.is_some() && i.status != "deleted")
+    .is_none();
+  let profile = CloudProfileSection {
+    options: std::iter::once(ProfileOption {
+      org_id: None,
+      label: "Personal".into(),
+      note: if pro {
+        "Bills you.".into()
+      } else {
+        "Needs Pro.".into()
+      },
+      selected: current.is_none(),
+    })
+    .chain(teams.iter().map(|o| ProfileOption {
+      org_id: Some(o.org_id.clone()),
+      label: o.name.clone(),
+      note: org_cloud_note(o),
+      selected: current == Some(o.org_id.as_str()),
+    }))
+    .collect(),
+    saving: cloud.team_saving,
+    error: cloud.team_error.clone(),
+  };
+  let owned = teams
+    .iter()
+    .filter(|o| o.is_owner())
+    .map(|o| {
+      let draft = state
+        .team_drafts
+        .get(&o.org_id)
+        .cloned()
+        .unwrap_or_default();
+      let saved = cloud.org_keys.get(&o.org_id).cloned().unwrap_or_default();
+      // "Create workspace on this account" runs on the selected profile, so
+      // it shows on this organization's keys only while it is selected.
+      let creates_here = no_workspace && o.allow_byos && current == Some(o.org_id.as_str());
+      let keys: Vec<ProviderKeyRow> = saved
+        .iter()
+        .map(|key| {
+          let name = crate::core::cloud_catalog::provider_name(&key.provider_kind);
+          let invalid = key.invalid_at.is_some();
+          ProviderKeyRow {
+            kind: key.provider_kind.clone(),
+            status: if invalid {
+              format!("Rejected by {name}. Replace the key.")
+            } else {
+              "Key saved".into()
+            },
+            name,
+            invalid,
+            can_create: creates_here && !invalid && !cloud.submitting,
+          }
+        })
+        .collect();
+      OrgCloudSection {
+        org_id: o.org_id.clone(),
+        name: o.name.clone(),
+        allow_managed: draft.allow_managed.unwrap_or(o.allow_managed),
+        allow_byos: draft.allow_byos.unwrap_or(o.allow_byos),
+        org_cap: draft
+          .org_cap
+          .clone()
+          .unwrap_or_else(|| js_number(o.org_cap_usd)),
+        member_cap: draft
+          .member_cap
+          .clone()
+          .unwrap_or_else(|| js_number(o.member_cap_usd)),
+        addable: crate::core::cloud_catalog::BYOS_PROVIDERS
+          .iter()
+          .filter(|(kind, _)| !keys.iter().any(|r| r.kind == *kind))
+          .map(|(kind, name)| (kind.to_string(), name.to_string()))
+          .collect(),
+        keys,
+        editing: state
+          .team_key_editing
+          .as_ref()
+          .filter(|(org, _)| *org == o.org_id)
+          .map(|(_, kind)| kind.clone()),
+        draft: state.team_key_draft.clone(),
+        saving: cloud.team_saving,
+        error: draft.invalid.or_else(|| cloud.team_error.clone()),
+      }
+    })
+    .collect();
+  (Some(profile), owned)
 }
 
 impl SettingsView {
@@ -858,8 +1070,11 @@ impl SettingsView {
         error: cloud.provider_key_error.clone(),
       }
     });
+    let (cloud_profile, org_cloud) = team_sections(cloud_route.as_ref(), state, pro);
     AccountTab::SignedIn(Box::new(SignedIn {
       provider_keys,
+      cloud_profile,
+      org_cloud,
       name: user.name.clone(),
       email: user.email.clone(),
       pro,
@@ -875,8 +1090,10 @@ impl SettingsView {
         let end = s.current_period_end.as_ref()?;
         Some((period_label(&s.status).to_string(), local_date(end)))
       }),
-      manage_label: if pro {
-        "Manage Subscription"
+      manage_label: if past_due(subscription) {
+        "Update payment method"
+      } else if pro {
+        "Manage subscription"
       } else {
         "Upgrade to Pro"
       }
@@ -959,16 +1176,17 @@ impl SettingsView {
         let key = linear.and_then(|l| l.key.clone());
         LinearSection {
           repo: self.repo.is_some(),
+          connected: key.is_some(),
           description: if key.is_some() {
             "Direct API access configured"
           } else {
-            "Free plan: provide your API key"
+            "Paste a Linear personal API key"
           }
           .into(),
           editing: linear.is_some_and(|l| l.editing),
           draft: linear.map(|l| l.draft.clone()).unwrap_or_default(),
           saving: linear.is_some_and(|l| l.saving),
-          edit_label: format!("{} API Key", if key.is_some() { "Update" } else { "Add" }),
+          edit_label: format!("{} API key", if key.is_some() { "Update" } else { "Add" }),
           oauth: pro && native::feature_flag("pro"),
           oauth_description: if key.is_some() {
             "API key takes priority, but you can also connect via OAuth"
@@ -980,7 +1198,19 @@ impl SettingsView {
           key_priority_note: key.is_some() && pro,
         }
       });
-    IntegrationsTab { github, linear }
+    IntegrationsTab {
+      github_connected: matches!(github, GithubSection::SignedIn { .. }),
+      github,
+      linear,
+      expanded: self.account.expanded.iter().cloned().collect(),
+    }
+  }
+
+  /// Opens or closes an Integrations card.
+  pub(super) fn toggle_integration(&mut self, id: &str) {
+    if !self.account.expanded.remove(id) {
+      self.account.expanded.insert(id.to_string());
+    }
   }
 
   /// Reads the Linear API key each time the Integrations tab shows, as
@@ -1036,7 +1266,7 @@ impl SettingsView {
           match &result {
             Ok(()) => {
               host.notify(NativeEvent::RepoSettingsChanged { repo_path: path });
-              host.notify(toast(ToastTone::Success, "API Key saved", ""));
+              host.notify(toast(ToastTone::Success, "API key saved", ""));
             }
             Err(err) => host.notify(toast(ToastTone::Error, "Error saving API key", err)),
           }
@@ -1277,10 +1507,20 @@ impl SettingsView {
     }
     match id {
       "account.signIn" => self.host.open_url(&format!("{web}/sign-in?source=desktop")),
+      // A failed payment goes straight to the subscription tab, where the
+      // billing portal updates the card.
+      "account.manage" if past_due(self.account_route().and_then(|a| a.subscription).as_ref()) => {
+        self
+          .host
+          .open_url(&format!("{web}/dashboard?tab=subscription"))
+      }
       "account.manage" | "cloud.upgrade" => self.host.open_url(&format!("{web}/dashboard")),
       "github.manage" => self
         .host
         .open_url(&format!("{web}/dashboard?tab=integrations")),
+      "integration.toggle.github" => self.toggle_integration("github"),
+      "integration.toggle.linear" => self.toggle_integration("linear"),
+      "linear.createKey" => self.host.open_url(LINEAR_API_KEYS_URL),
       "account.devCallback.go" => match callback_token(&self.account.callback_url) {
         Ok(token) => {
           self.account.callback_error = None;
@@ -1303,7 +1543,11 @@ impl SettingsView {
       "account.delete.confirm" => self.delete_account(cx),
       "account.farewell.dismiss" => self.account.farewell = false,
       "linear.oauth" => self.start_linear_oauth(cx),
-      "cloud.provision" => self.host.cloud_action(CloudAction::Provision),
+      "cloud.provision" => {
+        let host = self.host.clone();
+        account_data::provision_once(cx, || host.cloud_action(CloudAction::Provision));
+        self.account.rust = account_data::account(cx);
+      }
       "cloud.wake" => self.host.cloud_action(CloudAction::Wake),
       "cloud.repair" => self.host.cloud_action(CloudAction::Repair),
       "cloud.openRepositories" => {
@@ -1376,6 +1620,63 @@ impl SettingsView {
             .to_string(),
         });
       }
+      "team.profile.personal" => self
+        .host
+        .cloud_action(CloudAction::SetCloudProfile { org_id: None }),
+      _ if id.starts_with("team.profile.") => {
+        let org_id = id
+          .strip_prefix("team.profile.")
+          .unwrap_or_default()
+          .to_string();
+        self.host.cloud_action(CloudAction::SetCloudProfile {
+          org_id: Some(org_id),
+        });
+      }
+      _ if id.starts_with("team.save.") => {
+        let org_id = id
+          .strip_prefix("team.save.")
+          .unwrap_or_default()
+          .to_string();
+        self.save_org_cloud(&org_id);
+      }
+      "team.key.cancel" => {
+        self.account.team_key_editing = None;
+        self.account.team_key_draft.clear();
+      }
+      "team.key.save" => {
+        let draft = std::mem::take(&mut self.account.team_key_draft);
+        if let (Some((org_id, kind)), false) = (
+          self.account.team_key_editing.take(),
+          draft.trim().is_empty(),
+        ) {
+          self.host.cloud_action(CloudAction::SaveOrgProviderKey {
+            org_id,
+            kind,
+            key: crate::commands::cloud::ApiKey(draft.trim().to_string()),
+          });
+        }
+      }
+      _ if id.starts_with("team.key.add.") => {
+        if let Some((org_id, kind)) = id
+          .strip_prefix("team.key.add.")
+          .and_then(|r| r.split_once('.'))
+        {
+          self.account.team_key_editing = Some((org_id.to_string(), kind.to_string()));
+          self.account.team_key_draft.clear();
+          self.account.team_key_focus = true;
+        }
+      }
+      _ if id.starts_with("team.key.remove.") => {
+        if let Some((org_id, kind)) = id
+          .strip_prefix("team.key.remove.")
+          .and_then(|r| r.split_once('.'))
+        {
+          self.host.cloud_action(CloudAction::RemoveOrgProviderKey {
+            org_id: org_id.to_string(),
+            kind: kind.to_string(),
+          });
+        }
+      }
       "cloud.spendCap.edit" => {
         let cap = self
           .account_route()
@@ -1422,9 +1723,94 @@ impl SettingsView {
       }
       "cloud.spendCap" => self.account.spend_cap_draft = text,
       "byos.key" => self.account.byos_key_draft = text,
+      "team.key" => self.account.team_key_draft = text,
+      _ if field.starts_with("team.cap.org.") => {
+        let org_id = field.strip_prefix("team.cap.org.").unwrap_or_default();
+        self
+          .account
+          .team_drafts
+          .entry(org_id.to_string())
+          .or_default()
+          .org_cap = Some(text);
+      }
+      _ if field.starts_with("team.cap.member.") => {
+        let org_id = field.strip_prefix("team.cap.member.").unwrap_or_default();
+        self
+          .account
+          .team_drafts
+          .entry(org_id.to_string())
+          .or_default()
+          .member_cap = Some(text);
+      }
+      _ if field.starts_with("team.managed.") => {
+        let org_id = field.strip_prefix("team.managed.").unwrap_or_default();
+        self
+          .account
+          .team_drafts
+          .entry(org_id.to_string())
+          .or_default()
+          .allow_managed = value.as_bool();
+      }
+      _ if field.starts_with("team.byos.") => {
+        let org_id = field.strip_prefix("team.byos.").unwrap_or_default();
+        self
+          .account
+          .team_drafts
+          .entry(org_id.to_string())
+          .or_default()
+          .allow_byos = value.as_bool();
+      }
       _ => return false,
     }
     true
+  }
+}
+
+impl SettingsView {
+  /// Sends an owner's changes to an organization's cloud, or says why a cap
+  /// is not accepted.
+  fn save_org_cloud(&mut self, org_id: &str) {
+    let Some(org) = self
+      .account_route()
+      .and_then(|a| a.cloud)
+      .and_then(|c| c.organizations.into_iter().find(|o| o.org_id == org_id))
+    else {
+      return;
+    };
+    let draft = self
+      .account
+      .team_drafts
+      .entry(org_id.to_string())
+      .or_default();
+    let caps = parse_spend_cap(
+      draft
+        .org_cap
+        .as_deref()
+        .unwrap_or(&js_number(org.org_cap_usd)),
+    )
+    .and_then(|org_cap| {
+      parse_spend_cap(
+        draft
+          .member_cap
+          .as_deref()
+          .unwrap_or(&js_number(org.member_cap_usd)),
+      )
+      .map(|m| (org_cap, m))
+    });
+    match caps {
+      Err(error) => draft.invalid = Some(error),
+      Ok((org_cap_usd, member_cap_usd)) => {
+        let settings = CloudAction::SaveOrgCloudSettings {
+          org_id: org_id.to_string(),
+          allow_managed: draft.allow_managed.unwrap_or(org.allow_managed),
+          allow_byos: draft.allow_byos.unwrap_or(org.allow_byos),
+          org_cap_usd,
+          member_cap_usd,
+        };
+        self.account.team_drafts.remove(org_id);
+        self.host.cloud_action(settings);
+      }
+    }
   }
 }
 
@@ -1460,7 +1846,7 @@ fn heading(text: &'static str) -> gpui::Div {
     .child(text)
 }
 
-/// "Sign in with Browser", which opens the website's sign-in page.
+/// "Sign in with browser", which opens the website's sign-in page.
 fn sign_in_button(id: &'static str, view: &SettingsView, p: &Palette) -> Button {
   Button::new(id, p)
     .child(ui::icon(
@@ -1468,7 +1854,7 @@ fn sign_in_button(id: &'static str, view: &SettingsView, p: &Palette) -> Button 
       16.,
       p.primary_foreground,
     ))
-    .label("Sign in with Browser")
+    .label("Sign in with browser")
     .on_click(view.press("account.signIn"))
 }
 
@@ -1799,7 +2185,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           .into_any_element(),
         CloudUsage::Loading => div()
           .text_color(p.muted_foreground)
-          .child("Loading usage...")
+          .child("Loading usage…")
           .into_any_element(),
         CloudUsage::Report {
           summary,
@@ -2116,7 +2502,7 @@ impl SettingsView {
     let input = self.controls.input(
       "account.callbackUrl",
       &dev.url,
-      "treq://auth/callback?token=...",
+      "treq://auth/callback?token=…",
       window,
       cx,
     );
@@ -2152,7 +2538,7 @@ impl SettingsView {
               .size(Size::Sm)
               .variant(Variant::Outline)
               .disabled(dev.loading || dev.url.trim().is_empty())
-              .label(if dev.loading { "..." } else { "Go" })
+              .label(if dev.loading { "…" } else { "Go" })
               .on_click(self.press("account.devCallback.go")),
           ),
       )
@@ -2289,6 +2675,206 @@ impl SettingsView {
   }
 
   /// "Monthly spend cap: $50.00" with Change, or the amount field.
+  /// "Cloud billing": personal or a Team organization, for the next
+  /// workspace.
+  fn team_profile(&mut self, section: &CloudProfileSection, p: &Palette) -> AnyElement {
+    div()
+      .id("team-profile")
+      .debug_selector(|| "team-profile".into())
+      .flex()
+      .flex_col()
+      .gap_2()
+      .child(section_header(
+        theme::ICON_CLOUD,
+        "Cloud billing",
+        "Who pays for your next workspace",
+        p,
+      ))
+      .children(section.options.iter().map(|option| {
+        let key = option.org_id.clone().unwrap_or_else(|| "personal".into());
+        setting_row(
+          &option.label,
+          &option.note,
+          Button::new(format!("team-profile-{key}"), p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .selected(option.selected)
+            .disabled(section.saving || option.selected)
+            .label(if option.selected { "In use" } else { "Use" })
+            .on_click(self.press(&format!("team.profile.{key}"))),
+          p,
+        )
+      }))
+      .children(
+        section
+          .error
+          .clone()
+          .map(|e| ui::text(div(), TextSize::Sm).text_color(red(p)).child(e)),
+      )
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child("A workspace keeps the billing it was created with."),
+      )
+      .into_any_element()
+  }
+
+  /// An owner's cloud settings for one Team organization: what members may
+  /// run, both caps, and the organization's provider keys.
+  fn org_cloud(
+    &mut self,
+    org: &OrgCloudSection,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> AnyElement {
+    let id = org.org_id.clone();
+    let org_cap = self.controls.input(
+      &format!("team.cap.org.{id}"),
+      &org.org_cap,
+      "500",
+      window,
+      cx,
+    );
+    let member_cap = self.controls.input(
+      &format!("team.cap.member.{id}"),
+      &org.member_cap,
+      "50",
+      window,
+      cx,
+    );
+    let editor = org.editing.as_ref().map(|kind| {
+      let input = self
+        .controls
+        .password("team.key", &org.draft, "API key", window, cx);
+      if self.account.team_key_focus {
+        self.account.team_key_focus = false;
+        input.read(cx).focus_handle(cx).focus(window, cx);
+      }
+      let name = crate::core::cloud_catalog::provider_name(kind);
+      setting_row(
+        &format!("{name} API key for {}", org.name),
+        "Checked with the provider before it is saved.",
+        self.field_with_save(
+          ("team-key", "team.key"),
+          form::input_field("team-key-input", &input, false, org.saving),
+          256.,
+          !org.saving && !org.draft.trim().is_empty(),
+          p,
+        ),
+        p,
+      )
+    });
+    let keys = org.allow_byos.then(|| {
+      div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .children(org.keys.iter().map(|row| {
+          let create = row.can_create.then(|| {
+            Button::new(format!("team-{id}-key-create-{}", row.kind), p)
+              .size(Size::Sm)
+              .disabled(org.saving)
+              .label("Create workspace on this account")
+              .on_click(self.press(&format!("byos.create.{}", row.kind)))
+          });
+          let remove = Button::new(format!("team-{id}-key-remove-{}", row.kind), p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .disabled(org.saving)
+            .label("Remove")
+            .on_click(self.press(&format!("team.key.remove.{id}.{}", row.kind)));
+          setting_row(
+            &row.name,
+            &row.status,
+            div().flex().gap_2().children(create).child(remove),
+            p,
+          )
+          .when(row.invalid, |this| this.text_color(red(p)))
+        }))
+        .child(
+          div()
+            .flex()
+            .flex_wrap()
+            .gap_2()
+            .children(org.addable.iter().map(|(kind, name)| {
+              Button::new(format!("team-{id}-key-add-{kind}"), p)
+                .variant(Variant::Outline)
+                .size(Size::Sm)
+                .disabled(org.saving)
+                .label(format!("Add {name} key"))
+                .on_click(self.press(&format!("team.key.add.{id}.{kind}")))
+            })),
+        )
+    });
+    div()
+      .id(SharedString::from(format!("team-{id}")))
+      .debug_selector({
+        let id = id.clone();
+        move || format!("team-{id}")
+      })
+      .flex()
+      .flex_col()
+      .gap_2()
+      .child(section_header(theme::ICON_CLOUD, "Organization cloud", &format!("{}, owners only", org.name), p))
+      .child(setting_row(
+        "treq-managed sandboxes",
+        "Members run on treq's account. Billed to the organization at cost plus 20%.",
+        form::switch(
+          format!("team-{id}-managed"),
+          "treq-managed sandboxes",
+          org.allow_managed,
+          org.saving,
+          p,
+          self.field(&format!("team.managed.{id}")),
+        ),
+        p,
+      ))
+      .child(setting_row(
+        "The organization's own keys",
+        "Members run on the organization's provider accounts. treq bills the organization 5% of the provider's price.",
+        form::switch(
+          format!("team-{id}-byos"),
+          "The organization's own keys",
+          org.allow_byos,
+          org.saving,
+          p,
+          self.field(&format!("team.byos.{id}")),
+        ),
+        p,
+      ))
+      .child(setting_row(
+        "Organization cap",
+        "Monthly, for everyone together. In US dollars.",
+        form::input_field(format!("team-{id}-org-cap"), &org_cap, false, org.saving),
+        p,
+      ))
+      .child(setting_row(
+        "Member cap",
+        "Monthly, for each member. In US dollars.",
+        form::input_field(format!("team-{id}-member-cap"), &member_cap, false, org.saving),
+        p,
+      ))
+      .child(
+        div().flex().child(
+          Button::new(format!("team-{id}-save"), p)
+            .size(Size::Sm)
+            .disabled(org.saving)
+            .label("Save")
+            .on_click(self.press(&format!("team.save.{id}"))),
+        ),
+      )
+      .children(keys)
+      .children(editor)
+      .children(
+        org
+          .error
+          .clone()
+          .map(|e| ui::text(div(), TextSize::Sm).text_color(red(p)).child(e)),
+      )
+      .into_any_element()
+  }
+
   fn spend_cap_row(
     &mut self,
     editor: &SpendCapEditor,
@@ -2469,6 +3055,15 @@ impl SettingsView {
       .provider_keys
       .as_ref()
       .map(|keys| self.provider_keys(keys, p, window, cx));
+    let team_profile = s
+      .cloud_profile
+      .as_ref()
+      .map(|section| self.team_profile(section, p));
+    let org_cloud: Vec<AnyElement> = s
+      .org_cloud
+      .iter()
+      .map(|org| self.org_cloud(org, p, window, cx))
+      .collect();
     div()
       .flex()
       .flex_col()
@@ -2477,6 +3072,8 @@ impl SettingsView {
       .child(subscription)
       .children(cloud)
       .children(spend_cap)
+      .children(team_profile)
+      .children(org_cloud)
       .children(provider_keys)
       .child(
         div().flex().child(
@@ -2485,7 +3082,7 @@ impl SettingsView {
             .size(Size::Sm)
             .text_color(p.destructive)
             .child(ui::icon(theme::ICON_LOG_OUT, 16., p.destructive))
-            .label("Sign Out")
+            .label("Sign out")
             .on_click(self.press("account.signOut")),
         ),
       )
@@ -2512,7 +3109,7 @@ impl SettingsView {
                 .size(Size::Sm)
                 .text_color(p.destructive)
                 .child(ui::icon(theme::ICON_TRASH, 16., p.destructive))
-                .label("Delete Account")
+                .label("Delete account")
                 .on_click(self.press("account.delete.ask")),
             ),
           ),
@@ -2606,7 +3203,7 @@ impl SettingsView {
             Button::new("account-delete-confirm", p)
               .variant(Variant::Destructive)
               .disabled(!can_confirm)
-              .label(if dialog.deleting { "Deleting…" } else { "Delete Account" })
+              .label(if dialog.deleting { "Deleting…" } else { "Delete account" })
               .on_click(self.press("account.delete.confirm"))
               .into_any_element(),
           ]),
@@ -2630,16 +3227,112 @@ impl SettingsView {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let linear = tab
-      .linear
-      .as_ref()
-      .map(|linear| self.linear(linear, p, window, cx));
+    let open = |id: &str| tab.expanded.iter().any(|e| e == id);
+    let github = self.integration_card(
+      IntegrationCard {
+        id: "github",
+        icon: theme::ICON_GITHUB,
+        name: "GitHub",
+        purpose: "Pull requests, checks and reviews for your repositories",
+        connected: tab.github_connected,
+        open: open("github"),
+      },
+      open("github").then(|| self.github(&tab.github, p)),
+      p,
+    );
+    let linear = tab.linear.as_ref().map(|linear| {
+      let body = open("linear").then(|| self.linear(linear, p, window, cx));
+      self.integration_card(
+        IntegrationCard {
+          id: "linear",
+          icon: theme::ICON_LINEAR,
+          name: "Linear",
+          purpose: "Issues to start workspaces from",
+          connected: linear.connected,
+          open: open("linear"),
+        },
+        body,
+        p,
+      )
+    });
     div()
       .flex()
       .flex_col()
-      .gap_12()
-      .child(self.github(&tab.github, p))
+      .gap_3()
+      .child(github)
       .children(linear)
+  }
+
+  /// One integration's card: a header row (icon, name, purpose, status,
+  /// chevron) that expands the card to configure it.
+  fn integration_card(
+    &self,
+    card: IntegrationCard,
+    body: Option<AnyElement>,
+    p: &Palette,
+  ) -> gpui::Div {
+    let status = div()
+      .debug_selector({
+        let id = format!("integration-status-{}", card.id);
+        move || id
+      })
+      .flex()
+      .items_center()
+      .gap_1p5()
+      .child(ui::Dot::new(
+        if card.connected {
+          Tone::Success
+        } else {
+          Tone::Neutral
+        },
+        if card.connected {
+          "Connected"
+        } else {
+          "Not connected"
+        },
+        p,
+      ))
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child(if card.connected {
+            "Connected"
+          } else {
+            "Not connected"
+          }),
+      );
+    let header = ui::Row::new(format!("integration-card-{}", card.id), p)
+      .role(gpui::Role::Button)
+      .label(format!("{} integration", card.name))
+      .density(ui::RowDensity::TwoLine)
+      .leading(ui::icon(card.icon, 20., p.foreground))
+      .title(card.name)
+      .meta(card.purpose)
+      .trailing(status)
+      .trailing(ui::icon(
+        if card.open {
+          theme::ICON_CHEVRON_UP
+        } else {
+          theme::ICON_CHEVRON_DOWN
+        },
+        16.,
+        p.muted_foreground,
+      ))
+      .px_4()
+      .on_click(self.press(&format!("integration.toggle.{}", card.id)));
+    ui::card(p)
+      .overflow_hidden()
+      .child(header)
+      .when_some(body, |this, body| {
+        this.child(
+          div()
+            .border_t_1()
+            .border_color(p.border)
+            .px_4()
+            .py_2()
+            .child(body),
+        )
+      })
   }
 
   fn github(&self, github: &GithubSection, p: &Palette) -> AnyElement {
@@ -2647,23 +3340,19 @@ impl SettingsView {
       GithubSection::Loading => div()
         .flex()
         .justify_center()
-        .py_16()
+        .py_6()
         .child(ui::spinner("github-loading", 24., p.muted_foreground))
         .into_any_element(),
-      GithubSection::SignedOut => centered(16.)
-        .text_center()
-        .child(ui::icon(theme::ICON_GITHUB, 48., p.muted_foreground))
+      GithubSection::SignedOut => div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_4()
+        .py_3()
         .child(
-          div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .child(heading("Sign in to manage integrations"))
-            .child(help(
-              "Connect your GitHub repositories through Treq.",
-              p,
-              4.,
-            )),
+          ui::text(div(), TextSize::Sm)
+            .text_color(p.muted_foreground)
+            .child("Sign in to Treq Cloud to connect GitHub"),
         )
         .child(sign_in_button("integrations-sign-in", self, p))
         .into_any_element(),
@@ -2731,7 +3420,7 @@ impl SettingsView {
     let key_control: AnyElement = if linear.editing {
       let input = self
         .controls
-        .password("linear.apiKey", &linear.draft, "lin_api_...", window, cx);
+        .password("linear.apiKey", &linear.draft, "lin_api_…", window, cx);
       if let Some(state) = self.account.linear.as_mut().filter(|l| l.focus) {
         state.focus = false;
         input.read(cx).focus_handle(cx).focus(window, cx);
@@ -2788,18 +3477,21 @@ impl SettingsView {
         })
         .label("Connect via OAuth")
         .on_click(self.press("linear.oauth"));
-      setting_row("OAuth Connect", &linear.oauth_description, button, p)
+      setting_row("OAuth connection", &linear.oauth_description, button, p)
         .border_t_1()
         .border_color(p.border)
     });
+    let create_key = Button::new("linear-create-key", p)
+      .variant(Variant::Link)
+      .size(Size::Sm)
+      .child(ui::icon(theme::ICON_EXTERNAL_LINK, 12., p.primary))
+      .label("Create a key in Linear")
+      .on_click(self.press("linear.createKey"));
     div()
-      .child(section_header(
-        theme::ICON_LINEAR,
-        "Linear",
-        "Issue tracker integration",
-        p,
-      ))
-      .child(setting_row("API Key", &linear.description, key_control, p))
+      .child(setting_row("API key", &linear.description, key_control, p))
+      .when(!linear.connected, |this| {
+        this.child(div().pb_2().flex().child(create_key))
+      })
       .children(oauth)
       .when(linear.key_priority_note, |this| {
         this.child(

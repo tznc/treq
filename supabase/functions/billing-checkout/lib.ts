@@ -64,7 +64,10 @@ async function customerFor(owner: Owner, deps: CheckoutDeps) {
 
   const params: StripeParams = {};
   // The email is for Stripe receipts only. Ownership never depends on it.
-  if (deps.user.email) params.email = deps.user.email;
+  // An organization's customer is the team's billing account, shared by all
+  // its owners, so the buyer's personal email stays off it: Checkout asks for
+  // a billing email, and any owner changes it in Manage billing.
+  if (owner.type === "user" && deps.user.email) params.email = deps.user.email;
   params["metadata[owner_type]"] = owner.type;
   params["metadata[owner_id]"] = owner.id;
   const created = await deps.stripe.request<{ id: string }>(
@@ -79,6 +82,62 @@ async function customerFor(owner: Owner, deps: CheckoutDeps) {
   return recorded;
 }
 
+// Stripe statuses that mean the customer already has, or is about to have,
+// this plan. The webhook may not have recorded it yet, so hasPro() alone
+// lets two tabs each start a paid subscription.
+const LIVE_STATUSES: ReadonlySet<string> = new Set([
+  "trialing",
+  "active",
+  "past_due",
+  "incomplete",
+  "unpaid",
+  "paused",
+]);
+
+type StripeList<T> = { data?: T[] };
+type StripeSubscription = {
+  status?: string;
+  items?: { data?: { price?: { lookup_key?: string | null } }[] };
+};
+
+async function hasLiveSubscription(
+  customerId: string,
+  plan: BillingPlan,
+  stripe: StripeClient,
+): Promise<boolean> {
+  const subscriptions = await stripe.request<StripeList<StripeSubscription>>(
+    "GET",
+    "/v1/subscriptions",
+    { customer: customerId, status: "all", limit: 100 },
+  );
+  return (subscriptions.data ?? []).some(
+    (sub) =>
+      LIVE_STATUSES.has(sub.status ?? "") &&
+      (sub.items?.data ?? []).some(
+        (item) => item.price?.lookup_key === LOOKUP_KEY_BY_PLAN[plan],
+      ),
+  );
+}
+
+// Only one checkout per customer stays payable: the newest. An older tab
+// that is completed after this would otherwise start a second subscription.
+async function expireOpenSessions(
+  customerId: string,
+  stripe: StripeClient,
+): Promise<void> {
+  const sessions = await stripe.request<StripeList<{ id: string }>>(
+    "GET",
+    "/v1/checkout/sessions",
+    { customer: customerId, status: "open", limit: 100 },
+  );
+  for (const session of sessions.data ?? []) {
+    await stripe.request(
+      "POST",
+      `/v1/checkout/sessions/${encodeURIComponent(session.id)}/expire`,
+    );
+  }
+}
+
 async function openSession(
   plan: BillingPlan,
   owner: Owner,
@@ -87,11 +146,21 @@ async function openSession(
   try {
     const customer = await customerFor(owner, deps);
 
-    // Pro also carries the metered usage price for cloud workspaces.
-    const usageKey =
-      plan === "pro"
-        ? (deps.usagePriceLookupKey ?? DEFAULT_USAGE_PRICE_LOOKUP_KEY)
-        : null;
+    if (
+      await hasLiveSubscription(customer.stripe_customer_id, plan, deps.stripe)
+    ) {
+      return {
+        status: 409,
+        body: {
+          error: `A ${PLAN_NAMES[plan]} subscription is already being set up. Refresh in a minute, or use Manage billing.`,
+        },
+      };
+    }
+    await expireOpenSessions(customer.stripe_customer_id, deps.stripe);
+
+    // Pro and Team both carry the metered usage price for cloud workspaces:
+    // Team members' usage on the organization profile bills the organization.
+    const usageKey = deps.usagePriceLookupKey ?? DEFAULT_USAGE_PRICE_LOOKUP_KEY;
     const query: StripeParams = { "lookup_keys[0]": LOOKUP_KEY_BY_PLAN[plan] };
     if (usageKey) query["lookup_keys[1]"] = usageKey;
     query.active = true;
@@ -127,7 +196,7 @@ async function openSession(
         priceId,
         ownerId: owner.id,
         ownerType: owner.type,
-        trialEligible: plan === "pro" && customer.trial_used_at === null,
+        trialEligible: plan === "pro" && customer.trial_used_at === null && !(await owner.store.trialClaimed()),
         webUrl: deps.webUrl,
         quantity: owner.quantity,
         usagePriceId,

@@ -103,7 +103,12 @@ pub struct OnboardingView {
   /// By machine id: what the host last said holds its terminals, or
   /// `None` while it is asked.
   live: HashMap<String, Option<Result<TerminalStatus, String>>>,
+  /// Other machines' + is open, offering an SSH host or a dev container.
+  other_open: bool,
 }
+
+/// The one group SSH hosts and dev containers share until there is one.
+const OTHER_MACHINES: &str = "Other machines";
 
 /// The listing the last onboarding screen read, which the next one draws
 /// until its own read returns: opening a window or coming back to the
@@ -151,6 +156,7 @@ impl OnboardingView {
       confirm: None,
       terminals: HashMap::new(),
       live: HashMap::new(),
+      other_open: false,
     };
     // Signing in, or the cloud workspace changing state, changes its row.
     cx.observe_global::<super::account_data::Account>(|view, cx| {
@@ -302,7 +308,15 @@ impl OnboardingView {
       other => return (self.react)(other, cx),
     };
     let (name, arg) = press.split_once(':').unwrap_or((press.as_str(), ""));
+    if matches!(name, "machines.addSsh" | "machines.addContainer") {
+      self.other_open = false;
+      cx.notify();
+    }
     match name {
+      "machines.toggleOther" => {
+        self.other_open = !self.other_open;
+        cx.notify();
+      }
       "machines.tools" => self.toggle_popover(arg, cx),
       "machines.addContainer" => self.add_container(cx),
       "machines.open" => {
@@ -553,6 +567,15 @@ impl OnboardingView {
   }
 }
 
+/// The terminals status dot's label: green while terminals can run, amber
+/// when tmux is missing.
+fn terminals_dot_label(tone: Tone) -> &'static str {
+  match tone {
+    Tone::Warning => "tmux not installed",
+    _ => "Terminals running",
+  }
+}
+
 fn plural(n: usize, one: &str) -> String {
   if n == 1 {
     format!("1 {one}")
@@ -625,7 +648,7 @@ fn live_status(
     .flex()
     .items_center()
     .gap_2()
-    .children(tone.map(|tone| Dot::new(tone, p)))
+    .children(tone.map(|tone| Dot::new(tone, terminals_dot_label(tone), p)))
     .child(ui::text(div(), TextSize::Sm).min_w_0().child(line))
     .test_support()
     .into_any_element()
@@ -699,6 +722,7 @@ impl OnboardingView {
       .relative()
       .child(
         Row::new(row_id, &p)
+          .role(gpui::Role::ListItem)
           .density(if machine.detail.is_empty() {
             RowDensity::Default
           } else {
@@ -709,7 +733,9 @@ impl OnboardingView {
           .when(!machine.detail.is_empty(), |row| {
             row.meta(machine.detail.clone())
           })
-          .when_some(status, |row, tone| row.trailing(Dot::new(tone, &p)))
+          .when_some(status, |row, tone| {
+            row.trailing(Dot::new(tone, status_label, &p))
+          })
           .actions(tools_button, 24.)
           .selected(open)
           .on_click(ctx.send(press(format!("machines.open:{}", machine.id)))),
@@ -847,17 +873,55 @@ impl OnboardingView {
       endpoint_id: String::new(),
     }
     .section();
-    if self.listing.ssh && !sections.iter().any(|(s, _)| *s == ssh) {
-      sections.insert(sections.len().min(1), (ssh, Vec::new()));
-    }
     let containers = Place::DevContainer {
       container_id: String::new(),
       repo_path: String::new(),
       running: false,
     }
     .section();
-    if self.listing.containers && !sections.iter().any(|(s, _)| *s == containers) {
-      sections.push((containers, Vec::new()));
+    // Until there is an SSH host or a dev container, one Other machines
+    // group stands for both, with one +.
+    let offered = self.listing.ssh || self.listing.containers;
+    let any_other =
+      self.container.is_some() || sections.iter().any(|(s, _)| *s == ssh || *s == containers);
+    if offered && !any_other {
+      let mut options = Vec::new();
+      if self.other_open {
+        let option = |id: &'static str, icon, label: &'static str, action: &'static str| {
+          Button::new(id, &p)
+            .variant(Variant::Ghost)
+            .size(Size::Sm)
+            .w_full()
+            .icon(icon, 14.)
+            .label(label)
+            .on_click(ctx.send(press(action)))
+            .into_any_element()
+        };
+        if self.listing.ssh {
+          options.push(option(
+            "machines-add-ssh",
+            theme::ICON_SERVER,
+            "Add SSH host",
+            "machines.addSsh",
+          ));
+        }
+        if self.listing.containers {
+          options.push(option(
+            "machines-add-container",
+            theme::ICON_BOX,
+            "Add dev container",
+            "machines.addContainer",
+          ));
+        }
+      }
+      sections.push((OTHER_MACHINES, options));
+    } else {
+      if self.listing.ssh && !sections.iter().any(|(s, _)| *s == ssh) {
+        sections.insert(sections.len().min(1), (ssh, Vec::new()));
+      }
+      if self.listing.containers && !sections.iter().any(|(s, _)| *s == containers) {
+        sections.push((containers, Vec::new()));
+      }
     }
     let add = |section: &str| match section {
       s if s == ssh => Some(("machines-add-ssh", "Add SSH host", "machines.addSsh")),
@@ -866,7 +930,18 @@ impl OnboardingView {
         "Add dev container",
         "machines.addContainer",
       )),
+      OTHER_MACHINES => Some((
+        "machines-add-other",
+        "Add another machine",
+        "machines.toggleOther",
+      )),
       _ => None,
+    };
+    let group_id = |section: &str| match section {
+      s if s == ssh => "machines-group-ssh",
+      s if s == containers => "machines-group-containers",
+      OTHER_MACHINES => "machines-group-other",
+      _ => "machines-group",
     };
     let mut container_status = self.container.clone().map(|status| match status {
       Ok(path) => div()
@@ -921,7 +996,9 @@ impl OnboardingView {
           .px_2()
           .children(sections.into_iter().map(|(section, rows)| {
             let empty = rows.is_empty();
+            let group = group_id(section);
             div()
+              .debug_selector(move || group.into())
               .pb_3()
               .child(
                 div()
@@ -951,6 +1028,8 @@ impl OnboardingView {
                       .text_color(p.muted_foreground)
                       .child(if section == ssh {
                         "No hosts yet."
+                      } else if section == OTHER_MACHINES {
+                        "No SSH hosts or dev containers yet."
                       } else {
                         "No containers yet."
                       }),
@@ -981,6 +1060,7 @@ impl OnboardingView {
       None => press(format!("machines.openLocal:{}", recent.path)),
     };
     Row::new(format!("recent-{}-{i}", recent.machine_id), &p)
+      .role(gpui::Role::ListItem)
       .density(RowDensity::Default)
       .icon(theme::ICON_FOLDER_GIT)
       .title(recent.name.clone())
@@ -1112,9 +1192,12 @@ impl OnboardingView {
               .flex_col()
               .gap_1p5()
               .child(
-                ui::text(div(), TextSize::Lg)
+                ui::text(div().id("onboarding-heading"), TextSize::Lg)
+                  .role(gpui::Role::Heading)
+                  .aria_label("Open a repository")
                   .font_weight(FontWeight::SEMIBOLD)
-                  .child("Overview"),
+                  .child("Open a repository")
+                  .test_support(),
               )
               .child(
                 ui::text(div(), TextSize::Sm)
@@ -1212,7 +1295,7 @@ where
   if !core::is_repository(path) {
     toast(
       ToastTone::Error,
-      "Not a Git Repository",
+      "Not a Git repository",
       "Please select a folder that contains a git repository.".into(),
     );
     return;

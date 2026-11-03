@@ -654,7 +654,10 @@ impl RemoteView {
           self.host.cloud_action(action);
         }
       }
-      "cloud.provision" => self.host.cloud_action(CloudAction::Provision),
+      "cloud.provision" => {
+        let host = self.host.clone();
+        account_data::provision_once(cx, || host.cloud_action(CloudAction::Provision));
+      }
       "cloud.wake" => self.host.cloud_action(CloudAction::Wake),
       "cloud.repair" => self.host.cloud_action(CloudAction::Repair),
       // The repository list opens once the endpoint connects.
@@ -883,7 +886,7 @@ impl RemoteView {
           .label(if account.signing_in {
             "Signing in…"
           } else {
-            "Sign in with Browser"
+            "Sign in with browser"
           })
           .disabled(busy)
           .on_click(press("account.signIn")),
@@ -1072,7 +1075,7 @@ impl RemoteView {
                   .size(Size::Sm)
                   .disabled(alias_empty || form.resolving)
                   .label(if form.resolving {
-                    "Resolving..."
+                    "Resolving…"
                   } else {
                     "Autofill from alias"
                   })

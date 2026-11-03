@@ -264,9 +264,7 @@ pub fn abandon_commit(
   let (workspace_dir, workspace) = workspace_target(repo_path, workspace_id.into())?;
   let workspace_dir_str = workspace_dir.as_str();
 
-  if let Some(workspace) = &workspace {
-    ensure_rewritable(repo_path, workspace, commit_change_id)?;
-  }
+  ensure_target_rewritable(repo_path, workspace.as_ref(), commit_change_id)?;
 
   let op_id = jj::jj_abandon(workspace_dir_str, commit_change_id)
     .map_err(|e| format!("Failed to abandon commit: {}", e))?;
@@ -275,6 +273,23 @@ pub fn abandon_commit(
     .map_err(|e| format!("Failed to update workspace working copy: {}", e))?;
 
   Ok(op_id)
+}
+
+/// [`ensure_rewritable`] for a workspace; for the home repository (`None`),
+/// refuses commits already pushed to the home branch's `origin` bookmark.
+fn ensure_target_rewritable(
+  repo_path: &str,
+  workspace: Option<&local_db::Workspace>,
+  revision: &str,
+) -> Result<(), String> {
+  match workspace {
+    Some(workspace) => ensure_rewritable(repo_path, workspace, revision),
+    None => {
+      let branch = jj::resolve_home_repo_branch(repo_path)
+        .map_err(|e| format!("Failed to get active branch: {}", e))?;
+      jj::ensure_home_commit_rewritable(repo_path, revision, &branch).map_err(|e| e.to_string())
+    }
+  }
 }
 
 /// Refuses `revision` unless `workspace` may rewrite it: it must be in the
@@ -440,9 +455,7 @@ pub fn describe_commit(
   let (workspace_dir, workspace) = workspace_target(repo_path, workspace_id.into())?;
   let workspace_dir_str = workspace_dir.as_str();
 
-  if let Some(workspace) = &workspace {
-    ensure_rewritable(repo_path, workspace, commit_change_id)?;
-  }
+  ensure_target_rewritable(repo_path, workspace.as_ref(), commit_change_id)?;
 
   jj::jj_describe(workspace_dir_str, commit_change_id, description)
     .map_err(|e| format!("Failed to describe commit: {}", e))?;

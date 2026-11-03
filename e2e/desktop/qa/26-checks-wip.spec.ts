@@ -19,7 +19,7 @@ test("checks-wip: WIP status is inactive, not counted", async ({ page }) => {
     screen: true,
     rest: false,
     expectations: [
-      "The header reads GitHub checks · 3/3 and the chip shows a green check, not a spinner",
+      "The header chip reads '3/3 checks passed' with a green check, not a spinner; the popover reads GitHub checks · 3/3",
       "WIP is the last row: a grey dash icon, grey name and 'inactive' where a duration would be",
     ],
   });

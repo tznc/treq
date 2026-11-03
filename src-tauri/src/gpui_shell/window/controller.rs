@@ -611,6 +611,15 @@ impl WindowController {
         title,
         description,
       } => self.host.toast(tone, &title, &description),
+      Effect::ReviewDone {
+        repo_path,
+        workspace_id,
+        ..
+      } => self.background(
+        move |host| host.review_done(&repo_path, workspace_id),
+        |_, (), _| {},
+        cx,
+      ),
       Effect::OpenUrl(url) => self.host.open_url(&url),
       Effect::Remote(effect) => self.remote_effect(*effect, cx),
     }
@@ -1002,6 +1011,7 @@ impl WindowController {
       workspace_path: workspace
         .map(model::full_path)
         .unwrap_or_else(|| self.model.repo().to_string()),
+      query: self.model.dialogs.file_query.clone(),
     })
   }
 }

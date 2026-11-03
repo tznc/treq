@@ -37,7 +37,7 @@ fn turning_the_agent_finished_notification_off_saves_it(cx: &mut TestAppContext)
   let toggle = screen.get_by_role(by::role(Role::Switch).name("Notify when an agent finishes"));
   user.click(&toggle);
   expect(&toggle).not().to_be_checked();
-  user.click(&screen.get_by_role(by::role(Role::Button).name("Save Settings")));
+  // The switch saves as it flips, with no Save button and no toast.
   h.cx.run_until_parked();
 
   let writes = host.writes();
@@ -48,24 +48,39 @@ fn turning_the_agent_finished_notification_off_saves_it(cx: &mut TestAppContext)
     "{writes:?}"
   );
   assert!(
-    writes.contains(&"notify toast Settings saved".to_string()),
+    !writes.iter().any(|w| w.starts_with("notify toast")),
     "{writes:?}"
   );
 }
 
-// plan-split-button.test.tsx
+// The prompt's Send button.
 
 #[gpui::test]
-fn claude_offers_plan_mode_from_the_submit_menu(cx: &mut TestAppContext) {
+fn the_prompt_dialog_sends_in_edit_mode_from_the_send_button(cx: &mut TestAppContext) {
   let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
   let screen = screen(&mut h);
   let user = screen.user();
   expect(screen.get_by_role(by::role(Role::Dialog).name("Start a new agent session")))
     .to_be_visible();
-  expect(screen.get_by_role(by::role(Role::Button).name("Edit"))).to_be_visible();
-  user.click(&screen.get_by_role(by::role(Role::Button).name("More submit options")));
-  user.click(&screen.get_by_role(by::role(Role::MenuItem).name("Plan")));
-  assert_eq!(tasks(&mut h, &host)[0].mode, "plan");
+  assert!(screen
+    .query_by_role(by::role(Role::Button).name("More submit options"))
+    .is_none());
+  assert!(screen
+    .query_by_role(by::role(Role::Button).name("Edit"))
+    .is_none());
+  let send = screen.get_by_role(by::role(Role::Button).name("Send"));
+  expect(&send).to_be_enabled();
+  user.click(&send);
+  assert_eq!(tasks(&mut h, &host)[0].mode, "acceptEdits");
+}
+
+#[gpui::test]
+fn the_send_button_is_disabled_without_a_prompt(cx: &mut TestAppContext) {
+  let mut modal = agent_modal();
+  modal["initialPrompt"] = serde_json::Value::Null;
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), modal);
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Button).name("Send"))).to_be_disabled();
 }
 
 #[gpui::test]
@@ -83,13 +98,13 @@ fn the_prompt_dialog_targets_the_workspace_it_opened_on(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
-fn agents_without_plan_mode_hide_the_submit_menu(cx: &mut TestAppContext) {
+fn agents_without_plan_mode_send_the_same_way(cx: &mut TestAppContext) {
   let host = FakeHost::with_settings(&[("/repo:default_agent", "codex")]);
   let (mut h, _) = modal_harness(cx, host, agent_modal());
   let screen = screen(&mut h);
-  expect(screen.get_by_role(by::role(Role::Button).name("Run"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Button).name("Send"))).to_be_visible();
   assert!(screen
-    .query_by_role(by::role(Role::Button).name("More submit options"))
+    .query_by_role(by::role(Role::Button).name("Run"))
     .is_none());
 }
 
@@ -118,12 +133,12 @@ fn escape_closes_the_workspace_picker_then_the_dialog(cx: &mut TestAppContext) {
   let screen = screen(&mut h);
   let user = screen.user();
   user.click(&screen.get_by_role(by::role(Role::Button).name("Workspace: treq/login")));
-  let search = screen.get_by_role(by::role(Role::TextInput).name("Search workspaces..."));
+  let search = screen.get_by_role(by::role(Role::TextInput).name("Search workspaces…"));
   expect(&search).to_have_focus();
 
   user.keyboard("{Escape}");
   assert!(screen
-    .query_by_role(by::role(Role::TextInput).name("Search workspaces..."))
+    .query_by_role(by::role(Role::TextInput).name("Search workspaces…"))
     .is_none());
   assert!(h.sent().is_empty(), "{:?}", h.sent());
 
@@ -181,7 +196,7 @@ fn choosing_another_agent_offers_to_make_it_the_repo_default(cx: &mut TestAppCon
   user.click(&screen.get_by_role(by::role(Role::ComboBox).name("Agent")));
   user.click(&screen.get_by_role(by::role(Role::MenuItem).name("Codex")));
   user.click(&screen.get_by_role(save_default));
-  user.click(&screen.get_by_role(by::role(Role::Button).name("Run")));
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Send")));
   let start = &tasks(&mut h, &host)[0];
   assert_eq!(start.agent, "codex");
   assert!(start.save_as_repo_default);
@@ -213,9 +228,9 @@ fn the_create_dialog_names_the_branch_from_the_title(cx: &mut TestAppContext) {
     .advance_clock(std::time::Duration::from_millis(600));
   h.cx.run_until_parked();
   screen.redraw();
-  expect(screen.get_by_label_text("Branch Name")).to_have_value("treq/dark-mode");
+  expect(screen.get_by_label_text("Branch name")).to_have_value("treq/dark-mode");
 
-  user.click(&screen.get_by_role(by::role(Role::Button).name("Create Workspace")));
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Create workspace")));
   h.cx.run_until_parked();
   assert!(host
     .calls()
@@ -381,10 +396,10 @@ fn settings_selects_are_named_after_their_fields(cx: &mut TestAppContext) {
   let screen = screen(&mut h);
   for name in [
     "Theme",
-    "Font Size",
-    "Claude Code Model",
-    "Default Agent",
-    "Conflict Marker Style",
+    "Font size",
+    "Claude Code model",
+    "Default agent",
+    "Conflict marker style",
   ] {
     expect(screen.get_by_role(by::role(Role::ComboBox).name(name))).to_be_visible();
   }
@@ -478,7 +493,7 @@ fn account_deletion_refusal_is_announced_as_an_alert_in_a_dialog(cx: &mut TestAp
   let mut h = signed_in_as_ada(cx, host);
   let s = screen(&mut h);
   s.user()
-    .click(&s.get_by_role(by::role(Role::Button).name("Delete Account")));
+    .click(&s.get_by_role(by::role(Role::Button).name("Delete account")));
   let s = screen(&mut h);
   expect(s.get_by_role(by::role(Role::Dialog).name("Delete your Treq account?"))).to_be_visible();
   settings_act(
@@ -520,6 +535,7 @@ fn code_tab_alerts_on_a_failed_setup_script_and_opens_its_logs(cx: &mut TestAppC
     ..code_host()
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("code-status");
   assert!(h.drawn("code-setup"));
   h.click("code-setup-logs");
   h.cx.run_until_parked();
@@ -544,6 +560,7 @@ fn code_tab_offers_setup_logs_only_once_the_script_has_run(cx: &mut TestAppConte
     ..code_host()
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("code-status");
   assert!(h.drawn("code-setup"));
   assert!(!h.drawn("code-setup-logs"));
 }
@@ -555,6 +572,7 @@ fn code_tab_offers_no_setup_logs_without_the_logs_preview(cx: &mut TestAppContex
     ..code_host()
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("code-status");
   assert!(h.drawn("code-setup"));
   assert!(!h.drawn("code-setup-logs"));
 }
@@ -566,6 +584,7 @@ fn code_tab_reruns_the_setup_script(cx: &mut TestAppContext) {
     ..code_host()
   };
   let (mut h, host) = workspace_harness(cx, host, code_route());
+  h.click("code-status");
   h.click("code-setup-rerun");
   h.cx.run_until_parked();
   assert!(host.calls().contains(&"run setup 7".to_string()));

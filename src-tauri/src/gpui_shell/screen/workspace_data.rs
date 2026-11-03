@@ -635,7 +635,7 @@ pub fn workspace_view(
     branch: DEFAULT_BRANCH.into(),
     rebase: (loaded.home_ahead > 0).then(|| Rebase {
       tooltip: if pending == Pending::HomeRebase {
-        "Rebasing...".into()
+        "Rebasing…".into()
       } else {
         format!(
           "Rebase {branch} onto {DEFAULT_BRANCH} ({})",
@@ -735,13 +735,14 @@ pub fn workspace_view(
     .collect();
     Some(Checks {
       status: combined.map(str::to_string),
-      count: format!("{}/{}", passed + ci_passed, total + ci_total),
+      count: checks_label(combined, passed + ci_passed, total + ci_total),
       name: format!("Checks: {}", parts.join(", ")),
     })
   });
 
   let header = Header {
     branch: branch.clone(),
+    title: workspace.map(super::code_data::display_title),
     home: workspace.is_none(),
     linear: match (&metadata.linear_issue_key, &metadata.linear_issue_url) {
       (Some(key), Some(url)) if workspace.is_some() && loaded.linear_enabled => Some(Linear {
@@ -761,8 +762,12 @@ pub fn workspace_view(
       disabled: route.retargeting,
     }),
     home_target,
-    stack: workspace.is_none().then(|| Tooltip {
-      tooltip: format!("Create stacked workspace from {branch}"),
+    stack: Some(Tooltip {
+      tooltip: if workspace.is_none() {
+        format!("Create a workspace from {branch}")
+      } else {
+        format!("Stack a new workspace on {branch}")
+      },
     }),
     push: workspace
       .filter(|w| w.not_on_remote && (!has_remote || w.branch_name == DEFAULT_BRANCH))
@@ -792,11 +797,12 @@ pub fn workspace_view(
       passing: ci_passing,
       disabled: merge_blocked,
       tooltip: merge_blocked.then(|| {
+        // It opens with what to do to merge.
         if route.retargeting {
-          "Rebasing in progress...".to_string()
+          "Wait for the rebase to finish to merge".to_string()
         } else {
           format!(
-            "Cannot merge: {} detected",
+            "Resolve conflicts to merge ({})",
             plural(conflict_count, "conflict")
           )
         }
@@ -837,7 +843,7 @@ pub fn workspace_view(
       }),
       logs: loaded.logs_enabled,
       busy: if route.retargeting {
-        Some("Rebasing...".into())
+        Some("Rebasing…".into())
       } else {
         None
       },
@@ -859,6 +865,14 @@ pub fn workspace_view(
     }
   });
   (header, tab_row)
+}
+
+/// The header's checks pill: how many fail, else how many passed.
+fn checks_label(status: Option<&str>, passed: usize, total: usize) -> String {
+  match status {
+    Some("failed") => format!("{} of {total} checks failing", total.saturating_sub(passed)),
+    _ => format!("{passed}/{total} checks passed"),
+  }
 }
 
 #[cfg(test)]
@@ -906,6 +920,14 @@ mod remote_header_tests {
     let mut kinds: Vec<_> = transport.sent().iter().map(|r| r.kind_name()).collect();
     kinds.sort_unstable();
     kinds
+  }
+
+  #[test]
+  fn checks_label_spells_out_failing_and_passed_checks() {
+    assert_eq!(checks_label(Some("failed"), 2, 4), "2 of 4 checks failing");
+    assert_eq!(checks_label(Some("passed"), 3, 3), "3/3 checks passed");
+    assert_eq!(checks_label(Some("running"), 1, 3), "1/3 checks passed");
+    assert_eq!(checks_label(None, 0, 3), "0/3 checks passed");
   }
 
   #[test]

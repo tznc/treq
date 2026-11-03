@@ -17,7 +17,7 @@ proves the change, and always look at the pixels for anything visual.
 | Layer | Tool | Runs | Use for |
 |---|---|---|---|
 | Screen tests and fuzzing | gpui-testing-library (`#[gpui::test]`) | headless, parallel, in `cargo test --lib` | one screen's behavior, invariants under random input |
-| Screenshot QA | gpui-playwright, `e2e/desktop/qa/` (`npm run qa`) | the real binary under Xvfb, one app | what a change looks like, before/after captures |
+| Screenshot QA | gpui-playwright, `e2e/desktop/qa/` (`npm run qa`) | the real binary under Xvfb, one app per spec file | what a change looks like, before/after captures |
 | Chaos QA | gpui-playwright monkey script | the real binary under Xvfb | crashes, hangs and stale state across the whole app |
 
 ## When to use
@@ -86,8 +86,8 @@ only recorded in test builds.
    at most three plain-English claims about what the picture should show;
    keep real `expect(...)` assertions in the spec too, since they prove the
    state before the capture.
-   - The palette and other overlays open in one shared dialog window:
-     `overlay()` returns its page. Don't call `context.newPage()` twice.
+   - The palette, the other overlays and the header popovers draw in the
+     repo window itself: drive them through `page`.
    - Toasts, tooltips and menus are popup windows Playwright can't reach.
      Capture the whole X screen for those (`capture` with `screen: true`) and
      assert on what they change.
@@ -134,11 +134,8 @@ test when it reproduces headlessly.
 ## Linux and Xvfb notes
 
 - No window manager runs under Xvfb, so focus follows the pointer and a new
-  dialog window may not get keyboard focus. `focusMain()` (called by
-  `ready()`) runs `xdotool windowfocus` on the repo window.
-- Without a compositor, transparent windows (the palette and popover
-  backdrops) can paint the app black in screenshots. That is the
-  environment, not a bug, unless it reproduces on a desktop.
+  window may not get keyboard focus. `focusMain()` (called by `ready()`)
+  runs `xdotool windowfocus` on the repo window.
 - `page.mouse` reaches only the repo window. Popups, menus and native dialogs
   need real X clicks (`xPointer`, `dismissPopover`).
 - `GDK_SCALE=2` gives crisp 2x PNGs; the QA launcher sets it.

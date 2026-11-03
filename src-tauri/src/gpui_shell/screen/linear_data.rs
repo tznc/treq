@@ -259,9 +259,9 @@ impl IssueView {
 
   pub fn label(self) -> &'static str {
     match self {
-      IssueView::All => "All Issues",
+      IssueView::All => "All issues",
       IssueView::Active => "Active",
-      IssueView::MyIssues => "My Issues",
+      IssueView::MyIssues => "My issues",
       IssueView::Backlog => "Backlog",
     }
   }
@@ -788,7 +788,7 @@ mod tests {
       ids(&issue_view(&issues, IssueView::MyIssues, Some("me"))),
       ["1"]
     );
-    // Without a viewer, "My Issues" is empty.
+    // Without a viewer, "My issues" is empty.
     assert!(issue_view(&issues, IssueView::MyIssues, None).is_empty());
   }
 

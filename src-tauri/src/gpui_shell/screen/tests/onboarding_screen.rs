@@ -62,12 +62,102 @@ fn serializes_actions_as_react_reads_them() {
 }
 
 #[gpui::test]
+fn the_file_picker_opens_on_its_query(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, workspace_route());
+  let scope = file_picker::Scope {
+    repo_path: "/repo".into(),
+    workspace_id: None,
+    workspace_path: "/repo".into(),
+    query: "zzzz".into(),
+  };
+  h.screen
+    .update(&mut h.cx, |s, cx| s.set_file_picker(Some(scope), cx));
+  assert!(h.drawn("file-picker"));
+  let query = h.screen.read_with(&h.cx, |s, cx| {
+    s.file_picker
+      .as_ref()
+      .map(|(_, picker)| picker.read(cx).query.clone())
+  });
+  assert_eq!(query.as_deref(), Some("zzzz"));
+}
+
+/// An overlay host that reads nothing.
+struct NoOverlayHost;
+
+impl crate::gpui_shell::overlay::OverlayHost for NoOverlayHost {
+  fn checks(&self, _: &str, _: i64) -> crate::gpui_shell::overlay::PaletteChecks {
+    Default::default()
+  }
+  fn pr(&self, _: &str, _: &str) -> Option<crate::gpui_shell::overlay::PrLink> {
+    None
+  }
+  fn workspaces(&self, _: &str) -> Result<Vec<crate::gpui_shell::overlay::WorkspaceRow>, String> {
+    Ok(Vec::new())
+  }
+  fn branches(&self, _: &str) -> Result<Vec<crate::jj::JjBranch>, String> {
+    Ok(Vec::new())
+  }
+  fn current_branch(&self, _: &str) -> Option<String> {
+    None
+  }
+  fn switch_branch(&self, _: &str, _: &str) -> Result<(), String> {
+    Ok(())
+  }
+  fn open_url(&self, _: &str) {}
+  fn checks_target(&self, _: &str, _: i64) -> Option<crate::core::running_checks::ChecksTarget> {
+    None
+  }
+  fn run_checks(
+    &self,
+    _: &crate::core::running_checks::ChecksTarget,
+    _: &crate::core::running_checks::CheckRun,
+  ) -> Result<Vec<crate::core::checks::JobResult>, String> {
+    Ok(Vec::new())
+  }
+  fn trust_repo(&self, _: &str) -> Result<(), String> {
+    Ok(())
+  }
+  fn notify(&self, _: crate::gpui_shell::native::NativeEvent) {}
+  fn terminal(&self, _: crate::core::palette_commands::TerminalCommand) {}
+}
+
+/// The palette draws over the dimmed app in the repo window, as the file
+/// picker does, rather than in a separate transparent window.
+#[gpui::test]
+fn the_screen_draws_the_palette_over_the_app(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, workspace_route());
+  let snapshot: crate::gpui_shell::OverlaySnapshot = serde_json::from_value(serde_json::json!({
+    "kind": "commandPalette", "dark": false, "repoPath": "/repo", "stash": true,
+    "hasSelectedWorkspace": false, "workspace": null,
+  }))
+  .expect("snapshot");
+  let sink: ActionSink = std::rc::Rc::new(|_, _| {});
+  let host: std::sync::Arc<dyn crate::gpui_shell::overlay::OverlayHost> =
+    std::sync::Arc::new(NoOverlayHost);
+  h.screen.update(&mut h.cx, |s, cx| {
+    s.set_overlay(Some(snapshot), host, sink, cx)
+  });
+  assert!(h.drawn("overlay-dialog"));
+  assert!(h.drawn("overlay-backdrop"));
+  h.screen.update(&mut h.cx, |s, cx| {
+    s.set_overlay(
+      None,
+      std::sync::Arc::new(NoOverlayHost),
+      std::rc::Rc::new(|_, _| {}),
+      cx,
+    )
+  });
+  assert!(!h.drawn("overlay-dialog"));
+}
+
+#[gpui::test]
 fn the_window_models_file_picker_reports_a_dismissal(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, workspace_route());
   let scope = file_picker::Scope {
     repo_path: "/repo".into(),
     workspace_id: None,
     workspace_path: "/repo".into(),
+    query: String::new(),
   };
   h.screen
     .update(&mut h.cx, |s, cx| s.set_file_picker(Some(scope), cx));
@@ -613,11 +703,13 @@ fn onboarding_adds_machines_from_their_sections(cx: &mut TestAppContext) {
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, onboarding(), host.clone());
-  // Both sections show while empty, each with its +.
+  // Both kinds are offered under Other machines' +.
+  h.click("machines-add-other");
   assert!(h.drawn("machines-add-ssh"));
   assert!(h.drawn("machines-add-container"));
   h.click("machines-add-ssh");
   assert_eq!(h.sent(), vec![press("machines.addSsh")]);
+  h.click("machines-add-other");
   h.click("machines-add-container");
   h.cx.run_until_parked();
   assert!(host
@@ -634,6 +726,150 @@ fn onboarding_adds_machines_from_their_sections(cx: &mut TestAppContext) {
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, onboarding(), host);
-  assert!(!h.drawn("machines-add-ssh"), "the previews are off");
+  assert!(!h.drawn("machines-add-other"), "the previews are off");
+  assert!(!h.drawn("machines-add-ssh"));
   assert!(!h.drawn("machines-add-container"));
+}
+
+#[gpui::test]
+fn onboarding_titles_the_page_open_a_repository(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(gpui::Role::Heading).name("Open a repository")))
+    .to_be_visible();
+}
+
+#[gpui::test]
+fn onboarding_collapses_empty_host_groups_under_other_machines(cx: &mut TestAppContext) {
+  let mut empty = listing();
+  empty
+    .machines
+    .retain(|m| matches!(m.place, machines::Place::Local));
+  empty.ssh = true;
+  empty.containers = true;
+  let host = Arc::new(FakeHost {
+    listing: empty,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  // One group with one +, not two empty ones.
+  assert!(h.drawn("machines-group-other"));
+  assert!(!h.drawn("machines-group-ssh"));
+  assert!(!h.drawn("machines-group-containers"));
+  assert!(!h.drawn("machines-add-ssh"));
+  h.click("machines-add-other");
+  // Its + offers both kinds.
+  assert!(h.drawn("machines-add-ssh"));
+  assert!(h.drawn("machines-add-container"));
+  h.click("machines-add-ssh");
+  assert_eq!(h.sent(), vec![press("machines.addSsh")]);
+}
+
+#[gpui::test]
+fn onboarding_splits_other_machines_once_one_exists(cx: &mut TestAppContext) {
+  let mut with_host = listing();
+  with_host
+    .machines
+    .retain(|m| !matches!(m.place, machines::Place::DevContainer { .. }));
+  with_host.ssh = true;
+  with_host.containers = true;
+  let host = Arc::new(FakeHost {
+    listing: with_host,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(!h.drawn("machines-group-other"));
+  assert!(h.drawn("machines-group-ssh"));
+  assert!(h.drawn("machines-group-containers"));
+  assert!(h.drawn("machines-add-ssh"));
+  assert!(h.drawn("machines-add-container"));
+}
+
+/// The screen beside a sidebar, as the shell lays them out.
+struct BesideSidebar {
+  screen: Entity<Screen>,
+}
+
+impl Render for BesideSidebar {
+  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    div()
+      .size_full()
+      .flex()
+      .child(
+        div()
+          .w(gpui::px(260.))
+          .h_full()
+          .flex_none()
+          .debug_selector(|| "sidebar".into()),
+      )
+      .child(
+        div()
+          .flex_1()
+          .min_w_0()
+          .h_full()
+          .child(Screen::element(&self.screen)),
+      )
+  }
+}
+
+/// The palette's backdrop dims the whole window, sidebar included, and its
+/// dialog is centred on the window, not on the screen beside the sidebar.
+#[gpui::test]
+fn the_palette_covers_and_centres_on_the_whole_window(cx: &mut TestAppContext) {
+  cx.update(crate::gpui_shell::theme::init);
+  let (root, vcx) = cx.add_window_view(|_, cx| BesideSidebar {
+    screen: cx.new(|cx| {
+      Screen::new(
+        workspace_route(),
+        std::rc::Rc::new(|_, _| {}),
+        std::rc::Rc::new(|_, _| {}),
+        std::sync::Arc::new(FakeHost::default()),
+        cx,
+      )
+    }),
+  });
+  vcx.simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  let screen = root.read_with(vcx, |root, _| root.screen.clone());
+  let snapshot: crate::gpui_shell::OverlaySnapshot = serde_json::from_value(serde_json::json!({
+    "kind": "commandPalette", "dark": false, "repoPath": "/repo", "stash": true,
+    "hasSelectedWorkspace": false, "workspace": null,
+  }))
+  .expect("snapshot");
+  screen.update(vcx, |s, cx| {
+    s.set_overlay(
+      Some(snapshot),
+      std::sync::Arc::new(NoOverlayHost),
+      std::rc::Rc::new(|_, _| {}),
+      cx,
+    )
+  });
+  vcx.run_until_parked();
+  let window = vcx.update(|window, _| window.viewport_size());
+  let backdrop = vcx
+    .debug_bounds("overlay-backdrop")
+    .expect("backdrop drawn");
+  assert_eq!(
+    backdrop.origin,
+    gpui::Point::default(),
+    "the backdrop starts at the window's origin"
+  );
+  assert_eq!(
+    backdrop.size, window,
+    "the backdrop covers the whole window"
+  );
+  let dialog = vcx.debug_bounds("overlay-dialog").expect("dialog drawn");
+  assert!(
+    (dialog.center().x - window.width / 2.).abs() < gpui::px(1.),
+    "dialog centred at {:?}, window centre {:?}",
+    dialog.center().x,
+    window.width / 2.
+  );
 }

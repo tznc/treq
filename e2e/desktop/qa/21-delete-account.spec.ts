@@ -129,7 +129,7 @@ test("account: delete refused while last owner, then deleted and signed out", as
     await page.getByRole("button", { name: "Settings", exact: true }).click({ timeout: 30_000 });
     await page.getByRole("tab", { name: "Account" }).click();
     // GPUI text is not observable; the signed-in tab is, by its controls.
-    await expect(page.getByRole("button", { name: "Sign Out" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible({ timeout: 30_000 });
     const open = page.getByTestId("account-delete");
     await open.scrollIntoViewIfNeeded();
     await page.mouse.move(1000, 860);
@@ -140,7 +140,7 @@ test("account: delete refused while last owner, then deleted and signed out", as
       expectations: [
         "The signed-in user's email shows in the user card",
         "Below Sign Out, a red-bordered 'Delete account' section explains what deletion does",
-        "A red 'Delete Account' button sits in that section",
+        "A red 'Delete account' button sits in that section",
       ],
     });
 
@@ -156,7 +156,7 @@ test("account: delete refused while last owner, then deleted and signed out", as
       expectations: [
         "A dialog titled 'Delete your Treq account?' lists the consequences as bullet points",
         "An empty field asks to type the account email to confirm",
-        "The red 'Delete Account' button is disabled",
+        "The red 'Delete account' button is disabled",
       ],
     });
 
@@ -180,7 +180,7 @@ test("account: delete refused while last owner, then deleted and signed out", as
 
     await organizations(session, { action: "delete_organization", organization_id: orgId });
     await confirm.click();
-    await expect(page.getByRole("button", { name: "Sign in with Browser" })).toBeVisible({
+    await expect(page.getByRole("button", { name: "Sign in with browser" })).toBeVisible({
       timeout: 30_000,
     });
     await expect(dialog).toHaveCount(0);
@@ -195,7 +195,7 @@ test("account: delete refused while last owner, then deleted and signed out", as
       expectations: [
         "An 'Account deleted' success toast shows",
         "A 'Sorry to see you go' alert with a Dismiss button sits above 'Sign in to Treq'",
-        "The delete dialog is gone and 'Sign in with Browser' shows",
+        "The delete dialog is gone and 'Sign in with browser' shows",
       ],
     });
     await page.getByTestId("account-farewell-dismiss").click();

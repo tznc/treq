@@ -109,7 +109,7 @@ fn account_shows_the_plan_and_signs_out(cx: &mut TestAppContext) {
     signed_in.period,
     Some(("Renews on".into(), "11/1/2026".into()))
   );
-  assert_eq!(signed_in.manage_label, "Manage Subscription");
+  assert_eq!(signed_in.manage_label, "Manage subscription");
 
   h.click("account-manage-subscription");
   h.click("account-sign-out");
@@ -124,6 +124,36 @@ fn account_shows_the_plan_and_signs_out(cx: &mut TestAppContext) {
   );
   assert!(host.calls().contains(&"read cloud workspace".to_string()));
   assert!(h.sent().is_empty());
+}
+
+#[gpui::test]
+fn account_flags_a_failed_payment_and_offers_to_update_it(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, account_route("account"), host.clone());
+  h.set_account(account_state(serde_json::json!({
+    "user": ada(),
+    "subscription": { "plan": "pro", "status": "past_due", "currentPeriodEnd": "2026-11-01T12:00:00Z" },
+  })));
+  let account = drawn_settings(&mut h).account.expect("account tab");
+  let settings::AccountTab::SignedIn(signed_in) = account else {
+    panic!("signed in: {account:?}");
+  };
+  assert!(signed_in.pro);
+  assert_eq!(
+    signed_in.status,
+    Some(("Payment failed".into(), settings::StatusTone::Warn))
+  );
+  assert_eq!(
+    signed_in.period,
+    Some(("Billing period ends".into(), "11/1/2026".into()))
+  );
+  assert_eq!(signed_in.manage_label, "Update payment method");
+
+  h.click("account-manage-subscription");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"open http://localhost:3001/dashboard?tab=subscription".to_string()));
 }
 
 fn delete_dialog(h: &mut Harness) -> Option<settings::DeleteAccountDialog> {
@@ -350,7 +380,7 @@ fn cloud_workspace_creates_through_rust(cx: &mut TestAppContext) {
     "cloud": cloud(serde_json::json!({ "provisioningStage": "Requesting provisioning..." })),
   })));
   let create = cloud_card(&mut h).create.expect("create");
-  assert_eq!(create.label, "Creating...");
+  assert_eq!(create.label, "Creating…");
   assert!(create.disabled && create.spinning);
   assert_eq!(create.stage.as_deref(), Some("Requesting provisioning..."));
 }
@@ -659,6 +689,11 @@ fn integrations_sign_in_when_signed_out(cx: &mut TestAppContext) {
   let integrations = drawn_settings(&mut h).integrations.expect("integrations");
   assert_eq!(integrations.github, settings::GithubSection::SignedOut);
   assert_eq!(integrations.linear, None);
+  // Collapsed, the card only says it isn't connected.
+  assert!(h.drawn("integration-card-github"));
+  assert!(!h.drawn("integrations-sign-in"));
+  h.click("integration-card-github");
+  assert!(h.drawn("integrations-sign-in"));
   h.click("integrations-sign-in");
   h.cx.run_until_parked();
   assert_eq!(
@@ -697,12 +732,35 @@ fn integrations_list_public_repositories_on_the_free_plan(cx: &mut TestAppContex
       repositories: vec![("acme/public".into(), false)],
     }
   );
+  assert!(!h.drawn("github-manage"), "collapsed");
+  h.click("integration-card-github");
   h.click("github-manage");
   h.cx.run_until_parked();
   assert_eq!(
     host.writes(),
     ["open http://localhost:3001/dashboard?tab=integrations"]
   );
+}
+
+#[gpui::test]
+fn integrations_cards_say_whether_each_is_connected(cx: &mut TestAppContext) {
+  let (mut h, _) = linear_harness(cx, false, Some("lin_api_1"));
+  let integrations = drawn_settings(&mut h).integrations.expect("integrations");
+  // Signed in with GitHub repositories still loading: connected.
+  assert!(integrations.github_connected);
+  assert!(integrations.linear.expect("linear").connected);
+  assert!(h.drawn("integration-status-github"));
+  assert!(h.drawn("integration-status-linear"));
+}
+
+#[gpui::test]
+fn integrations_card_expands_and_collapses(cx: &mut TestAppContext) {
+  let (mut h, _) = linear_harness(cx, false, None);
+  assert!(!h.drawn("linear-api-key-edit"));
+  h.click("integration-card-linear");
+  assert!(h.drawn("linear-api-key-edit"));
+  h.click("integration-card-linear");
+  assert!(!h.drawn("linear-api-key-edit"));
 }
 
 fn linear_harness(
@@ -740,9 +798,11 @@ fn linear_section(h: &mut Harness) -> settings::LinearSection {
 fn linear_saves_an_api_key_to_the_repository(cx: &mut TestAppContext) {
   let (mut h, host) = linear_harness(cx, false, None);
   let linear = linear_section(&mut h);
-  assert_eq!(linear.description, "Free plan: provide your API key");
-  assert_eq!(linear.edit_label, "Add API Key");
+  assert_eq!(linear.description, "Paste a Linear personal API key");
+  assert_eq!(linear.edit_label, "Add API key");
   assert!(!linear.oauth);
+  assert!(!linear.connected);
+  h.click("integration-card-linear");
   h.click("linear-api-key-edit");
   assert!(linear_section(&mut h).editing);
   settings_act(&mut h, field("linear.apiKey", "lin_api_1".into()));
@@ -753,13 +813,14 @@ fn linear_saves_an_api_key_to_the_repository(cx: &mut TestAppContext) {
     [
       "set repo /repo linear_api_key=lin_api_1",
       "notify repoSettingsChanged",
-      "notify toast API Key saved",
+      "notify toast API key saved",
     ]
   );
   let linear = linear_section(&mut h);
   assert!(!linear.editing);
+  assert!(linear.connected);
   assert_eq!(linear.description, "Direct API access configured");
-  assert_eq!(linear.edit_label, "Update API Key");
+  assert_eq!(linear.edit_label, "Update API key");
 }
 
 #[gpui::test]
@@ -772,6 +833,7 @@ fn linear_connects_via_oauth_on_pro(cx: &mut TestAppContext) {
     linear.oauth_description,
     "API key takes priority, but you can also connect via OAuth"
   );
+  h.click("integration-card-linear");
   h.click("linear-oauth");
   h.cx.run_until_parked();
   assert!(h.sent().is_empty());
@@ -799,6 +861,7 @@ fn linear_oauth_refused_for_want_of_pro_offers_the_upgrade(cx: &mut TestAppConte
   h.set_account(account_state(
     serde_json::json!({ "user": ada(), "subscription": pro() }),
   ));
+  h.click("integration-card-linear");
   h.click("linear-oauth");
   h.cx.run_until_parked();
   assert_eq!(
@@ -1166,4 +1229,194 @@ fn byos_create_is_offered_only_without_a_workspace_and_with_a_valid_key(cx: &mut
     serde_json::json!({ "providerKeys": [{ "id": "c1", "provider_kind": "boat", "invalid_at": "2026-11-01T00:00:00Z" }] }),
   );
   assert!(!provider_keys(&mut h).unwrap().rows[0].can_create);
+}
+
+fn acme(role: &str, allow_managed: bool, allow_byos: bool) -> serde_json::Value {
+  serde_json::json!([{ "org_id": "o1", "name": "Acme", "role": role, "has_team": true,
+    "allow_managed": allow_managed, "allow_byos": allow_byos,
+    "org_cap_usd": 500, "member_cap_usd": 50 }])
+}
+
+fn team_cloud(
+  orgs: serde_json::Value,
+  profile_org: Option<&str>,
+  keys: serde_json::Value,
+) -> serde_json::Value {
+  cloud(serde_json::json!({
+    "organizations": orgs,
+    "profile": { "org_id": profile_org, "entitled": true, "allow_managed": true, "allow_byos": true },
+    "orgKeys": { "o1": keys },
+  }))
+}
+
+#[gpui::test]
+fn team_cloud_is_hidden_without_a_team(cx: &mut TestAppContext) {
+  let mut h = signed_in_with_cloud(
+    cx,
+    Arc::new(FakeHost::default()),
+    cloud(serde_json::json!({})),
+  );
+  let tab = signed_in_tab(&mut h);
+  assert_eq!(tab.cloud_profile, None);
+  assert!(tab.org_cloud.is_empty());
+  assert!(!h.drawn("team-profile"));
+}
+
+#[gpui::test]
+fn team_profile_switches_where_cloud_bills(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    team_cloud(acme("member", true, false), None, serde_json::json!([])),
+  );
+  let profile = signed_in_tab(&mut h)
+    .cloud_profile
+    .expect("a Team member gets the profile switcher");
+  assert!(h.drawn("team-profile"));
+  assert_eq!(
+    profile
+      .options
+      .iter()
+      .map(|o| (o.label.as_str(), o.selected))
+      .collect::<Vec<_>>(),
+    [("Personal", true), ("Acme", false)]
+  );
+  assert_eq!(
+    profile.options[1].note,
+    "Bills Acme. treq-managed sandboxes."
+  );
+  h.click("team-profile-personal");
+  assert!(
+    host.writes().is_empty(),
+    "the profile in use is not picked again"
+  );
+  h.click("team-profile-o1");
+  assert_eq!(
+    host.writes(),
+    ["cloud SetCloudProfile { org_id: Some(\"o1\") }"]
+  );
+  assert!(
+    signed_in_tab(&mut h).org_cloud.is_empty(),
+    "a member gets no owner settings"
+  );
+}
+
+#[gpui::test]
+fn team_owner_sets_what_members_may_run_and_both_caps(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    team_cloud(
+      acme("owner", true, false),
+      Some("o1"),
+      serde_json::json!([]),
+    ),
+  );
+  let org = signed_in_tab(&mut h)
+    .org_cloud
+    .pop()
+    .expect("an owner gets the organization's cloud settings");
+  assert!(h.drawn("team-o1"));
+  assert_eq!((org.allow_managed, org.allow_byos), (true, false));
+  assert_eq!(
+    (org.org_cap.as_str(), org.member_cap.as_str()),
+    ("500", "50")
+  );
+  for control in ["team-o1-managed", "team-o1-byos", "team-o1-save"] {
+    assert!(h.drawn(control), "{control} is drawn");
+  }
+  // Below the test window's fold a simulated click lands nowhere, so press by action.
+  settings_act(&mut h, field("team.byos.o1", true.into()));
+  settings_act(&mut h, field("team.cap.org.o1", "3".into()));
+  settings_act(&mut h, press("team.save.o1"));
+  assert_eq!(
+    signed_in_tab(&mut h).org_cloud[0].error.as_deref(),
+    Some("Enter an amount of at least $5.")
+  );
+  assert!(
+    host.writes().is_empty(),
+    "nothing is sent for a cap under $5"
+  );
+  settings_act(&mut h, field("team.cap.org.o1", "300".into()));
+  settings_act(&mut h, field("team.cap.member.o1", "$20".into()));
+  settings_act(&mut h, press("team.save.o1"));
+  assert_eq!(
+    host.writes(),
+    ["cloud SaveOrgCloudSettings { org_id: \"o1\", allow_managed: true, allow_byos: true, org_cap_usd: 300.0, member_cap_usd: 20.0 }"]
+  );
+}
+
+#[gpui::test]
+fn team_owner_adds_and_removes_organization_keys(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    team_cloud(
+      acme("owner", false, true),
+      Some("o1"),
+      serde_json::json!([{ "id": "k1", "provider_kind": "boat" }]),
+    ),
+  );
+  let org = signed_in_tab(&mut h).org_cloud.pop().unwrap();
+  assert_eq!(
+    org.keys.iter().map(|k| k.kind.as_str()).collect::<Vec<_>>(),
+    ["boat"]
+  );
+  assert!(h.drawn("team-o1-key-add-daytona") && h.drawn("team-o1-key-remove-boat"));
+  settings_act(&mut h, press("team.key.add.o1.daytona"));
+  assert_eq!(
+    signed_in_tab(&mut h).org_cloud[0].editing.as_deref(),
+    Some("daytona")
+  );
+  settings_act(&mut h, field("team.key", "dt-secret".into()));
+  settings_act(&mut h, press("team.key.save"));
+  settings_act(&mut h, press("team.key.remove.o1.boat"));
+  assert_eq!(
+    host.writes(),
+    [
+      "cloud SaveOrgProviderKey { org_id: \"o1\", kind: \"daytona\", key: <redacted> }",
+      "cloud RemoveOrgProviderKey { org_id: \"o1\", kind: \"boat\" }",
+    ]
+  );
+}
+
+#[gpui::test]
+fn on_an_organization_profile_the_card_names_no_provider_and_a_key_row_creates_on_it(
+  cx: &mut TestAppContext,
+) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    team_cloud(
+      acme("owner", false, true),
+      Some("o1"),
+      serde_json::json!([{ "id": "k1", "provider_kind": "boat" }]),
+    ),
+  );
+  let card = cloud_card(&mut h);
+  assert!(!format!("{card:?}").contains("Boat"), "{card:?}");
+  let org = signed_in_tab(&mut h).org_cloud.pop().unwrap();
+  assert!(org.keys[0].can_create);
+  settings_act(&mut h, press("byos.create.boat"));
+  assert_eq!(host.writes(), ["cloud ProvisionOn { kind: \"boat\" }"]);
+}
+
+#[gpui::test]
+fn an_organization_key_creates_only_while_its_profile_is_selected(cx: &mut TestAppContext) {
+  let mut h = signed_in_with_cloud(
+    cx,
+    Arc::new(FakeHost::default()),
+    team_cloud(
+      acme("owner", true, true),
+      None,
+      serde_json::json!([{ "id": "k1", "provider_kind": "boat" }]),
+    ),
+  );
+  let org = signed_in_tab(&mut h).org_cloud.pop().unwrap();
+  assert!(!org.keys[0].can_create);
+  assert!(!h.drawn("team-o1-key-create-boat"));
 }

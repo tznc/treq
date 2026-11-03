@@ -432,7 +432,7 @@ impl GithubView {
     )
   }
 
-  /// "Add Comment": the box and the buttons after "Comment".
+  /// "Add comment": the box and the buttons after "Comment".
   fn add_comment(
     &mut self,
     submit_on_enter: bool,
@@ -445,7 +445,7 @@ impl GithubView {
     let state = self.textarea(
       "github.comment",
       &comment,
-      "Leave a comment...",
+      "Leave a comment…",
       3,
       window,
       cx,
@@ -455,7 +455,7 @@ impl GithubView {
       .flex()
       .flex_col()
       .gap_2()
-      .child(parts::section_heading("Add Comment", None, p))
+      .child(parts::section_heading("Add comment", None, p))
       .child(
         ui::text(div().id("github-comment-box"), TextSize::Sm)
           .debug_selector(|| "github-comment-box".into())
@@ -566,7 +566,7 @@ impl GithubView {
               .size(Size::Sm)
               .gap_1p5()
               .icon(theme::ICON_SPARKLES, 16.)
-              .label("Agent...")
+              .label("Agent…")
               .on_click(cx.listener(move |view, _, _, cx| {
                 view.field(
                   "github.startPrompt",
@@ -626,7 +626,7 @@ impl GithubView {
         .child(
           Self::action(
             "github-close-issue",
-            if closing { "Closing…" } else { "Close Issue" },
+            if closing { "Closing…" } else { "Close issue" },
             closing,
             p,
           )
@@ -690,7 +690,7 @@ impl GithubView {
         if reopening {
           "Reopening…"
         } else {
-          "Reopen Issue"
+          "Reopen issue"
         },
         reopening,
         p,
@@ -893,9 +893,9 @@ impl GithubView {
           .disabled(opening)
           .child(workspace_icon)
           .label(if existing.is_some() {
-            "Open Workspace"
+            "Open workspace"
           } else {
-            "Create Workspace"
+            "Create workspace"
           })
           .on_click(cx.listener(|view, _, _, cx| view.open_workspace(cx))),
       )
@@ -1027,9 +1027,9 @@ impl GithubView {
         Self::action(
           "github-draft",
           if draft {
-            "Ready for Review"
+            "Ready for review"
           } else {
-            "Convert to Draft"
+            "Convert to draft"
           },
           drafting,
           p,
@@ -1224,7 +1224,7 @@ impl GithubView {
             .size(Size::Sm)
             .gap_0()
             .child(ui::icon(theme::ICON_SCROLL_TEXT, 12., p.foreground).mr_1())
-            .label("Open in Logs")
+            .label("Open in logs")
             .on_click(
               cx.listener(move |view, _, _, cx| view.press(format!("github.openLogs:{id}"), cx)),
             ),
@@ -1318,7 +1318,7 @@ impl GithubView {
               .variant(Variant::Outline)
               .size(Size::Sm)
               .ml_4()
-              .label("Trust Repository")
+              .label("Trust repository")
               .on_click(cx.listener(|view, _, _, cx| {
                 let repo_path = view.route.repo_path.clone();
                 view.run(

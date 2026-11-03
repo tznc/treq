@@ -13,6 +13,7 @@ mod review;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -1004,16 +1005,14 @@ impl FileBrowserView {
     cx: &mut Context<Self>,
   ) -> Option<Entity<TextareaState>> {
     let (slot, text, placeholder) = match field {
-      Field::Draft if self.draft_open && self.draft.is_some() => (
-        &self.draft_input,
-        self.draft_text.clone(),
-        "Add a comment...",
-      ),
+      Field::Draft if self.draft_open && self.draft.is_some() => {
+        (&self.draft_input, self.draft_text.clone(), "Add a comment…")
+      }
       Field::Edit if self.editing.is_some() => (&self.edit_input, self.edit_text.clone(), ""),
       Field::Summary if self.finish_open => (
         &self.summary_input,
         self.summary.clone(),
-        "Add a summary comment (optional)...",
+        "Add a summary comment (optional)…",
       ),
       _ => return None,
     };
@@ -1265,7 +1264,7 @@ impl FileBrowserView {
         .icon(MenuIcon::Copy),
       NativeMenuItem::Separator,
       NativeMenuItem::Submenu {
-        text: "Open in...".into(),
+        text: "Open in…".into(),
         icon: Some(MenuIcon::FolderOpen),
         detail: None,
         items: open,
@@ -1520,7 +1519,7 @@ impl FileBrowserView {
       let open = self.expanded.contains(&entry.path);
       let rel = self.rel(&entry.path);
       let status = dir_status(&self.changed, &rel);
-      let color = status.map_or(p.foreground, |s| status_tone(s).text(p));
+      let color = p.foreground;
       return row
         .leading(ui::icon(
           if open {
@@ -1550,9 +1549,7 @@ impl FileBrowserView {
       .get(&rel)
       .copied()
       .unwrap_or(0);
-    let color = status
-      .as_deref()
-      .map_or(p.foreground, |s| status_tone(s).text(p));
+    let color = p.foreground;
     let selected = self.selected.as_deref() == Some(entry.path.as_str());
     let primary = p.primary;
     row
@@ -1583,13 +1580,24 @@ impl FileBrowserView {
       })
       .when_some(status, |this, status| {
         let bg = status_dot(&status).map_or(p.muted, |tone| tone.color(p));
-        this.child(div().ml_auto().flex_none().child(self.tip(
-          format!("status-{rel}"),
-          status_title(&status),
-          Side::Top,
-          div().size_2().rounded_full().bg(bg),
-          cx,
-        )))
+        this.child(
+          div().ml_auto().flex_none().child(
+            self.tip(
+              format!("status-{rel}"),
+              status_title(&status),
+              Side::Top,
+              div()
+                .id(SharedString::from(format!("status-dot-{rel}")))
+                .role(gpui::Role::Image)
+                .aria_label(status_title(&status))
+                .size_2()
+                .rounded_full()
+                .bg(bg)
+                .test_support(),
+              cx,
+            ),
+          ),
+        )
       })
       .on_hover({
         let path = path.clone();
@@ -1940,15 +1948,6 @@ impl FileBrowserView {
       })
       .collect();
     highlight::styled_marked(text, self.language, self.dark, &marks).into_any_element()
-  }
-}
-
-/// The change a file status letter stands for, as the file row's name colour.
-fn status_tone(status: &str) -> ui::Tone {
-  match status {
-    "A" => ui::Tone::Success,
-    "D" => ui::Tone::Danger,
-    _ => ui::Tone::Warning,
   }
 }
 

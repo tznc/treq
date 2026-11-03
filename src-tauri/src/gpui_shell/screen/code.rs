@@ -1,5 +1,5 @@
-//! The workspace Code tab (`ShowWorkspace`'s Overview): the task input, the
-//! workspace's description and stack, its files and README, and its commit
+//! The workspace Code tab (`ShowWorkspace`'s Overview): the workspace's
+//! title, its action row (Agent, alerts, Go to file), description and stack, its files and README, and its commit
 //! history in a column on the right.
 //!
 //! Drawn from the backend directly ([`code_data`]). What stays React's goes
@@ -23,26 +23,22 @@ use std::{
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
-  input::{Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Textarea, TextareaState},
+  input::{Enter, Escape, Textarea, TextareaState},
   text::{TextView, TextViewStyle},
-  Sizable,
 };
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, prelude::*, px, relative, rems, Animation, AnimationExt as _,
   AnyElement, App, Context, Div, Entity, FontWeight, Hsla, Pixels, Role, ScrollHandle,
-  SharedString, Stateful, Subscription, Task, Window,
+  SharedString, Stateful, Subscription, Window,
 };
 
 use super::{
   code_data::{
-    self, conflict_count, description, diff_stats, display_title, group_by_day, headline,
-    history_commits, insert_at, looks_like_markdown, mention_at, replace_range, session_name,
-    task_branch_name, task_settings, workspace_stack, Agent, CodeHost, Overview, TaskSettings,
-    ENVIRONMENT_SETTING, NEW_WORKSPACE_SETTING, REMOTE_FILE_TREE_REASON,
+    self, description, diff_stats, display_title, group_by_day, headline, history_commits,
+    looks_like_markdown, task_settings, workspace_stack, Agent, AlertState, CodeAlert, CodeHost,
+    Overview, TaskSettings, REMOTE_FILE_TREE_REASON,
   },
-  environment,
-  file_picker::{FilePicker, FilePickerEvent, Scope},
   merge::full_path,
   prefetch, ActionSink, ScreenAction,
 };
@@ -54,7 +50,7 @@ use crate::{
     WorkspaceEntry,
   },
   gpui_shell::{
-    checks_run, form,
+    checks_run,
     native::{NativeEvent, ToastTone},
     popup::{PopupSink, Side, TooltipContent},
     theme::{self, Palette},
@@ -130,6 +126,23 @@ impl Parent {
 }
 
 /// A stack row with its lines changed.
+/// What the stack card shows from the workspace header.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StackCard {
+  pub branch: String,
+  pub target: Option<super::workspace::Target>,
+  /// Stack on this…'s tooltip; `None` hides the button.
+  pub stack_tooltip: Option<String>,
+}
+
+/// The header's part of the Code tab: the stack card's data, and where the
+/// header's popovers anchor.
+#[derive(Clone, Default)]
+pub struct CodeChrome {
+  pub card: Rc<RefCell<StackCard>>,
+  pub bounds: Rc<RefCell<HashMap<SharedString, gpui::Bounds<Pixels>>>>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct StackRow {
   pub workspace: Workspace,
@@ -217,8 +230,10 @@ fn read_history(host: &dyn CodeHost, parent: &Parent, limit: usize) -> Result<Jj
 /// The workspace's stack with each row's diff stats; `None` at home.
 fn read_stack(host: &dyn CodeHost, parent: &Parent) -> Option<Vec<StackRow>> {
   let current = parent.workspace.as_ref()?;
-  let workspaces = host.workspaces(&parent.repo_path).ok()?;
-  let stack = workspace_stack(&workspaces, current.id, &parent.default_branch)?;
+  let workspaces = host.workspaces(&parent.repo_path).unwrap_or_default();
+  // A workspace outside any stack is a stack of one.
+  let stack = workspace_stack(&workspaces, current.id, &parent.default_branch)
+    .unwrap_or_else(|| vec![(current.clone(), true)]);
   // Each row's commits are an independent read: read them all at once.
   Some(std::thread::scope(|scope| {
     #[expect(
@@ -251,12 +266,6 @@ fn read_stack(host: &dyn CodeHost, parent: &Parent) -> Option<Vec<StackRow>> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Menu {
-  Add,
-  Plan,
-  Agent,
-  Environment,
-  /// The title editor's Save options.
-  SaveTitle,
   /// The description editor's Save options.
   SaveDescription,
 }
@@ -267,15 +276,6 @@ pub enum AboutTab {
   #[default]
   Draft,
   GitHub,
-}
-
-/// `mentionQuery` and its results.
-#[derive(Debug, Clone, Default)]
-pub struct Mention {
-  pub anchor: usize,
-  pub query: String,
-  pub results: Vec<String>,
-  pub index: usize,
 }
 
 pub struct CodeView {
@@ -299,20 +299,13 @@ pub struct CodeView {
   history_error_text: Option<Entity<TextareaState>>,
   /// Whether "Show error" has the error's popover open.
   history_error_open: bool,
+  /// Whether the alerts button has its popover open.
+  status_open: bool,
   pub(super) stack: Option<Vec<StackRow>>,
   pub(super) settings: Option<TaskSettings>,
-  task: Option<Entity<TextareaState>>,
-  pub(super) task_text: String,
-  pub(super) focused: bool,
-  pub(super) mention: Option<Mention>,
-  pub(super) agent_override: Option<Agent>,
-  pub(super) save_default: bool,
-  show_save_default: bool,
-  pub(super) submitting: bool,
   pub(super) menu: Option<Menu>,
   /// The title being edited, and its editor.
-  pub(super) title_draft: Option<Entity<TextareaState>>,
-  saving_title: bool,
+  chrome: CodeChrome,
   /// The description being edited, and its editor.
   pub(super) description_draft: Option<Entity<TextareaState>>,
   saving_description: bool,
@@ -335,14 +328,9 @@ pub struct CodeView {
   logs_enabled: bool,
   /// The file list shows its untouched entries.
   show_untouched: bool,
-  starting_devcontainer: bool,
-  pub(super) picker: Option<Entity<FilePicker>>,
   /// The tab's scroll, and where the root's entry rows sit in it.
   scroll: ScrollHandle,
   entry_rows: Rc<EntryRows>,
-  /// Text to put in the task input at its cursor on the next render.
-  insert: Option<String>,
-  _mention_search: Option<Task<()>>,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -389,6 +377,7 @@ impl CodeView {
     host: Arc<dyn CodeHost>,
     react: ActionSink,
     popups: PopupSink,
+    chrome: CodeChrome,
     dark: bool,
     cx: &mut Context<Self>,
   ) -> Self {
@@ -407,19 +396,11 @@ impl CodeView {
       history_error: None,
       history_error_text: None,
       history_error_open: false,
+      status_open: false,
       stack: None,
       settings: None,
-      task: None,
-      task_text: String::new(),
-      focused: false,
-      mention: None,
-      agent_override: None,
-      save_default: false,
-      show_save_default: false,
-      submitting: false,
       menu: None,
-      title_draft: None,
-      saving_title: false,
+      chrome,
       description_draft: None,
       saving_description: false,
       pr_sync: (0, None),
@@ -432,12 +413,8 @@ impl CodeView {
       setup: None,
       logs_enabled: false,
       show_untouched: false,
-      starting_devcontainer: false,
-      picker: None,
       scroll: ScrollHandle::new(),
       entry_rows: Rc::default(),
-      insert: None,
-      _mention_search: None,
       _subscriptions: Vec::new(),
     };
     this.load(cx);
@@ -562,10 +539,6 @@ impl CodeView {
       Some(next) if next.key() == parent.key() => {
         self.parent = self.next.take().unwrap_or(parent);
         self.history_limit = HISTORY_PAGE;
-        self.agent_override = None;
-        self.save_default = false;
-        self.show_save_default = false;
-        self.title_draft = None;
         self.description_draft = None;
         self.about_tab = AboutTab::Draft;
         self.pr_text = None;
@@ -581,21 +554,13 @@ impl CodeView {
     };
     // A read again that found what shows already (a revalidation) draws
     // nothing new.
-    let mut settings = read.settings;
-    // The container's status is read next; what was read last shows meanwhile.
-    if let (Some(new), Some(old)) = (
-      settings.environment.as_mut(),
-      self.settings.as_ref().and_then(|s| s.environment.as_ref()),
-    ) {
-      new.status = old.status.clone();
-    }
     let unchanged = !moved
       && !(self.history_loading && self.history_limit > HISTORY_PAGE)
       && self.overview.as_ref() == Some(&read.overview)
       && self.history.as_deref() == read.history.as_ref().ok()
       && self.history_error.is_none()
       && self.stack == read.stack
-      && self.settings.as_ref() == Some(&settings)
+      && self.settings.as_ref() == Some(&read.settings)
       && self.pr_sync.1 == read.pr_sync.1
       && self.rebase_hold == read.rebase_hold
       && self.branch_deleted == read.branch_deleted
@@ -606,35 +571,13 @@ impl CodeView {
     self.set_setup(read.setup, cx);
     self.set_history(read.history);
     self.stack = read.stack;
-    let environment = settings.environment.is_some();
-    self.settings = Some(settings);
+    self.settings = Some(read.settings);
     self.take_pr_sync(read.pr_sync);
     self.rebase_hold = read.rebase_hold;
     self.branch_deleted = read.branch_deleted;
     if !unchanged {
       cx.notify();
     }
-    if environment {
-      self.read_environment_status(cx);
-    }
-  }
-
-  /// Reads whether the repository's devcontainer runs (a `docker ps`), apart
-  /// from the settings so those show without waiting for it.
-  fn read_environment_status(&mut self, cx: &mut Context<Self>) {
-    self.read(
-      |host, parent| host.devcontainer_status(&parent.repo_path),
-      |view, status, cx| {
-        let Some(env) = view.settings.as_mut().and_then(|s| s.environment.as_mut()) else {
-          return;
-        };
-        if env.status.as_ref() != Some(&status) {
-          env.status = Some(status);
-          cx.notify();
-        }
-      },
-      cx,
-    );
   }
 
   /// Runs `read` off the main thread, then `apply`s it unless the tab moved
@@ -792,446 +735,6 @@ impl CodeView {
       ScreenAction::Field {
         field: field.into(),
         value,
-      },
-      cx,
-    );
-  }
-
-  /// `configuredDefaultAgent` and `selectedAgent`.
-  pub(super) fn agents(&self) -> (Agent, Agent) {
-    let configured = self.settings.as_ref().map(|s| s.agent).unwrap_or_default();
-    (configured, self.agent_override.unwrap_or(configured))
-  }
-
-  /// The home view's "Run in a new workspace", when offered and on.
-  pub(super) fn run_in_new_workspace(&self) -> bool {
-    self.parent.workspace.is_none() && self.settings.as_ref().is_some_and(|s| s.new_workspace)
-  }
-
-  fn task_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<TextareaState> {
-    if let Some(task) = &self.task {
-      return task.clone();
-    }
-    let task = cx.new(|cx| {
-      TextareaState::new(window, cx)
-        .placeholder("Describe a task...")
-        .auto_grow(1, 9)
-    });
-    self._subscriptions.push(cx.subscribe(
-      &task,
-      |view, task, event: &InputEvent, cx| match event {
-        InputEvent::Change => {
-          let state = task.read(cx);
-          let (text, cursor) = (state.value().to_string(), state.cursor());
-          view.text_changed(text, cursor, cx);
-        }
-        InputEvent::Focus => {
-          view.focused = true;
-          cx.notify();
-        }
-        InputEvent::Blur => {
-          view.focused = false;
-          view.mention = None;
-          cx.notify();
-        }
-        InputEvent::PressEnter { .. } => {}
-      },
-    ));
-    task.update(cx, |task, cx| task.focus(window, cx));
-    self.focused = true;
-    self.task = Some(task.clone());
-    task
-  }
-
-  /// `handleTextChange`: follows an `@` being typed.
-  pub(super) fn text_changed(&mut self, text: String, cursor: usize, cx: &mut Context<Self>) {
-    self.task_text = text;
-    match mention_at(&self.task_text, cursor) {
-      Some((anchor, query)) => {
-        let results = self.mention.take().map(|m| m.results).unwrap_or_default();
-        self.mention = Some(Mention {
-          anchor,
-          query: query.clone(),
-          results,
-          index: 0,
-        });
-        self.search_mentions(query, cx);
-      }
-      None => self.mention = None,
-    }
-    cx.notify();
-  }
-
-  fn search_mentions(&mut self, query: String, cx: &mut Context<Self>) {
-    let (host, parent) = (self.host.clone(), self.parent.clone());
-    let delay = host.file_search_delay(&parent.repo_path);
-    let path = parent.working_directory();
-    self._mention_search = Some(cx.spawn(async move |this, cx| {
-      if !delay.is_zero() {
-        cx.background_executor().timer(delay).await;
-      }
-      let search = query.clone();
-      let results = cx
-        .background_spawn(async move {
-          host.search_files(&parent.repo_path, parent.workspace_id(), &path, &search, 4)
-        })
-        .await
-        .unwrap_or_default();
-      this
-        .update(cx, |view, cx| {
-          if let Some(mention) = view.mention.as_mut().filter(|m| m.query == query) {
-            mention.results = results;
-            mention.index = 0;
-            cx.notify();
-          }
-        })
-        .ignore_closed();
-    }));
-  }
-
-  fn mention_open(&self) -> bool {
-    self.mention.as_ref().is_some_and(|m| !m.results.is_empty())
-  }
-
-  fn step_mention(&mut self, delta: isize, cx: &mut Context<Self>) {
-    if let Some(m) = self.mention.as_mut().filter(|m| !m.results.is_empty()) {
-      let len = m.results.len() as isize;
-      m.index = (m.index as isize + delta).rem_euclid(len) as usize;
-      cx.notify();
-    }
-  }
-
-  /// `handleMentionSelect`: replaces `@query` with `@path `.
-  pub(super) fn select_mention(
-    &mut self,
-    index: usize,
-    window: &mut Window,
-    cx: &mut Context<Self>,
-  ) {
-    let Some(mention) = self.mention.take() else {
-      return;
-    };
-    let Some(path) = mention.results.get(index) else {
-      return;
-    };
-    let cursor = self
-      .task
-      .as_ref()
-      .map_or(self.task_text.len(), |t| t.read(cx).cursor());
-    let inserted = format!("@{path} ");
-    let text = replace_range(&self.task_text, mention.anchor, cursor, &inserted);
-    self.set_task_text(text, mention.anchor + inserted.len(), window, cx);
-  }
-
-  fn set_task_text(
-    &mut self,
-    text: String,
-    cursor: usize,
-    window: &mut Window,
-    cx: &mut Context<Self>,
-  ) {
-    self.task_text = text.clone();
-    if let Some(task) = &self.task {
-      task.update(cx, |task, cx| {
-        task.set_value(text, window, cx);
-        task.set_selected_range(cursor..cursor, cx);
-        task.focus(window, cx);
-      });
-    }
-    cx.notify();
-  }
-
-  /// `insertAtCursor`.
-  fn insert_text(&mut self, insertion: &str, window: &mut Window, cx: &mut Context<Self>) {
-    let cursor = self
-      .task
-      .as_ref()
-      .map_or(self.task_text.len(), |t| t.read(cx).cursor());
-    let (text, cursor) = insert_at(&self.task_text, cursor, insertion);
-    self.set_task_text(text, cursor, window, cx);
-  }
-
-  fn open_picker(&mut self, cx: &mut Context<Self>) {
-    self.menu = None;
-    let scope = Scope {
-      repo_path: self.parent.repo_path.clone(),
-      workspace_id: self.parent.workspace_id(),
-      workspace_path: self.parent.working_directory(),
-    };
-    let picker = cx.new(|cx| FilePicker::new(self.host.clone(), scope, self.dark, cx));
-    self._subscriptions.push(
-      cx.subscribe(&picker, |view, _, event: &FilePickerEvent, cx| {
-        if let FilePickerEvent::Selected(path) = event {
-          view.insert = Some(format!("@{path} "));
-        }
-        view.picker = None;
-        cx.notify();
-      }),
-    );
-    self.picker = Some(picker);
-    cx.notify();
-  }
-
-  fn attach(&mut self, cx: &mut Context<Self>) {
-    self.menu = None;
-    let host = self.host.clone();
-    cx.spawn(async move |this, cx| {
-      let files = cx.background_spawn(async move { host.pick_files() }).await;
-      let Some(files) = files.filter(|f| !f.is_empty()) else {
-        return;
-      };
-      let insertion = format!(
-        "{} ",
-        files
-          .iter()
-          .map(|p| format!("'{p}'"))
-          .collect::<Vec<_>>()
-          .join(" ")
-      );
-      this
-        .update(cx, |view, cx| {
-          view.insert = Some(insertion);
-          cx.notify();
-        })
-        .ignore_closed();
-    })
-    .detach();
-  }
-
-  fn choose_agent(&mut self, agent: Agent, cx: &mut Context<Self>) {
-    let (configured, _) = self.agents();
-    self.agent_override = Some(agent);
-    self.save_default = false;
-    self.show_save_default = agent != configured;
-    self.menu = None;
-    cx.notify();
-  }
-
-  fn set_new_workspace(&mut self, on: bool, cx: &mut Context<Self>) {
-    let previous = self.settings.as_ref().map(|s| s.new_workspace);
-    if let Some(settings) = self.settings.as_mut() {
-      settings.new_workspace = on;
-    }
-    cx.notify();
-    self.read(
-      move |host, parent| {
-        host.set_repo_settings(
-          &parent.repo_path,
-          &[(NEW_WORKSPACE_SETTING.into(), on.to_string())],
-        )
-      },
-      move |view, result, _| match result {
-        Ok(()) => tell(
-          view.host.as_ref(),
-          NativeEvent::RepoSettingsChanged {
-            repo_path: view.parent.repo_path.clone(),
-          },
-        ),
-        Err(err) => {
-          if let (Some(settings), Some(previous)) = (view.settings.as_mut(), previous) {
-            settings.new_workspace = previous;
-          }
-          view.toast(ToastTone::Error, "Failed to save setting", err);
-        }
-      },
-      cx,
-    );
-  }
-
-  fn set_environment(&mut self, devcontainer: bool, cx: &mut Context<Self>) {
-    self.menu = None;
-    let value = if devcontainer {
-      "devcontainer"
-    } else {
-      "local"
-    };
-    self.read(
-      move |host, parent| {
-        host.set_repo_settings(
-          &parent.repo_path,
-          &[(ENVIRONMENT_SETTING.into(), value.into())],
-        )
-      },
-      move |view, result, cx| {
-        if let Err(err) = result {
-          view.toast(ToastTone::Error, "Failed to save setting", err);
-          return;
-        }
-        tell(
-          view.host.as_ref(),
-          NativeEvent::RepoSettingsChanged {
-            repo_path: view.parent.repo_path.clone(),
-          },
-        );
-        let Some(env) = view.settings.as_mut().and_then(|s| s.environment.as_mut()) else {
-          return;
-        };
-        env.devcontainer = devcontainer;
-        let stopped = env.status.as_ref().is_some_and(|s| !s.running);
-        if devcontainer && stopped && !view.starting_devcontainer {
-          view.start_devcontainer(cx);
-        }
-      },
-      cx,
-    );
-  }
-
-  fn start_devcontainer(&mut self, cx: &mut Context<Self>) {
-    self.menu = None;
-    self.starting_devcontainer = true;
-    cx.notify();
-    self.read(
-      |host, parent| host.devcontainer_up(&parent.repo_path),
-      |view, result, _| {
-        view.starting_devcontainer = false;
-        match result {
-          Ok(status) => {
-            if let Some(env) = view.settings.as_mut().and_then(|s| s.environment.as_mut()) {
-              env.status = Some(status);
-            }
-          }
-          Err(err) => view.toast(ToastTone::Error, "Devcontainer did not start", err),
-        }
-      },
-      cx,
-    );
-  }
-
-  /// `submitTask`: starts an agent session on the task, in a new workspace
-  /// when the home view asks for one.
-  pub(super) fn submit(&mut self, plan: bool, cx: &mut Context<Self>) {
-    let prompt = self.task_text.trim().to_string();
-    if prompt.is_empty() || self.submitting {
-      return;
-    }
-    self.submitting = true;
-    self.menu = None;
-    cx.notify();
-    let (configured, agent) = self.agents();
-    let save_default = self.save_default && agent != configured;
-    let new_workspace = self.run_in_new_workspace();
-    let mode = if plan { "plan" } else { "acceptEdits" };
-    let (host, parent) = (self.host.clone(), self.parent.clone());
-    let key = parent.key();
-    cx.spawn(async move |this, cx| {
-      let result = cx
-        .background_spawn(async move {
-          let repo = parent.repo_path.as_str();
-          if save_default {
-            host.set_repo_settings(repo, &[("default_agent".into(), agent.id().into())])?;
-            tell(
-              host.as_ref(),
-              NativeEvent::RepoSettingsChanged {
-                repo_path: repo.into(),
-              },
-            );
-          }
-          let name = session_name(&prompt);
-          let mut workspace_id = parent.workspace_id();
-          if new_workspace {
-            let taken = host.branch_names(repo)?;
-            let pattern = host
-              .repo_settings(repo, &["branch_name_pattern".into()])
-              .ok()
-              .and_then(|v| v.get("branch_name_pattern").cloned().flatten())
-              .filter(|p| !p.is_empty())
-              .unwrap_or_else(|| "treq/{name}".into());
-            let branch = task_branch_name(&prompt, &taken, &pattern);
-            workspace_id = Some(host.create_workspace(repo, &branch, &name)?);
-            tell(
-              host.as_ref(),
-              NativeEvent::WorkspaceChanged {
-                repo_path: repo.into(),
-              },
-            );
-          }
-          let session_id = host.create_session(repo, workspace_id, &name)?;
-          Ok::<_, String>(super::launch_data::started(host.as_ref(), json!({
-            "sessionId": session_id,
-            "sessionName": name,
-            "workspaceId": workspace_id,
-            "workspacePath": null,
-            "repoPath": if repo.is_empty() { parent.working_directory() } else { repo.to_string() },
-            "pendingPrompt": prompt,
-            "permissionMode": mode,
-            "agent": agent.id(),
-          })))
-        })
-        .await;
-      this
-        .update_in(cx, |view, window, cx| {
-          view.submitting = false;
-          match result {
-            Ok(session) => {
-              if save_default {
-                view.save_default = false;
-                if let Some(settings) = view.settings.as_mut() {
-                  settings.agent = agent;
-                  settings.from_repo = true;
-                }
-              }
-              let _ = session;
-              if view.parent.key() == key {
-                view.show_save_default = false;
-                view.set_task_text(String::new(), 0, window, cx);
-              }
-            }
-            Err(err) => view.toast(ToastTone::Error, "Failed to create task", err),
-          }
-          cx.notify();
-        })
-        .ignore_closed();
-    })
-    .detach();
-  }
-
-  fn edit_title(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
-    let draft = cx.new(|cx| {
-      TextareaState::new(window, cx)
-        .auto_grow(1, 5)
-        .placeholder("Workspace title")
-        .default_value(text)
-    });
-    draft.update(cx, |d, cx| d.focus(window, cx));
-    // Save is disabled while the title is blank.
-    self
-      ._subscriptions
-      .push(cx.subscribe(&draft, |_, _, event: &InputEvent, cx| {
-        if matches!(event, InputEvent::Change) {
-          cx.notify();
-        }
-      }));
-    self.title_draft = Some(draft);
-    cx.notify();
-  }
-
-  /// Saves the title being edited; on a workspace that follows its pull
-  /// request, to the PR too unless `draft` keeps it local until a push.
-  fn save_title(&mut self, draft: bool, cx: &mut Context<Self>) {
-    let (Some(editor), Some(ws)) = (&self.title_draft, &self.parent.workspace) else {
-      return;
-    };
-    let text = editor.read(cx).value().trim().to_string();
-    if text.is_empty() || self.saving_title {
-      return;
-    }
-    let (id, to_pr) = (ws.id, !draft && self.pr_sync.1.is_some());
-    self.saving_title = true;
-    self.menu = None;
-    self.read(
-      move |host, parent| {
-        host.set_title(&parent.repo_path, id, &text)?;
-        Ok(
-          to_pr
-            .then(|| host.push_to_pr(&parent.repo_path, id).err())
-            .flatten(),
-        )
-      },
-      |view, result, _| {
-        view.saving_title = false;
-        if view.saved("title", result) {
-          view.title_draft = None;
-        }
       },
       cx,
     );
@@ -1478,6 +981,16 @@ impl CodeView {
     );
   }
 
+  fn close_menu_on_outside(&self, panel: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+    panel.dismiss_with("code-menu", cx, |view, cx| {
+      let open = view.menu.take().is_some();
+      if open {
+        cx.notify();
+      }
+      open
+    })
+  }
+
   fn toggle_menu(&mut self, menu: Menu, cx: &mut Context<Self>) {
     self.menu = if self.menu == Some(menu) {
       None
@@ -1620,9 +1133,6 @@ impl Render for CodeView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.tips.sync(cx);
     let p = theme::palette(self.dark);
-    if let Some(insertion) = self.insert.take() {
-      self.insert_text(&insertion, window, cx);
-    }
     let left = div()
       .id("code-scroll")
       .track_scroll(&self.scroll)
@@ -1639,14 +1149,9 @@ impl Render for CodeView {
           .flex_col()
           .gap_4()
           .when(self.overview.is_none(), |this| this.child(skeleton(&p)))
-          .children(self.conflicts(&p))
-          .children(self.branch_deleted_alert(&p))
-          .children(self.rebase_alert(&p))
-          .children(self.setup_alert(&p, cx))
-          .child(self.task_card(&p, window, cx))
           .children(self.about(&p, window, cx))
+          .child(self.action_row(&p, cx))
           .children(self.stack_panel(&p, cx))
-          .child(self.go_to_file(&p))
           .child(self.files(&p, cx))
           .child(self.readme(&p)),
       );
@@ -1665,7 +1170,46 @@ impl Render for CodeView {
           .bg(p.muted.opacity(0.2))
           .child(self.history(&p, window, cx)),
       )
-      .children(self.picker.clone())
+  }
+}
+
+/// The icon and colour an alert of `level` shows, as [`ui::Alert`] draws it.
+fn severity_icon(level: ui::Severity, p: &Palette) -> (&'static str, gpui::Hsla) {
+  match level {
+    ui::Severity::Info => (theme::ICON_INFO, p.primary),
+    ui::Severity::Warning => (theme::ICON_TRIANGLE_ALERT, p.warning),
+    ui::Severity::Danger => (theme::ICON_CIRCLE_ALERT, p.destructive),
+  }
+}
+
+/// Why the last rebase skipped this workspace, or ran onto a target it
+/// could not fetch. Clears once a rebase passes its checks.
+fn rebase_alert(hold: &RebaseHold, p: &Palette) -> ui::Alert {
+  match hold {
+    RebaseHold::ParentDirty { branch } => ui::Alert::new(
+      "code-rebase-held-parent-dirty",
+      format!("Rebase skipped: {branch} has uncommitted changes"),
+      p,
+    )
+    .severity(ui::Severity::Warning)
+    .message(format!(
+      "Commit or discard the changes in {branch}; the next rebase picks this workspace up."
+    )),
+    RebaseHold::TargetDiverged { bookmark } => ui::Alert::new(
+      "code-rebase-held-diverged",
+      format!("Rebase skipped: {bookmark} diverged from origin"),
+      p,
+    )
+    .severity(ui::Severity::Warning)
+    .message(format!(
+      "Local {bookmark} and origin/{bookmark} each have commits the other lacks. \
+       Push {bookmark}, or reset it to origin/{bookmark}, then rebase."
+    )),
+    RebaseHold::StaleTarget { .. } => {
+      ui::Alert::new("code-rebase-stale-target", "Rebased without fetching", p)
+        .severity(ui::Severity::Info)
+        .message("Fetching origin failed, so the rebase used the last-fetched target.")
+    }
   }
 }
 
@@ -1711,143 +1255,228 @@ fn skeleton(p: &Palette) -> impl IntoElement {
 }
 
 impl CodeView {
-  fn conflicts(&self, p: &Palette) -> Option<impl IntoElement> {
-    let count = conflict_count(&self.parent.conflicted_files);
-    if count == 0 {
+  /// The tab's alerts, as [`code_data::code_alerts`] gathers them.
+  pub(super) fn alerts(&self, cx: &App) -> Vec<CodeAlert> {
+    let workspace_id = self.parent.workspace_id();
+    let setup_rerunning = workspace_id.is_some_and(|id| {
+      checks_run::keys(cx, &self.parent.repo_path).contains(&CheckRun::Setup.key(id))
+    });
+    code_data::code_alerts(&AlertState {
+      conflicted_files: &self.parent.conflicted_files,
+      rebase_hold: self.rebase_hold.as_ref(),
+      setup: self.setup.as_ref(),
+      in_workspace: workspace_id.is_some(),
+      setup_rerunning,
+      branch_deleted: self
+        .branch_deleted
+        .then(|| {
+          self
+            .parent
+            .workspace
+            .as_ref()
+            .map(|w| w.branch_name.as_str())
+        })
+        .flatten(),
+    })
+  }
+
+  /// One row under the title card: Agent on the left; the alerts button
+  /// and Go to file on the right.
+  fn action_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let react = self.react.clone();
+    let agent = Button::new("code-agent", p)
+      .variant(Variant::Outline)
+      .size(Size::Sm)
+      .gap_1p5()
+      .icon(theme::ICON_BOT, 14.)
+      .label("Agent")
+      .on_click(move |_, _, cx| {
+        let react = react.clone();
+        cx.defer(move |cx| {
+          react(
+            ScreenAction::Press {
+              id: "code.agentPrompt".into(),
+            },
+            cx,
+          )
+        });
+      });
+    div()
+      .debug_selector(|| "code-action-row".into())
+      .flex()
+      .items_center()
+      .gap_2()
+      .child(agent)
+      .child(div().flex_1())
+      .children(self.status_button(p, cx))
+      .child(self.go_to_file(p))
+  }
+
+  /// Every alert behind one button that counts them by severity; it opens
+  /// a popover with each alert and its actions. Hidden with no alerts.
+  fn status_button(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let alerts = self.alerts(cx);
+    if alerts.is_empty() {
+      self.status_open = false;
       return None;
     }
+    let counts = code_data::severity_counts(&alerts);
+    let name = counts
+      .iter()
+      .map(|(level, n)| {
+        let what = match level {
+          ui::Severity::Danger => "error",
+          ui::Severity::Warning => "warning",
+          ui::Severity::Info => "info",
+        };
+        format!("{n} {what}")
+      })
+      .collect::<Vec<_>>()
+      .join(", ");
+    let mut button = Button::new("code-status", p)
+      .variant(Variant::Outline)
+      .size(Size::Sm)
+      .gap_2()
+      .aria_label(format!("Alerts: {name}"));
+    for (level, n) in counts {
+      let (icon, color) = severity_icon(level, p);
+      button = button.child(
+        div()
+          .flex()
+          .items_center()
+          .gap_1()
+          .child(ui::icon(icon, 14., color))
+          .child(n.to_string()),
+      );
+    }
+    // A press outside the open popover closes it, so this only opens.
+    let button = button.on_click(cx.listener(|view, _, _, cx| {
+      view.status_open = true;
+      cx.notify();
+    }));
+    let popover = self.status_open.then(|| {
+      let items: Vec<AnyElement> = alerts.iter().map(|a| self.alert(a, p, cx)).collect();
+      ui::Popover::new("code-status-popover", p)
+        .w(zpx(420.))
+        .gap_2()
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .dismiss_with("code-status", cx, |view, cx| {
+          let open = std::mem::take(&mut view.status_open);
+          if open {
+            cx.notify();
+          }
+          open
+        })
+        .children(items)
+    });
+    Some(div().relative().child(button).children(popover))
+  }
+
+  fn alert(&self, alert: &CodeAlert, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    match alert {
+      CodeAlert::Conflicts { count } => self.conflicts(*count, p).into_any_element(),
+      CodeAlert::BranchDeleted { branch } => {
+        self.branch_deleted_alert(branch, p).into_any_element()
+      }
+      CodeAlert::Rebase(hold) => rebase_alert(hold, p).into_any_element(),
+      CodeAlert::Setup {
+        status,
+        running,
+        run_id,
+      } => self
+        .setup_alert(status, *running, *run_id, alert.severity(), p, cx)
+        .into_any_element(),
+    }
+  }
+
+  fn conflicts(&self, count: usize, p: &Palette) -> impl IntoElement {
     let react = self.react.clone();
-    Some(
-      ui::Alert::new(
-        "code-conflicts",
-        format!(
-          "{count} {} {} conflicts",
-          if count == 1 { "file" } else { "files" },
-          if count == 1 { "has" } else { "have" }
-        ),
-        p,
-      )
-      .severity(ui::Severity::Danger)
-      .message("Resolve them before you push or merge.")
-      .action(
-        Button::new("code-view-conflicts", p)
-          .variant(Variant::Outline)
-          .size(Size::Sm)
-          .label("Resolve…")
-          .on_click(move |_, _, cx| {
-            let react = react.clone();
-            cx.defer(move |cx| {
-              react(
-                ScreenAction::Field {
-                  field: "workspace.tab".into(),
-                  value: "changes".into(),
-                },
-                cx,
-              )
-            });
-          }),
+    ui::Alert::new(
+      "code-conflicts",
+      format!(
+        "{count} {} {} conflicts",
+        if count == 1 { "file" } else { "files" },
+        if count == 1 { "has" } else { "have" }
       ),
+      p,
+    )
+    .severity(ui::Severity::Danger)
+    .message("Resolve them before you push or merge.")
+    .action(
+      Button::new("code-view-conflicts", p)
+        .variant(Variant::Outline)
+        .size(Size::Sm)
+        .label("Resolve…")
+        .on_click(move |_, _, cx| {
+          let react = react.clone();
+          cx.defer(move |cx| {
+            react(
+              ScreenAction::Field {
+                field: "workspace.tab".into(),
+                value: "changes".into(),
+              },
+              cx,
+            )
+          });
+        }),
     )
   }
 
   /// The workspace's branch was deleted, usually by a fetch after its pull
   /// request merged: the work has landed, so offer to archive it.
-  fn branch_deleted_alert(&self, p: &Palette) -> Option<impl IntoElement> {
-    if !self.branch_deleted {
-      return None;
-    }
-    let branch = self.parent.workspace.as_ref()?.branch_name.clone();
+  fn branch_deleted_alert(&self, branch: &str, p: &Palette) -> impl IntoElement {
     let react = self.react.clone();
-    Some(
-      ui::Alert::new("code-branch-deleted", "Branch deleted on remote", p)
-        .severity(ui::Severity::Warning)
-        .message(format!(
-          "{branch} no longer exists, usually because its pull request merged. \
+    ui::Alert::new("code-branch-deleted", "Branch deleted on remote", p)
+      .severity(ui::Severity::Warning)
+      .message(format!(
+        "{branch} no longer exists, usually because its pull request merged. \
            Archive the workspace once you no longer need it."
-        ))
-        .action(
-          Button::new("code-branch-deleted-archive", p)
-            .variant(Variant::Outline)
-            .size(Size::Sm)
-            .label("Archive")
-            .on_click(move |_, _, cx| {
-              let react = react.clone();
-              cx.defer(move |cx| {
-                react(
-                  ScreenAction::Press {
-                    id: "workspace.archive".into(),
-                  },
-                  cx,
-                )
-              });
-            }),
-        ),
-    )
-  }
-
-  /// Why the last rebase skipped this workspace, or ran onto a target it
-  /// could not fetch. Clears once a rebase passes its checks.
-  fn rebase_alert(&self, p: &Palette) -> Option<impl IntoElement> {
-    let alert = match self.rebase_hold.as_ref()? {
-      RebaseHold::ParentDirty { branch } => ui::Alert::new(
-        "code-rebase-held-parent-dirty",
-        format!("Rebase skipped: {branch} has uncommitted changes"),
-        p,
+      ))
+      .action(
+        Button::new("code-branch-deleted-archive", p)
+          .variant(Variant::Outline)
+          .size(Size::Sm)
+          .label("Archive")
+          // Apart from the header's Archive, which a merged PR shows.
+          .aria_label("Archive workspace")
+          .on_click(move |_, _, cx| {
+            let react = react.clone();
+            cx.defer(move |cx| {
+              react(
+                ScreenAction::Press {
+                  id: "workspace.archive".into(),
+                },
+                cx,
+              )
+            });
+          }),
       )
-      .severity(ui::Severity::Warning)
-      .message(format!(
-        "Commit or discard the changes in {branch}; the next rebase picks this workspace up."
-      )),
-      RebaseHold::TargetDiverged { bookmark } => ui::Alert::new(
-        "code-rebase-held-diverged",
-        format!("Rebase skipped: {bookmark} diverged from origin"),
-        p,
-      )
-      .severity(ui::Severity::Warning)
-      .message(format!(
-        "Local {bookmark} and origin/{bookmark} each have commits the other lacks. \
-         Push {bookmark}, or reset it to origin/{bookmark}, then rebase."
-      )),
-      RebaseHold::StaleTarget { .. } => {
-        ui::Alert::new("code-rebase-stale-target", "Rebased without fetching", p)
-          .severity(ui::Severity::Info)
-          .message("Fetching origin failed, so the rebase used the last-fetched target.")
-      }
-    };
-    Some(alert)
   }
 
   /// The workspace setup script: its state, re-run, and a link to its
   /// output in the Logs tab once it has run.
-  fn setup_alert(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-    let setup = self.setup.as_ref().filter(|s| s.configured)?;
-    let workspace_id = self.parent.workspace_id()?;
-    let rerunning =
-      checks_run::keys(cx, &self.parent.repo_path).contains(&CheckRun::Setup.key(workspace_id));
-    let running = rerunning || matches!(setup.status.as_str(), "pending" | "running");
-    let (title, message, severity) = match setup.status.as_str() {
-      _ if rerunning || setup.status == "running" => (
+  fn setup_alert(
+    &self,
+    status: &str,
+    running: bool,
+    run_id: Option<i64>,
+    severity: ui::Severity,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let (title, message) = match status {
+      _ if running && status != "pending" => (
         "Running the workspace setup script",
         "Checks run once it finishes.",
-        ui::Severity::Info,
       ),
       "pending" => (
         "The workspace setup script has not run yet",
         "Checks run once it finishes.",
-        ui::Severity::Info,
       ),
-      "failed" => (
-        "Workspace setup script failed",
-        "Checks can still run.",
-        ui::Severity::Danger,
-      ),
-      _ => (
-        "Workspace setup script passed",
-        "Checks can run.",
-        ui::Severity::Info,
-      ),
+      "failed" => ("Workspace setup script failed", "Checks can still run."),
+      _ => ("Workspace setup script passed", "Checks can run."),
     };
-    let logs = (self.logs_enabled && setup.run_id.is_some()).then(|| {
+    let logs = (self.logs_enabled && run_id.is_some()).then(|| {
       let react = self.react.clone();
       Button::new("code-setup-logs", p)
         .variant(Variant::Ghost)
@@ -1866,411 +1495,18 @@ impl CodeView {
           });
         })
     });
-    Some(
-      ui::Alert::new("code-setup", title, p)
-        .severity(severity)
-        .message(message)
-        .actions(logs)
-        .action(
-          Button::new("code-setup-rerun", p)
-            .variant(Variant::Outline)
-            .size(Size::Sm)
-            .disabled(running)
-            .label("Re-run setup script")
-            .on_click(cx.listener(|view, _, _, cx| view.rerun_setup(cx))),
-        ),
-    )
-  }
-
-  fn task_card(
-    &mut self,
-    p: &Palette,
-    window: &mut Window,
-    cx: &mut Context<Self>,
-  ) -> impl IntoElement {
-    let task = self.task_input(window, cx);
-    let border = if self.focused { p.primary } else { p.border };
-    let mention = self.mention.clone().filter(|m| !m.results.is_empty());
-    div()
-      .debug_selector(|| "agent-task-input".into())
-      .w_full()
-      .max_w(zpx(672.))
-      .mx_auto()
-      .child(
-        div()
-          .id("task-card")
-          .min_h(zpx(112.))
-          .rounded(radius::LG)
-          .border_1()
-          .border_color(border)
-          .bg(p.background)
-          .relative()
-          .flex()
-          .flex_col()
-          .capture_action(cx.listener(|view, _: &MoveDown, _, cx| {
-            if view.mention_open() {
-              view.step_mention(1, cx);
-              cx.stop_propagation();
-            }
-          }))
-          .capture_action(cx.listener(|view, _: &MoveUp, _, cx| {
-            if view.mention_open() {
-              view.step_mention(-1, cx);
-              cx.stop_propagation();
-            }
-          }))
-          .capture_action(cx.listener(|view, action: &Enter, window, cx| {
-            if view.mention_open() && !action.secondary {
-              let index = view.mention.as_ref().map_or(0, |m| m.index);
-              view.select_mention(index, window, cx);
-              cx.stop_propagation();
-            } else if action.secondary && !action.shift {
-              view.submit(false, cx);
-              cx.stop_propagation();
-            }
-          }))
-          .capture_action(cx.listener(|view, _: &Escape, _, cx| {
-            if view.mention.take().is_some() {
-              cx.notify();
-            }
-          }))
-          .capture_action(cx.listener(|view, _: &IndentInline, _, cx| {
-            if view.mention.take().is_some() {
-              cx.notify();
-            }
-          }))
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .debug_selector(|| "task-input".into())
-              // The textarea's own 4px inset makes up React's `px-4`.
-              .px_3()
-              .pt_3()
-              .pb_1()
-              .min_h(zpx(44.))
-              .max_h(zpx(200.))
-              .child(ui::text(
-                Textarea::new(&task)
-                  .appearance(false)
-                  .bordered(false)
-                  .xsmall(),
-                TextSize::Sm,
-              )),
-          )
-          .children(mention.map(|m| self.mention_dropdown(&m, p, cx)))
-          .child(div().mt_auto().child(self.toolbar(p, cx))),
+    ui::Alert::new("code-setup", title, p)
+      .severity(severity)
+      .message(message)
+      .actions(logs)
+      .action(
+        Button::new("code-setup-rerun", p)
+          .variant(Variant::Outline)
+          .size(Size::Sm)
+          .disabled(running)
+          .label("Re-run setup script")
+          .on_click(cx.listener(|view, _, _, cx| view.rerun_setup(cx))),
       )
-  }
-
-  fn mention_dropdown(
-    &self,
-    mention: &Mention,
-    p: &Palette,
-    cx: &mut Context<Self>,
-  ) -> impl IntoElement {
-    div()
-      .debug_selector(|| "task-mentions".into())
-      .mx_2()
-      .mb_1()
-      .rounded(radius::LG)
-      .border_1()
-      .border_color(p.border)
-      .bg(p.muted.opacity(0.5))
-      .overflow_hidden()
-      .child(
-        ui::text(div(), TextSize::Xs)
-          .px_3()
-          .py_1()
-          .font_weight(FontWeight::MEDIUM)
-          .text_color(p.muted_foreground)
-          .border_b_1()
-          .border_color(p.border)
-          .child("FILES"),
-      )
-      .children(mention.results.iter().enumerate().map(|(i, path)| {
-        let id = SharedString::from(format!("task-mention-{i}"));
-        let selected = i == mention.index;
-        ui::Row::new(id, p)
-          .role(gpui::Role::ListBoxOption)
-          .label(path.clone())
-          .selected(selected)
-          .w_full()
-          .px_3()
-          .rounded_none()
-          .leading(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .font_family(theme::MONO_FONT)
-              .min_w_0()
-              .truncate()
-              .child(path.clone()),
-          )
-          .on_mouse_down(
-            gpui::MouseButton::Left,
-            cx.listener(move |view, _, window, cx| {
-              cx.stop_propagation();
-              window.prevent_default();
-              view.select_mention(i, window, cx);
-            }),
-          )
-      }))
-  }
-
-  fn toolbar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let (configured, agent) = self.agents();
-    let empty = self.task_text.trim().is_empty();
-    let plan = agent.has_plan_mode();
-    let new_workspace = (self.parent.workspace.is_none())
-      .then(|| self.settings.as_ref().map(|s| s.new_workspace))
-      .flatten();
-    let small = |b: Button| b.size(Size::Sm).h(zpx(28.));
-
-    let add = div()
-      .relative()
-      .child(
-        small(Button::new("task-add", p).variant(Variant::Ghost))
-          .aria_label("Add")
-          .px_2()
-          .gap_1()
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .flex()
-              .items_center()
-              .gap_1()
-              .child(ui::icon(theme::ICON_PLUS, 16., p.foreground))
-              .child("Add"),
-          )
-          .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Add, cx))),
-      )
-      .when(self.menu == Some(Menu::Add), |this| {
-        this.child(self.add_menu(p, cx))
-      });
-
-    let mut left = div().flex().items_center().gap_1().child(add);
-    if let Some(on) = new_workspace {
-      left = left.child(
-        div()
-          .ml_1()
-          .flex()
-          .items_center()
-          .gap_1p5()
-          .child(form::switch_sized(
-            "task-new-workspace",
-            "Run in a new workspace",
-            on,
-            false,
-            p,
-            (28., 16., 12.),
-            cx.listener(move |view, checked: &bool, _, cx| view.set_new_workspace(*checked, cx)),
-          ))
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .id("task-new-workspace-label")
-              .cursor_pointer()
-              .text_color(p.muted_foreground)
-              .child("Run in a new workspace")
-              .on_click(cx.listener(move |view, _, _, cx| view.set_new_workspace(!on, cx))),
-          ),
-      );
-    }
-
-    let mut right = div()
-      .flex()
-      .min_w_0()
-      .flex_wrap()
-      .items_center()
-      .justify_end()
-      .gap_2();
-    if self.show_save_default && agent != configured {
-      let checked = self.save_default;
-      right = right.child(
-        ui::text(div(), TextSize::Xs)
-          .id("task-save-default")
-          .flex()
-          .items_center()
-          .gap_1p5()
-          .cursor_pointer()
-          .text_color(p.muted_foreground)
-          .child(ui::Checkbox::new("task-save-default-box", p).checked(checked))
-          .child("Set as default for this repo")
-          .on_click(cx.listener(move |view, _, _, cx| {
-            view.save_default = !checked;
-            cx.notify();
-          })),
-      );
-    }
-    if let Some(env) = self.settings.as_ref().and_then(|s| s.environment.clone()) {
-      right = right.child(self.environment(&env, p, cx));
-    }
-    right = right.child(
-      div()
-        .relative()
-        .flex()
-        .items_center()
-        .child(
-          ui::Picker::new("task-agent", p)
-            .placement(ui::PickerPlacement::Toolbar)
-            .icon(agent_icon(agent))
-            .value(agent.label())
-            .open(self.menu == Some(Menu::Agent))
-            .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Agent, cx))),
-        )
-        .when(self.menu == Some(Menu::Agent), |this| {
-          this.child(self.agent_menu(agent, p, cx))
-        }),
-    );
-
-    let disabled = empty || self.submitting;
-    let label = if self.submitting {
-      "Starting…"
-    } else if agent == Agent::Claude {
-      "Edit"
-    } else {
-      "Run"
-    };
-    let submit = small(Button::new("task-submit", p))
-      .px_3()
-      .disabled(disabled)
-      .when(plan, |b| b.rounded_r_none())
-      .when(self.submitting, |b| {
-        b.child(ui::spinner("task-starting", 14., p.primary_foreground))
-      })
-      .aria_label(label)
-      .child(ui::text(div(), TextSize::Xs).child(label))
-      .on_click(cx.listener(|view, _, _, cx| view.submit(false, cx)));
-    let submit = self.tips.wrap(
-      "task-submit",
-      Side::Top,
-      Some(TooltipContent::Text(
-        crate::gpui_shell::keys::hint("⌘ + Enter").into(),
-      )),
-      submit,
-      cx,
-    );
-    let mut buttons = div().relative().flex().items_center().child(submit);
-    if plan {
-      buttons = buttons
-        .child(
-          small(Button::new("task-submit-menu", p))
-            .aria_label("More submit options")
-            .disabled(disabled)
-            .rounded_l_none()
-            .border_l_1()
-            .border_color(p.primary_foreground.opacity(0.2))
-            .px_1p5()
-            .icon(theme::ICON_CHEVRON_DOWN, 14.)
-            .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Plan, cx))),
-        )
-        .when(self.menu == Some(Menu::Plan) && !disabled, |this| {
-          this.child(self.plan_menu(p, cx))
-        });
-    }
-    right = right.child(buttons);
-
-    div()
-      .px_2()
-      .pb_2()
-      .pt_1()
-      .flex()
-      .min_w_0()
-      .flex_wrap()
-      .items_center()
-      .justify_between()
-      .gap_1()
-      .child(left)
-      .child(right)
-  }
-
-  fn close_menu_on_outside(&self, panel: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
-    panel.dismiss_with("code-menu", cx, |view, cx| {
-      let open = view.menu.take().is_some();
-      if open {
-        cx.notify();
-      }
-      open
-    })
-  }
-
-  fn add_menu(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let panel = menu_panel("task-add-menu", p)
-      .top(zpx(32.))
-      .left_0()
-      .min_w(zpx(128.))
-      .child(
-        ui::MenuItem::new("task-add-file", "File", p)
-          .icon(theme::ICON_PLUS)
-          .on_click(cx.listener(|view, _, _, cx| view.open_picker(cx))),
-      )
-      .child(
-        ui::MenuItem::new("task-add-attach", "Attach", p)
-          .icon(theme::ICON_PAPERCLIP)
-          .on_click(cx.listener(|view, _, _, cx| view.attach(cx))),
-      );
-    deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
-  }
-
-  fn plan_menu(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let panel = menu_panel("task-plan-menu", p)
-      .top(zpx(32.))
-      .right_0()
-      .w(zpx(224.))
-      .child(
-        ui::MenuItem::new("task-plan", "Plan", p)
-          .description("Plan the change first, without editing files")
-          .on_click(cx.listener(|view, _, _, cx| view.submit(true, cx))),
-      );
-    deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
-  }
-
-  fn agent_menu(&self, selected: Agent, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let panel = menu_panel("task-agent-menu", p)
-      .top(zpx(32.))
-      .right_0()
-      .min_w(zpx(128.))
-      .child(ui::MenuLabel::new("Agent", p))
-      .children(Agent::ALL.into_iter().map(|agent| {
-        ui::MenuItem::new(format!("task-agent-{}", agent.id()), agent.label(), p)
-          .icon(agent_icon(agent))
-          .checked(agent == selected)
-          .on_click(cx.listener(move |view, _, _, cx| view.choose_agent(agent, cx)))
-      }));
-    deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
-  }
-
-  fn environment(
-    &self,
-    env: &code_data::Environment,
-    p: &Palette,
-    cx: &mut Context<Self>,
-  ) -> impl IntoElement {
-    let button = environment::picker("task-environment", env, p)
-      .open(self.menu == Some(Menu::Environment))
-      .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Environment, cx)));
-    div()
-      .relative()
-      .child(button)
-      .when(self.menu == Some(Menu::Environment), |this| {
-        this.child(self.environment_menu(env, p, cx))
-      })
-  }
-
-  fn environment_menu(
-    &self,
-    env: &code_data::Environment,
-    p: &Palette,
-    cx: &mut Context<Self>,
-  ) -> impl IntoElement {
-    let panel = environment::menu(
-      "task-environment-menu",
-      env,
-      self.starting_devcontainer,
-      p,
-      Self::set_environment,
-      Self::start_devcontainer,
-      cx,
-    )
-    .top(zpx(32.))
-    .right_0();
-    deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
   }
 
   /// The workspace's full title, wrapped rather than truncated, with an
@@ -2291,6 +1527,19 @@ impl CodeView {
       // The next draft opens on itself.
       self.about_tab = AboutTab::Draft;
     }
+    self.parent.workspace.as_ref()?;
+    let github = draft && self.about_tab == AboutTab::GitHub;
+    let body = if github {
+      Some(self.github_text(p).into_any_element())
+    } else {
+      self
+        .description(p, window, cx)
+        .map(IntoElement::into_any_element)
+    };
+    let footer = self.pr_footer(p, cx).map(IntoElement::into_any_element);
+    if !draft && body.is_none() && footer.is_none() {
+      return None;
+    }
     let card = section(p)
       .debug_selector(|| "workspace-about".into())
       .px_4()
@@ -2299,14 +1548,7 @@ impl CodeView {
       .flex_col()
       .gap_3()
       .when(draft, |card| card.child(self.about_tabs(p, cx)));
-    let card = if draft && self.about_tab == AboutTab::GitHub {
-      card.child(self.github_text(p))
-    } else {
-      card
-        .child(self.title(p, cx)?)
-        .children(self.description(p, window, cx))
-    };
-    Some(card.children(self.pr_footer(p, cx)))
+    Some(card.children(body).children(footer))
   }
 
   fn about_tabs(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2380,100 +1622,6 @@ impl CodeView {
           .child(body)
           .into_any_element()
       })
-  }
-
-  fn title(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-    let title = display_title(self.parent.workspace.as_ref()?);
-    let heading = |el: Div| {
-      ui::text(el, TextSize::Xl)
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(p.foreground)
-    };
-    let panel = div().debug_selector(|| "workspace-title".into());
-    let Some(draft) = self.title_draft.clone() else {
-      return Some(
-        panel
-          .flex()
-          .items_start()
-          .gap_2()
-          .child(
-            heading(div())
-              .flex_1()
-              .min_w_0()
-              .whitespace_normal()
-              .debug_selector(|| "workspace-title-text".into())
-              .child(title.clone()),
-          )
-          .child(
-            Button::new("workspace-title-edit", p)
-              .aria_label("Edit workspace title")
-              .variant(Variant::Ghost)
-              .size(Size::Icon)
-              .flex_none()
-              .w(zpx(20.))
-              .h(zpx(20.))
-              .child(ui::icon(theme::ICON_PENCIL, 16., p.muted_foreground))
-              .on_click(
-                cx.listener(move |view, _, window, cx| view.edit_title(title.clone(), window, cx)),
-              ),
-          )
-          .into_any_element(),
-      );
-    };
-    let saving = self.saving_title;
-    let empty = draft.read(cx).value().trim().is_empty();
-    Some(
-      panel
-        .child(
-          div()
-            .id("workspace-title-editor")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .capture_action(cx.listener(|view, action: &Enter, _, cx| {
-              if action.secondary {
-                view.save_title(false, cx);
-                cx.stop_propagation();
-              }
-            }))
-            .capture_action(cx.listener(|view, _: &Escape, _, cx| {
-              view.title_draft = None;
-              cx.notify();
-              cx.stop_propagation();
-            }))
-            .child(
-              heading(div())
-                .debug_selector(|| "workspace-title-input".into())
-                .child(Textarea::new(&draft)),
-            )
-            .child(
-              div()
-                .flex()
-                .justify_end()
-                .gap_2()
-                .child(
-                  Button::new("workspace-title-cancel", p)
-                    .variant(Variant::Ghost)
-                    .size(Size::Sm)
-                    .disabled(saving)
-                    .label("Cancel")
-                    .on_click(cx.listener(|view, _, _, cx| {
-                      view.title_draft = None;
-                      cx.notify();
-                    })),
-                )
-                .child(self.save_button(
-                  "workspace-title-save",
-                  Menu::SaveTitle,
-                  saving || empty,
-                  p,
-                  Self::save_title,
-                  cx,
-                )),
-            ),
-        )
-        .into_any_element(),
-    )
   }
 
   fn description(
@@ -2659,6 +1807,7 @@ impl CodeView {
       section(p)
         .debug_selector(|| "workspace-stack-panel".into())
         .p_4()
+        .child(self.branch_row(p, cx))
         .child(header)
         .child(
           div()
@@ -2676,6 +1825,99 @@ impl CodeView {
             .child(base),
         ),
     )
+  }
+
+  /// The card's top row: the branch, its target picker, and Stack on this….
+  fn branch_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let card = self.chrome.card.borrow().clone();
+    let press = |id: &'static str, react: ActionSink| {
+      move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
+        let react = react.clone();
+        cx.defer(move |cx| react(ScreenAction::Press { id: id.into() }, cx));
+      }
+    };
+    let mut row = div()
+      .flex()
+      .items_center()
+      .gap_2()
+      .min_w_0()
+      .mb_4()
+      .child(ui::icon(theme::ICON_BRANCH_BOLD, 16., p.muted_foreground))
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .font_family(theme::MONO_FONT)
+          .font_weight(FontWeight::SEMIBOLD)
+          .min_w_0()
+          .max_w(zpx(220.))
+          .truncate()
+          .debug_selector(|| "workspace-branch".into())
+          .child(card.branch.clone()),
+      );
+    if let Some(target) = &card.target {
+      let label = target.branch.clone().unwrap_or_else(|| "Select…".into());
+      let button = Button::new("workspace-target", p)
+        .aria_label("Workspace target")
+        .variant(Variant::Outline)
+        .size(Size::Sm)
+        .disabled(target.disabled)
+        .max_w(zpx(220.))
+        .map(|b| {
+          let fg = b.foreground();
+          if target.loading {
+            b.child(ui::spinner("workspace-target-spin", 16., fg))
+          } else {
+            b.icon(theme::ICON_BRANCH_BOLD, 16.)
+          }
+        })
+        .child(
+          div()
+            .font_family(theme::MONO_FONT)
+            .min_w_0()
+            .truncate()
+            .child(label),
+        )
+        .child(ui::icon(
+          theme::ICON_CHEVRON_DOWN,
+          16.,
+          p.foreground.opacity(0.5),
+        ))
+        .on_click(press("workspace.target", self.react.clone()));
+      let bounds = self.chrome.bounds.clone();
+      row = row
+        .child(ui::icon(theme::ICON_ARROW_RIGHT, 16., p.muted_foreground))
+        .child(
+          div().relative().flex_none().child(button).child(
+            gpui::canvas(
+              move |b, _, _| {
+                bounds.borrow_mut().insert("workspace-target".into(), b);
+              },
+              |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+          ),
+        );
+    }
+    if let Some(tooltip) = card.stack_tooltip {
+      let button = Button::new("workspace-stack", p)
+        .variant(Variant::Outline)
+        .size(Size::Sm)
+        .gap_1()
+        .px_2()
+        .icon(theme::ICON_LAYERS, 16.)
+        .label(super::workspace::stack_label(false))
+        .on_click(press("workspace.stack", self.react.clone()));
+      row = row.child(div().flex_1()).child(self.tips.wrap(
+        "workspace-stack",
+        Side::Top,
+        Some(TooltipContent::Text(tooltip.into())),
+        button,
+        cx,
+      ));
+    }
+    row
   }
 
   fn stack_row(
@@ -2700,7 +1942,9 @@ impl CodeView {
     );
     let (ins, del) = row.stats;
     let workspace = row.workspace.clone();
+    // A stack entry: the sidebar row is the button that opens it.
     ui::Row::new(id, p)
+      .role(Role::ListItem)
       .label(title.clone())
       .selected(row.current)
       .relative()
@@ -2743,10 +1987,13 @@ impl CodeView {
 
   fn go_to_file(&self, p: &Palette) -> impl IntoElement {
     let react = self.react.clone();
-    div().flex().justify_end().child(
+    div().flex_none().w(zpx(280.)).child(
       div()
         .id("code-go-to-file")
         .debug_selector(|| "code-go-to-file".into())
+        .role(gpui::Role::Button)
+        .aria_label("Go to file")
+        .test_support()
         .flex()
         .items_center()
         .gap_3()
@@ -2759,7 +2006,6 @@ impl CodeView {
         .hover(move |s| s.bg(p.hover()))
         .cursor_pointer()
         .w_full()
-        .max_w(zpx(320.))
         .child(ui::icon(theme::ICON_SEARCH, 16., p.muted_foreground))
         .child(
           ui::text(div(), TextSize::Sm)
@@ -2870,10 +2116,10 @@ impl CodeView {
         Some("workingCopy") => Some((ui::Tone::Warning.color(p), "Working copy change")),
         _ => None,
       };
-      let name_color = match (entry.status.as_deref(), pip) {
-        (Some("conflict"), _) => ui::Tone::Danger.color(p),
-        (_, Some(_)) => p.foreground,
-        _ => p.muted_foreground.opacity(0.7),
+      // The pip after the name carries the status; the name stays neutral.
+      let name_color = match pip {
+        Some(_) => p.foreground,
+        None => p.muted_foreground.opacity(0.7),
       };
       let pip_id = SharedString::from(format!("code-entry-status-{}", entry.name));
       // A row has something above it: an earlier row, or the toggle.
@@ -3204,7 +2450,7 @@ impl CodeView {
           .into_any_element(),
         None => ui::text(div(), TextSize::Sm)
           .text_color(p.muted_foreground)
-          .child("Loading commits...")
+          .child("Loading commits…")
           .into_any_element(),
       };
       return div()
@@ -3322,7 +2568,17 @@ impl CodeView {
             )
           })
       } else {
-        div().child(format!("Recent on {}", log.target_branch))
+        {
+          let text = format!("On {} (read-only)", log.target_branch);
+          div().child(
+            div()
+              .id("history-divider")
+              .role(Role::Heading)
+              .aria_label(text.clone())
+              .child(text)
+              .test_support(),
+          )
+        }
       };
       track = track.child(separator(label, p));
       for (label, commits) in group_by_day(target.iter().copied()) {
@@ -3426,20 +2682,6 @@ impl CodeView {
           .gap_2()
           .mt_0p5()
           .flex_wrap()
-          .when(commit.is_immutable, |this| {
-            this.child(
-              ui::text(div(), TextSize::Xs)
-                .px_1p5()
-                .py_0p5()
-                .rounded_full()
-                .bg(p.muted)
-                .text_color(p.muted_foreground)
-                .border_1()
-                .border_color(p.border)
-                .font_weight(FontWeight::MEDIUM)
-                .child("Immutable"),
-            )
-          })
           .child(time)
           .when(commit.insertions > 0 || commit.deletions > 0, |this| {
             this.child(
@@ -3507,7 +2749,7 @@ fn day_label(label: &str, p: &Palette) -> impl IntoElement {
     .child(label.to_string())
 }
 
-/// The dashed `Diverged from` / `Recent on` rule.
+/// The dashed `Diverged from` / `On main (read-only)` rule.
 fn separator(label: Div, p: &Palette) -> impl IntoElement {
   // `border-t border-dashed`, as Chromium dashes a 1px border.
   let dashes = || {

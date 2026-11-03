@@ -285,7 +285,7 @@ impl Render for RenameDialog {
     ui::Dialog::new("rename-workspace-dialog", &p)
       .overlay(window.viewport_size())
       .width(500.)
-      .title("Rename Workspace")
+      .title("Rename workspace")
       .description("Rename the branch for this workspace")
       .focus(&self.focus)
       .on_close(ui::handler(cx, |view, _, cx| view.close(cx)))
@@ -305,7 +305,7 @@ impl Render for RenameDialog {
               .child(
                 ui::text(div(), TextSize::Sm)
                   .font_weight(FontWeight::MEDIUM)
-                  .child("Branch Name"),
+                  .child("Branch name"),
               )
               .child(
                 div()
@@ -348,7 +348,7 @@ impl Render for RenameDialog {
           .into_any_element(),
         Button::new("rename-submit", &p)
           .disabled(!can_submit)
-          .label(if pending { "Renaming..." } else { "Rename" })
+          .label(if pending { "Renaming…" } else { "Rename" })
           .on_click(cx.listener(|view, _, _, cx| view.submit(cx)))
           .into_any_element(),
       ])

@@ -18,6 +18,7 @@ import {
   type RelayTarget,
   relayUrlForEndpoint,
   UpstreamError,
+  wakeBeforeConnect,
 } from "../_shared/remote/ssh-relay.ts";
 import { parseHostKeyLines } from "../_shared/remote/managed-sshd.ts";
 import { openProxy } from "../_shared/remote/gateway-proxy.ts";
@@ -75,6 +76,7 @@ function store(
     },
     // Pro refusals are covered in test/billing/relay-pro.test.ts.
     hasPro: () => Promise.resolve(true),
+    spendCapped: () => Promise.resolve(false),
   };
 }
 
@@ -115,6 +117,7 @@ Deno.test("relay authorizes the owner of a ready managed endpoint", async () => 
     providerResourceId: "dev-treq-user-1",
     providerKind: "boat",
     placementId: "pl-1",
+    instanceStatus: "ready",
     host: "localhost",
     port: 2222,
   });
@@ -205,6 +208,22 @@ Deno.test("relay accepts a suspended instance because the proxy wakes it", async
     store: s,
   });
   assertEquals(target.providerResourceId, "x");
+});
+
+// A provider's gatewayEndpoint resumes a suspended machine by itself, which
+// skipped the recorded waking -> ready and left it running unbilled until
+// the idle controller noticed. The relay wakes it, recorded, first.
+Deno.test("the relay wakes a suspended machine, recorded, before connecting", async () => {
+  const woke: string[] = [];
+  const wake = (id: string) => {
+    woke.push(id);
+    return Promise.resolve();
+  };
+  const base = await authorizeRelayRequest(relayRequest(), { getUserId, store: store() });
+  await wakeBeforeConnect({ ...base, instanceStatus: "ready" }, wake);
+  assertEquals(woke, []);
+  await wakeBeforeConnect({ ...base, instanceStatus: "suspended" }, wake);
+  assertEquals(woke, ["dev-treq-user-1"]);
 });
 
 Deno.test("relay refuses revoked or foreign client keys", async () => {
@@ -299,6 +318,7 @@ const TARGET: RelayTarget = {
   providerResourceId: "dev-treq-user-1",
   providerKind: "boat",
   placementId: null,
+  instanceStatus: "ready",
   host: "localhost",
   port: 2222,
 };

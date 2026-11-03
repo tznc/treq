@@ -297,7 +297,7 @@ fn merge_preview_hints_the_github_message_is_optional(cx: &mut TestAppContext) {
         .message_placeholder()
     })
   };
-  assert_eq!(placeholder(&mut h), "Enter merge commit message...");
+  assert_eq!(placeholder(&mut h), "Enter merge commit message…");
   h.click("merge-location-github");
   assert!(h.drawn("merge-message"));
   assert_eq!(

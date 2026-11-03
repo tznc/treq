@@ -44,18 +44,19 @@ test("branch deleted: Code tab offers Archive, the diff still reads", async ({ p
 
   await openTab(page, "Code");
   await settle(page, 1500);
+  await page.getByRole("button", { name: /^Alerts: .*1 warning/ }).click();
   await expect(page.getByText("Branch deleted on remote")).toBeVisible();
   await capture(page, {
     name: "98-02-branch-deleted-alert",
     title: "Code tab alert for a deleted branch",
     expectations: [
-      "An amber alert reads 'Branch deleted on remote'",
+      "The alerts popover is open under the action row, with an amber alert reading 'Branch deleted on remote'",
       `Its message names ${ALERTING} and suggests archiving; an outlined Archive button sits on the alert`,
-      "The rest of the Code tab renders below it normally",
+      "The rest of the Code tab renders normally behind the popover",
     ],
   });
 
-  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await page.getByRole("button", { name: "Archive workspace", exact: true }).click();
   await settle(page, 2500);
   await expect(row(page, ALERTING)).toHaveCount(0);
   await capture(page, {

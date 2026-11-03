@@ -24,6 +24,8 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
+  /// Saving repository settings fails, as a full disk would.
+  fail_repo_settings: bool,
   /// The tuning agent's proposed review prompt edits.
   prompt_edits: std::sync::Mutex<Vec<crate::local_db::AgentReviewComment>>,
   /// What the folder picker returns, and why starting a dev container fails.
@@ -84,6 +86,8 @@ struct FakeHost {
   working: Option<crate::jj::JjRevisionDiff>,
   /// Replaces `working` once set: the files edited on disk meanwhile.
   edited: Mutex<Option<crate::jj::JjRevisionDiff>>,
+  /// The files kept as viewed, with their diff hashes.
+  viewed: Vec<(String, String)>,
   /// The token hunk reads report instead of the diff's: the disk moved on
   /// between the two reads.
   hunks_token: Mutex<Option<String>>,
@@ -426,6 +430,9 @@ impl settings_data::SettingsHost for FakeHost {
   fn set_repo_settings(&self, repo_path: &str, values: &[(String, String)]) -> Result<(), String> {
     let pairs: Vec<_> = values.iter().map(|(k, v)| format!("{k}={v}")).collect();
     self.record(format!("set repo {repo_path} {}", pairs.join(" ")));
+    if self.fail_repo_settings {
+      return Err("disk full".into());
+    }
     let mut settings = self.settings.lock().unwrap();
     for (k, v) in values {
       settings.insert(format!("{repo_path}:{k}"), Some(v.clone()));
@@ -870,16 +877,6 @@ impl code_data::CodeHost for FakeHost {
     Ok(self.devcontainer_status(repo_path))
   }
 
-  fn branch_names(&self, _: &str) -> Result<std::collections::HashSet<String>, String> {
-    self.record("read branches".into());
-    Ok(["treq/fix-login".to_string()].into())
-  }
-
-  fn create_workspace(&self, _: &str, branch: &str, title: &str) -> Result<i64, String> {
-    self.record(format!("create workspace {branch} {title:?}"));
-    Ok(9)
-  }
-
   fn create_session(&self, _: &str, workspace_id: Option<i64>, name: &str) -> Result<i64, String> {
     self.record(format!("create session {workspace_id:?} {name:?}"));
     Ok(31)
@@ -1032,6 +1029,10 @@ impl changes_data::ChangesHost for FakeHost {
   fn unmark_viewed(&self, _: &str, path: &str) -> Result<(), String> {
     self.record(format!("unmark viewed {path}"));
     Ok(())
+  }
+
+  fn viewed_files(&self, _: &str) -> Result<Vec<(String, String)>, String> {
+    Ok(self.viewed.clone())
   }
 
   fn github_remote(&self, _: &str) -> bool {
@@ -2939,6 +2940,7 @@ mod kept_tabs;
 mod linear_view;
 mod logs_explorer;
 mod logs_screen;
+mod machines_chaos;
 mod merge_screen;
 mod onboarding_screen;
 mod open_workspaces;

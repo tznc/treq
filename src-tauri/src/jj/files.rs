@@ -512,7 +512,9 @@ pub(super) fn parse_git_diff_hunks(diff: &str) -> Result<Vec<JjDiffHunk>, JjErro
   let mut current_hunk: Option<(String, Vec<String>)> = None;
   let mut hunk_index = 0;
 
-  for line in diff.lines() {
+  // Split on `\n` only: `lines()` would also strip a `\r` that is part of
+  // the line's text (the diff already dropped each line's own `\r\n`).
+  for line in diff.strip_suffix('\n').unwrap_or(diff).split('\n') {
     if line.starts_with("@@") {
       // Save previous hunk if exists
       if let Some((header, lines)) = current_hunk.take() {

@@ -34,7 +34,7 @@ pub enum ModalRoute {
   WorkspaceDialog(Box<workspace_dialog_data::Route>),
   /// `RenameWorkspaceDialog`.
   RenameWorkspace(RenameRoute),
-  /// `WorkspaceDeletion`, the command palette's "Delete Workspace".
+  /// `WorkspaceDeletion`, the command palette's "Delete workspace".
   WorkspaceDeletion(DeletionRoute),
   /// The `AlertDialog` that confirms moving dropped files.
   ConfirmChangeMove(ChangeMoveRoute),

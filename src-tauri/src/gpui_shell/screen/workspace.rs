@@ -30,7 +30,7 @@ use tauri_plugin_gpui::gpui::{
 use super::launch_data::LaunchRequest;
 use super::{
   changes::{self, ChangesView},
-  code::{CodeView, Parent},
+  code::{CodeChrome, CodeView, Parent, StackCard},
   commits::CommitsView,
   commits_data::CommitsHost,
   file_browser::{FileBrowserView, Opening},
@@ -43,6 +43,7 @@ use super::{
   workspace_data::{
     workspace_view, Loaded, Outcome, Pending, PrCache, Route, WorkspaceHost, DEFAULT_BRANCH,
   },
+  workspace_title::TitleEditor,
   ActionSink, ScreenAction,
 };
 use crate::gpui_shell::{
@@ -94,6 +95,10 @@ pub struct Workspace {
 #[serde(rename_all = "camelCase")]
 pub struct Header {
   pub branch: String,
+  /// The workspace's title, which the header shows in place of `branch`;
+  /// `None` at home.
+  #[serde(default)]
+  pub title: Option<String>,
   pub home: bool,
   pub linear: Option<Linear>,
   pub target: Option<Target>,
@@ -164,6 +169,16 @@ pub struct ViewPr {
 
 /// React's `View PR (#12, open)`: the number and state the icon and color show.
 /// What the sync pip signals, as its tooltip and accessible name say it.
+/// The header's create button: a new workspace at home, one stacked on the
+/// workspace on screen elsewhere.
+pub(super) fn stack_label(home: bool) -> &'static str {
+  if home {
+    "New workspace…"
+  } else {
+    "Stack on this…"
+  }
+}
+
 fn sync_state(sync: &Sync) -> String {
   match (sync.ahead, sync.behind) {
     (a, 0) => format!("{a} to push"),
@@ -292,11 +307,8 @@ pub struct WorkspaceView {
   confirm: Option<crate::gpui_shell::confirm::Pending<Self>>,
   popover_host: Arc<dyn PopoverHost>,
   code_host: Arc<dyn TerminalHost>,
-  /// The header popover that shows in the modal window, if one does.
+  /// The header popover drawn over the window, if one shows.
   popover: Option<(Entity<Popover>, gpui::Subscription)>,
-  /// The window this view draws in, which a press outside the popover goes
-  /// on to.
-  window: Option<gpui::AnyWindowHandle>,
   /// The terminal pane, while GPUI draws it, and the workspace it was
   /// last placed in.
   terminal: Option<(Entity<TerminalPane>, TerminalPlace)>,
@@ -343,10 +355,11 @@ pub struct WorkspaceView {
   /// workspace and revision it started on.
   _idle: Task<()>,
   idle_for: Option<(RouteKey, u64)>,
-  /// The target button while the pointer rests on it, and the branch names
-  /// read ahead that way, by repository.
-  target_hover: prefetch::Intent<()>,
-  branches: prefetch::Lru<String, Vec<String>>,
+  /// The header's title and its editor, for the workspace on screen.
+  title: Option<Entity<TitleEditor>>,
+  /// What the Code tab's stack card shows from the header: the branch, its
+  /// target picker and Stack on this….
+  stack_card: Rc<RefCell<StackCard>>,
   /// The workspace whose file index was last asked to be built.
   indexed: Option<RouteKey>,
   /// The route's `changes_revision` the file index was last asked to read.
@@ -389,7 +402,7 @@ impl WorkspaceView {
       let (view, react) = (cx.weak_entity(), react.clone());
       Rc::new(move |action, cx| {
         let view = view.clone();
-        if archives(&action) {
+        if archives(&action) || header_press(&action) {
           return cx.defer(move |cx| {
             view
               .update(cx, |view, cx| view.handle(action, cx))
@@ -421,7 +434,6 @@ impl WorkspaceView {
       confirm: None,
       popover_host: host.clone(),
       popover: None,
-      window: None,
       code_host: host,
       terminal: None,
       code: None,
@@ -446,8 +458,8 @@ impl WorkspaceView {
       recent: Vec::new(),
       _idle: Task::ready(()),
       idle_for: None,
-      target_hover: prefetch::Intent::default(),
-      branches: prefetch::Lru::new(1),
+      title: None,
+      stack_card: Rc::default(),
       indexed: None,
       indexed_revision: 0,
       _reindex: Task::ready(()),
@@ -644,7 +656,9 @@ impl WorkspaceView {
           // Not shown yet: made on the workspace, hidden until it shows.
           None => {
             let host: Arc<dyn CommitsHost> = host;
-            self.code = Some(cx.new(|cx| CodeView::new(parent, host, react, popups, dark, cx)));
+            let chrome = self.code_chrome();
+            self.code =
+              Some(cx.new(|cx| CodeView::new(parent, host, react, popups, chrome, dark, cx)));
           }
         },
       },
@@ -739,36 +753,6 @@ impl WorkspaceView {
       && self.changes.ready_for(&key, cx)
       && self.file_browser.ready_for(&key, cx)
       && self.code.as_ref().is_none_or(|code| code.read(cx).ready())
-  }
-
-  /// The pointer entered or left the target button: the branches it lists
-  /// are read ahead.
-  fn hover_target(&mut self, hovered: bool, cx: &mut Context<Self>) {
-    self.target_hover.hover((), hovered, cx, |view, cx| {
-      let repo = view.route.repo_path.clone();
-      let now = cx.background_executor().now();
-      if view.branches.has_fresh(&repo, now) {
-        return;
-      }
-      let host = view.popover_host.clone();
-      cx.spawn(async move |this, cx| {
-        let path = repo.clone();
-        let read = cx
-          .background_spawn(async move { host.branches(&path) })
-          .await;
-        let Ok(branches) = read else {
-          return;
-        };
-        let names = branches.into_iter().map(|b| b.name).collect();
-        this
-          .update(cx, |view, cx| {
-            let now = cx.background_executor().now();
-            view.branches.insert(repo, now, names);
-          })
-          .ignore_closed();
-      })
-      .detach();
-    });
   }
 
   /// Reads everything again off the main thread; a load asked for while one
@@ -893,18 +877,14 @@ impl WorkspaceView {
     }
   }
 
-  /// Opens the popover under header button `key` in the modal window.
+  /// Opens the popover under header button `key`, drawn over the window.
   fn open_popover(&mut self, key: &'static str, cx: &mut Context<Self>) {
     let Some(anchor) = self.bounds.borrow().get(key).copied() else {
       return;
     };
-    let Some(mut kind) = self.popover_kind(key, cx) else {
+    let Some(kind) = self.popover_kind(key, cx) else {
       return;
     };
-    if let popover::Kind::Target(spec) = &mut kind {
-      let now = cx.background_executor().now();
-      spec.branches = self.branches.take_fresh(&spec.repo_path, now);
-    }
     self.close_popover(cx);
     // The button's tooltip would cover the popover and swallow the next
     // click; `hover_tooltip` keeps it hidden while the popover shows.
@@ -913,19 +893,29 @@ impl WorkspaceView {
       cx.notify();
     }
     let (host, react, dark) = (self.popover_host.clone(), self.sink.clone(), self.dark);
-    let shell = self.window;
-    let popover = cx.new(|cx| Popover::new(kind, anchor, shell, dark, host, react, cx));
+    let popover = cx.new(|cx| Popover::new(kind, anchor, dark, host, react, cx));
     let subscription = cx.subscribe(&popover, |this, _, _: &popover::Closed, cx| {
       this.close_popover(cx)
     });
-    self.popover = Some((popover.clone(), subscription));
-    (self.popups)(PopupRequest::ShowPopover { popover, dark }, cx);
+    self.popover = Some((popover, subscription));
+    cx.notify();
   }
 
   fn close_popover(&mut self, cx: &mut Context<Self>) {
     if self.popover.take().is_some() {
-      (self.popups)(PopupRequest::HidePopover, cx);
+      cx.notify();
     }
+  }
+
+  /// The open popover, laid over the whole window from its origin, as the
+  /// popover's anchor is in window coordinates.
+  fn popover_layer(&self) -> Option<impl IntoElement> {
+    let (popover, _) = self.popover.as_ref()?;
+    Some(gpui::deferred(
+      gpui::anchored()
+        .position(gpui::Point::default())
+        .child(popover.clone()),
+    ))
   }
 
   /// Passes the open popover what changed under it.
@@ -1047,6 +1037,46 @@ impl WorkspaceView {
 
   /// Records the bounds of its parent as `key`'s, for a dropdown to open
   /// below.
+  /// What the Code tab draws of the header: its stack card's branch, target
+  /// picker and Stack on this…, anchored where the header's popovers open.
+  fn code_chrome(&self) -> CodeChrome {
+    CodeChrome {
+      card: self.stack_card.clone(),
+      bounds: self.bounds.clone(),
+    }
+  }
+
+  /// The header's title for the workspace on screen, made or brought up to
+  /// date, and the stack card's header data; `None` at home.
+  fn sync_header_chrome(&mut self, header: &Header, cx: &mut Context<Self>) {
+    let card = StackCard {
+      branch: header.branch.clone(),
+      target: header.target.clone(),
+      stack_tooltip: header.stack.as_ref().map(|s| s.tooltip.clone()),
+    };
+    if *self.stack_card.borrow() != card {
+      *self.stack_card.borrow_mut() = card;
+      if let Some(code) = &self.code {
+        code.update(cx, |_, cx| cx.notify());
+      }
+    }
+    let (Some(title), Some(id)) = (header.title.clone(), self.route.workspace_id) else {
+      self.title = None;
+      return;
+    };
+    let repo = self.route.repo_path.clone();
+    let dark = self.dark;
+    match &self.title {
+      Some(editor) if editor.read(cx).workspace() == (repo.as_str(), id) => {
+        editor.update(cx, |editor, cx| editor.set_title(title, dark, cx));
+      }
+      _ => {
+        let host: Arc<dyn super::code_data::CodeHost> = self.code_host.clone();
+        self.title = Some(cx.new(|_| TitleEditor::new(host, repo, id, title, dark)));
+      }
+    }
+  }
+
   fn record_bounds(&self, key: &'static str) -> impl IntoElement {
     let bounds = self.bounds.clone();
     gpui::canvas(
@@ -1175,50 +1205,15 @@ impl WorkspaceView {
       .items_center()
       .gap_2()
       .min_w_0()
-      .child(ui::icon(theme::ICON_BRANCH_BOLD, 16., p.muted_foreground));
+      .when(h.home, |left| {
+        left.child(ui::icon(theme::ICON_BRANCH_BOLD, 16., p.muted_foreground))
+      });
 
     if !h.home {
-      left = left.child(mono_title(&h.branch).debug_selector(|| "workspace-branch".into()));
-      if let Some(target) = &h.target {
-        let label = target.branch.clone().unwrap_or_else(|| "Select...".into());
-        let button = Button::new("workspace-target", p)
-          .aria_label("Workspace target")
-          .variant(Variant::Outline)
-          .size(Size::Sm)
-          .disabled(target.disabled)
-          .max_w(zpx(220.))
-          .map(|b| {
-            let fg = b.foreground();
-            if target.loading {
-              b.child(ui::spinner("workspace-target-spin", 16., fg))
-            } else {
-              b.icon(theme::ICON_BRANCH_BOLD, 16.)
-            }
-          })
-          .child(
-            div()
-              .font_family(theme::MONO_FONT)
-              .min_w_0()
-              .truncate()
-              .child(label),
-          )
-          .child(ui::icon(
-            theme::ICON_CHEVRON_DOWN,
-            16.,
-            p.foreground.opacity(0.5),
-          ))
-          .on_click(self.press("workspace.target"));
-        left = left
-          .child(ui::icon(theme::ICON_ARROW_RIGHT, 16., p.muted_foreground))
-          .child(
-            div()
-              .id("workspace-target-anchor")
-              .relative()
-              .flex_none()
-              .on_hover(cx.listener(|this, hovered: &bool, _, cx| this.hover_target(*hovered, cx)))
-              .child(button)
-              .child(self.record_bounds("workspace-target")),
-          );
+      // The title in place of the branch: the branch, its target and Stack
+      // on this… live in the Code tab's stack card.
+      if let Some(title) = &self.title {
+        left = left.child(title.clone());
       }
       if h.details {
         let button = Button::new("workspace-details", p)
@@ -1304,21 +1299,21 @@ impl WorkspaceView {
           ));
         }
       }
-      if let Some(stack) = &h.stack {
-        let button = Button::new("workspace-stack", p)
-          .size(Size::Sm)
-          .gap_1()
-          .px_2()
-          .icon(theme::ICON_LAYERS, 16.)
-          .label("Stack")
-          .on_click(self.press("workspace.stack"));
-        left = left.child(self.with_tooltip(
-          "workspace-stack",
-          Some(TooltipContent::Text(stack.tooltip.clone().into())),
-          button,
-          cx,
-        ));
-      }
+    }
+    if let Some(stack) = h.stack.as_ref().filter(|_| h.home) {
+      let button = Button::new("workspace-stack", p)
+        .size(Size::Sm)
+        .gap_1()
+        .px_2()
+        .icon(theme::ICON_LAYERS, 16.)
+        .label(stack_label(h.home))
+        .on_click(self.press("workspace.stack"));
+      left = left.child(self.with_tooltip(
+        "workspace-stack",
+        Some(TooltipContent::Text(stack.tooltip.clone().into())),
+        button,
+        cx,
+      ));
     }
 
     // The row wraps it whole first; alone on its row and still too wide (at
@@ -1403,9 +1398,30 @@ impl WorkspaceView {
     if let Some(sync) = &h.sync {
       right = right.child(self.sync(sync, p, cx));
     }
-    if let Some(merge) = &h.merge {
+    let merged = h
+      .view_pr
+      .as_ref()
+      .is_some_and(|pr| pr.state == PrState::Merged);
+    if h.merge.is_some() && merged {
+      // The work landed: archiving is the next step, not merging again.
+      let button = Button::new("workspace-archive", p)
+        .variant(Variant::Outline)
+        .size(Size::Md)
+        .gap_1()
+        .icon(theme::ICON_ARCHIVE, 16.)
+        .label("Archive")
+        .on_click(self.press("workspace.archive"));
+      right = right.child(self.with_tooltip(
+        "workspace-archive",
+        Some(TooltipContent::Text(
+          "The pull request merged. Archive this workspace.".into(),
+        )),
+        button,
+        cx,
+      ));
+    } else if let Some(merge) = &h.merge {
       let button = Button::new("workspace-merge", p)
-        .aria_label("Merge...")
+        .aria_label("Merge…")
         .variant(if merge.passing {
           Variant::Success
         } else {
@@ -1415,7 +1431,7 @@ impl WorkspaceView {
         .gap_1()
         .disabled(merge.disabled)
         .icon(theme::ICON_COMPARE, 16.)
-        .label("Merge...")
+        .label("Merge…")
         .on_click(self.press("workspace.merge"));
       right = right.child(
         self.with_tooltip(
@@ -1650,17 +1666,19 @@ impl WorkspaceView {
       Some(CommitsLabel::Count { count, tone }) => {
         let tab = commits.count(*count as usize);
         if *tone == Tone::Conflict {
-          tab.dot(ui::Tone::Danger)
+          tab.dot(ui::Tone::Danger, "Conflicted commits")
         } else {
           tab
         }
       }
-      Some(CommitsLabel::HomeConflict) => commits.dot(ui::Tone::Danger),
+      Some(CommitsLabel::HomeConflict) => commits.dot(ui::Tone::Danger, "Conflicted commits"),
       None => commits,
     };
     let changes = ui::Tab::new("workspace-tab-changes", "Changes").icon(theme::ICON_FILE_DIFF);
     let changes = match &row.changes {
-      Some(c) if c.tone == Tone::Conflict => changes.count(c.count as usize).dot(ui::Tone::Danger),
+      Some(c) if c.tone == Tone::Conflict => changes
+        .count(c.count as usize)
+        .dot(ui::Tone::Danger, "Conflict"),
       Some(c) => changes.count(c.count as usize),
       None => changes,
     };
@@ -1813,6 +1831,11 @@ fn archives(action: &ScreenAction) -> bool {
   matches!(action, ScreenAction::Press { id } if id == "workspace.archive")
 }
 
+/// The header's actions the Code tab's stack card presses.
+fn header_press(action: &ScreenAction) -> bool {
+  matches!(action, ScreenAction::Press { id } if id == "workspace.target")
+}
+
 fn launches(action: &ScreenAction) -> bool {
   matches!(action, ScreenAction::Field { field, .. } if matches!(
     field.as_str(),
@@ -1852,7 +1875,14 @@ impl WorkspaceView {
       "changes.startReview" => {
         let agent = value["agent"].as_str().map(str::to_string);
         let prompt = text("prompt");
-        self.start(cx, None, "Failed to create agent", move |host| {
+        let branch = self
+          .snapshot_branch()
+          .unwrap_or_else(|| "this workspace".into());
+        let started = (
+          format!("Review started on {branch}"),
+          "Comments will appear inline",
+        );
+        self.start_then(cx, Some(started), "Failed to create agent", move |host| {
           let agent = host.resolve_agent(&repo, agent.as_deref());
           request("AI Review", prompt, "acceptEdits", agent)
         });
@@ -1886,7 +1916,7 @@ impl WorkspaceView {
         }
         self.start(cx, None, "Failed to create agent", move |host| {
           let agent = host.resolve_agent(&repo, None);
-          request("Code Review", markdown, &mode, agent)
+          request("Code review", markdown, &mode, agent)
         });
       }
       "changes.agentComment" => {
@@ -1905,7 +1935,7 @@ impl WorkspaceView {
         }
         let done = ("Comment sent to agent", "");
         self.start(cx, Some(done), "Failed to create agent", move |_| {
-          request("Review Comment", prompt, "acceptEdits", None)
+          request("Review comment", prompt, "acceptEdits", None)
         });
       }
       "logs.sendToAgent" => {
@@ -1948,6 +1978,18 @@ impl WorkspaceView {
     failed: &'static str,
     request: impl FnOnce(&dyn TerminalHost) -> LaunchRequest + Send + 'static,
   ) {
+    let done = done.map(|(title, description)| (title.to_string(), description));
+    self.start_then(cx, done, failed, request);
+  }
+
+  /// [`Self::start`] with a toast title built at the call.
+  fn start_then(
+    &self,
+    cx: &mut Context<Self>,
+    done: Option<(String, &'static str)>,
+    failed: &'static str,
+    request: impl FnOnce(&dyn TerminalHost) -> LaunchRequest + Send + 'static,
+  ) {
     let host = self.code_host.clone();
     cx.spawn(async move |this, cx| {
       let result = cx
@@ -1958,7 +2000,9 @@ impl WorkspaceView {
         .await;
       this
         .update(cx, |view, _| match (result, done) {
-          (Ok(_), Some((title, description))) => view.toast(ToastTone::Success, title, description),
+          (Ok(_), Some((title, description))) => {
+            view.toast(ToastTone::Success, &title, description)
+          }
           (Ok(_), None) => {}
           (Err(err), _) => view.toast(ToastTone::Error, failed, err),
         })
@@ -2226,7 +2270,8 @@ impl WorkspaceView {
       });
       return Body::Code(code.clone());
     }
-    let code = cx.new(|cx| CodeView::new(parent, host, react, popups, dark, cx));
+    let chrome = self.code_chrome();
+    let code = cx.new(|cx| CodeView::new(parent, host, react, popups, chrome, dark, cx));
     self.code = Some(code.clone());
     Body::Code(code)
   }
@@ -2355,12 +2400,14 @@ impl Body {
 
 impl Render for WorkspaceView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    self.window = Some(window.window_handle());
     self.sync_tooltip_popup(cx);
     self.idle(window, cx);
     let p = theme::palette(self.dark);
     let confirm = crate::gpui_shell::confirm::render(Self::confirm_slot, self, window, &p, cx);
     let snapshot = self.snapshot.clone();
+    if let Some(snapshot) = &snapshot {
+      self.sync_header_chrome(&snapshot.header, cx);
+    }
     let header = match &snapshot {
       Some(snapshot) => self.header(&snapshot.header, &p, cx),
       // Until the first load: the empty bar, as tall as a row of buttons.
@@ -2441,6 +2488,7 @@ impl Render for WorkspaceView {
           .text_color(p.foreground)
           .children(strip)
           .child(pane_area)
+          .children(self.popover_layer())
           .children(confirm)
           .into_any_element();
       }
@@ -2474,6 +2522,7 @@ impl Render for WorkspaceView {
             d.child(super::remote_chrome::cutoff_overlay(&p))
           }),
       )
+      .children(self.popover_layer())
       .children(confirm)
       .into_any_element()
   }

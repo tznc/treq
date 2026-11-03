@@ -1154,8 +1154,8 @@ fn test_unpushed_commits_on_default_branch_are_mutable() {
 }
 
 #[test]
-fn test_default_branch_without_remote_all_commits_immutable() {
-  // When there is no remote, fall back to local bookmark — everything immutable.
+fn test_default_branch_without_remote_commits_stay_mutable() {
+  // Nothing is published without a remote, so nothing is immutable.
   let repo = TestRepo::new().expect("Failed to create test repo");
   let default_branch = repo.default_branch();
 
@@ -1178,8 +1178,8 @@ fn test_default_branch_without_remote_all_commits_immutable() {
 
   for commit in &non_wc_commits {
     assert!(
-      commit.is_immutable,
-      "without remote, commit '{}' should be immutable (fallback behavior)",
+      !commit.is_immutable,
+      "without remote, commit '{}' should stay mutable",
       commit.description
     );
   }

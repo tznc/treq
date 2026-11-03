@@ -9,6 +9,7 @@
 //! timeline draws its own stretch of the rule.
 
 use crate::gpui_shell::ui::radius;
+use gpui_kit::base::TestSupportExt as _;
 use std::{collections::HashSet, rc::Rc};
 
 use tauri_plugin_gpui::gpui::{
@@ -62,7 +63,7 @@ pub(super) enum Row {
   OwnEmpty,
   /// "Load more commits", of the target's commits or not.
   LoadMore(bool),
-  /// The rule and "Recent on {target}".
+  /// The rule and "On {target} (read-only)".
   Divider,
   /// The space under the last row.
   End,
@@ -508,7 +509,11 @@ impl CommitsView {
               .font_weight(gpui::FontWeight::SEMIBOLD)
               .text_color(p.muted_foreground)
               .pl_7()
-              .child(format!("Recent on {branch}")),
+              .child(format!("On {branch} (read-only)"))
+              .id("target-divider")
+              .role(gpui::Role::Heading)
+              .aria_label(format!("On {branch} (read-only)"))
+              .test_support(),
           )
           .into_any_element()
       }

@@ -35,9 +35,9 @@ pub struct RemoteChrome {
 fn copy(state: &str) -> Option<(&'static str, Tone)> {
   Some(match state {
     "online" => return None,
-    "connecting" => ("Connecting...", Tone::Warning),
-    "reconnecting" => ("Reconnecting...", Tone::Warning),
-    "waking" => ("Waking managed VM...", Tone::Warning),
+    "connecting" => ("Connecting…", Tone::Warning),
+    "reconnecting" => ("Reconnecting…", Tone::Warning),
+    "waking" => ("Waking managed VM…", Tone::Warning),
     "stale" => ("Showing cached data - refreshing", Tone::Warning),
     "offline" => ("Offline", Tone::Danger),
     "degraded" => ("Degraded - some checks are failing", Tone::Danger),

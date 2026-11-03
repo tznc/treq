@@ -1,9 +1,8 @@
-// The Code tab's file list leaves out the .git and .jj directories, a
-// hovered workspace row keeps its branch name clear of the row actions, and
-// the window the palette and other dialogs open in is titled "Treq".
+// The Code tab's file list leaves out the .git and .jj directories, and a
+// hovered workspace row keeps its branch name clear of the row actions.
 import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { home, mod, overlay, row, settle } from "./helpers.ts";
+import { home, row, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
@@ -11,6 +10,8 @@ const BRANCH = "feat/empty-event-message";
 
 test("code-git: the Code tab hides version control directories", async ({ page }) => {
   await home(page);
+  // Untouched entries fold behind this toggle; on main every entry is.
+  await page.getByRole("button", { name: /^Show \d+ unchanged files?$/ }).click();
   await settle(page, 2000);
   await capture(page, {
     name: "15-code-git-hidden",
@@ -27,7 +28,7 @@ test("row-hover: a hovered workspace row keeps its branch name clear of the acti
   await home(page);
   await row(page, BRANCH).hover();
   await settle(page, 1500);
-  await expect(row(page, BRANCH).getByRole("button", { name: "Stack workspace" })).toBeVisible();
+  await expect(row(page, BRANCH).getByRole("button", { name: "Stack on this…" })).toBeVisible();
   await capture(page, {
     name: "15-row-hover-actions",
     title: "Hovered workspace row at the default sidebar width",
@@ -35,13 +36,4 @@ test("row-hover: a hovered workspace row keeps its branch name clear of the acti
     rest: false,
     expectations: ["The feat/empty-event-message title ends in an ellipsis before its three action buttons"],
   });
-});
-
-test("dialog-title: the palette window is titled Treq", async ({ page, context }) => {
-  await home(page);
-  await page.keyboard.press(`${mod}+k`);
-  const dialog = await overlay(page, context);
-  await expect(dialog.getByRole("textbox").first()).toBeVisible();
-  expect(await dialog.title()).toBe("Treq");
-  await dialog.keyboard.press("Escape");
 });

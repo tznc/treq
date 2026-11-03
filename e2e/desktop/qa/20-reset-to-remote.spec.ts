@@ -53,7 +53,7 @@ test("reset-to-remote: More menu item and its question", async ({ page }) => {
     screen: true,
     rest: false,
     expectations: [
-      "The menu lists 'Reset to remote' with a counter-clockwise arrow, a separator, then 'Delete Workspace'",
+      "The menu lists 'Reset to remote' with a counter-clockwise arrow, a separator, then 'Delete workspace'",
       "Both items are red, as destructive items are",
     ],
   });

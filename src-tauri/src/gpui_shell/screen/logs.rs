@@ -11,6 +11,7 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, time::Duration};
 
 use gpui_kit::component::input::{Escape, InputEvent, InputState, Textarea, TextareaState};
@@ -778,9 +779,12 @@ impl LogsView {
   }
 
   /// A native `<select>`: `h-8 rounded-md border bg-background px-2`.
+  /// A picker showing `label`, named "`name`: `label`"; the caller ends
+  /// it with `.test_support()`, after its handler.
   fn select(
     &self,
     key: &'static str,
+    name: &str,
     label: String,
     min_width: f32,
     disabled: bool,
@@ -789,6 +793,8 @@ impl LogsView {
     ui::text(div(), TextSize::Sm)
       .id(key)
       .debug_selector(move || key.into())
+      .role(gpui::Role::ComboBox)
+      .aria_label(SharedString::from(format!("{name}: {label}")))
       .relative()
       .h_8()
       .min_w(zpx(min_width))
@@ -850,8 +856,16 @@ impl LogsView {
       .border_color(p.border)
       .child(
         self
-          .select("log-source", self.source.label().into(), 0., false, p)
-          .on_click(cx.listener(|view, _, _, cx| view.source_menu(cx))),
+          .select(
+            "log-source",
+            "Log source",
+            self.source.label().into(),
+            0.,
+            false,
+            p,
+          )
+          .on_click(cx.listener(|view, _, _, cx| view.source_menu(cx)))
+          .test_support(),
       )
       .when(self.source == Source::Checks, |this| {
         this.child(
@@ -885,7 +899,7 @@ impl LogsView {
                   Variant::Secondary
                 })
                 .icon(theme::ICON_DATABASE, 12.)
-                .label("Logs Explorer")
+                .label("Logs explorer")
                 .on_click(cx.listener(|view, _, _, cx| {
                   view.explorer_open = true;
                   view.find.open = false;
@@ -1004,8 +1018,16 @@ impl LogsView {
       .bg(p.muted.opacity(0.3))
       .child(
         self
-          .select("agent-terminal", label, 192., chats.is_empty(), p)
-          .on_click(cx.listener(|view, _, _, cx| view.chat_menu(cx))),
+          .select(
+            "agent-terminal",
+            "Agent chat",
+            label,
+            192.,
+            chats.is_empty(),
+            p,
+          )
+          .on_click(cx.listener(|view, _, _, cx| view.chat_menu(cx)))
+          .test_support(),
       )
       .child(self.search_box(p))
   }
@@ -1792,7 +1814,7 @@ impl LogsView {
         list = list.child(
           check_row(
             "log-level-option-all".into(),
-            "All Levels".into(),
+            "All levels".into(),
             self.levels.is_empty(),
             p,
           )

@@ -18,7 +18,7 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
     expectations: [
       "Sidebar: event-bus and docs-site home rows, Github, Linear, then WORKSPACES grouped by repo",
       "Stacked feat/empty-event-message is indented under feat/event-ingest; status dots aligned right",
-      "Code tab: prompt box, Go to file, file tree, README preview and the Commits rail",
+      "Code tab: Agent and Go to file in one row, file tree, README preview and the Commits rail; no prompt box",
     ],
     issue: "Shortcut hints read '⌘ + K' / '⌘ + P' on Linux; the home file tree lists .git",
   });
@@ -31,13 +31,13 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
     screen: true,
     rest: false,
     expectations: [
-      "Hovered row shows Start agent, Open shell and Stack workspace icons, aligned",
+      "Hovered row shows Start agent, Open shell and Stack on this… icons, aligned",
       "Tooltip names the branch and its PR state (Open PR) and does not cover the row",
     ],
   });
 
   await row(page, "feat/keyvalues-cache")
-    .getByRole("button", { name: "Stack workspace" })
+    .getByRole("button", { name: "Stack on this…" })
     .hover();
   await settle(page, 1500);
   await capture(page, {
@@ -45,7 +45,7 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
     title: "Tooltip on a row action button",
     screen: true,
     rest: false,
-    expectations: ["The Stack workspace icon's tooltip is readable and placed next to it"],
+    expectations: ["The Stack on this… icon's tooltip is readable and placed next to it"],
   });
 
   await row(page, "main").click({ button: "right" });

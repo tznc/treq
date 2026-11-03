@@ -234,6 +234,13 @@ pub enum TreqCommandRequest {
     repo: String,
     workspace: Option<String>,
   },
+  /// Whether the workspace's branch no longer exists, as after a fetch
+  /// dropped a branch deleted on the remote
+  /// (`core::workspace_branch_deleted`).
+  WorkspaceBranchDeleted {
+    repo: String,
+    workspace: String,
+  },
   /// Totals for every repository under `root` on the machine: repository
   /// and workspace counts plus the bytes they occupy. See [`MachineUsageReport`].
   MachineUsage {
@@ -741,6 +748,7 @@ impl TreqCommandRequest {
       | Self::PtyStatus
       | Self::PtyAttachCommand { .. }
       | Self::WorkspaceChangeMarker { .. }
+      | Self::WorkspaceBranchDeleted { .. }
       | Self::MachineUsage { .. }
       | Self::MachineTools { .. }
       | Self::ListDirectories { .. }
@@ -839,6 +847,7 @@ impl TreqCommandRequest {
       | Self::SearchFiles { .. }
       | Self::ListFiles { .. }
       | Self::WorkspaceChangeMarker { .. }
+      | Self::WorkspaceBranchDeleted { .. }
       | Self::MachineUsage { .. }
       | Self::MachineTools { .. }
       | Self::ListDirectories { .. }
@@ -897,6 +906,7 @@ impl TreqCommandRequest {
       Self::SearchFiles { .. } => "SearchFiles",
       Self::ListFiles { .. } => "ListFiles",
       Self::WorkspaceChangeMarker { .. } => "WorkspaceChangeMarker",
+      Self::WorkspaceBranchDeleted { .. } => "WorkspaceBranchDeleted",
       Self::MachineUsage { .. } => "MachineUsage",
       Self::MachineTools { .. } => "MachineTools",
       Self::ListDirectories { .. } => "ListDirectories",
@@ -973,6 +983,7 @@ impl TreqCommandRequest {
     "ListCommits",
     "ListConflicts",
     "WorkspaceChangeMarker",
+    "WorkspaceBranchDeleted",
     "MachineUsage",
     "MachineTools",
     "ListDirectories",
@@ -1509,6 +1520,10 @@ impl TreqCommandRequest {
       Self::WorkspaceChangeMarker { repo, workspace } => {
         fields.workspace = workspace.as_deref();
         ("workspace", "marker", repo)
+      }
+      Self::WorkspaceBranchDeleted { repo, workspace } => {
+        fields.workspace = Some(workspace);
+        ("workspace", "branch-deleted", repo)
       }
       Self::ResolveConflict {
         repo,
@@ -2762,6 +2777,25 @@ mod tests {
   }
 
   #[test]
+  fn branch_deleted_dispatches_to_the_workspace_check() {
+    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_path = repo_dir.path().to_str().unwrap().to_string();
+    execute_local_request(TreqCommandRequest::InitRepo {
+      repo: repo_path.clone(),
+      idempotency_key: "init-1".into(),
+    })
+    .unwrap();
+
+    // An unknown workspace has no branch to have lost.
+    let deleted = execute_local_request(TreqCommandRequest::WorkspaceBranchDeleted {
+      repo: repo_path,
+      workspace: "42".into(),
+    })
+    .unwrap();
+    assert_eq!(deleted, serde_json::json!(false));
+  }
+
+  #[test]
   fn change_marker_reflects_new_operations_and_local_dispatch_matches_direct_jj_call() {
     let repo_dir = tempfile::tempdir().unwrap();
     let repo_path = repo_dir.path().to_str().unwrap().to_string();
@@ -3519,7 +3553,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 75);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 76);
   }
 
   #[test]

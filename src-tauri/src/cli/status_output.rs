@@ -88,10 +88,13 @@ pub(crate) fn format_workspace_stack_lines(
       status.current.branch_name, status.current.title
     ));
     if let Some(description) = status.current.description.as_deref() {
-      lines.push(format!(
-        "{}   Description: {description}",
-        "   ".repeat(depth)
-      ));
+      let label = format!("{}   Description: ", "   ".repeat(depth));
+      let continuation = " ".repeat(label.chars().count());
+      let body = description.trim_end_matches(['\r', '\n']);
+      for (index, line) in body.lines().enumerate() {
+        let lead = if index == 0 { &label } else { &continuation };
+        lines.push(format!("{lead}{line}").trim_end().to_string());
+      }
     }
     if let Some(descendants) = children.get(status.current.branch_name.as_str()) {
       for child in descendants {
@@ -417,6 +420,55 @@ mod tests {
         "● main-work — Main",
         "  └─ ● feat/api — API",
         "     └─ ● feat/ui — UI",
+      ]
+    );
+  }
+
+  #[test]
+  fn stack_renders_every_line_of_a_multiline_description_aligned() {
+    let statuses = vec![
+      sidebar(workspace(1, "main-work", "Main", None, Some("main"))),
+      sidebar(workspace(
+        2,
+        "feat/api",
+        "API",
+        Some("Add endpoints\r\n\r\n- list\n- get\n"),
+        Some("main-work"),
+      )),
+      sidebar(workspace(3, "feat/ui", "UI", None, Some("feat/api"))),
+    ];
+
+    assert_eq!(
+      format_workspace_stack_lines(&statuses),
+      vec![
+        "Stack:",
+        "● main-work — Main",
+        "  └─ ● feat/api — API",
+        "      Description: Add endpoints",
+        "",
+        "                   - list",
+        "                   - get",
+        "     └─ ● feat/ui — UI",
+      ]
+    );
+  }
+
+  #[test]
+  fn stack_renders_single_line_description_unchanged() {
+    let statuses = vec![sidebar(workspace(
+      1,
+      "main-work",
+      "Main",
+      Some("Just one line\n"),
+      Some("main"),
+    ))];
+
+    assert_eq!(
+      format_workspace_stack_lines(&statuses),
+      vec![
+        "Stack:",
+        "● main-work — Main",
+        "   Description: Just one line"
       ]
     );
   }

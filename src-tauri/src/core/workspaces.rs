@@ -816,14 +816,25 @@ pub fn create_workspace_with_symlinked_dirs(
   let repo_mutation_lock = commit_lock_for_repo(repo_path);
   let _repo_mutation_guard = repo_mutation_lock.lock_or_recover();
 
-  if local_db::get_workspace_by_branch(repo_path, branch_name)
+  if let Some(existing) = local_db::get_workspace_by_branch(repo_path, branch_name)
     .map_err(|e| format!("Failed to check existing workspace: {e}"))?
-    .is_some()
   {
-    return Err(format!(
-      "Workspace '{}' is already registered; refusing to recreate it",
-      branch_name
-    ));
+    let existing_dir = Path::new(repo_path)
+      .join(".treq")
+      .join("workspaces")
+      .join(&existing.workspace_path);
+    if existing_dir.join(".jj").exists() {
+      return Err(format!(
+        "Workspace '{}' is already registered; refusing to recreate it",
+        branch_name
+      ));
+    }
+    // A create killed between reserving its row and making the dir: drop it and retry.
+    rollback_created_workspace(
+      repo_path,
+      &existing_dir.to_string_lossy(),
+      Some(existing.id),
+    );
   }
 
   // Moved files outside the sparse cone would land in the commit but be invisible on disk.
@@ -894,21 +905,40 @@ pub fn create_workspace_with_symlinked_dirs(
   let new_branch: bool = !branch_exists || resolved_source_branch.as_deref() == Some(&remote_ref);
   let prior_bookmark = branch_exists.then(|| existing.commit_id(branch_name));
   drop(existing);
-  let workspace_name = jj::create_workspace(
+
+  // The row's id prefixes the dir and jj name, so `feat/x` and `feat-x` never collide.
+  let reserved = local_db::reserve_workspace(
     repo_path,
-    branch_name,
+    branch_name.to_string(),
+    description,
+    moved_files.clone(),
+    sparse_patterns.clone(),
+    !branch_exists_on_remote,
+    &effective_target_branch,
+    |id| jj::sanitize_workspace_name(&format!("{id}-{branch_name}")),
+  )
+  .map_err(|e| format!("Failed to add workspace to db: {}", e))?;
+
+  let workspace_name = match jj::create_workspace(
+    repo_path,
+    &reserved.workspace_name,
     branch_name,
     new_branch,
     resolved_source_branch.as_deref(),
     Some(&effective_target_branch),
     sparse_patterns.as_deref(),
-  )
-  .map_err(|e| format!("Failed to create workspace: {}", e))?;
+  ) {
+    Ok(name) => name,
+    Err(e) => {
+      if let Err(error) = local_db::delete_workspace(repo_path, reserved.id) {
+        tracing::warn!(%error, id = reserved.id, "Rollback: failed to delete reserved workspace row");
+      }
+      return Err(format!("Failed to create workspace: {}", e));
+    }
+  };
 
-  // jj has registered the workspace. Any failure from here on must undo that,
-  // or the half-made workspace blocks a retry and later shows up in the
-  // sidebar through discovery without its metadata.
-  let mut registered_id: Option<i64> = None;
+  // jj has registered the workspace; any later failure undoes it and the reserved row.
+  let registered_id = Some(reserved.id);
   let result = (|| -> Result<local_db::Workspace, String> {
     // Extract just the sanitized workspace name from the full path
     let workspace_path = Path::new(&workspace_name)
@@ -958,21 +988,7 @@ pub fn create_workspace_with_symlinked_dirs(
       .map_err(|e| format!("Failed to install library skills into workspace: {e}"))?;
     }
 
-    // One transaction: the row, the not_on_remote flag (set when the branch
-    // isn't on the remote) and the target branch.
-    let workspace = local_db::add_workspace_targeting(
-      repo_path,
-      workspace_path.clone(),
-      workspace_path,
-      branch_name.to_string(),
-      description,
-      moved_files.clone(),
-      sparse_patterns.clone(),
-      !branch_exists_on_remote,
-      &effective_target_branch,
-    )
-    .map_err(|e| format!("Failed to add workspace to db: {}", e))?;
-    registered_id = Some(workspace.id);
+    let workspace = reserved;
 
     // If moved_files are specified, perform the squash operation
     if let Some(files) = moved_files.clone() {
@@ -1941,6 +1957,45 @@ mod tests {
   }
 
   #[test]
+  fn apply_workspace_target_branch_refuses_a_stack_cycle_before_rebasing() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    crate::local_db::init_local_db(repo_path).expect("initialize database");
+    let a = crate::local_db::add_workspace_targeting(
+      repo_path,
+      "a".into(),
+      "a".into(),
+      "a".into(),
+      None,
+      None,
+      None,
+      false,
+      "main",
+    )
+    .expect("register a");
+    crate::local_db::add_workspace_targeting(
+      repo_path,
+      "b".into(),
+      "b".into(),
+      "b".into(),
+      None,
+      None,
+      None,
+      false,
+      "a",
+    )
+    .expect("register b");
+
+    let err = super::apply_workspace_target_branch(repo_path, a.id, "b").unwrap_err();
+
+    assert_eq!(err, "Retargeting a onto b would create a stack cycle");
+    let stored = crate::local_db::get_workspace_by_id(repo_path, a.id)
+      .expect("lookup")
+      .expect("stored");
+    assert_eq!(stored.target_branch.as_deref(), Some("main"));
+  }
+
+  #[test]
   fn linear_issue_base_branch_stacks_on_the_parents_workspace() {
     let workspaces = [
       test_workspace(1, "feat/plain", Some("main")),
@@ -2136,8 +2191,10 @@ mod tests {
     assert!(!crate::jj::list_jj_workspaces(&repo_path)
       .expect("list jj workspaces")
       .iter()
-      .any(|name| name == "fix-rollback"));
-    assert!(!temp.path().join(".treq/workspaces/fix-rollback").exists());
+      .any(|name| name.ends_with("fix-rollback")));
+    assert!(fs::read_dir(temp.path().join(".treq/workspaces"))
+      .map(|mut entries| entries.next().is_none())
+      .unwrap_or(true));
     assert!(super::list_workspaces(&repo_path)
       .expect("list workspaces")
       .is_empty());
@@ -2587,12 +2644,16 @@ mod tests {
     assert!(!workspace_dir.exists());
     let second = super::create_workspace(&repo_path, "fix/race", None, None, None, None, None)
       .expect("recreate while removal is pending");
-    let marker = workspace_dir.join("keep-me.txt");
+    let marker = temp
+      .path()
+      .join(".treq/workspaces")
+      .join(&second.workspace_path)
+      .join("keep-me.txt");
     fs::write(&marker, "new work").expect("write marker");
 
     crate::jj::remove_workspace_directory_only(&leftover).expect("background removal");
 
-    assert_eq!(second.workspace_path, first.workspace_path);
+    assert_ne!(second.workspace_path, first.workspace_path);
     assert_eq!(fs::read_to_string(marker).expect("marker"), "new work");
   }
 
@@ -2630,7 +2691,11 @@ mod tests {
         .expect("open PR workspace");
 
     assert!(created);
-    assert!(workspace_dir.exists());
+    assert!(temp
+      .path()
+      .join(".treq/workspaces")
+      .join(&workspace.workspace_path)
+      .exists());
     let listed = super::list_workspace_statuses(&repo_path).expect("list statuses");
     assert!(listed.iter().any(|s| s.current.id == workspace.id));
   }
@@ -2694,7 +2759,7 @@ mod tests {
   }
 
   #[test]
-  fn create_workspace_recovers_orphaned_partial_directory() {
+  fn create_workspace_ignores_orphaned_partial_directory_under_the_old_name() {
     let temp = TempDir::new().expect("tempdir");
     let repo_path = init_workspace_creation_repo(&temp);
     let partial = temp.path().join(".treq/workspaces/fix-partial");
@@ -2702,10 +2767,13 @@ mod tests {
     fs::write(partial.join("partial"), "incomplete").expect("write marker");
 
     let created = super::create_workspace(&repo_path, "fix/partial", None, None, None, None, None)
-      .expect("recover partial workspace");
+      .expect("create beside the orphaned partial dir");
 
     assert_eq!(created.branch_name, "fix/partial");
-    assert!(!partial.join("partial").exists());
+    assert_eq!(
+      created.workspace_path,
+      format!("{}-fix-partial", created.id)
+    );
   }
 
   #[test]
@@ -2726,7 +2794,7 @@ mod tests {
     let created = super::create_workspace(&repo_path, "fix/killed", None, None, None, None, None)
       .expect("retry recovers the interrupted create");
 
-    assert_eq!(created.workspace_path, "fix-killed");
+    assert_eq!(created.workspace_path, format!("{}-fix-killed", created.id));
     assert!(crate::jj::jj_get_commit_id(&repo_path, "fix/killed").is_ok());
   }
 
@@ -2746,7 +2814,12 @@ mod tests {
     )
     .expect_err("missing source must fail");
 
-    assert!(!temp.path().join(".treq/workspaces/fix-bad-source").exists());
+    assert!(fs::read_dir(temp.path().join(".treq/workspaces"))
+      .map(|mut entries| entries.next().is_none())
+      .unwrap_or(true));
+    assert!(super::list_workspaces(&repo_path)
+      .expect("list workspaces")
+      .is_empty());
   }
 
   #[test]
@@ -3830,17 +3903,16 @@ fn sync_home_on_branch_and_workspace(
     SyncSource::WorkspaceToHome => workspace_path_str,
   };
   jj::jj_workspace_update_stale(source_path).warn_on_err("jj workspace update stale");
+  // Setting a diverged bookmark to one checkout would drop `origin`'s side; a pull heals it instead.
+  if jj::jj_is_bookmark_conflicted(source_path, branch) {
+    return Ok(());
+  }
   // Use `@-` when `@` is the empty working copy, so no empty commit gets pushed.
   let checkout_tip = jj::jj_resolve_bookmark_tip(source_path)
     .map_err(|e| format!("Failed to resolve source tip: {}", e))?;
-  // A fetch can move the bookmark past the source checkout; never sync the
-  // destination back to the older commit.
+  // The bookmark is the branch; a checkout's working copy, dirty or not, is never moved onto it.
   let source_tip = jj::jj_get_commit_id(source_path, branch)
     .ok()
-    .filter(|bookmark| {
-      jj::jj_log_revset_commit_ids(source_path, &format!("{checkout_tip}::{bookmark}"))
-        .is_ok_and(|ids| ids.len() > 1)
-    })
     .unwrap_or(checkout_tip);
 
   let destination_path = match source {
@@ -4007,6 +4079,13 @@ pub(crate) fn apply_workspace_target_branch_after(
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
     .map_err(|e| format!("Failed to get workspace from db: {}", e))?
     .ok_or("Workspace not found in database")?;
+  // Refuse before the rebase so a blocked retarget leaves the repo untouched.
+  crate::core::stack_cycle::ensure_no_stack_cycle(
+    &local_db::get_workspaces(repo_path)?,
+    &workspace.branch_name,
+    target_branch,
+    &crate::core::get_repo_default_branch(repo_path).unwrap_or_default(),
+  )?;
 
   let workspace_path = Path::new(repo_path)
     .join(".treq")
@@ -4634,9 +4713,19 @@ pub fn pull_workspace_from_remote(
 
   // Step 3: Diverged — capture local-only commit IDs BEFORE resolving bookmark
   let remote_ref = format!("{}@origin", branch_name);
-  let local_revset = format!("({}..@-) & mutable()", remote_ref);
+  // The local side can come from another checkout of the branch (the home repo), not only `@-`.
+  let local_revset = format!(
+    "({}..(@- | bookmarks(exact:\"{}\"))) & mutable()",
+    remote_ref, branch_name
+  );
   let local_commit_ids = jj::jj_log_revset_commit_ids(full_path_str, &local_revset)
     .map_err(|e| format!("Failed to capture local commits: {}", e))?;
+  let local_change_ids = if local_commit_ids.is_empty() {
+    Vec::new()
+  } else {
+    jj::jj_log_revset_change_ids(full_path_str, &local_commit_ids.join(" | "))
+      .map_err(|e| format!("Failed to capture local commits: {}", e))?
+  };
 
   let commits_rebased = local_commit_ids.len();
 
@@ -4661,7 +4750,16 @@ pub fn pull_workspace_from_remote(
     // Step 5b: Advance the bookmark to the rebased local tip.
     // Without this, the bookmark stays on origin and Sync reports InSync while
     // conflicted/rebased work only lives on @ — users can't resolve locally and push.
-    advance_bookmark_to_working_copy_tip(full_path_str, branch_name)?;
+    let rebased_heads = jj::jj_log_revset_commit_ids(
+      full_path_str,
+      &format!("heads({})", local_change_ids.join(" | ")),
+    )
+    .unwrap_or_default();
+    match rebased_heads.as_slice() {
+      [tip] => jj::jj_set_bookmark(full_path_str, branch_name, tip)
+        .map_err(|e| format!("Failed to advance bookmark '{branch_name}': {e}"))?,
+      _ => advance_bookmark_to_working_copy_tip(full_path_str, branch_name)?,
+    }
   }
 
   // Step 6: refresh stale working copy only; do not sync bookmark tip here.

@@ -5,17 +5,18 @@ use super::*;
 const WORKSPACE_JSON: &str = r#"{
   "header": {
     "branch": "feature/login",
+    "title": "Add login",
     "home": false,
     "linear": {"key": "ENG-12", "url": "https://linear.app/t/ENG-12", "title": "Login"},
     "target": {"branch": "main", "loading": false, "disabled": false},
     "homeTarget": null,
-    "stack": null,
+    "stack": {"tooltip": "Stack a new workspace on feature/login"},
     "push": null,
     "viewPr": {"number": 42, "state": "OPEN", "draft": false},
     "createPr": null,
     "statusLoading": false,
     "sync": {"ahead": 2, "behind": 0, "disabled": false, "spinning": false},
-    "checks": {"status": "passed", "count": "7/7", "name": "Checks: Treq 3/3, GitHub 4/4"},
+    "checks": {"status": "passed", "count": "7/7 checks passed", "name": "Checks: Treq 3/3, GitHub 4/4"},
     "merge": {"passing": true, "disabled": false, "tooltip": null},
     "details": true,
     "more": {"disabled": false}
@@ -44,6 +45,15 @@ fn workspace_header_is_what_react_drew() {
 }
 
 #[test]
+fn labels_header_create_button_new_at_home_and_stack_in_a_workspace() {
+  assert_eq!(super::super::workspace::stack_label(true), "New workspace…");
+  assert_eq!(
+    super::super::workspace::stack_label(false),
+    "Stack on this…"
+  );
+}
+
+#[test]
 fn workspace_header_offers_the_home_rebase() {
   let route: ScreenSnapshot = serde_json::from_value(route_json(None, "feat/home")).expect("route");
   let loaded = workspace_data::Loaded {
@@ -65,7 +75,7 @@ fn workspace_header_offers_the_home_rebase() {
   );
   assert_eq!(
     header.stack.expect("stack").tooltip,
-    "Create stacked workspace from feat/home"
+    "Create a workspace from feat/home"
   );
 }
 
@@ -180,4 +190,38 @@ fn home_workspace_opens_the_branch_switcher(cx: &mut TestAppContext) {
     h.sent(),
     vec![press("workspace.branchSwitcher"), press("workspace.stack")]
   );
+}
+
+#[gpui::test]
+fn a_disabled_merge_button_says_why_first(cx: &mut TestAppContext) {
+  use crate::gpui_shell::popup::{PopupRequest, TooltipContent};
+  let mut host = feature_host();
+  if let Some(status) = host.loaded.status.as_mut() {
+    status.conflicted_files = vec!["src/a.rs".into(), "src/b.rs".into()];
+  }
+  let (mut h, _) = workspace_harness(cx, host, workspace_route());
+  h.cx.run_until_parked();
+  let at = h
+    .cx
+    .debug_bounds("workspace-merge")
+    .expect("merge")
+    .center();
+  h.cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  h.cx.run_until_parked();
+  let popups = h.popups.borrow();
+  let text = popups
+    .iter()
+    .rev()
+    .find_map(|p| match p {
+      PopupRequest::ShowTooltip {
+        content: TooltipContent::Text(text),
+        ..
+      } => Some(text.to_string()),
+      _ => None,
+    })
+    .expect("a tooltip on the disabled Merge… button");
+  assert!(text.starts_with("Resolve conflicts to merge"), "{text}");
 }

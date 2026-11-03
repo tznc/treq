@@ -62,6 +62,38 @@ pub(super) fn select_equivalent_remote_tip<T: PartialEq>(
     .then(|| remote_id.clone())
 }
 
+/// In a fork clone, `<branch>@upstream` when it has moved ahead of the local
+/// bookmark: the fork's own copy of the default branch goes stale, and work
+/// must land on the original repository's tip.
+fn upstream_tip_ahead_of(
+  loaded: &LoadedWorkspaceRepo,
+  workspace_path: &str,
+  target_branch: &str,
+  local: &jj_lib::backend::CommitId,
+) -> Option<String> {
+  if jj_base_remote(&workspace_repo_path(workspace_path)) != "upstream" {
+    return None;
+  }
+  let symbol = RemoteRefSymbol {
+    name: RefName::new(target_branch),
+    remote: RemoteName::new("upstream"),
+  };
+  let remote = loaded
+    .repo
+    .view()
+    .get_remote_bookmark(symbol)
+    .target
+    .as_normal()?
+    .clone();
+  let ahead = remote != *local
+    && loaded
+      .repo
+      .index()
+      .is_ancestor(local, &remote)
+      .unwrap_or(false);
+  ahead.then(|| remote.hex())
+}
+
 /// Resolves the revset for a local target-branch bookmark.
 /// When the bookmark is conflicted, prefers the commit matching the git local branch tip;
 /// otherwise picks the newest non-immutable tip (author timestamp, then commit id).
@@ -82,6 +114,9 @@ pub(super) fn resolve_local_target_branch_revision(
     )));
   }
   if ids.len() == 1 {
+    if let Some(ahead) = upstream_tip_ahead_of(loaded, workspace_path, target_branch, &ids[0]) {
+      return Ok(ahead);
+    }
     return Ok(format_revset_symbol(target_branch));
   }
 
@@ -264,25 +299,25 @@ pub fn jj_get_log(
       last_error.unwrap_or_else(|| JjError::IoError("Failed to evaluate log revset".to_string())),
     );
   };
-  // Home-repo immutability uses the remote tracking bookmark (e.g. `main@origin`); unpushed commits stay mutable, pushed commits immutable; falls back to local bookmark when no remote ref exists.
-  let immutable_ref = if is_home_repo.unwrap_or(false) {
+  // Home-repo immutability follows the remote tracking bookmark (e.g. `main@origin`): pushed commits are immutable, unpushed ones mutable, and without a remote only the root is.
+  let immutable_expr = if is_home_repo.unwrap_or(false) {
     let remote_symbol = RemoteRefSymbol {
       name: RefName::new(target_branch),
       remote: RemoteName::new("origin"),
     };
     let remote_ref = loaded.repo.view().get_remote_bookmark(remote_symbol);
     if !remote_ref.target.is_absent() {
-      format!("{}@origin", target_branch)
+      format!(
+        "::{}",
+        format_revset_symbol(&format!("{}@origin", target_branch))
+      )
     } else {
-      selected_target_ref
+      "root()".to_string()
     }
   } else {
-    selected_target_ref
+    format!("::{}", format_revset_symbol(&selected_target_ref))
   };
-  let immutable_revset = evaluate_revset(
-    &loaded,
-    &format!("::{}", format_revset_symbol(&immutable_ref)),
-  )?;
+  let immutable_revset = evaluate_revset(&loaded, &immutable_expr)?;
   let is_immutable = immutable_revset.containing_fn();
   let wc_commit_ids: HashSet<_> = loaded
     .repo

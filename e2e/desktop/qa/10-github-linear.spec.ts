@@ -137,14 +137,14 @@ test("github-linear: pull requests", async ({ page }) => {
     expectations: ["Each check with status, name and link; failing first"],
   });
   await dismissPopover(page);
-  await page.getByRole("textbox", { name: "Leave a comment..." }).fill("Looks good once the test passes");
+  await page.getByRole("textbox", { name: "Leave a comment…" }).fill("Looks good once the test passes");
   await settle(page, 400);
   await capture(page, {
     name: "10-github-pr-comment-typed",
     title: "Pull request: comment typed",
     expectations: ["Comment button enabled; text not clipped"],
   });
-  await page.getByRole("textbox", { name: "Leave a comment..." }).fill("");
+  await page.getByRole("textbox", { name: "Leave a comment…" }).fill("");
 
   await page.getByRole("button", { name: "Review changes" }).click();
   await settle(page, 3000);
@@ -196,7 +196,7 @@ test("github-linear: linear without an API key", async ({ page }) => {
       "An Open Settings button under the message; no spinner",
     ],
   });
-  await page.getByRole("button", { name: "Open Settings" }).click();
+  await page.getByRole("button", { name: "Open settings" }).click();
   await expect(page.getByRole("tab", { name: "Integrations", selected: true })).toBeVisible();
   await settle(page, 1500);
   await capture(page, {

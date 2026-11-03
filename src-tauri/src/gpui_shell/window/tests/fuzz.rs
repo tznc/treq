@@ -124,6 +124,7 @@ const PRESSES: &[&str] = &[
   "workspace.stack",
   "workspace.merge",
   "code.filePicker",
+  "code.agentPrompt",
   "fileBrowser.back",
   "workspaceDialog.close",
   "renameWorkspace.close",

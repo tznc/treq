@@ -125,12 +125,16 @@ impl Render for ReposScreen {
       .map(|e| store::saved_repositories(&e.id, store::endpoint_generation(&e)))
       .unwrap_or_default();
     let saved_list = if saved.is_empty() {
-      widgets::card(cx).child(widgets::centered_message("No saved repositories yet.", cx))
+      widgets::card(cx).child(widgets::empty(
+        "repos-empty",
+        "No saved repositories yet.",
+        cx,
+      ))
     } else {
       widgets::card(cx).children(saved.into_iter().enumerate().map(|(i, repo)| {
         let path = repo.canonical_remote_path;
         let name = workspaces::repo_name(&path).to_string();
-        widgets::row(("repo", i), name, Some(path.clone().into()), cx)
+        widgets::row(format!("repo-{i}"), name, Some(path.clone().into()), cx)
           .on_click(cx.listener(move |this, _, _, cx| this.open_repository(path.clone(), cx)))
       }))
     };

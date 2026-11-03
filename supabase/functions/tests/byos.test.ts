@@ -16,6 +16,7 @@ import { LocalProvider } from "../_shared/remote/local-provider.ts";
 import { ProviderError, type ProviderKind, type SandboxProvider } from "../_shared/remote/provider.ts";
 import { providerFor } from "../_shared/remote/provider-registry.ts";
 import {
+  ByosError,
   type ByosCredentialStore,
   handleByosAction,
   isOperatorMovable,
@@ -125,8 +126,8 @@ function fakeCredentialStore(
       loads.push(placementId);
       return Promise.resolve(rows[placementId] ?? null);
     },
-    markInvalid: (id) => {
-      invalid.push(id);
+    markInvalid: (id, key) => {
+      invalid.push(`${id}:${key}`);
       return Promise.resolve();
     },
   };
@@ -184,7 +185,8 @@ Deno.test("an unauthorized answer marks the credential invalid and is rethrown",
   const { build } = recordingBuild(new ProviderError("unauthorized", "revoked"));
   const err = await assertRejects(() => providerForPlacement(store, "boat", "p4", build).getInstance("x"), ProviderError);
   assertEquals(err.kind, "unauthorized");
-  assertEquals(invalid, ["c4"]);
+  // The key that failed goes along, so a 401 racing a rotation spares the new key.
+  assertEquals(invalid, ["c4:k"]);
 });
 
 Deno.test("unauthorized surfaces to the app as provider_credential_invalid", () => {
@@ -212,6 +214,18 @@ function fakeActionStore() {
       return Promise.resolve();
     },
     byosCatalog: () => Promise.resolve([]),
+    saveOrg: (orgId, kind, key, label) => {
+      if (orgId === "org-not-owner") return Promise.reject(new ByosError("not_organization_owner"));
+      saved.push({ kind: `${orgId}/${kind}`, key, label });
+      return Promise.resolve({ id: "oc1", provider_kind: kind, label, validated_at: "now", invalid_at: null });
+    },
+    listOrg: (orgId) =>
+      Promise.resolve([{ id: "oc1", provider_kind: `${orgId}/boat`, label: null, validated_at: "now", invalid_at: null }]),
+    removeOrg: (orgId, kind) => {
+      if (kind === "in-use") return Promise.reject(new ByosError("credential_in_use"));
+      deleted.push(`${orgId}/${kind}`);
+      return Promise.resolve();
+    },
   };
   return { store, saved, deleted };
 }
@@ -251,6 +265,33 @@ Deno.test("an invalid key is refused and not stored", async () => {
   assertEquals(r?.status, 400);
   assertEquals((r?.body as { code: string }).code, "provider_credential_invalid");
   assertEquals(saved, []);
+});
+
+Deno.test("a key with characters no HTTP header can carry is a validation error, not a retry", async () => {
+  for (const key of ["ключ", "a\nb", "tab\tkey", "😀"]) {
+    const { store, saved } = fakeActionStore();
+    const r = await handleByosAction("save_provider_credential", { provider_kind: "boat", api_key: key }, {
+      canByos: () => Promise.resolve(true),
+      store,
+      build: validatingProvider("ok"),
+    });
+    assertEquals(r?.status, 400, JSON.stringify(key));
+    assertEquals((r?.body as { code: string }).code, "validation_error");
+    assertEquals(saved, []);
+  }
+});
+
+// A pasted key often carries a trailing newline or spaces. Headers trim it on
+// the wire, but the stored key kept them; it is trimmed before validating.
+Deno.test("a key is trimmed before it is validated and stored", async () => {
+  const { store, saved } = fakeActionStore();
+  const r = await handleByosAction("save_provider_credential", { provider_kind: "boat", api_key: "  sk-user\n" }, {
+    canByos: () => Promise.resolve(true),
+    store,
+    build: validatingProvider("ok"),
+  });
+  assertEquals(r?.status, 200);
+  assertEquals(saved.map((x) => x.key), ["sk-user"]);
 });
 
 Deno.test("a user the gate refuses cannot save a key", async () => {
@@ -358,4 +399,49 @@ Deno.test("BYOS with no machine type for the tier or region is tier_unavailable"
 Deno.test("operator drains and cheaper-default moves skip BYOS placements", () => {
   assertEquals(isOperatorMovable({ credential_source: "managed" }), true);
   assertEquals(isOperatorMovable({ credential_source: "byos" }), false);
+});
+
+// ── Organization keys (Team) ───────────────────────────────────────────
+
+Deno.test("an organization key is validated with the provider, then stored for the organization", async () => {
+  const { store, saved } = fakeActionStore();
+  const r = await handleByosAction(
+    "save_org_provider_credential",
+    { org_id: "org-1", provider_kind: "boat", api_key: "sk-user", label: "Team" },
+    { canByos: () => Promise.resolve(false), store, build: validatingProvider("ok") },
+  );
+  assertEquals(r?.status, 200);
+  assertEquals(saved, [{ kind: "org-1/boat", key: "sk-user", label: "Team" }]);
+  assert(!JSON.stringify(r?.body).includes("sk-user"), "the key is never echoed");
+});
+
+Deno.test("an organization key the provider rejects is not stored", async () => {
+  const { store, saved } = fakeActionStore();
+  const r = await handleByosAction(
+    "save_org_provider_credential",
+    { org_id: "org-1", provider_kind: "boat", api_key: "sk-user" },
+    { canByos: () => Promise.resolve(true), store, build: validatingProvider("unauthorized") },
+  );
+  assertEquals((r?.body as { code: string }).code, "provider_credential_invalid");
+  assertEquals(saved, []);
+});
+
+Deno.test("organization key actions need an org_id and map owner and in-use refusals", async () => {
+  const { store, deleted } = fakeActionStore();
+  const deps = { canByos: () => Promise.resolve(true), store, build: validatingProvider("ok") };
+  const missing = await handleByosAction("save_org_provider_credential", { provider_kind: "boat", api_key: "sk-user" }, deps);
+  assertEquals([missing?.status, (missing?.body as { code: string }).code], [400, "validation_error"]);
+  const notOwner = await handleByosAction(
+    "save_org_provider_credential",
+    { org_id: "org-not-owner", provider_kind: "boat", api_key: "sk-user" },
+    deps,
+  );
+  assertEquals([notOwner?.status, (notOwner?.body as { code: string }).code], [403, "not_organization_owner"]);
+  const inUse = await handleByosAction("delete_org_provider_credential", { org_id: "org-1", provider_kind: "in-use" }, deps);
+  assertEquals([inUse?.status, (inUse?.body as { code: string }).code], [409, "credential_in_use"]);
+  const ok = await handleByosAction("delete_org_provider_credential", { org_id: "org-1", provider_kind: "boat" }, deps);
+  assertEquals(ok?.status, 200);
+  assertEquals(deleted, ["org-1/boat"]);
+  const listed = await handleByosAction("list_org_provider_credentials", { org_id: "org-1" }, deps);
+  assertEquals((listed?.body as { credentials: Array<{ provider_kind: string }> }).credentials[0].provider_kind, "org-1/boat");
 });

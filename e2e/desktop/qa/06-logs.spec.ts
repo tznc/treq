@@ -51,7 +51,7 @@ test("logs: empty state, filters, query and explorer", async ({ page }) => {
   });
   await search.fill("");
 
-  await page.getByRole("button", { name: "Logs Explorer" }).click();
+  await page.getByRole("button", { name: "Logs explorer" }).click();
   await settle(page, 1500);
   await capture(page, {
     name: "06-logs-explorer",

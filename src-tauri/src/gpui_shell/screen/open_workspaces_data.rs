@@ -36,6 +36,45 @@ pub struct Route {
 
 pub use crate::core::new_workspaces::{parse_lines, stack_parents, Line};
 
+/// The dialog's footer: what submitting will create, from the checked lines
+/// and the picked pull requests and issues.
+pub fn preview(targets: &[Target]) -> String {
+  let new: Vec<&Target> = targets.iter().filter(|t| !t.existing).collect();
+  let open = targets.len() - new.len();
+  match (new.as_slice(), open) {
+    ([], 0) => "Type a line or pick an item to create workspaces.".to_string(),
+    ([], 1) => format!("{} is already open", targets[0].branch),
+    ([], n) => format!("{n} workspaces are already open"),
+    ([one], 0) => match (&one.pr, &one.issue) {
+      (Some(pr), _) => format!("Will create {} from PR #{pr}", one.branch),
+      (None, Some(issue)) => format!("Will create {} from {}", one.branch, issue.identifier),
+      (None, None) => format!("Will create {}", one.branch),
+    },
+    (new, open) => {
+      let mut parts = vec![format!(
+        "Will create {}",
+        if new.len() == 1 {
+          "1 workspace".to_string()
+        } else {
+          format!("{} workspaces", new.len())
+        }
+      )];
+      // A line's base is set only when it stacks on the line above it.
+      let stacked = new
+        .iter()
+        .filter(|t| t.pr.is_none() && t.base.is_some())
+        .count();
+      if stacked > 0 {
+        parts.push(format!("{stacked} stacked"));
+      }
+      if open > 0 {
+        parts.push(format!("{open} already open"));
+      }
+      parts.join(", ")
+    }
+  }
+}
+
 /// `checked` stacked on `parent`'s branch.
 pub fn stack_on_line(checked: &Checked, parent: &Checked) -> Checked {
   let parent = parent
@@ -648,6 +687,59 @@ mod tests {
     assert_eq!(
       stack_on_line(&Err("x".into()), &Ok(target("/r", "a"))).unwrap_err(),
       "x"
+    );
+  }
+
+  fn line(branch: &str) -> Target {
+    Target {
+      repo_path: "/r".into(),
+      branch: branch.into(),
+      base: None,
+      title: None,
+      pr: None,
+      issue: None,
+      existing: false,
+      create: true,
+    }
+  }
+
+  #[test]
+  fn preview_says_nothing_is_picked_yet() {
+    assert_eq!(
+      preview(&[]),
+      "Type a line or pick an item to create workspaces."
+    );
+  }
+
+  #[test]
+  fn preview_names_a_single_workspace_and_its_source() {
+    assert_eq!(preview(&[line("feat/a")]), "Will create feat/a");
+    let mut pr = line("feat/login-tests");
+    pr.pr = Some(42);
+    pr.base = Some("main".into());
+    assert_eq!(preview(&[pr]), "Will create feat/login-tests from PR #42");
+    let mut open = line("feat/c");
+    open.existing = true;
+    assert_eq!(preview(&[open]), "feat/c is already open");
+  }
+
+  #[test]
+  fn preview_counts_stacked_and_open_workspaces() {
+    let mut stacked = line("feat/b");
+    stacked.base = Some("feat/a".into());
+    assert_eq!(
+      preview(&[line("feat/a"), stacked.clone()]),
+      "Will create 2 workspaces, 1 stacked"
+    );
+    let mut open = line("feat/c");
+    open.existing = true;
+    assert_eq!(
+      preview(&[line("feat/a"), stacked, open.clone()]),
+      "Will create 2 workspaces, 1 stacked, 1 already open"
+    );
+    assert_eq!(
+      preview(&[open.clone(), open]),
+      "2 workspaces are already open"
     );
   }
 }
