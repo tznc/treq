@@ -788,8 +788,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
       .iter()
       .find(|t| Some(t.provider_kind.as_str()) == byos_kind && t.tier_id == tier_id)
   };
-  // On an organization profile the keys are the organization's, and
-  // treq managed shows only if the organization allows it.
+  // Organization profile: its keys, and treq managed only if it allows it.
   let (owner, managed_allowed) = match &cloud.org_placement {
     Some((org, managed)) => (format!("{org}'s"), *managed),
     None => ("Your".to_string(), true),
@@ -820,23 +819,25 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
       "{name} bills {org} directly for the machine. treq charges {org} 5% of {name}'s price."
     ))
   });
-  let byos_note = org_note.or_else(|| byos_kind.map(|kind| {
-    let name = crate::core::cloud_catalog::provider_name(kind);
-    let tier = selected
-      .as_deref()
-      .and_then(|id| cloud.tiers.iter().find(|t| t.id == id));
-    let price = tier.and_then(|t| byos_price(&t.id).map(|b| (t, b)));
-    match price {
-      Some((t, b)) => format!(
+  let byos_note = org_note.or_else(|| {
+    byos_kind.map(|kind| {
+      let name = crate::core::cloud_catalog::provider_name(kind);
+      let tier = selected
+        .as_deref()
+        .and_then(|id| cloud.tiers.iter().find(|t| t.id == id));
+      let price = tier.and_then(|t| byos_price(&t.id).map(|b| (t, b)));
+      match price {
+        Some((t, b)) => format!(
         "{name} bills you directly for the machine ({} for {}). treq charges 5% of {name}'s price.",
         crate::core::cloud_catalog::format_hourly(b.provider_hourly_usd),
         t.label
       ),
-      None => {
-        format!("{name} bills you directly for the machine. treq charges 5% of {name}'s price.")
+        None => {
+          format!("{name} bills you directly for the machine. treq charges 5% of {name}'s price.")
+        }
       }
-    }
-  }));
+    })
+  });
   let credential_invalid = error
     .filter(|e| e.starts_with("[provider_credential_invalid]"))
     .map(|_| {
@@ -982,7 +983,11 @@ fn team_sections(
     options: std::iter::once(ProfileOption {
       org_id: None,
       label: "Personal".into(),
-      note: if pro { "Bills you.".into() } else { "Needs Pro.".into() },
+      note: if pro {
+        "Bills you.".into()
+      } else {
+        "Needs Pro.".into()
+      },
       selected: current.is_none(),
     })
     .chain(teams.iter().map(|o| ProfileOption {
@@ -999,7 +1004,11 @@ fn team_sections(
     .iter()
     .filter(|o| o.is_owner())
     .map(|o| {
-      let draft = state.team_drafts.get(&o.org_id).cloned().unwrap_or_default();
+      let draft = state
+        .team_drafts
+        .get(&o.org_id)
+        .cloned()
+        .unwrap_or_default();
       let saved = cloud.org_keys.get(&o.org_id).cloned().unwrap_or_default();
       let keys: Vec<ProviderKeyRow> = saved
         .iter()
@@ -1023,8 +1032,14 @@ fn team_sections(
         name: o.name.clone(),
         allow_managed: draft.allow_managed.unwrap_or(o.allow_managed),
         allow_byos: draft.allow_byos.unwrap_or(o.allow_byos),
-        org_cap: draft.org_cap.clone().unwrap_or_else(|| js_number(o.org_cap_usd)),
-        member_cap: draft.member_cap.clone().unwrap_or_else(|| js_number(o.member_cap_usd)),
+        org_cap: draft
+          .org_cap
+          .clone()
+          .unwrap_or_else(|| js_number(o.org_cap_usd)),
+        member_cap: draft
+          .member_cap
+          .clone()
+          .unwrap_or_else(|| js_number(o.member_cap_usd)),
         addable: crate::core::cloud_catalog::BYOS_PROVIDERS
           .iter()
           .filter(|(kind, _)| !keys.iter().any(|r| r.kind == *kind))
@@ -1132,14 +1147,19 @@ impl SettingsView {
       }
     });
     let (cloud_profile, org_cloud) = team_sections(cloud_route.as_ref(), state, pro);
-    // On an organization profile, Create offers the organization's keys and
-    // treq managed only as the organization allows.
+    // Organization profile: Create offers only what the organization allows.
     if let Some(cloud) = cloud_route.as_mut() {
       let org = cloud
         .profile
         .as_ref()
         .and_then(|p| p.org_id.clone())
-        .and_then(|id| cloud.organizations.iter().find(|o| o.org_id == id && o.has_team).cloned());
+        .and_then(|id| {
+          cloud
+            .organizations
+            .iter()
+            .find(|o| o.org_id == id && o.has_team)
+            .cloned()
+        });
       if let Some(org) = org {
         let settings = crate::core::cloud_catalog::CloudProfile {
           org_id: Some(org.org_id.clone()),
@@ -1152,8 +1172,11 @@ impl SettingsView {
         } else {
           Vec::new()
         };
-        cloud.selected_provider =
-          crate::core::cloud::org_provider(&settings, &keys, cloud.selected_org_provider.as_deref());
+        cloud.selected_provider = crate::core::cloud::org_provider(
+          &settings,
+          &keys,
+          cloud.selected_org_provider.as_deref(),
+        );
         cloud.provider_keys = keys;
         cloud.byos_catalog.clear();
         cloud.org_placement = Some((org.name.clone(), org.allow_managed));
@@ -1696,13 +1719,23 @@ impl SettingsView {
             .to_string(),
         });
       }
-      "team.profile.personal" => self.host.cloud_action(CloudAction::SetCloudProfile { org_id: None }),
+      "team.profile.personal" => self
+        .host
+        .cloud_action(CloudAction::SetCloudProfile { org_id: None }),
       _ if id.starts_with("team.profile.") => {
-        let org_id = id.strip_prefix("team.profile.").unwrap_or_default().to_string();
-        self.host.cloud_action(CloudAction::SetCloudProfile { org_id: Some(org_id) });
+        let org_id = id
+          .strip_prefix("team.profile.")
+          .unwrap_or_default()
+          .to_string();
+        self.host.cloud_action(CloudAction::SetCloudProfile {
+          org_id: Some(org_id),
+        });
       }
       _ if id.starts_with("team.save.") => {
-        let org_id = id.strip_prefix("team.save.").unwrap_or_default().to_string();
+        let org_id = id
+          .strip_prefix("team.save.")
+          .unwrap_or_default()
+          .to_string();
         self.save_org_cloud(&org_id);
       }
       "team.key.cancel" => {
@@ -1723,14 +1756,20 @@ impl SettingsView {
         }
       }
       _ if id.starts_with("team.key.add.") => {
-        if let Some((org_id, kind)) = id.strip_prefix("team.key.add.").and_then(|r| r.split_once('.')) {
+        if let Some((org_id, kind)) = id
+          .strip_prefix("team.key.add.")
+          .and_then(|r| r.split_once('.'))
+        {
           self.account.team_key_editing = Some((org_id.to_string(), kind.to_string()));
           self.account.team_key_draft.clear();
           self.account.team_key_focus = true;
         }
       }
       _ if id.starts_with("team.key.remove.") => {
-        if let Some((org_id, kind)) = id.strip_prefix("team.key.remove.").and_then(|r| r.split_once('.')) {
+        if let Some((org_id, kind)) = id
+          .strip_prefix("team.key.remove.")
+          .and_then(|r| r.split_once('.'))
+        {
           self.host.cloud_action(CloudAction::RemoveOrgProviderKey {
             org_id: org_id.to_string(),
             kind: kind.to_string(),
@@ -1786,19 +1825,39 @@ impl SettingsView {
       "team.key" => self.account.team_key_draft = text,
       _ if field.starts_with("team.cap.org.") => {
         let org_id = field.strip_prefix("team.cap.org.").unwrap_or_default();
-        self.account.team_drafts.entry(org_id.to_string()).or_default().org_cap = Some(text);
+        self
+          .account
+          .team_drafts
+          .entry(org_id.to_string())
+          .or_default()
+          .org_cap = Some(text);
       }
       _ if field.starts_with("team.cap.member.") => {
         let org_id = field.strip_prefix("team.cap.member.").unwrap_or_default();
-        self.account.team_drafts.entry(org_id.to_string()).or_default().member_cap = Some(text);
+        self
+          .account
+          .team_drafts
+          .entry(org_id.to_string())
+          .or_default()
+          .member_cap = Some(text);
       }
       _ if field.starts_with("team.managed.") => {
         let org_id = field.strip_prefix("team.managed.").unwrap_or_default();
-        self.account.team_drafts.entry(org_id.to_string()).or_default().allow_managed = value.as_bool();
+        self
+          .account
+          .team_drafts
+          .entry(org_id.to_string())
+          .or_default()
+          .allow_managed = value.as_bool();
       }
       _ if field.starts_with("team.byos.") => {
         let org_id = field.strip_prefix("team.byos.").unwrap_or_default();
-        self.account.team_drafts.entry(org_id.to_string()).or_default().allow_byos = value.as_bool();
+        self
+          .account
+          .team_drafts
+          .entry(org_id.to_string())
+          .or_default()
+          .allow_byos = value.as_bool();
       }
       _ => return false,
     }
@@ -1817,9 +1876,25 @@ impl SettingsView {
     else {
       return;
     };
-    let draft = self.account.team_drafts.entry(org_id.to_string()).or_default();
-    let caps = parse_spend_cap(draft.org_cap.as_deref().unwrap_or(&js_number(org.org_cap_usd))).and_then(|org_cap| {
-      parse_spend_cap(draft.member_cap.as_deref().unwrap_or(&js_number(org.member_cap_usd))).map(|m| (org_cap, m))
+    let draft = self
+      .account
+      .team_drafts
+      .entry(org_id.to_string())
+      .or_default();
+    let caps = parse_spend_cap(
+      draft
+        .org_cap
+        .as_deref()
+        .unwrap_or(&js_number(org.org_cap_usd)),
+    )
+    .and_then(|org_cap| {
+      parse_spend_cap(
+        draft
+          .member_cap
+          .as_deref()
+          .unwrap_or(&js_number(org.member_cap_usd)),
+      )
+      .map(|m| (org_cap, m))
     });
     match caps {
       Err(error) => draft.invalid = Some(error),
@@ -2727,7 +2802,12 @@ impl SettingsView {
       .flex()
       .flex_col()
       .gap_2()
-      .child(section_header(theme::ICON_CLOUD, "Cloud billing", "Who pays for your next workspace", p))
+      .child(section_header(
+        theme::ICON_CLOUD,
+        "Cloud billing",
+        "Who pays for your next workspace",
+        p,
+      ))
       .children(section.options.iter().map(|option| {
         let key = option.org_id.clone().unwrap_or_else(|| "personal".into());
         setting_row(
@@ -2767,12 +2847,20 @@ impl SettingsView {
     cx: &mut Context<Self>,
   ) -> AnyElement {
     let id = org.org_id.clone();
-    let org_cap = self
-      .controls
-      .input(&format!("team.cap.org.{id}"), &org.org_cap, "500", window, cx);
-    let member_cap = self
-      .controls
-      .input(&format!("team.cap.member.{id}"), &org.member_cap, "50", window, cx);
+    let org_cap = self.controls.input(
+      &format!("team.cap.org.{id}"),
+      &org.org_cap,
+      "500",
+      window,
+      cx,
+    );
+    let member_cap = self.controls.input(
+      &format!("team.cap.member.{id}"),
+      &org.member_cap,
+      "50",
+      window,
+      cx,
+    );
     let editor = org.editing.as_ref().map(|kind| {
       let input = self
         .controls
@@ -2814,14 +2902,20 @@ impl SettingsView {
           )
           .when(row.invalid, |this| this.text_color(red(p)))
         }))
-        .child(div().flex().flex_wrap().gap_2().children(org.addable.iter().map(|(kind, name)| {
-          Button::new(format!("team-{id}-key-add-{kind}"), p)
-            .variant(Variant::Outline)
-            .size(Size::Sm)
-            .disabled(org.saving)
-            .label(format!("Add {name} key"))
-            .on_click(self.press(&format!("team.key.add.{id}.{kind}")))
-        })))
+        .child(
+          div()
+            .flex()
+            .flex_wrap()
+            .gap_2()
+            .children(org.addable.iter().map(|(kind, name)| {
+              Button::new(format!("team-{id}-key-add-{kind}"), p)
+                .variant(Variant::Outline)
+                .size(Size::Sm)
+                .disabled(org.saving)
+                .label(format!("Add {name} key"))
+                .on_click(self.press(&format!("team.key.add.{id}.{kind}")))
+            })),
+        )
     });
     div()
       .id(SharedString::from(format!("team-{id}")))
@@ -3071,7 +3165,10 @@ impl SettingsView {
       .provider_keys
       .as_ref()
       .map(|keys| self.provider_keys(keys, p, window, cx));
-    let team_profile = s.cloud_profile.as_ref().map(|section| self.team_profile(section, p));
+    let team_profile = s
+      .cloud_profile
+      .as_ref()
+      .map(|section| self.team_profile(section, p));
     let org_cloud: Vec<AnyElement> = s
       .org_cloud
       .iter()

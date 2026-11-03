@@ -153,7 +153,12 @@ pub async fn list_org_provider_credentials(
   supabase: &Supabase,
   org_id: &str,
 ) -> Result<Vec<super::cloud_catalog::ProviderKey>, ApiError> {
-  let mut value: Value = instance(supabase, "list_org_provider_credentials", json!({ "org_id": org_id })).await?;
+  let mut value: Value = instance(
+    supabase,
+    "list_org_provider_credentials",
+    json!({ "org_id": org_id }),
+  )
+  .await?;
   serde_json::from_value(value["credentials"].take())
     .map_err(|e| ApiError::new("invalid_response", e.to_string()))
 }

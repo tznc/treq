@@ -1246,15 +1246,17 @@ fn byos_create_offers_your_own_provider_account(cx: &mut TestAppContext) {
   );
 }
 
-// -- Team cloud ---------------------------------------------------------------
-
 fn acme(role: &str, allow_managed: bool, allow_byos: bool) -> serde_json::Value {
   serde_json::json!([{ "org_id": "o1", "name": "Acme", "role": role, "has_team": true,
     "allow_managed": allow_managed, "allow_byos": allow_byos,
     "org_cap_usd": 500, "member_cap_usd": 50 }])
 }
 
-fn team_cloud(orgs: serde_json::Value, profile_org: Option<&str>, keys: serde_json::Value) -> serde_json::Value {
+fn team_cloud(
+  orgs: serde_json::Value,
+  profile_org: Option<&str>,
+  keys: serde_json::Value,
+) -> serde_json::Value {
   cloud(serde_json::json!({
     "organizations": orgs,
     "profile": { "org_id": profile_org, "entitled": true, "allow_managed": true, "allow_byos": true },
@@ -1274,42 +1276,83 @@ fn team_cloud_is_hidden_without_a_team(cx: &mut TestAppContext) {
 #[gpui::test]
 fn team_profile_switches_where_cloud_bills(cx: &mut TestAppContext) {
   let host = byos_host(false);
-  let mut h = signed_in_with_cloud(cx, host.clone(), team_cloud(acme("member", true, false), None, serde_json::json!([])));
-  let profile = signed_in_tab(&mut h).cloud_profile.expect("a Team member gets the profile switcher");
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    team_cloud(acme("member", true, false), None, serde_json::json!([])),
+  );
+  let profile = signed_in_tab(&mut h)
+    .cloud_profile
+    .expect("a Team member gets the profile switcher");
   assert!(h.drawn("team-profile"));
   assert_eq!(
-    profile.options.iter().map(|o| (o.label.as_str(), o.selected)).collect::<Vec<_>>(),
+    profile
+      .options
+      .iter()
+      .map(|o| (o.label.as_str(), o.selected))
+      .collect::<Vec<_>>(),
     [("Personal", true), ("Acme", false)]
   );
-  assert_eq!(profile.options[1].note, "Bills Acme. treq-managed sandboxes.");
-  h.click("team-profile-o1");
+  assert_eq!(
+    profile.options[1].note,
+    "Bills Acme. treq-managed sandboxes."
+  );
   h.click("team-profile-personal");
+  assert!(
+    host.writes().is_empty(),
+    "the profile in use is not picked again"
+  );
+  h.click("team-profile-o1");
   assert_eq!(
     host.writes(),
-    [
-      "cloud SetCloudProfile { org_id: Some(\"o1\") }",
-      "cloud SetCloudProfile { org_id: None }",
-    ]
+    ["cloud SetCloudProfile { org_id: Some(\"o1\") }"]
   );
-  assert!(signed_in_tab(&mut h).org_cloud.is_empty(), "a member gets no owner settings");
+  assert!(
+    signed_in_tab(&mut h).org_cloud.is_empty(),
+    "a member gets no owner settings"
+  );
 }
 
 #[gpui::test]
 fn team_owner_sets_what_members_may_run_and_both_caps(cx: &mut TestAppContext) {
   let host = byos_host(false);
-  let mut h = signed_in_with_cloud(cx, host.clone(), team_cloud(acme("owner", true, false), Some("o1"), serde_json::json!([])));
-  let org = signed_in_tab(&mut h).org_cloud.pop().expect("an owner gets the organization's cloud settings");
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    team_cloud(
+      acme("owner", true, false),
+      Some("o1"),
+      serde_json::json!([]),
+    ),
+  );
+  let org = signed_in_tab(&mut h)
+    .org_cloud
+    .pop()
+    .expect("an owner gets the organization's cloud settings");
   assert!(h.drawn("team-o1"));
   assert_eq!((org.allow_managed, org.allow_byos), (true, false));
-  assert_eq!((org.org_cap.as_str(), org.member_cap.as_str()), ("500", "50"));
-  h.click("team-o1-byos");
+  assert_eq!(
+    (org.org_cap.as_str(), org.member_cap.as_str()),
+    ("500", "50")
+  );
+  for control in ["team-o1-managed", "team-o1-byos", "team-o1-save"] {
+    assert!(h.drawn(control), "{control} is drawn");
+  }
+  // Below the test window's fold a simulated click lands nowhere, so press by action.
+  settings_act(&mut h, field("team.byos.o1", true.into()));
   settings_act(&mut h, field("team.cap.org.o1", "3".into()));
-  h.click("team-o1-save");
-  assert_eq!(signed_in_tab(&mut h).org_cloud[0].error.as_deref(), Some("Enter an amount of at least $5."));
-  assert!(host.writes().is_empty(), "nothing is sent for a cap under $5");
+  settings_act(&mut h, press("team.save.o1"));
+  assert_eq!(
+    signed_in_tab(&mut h).org_cloud[0].error.as_deref(),
+    Some("Enter an amount of at least $5.")
+  );
+  assert!(
+    host.writes().is_empty(),
+    "nothing is sent for a cap under $5"
+  );
   settings_act(&mut h, field("team.cap.org.o1", "300".into()));
   settings_act(&mut h, field("team.cap.member.o1", "$20".into()));
-  h.click("team-o1-save");
+  settings_act(&mut h, press("team.save.o1"));
   assert_eq!(
     host.writes(),
     ["cloud SaveOrgCloudSettings { org_id: \"o1\", allow_managed: true, allow_byos: true, org_cap_usd: 300.0, member_cap_usd: 20.0 }"]
@@ -1322,15 +1365,26 @@ fn team_owner_adds_and_removes_organization_keys(cx: &mut TestAppContext) {
   let mut h = signed_in_with_cloud(
     cx,
     host.clone(),
-    team_cloud(acme("owner", false, true), Some("o1"), serde_json::json!([{ "id": "k1", "provider_kind": "boat" }])),
+    team_cloud(
+      acme("owner", false, true),
+      Some("o1"),
+      serde_json::json!([{ "id": "k1", "provider_kind": "boat" }]),
+    ),
   );
   let org = signed_in_tab(&mut h).org_cloud.pop().unwrap();
-  assert_eq!(org.keys.iter().map(|k| k.kind.as_str()).collect::<Vec<_>>(), ["boat"]);
-  h.click("team-o1-key-add-daytona");
-  assert_eq!(signed_in_tab(&mut h).org_cloud[0].editing.as_deref(), Some("daytona"));
+  assert_eq!(
+    org.keys.iter().map(|k| k.kind.as_str()).collect::<Vec<_>>(),
+    ["boat"]
+  );
+  assert!(h.drawn("team-o1-key-add-daytona") && h.drawn("team-o1-key-remove-boat"));
+  settings_act(&mut h, press("team.key.add.o1.daytona"));
+  assert_eq!(
+    signed_in_tab(&mut h).org_cloud[0].editing.as_deref(),
+    Some("daytona")
+  );
   settings_act(&mut h, field("team.key", "dt-secret".into()));
-  h.click("team-key-save");
-  h.click("team-o1-key-remove-boat");
+  settings_act(&mut h, press("team.key.save"));
+  settings_act(&mut h, press("team.key.remove.o1.boat"));
   assert_eq!(
     host.writes(),
     [
@@ -1345,13 +1399,20 @@ fn on_an_organization_profile_create_offers_only_what_it_allows(cx: &mut TestApp
   let mut h = signed_in_with_cloud(
     cx,
     byos_host(false),
-    team_cloud(acme("member", false, true), Some("o1"), serde_json::json!([{ "id": "k1", "provider_kind": "boat" }])),
+    team_cloud(
+      acme("member", false, true),
+      Some("o1"),
+      serde_json::json!([{ "id": "k1", "provider_kind": "boat" }]),
+    ),
   );
   let card = cloud_card(&mut h);
   assert_eq!(
-    card.placements.iter().map(|p| (p.label.as_str(), p.selected)).collect::<Vec<_>>(),
+    card
+      .placements
+      .iter()
+      .map(|p| (p.label.as_str(), p.selected))
+      .collect::<Vec<_>>(),
     [("Acme's Boat account", true)],
     "no treq-managed option when the organization allows only its own keys"
   );
 }
-

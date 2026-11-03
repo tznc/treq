@@ -18,8 +18,8 @@ use super::{
   account::{self, Subscription},
   auth::{AuthStatus, Session},
   cloud_catalog::{
-    self, CloudOrganization, CloudProfile, Notification, OrgCloudSettings, SpendState, SpendStatus, Tier,
-    UsageTotals,
+    self, CloudOrganization, CloudProfile, Notification, OrgCloudSettings, SpendState, SpendStatus,
+    Tier, UsageTotals,
   },
   control_plane::{self, InstanceStatus, Preflight, ProcessAction, ResizeError},
   managed::{self, Lease, RenewalHooks},
@@ -114,7 +114,11 @@ pub fn org_provider(
 /// The sentence for a refused Team change. Database refusals carry the
 /// reason in `message`, Edge Function refusals in `code`.
 fn team_message(error: &ApiError, kind: Option<&str>) -> String {
-  let reason = if error.code.starts_with('P') || error.code.is_empty() { error.message.as_str() } else { error.code.as_str() };
+  let reason = if error.code.starts_with('P') || error.code.is_empty() {
+    error.message.as_str()
+  } else {
+    error.code.as_str()
+  };
   let provider = kind.map(cloud_catalog::provider_name).unwrap_or_default();
   match reason {
     "spend_cap_too_low" => "Each cap must be at least $5.".into(),
@@ -122,9 +126,13 @@ fn team_message(error: &ApiError, kind: Option<&str>) -> String {
     "not_organization_owner" => "Only an owner of the organization can change this.".into(),
     "not_organization_member" => "You are no longer a member of that organization.".into(),
     "byos_not_allowed" => "Organization keys need the Team plan.".into(),
-    "provider_credential_invalid" => format!("{provider} rejected this API key. Check it and try again."),
+    "provider_credential_invalid" => {
+      format!("{provider} rejected this API key. Check it and try again.")
+    }
     "byos_kind_unsupported" => format!("{provider} doesn't take your own key yet."),
-    "credential_in_use" => "A cloud workspace still runs on this key. Delete the workspace first.".into(),
+    "credential_in_use" => {
+      "A cloud workspace still runs on this key. Delete the workspace first.".into()
+    }
     _ => format!("Couldn't save: {}", error.message),
   }
 }
@@ -471,8 +479,6 @@ impl Cloud {
     self.load_byos().await;
     self.load_team().await;
   }
-
-  // -- Team cloud -------------------------------------------------------------
 
   /// Reads the user's organizations, their profile and each Team
   /// organization's keys. Team cloud is not behind the `byos` preview: an
@@ -927,7 +933,10 @@ impl Cloud {
         let byos_kind = match w.profile.as_ref().filter(|p| p.org_id.is_some()) {
           Some(profile) => org_provider(
             profile,
-            w.org_keys.get(profile.org_id.as_deref().unwrap_or_default()).map(Vec::as_slice).unwrap_or_default(),
+            w.org_keys
+              .get(profile.org_id.as_deref().unwrap_or_default())
+              .map(Vec::as_slice)
+              .unwrap_or_default(),
             w.selected_org_provider.as_deref(),
           ),
           None => w.selected_provider.clone().filter(|_| w.byos_enabled),
@@ -2048,7 +2057,12 @@ mod tests {
   /// A workspace with the organization profile, its keys and settings.
   fn on_org_profile(cloud: &Cloud, allow_managed: bool, allow_byos: bool) {
     cloud.update_workspace(|w| {
-      w.profile = Some(CloudProfile { org_id: Some("o1".into()), entitled: true, allow_managed, allow_byos });
+      w.profile = Some(CloudProfile {
+        org_id: Some("o1".into()),
+        entitled: true,
+        allow_managed,
+        allow_byos,
+      });
       w.org_keys.insert(
         "o1".into(),
         vec![cloud_catalog::ProviderKey {
@@ -2078,7 +2092,10 @@ mod tests {
     let (cloud, _) = signed_in(&server).await;
     on_org_profile(&cloud, true, true);
     cloud.set_byos_enabled(false);
-    assert_eq!(provision_with(&cloud, &server).await[0].get("credential_source"), None);
+    assert_eq!(
+      provision_with(&cloud, &server).await[0].get("credential_source"),
+      None
+    );
     cloud.select_provider(Some("boat"));
     cloud.set_byos_enabled(false);
     let ensured = provision_with(&cloud, &server).await;
@@ -2176,9 +2193,6 @@ mod tests {
       .is_empty());
   }
 
-
-  // -- Team cloud ------------------------------------------------------------
-
   /// The JSON bodies sent to the RPC `name`.
   async fn rpc_bodies(server: &MockServer, name: &str) -> Vec<Value> {
     let suffix = format!("/rest/v1/rpc/{name}");
@@ -2204,8 +2218,13 @@ mod tests {
     let (cloud, _) = signed_in(&server).await;
     cloud.set_byos_enabled(true);
     rpc(&server, "list_my_cloud_organizations", acme(true, true)).await;
-    rpc(&server, "get_cloud_profile", json!({"org_id": "o1", "entitled": true,
-      "allow_managed": true, "allow_byos": true})).await;
+    rpc(
+      &server,
+      "get_cloud_profile",
+      json!({"org_id": "o1", "entitled": true,
+      "allow_managed": true, "allow_byos": true}),
+    )
+    .await;
     on_action(&server, "list_org_provider_credentials", json!({"credentials": [
       {"id": "k1", "provider_kind": "boat", "label": "Team Boat", "validated_at": "2026-11-03T00:00:00Z", "invalid_at": null}
     ]})).await;
@@ -2214,17 +2233,31 @@ mod tests {
     assert_eq!(w.organizations.len(), 1);
     assert_eq!(w.organizations[0].name, "Acme");
     assert!(w.organizations[0].is_owner());
-    assert_eq!(w.profile.as_ref().and_then(|p| p.org_id.as_deref()), Some("o1"));
-    assert_eq!(w.org_keys.get("o1").map(|k| k[0].provider_kind.as_str()), Some("boat"));
-    assert_eq!(bodies(&server, "list_org_provider_credentials").await[0]["org_id"], "o1");
+    assert_eq!(
+      w.profile.as_ref().and_then(|p| p.org_id.as_deref()),
+      Some("o1")
+    );
+    assert_eq!(
+      w.org_keys.get("o1").map(|k| k[0].provider_kind.as_str()),
+      Some("boat")
+    );
+    assert_eq!(
+      bodies(&server, "list_org_provider_credentials").await[0]["org_id"],
+      "o1"
+    );
   }
 
   #[tokio::test]
   async fn switching_the_cloud_profile_saves_it_and_rereads_teams() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    rpc(&server, "set_cloud_profile", json!({"org_id": "o1", "entitled": true,
-      "allow_managed": true, "allow_byos": false})).await;
+    rpc(
+      &server,
+      "set_cloud_profile",
+      json!({"org_id": "o1", "entitled": true,
+      "allow_managed": true, "allow_byos": false}),
+    )
+    .await;
     rpc(&server, "list_my_cloud_organizations", acme(true, false)).await;
     cloud.set_cloud_profile(Some("o1")).await;
     cloud.set_cloud_profile(None).await;
@@ -2243,16 +2276,39 @@ mod tests {
     Mock::given(method("POST"))
       .and(path("/rest/v1/rpc/set_organization_cloud_settings"))
       .and(body_partial_json(json!({"p_org_cap_usd": 4.0})))
-      .respond_with(ResponseTemplate::new(400).set_body_json(json!({"code": "P0001", "message": "spend_cap_too_low"})))
+      .respond_with(
+        ResponseTemplate::new(400)
+          .set_body_json(json!({"code": "P0001", "message": "spend_cap_too_low"})),
+      )
       .mount(&server)
       .await;
-    rpc(&server, "set_organization_cloud_settings", json!({"org_id": "o1"})).await;
+    rpc(
+      &server,
+      "set_organization_cloud_settings",
+      json!({"org_id": "o1"}),
+    )
+    .await;
     cloud
-      .save_org_cloud_settings(OrgCloudSettings { org_id: "o1".into(), allow_managed: false, allow_byos: true, org_cap_usd: 4.0, member_cap_usd: 50.0 })
+      .save_org_cloud_settings(OrgCloudSettings {
+        org_id: "o1".into(),
+        allow_managed: false,
+        allow_byos: true,
+        org_cap_usd: 4.0,
+        member_cap_usd: 50.0,
+      })
       .await;
-    assert_eq!(cloud.snapshot().cloud.team_error.as_deref(), Some("Each cap must be at least $5."));
+    assert_eq!(
+      cloud.snapshot().cloud.team_error.as_deref(),
+      Some("Each cap must be at least $5.")
+    );
     cloud
-      .save_org_cloud_settings(OrgCloudSettings { org_id: "o1".into(), allow_managed: false, allow_byos: true, org_cap_usd: 400.0, member_cap_usd: 25.0 })
+      .save_org_cloud_settings(OrgCloudSettings {
+        org_id: "o1".into(),
+        allow_managed: false,
+        allow_byos: true,
+        org_cap_usd: 400.0,
+        member_cap_usd: 25.0,
+      })
       .await;
     let sent = rpc_bodies(&server, "set_organization_cloud_settings").await;
     assert_eq!(
@@ -2270,19 +2326,36 @@ mod tests {
     let (cloud, _) = signed_in(&server).await;
     cloud.set_byos_enabled(true);
     rpc(&server, "list_my_cloud_organizations", acme(false, true)).await;
-    on_action(&server, "save_org_provider_credential", json!({"credential": {"id": "k1"}})).await;
-    on_action(&server, "delete_org_provider_credential", json!({"deleted": "boat"})).await;
+    on_action(
+      &server,
+      "save_org_provider_credential",
+      json!({"credential": {"id": "k1"}}),
+    )
+    .await;
+    on_action(
+      &server,
+      "delete_org_provider_credential",
+      json!({"deleted": "boat"}),
+    )
+    .await;
     on_action(&server, "list_org_provider_credentials", json!({"credentials": [
       {"id": "k1", "provider_kind": "boat", "label": null, "validated_at": null, "invalid_at": null}
     ]})).await;
-    cloud.save_org_provider_key("o1", "boat", "org-secret").await;
+    cloud
+      .save_org_provider_key("o1", "boat", "org-secret")
+      .await;
     cloud.remove_org_provider_key("o1", "boat").await;
     let saved = bodies(&server, "save_org_provider_credential").await;
     assert_eq!(saved[0]["org_id"], "o1");
     assert_eq!(saved[0]["provider_kind"], "boat");
     assert_eq!(saved[0]["api_key"], "org-secret");
-    assert_eq!(bodies(&server, "delete_org_provider_credential").await[0]["org_id"], "o1");
+    assert_eq!(
+      bodies(&server, "delete_org_provider_credential").await[0]["org_id"],
+      "o1"
+    );
     assert_eq!(cloud.snapshot().cloud.org_keys["o1"].len(), 1);
-    assert!(!serde_json::to_string(&cloud.snapshot()).unwrap().contains("org-secret"));
+    assert!(!serde_json::to_string(&cloud.snapshot())
+      .unwrap()
+      .contains("org-secret"));
   }
 }

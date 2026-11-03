@@ -247,19 +247,31 @@ pub struct OrgCloudSettings {
   pub member_cap_usd: f64,
 }
 
-pub async fn fetch_cloud_organizations(supabase: &Supabase) -> Result<Vec<CloudOrganization>, ApiError> {
-  supabase.rpc("list_my_cloud_organizations", &json!({})).await
+pub async fn fetch_cloud_organizations(
+  supabase: &Supabase,
+) -> Result<Vec<CloudOrganization>, ApiError> {
+  supabase
+    .rpc("list_my_cloud_organizations", &json!({}))
+    .await
 }
 
 pub async fn fetch_cloud_profile(supabase: &Supabase) -> Result<CloudProfile, ApiError> {
   supabase.rpc("get_cloud_profile", &json!({})).await
 }
 
-pub async fn set_cloud_profile(supabase: &Supabase, org_id: Option<&str>) -> Result<CloudProfile, ApiError> {
-  supabase.rpc("set_cloud_profile", &json!({ "p_org_id": org_id })).await
+pub async fn set_cloud_profile(
+  supabase: &Supabase,
+  org_id: Option<&str>,
+) -> Result<CloudProfile, ApiError> {
+  supabase
+    .rpc("set_cloud_profile", &json!({ "p_org_id": org_id }))
+    .await
 }
 
-pub async fn set_org_cloud_settings(supabase: &Supabase, s: &OrgCloudSettings) -> Result<Value, ApiError> {
+pub async fn set_org_cloud_settings(
+  supabase: &Supabase,
+  s: &OrgCloudSettings,
+) -> Result<Value, ApiError> {
   supabase
     .rpc(
       "set_organization_cloud_settings",
