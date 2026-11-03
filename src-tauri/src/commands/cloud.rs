@@ -301,9 +301,9 @@ pub enum CloudAction {
   RemoveProviderKey {
     kind: String,
   },
-  /// The provider Create runs on with the user's key; `None` is treq managed.
-  SelectProvider {
-    kind: Option<String>,
+  /// Create the workspace on the user's own provider account (BYOS).
+  ProvisionOn {
+    kind: String,
   },
   /// Team cloud: bill the next workspace to an organization, or `None` for
   /// personal.
@@ -345,9 +345,6 @@ pub async fn run_cloud_action(
     .ok_or("The account is not available in this window.")?;
   *state.effects.window.lock_or_recover() = Some(label.to_string());
   let cloud = state.cloud.clone();
-  cloud.set_byos_enabled(crate::core::feature_preview::is_enabled_in_app_db(
-    crate::core::feature_preview::PreviewFeature::Byos,
-  ));
   use crate::core::control_plane::ProcessAction;
   match action {
     CloudAction::Refresh => cloud.refresh_cloud().await,
@@ -372,7 +369,7 @@ pub async fn run_cloud_action(
     }
     CloudAction::SaveProviderKey { kind, key } => cloud.save_provider_key(&kind, &key.0).await,
     CloudAction::RemoveProviderKey { kind } => cloud.remove_provider_key(&kind).await,
-    CloudAction::SelectProvider { kind } => cloud.select_provider(kind.as_deref()),
+    CloudAction::ProvisionOn { kind } => cloud.provision_on(&kind).await,
     CloudAction::SetCloudProfile { org_id } => cloud.set_cloud_profile(org_id.as_deref()).await,
     CloudAction::SaveOrgCloudSettings {
       org_id,

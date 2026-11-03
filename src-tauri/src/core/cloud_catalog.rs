@@ -169,11 +169,8 @@ pub struct Notification {
 // -- Bring your own sandbox (BYOS) ----------------------------------------
 
 /// The providers a user can bring their own key for: kind and name.
-pub const BYOS_PROVIDERS: [(&str, &str); 3] = [
-  ("boat", "Boat"),
-  ("daytona", "Daytona"),
-  ("fly_machines", "Fly Machines"),
-];
+pub const BYOS_PROVIDERS: [(&str, &str); 3] =
+  [("boat", "Boat"), ("daytona", "Daytona"), ("e2b", "E2B")];
 
 /// A provider's display name.
 pub fn provider_name(kind: &str) -> String {

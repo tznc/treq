@@ -12,7 +12,6 @@
     "remoteSsh": false,
     "devcontainers": false,
     "linearIntegration": false,
-    "byos": false,
     "logs": true
   },
   "env": {

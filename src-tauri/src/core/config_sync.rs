@@ -58,13 +58,12 @@ const APP_SETTING_KEYS: &[&str] = &[
   super::app_setup_script::ALWAYS_RUN_KEY,
 ];
 
-const PREVIEW_FEATURES: [PreviewFeature; 6] = [
+const PREVIEW_FEATURES: [PreviewFeature; 5] = [
   PreviewFeature::SkillsInstallation,
   PreviewFeature::RemoteSsh,
   PreviewFeature::LinearIntegration,
   PreviewFeature::Logs,
   PreviewFeature::Devcontainers,
-  PreviewFeature::Byos,
 ];
 
 /// Every settings key that is synced.

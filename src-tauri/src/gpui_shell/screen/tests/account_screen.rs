@@ -1084,13 +1084,6 @@ fn stored_notifications_show_and_dismiss(cx: &mut TestAppContext) {
 
 // -- Bring your own sandbox (BYOS) ------------------------------------------
 
-fn byos_host(on: bool) -> Arc<FakeHost> {
-  Arc::new(FakeHost::with_settings(&[(
-    "feature_preview.byos",
-    if on { "true" } else { "false" },
-  )]))
-}
-
 fn provider_keys(h: &mut Harness) -> Option<settings::ProviderKeysSection> {
   signed_in_tab(h).provider_keys
 }
@@ -1100,29 +1093,36 @@ fn boat_key() -> serde_json::Value {
 }
 
 #[gpui::test]
-fn byos_is_hidden_with_its_preview_off(cx: &mut TestAppContext) {
+fn byos_shows_for_pro_without_a_feature_preview(cx: &mut TestAppContext) {
   let mut h = signed_in_with_cloud(
     cx,
-    byos_host(false),
-    cloud(serde_json::json!({ "providerKeys": boat_key(), "selectedProvider": "boat" })),
+    Arc::new(FakeHost::default()),
+    cloud(serde_json::json!({ "providerKeys": boat_key() })),
   );
+  assert!(provider_keys(&mut h).is_some());
+  assert!(h.drawn("byos-provider-keys"));
+}
+
+#[gpui::test]
+fn byos_is_hidden_without_pro(cx: &mut TestAppContext) {
+  let mut h = Harness::with_host(cx, account_route("account"), Arc::new(FakeHost::default()));
+  h.set_account(account_state(serde_json::json!({
+    "user": ada(),
+    "cloud": cloud(serde_json::json!({ "providerKeys": boat_key(), "selectedProvider": "boat" })),
+  })));
   assert_eq!(provider_keys(&mut h), None);
   assert!(!h.drawn("byos-provider-keys"));
-  let card = cloud_card(&mut h);
-  assert!(card.placements.is_empty());
-  assert_eq!(card.byos_note, None);
-  assert!(!h.drawn("cloud-placement-managed"));
 }
 
 #[gpui::test]
 fn byos_adds_and_removes_provider_keys(cx: &mut TestAppContext) {
-  let host = byos_host(true);
+  let host = Arc::new(FakeHost::default());
   let mut h = signed_in_with_cloud(
     cx,
     host.clone(),
     cloud(serde_json::json!({ "providerKeys": boat_key() })),
   );
-  let keys = provider_keys(&mut h).expect("provider keys with the preview on");
+  let keys = provider_keys(&mut h).expect("provider keys for Pro");
   assert!(h.drawn("byos-provider-keys"));
   assert_eq!(
     keys.rows,
@@ -1131,13 +1131,14 @@ fn byos_adds_and_removes_provider_keys(cx: &mut TestAppContext) {
       name: "Boat".into(),
       status: "Key saved".into(),
       invalid: false,
+      can_create: true,
     }]
   );
   assert_eq!(
     keys.addable,
     [
       ("daytona".to_string(), "Daytona".to_string()),
-      ("fly_machines".to_string(), "Fly Machines".to_string())
+      ("e2b".to_string(), "E2B".to_string())
     ]
   );
   h.click("byos-key-add-daytona");
@@ -1166,7 +1167,7 @@ fn byos_adds_and_removes_provider_keys(cx: &mut TestAppContext) {
 fn byos_shows_a_key_the_provider_rejected(cx: &mut TestAppContext) {
   let mut h = signed_in_with_cloud(
     cx,
-    byos_host(true),
+    Arc::new(FakeHost::default()),
     cloud(serde_json::json!({
       "providerKeys": [{ "id": "c1", "provider_kind": "daytona", "invalid_at": "2026-10-28T00:00:00Z" }],
       "providerKeyError": "Daytona rejected this API key. Check it and try again.",
@@ -1189,61 +1190,45 @@ fn byos_shows_a_key_the_provider_rejected(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn byos_create_offers_your_own_provider_account(cx: &mut TestAppContext) {
-  let host = byos_host(true);
-  let byos_catalog = serde_json::json!([
-    { "provider_kind": "boat", "tier_id": "s", "hourly_usd": 0.0009, "provider_hourly_usd": 0.018 },
-    { "provider_kind": "boat", "tier_id": "m", "hourly_usd": 0.0018, "provider_hourly_usd": 0.036 }
-  ]);
+fn the_cloud_card_never_names_a_provider(cx: &mut TestAppContext) {
+  let mut h = signed_in_with_cloud(
+    cx,
+    Arc::new(FakeHost::default()),
+    cloud(serde_json::json!({ "tiers": tiers(), "selectedTier": "s", "providerKeys": boat_key() })),
+  );
+  let card = cloud_card(&mut h);
+  assert!(!format!("{card:?}").contains("Boat"), "{card:?}");
+  assert!(!h.drawn("cloud-placement-boat"));
+  assert!(!h.drawn("cloud-placement-picker"));
+}
+
+#[gpui::test]
+fn byos_creates_on_your_own_account_from_its_key(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
   let mut h = signed_in_with_cloud(
     cx,
     host.clone(),
-    cloud(serde_json::json!({
-      "tiers": tiers(), "selectedTier": "s", "providerKeys": boat_key(), "byosCatalog": byos_catalog,
-    })),
+    cloud(serde_json::json!({ "tiers": tiers(), "selectedTier": "s", "providerKeys": boat_key() })),
   );
-  let card = cloud_card(&mut h);
-  assert_eq!(
-    card.placements,
-    [
-      settings::PlacementOption {
-        kind: None,
-        label: "treq managed".into(),
-        selected: true
-      },
-      settings::PlacementOption {
-        kind: Some("boat".into()),
-        label: "Your Boat account".into(),
-        selected: false
-      },
-    ]
-  );
-  assert_eq!(card.byos_note, None);
-  h.click("cloud-placement-boat");
-  h.click("cloud-placement-managed");
-  assert_eq!(
-    host.writes(),
-    [
-      "cloud SelectProvider { kind: Some(\"boat\") }",
-      "cloud SelectProvider { kind: None }",
-    ]
-  );
+  assert!(provider_keys(&mut h).unwrap().rows[0].can_create);
+  h.click("byos-key-create-boat");
+  assert_eq!(host.writes(), ["cloud ProvisionOn { kind: \"boat\" }"]);
+}
 
+#[gpui::test]
+fn byos_create_is_offered_only_without_a_workspace_and_with_a_valid_key(cx: &mut TestAppContext) {
+  let ready = serde_json::json!({
+    "instance": { "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 5 },
+    "providerKeys": boat_key(),
+  });
+  let mut h = signed_in_with_cloud(cx, Arc::new(FakeHost::default()), cloud(ready));
+  assert!(!provider_keys(&mut h).unwrap().rows[0].can_create);
+  assert!(!h.drawn("byos-key-create-boat"));
   set_cloud(
     &mut h,
-    serde_json::json!({
-      "tiers": tiers(), "selectedTier": "s", "providerKeys": boat_key(),
-      "byosCatalog": byos_catalog, "selectedProvider": "boat",
-    }),
+    serde_json::json!({ "providerKeys": [{ "id": "c1", "provider_kind": "boat", "invalid_at": "2026-11-01T00:00:00Z" }] }),
   );
-  let card = cloud_card(&mut h);
-  assert!(card.placements[1].selected);
-  assert_eq!(card.sizes.len(), 2);
-  assert_eq!(card.sizes[0].price.as_deref(), Some("$0.0009/hour"));
-  assert_eq!(
-    card.byos_note.as_deref(),
-    Some("Boat bills you directly for the machine ($0.0180/hour for Small). treq charges 5% of Boat's price.")
-  );
+  assert!(!provider_keys(&mut h).unwrap().rows[0].can_create);
 }
 
 fn acme(role: &str, allow_managed: bool, allow_byos: bool) -> serde_json::Value {
@@ -1266,7 +1251,11 @@ fn team_cloud(
 
 #[gpui::test]
 fn team_cloud_is_hidden_without_a_team(cx: &mut TestAppContext) {
-  let mut h = signed_in_with_cloud(cx, byos_host(false), cloud(serde_json::json!({})));
+  let mut h = signed_in_with_cloud(
+    cx,
+    Arc::new(FakeHost::default()),
+    cloud(serde_json::json!({})),
+  );
   let tab = signed_in_tab(&mut h);
   assert_eq!(tab.cloud_profile, None);
   assert!(tab.org_cloud.is_empty());
@@ -1275,7 +1264,7 @@ fn team_cloud_is_hidden_without_a_team(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn team_profile_switches_where_cloud_bills(cx: &mut TestAppContext) {
-  let host = byos_host(false);
+  let host = Arc::new(FakeHost::default());
   let mut h = signed_in_with_cloud(
     cx,
     host.clone(),
@@ -1315,7 +1304,7 @@ fn team_profile_switches_where_cloud_bills(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn team_owner_sets_what_members_may_run_and_both_caps(cx: &mut TestAppContext) {
-  let host = byos_host(false);
+  let host = Arc::new(FakeHost::default());
   let mut h = signed_in_with_cloud(
     cx,
     host.clone(),
@@ -1361,7 +1350,7 @@ fn team_owner_sets_what_members_may_run_and_both_caps(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn team_owner_adds_and_removes_organization_keys(cx: &mut TestAppContext) {
-  let host = byos_host(false);
+  let host = Arc::new(FakeHost::default());
   let mut h = signed_in_with_cloud(
     cx,
     host.clone(),
@@ -1395,24 +1384,39 @@ fn team_owner_adds_and_removes_organization_keys(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn on_an_organization_profile_create_offers_only_what_it_allows(cx: &mut TestAppContext) {
+fn on_an_organization_profile_the_card_names_no_provider_and_a_key_row_creates_on_it(
+  cx: &mut TestAppContext,
+) {
+  let host = Arc::new(FakeHost::default());
   let mut h = signed_in_with_cloud(
     cx,
-    byos_host(false),
+    host.clone(),
     team_cloud(
-      acme("member", false, true),
+      acme("owner", false, true),
       Some("o1"),
       serde_json::json!([{ "id": "k1", "provider_kind": "boat" }]),
     ),
   );
   let card = cloud_card(&mut h);
-  assert_eq!(
-    card
-      .placements
-      .iter()
-      .map(|p| (p.label.as_str(), p.selected))
-      .collect::<Vec<_>>(),
-    [("Acme's Boat account", true)],
-    "no treq-managed option when the organization allows only its own keys"
+  assert!(!format!("{card:?}").contains("Boat"), "{card:?}");
+  let org = signed_in_tab(&mut h).org_cloud.pop().unwrap();
+  assert!(org.keys[0].can_create);
+  settings_act(&mut h, press("byos.create.boat"));
+  assert_eq!(host.writes(), ["cloud ProvisionOn { kind: \"boat\" }"]);
+}
+
+#[gpui::test]
+fn an_organization_key_creates_only_while_its_profile_is_selected(cx: &mut TestAppContext) {
+  let mut h = signed_in_with_cloud(
+    cx,
+    Arc::new(FakeHost::default()),
+    team_cloud(
+      acme("owner", true, true),
+      None,
+      serde_json::json!([{ "id": "k1", "provider_kind": "boat" }]),
+    ),
   );
+  let org = signed_in_tab(&mut h).org_cloud.pop().unwrap();
+  assert!(!org.keys[0].can_create);
+  assert!(!h.drawn("team-o1-key-create-boat"));
 }

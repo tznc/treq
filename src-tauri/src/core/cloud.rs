@@ -62,8 +62,6 @@ pub struct CloudWorkspace {
   pub notifications: Vec<Notification>,
   /// The idle controller's last probe: background processes and the stop ETA.
   pub activity: Option<crate::core::workspace_activity::WorkspaceActivity>,
-  /// Bring your own sandbox is on (the `byos` feature preview).
-  pub byos_enabled: bool,
   /// The user's saved provider keys (never the keys themselves).
   pub provider_keys: Vec<cloud_catalog::ProviderKey>,
   /// A provider key is being saved or removed.
@@ -72,19 +70,12 @@ pub struct CloudWorkspace {
   pub provider_key_error: Option<String>,
   /// Tier prices on the providers the user has a key for.
   pub byos_catalog: Vec<cloud_catalog::ByosMachineType>,
-  /// The provider Create runs on with the user's own key; `None` is treq
-  /// managed.
-  pub selected_provider: Option<String>,
   /// The organizations the user belongs to, with their cloud settings.
   pub organizations: Vec<CloudOrganization>,
   /// Where the next workspace bills: personal or an organization.
   pub profile: Option<CloudProfile>,
   /// Saved keys of each Team organization (metadata only).
   pub org_keys: std::collections::BTreeMap<String, Vec<cloud_catalog::ProviderKey>>,
-  /// The organization key Create runs on when the profile is an
-  /// organization; kept apart from `selected_provider`, which is personal
-  /// and behind the `byos` preview.
-  pub selected_org_provider: Option<String>,
   /// A profile switch, settings change or organization key change is running.
   pub team_saving: bool,
   /// Why the last of those was refused.
@@ -489,8 +480,7 @@ impl Cloud {
   }
 
   /// Reads the user's organizations, their profile and each Team
-  /// organization's keys. Team cloud is not behind the `byos` preview: an
-  /// owner who allows BYOS needs members to see it.
+  /// organization's keys.
   async fn load_team(&self) {
     let orgs = cloud_catalog::fetch_cloud_organizations(&self.supabase);
     self
@@ -596,46 +586,11 @@ impl Cloud {
 
   // -- Bring your own sandbox (BYOS) ----------------------------------------
 
-  /// Turns BYOS on or off (the `byos` feature preview). Off forgets the
-  /// keys read and the provider choice, so nothing BYOS shows or is sent.
-  pub fn set_byos_enabled(&self, enabled: bool) {
-    self.update_workspace(|w| {
-      w.byos_enabled = enabled;
-      if !enabled {
-        w.provider_keys.clear();
-        w.byos_catalog.clear();
-        w.selected_provider = None;
-        w.provider_key_error = None;
-      }
-    });
-  }
-
-  /// Picks the provider Create runs on with the user's key, or on an
-  /// organization profile with the organization's key; `None` is treq
-  /// managed.
-  pub fn select_provider(&self, kind: Option<&str>) {
-    let kind = kind.map(str::to_string);
-    self.update_workspace(|w| {
-      if w.profile.as_ref().is_some_and(|p| p.org_id.is_some()) {
-        w.selected_org_provider = kind;
-      } else {
-        w.selected_provider = kind;
-      }
-    });
-  }
-
-  /// Reads the saved keys and their tier prices, with BYOS on.
+  /// Reads the saved keys and their tier prices.
   async fn load_byos(&self) {
-    if !self.workspace.lock_or_recover().byos_enabled {
-      return;
-    }
     let keys = control_plane::list_provider_credentials(&self.supabase);
     self
-      .load("provider keys", keys, |w, keys| {
-        let kept = |k: &String| keys.iter().any(|key| &key.provider_kind == k);
-        w.selected_provider = w.selected_provider.take().filter(kept);
-        w.provider_keys = keys;
-      })
+      .load("provider keys", keys, |w, keys| w.provider_keys = keys)
       .await;
     let types = control_plane::byos_catalog(&self.supabase);
     self
@@ -926,6 +881,18 @@ impl Cloud {
   /// "Create cloud workspace": registration, provisioning, readiness,
   /// certificate, then the repository list.
   pub async fn provision(self: &Arc<Self>) {
+    self.provision_guarded(None).await;
+  }
+
+  /// Creates the workspace on `kind`: the user's own key, or the selected
+  /// organization's key on an organization profile (BYOS), at the size
+  /// picked on the cloud card.
+  pub async fn provision_on(self: &Arc<Self>, kind: &str) {
+    self.provision_guarded(Some(kind)).await;
+  }
+
+  /// One provisioning at a time: a double click provisions once.
+  async fn provision_guarded(self: &Arc<Self>, kind: Option<&str>) {
     let flag = std::sync::atomic::Ordering::SeqCst;
     if self
       .provisioning
@@ -934,11 +901,11 @@ impl Cloud {
     {
       return;
     }
-    self.provision_once().await;
+    self.provision_once(kind).await;
     self.provisioning.store(false, flag);
   }
 
-  async fn provision_once(self: &Arc<Self>) {
+  async fn provision_once(self: &Arc<Self>, kind: Option<&str>) {
     self.update_workspace(|w| {
       w.provisioning_error = None;
       w.provisioning_stage = Some("Requesting provisioning...".into());
@@ -955,17 +922,17 @@ impl Cloud {
         .clone();
       let (tier, byos_kind) = {
         let w = self.workspace.lock_or_recover();
-        let byos_kind = match w.profile.as_ref().filter(|p| p.org_id.is_some()) {
-          Some(profile) => org_provider(
-            profile,
-            w.org_keys
-              .get(profile.org_id.as_deref().unwrap_or_default())
-              .map(Vec::as_slice)
-              .unwrap_or_default(),
-            w.selected_org_provider.as_deref(),
-          ),
-          None => w.selected_provider.clone().filter(|_| w.byos_enabled),
-        };
+        // Create on the card is treq managed, unless an organization
+        // allows only its own keys.
+        let byos_kind = kind.map(str::to_string).or_else(|| {
+          let profile = w.profile.as_ref().filter(|p| p.org_id.is_some())?;
+          let keys = w
+            .org_keys
+            .get(profile.org_id.as_deref().unwrap_or_default())
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+          org_provider(profile, keys, None)
+        });
         (w.selected_tier.clone(), byos_kind)
       };
       let ensured =
@@ -2099,10 +2066,21 @@ mod tests {
   // -- Bring your own sandbox (BYOS) --------------------------------------
 
   async fn provision_with(cloud: &Arc<Cloud>, server: &MockServer) -> Vec<Value> {
+    provision_on_with(cloud, server, None).await
+  }
+
+  async fn provision_on_with(
+    cloud: &Arc<Cloud>,
+    server: &MockServer,
+    kind: Option<&str>,
+  ) -> Vec<Value> {
     on_action(server, "ensure", json!({})).await;
     on_action(server, "status", status("ready")).await;
     trust_mocks(server, None).await;
-    cloud.provision().await;
+    match kind {
+      Some(kind) => cloud.provision_on(kind).await,
+      None => cloud.provision().await,
+    }
     bodies(server, "ensure").await
   }
 
@@ -2110,18 +2088,15 @@ mod tests {
   async fn provisioning_on_the_users_own_provider_asks_for_byos() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    cloud.set_byos_enabled(true);
-    cloud.select_provider(Some("daytona"));
-    let ensured = provision_with(&cloud, &server).await;
+    let ensured = provision_on_with(&cloud, &server, Some("daytona")).await;
     assert_eq!(ensured[0]["credential_source"], "byos");
     assert_eq!(ensured[0]["provider_kind"], "daytona");
   }
 
   #[tokio::test]
-  async fn provisioning_stays_treq_managed_with_byos_off() {
+  async fn provisioning_stays_treq_managed_without_a_chosen_provider() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    cloud.select_provider(Some("daytona"));
     let ensured = provision_with(&cloud, &server).await;
     assert_eq!(ensured[0].get("credential_source"), None);
     assert_eq!(ensured[0].get("provider_kind"), None);
@@ -2150,7 +2125,7 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn an_organization_that_allows_only_its_keys_provisions_on_them_without_the_byos_preview() {
+  async fn an_organization_that_allows_only_its_keys_provisions_on_them() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
     on_org_profile(&cloud, false, true);
@@ -2160,18 +2135,15 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn on_an_organization_profile_the_picked_key_is_kept_and_managed_is_the_default() {
+  async fn on_an_organization_profile_create_is_managed_and_a_key_row_creates_on_that_key() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
     on_org_profile(&cloud, true, true);
-    cloud.set_byos_enabled(false);
     assert_eq!(
       provision_with(&cloud, &server).await[0].get("credential_source"),
       None
     );
-    cloud.select_provider(Some("boat"));
-    cloud.set_byos_enabled(false);
-    let ensured = provision_with(&cloud, &server).await;
+    let ensured = provision_on_with(&cloud, &server, Some("boat")).await;
     assert_eq!(ensured.last().unwrap()["provider_kind"], "boat");
   }
 
@@ -2179,7 +2151,6 @@ mod tests {
   async fn saving_a_provider_key_rereads_the_list() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    cloud.set_byos_enabled(true);
     on_action(
       &server,
       "save_provider_credential",
@@ -2211,7 +2182,6 @@ mod tests {
   async fn a_rejected_provider_key_says_so() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    cloud.set_byos_enabled(true);
     Mock::given(method("POST"))
       .and(path("/functions/v1/remote-instance"))
       .and(body_partial_json(
@@ -2233,7 +2203,6 @@ mod tests {
   async fn removing_a_provider_key_rereads_the_list() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    cloud.set_byos_enabled(true);
     on_action(
       &server,
       "delete_provider_credential",
@@ -2253,17 +2222,6 @@ mod tests {
       "boat"
     );
     assert!(cloud.snapshot().cloud.provider_keys.is_empty());
-  }
-
-  #[tokio::test]
-  async fn provider_keys_are_not_read_with_byos_off() {
-    let server = MockServer::start().await;
-    let (cloud, _) = signed_in(&server).await;
-    on_action(&server, "status", status("ready")).await;
-    cloud.refresh_cloud().await;
-    assert!(bodies(&server, "list_provider_credentials")
-      .await
-      .is_empty());
   }
 
   /// The JSON bodies sent to the RPC `name`.
@@ -2289,7 +2247,6 @@ mod tests {
   async fn refreshing_reads_the_teams_the_profile_and_their_keys() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    cloud.set_byos_enabled(true);
     rpc(&server, "list_my_cloud_organizations", acme(true, true)).await;
     rpc(
       &server,
@@ -2397,7 +2354,6 @@ mod tests {
   async fn an_owner_saves_and_removes_an_organization_key() {
     let server = MockServer::start().await;
     let (cloud, _) = signed_in(&server).await;
-    cloud.set_byos_enabled(true);
     rpc(&server, "list_my_cloud_organizations", acme(false, true)).await;
     on_action(
       &server,

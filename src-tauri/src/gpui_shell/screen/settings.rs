@@ -24,9 +24,8 @@ pub(super) mod account;
 )]
 pub use account::{
   AccountRoute, AccountTab, CloudCard, CloudEndpoint, CloudInstance, CloudRoute, CloudUsage,
-  DeleteAccountDialog, GithubSection, IntegrationsTab, LinearSection, PlacementOption, ProcessRow,
-  ProviderKeyRow, ProviderKeysSection, SignedIn, SizeOption, StatusTone, Subscription, UsageReport,
-  User,
+  DeleteAccountDialog, GithubSection, IntegrationsTab, LinearSection, ProcessRow, ProviderKeyRow,
+  ProviderKeysSection, SignedIn, SizeOption, StatusTone, Subscription, UsageReport, User,
 };
 
 use super::{

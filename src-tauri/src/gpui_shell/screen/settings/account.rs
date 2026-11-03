@@ -133,8 +133,6 @@ pub struct CloudRoute {
   pub provider_key_error: Option<String>,
   /// Tier prices on the providers the user has a key for.
   pub byos_catalog: Vec<crate::core::cloud_catalog::ByosMachineType>,
-  /// The provider Create runs on with the user's key; `None` is treq managed.
-  pub selected_provider: Option<String>,
   /// Team cloud: the user's organizations and their cloud settings.
   pub organizations: Vec<crate::core::cloud_catalog::CloudOrganization>,
   /// Where the next workspace bills: personal or an organization.
@@ -143,12 +141,6 @@ pub struct CloudRoute {
   pub org_keys: std::collections::BTreeMap<String, Vec<crate::core::cloud_catalog::ProviderKey>>,
   pub team_saving: bool,
   pub team_error: Option<String>,
-  /// The organization key Create runs on with an organization profile.
-  pub selected_org_provider: Option<String>,
-  /// Set by the view, not read: with an organization profile, its name and
-  /// whether it allows treq-managed sandboxes.
-  #[serde(skip)]
-  pub org_placement: Option<(String, bool)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -239,7 +231,7 @@ pub struct SignedIn {
   pub cloud: Option<CloudCard>,
   /// The spend cap row, once the spend status is read.
   pub spend_cap: Option<SpendCapEditor>,
-  /// "Provider keys", with the `byos` preview on and Pro.
+  /// "Provider keys", for Pro.
   pub provider_keys: Option<ProviderKeysSection>,
   /// "Cloud billing": personal or a Team organization. Only for members of
   /// a Team organization.
@@ -301,22 +293,8 @@ pub struct CloudCard {
   pub processes: Vec<ProcessRow>,
   /// "Stops in N min if idle", while it runs.
   pub idle_stop: Option<String>,
-  /// Where Create runs: treq managed, or the user's own provider account
-  /// for each saved key. Empty without BYOS.
-  pub placements: Vec<PlacementOption>,
-  /// Who bills what when the user's own account is picked.
-  pub byos_note: Option<String>,
   /// The provider refused the saved BYOS key.
   pub credential_invalid: Option<String>,
-}
-
-/// One "run it on" choice when creating a cloud workspace.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PlacementOption {
-  /// The provider kind; `None` is treq managed.
-  pub kind: Option<String>,
-  pub label: String,
-  pub selected: bool,
 }
 
 /// The "Provider keys" section (bring your own sandbox).
@@ -387,6 +365,9 @@ pub struct ProviderKeyRow {
   pub name: String,
   pub status: String,
   pub invalid: bool,
+  /// "Create workspace on this account" shows: no workspace yet and the key
+  /// is valid.
+  pub can_create: bool,
 }
 
 /// One background process on the cloud workspace.
@@ -771,73 +752,6 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
     .clone()
     .or_else(|| current_tier.clone())
     .or_else(|| cloud.tiers.first().map(|t| t.id.clone()));
-  // Bring your own sandbox: the provider picked for Create, if it has a key.
-  let byos_kind = cloud
-    .selected_provider
-    .as_deref()
-    .filter(|k| {
-      cloud
-        .provider_keys
-        .iter()
-        .any(|key| key.provider_kind == *k)
-    })
-    .filter(|_| instance.is_none());
-  let byos_price = |tier_id: &str| {
-    cloud
-      .byos_catalog
-      .iter()
-      .find(|t| Some(t.provider_kind.as_str()) == byos_kind && t.tier_id == tier_id)
-  };
-  // Organization profile: its keys, and treq managed only if it allows it.
-  let (owner, managed_allowed) = match &cloud.org_placement {
-    Some((org, managed)) => (format!("{org}'s"), *managed),
-    None => ("Your".to_string(), true),
-  };
-  let placements: Vec<PlacementOption> = if instance.is_none() && !cloud.provider_keys.is_empty() {
-    managed_allowed
-      .then(|| PlacementOption {
-        kind: None,
-        label: "treq managed".into(),
-        selected: byos_kind.is_none(),
-      })
-      .into_iter()
-      .chain(cloud.provider_keys.iter().map(|key| PlacementOption {
-        kind: Some(key.provider_kind.clone()),
-        label: format!(
-          "{owner} {} account",
-          crate::core::cloud_catalog::provider_name(&key.provider_kind)
-        ),
-        selected: byos_kind == Some(key.provider_kind.as_str()),
-      }))
-      .collect()
-  } else {
-    Vec::new()
-  };
-  let org_note = cloud.org_placement.as_ref().and_then(|(org, _)| {
-    let name = crate::core::cloud_catalog::provider_name(byos_kind?);
-    Some(format!(
-      "{name} bills {org} directly for the machine. treq charges {org} 5% of {name}'s price."
-    ))
-  });
-  let byos_note = org_note.or_else(|| {
-    byos_kind.map(|kind| {
-      let name = crate::core::cloud_catalog::provider_name(kind);
-      let tier = selected
-        .as_deref()
-        .and_then(|id| cloud.tiers.iter().find(|t| t.id == id));
-      let price = tier.and_then(|t| byos_price(&t.id).map(|b| (t, b)));
-      match price {
-        Some((t, b)) => format!(
-        "{name} bills you directly for the machine ({} for {}). treq charges 5% of {name}'s price.",
-        crate::core::cloud_catalog::format_hourly(b.provider_hourly_usd),
-        t.label
-      ),
-        None => {
-          format!("{name} bills you directly for the machine. treq charges 5% of {name}'s price.")
-        }
-      }
-    })
-  });
   let credential_invalid = error
     .filter(|e| e.starts_with("[provider_credential_invalid]"))
     .map(|_| {
@@ -855,19 +769,15 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
         js_number(tier.ram_gib),
         tier.disk_gb
       ),
-      price: match byos_kind {
-        Some(_) => byos_price(&tier.id).map(|b| b.hourly_usd),
-        None => tier.hourly_usd(region),
-      }
-      .map(crate::core::cloud_catalog::format_hourly),
+      price: tier
+        .hourly_usd(region)
+        .map(crate::core::cloud_catalog::format_hourly),
       selected: selected.as_deref() == Some(tier.id.as_str()),
       current: current_tier.as_deref() == Some(tier.id.as_str()),
     })
     .collect();
   let (processes, idle_stop) = process_rows(cloud, instance.is_some_and(|i| i.status == "ready"));
   CloudCard {
-    placements,
-    byos_note,
     processes,
     idle_stop,
     sizes,
@@ -979,6 +889,11 @@ fn team_sections(
     return (None, Vec::new());
   }
   let current = cloud.profile.as_ref().and_then(|p| p.org_id.as_deref());
+  let no_workspace = cloud
+    .instance
+    .as_ref()
+    .filter(|i| i.provider_resource_id.is_some() && i.status != "deleted")
+    .is_none();
   let profile = CloudProfileSection {
     options: std::iter::once(ProfileOption {
       org_id: None,
@@ -1010,6 +925,9 @@ fn team_sections(
         .cloned()
         .unwrap_or_default();
       let saved = cloud.org_keys.get(&o.org_id).cloned().unwrap_or_default();
+      // "Create workspace on this account" runs on the selected profile, so
+      // it shows on this organization's keys only while it is selected.
+      let creates_here = no_workspace && o.allow_byos && current == Some(o.org_id.as_str());
       let keys: Vec<ProviderKeyRow> = saved
         .iter()
         .map(|key| {
@@ -1024,6 +942,7 @@ fn team_sections(
             },
             name,
             invalid,
+            can_create: creates_here && !invalid && !cloud.submitting,
           }
         })
         .collect();
@@ -1103,18 +1022,22 @@ impl SettingsView {
     };
     let subscription = account.subscription.as_ref();
     let pro = is_pro(subscription);
-    // Bring your own sandbox shows only with its preview on, for Pro.
-    let byos = pro && self.preview_on(crate::core::feature_preview::PreviewFeature::Byos);
+    // Bring your own sandbox shows only for Pro.
+    let byos = pro;
     let mut cloud_route = account.cloud.clone();
     if !byos {
       if let Some(cloud) = cloud_route.as_mut() {
         cloud.provider_keys.clear();
         cloud.byos_catalog.clear();
-        cloud.selected_provider = None;
         cloud.provider_key_error = None;
       }
     }
     let provider_keys = cloud_route.as_ref().filter(|_| byos).map(|cloud| {
+      let no_workspace = cloud
+        .instance
+        .as_ref()
+        .filter(|i| i.provider_resource_id.is_some() && i.status != "deleted")
+        .is_none();
       let rows: Vec<ProviderKeyRow> = cloud
         .provider_keys
         .iter()
@@ -1130,6 +1053,7 @@ impl SettingsView {
             },
             name,
             invalid,
+            can_create: no_workspace && !invalid && !cloud.submitting,
           }
         })
         .collect();
@@ -1147,41 +1071,6 @@ impl SettingsView {
       }
     });
     let (cloud_profile, org_cloud) = team_sections(cloud_route.as_ref(), state, pro);
-    // Organization profile: Create offers only what the organization allows.
-    if let Some(cloud) = cloud_route.as_mut() {
-      let org = cloud
-        .profile
-        .as_ref()
-        .and_then(|p| p.org_id.clone())
-        .and_then(|id| {
-          cloud
-            .organizations
-            .iter()
-            .find(|o| o.org_id == id && o.has_team)
-            .cloned()
-        });
-      if let Some(org) = org {
-        let settings = crate::core::cloud_catalog::CloudProfile {
-          org_id: Some(org.org_id.clone()),
-          entitled: org.allow_managed || org.allow_byos,
-          allow_managed: org.allow_managed,
-          allow_byos: org.allow_byos,
-        };
-        let keys = if org.allow_byos {
-          cloud.org_keys.get(&org.org_id).cloned().unwrap_or_default()
-        } else {
-          Vec::new()
-        };
-        cloud.selected_provider = crate::core::cloud::org_provider(
-          &settings,
-          &keys,
-          cloud.selected_org_provider.as_deref(),
-        );
-        cloud.provider_keys = keys;
-        cloud.byos_catalog.clear();
-        cloud.org_placement = Some((org.name.clone(), org.allow_managed));
-      }
-    }
     AccountTab::SignedIn(Box::new(SignedIn {
       provider_keys,
       cloud_profile,
@@ -1715,6 +1604,14 @@ impl SettingsView {
         self.account.byos_key_draft.clear();
         self.account.byos_key_focus = true;
       }
+      _ if id.starts_with("byos.create.") => {
+        self.host.cloud_action(CloudAction::ProvisionOn {
+          kind: id
+            .strip_prefix("byos.create.")
+            .unwrap_or_default()
+            .to_string(),
+        });
+      }
       _ if id.starts_with("byos.key.remove.") => {
         self.host.cloud_action(CloudAction::RemoveProviderKey {
           kind: id
@@ -2122,24 +2019,6 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           .on_click(press(&format!("cloud.tier.{}", size.id)))
       }))
   });
-  let placements = (!c.placements.is_empty()).then(|| {
-    div()
-      .debug_selector(|| "cloud-placement-picker".into())
-      .flex()
-      .flex_col()
-      .gap_1()
-      .children(c.placements.iter().map(|option| {
-        let key = option.kind.clone().unwrap_or_else(|| "managed".into());
-        Button::new(format!("cloud-placement-{key}"), p)
-          .variant(Variant::Outline)
-          .size(Size::Sm)
-          .w_full()
-          .selected(option.selected)
-          .disabled(c.submitting)
-          .label(option.label.clone())
-          .on_click(press(&format!("cloud.placement.{key}")))
-      }))
-  });
   let processes = (!c.processes.is_empty() || c.idle_stop.is_some()).then(|| {
     div()
       .debug_selector(|| "cloud-processes".into())
@@ -2407,15 +2286,6 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           .text_color(p.muted_foreground)
           .child("Treq creates one persistent cloud workspace for your account, with Treq, JJ, Git, and agents installed. Pick a size: usage is billed by the second at its hourly price."),
       )
-      .children(placements)
-      .when_some(c.byos_note.clone(), |this, note| {
-        this.child(
-          ui::text(div(), TextSize::Sm)
-            .debug_selector(|| "cloud-byos-note".into())
-            .text_color(p.muted_foreground)
-            .child(note),
-        )
-      })
       .children(sizes)
       .child(
         Button::new("cloud-create", p)
@@ -2745,15 +2615,23 @@ impl SettingsView {
       )
     });
     let rows = keys.rows.iter().map(|row| {
+      let create = row.can_create.then(|| {
+        Button::new(format!("byos-key-create-{}", row.kind), p)
+          .size(Size::Sm)
+          .disabled(keys.saving)
+          .label("Create workspace on this account")
+          .on_click(self.press(&format!("byos.create.{}", row.kind)))
+      });
+      let remove = Button::new(format!("byos-key-remove-{}", row.kind), p)
+        .variant(Variant::Outline)
+        .size(Size::Sm)
+        .disabled(keys.saving)
+        .label("Remove")
+        .on_click(self.press(&format!("byos.key.remove.{}", row.kind)));
       setting_row(
         &row.name,
         &row.status,
-        Button::new(format!("byos-key-remove-{}", row.kind), p)
-          .variant(Variant::Outline)
-          .size(Size::Sm)
-          .disabled(keys.saving)
-          .label("Remove")
-          .on_click(self.press(&format!("byos.key.remove.{}", row.kind))),
+        div().flex().gap_2().children(create).child(remove),
         p,
       )
       .when(row.invalid, |this| this.text_color(red(p)))
@@ -2785,7 +2663,7 @@ impl SettingsView {
       .child(
         ui::text(div(), TextSize::Sm)
           .text_color(p.muted_foreground)
-          .child("Run your cloud workspace on your own provider account. The provider bills you for the machine; treq charges 5% of the provider's price."),
+          .child("Run your cloud workspace on your own provider account. The provider bills you for the machine; treq charges 5% of the provider's list price."),
       )
       .children(rows)
       .children(editor)
@@ -2893,15 +2771,23 @@ impl SettingsView {
         .flex_col()
         .gap_2()
         .children(org.keys.iter().map(|row| {
+          let create = row.can_create.then(|| {
+            Button::new(format!("team-{id}-key-create-{}", row.kind), p)
+              .size(Size::Sm)
+              .disabled(org.saving)
+              .label("Create workspace on this account")
+              .on_click(self.press(&format!("byos.create.{}", row.kind)))
+          });
+          let remove = Button::new(format!("team-{id}-key-remove-{}", row.kind), p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .disabled(org.saving)
+            .label("Remove")
+            .on_click(self.press(&format!("team.key.remove.{id}.{}", row.kind)));
           setting_row(
             &row.name,
             &row.status,
-            Button::new(format!("team-{id}-key-remove-{}", row.kind), p)
-              .variant(Variant::Outline)
-              .size(Size::Sm)
-              .disabled(org.saving)
-              .label("Remove")
-              .on_click(self.press(&format!("team.key.remove.{id}.{}", row.kind))),
+            div().flex().gap_2().children(create).child(remove),
             p,
           )
           .when(row.invalid, |this| this.text_color(red(p)))

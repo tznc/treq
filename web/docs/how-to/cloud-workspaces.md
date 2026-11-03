@@ -56,6 +56,19 @@ When the card shows **Degraded** or **Failed**, a **Repair** button appears. It 
 
 The trash icon (**Delete cloud workspace**) removes the machine. The confirmation dialog warns that cloned repositories, uncommitted changes, and agent sessions are lost, and that you cannot undo it. Deleting your Treq account deletes the cloud workspace and its disk too.
 
+## Bring your own sandbox
+
+With Pro, you can run the cloud workspace on your own Boat, Daytona, or E2B account instead of Treq's. The provider bills you for the machine. Treq charges 5% of the provider's list price for the same usage, whatever rate your provider account pays.
+
+1. Open Settings and choose **Account**.
+2. Under **Provider keys**, select **Add Boat key**, **Add Daytona key**, or **Add E2B key**.
+3. Paste the key into **API key** and save it. Treq checks the key with the provider before it saves it.
+4. Pick a size in the **Cloud workspace** card, then select **Create workspace on this account** on the saved key's row.
+
+The **Create cloud workspace** button on the card always makes a Treq-managed workspace.
+
+If the provider later rejects the key, the key row reads **Rejected by** the provider, and the workspace does not start until you replace the key. Treq never falls back to its own provider account. You cannot remove a key while a workspace runs on it.
+
 ## If your subscription lapses
 
 Creating, waking, and repairing a cloud workspace need an active Pro or Team subscription, and so does connecting to it. When the subscription ends, the machine stops. Treq keeps the disk for 7 days and then deletes it.
