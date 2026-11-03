@@ -10,6 +10,7 @@ use gpui::{
 use gpui_testing_library::prelude::*;
 
 use super::*;
+use crate::core::supabase::ApiError;
 use crate::gpui_shell::fuzz;
 
 fn view(h: &mut Harness) -> gpui_testing_library::Screen {
@@ -92,37 +93,74 @@ fn no_spinner_is_left_after_a_failure(cx: &mut TestAppContext) {
   assert_eq!(provisions(&host), 1);
 }
 
-/// What `ApiError`'s Display and the other host failures put in
-/// `provisioningError`, by the failure that causes them.
-const HOST_ERRORS: &[(&str, &str)] = &[
-  ("network", "[network_error] error sending request for url (https://x.supabase.co/functions/v1/control-plane)"),
-  ("timeout", "[network_error] operation timed out\nHTTP 0"),
-  ("401", "[unauthorized] JWT expired\nHTTP 401 · Correlation ID: 7f3a"),
-  ("403", "[forbidden] new row violates row-level security policy\nHTTP 403"),
-  ("409 quota", "[quota_exceeded] Instance limit reached\nHTTP 409"),
-  ("500", "[internal_error] {\"message\":\"upstream sprite error\"}\nHTTP 500"),
-  ("malformed", "[invalid_response] expected value at line 1 column 1\nHTTP 200"),
-];
+/// The host failures behind `provisioningError`, as `ApiError`s; the
+/// host stores their `friendly()` text.
+fn host_errors() -> Vec<(&'static str, ApiError)> {
+  let refusal = |status, code: &str, message: &str| ApiError {
+    status,
+    correlation_id: Some("7f3a".into()),
+    ..ApiError::new(code, message)
+  };
+  vec![
+    (
+      "network",
+      ApiError::new(
+        "network",
+        "error sending request for url (https://x.supabase.co/functions/v1/control-plane)",
+      ),
+    ),
+    ("timeout", ApiError::new("network", "operation timed out")),
+    ("401", refusal(401, "unauthorized", "JWT expired")),
+    (
+      "403",
+      refusal(
+        403,
+        "forbidden",
+        "new row violates row-level security policy",
+      ),
+    ),
+    (
+      "409 quota",
+      refusal(409, "quota_exceeded", "Instance limit reached"),
+    ),
+    (
+      "500",
+      refusal(
+        500,
+        "internal_error",
+        "{\"message\":\"upstream sprite error\"}",
+      ),
+    ),
+    (
+      "malformed",
+      refusal(200, "invalid_response", "expected value at line 1 column 1"),
+    ),
+  ]
+}
 
 #[gpui::test]
-#[ignore = "chaos: raw [code] errors, no alert role"]
 fn host_errors_read_as_sentences_not_codes(cx: &mut TestAppContext) {
   let (mut h, _) = managed(cx);
   let mut raw = Vec::new();
-  for (case, error) in HOST_ERRORS {
+  for (case, api_error) in host_errors() {
+    let error = api_error.friendly();
     h.set_account(cloud(serde_json::json!({ "provisioningError": error })));
-    let shown = error.split('\n').next().unwrap();
     let s = view(&mut h);
     // The error must not leave the button spinning or disabled.
     assert!(!creating(&mut h), "{case}");
-    // What the card draws: `cloud_card`'s error line, verbatim.
+    // What the card draws: `cloud_card`'s error line.
     let route: settings::CloudRoute =
       serde_json::from_value(serde_json::json!({ "provisioningError": error })).unwrap();
     let drawn = settings::account::cloud_card(&route, false)
       .error
       .unwrap_or_default();
-    if drawn == shown && shown.starts_with('[') {
-      raw.push(format!("{case}: {shown:?}"));
+    if drawn.is_empty()
+      || drawn.starts_with('[')
+      || drawn.contains("http")
+      || drawn.contains('{')
+      || !drawn.ends_with('.')
+    {
+      raw.push(format!("{case}: {drawn:?}"));
     }
     // It is announced, as the account deletion refusal is.
     if s.query_by_role(by::role(Role::Alert)).is_none() {

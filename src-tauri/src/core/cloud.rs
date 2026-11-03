@@ -459,7 +459,7 @@ impl Cloud {
           self.load_activity().await;
         }
       }
-      Err(error) => self.fail(error.to_string()),
+      Err(error) => self.fail(error.friendly()),
     }
   }
 
@@ -731,7 +731,7 @@ impl Cloud {
           Err(ResizeError::UnpushedWork(preflight)) => {
             self.update_workspace(|w| w.resize_preflight = Some((tier_id.clone(), preflight)))
           }
-          Err(ResizeError::Api(error)) => self.fail(error.to_string()),
+          Err(ResizeError::Api(error)) => self.fail(error.friendly()),
         }
       })
       .await;
@@ -832,7 +832,7 @@ impl Cloud {
       &format!("register-client-key:{key_reference}"),
     )
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.friendly())?;
     self.managed.lock_or_recover().key_id = Some(key.id.clone());
     Ok(key.id)
   }
@@ -952,7 +952,7 @@ impl Cloud {
       {
         *self.provision_key.lock_or_recover() = None;
       }
-      ensured.map_err(|e| e.to_string())?;
+      ensured.map_err(|e| e.friendly())?;
       let progress = self.wait_progress();
       let status = managed::wait_for_ready(
         &self.supabase,
@@ -999,7 +999,7 @@ impl Cloud {
             control_plane::wake_idempotency_key(&instance_id, &uuid::Uuid::new_v4().to_string());
           control_plane::wake(&self.supabase, &instance_id, &key)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.friendly())?;
           let status = managed::wait_for_ready(
             &self.supabase,
             managed::READY_POLL,
@@ -1060,7 +1060,7 @@ impl Cloud {
           // "not ready" instead of a certificate for an unreachable host.
           let status = control_plane::instance_status(&self.supabase)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.friendly())?;
           self.update_workspace(|w| w.instance_status = Some(status.clone()));
           let instance = status
             .instance
@@ -1121,7 +1121,7 @@ impl Cloud {
         );
         match control_plane::reprovision(&self.supabase, &instance_id, &key).await {
           Ok(_) => self.refresh_status().await,
-          Err(error) => self.fail(error.to_string()),
+          Err(error) => self.fail(error.friendly()),
         }
       })
       .await;
@@ -1140,7 +1140,7 @@ impl Cloud {
         );
         match control_plane::delete(&self.supabase, &instance_id, &key).await {
           Ok(_) => self.refresh_status().await,
-          Err(error) => self.fail(error.to_string()),
+          Err(error) => self.fail(error.friendly()),
         }
       })
       .await;
@@ -1168,7 +1168,7 @@ impl Cloud {
             .await;
         }
       }
-      Err(error) => self.fail(error.to_string()),
+      Err(error) => self.fail(error.friendly()),
     }
   }
 }
