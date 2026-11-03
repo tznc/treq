@@ -6,7 +6,7 @@ Status: draft spec, no implementation. Date: 2026-11-03.
 
 - **Synced from day one** via Supabase.
 - **Personal only**: a project belongs to one user; no team sharing.
-- **Project replaces repo as the top-level entity**: every repo lives inside a project. A single-repo user gets an implicit one-repo project.
+- **Project is the top-level entity; repos are many-to-many with projects**: a repo is added to one or more projects (like Claude Code projects). The repo itself is not owned by any one project: its checkout, `.treq` state and workspaces are shared, and each project adds its own grouping, prompts and context on top. A single-repo user gets an implicit one-repo project.
 
 ## Current model (what this builds on)
 
@@ -90,6 +90,13 @@ A keeps PR descriptions owned by the author and needs no sync of PR bodies. B ad
 
 Repo config is checked in and shared with teammates; a personal project must not override it. Project config adds defaults (pattern, agent, model) and project-only keys (agent scope).
 
+### D7a. Repo membership
+- A. A repo belongs to exactly one project.
+- B. Many-to-many: a repo can be in one or more projects, sharing one checkout. **(Recommended, matches Claude Code projects)**
+- C. Many-to-many with a separate checkout per project.
+
+B lets "payments" and "platform" both include the same shared library without duplicate clones or diverging state. C wastes disk and splits workspaces.
+
 ### D7. Sessions/agents scope
 - A. Session belongs to one repo workspace (today).
 - B. Session belongs to a project workspace, cwd = project root (D3); optional per-repo sessions too. **(Recommended)**
@@ -148,7 +155,7 @@ RLS: enable on all three; `revoke all from anon`. Policy: `owner_user_id = (sele
 
 - `projects_cache`, `project_repos_cache`, `project_workspaces_cache`: mirrors + `sync_state` (`clean|dirty|conflict`).
 - `repo_locations(repo_key, machine_path)`: per-machine path map. Never synced.
-- Per-repo `.treq` DB: add nullable `workspaces.project_workspace_id TEXT`, `sessions.project_workspace_id TEXT`. Repo DBs stay authoritative for workspace state.
+- Per-repo `.treq` DB: add nullable `workspaces.project_id TEXT`, `workspaces.project_workspace_id TEXT`, `sessions.project_id TEXT`, `sessions.project_workspace_id TEXT`. `project_id` records the project a workspace or session was created from, which decides its prompts and context. Repo DBs stay authoritative for workspace state.
 
 ### Migration
 
@@ -285,12 +292,12 @@ treq project prompt preview <project> [--repo r]   # prints the final system pro
 - Repo-relative ref to a repo not cloned here: skipped with the same warning.
 - Context path that contains secrets (`.env`, keys): refuse to add paths matching a deny list; warn on dirs that contain them.
 - Huge prompts: total injected text capped (64 KiB); launch warns and truncates lowest-priority prompts last-first.
-- Same repo in two projects: an agent launched from a repo workspace uses the project of that workspace's project workspace; for a plain repo workspace, the user picks a primary project for the repo (default: first added). Never merges two projects' prompts silently.
+- Same repo in two projects: an agent uses the project its session was opened from (`sessions.project_id`, else the workspace's `project_id`, else the project active in the sidebar). Never merges two projects' prompts.
 - Non-Claude agents without `--add-dir`: paths are listed in the prompt only; the preview says read access is not enforced for that agent.
 
 ## Edge cases
 
-- **Same repo in multiple projects**: allowed; repo state stays in the repo's `.treq`. A workspace belongs to at most one project workspace. Removing a repo from one project does not touch others.
+- **Same repo in multiple projects**: the normal case (many-to-many through `project_repos`). One checkout per machine, shared by all its projects; repo state stays in the repo's `.treq`. Each project lists all of the repo's workspaces, tagged with the project they were created from; a filter shows "this project only". A workspace belongs to at most one project workspace. Removing a repo from one project does not touch others; removing it from its last project asks whether to remove it from Treq (files are never deleted).
 - **Missing access** (no clone, no GitHub permission, auth expired): repo shown as unavailable; project workspace ops skip it with a visible warning; the Summary tab omits PRs we cannot read.
 - **Renamed repo**: match on `github_node_id`, update `repo_key`; local detection via remote URL change on fetch.
 - **Deleted repo / missing path**: mark unavailable, keep row; user removes explicitly. `jj.rs` path-validating functions already return defaults on missing paths.
@@ -322,6 +329,6 @@ Each step starts with a failing test.
 
 ## Open questions
 
-- Should "project replaces repo" also rename repo-scoped settings keys in `db.rs`, or keep repo keys and add project keys?
+- Should projects also rename repo-scoped settings keys in `db.rs`, or keep repo keys and add project keys?
 - Project root symlinks on Windows (junctions vs. copy-free alternative)?
 - Do mobile/remote (`mobile/`, `remote/`) surfaces need projects in Phase 1?
