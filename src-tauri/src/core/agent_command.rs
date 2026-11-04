@@ -91,6 +91,9 @@ pub fn system_prompt(paths: &AgentPaths<'_>) -> String {
       "This work is part of the Treq project \"{}\".",
       project.name
     ));
+    parts.push(
+      "Run `treq project status` to see every repository and workspace in the project, and `treq project add-repo <owner/name|url|path>` to add (and clone) a repository; never clone it yourself.".into(),
+    );
     let prompt = project
       .prompt
       .split_whitespace()
@@ -448,6 +451,7 @@ mod tests {
       project: Some(&project),
     });
     assert!(prompt.contains("Treq project \"Checkout\""));
+    assert!(prompt.contains("treq project status"));
     assert!(prompt.contains("Project instructions: Use pnpm. Keep the API and web in sync."));
     assert!(prompt
       .contains("Project context you may read (never write): /docs/style.md, https://x.dev/spec."));
