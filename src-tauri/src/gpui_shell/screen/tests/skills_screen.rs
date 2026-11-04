@@ -508,3 +508,19 @@ fn skill_link_confirmation_cancels_on_escape_and_installs_on_enter(cx: &mut Test
     host.writes()
   );
 }
+
+/// Every card repeats Install…, so it is an outline button: the list holds
+/// no filled one per card.
+#[gpui::test]
+fn skill_cards_draw_no_filled_install_button(cx: &mut TestAppContext) {
+  let (mut h, _) = skills_harness(cx);
+  let skills = drawn_settings(&mut h).skills.expect("skills tab");
+  let p = crate::gpui_shell::ui::theme::palette(false);
+  let word = skills
+    .rows
+    .iter()
+    .find(|r| r.name == "Word")
+    .expect("Word not installed");
+  assert!(h.drawn("skill-install-docx"));
+  assert!(!settings::install_button(word, &p).filled());
+}

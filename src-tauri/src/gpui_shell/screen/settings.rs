@@ -3057,10 +3057,7 @@ impl SettingsView {
       None
     } else {
       Some(
-        Button::new(format!("skill-install-{id}"), p)
-          .size(Size::Sm)
-          .disabled(row.busy)
-          .label("Install…")
+        install_button(row, p)
           .on_click(self.press(&format!("skills.install:{id}")))
           .into_any_element(),
       )
@@ -3245,6 +3242,15 @@ impl SettingsView {
           ),
     )
   }
+}
+
+/// A skill card's Install…, before its click handler.
+pub(super) fn install_button(row: &SkillRow, p: &Palette) -> Button {
+  Button::new(format!("skill-install-{}", row.id), p)
+    .variant(Variant::Outline)
+    .size(Size::Sm)
+    .disabled(row.busy)
+    .label("Install…")
 }
 
 #[cfg(test)]

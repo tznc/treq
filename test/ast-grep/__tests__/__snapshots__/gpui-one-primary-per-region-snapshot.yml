@@ -1,0 +1,82 @@
+id: gpui-one-primary-per-region
+snapshots:
+  ? |
+    fn rows(p: &Palette) -> Vec<Button> {
+      items.iter().map(|i| Button::new(format!("install-{i}"), p).size(Size::Sm).label("Install…")).collect()
+    }
+  : labels:
+    - source: Button::new(format!("install-{i}"), p)
+      style: primary
+      start: 61
+      end: 99
+    - source: Button::new
+      style: secondary
+      start: 61
+      end: 72
+    - source: format!("install-{i}")
+      style: secondary
+      start: 73
+      end: 95
+    - source: format!("install-{i}")
+      style: secondary
+      start: 73
+      end: 95
+    - source: '|i| Button::new(format!("install-{i}"), p).size(Size::Sm).label("Install…")'
+      style: secondary
+      start: 57
+      end: 134
+  ? |
+    fn rows(p: &Palette) {
+      for i in items {
+        el = el.child(ui::Button::new(format!("del-{i}"), p).variant(Variant::Destructive));
+      }
+    }
+  : labels:
+    - source: ui::Button::new(format!("del-{i}"), p)
+      style: primary
+      start: 60
+      end: 98
+    - source: ui::Button::new
+      style: secondary
+      start: 60
+      end: 75
+    - source: format!("del-{i}")
+      style: secondary
+      start: 76
+      end: 94
+    - source: format!("del-{i}")
+      style: secondary
+      start: 76
+      end: 94
+    - source: |-
+        for i in items {
+            el = el.child(ui::Button::new(format!("del-{i}"), p).variant(Variant::Destructive));
+          }
+      style: secondary
+      start: 25
+      end: 134
+  ? |
+    fn rows(p: &Palette) {
+      items.iter().map(|i| Button::new(format!("go-{i}"), p).variant(Variant::Default));
+    }
+  : labels:
+    - source: Button::new(format!("go-{i}"), p)
+      style: primary
+      start: 46
+      end: 79
+    - source: Button::new
+      style: secondary
+      start: 46
+      end: 57
+    - source: format!("go-{i}")
+      style: secondary
+      start: 58
+      end: 75
+    - source: format!("go-{i}")
+      style: secondary
+      start: 58
+      end: 75
+    - source: '|i| Button::new(format!("go-{i}"), p).variant(Variant::Default)'
+      style: secondary
+      start: 42
+      end: 105
