@@ -49,7 +49,6 @@ use super::{
 use crate::{
   core::WorkspaceEntry,
   gpui_shell::{
-    native::{NativeEvent, ToastTone},
     popup::{self, MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
     theme::{self, Palette},
     time,
@@ -501,7 +500,12 @@ impl FileBrowserView {
         let entries = match result {
           Ok(entries) => entries,
           Err(err) => {
-            super::workspace_data::WorkspaceHost::notify(view.host.as_ref(), Toast::error("Failed to load directory").description(err).into());
+            super::workspace_data::WorkspaceHost::notify(
+              view.host.as_ref(),
+              Toast::error("Failed to load directory")
+                .description(err)
+                .into(),
+            );
             Vec::new()
           }
         };
@@ -649,13 +653,21 @@ impl FileBrowserView {
         }
         match result {
           Ok(None) => {
-            super::workspace_data::WorkspaceHost::notify(view.host.as_ref(), Toast::warning("File too large").description("Files larger than 1MB cannot be displayed.").into());
+            super::workspace_data::WorkspaceHost::notify(
+              view.host.as_ref(),
+              Toast::warning("File too large")
+                .description("Files larger than 1MB cannot be displayed.")
+                .into(),
+            );
             view.selected = None;
             view.opened = None;
           }
           Ok(Some(read)) => view.show_content(read, refreshing, cx),
           Err(err) => {
-            super::workspace_data::WorkspaceHost::notify(view.host.as_ref(), Toast::error("Failed to read file").description(err).into());
+            super::workspace_data::WorkspaceHost::notify(
+              view.host.as_ref(),
+              Toast::error("Failed to read file").description(err).into(),
+            );
             view.opened = Some(Opened::default());
             view.marks = LineMarks::default();
           }
@@ -980,7 +992,10 @@ impl FileBrowserView {
 
   fn discard_review(&mut self, cx: &mut Context<Self>) {
     self.reset_review(cx);
-    super::workspace_data::WorkspaceHost::notify(self.host.as_ref(), Toast::success("Review canceled").into());
+    super::workspace_data::WorkspaceHost::notify(
+      self.host.as_ref(),
+      Toast::success("Review canceled").into(),
+    );
   }
 
   fn input_for(
@@ -1696,12 +1711,12 @@ impl FileBrowserView {
       .flex()
       .flex_col()
       .bg(theme::palette(self.dark).code_background())
-      .child(self.content_header(&path, markdown, previewing, p, cx))
+      .child(self.path_bar(&path, markdown, previewing, p, cx))
       .child(div().flex_1().min_h_0().overflow_hidden().child(body))
       .into_any_element()
   }
 
-  fn content_header(
+  fn path_bar(
     &self,
     path: &str,
     markdown: bool,

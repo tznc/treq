@@ -568,15 +568,12 @@ impl WindowHost for Backend {
         },
       });
     });
-    self.notify(NativeEvent::Toast {
-      title: super::model::review_done_title(comments),
-      description: String::new(),
-      tone: ToastTone::Success,
-      action: Some(ToastAction {
+    self.notify(NativeEvent::from(
+      Toast::success(super::model::review_done_title(comments)).action(ToastAction {
         label: "Show comments".into(),
         id,
       }),
-    });
+    ));
   }
 
   fn open_url(&self, url: &str) {

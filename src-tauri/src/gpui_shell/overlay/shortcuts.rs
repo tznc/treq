@@ -92,20 +92,18 @@ pub fn keys(p: &Palette, keys: &[&str]) -> gpui::Div {
     }))
 }
 
-/// A `<section>`: its uppercase heading, then one row per shortcut.
+/// A `<section>`: its heading, then one row per shortcut.
 fn section(p: &Palette, title: &str, shortcuts: &[Shortcut]) -> gpui::Div {
   div()
     .flex_1()
     .min_w_0()
     .flex()
     .flex_col()
-    .child(
-      ui::text(div(), TextSize::Xs)
-        .mb_3()
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(p.muted_foreground)
-        .child(title.to_uppercase()),
-    )
+    .child(div().mb_3().child(ui::SectionHeader::new(
+      format!("shortcuts-{}", title.to_lowercase().replace(' ', "-")),
+      title.to_string(),
+      p,
+    )))
     .child(
       div()
         .flex()

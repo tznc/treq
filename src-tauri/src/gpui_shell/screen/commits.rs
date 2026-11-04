@@ -42,7 +42,7 @@ use super::{
 use crate::{
   gpui_shell::{
     confirm::{self, Question},
-    native::{self, NativeEvent, ToastAction, ToastTone},
+    native::{self, NativeEvent, ToastAction},
     popup::{MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
     theme::{self, Palette},
     time,
@@ -722,18 +722,22 @@ impl CommitsView {
           });
           tell(
             view.host.as_ref(),
-            NativeEvent::Toast {
-              title: "Commit deleted".into(),
-              description: format!("Abandoned commit {}", commit.short_id),
-              tone: ToastTone::Success,
-              action: Some(ToastAction {
-                label: "Undo".into(),
-                id: undo,
-              }),
-            },
+            NativeEvent::from(
+              Toast::success("Commit deleted")
+                .description(format!("Abandoned commit {}", commit.short_id))
+                .action(ToastAction {
+                  label: "Undo".into(),
+                  id: undo,
+                }),
+            ),
           );
         }
-        Err(err) => tell(view.host.as_ref(), Toast::error("Failed to delete commit").description(err).into()),
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Failed to delete commit")
+            .description(err)
+            .into(),
+        ),
       };
     self.confirmed(
       question,
@@ -753,7 +757,12 @@ impl CommitsView {
           Self::changed(view.host.as_ref(), &view.parent);
           tell(view.host.as_ref(), Toast::success("Commit stashed").into());
         }
-        Err(err) => tell(view.host.as_ref(), Toast::error("Failed to stash commit").description(err).into()),
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Failed to stash commit")
+            .description(err)
+            .into(),
+        ),
       },
       cx,
     );
@@ -780,9 +789,17 @@ impl CommitsView {
       move |view: &mut Self, result: Result<(), String>, _: &mut Context<Self>| match result {
         Ok(()) => {
           Self::changed(view.host.as_ref(), &view.parent);
-          tell(view.host.as_ref(), Toast::success(&format!("Undid commit {}", commit.short_id)).into());
+          tell(
+            view.host.as_ref(),
+            Toast::success(&format!("Undid commit {}", commit.short_id)).into(),
+          );
         }
-        Err(err) => tell(view.host.as_ref(), Toast::error("Failed to undo commit").description(err).into()),
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Failed to undo commit")
+            .description(err)
+            .into(),
+        ),
       };
     self.confirmed(
       question,
@@ -810,9 +827,17 @@ impl CommitsView {
           move |view, result, _| match result {
             Ok(()) => {
               Self::changed(view.host.as_ref(), &view.parent);
-              tell(view.host.as_ref(), Toast::success(&format!("Reverted commit {}", commit.short_id)).into());
+              tell(
+                view.host.as_ref(),
+                Toast::success(&format!("Reverted commit {}", commit.short_id)).into(),
+              );
             }
-            Err(err) => tell(view.host.as_ref(), Toast::error("Failed to revert commit").description(err).into()),
+            Err(err) => tell(
+              view.host.as_ref(),
+              Toast::error("Failed to revert commit")
+                .description(err)
+                .into(),
+            ),
           },
           cx,
         )
@@ -846,7 +871,10 @@ impl CommitsView {
         view.shifting = false;
         match result {
           Ok(()) => {
-            tell(view.host.as_ref(), Toast::success("Timestamps updated").into());
+            tell(
+              view.host.as_ref(),
+              Toast::success("Timestamps updated").into(),
+            );
             Self::changed(view.host.as_ref(), &view.parent);
             if from_dialog {
               view.dialog = None;
@@ -857,7 +885,12 @@ impl CommitsView {
               *saving = false;
               *error = Some(err.clone());
             }
-            tell(view.host.as_ref(), Toast::error("Failed to shift timestamps").description(err).into());
+            tell(
+              view.host.as_ref(),
+              Toast::error("Failed to shift timestamps")
+                .description(err)
+                .into(),
+            );
           }
         }
       },
@@ -894,18 +927,22 @@ impl CommitsView {
           });
           tell(
             view.host.as_ref(),
-            NativeEvent::Toast {
-              title: "Changes discarded".into(),
-              description: "Working copy changes were removed".into(),
-              tone: ToastTone::Success,
-              action: Some(ToastAction {
-                label: "Undo".into(),
-                id: undo,
-              }),
-            },
+            NativeEvent::from(
+              Toast::success("Changes discarded")
+                .description("Working copy changes were removed")
+                .action(ToastAction {
+                  label: "Undo".into(),
+                  id: undo,
+                }),
+            ),
           );
         }
-        Err(err) => tell(view.host.as_ref(), Toast::error("Failed to discard changes").description(err).into()),
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Failed to discard changes")
+            .description(err)
+            .into(),
+        ),
       },
       cx,
     );
@@ -1083,9 +1120,17 @@ impl CommitsView {
       },
       |view, result, _cx| match result {
         Ok(_) => {
-          tell(view.host.as_ref(), Toast::success("Comment sent to agent").into());
+          tell(
+            view.host.as_ref(),
+            Toast::success("Comment sent to agent").into(),
+          );
         }
-        Err(err) => tell(view.host.as_ref(), Toast::error("Failed to create agent").description(err).into()),
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Failed to create agent")
+            .description(err)
+            .into(),
+        ),
       },
       cx,
     );
@@ -1143,7 +1188,10 @@ impl CommitsView {
       move |host, parent| host.describe(&parent.repo_path, ws, &change, &description),
       move |view, result, _| match result {
         Ok(()) => {
-          tell(view.host.as_ref(), Toast::success("Description updated").into());
+          tell(
+            view.host.as_ref(),
+            Toast::success("Description updated").into(),
+          );
           Self::changed(view.host.as_ref(), &view.parent);
         }
         Err(err) => {
@@ -1151,7 +1199,12 @@ impl CommitsView {
             view.restore_description(&commit_id, description);
           }
           view.layout_gen += 1;
-          tell(view.host.as_ref(), Toast::error("Failed to update description").description(err).into());
+          tell(
+            view.host.as_ref(),
+            Toast::error("Failed to update description")
+              .description(err)
+              .into(),
+          );
         }
       },
       cx,
@@ -1238,7 +1291,10 @@ impl CommitsView {
       move |view, result, _| match result {
         Ok(()) => {
           view.dialog = None;
-          tell(view.host.as_ref(), Toast::success("Timestamp updated").into());
+          tell(
+            view.host.as_ref(),
+            Toast::success("Timestamp updated").into(),
+          );
           Self::changed(view.host.as_ref(), &view.parent);
         }
         Err(err) => {
@@ -1246,7 +1302,12 @@ impl CommitsView {
             *saving = false;
             *error = Some(err.clone());
           }
-          tell(view.host.as_ref(), Toast::error("Failed to update timestamp").description(err).into());
+          tell(
+            view.host.as_ref(),
+            Toast::error("Failed to update timestamp")
+              .description(err)
+              .into(),
+          );
         }
       },
       cx,
@@ -1268,7 +1329,12 @@ impl CommitsView {
       move |host, parent| host.start_resolve(&parent.repo_path, parent.workspace_id(), Some(ids)),
       move |view, result, _| {
         if let Err(err) = &result {
-          tell(view.host.as_ref(), Toast::error("Failed to prepare resolve workspaces").description(err.clone()).into());
+          tell(
+            view.host.as_ref(),
+            Toast::error("Failed to prepare resolve workspaces")
+              .description(err.clone())
+              .into(),
+          );
         }
         if let Some(Dialog::Resolve {
           change_ids: open,
@@ -1342,13 +1408,21 @@ impl CommitsView {
       |view, result, _cx| match result {
         Ok(_) => {
           view.dialog = None;
-          tell(view.host.as_ref(), Toast::success("Resolve session started").into());
+          tell(
+            view.host.as_ref(),
+            Toast::success("Resolve session started").into(),
+          );
         }
         Err(err) => {
           if let Some(Dialog::Resolve { submitting, .. }) = &mut view.dialog {
             *submitting = false;
           }
-          tell(view.host.as_ref(), Toast::error("Failed to start resolve").description(err).into());
+          tell(
+            view.host.as_ref(),
+            Toast::error("Failed to start resolve")
+              .description(err)
+              .into(),
+          );
         }
       },
       cx,
@@ -2082,7 +2156,10 @@ impl CommitsView {
         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
         view
           .update(cx, |view, _| {
-            tell(view.host.as_ref(), Toast::success(&format!("{what} copied")).into())
+            tell(
+              view.host.as_ref(),
+              Toast::success(&format!("{what} copied")).into(),
+            )
           })
           .ignore_closed();
       })

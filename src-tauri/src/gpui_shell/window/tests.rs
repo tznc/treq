@@ -36,7 +36,7 @@ use crate::{
   github::{GitRemoteInfo, PrInfo},
   gpui_shell::{
     confirm::Question,
-    native::{NativeEvent, ToastTone},
+    native::NativeEvent,
     remote_repo::{Mutation, RemoteRepository},
     screen::{account_data::CloudAction, ScreenAction, View},
     sidebar::SidebarAction,

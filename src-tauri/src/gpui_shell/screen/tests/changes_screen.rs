@@ -1501,6 +1501,5 @@ fn the_changes_section_header_is_a_heading(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   let screen = a11y_screen(&mut h);
   expect(screen.get_by_role(by::role(gpui::Role::Heading).name("Changes"))).to_be_visible();
-  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Collapse Changes")))
-    .to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Collapse Changes"))).to_be_visible();
 }

@@ -25,7 +25,7 @@ use crate::{
   },
   gpui_shell::{
     confirm::Question,
-    native::{NativeEvent, ToastTone},
+    native::NativeEvent,
     overlay::OverlaySnapshot,
     screen::{file_picker::Scope, workspace_data, Modal, ScreenAction, ScreenSnapshot, View},
     sidebar::{SidebarAction, SidebarSnapshot},
@@ -494,7 +494,9 @@ impl WindowController {
           |this, result, cx| {
             if let Err(err) = result {
               this.run(
-                vec![Effect::from(Toast::error("Failed to start session").description(&err))],
+                vec![Effect::from(
+                  Toast::error("Failed to start session").description(&err),
+                )],
                 cx,
               );
             }
@@ -516,7 +518,9 @@ impl WindowController {
         |this, result: Result<(), String>, cx| {
           if let Err(err) = result {
             this.run(
-              vec![Effect::from(Toast::error("Failed to open repository").description(&err))],
+              vec![Effect::from(
+                Toast::error("Failed to open repository").description(&err),
+              )],
               cx,
             );
           }
@@ -553,7 +557,9 @@ impl WindowController {
               }
               vec![Effect::Refresh { revision: false }]
             }
-            Err(err) => vec![Effect::from(Toast::error("Failed to remove repository").description(&err))],
+            Err(err) => vec![Effect::from(
+              Toast::error("Failed to remove repository").description(&err),
+            )],
           };
           this.run(effects, cx);
         },
@@ -1149,4 +1155,3 @@ fn settings_keys(main: &str) -> Vec<String> {
   .chain([model::collapsed_key(main)])
   .collect()
 }
-

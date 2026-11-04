@@ -52,7 +52,7 @@ use crate::{
   },
   gpui_shell::{
     checks_run,
-    native::{NativeEvent, ToastTone},
+    native::NativeEvent,
     popup::{PopupSink, Side, TooltipContent},
     theme::{self, Palette},
     time,
@@ -748,12 +748,22 @@ impl CodeView {
           },
         );
         if let Some(err) = pr_error {
-          tell(self.host.as_ref(), Toast::error("Saved as a local draft").description(format!("The pull request wasn't updated: {err}")).into());
+          tell(
+            self.host.as_ref(),
+            Toast::error("Saved as a local draft")
+              .description(format!("The pull request wasn't updated: {err}"))
+              .into(),
+          );
         }
         true
       }
       Err(err) => {
-        tell(self.host.as_ref(), Toast::error(&format!("Failed to save {what}")).description(err).into());
+        tell(
+          self.host.as_ref(),
+          Toast::error(&format!("Failed to save {what}"))
+            .description(err)
+            .into(),
+        );
         false
       }
     }
@@ -779,7 +789,12 @@ impl CodeView {
               repo_path: view.parent.repo_path.clone(),
             },
           ),
-          Err(err) => tell(view.host.as_ref(), Toast::error("Failed to resync from the pull request").description(err).into()),
+          Err(err) => tell(
+            view.host.as_ref(),
+            Toast::error("Failed to resync from the pull request")
+              .description(err)
+              .into(),
+          ),
         }
       },
       cx,

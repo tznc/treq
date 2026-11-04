@@ -25,7 +25,7 @@ use tauri_plugin_gpui::gpui::{
 use super::{fuzzy_matches, Env};
 use crate::core::agent_launch::{self as launch, IssueAttachment, TaskRequest};
 use crate::gpui_shell::{
-  native::{NativeEvent, ToastTone},
+  native::NativeEvent,
   popup::{Side, TooltipContent},
   screen::{
     code::{agent_icon, menu_panel},
@@ -705,7 +705,11 @@ impl AgentPromptView {
       ),
       |view, result, cx| {
         if let Err(err) = result {
-          view.env.notify(Toast::error("Failed to save setting").description(err).into());
+          view.env.notify(
+            Toast::error("Failed to save setting")
+              .description(err)
+              .into(),
+          );
         } else {
           view.env.notify(NativeEvent::RepoSettingsChanged {
             repo_path: view.route.repo_path.clone(),
@@ -738,7 +742,11 @@ impl AgentPromptView {
               env.status = Some(status);
             }
           }
-          Err(err) => view.env.notify(Toast::error("Devcontainer did not start").description(err).into()),
+          Err(err) => view.env.notify(
+            Toast::error("Devcontainer did not start")
+              .description(err)
+              .into(),
+          ),
         }
       }
     );
@@ -772,7 +780,11 @@ impl AgentPromptView {
         Ok(false) => view.submitted = false,
         Err(err) => {
           view.submitted = false;
-          view.env.notify(Toast::error("Failed to create task").description(err).into());
+          view.env.notify(
+            Toast::error("Failed to create task")
+              .description(err)
+              .into(),
+          );
         }
       }
     );

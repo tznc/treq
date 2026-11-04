@@ -2,16 +2,16 @@
 //! handlers did: run checks, create pull requests, retarget, and delete or
 //! archive workspaces. Each reports with a toast and tells React which caches to refresh (`NativeEvent`).
 
-use crate::gpui_shell::native::Toast;
 use super::{
   code_data::CodeHost, github_data::GithubHost, workspace_data::WorkspaceHost,
   workspace_dialog_data::WorkspaceDialogHost,
 };
+use crate::gpui_shell::native::Toast;
 use crate::{
   core,
   gpui_shell::{
     confirm::Question,
-    native::{Backend, NativeEvent, ToastTone},
+    native::{Backend, NativeEvent},
   },
 };
 
@@ -126,7 +126,10 @@ pub fn archive(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
     }
     Err(err) => {
       restored(host, &workspace.repo_path, vec![workspace.id]);
-      WorkspaceHost::notify(host, Toast::error("Archive failed").description(&err).into());
+      WorkspaceHost::notify(
+        host,
+        Toast::error("Archive failed").description(&err).into(),
+      );
       false
     }
   }
@@ -158,7 +161,10 @@ pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> V
   if let Some(first) = archived.first() {
     let n = archived.len();
     let s = if n > 1 { "s" } else { "" };
-    WorkspaceHost::notify(host, Toast::success(&format!("{n} workspace{s} archived")).into());
+    WorkspaceHost::notify(
+      host,
+      Toast::success(&format!("{n} workspace{s} archived")).into(),
+    );
     removed(
       host,
       &first.repo_path,
@@ -169,7 +175,12 @@ pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> V
     if let Some(first) = workspaces.first() {
       restored(host, &first.repo_path, failed_ids);
     }
-    WorkspaceHost::notify(host, Toast::error("Archive failed").description(&failures.join("\n")).into());
+    WorkspaceHost::notify(
+      host,
+      Toast::error("Archive failed")
+        .description(&failures.join("\n"))
+        .into(),
+    );
   }
   archived
 }
@@ -228,7 +239,12 @@ pub fn move_workspace(
         repo_path: repo_path.into(),
       },
     ),
-    Err(err) => WorkspaceHost::notify(host, Toast::error("Failed to move workspace").description(&err).into()),
+    Err(err) => WorkspaceHost::notify(
+      host,
+      Toast::error("Failed to move workspace")
+        .description(&err)
+        .into(),
+    ),
   }
 }
 

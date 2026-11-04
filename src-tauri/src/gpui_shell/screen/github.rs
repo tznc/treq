@@ -8,6 +8,7 @@
 //! comes back as the next [`Route`]. The PR review page is drawn by its
 //! own view: GPUI hands its route back.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::result_ext::ResultExt;
@@ -41,7 +42,7 @@ use crate::{
   gpui_shell::{
     checks_run,
     form::{self, Controls, SelectOption},
-    native::{register_toast_action, NativeEvent, ToastAction, ToastTone},
+    native::{register_toast_action, NativeEvent, ToastAction},
     popup::{self, PopupSink},
     theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
@@ -1078,20 +1079,18 @@ impl GithubView {
     let url = format!("https://github.com/{repo}/pull/{number}");
     let host = self.host.clone();
     let id = register_toast_action(move || host.open_url(&url));
-    self.host.notify(NativeEvent::Toast {
-      title: if draft {
+    self.host.notify(NativeEvent::from(
+      Toast::success(if draft {
         "Draft PR created"
       } else {
         "Pull request created"
-      }
-      .into(),
-      description: format!("#{number}"),
-      tone: ToastTone::Success,
-      action: Some(ToastAction {
+      })
+      .description(format!("#{number}"))
+      .action(ToastAction {
         label: "Open in web".into(),
         id,
       }),
-    });
+    ));
   }
 
   fn create_issue(&mut self, cx: &mut Context<Self>) {

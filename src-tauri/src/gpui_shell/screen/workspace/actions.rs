@@ -26,7 +26,7 @@ use crate::{
     checks_run,
     confirm::{self, Question},
     menus,
-    native::{self, NativeEvent, OpenRequest, ToastAction, ToastTone},
+    native::{self, NativeEvent, OpenRequest, ToastAction},
     popup::PopupRequest,
   },
 };
@@ -386,27 +386,22 @@ impl WorkspaceView {
             Ok(number) => {
               let url = format!("https://github.com/{}/pull/{number}", request.full_name);
               let opener = host.clone();
-              view.host.notify(NativeEvent::Toast {
-                title: if draft {
+              view.host.notify(NativeEvent::from(
+                Toast::success(if draft {
                   "Draft PR created"
                 } else {
                   "Pull request created"
-                }
-                .into(),
-                description: format!("#{number}"),
-                tone: ToastTone::Success,
-                action: Some(ToastAction {
+                })
+                .description(format!("#{number}"))
+                .action(ToastAction {
                   label: "Open in web".into(),
                   id: native::register_toast_action(move || opener.open_url(&url)),
                 }),
-              });
+              ));
             }
-            Err(err) => view.host.notify(NativeEvent::Toast {
-              title: "Failed to create PR".into(),
-              description: err,
-              tone: ToastTone::Error,
-              action: None,
-            }),
+            Err(err) => view.host.notify(NativeEvent::from(
+              Toast::error("Failed to create PR").description(err),
+            )),
           }
           view.host.notify(NativeEvent::WorkspaceChanged {
             repo_path: request.repo_path.clone(),
@@ -460,9 +455,12 @@ impl WorkspaceView {
               }
               view.host.open_url(&url);
             }
-            Err(err) => {
-              WorkspaceHost::notify(&*view.host, Toast::error("Failed to push branch").description(&err).into())
-            }
+            Err(err) => WorkspaceHost::notify(
+              &*view.host,
+              Toast::error("Failed to push branch")
+                .description(&err)
+                .into(),
+            ),
           }
           view.rebuild(cx);
         })
@@ -496,8 +494,14 @@ impl WorkspaceView {
         .update(cx, |view, cx| {
           view.busy.retargeting = false;
           match done {
-            Ok(()) => WorkspaceHost::notify(&*view.host, Toast::success(&format!("Rebased onto {branch}")).into()),
-            Err(err) => WorkspaceHost::notify(&*view.host, Toast::error("Rebase failed").description(&err).into()),
+            Ok(()) => WorkspaceHost::notify(
+              &*view.host,
+              Toast::success(&format!("Rebased onto {branch}")).into(),
+            ),
+            Err(err) => WorkspaceHost::notify(
+              &*view.host,
+              Toast::error("Rebase failed").description(&err).into(),
+            ),
           }
           view
             .host

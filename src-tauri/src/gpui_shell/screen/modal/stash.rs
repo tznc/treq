@@ -15,7 +15,6 @@ use tauri_plugin_gpui::gpui::{
 use super::Env;
 use crate::{
   gpui_shell::{
-    native::ToastTone,
     screen::{code::menu_panel, rows::Rows},
     theme::{self, Palette},
     time,
@@ -329,7 +328,9 @@ impl StashView {
               cx.write_to_clipboard(ClipboardItem::new_string(patch));
               view.env.notify(Toast::success("Patch copied").into());
             }
-            Err(err) => view.env.notify(Toast::error("Failed to copy patch").description(err).into()),
+            Err(err) => view
+              .env
+              .notify(Toast::error("Failed to copy patch").description(err).into()),
           }
           cx.notify();
         })
@@ -366,7 +367,11 @@ impl StashView {
               view.load(cx);
               view.env.notify(Toast::success("Stash deleted").into());
             }
-            Err(err) => view.env.notify(Toast::error("Failed to delete stash").description(err).into()),
+            Err(err) => view.env.notify(
+              Toast::error("Failed to delete stash")
+                .description(err)
+                .into(),
+            ),
           }
           cx.notify();
         })
@@ -400,7 +405,11 @@ impl StashView {
               view.env.workspace_changed(&repo);
               view.env.notify(Toast::success("Stash applied").into());
             }
-            Err(err) => view.env.notify(Toast::error("Failed to apply stash").description(err).into()),
+            Err(err) => view.env.notify(
+              Toast::error("Failed to apply stash")
+                .description(err)
+                .into(),
+            ),
           }
           cx.notify();
         })

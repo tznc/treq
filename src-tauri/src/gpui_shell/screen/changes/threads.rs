@@ -207,7 +207,12 @@ impl ChangesView {
                 view.load(cx);
               }
             }
-            Err(err) => super::tell(view.host.as_ref(), Toast::error("Review comment action failed").description(err).into()),
+            Err(err) => super::tell(
+              view.host.as_ref(),
+              Toast::error("Review comment action failed")
+                .description(err)
+                .into(),
+            ),
           }
           view.read_agent(cx);
         }
@@ -861,7 +866,10 @@ impl Reacts for ChangesView {
           if let Some(comment) = view.review_comment_mut(&id) {
             reactions::toggle(&mut comment.reactions, content);
           }
-          super::tell(view.host.as_ref(), Toast::error("Failed to react").description(err).into());
+          super::tell(
+            view.host.as_ref(),
+            Toast::error("Failed to react").description(err).into(),
+          );
         }
       },
       cx,

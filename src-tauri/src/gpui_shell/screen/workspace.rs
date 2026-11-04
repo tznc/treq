@@ -988,16 +988,15 @@ impl WorkspaceView {
       this
         .update(cx, |view, cx| {
           view.pending = Pending::None;
-          view.host.notify(NativeEvent::Toast {
-            title: outcome.title,
-            description: outcome.description,
-            tone: match (outcome.ok, outcome.warning) {
+          view.host.notify(NativeEvent::from(Toast::new(
+            match (outcome.ok, outcome.warning) {
               (false, _) => ToastTone::Error,
               (true, true) => ToastTone::Warning,
               (true, false) => ToastTone::Success,
             },
-            action: None,
-          });
+            outcome.title,
+            outcome.description,
+          )));
           // The window reads again on this and bumps the route's revision,
           // which reloads the header (`set_route`).
           view
@@ -1913,7 +1912,11 @@ impl WorkspaceView {
         if value["useIdleAgent"].as_bool() == Some(true) {
           match self.send_to_idle(&markdown, cx) {
             None => return (self.react)(ScreenAction::Field { field, value }, cx),
-            Some(true) => return self.host.notify(Toast::success("Review sent to agent").into()),
+            Some(true) => {
+              return self
+                .host
+                .notify(Toast::success("Review sent to agent").into())
+            }
             Some(false) => {}
           }
         }
@@ -1933,7 +1936,11 @@ impl WorkspaceView {
         let prompt = crate::core::agent_launch::review_comment_prompt(&comment, &dir);
         match self.send_to_idle(&prompt, cx) {
           None => return (self.react)(ScreenAction::Field { field, value }, cx),
-          Some(true) => return self.host.notify(Toast::success("Comment sent to agent").into()),
+          Some(true) => {
+            return self
+              .host
+              .notify(Toast::success("Comment sent to agent").into())
+          }
           Some(false) => {}
         }
         let done = ("Comment sent to agent", "");
@@ -2003,17 +2010,18 @@ impl WorkspaceView {
         .await;
       this
         .update(cx, |view, _| match (result, done) {
-          (Ok(_), Some((title, description))) => {
-            view.host.notify(Toast::success(&title).description(description).into())
-          }
+          (Ok(_), Some((title, description))) => view
+            .host
+            .notify(Toast::success(&title).description(description).into()),
           (Ok(_), None) => {}
-          (Err(err), _) => view.host.notify(Toast::error(failed).description(err).into()),
+          (Err(err), _) => view
+            .host
+            .notify(Toast::error(failed).description(err).into()),
         })
         .ignore_closed();
     })
     .detach();
   }
-
 }
 
 impl WorkspaceView {

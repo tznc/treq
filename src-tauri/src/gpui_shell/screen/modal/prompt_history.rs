@@ -16,7 +16,6 @@ use tauri_plugin_gpui::gpui::{
 use super::Env;
 use crate::{
   gpui_shell::{
-    native::ToastTone,
     theme::{self, Palette},
     time,
     ui::{self, Button, Size, TextSize, Variant},

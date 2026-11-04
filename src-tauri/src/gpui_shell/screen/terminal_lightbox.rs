@@ -3,8 +3,8 @@
 //! highlighted regions (`ImageHighlightLayer`), text files line comments
 //! (`TextAssetLineReview`).
 
-use crate::gpui_shell::native::Toast;
 use crate::core::review::parse_suggestion;
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -33,7 +33,6 @@ use super::{
   },
 };
 use crate::gpui_shell::{
-  native::ToastTone,
   theme::{self, Palette},
   ui::{self, Button, TextSize, Variant},
 };
@@ -497,7 +496,9 @@ impl Lightbox {
           let annotated = match annotated {
             Some(Ok(path)) => Some(path),
             Some(Err(error)) => {
-              cx.emit(LightboxEvent::Toast(Toast::error("Could not attach highlighted image").description(error)));
+              cx.emit(LightboxEvent::Toast(
+                Toast::error("Could not attach highlighted image").description(error),
+              ));
               None
             }
             None => None,

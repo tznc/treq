@@ -15,7 +15,6 @@ use super::{
 use crate::{
   gpui_shell::{
     form,
-    native::ToastTone,
     screen::github_data as data,
     theme::{self, Palette},
     ui::{self, Button, Size, TextSize, Variant},
@@ -240,7 +239,9 @@ impl GithubView {
             view.reload_list(false, cx);
             view.press(format!("github.created:{number}"), cx);
           }
-          Err(err) => view.host.notify(Toast::error("Failed to create PR").description(err).into()),
+          Err(err) => view
+            .host
+            .notify(Toast::error("Failed to create PR").description(err).into()),
         }
       },
     );

@@ -42,7 +42,6 @@ use super::{
 use crate::{
   github::GhPullRequest,
   gpui_shell::{
-    native::{NativeEvent, ToastTone},
     popup::{self, PopupSink, Side, TooltipContent},
     theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
@@ -282,7 +281,12 @@ impl PrReviewView {
       |view, result, _cx| {
         view.starting = false;
         if let Err(err) = result {
-          super::workspace_data::WorkspaceHost::notify(view.host.as_ref(), Toast::error("Failed to start review").description(err).into());
+          super::workspace_data::WorkspaceHost::notify(
+            view.host.as_ref(),
+            Toast::error("Failed to start review")
+              .description(err)
+              .into(),
+          );
         }
       },
       cx,
@@ -335,7 +339,12 @@ impl PrReviewView {
                 c.read_drafts(cx);
               });
             }
-            super::workspace_data::WorkspaceHost::notify(view.host.as_ref(), Toast::success("Review submitted").description(format!("#{number}: {}", event.label())).into());
+            super::workspace_data::WorkspaceHost::notify(
+              view.host.as_ref(),
+              Toast::success("Review submitted")
+                .description(format!("#{number}: {}", event.label()))
+                .into(),
+            );
             view.send(
               ScreenAction::Press {
                 id: "prReview.submitted".into(),
@@ -343,7 +352,12 @@ impl PrReviewView {
               cx,
             );
           }
-          Err(err) => super::workspace_data::WorkspaceHost::notify(view.host.as_ref(), Toast::error("Failed to submit review").description(err).into()),
+          Err(err) => super::workspace_data::WorkspaceHost::notify(
+            view.host.as_ref(),
+            Toast::error("Failed to submit review")
+              .description(err)
+              .into(),
+          ),
         }
       },
       cx,

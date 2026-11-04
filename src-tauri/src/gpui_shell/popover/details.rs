@@ -2,6 +2,7 @@
 //! and the prompt it started with (`ShowWorkspace`'s `PopoverContent`
 //! `w-96`).
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use tauri_plugin_gpui::gpui::{
@@ -10,7 +11,7 @@ use tauri_plugin_gpui::gpui::{
 
 use super::{data::StartingPrompt, Popover};
 use crate::gpui_shell::{
-  native::{NativeEvent, ToastTone},
+  native::NativeEvent,
   theme::{self, Palette},
   time,
   ui::{self, Button, Size, TextSize, Variant},
@@ -82,12 +83,9 @@ impl Popover {
       return;
     };
     cx.write_to_clipboard(ClipboardItem::new_string(prompt.text.clone()));
-    self.host.notify(NativeEvent::Toast {
-      title: "Prompt copied".into(),
-      description: String::new(),
-      tone: ToastTone::Success,
-      action: None,
-    });
+    self
+      .host
+      .notify(NativeEvent::from(Toast::success("Prompt copied")));
   }
 
   /// "View full prompt": React's prompt history opens on it.

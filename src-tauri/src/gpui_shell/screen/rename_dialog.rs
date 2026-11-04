@@ -17,7 +17,7 @@ use super::{
   workspace_modal::press, ActionSink,
 };
 use crate::gpui_shell::{
-  native::{NativeEvent, ToastTone},
+  native::NativeEvent,
   theme,
   ui::{self, Button, TextSize, Variant},
 };
@@ -195,7 +195,10 @@ impl RenameDialog {
             Ok(result) if !result.success => view.error = result.message,
             Ok(_) => {
               view.error.clear();
-              WorkspaceHost::notify(&*view.host, Toast::success(&format!("Renamed to {next}")).into());
+              WorkspaceHost::notify(
+                &*view.host,
+                Toast::success(&format!("Renamed to {next}")).into(),
+              );
               WorkspaceHost::notify(
                 &*view.host,
                 NativeEvent::WorkspaceChanged {
@@ -205,7 +208,12 @@ impl RenameDialog {
               view.close(cx);
             }
             Err(err) => {
-              WorkspaceHost::notify(&*view.host, Toast::error("Failed to rename workspace").description(err.clone()).into());
+              WorkspaceHost::notify(
+                &*view.host,
+                Toast::error("Failed to rename workspace")
+                  .description(err.clone())
+                  .into(),
+              );
               view.error = err;
             }
           }

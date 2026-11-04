@@ -14,7 +14,7 @@ use tauri_plugin_gpui::gpui::{
 use super::code::menu_panel;
 use super::code_data::CodeHost;
 use crate::gpui_shell::{
-  native::{NativeEvent, ToastTone},
+  native::NativeEvent,
   theme::{self, Palette},
   ui::{self, zpx, Button, DismissExt as _, Size, TextSize, Variant},
 };
@@ -142,7 +142,11 @@ impl TitleEditor {
                 repo_path: view.repo_path.clone(),
               });
               if let Some(err) = pr_error {
-                view.tell(Toast::error("Saved as a local draft").description(format!("The pull request wasn't updated: {err}")).into());
+                view.tell(
+                  Toast::error("Saved as a local draft")
+                    .description(format!("The pull request wasn't updated: {err}"))
+                    .into(),
+                );
               }
             }
             Err(err) => view.tell(Toast::error("Failed to save title").description(err).into()),

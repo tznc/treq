@@ -10,8 +10,8 @@
 //! [`account_data`]: crate::gpui_shell::screen::account_data
 //! [`Account`]: crate::gpui_shell::screen::account_data::Account
 
-use crate::gpui_shell::native::Toast;
 use crate::core::cloud_catalog::{Notification, SpendState};
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
@@ -25,7 +25,7 @@ use tauri_plugin_gpui::gpui::{
 use super::{help, SettingsView, Tab};
 use crate::gpui_shell::{
   form,
-  native::{self, NativeEvent, ToastTone},
+  native::{self, NativeEvent},
   popup::{Side, TooltipContent},
   screen::{
     account_data::{self, CloudAction},
@@ -1282,7 +1282,9 @@ impl SettingsView {
               host.notify(NativeEvent::RepoSettingsChanged { repo_path: path });
               host.notify(NativeEvent::from(Toast::success("API key saved")));
             }
-            Err(err) => host.notify(NativeEvent::from(Toast::error("Error saving API key").description(err.to_string()))),
+            Err(err) => host.notify(NativeEvent::from(
+              Toast::error("Error saving API key").description(err.to_string()),
+            )),
           }
           result
         }
@@ -1455,7 +1457,10 @@ impl SettingsView {
         Ok(()) => {
           view.account.delete_account = None;
           view.account.farewell = true;
-          view.host.notify(NativeEvent::from(Toast::success("Account deleted").description("Your Treq account and its data have been deleted.")));
+          view.host.notify(NativeEvent::from(
+            Toast::success("Account deleted")
+              .description("Your Treq account and its data have been deleted."),
+          ));
         }
         Err(error) => {
           if let Some(dialog) = &mut view.account.delete_account {
@@ -1487,18 +1492,18 @@ impl SettingsView {
             let id = native::register_toast_action(move || {
               opener.open_url(&format!("{}/dashboard", native::web_url()))
             });
-            host.notify(NativeEvent::Toast {
-              title: "Linear OAuth needs Pro".into(),
-              description: "Add a personal Linear API key above to use Linear on the Free plan."
-                .into(),
-              tone: ToastTone::Warning,
-              action: Some(native::ToastAction {
-                label: "Upgrade to Pro".into(),
-                id,
-              }),
-            });
+            host.notify(NativeEvent::from(
+              Toast::warning("Linear OAuth needs Pro")
+                .description("Add a personal Linear API key above to use Linear on the Free plan.")
+                .action(native::ToastAction {
+                  label: "Upgrade to Pro".into(),
+                  id,
+                }),
+            ));
           }
-          Err(error) => host.notify(NativeEvent::from(Toast::error("Error starting OAuth flow").description(error.message.to_string()))),
+          Err(error) => host.notify(NativeEvent::from(
+            Toast::error("Error starting OAuth flow").description(error.message.to_string()),
+          )),
         }
       },
     );
@@ -1900,20 +1905,6 @@ fn setting_row(
         .gap_2()
         .child(control),
     )
-}
-
-/// An integration's header: icon, name and a muted note, over a rule.
-fn section_header(icon: &'static str, name: &'static str, note: &str, p: &Palette) -> gpui::Div {
-  ui::text(div(), TextSize::Sm)
-    .flex()
-    .items_center()
-    .gap_3()
-    .pb_2()
-    .border_b_1()
-    .border_color(p.border)
-    .child(ui::icon(icon, 20., p.foreground))
-    .child(div().font_weight(FontWeight::SEMIBOLD).child(name))
-    .child(div().text_color(p.muted_foreground).child(note.to_string()))
 }
 
 /// Error text.
@@ -2683,12 +2674,7 @@ impl SettingsView {
       .flex()
       .flex_col()
       .gap_2()
-      .child(section_header(
-        theme::ICON_CLOUD,
-        "Provider keys",
-        "Bring your own sandbox",
-        p,
-      ))
+      .child(ui::SectionHeader::new("provider-keys-heading", "Provider keys", p).icon(theme::ICON_CLOUD).note("Bring your own sandbox"))
       .child(
         ui::text(div(), TextSize::Sm)
           .text_color(p.muted_foreground)
@@ -2713,12 +2699,11 @@ impl SettingsView {
       .flex()
       .flex_col()
       .gap_2()
-      .child(section_header(
-        theme::ICON_CLOUD,
-        "Cloud billing",
-        "Who pays for your next workspace",
-        p,
-      ))
+      .child(
+        ui::SectionHeader::new("cloud-billing-heading", "Cloud billing", p)
+          .icon(theme::ICON_CLOUD)
+          .note("Who pays for your next workspace"),
+      )
       .children(section.options.iter().map(|option| {
         let key = option.org_id.clone().unwrap_or_else(|| "personal".into());
         setting_row(
@@ -2846,7 +2831,7 @@ impl SettingsView {
       .flex()
       .flex_col()
       .gap_2()
-      .child(section_header(theme::ICON_CLOUD, "Organization cloud", &format!("{}, owners only", org.name), p))
+      .child(ui::SectionHeader::new("organization-cloud-heading", "Organization cloud", p).icon(theme::ICON_CLOUD).note(format!("{}, owners only", org.name)))
       .child(setting_row(
         "treq-managed sandboxes",
         "Members run on treq's account. Billed to the organization at cost plus 20%.",
@@ -3398,7 +3383,11 @@ impl SettingsView {
           .label("Manage GitHub")
           .on_click(self.press("github.manage"));
         div()
-          .child(section_header(theme::ICON_GITHUB, "GitHub", scope, p))
+          .child(
+            ui::SectionHeader::new("github-heading", "GitHub", p)
+              .icon(theme::ICON_GITHUB)
+              .note(scope),
+          )
           .child(setting_row(
             "Connected repositories",
             description,

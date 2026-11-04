@@ -136,6 +136,7 @@ impl RenderOnce for SectionHeader {
           .debug_selector(move || toggle_selector)
           .role(gpui::Role::Button)
           .aria_label(toggle_label(&self.title, toggle.collapsed))
+          .test_support()
           .flex()
           .items_center()
           .gap_1()
@@ -162,7 +163,9 @@ impl RenderOnce for SectionHeader {
       .flex()
       .items_center()
       .gap_2()
-      .when_some(self.icon, |el, icon| el.child(crate::icon(icon, 12., muted)))
+      .when_some(self.icon, |el, icon| {
+        el.child(crate::icon(icon, 12., muted))
+      })
       .child(lead)
       .when_some(self.note, |el, note| {
         el.child(caption(div(), cx).truncate().text_color(muted).child(note))
@@ -210,8 +213,14 @@ mod tests {
 
   #[test]
   fn test_section_header_toggle_names_its_action() {
-    assert_eq!(super::toggle_label("Changes", true).as_ref(), "Expand Changes");
-    assert_eq!(super::toggle_label("Changes", false).as_ref(), "Collapse Changes");
+    assert_eq!(
+      super::toggle_label("Changes", true).as_ref(),
+      "Expand Changes"
+    );
+    assert_eq!(
+      super::toggle_label("Changes", false).as_ref(),
+      "Collapse Changes"
+    );
   }
 
   mod render {
@@ -233,10 +242,13 @@ mod tests {
     impl Render for Collapsible {
       fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let p = theme::palette(false);
-        div().w(px(300.)).child(
-          SectionHeader::new("changes", "Changes", &p)
-            .collapsible("changes-toggle", true, |_, _, _| {}),
-        )
+        div()
+          .w(px(300.))
+          .child(SectionHeader::new("changes", "Changes", &p).collapsible(
+            "changes-toggle",
+            true,
+            |_, _, _| {},
+          ))
       }
     }
 

@@ -573,11 +573,19 @@ impl ChangesView {
       move |view, result, cx| match result {
         Ok(()) => {
           view.delete_comment(&id, cx);
-          super::tell(view.host.as_ref(), Toast::success("Suggestion applied").into());
+          super::tell(
+            view.host.as_ref(),
+            Toast::success("Suggestion applied").into(),
+          );
           view.review.apply_next = true;
           view.load(cx);
         }
-        Err(err) => super::tell(view.host.as_ref(), Toast::error("Could not apply suggestion").description(err).into()),
+        Err(err) => super::tell(
+          view.host.as_ref(),
+          Toast::error("Could not apply suggestion")
+            .description(err)
+            .into(),
+        ),
       },
       cx,
     );
@@ -899,10 +907,15 @@ impl ChangesView {
     });
     let dropped = before - self.review.comments.len();
     if dropped > 0 {
-      super::tell(self.host.as_ref(), Toast::warning("Comments discarded").description(format!(
-          "{} discarded (lines changed)",
-          count_label(dropped, "outdated comment")
-        )).into());
+      super::tell(
+        self.host.as_ref(),
+        Toast::warning("Comments discarded")
+          .description(format!(
+            "{} discarded (lines changed)",
+            count_label(dropped, "outdated comment")
+          ))
+          .into(),
+      );
       self.save_review(cx);
     }
   }
@@ -935,7 +948,14 @@ impl ChangesView {
       })
       .collect();
     cx.write_to_clipboard(ClipboardItem::new_string(outdated_markdown(&all)));
-    super::tell(self.host.as_ref(), Toast::success(&format!("{} copied", count_label(all.len(), "outdated comment"))).into());
+    super::tell(
+      self.host.as_ref(),
+      Toast::success(&format!(
+        "{} copied",
+        count_label(all.len(), "outdated comment")
+      ))
+      .into(),
+    );
   }
 
   /// Right-click with lines selected (`ContextMenu`).

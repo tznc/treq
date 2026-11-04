@@ -17,7 +17,7 @@ use tauri_plugin_gpui::gpui::App;
 use super::{code_data::CodeHost, ActionSink, ScreenAction};
 use crate::{
   gpui_shell::{
-    native::{Backend, NativeEvent, ToastTone},
+    native::{Backend, NativeEvent},
     popup::PopupSink,
   },
   jj::JjRevisionDiff,

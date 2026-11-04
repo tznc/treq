@@ -49,7 +49,7 @@
     "lint:subprocess": "ast-grep scan --filter '^(no-command-for-jj-or-git-tauri-src|no-command-new-git-rust-tests|no-subprocess-conflict-pipeline-tauri-src)$'",
     "lint:home-head": "ast-grep scan --filter '^home-git-head-history-edit-needs-test$'",
     "lint:a11y": "ast-grep scan --filter '^(gpui-control-needs-accessible-name|mobile-icon-button-needs-name)$'",
-    "lint:design": "ast-grep scan --filter '^(gpui-button-no-restyle|gpui-clickable-needs-role|gpui-escape-via-layers|gpui-hover-token|gpui-list-nav-shared|gpui-name-no-status-color|gpui-success-means-success|gpui-no-adhoc-controls|gpui-no-adhoc-feedback|gpui-no-adhoc-tabs|gpui-no-local-dialog|gpui-no-local-row|gpui-no-raw-color|gpui-no-raw-text-size|gpui-no-zpx-spacing|gpui-one-primary-per-region|gpui-row-selected-token|ui-copy-brand-spelling|ui-copy-ellipsis|ui-copy-no-yes-no|ui-copy-sentence-case)$'",
+    "lint:design": "ast-grep scan --filter '^(gpui-button-no-restyle|gpui-clickable-needs-role|gpui-escape-via-layers|gpui-hover-token|gpui-list-nav-shared|gpui-name-no-status-color|gpui-success-means-success|gpui-no-adhoc-controls|gpui-no-adhoc-feedback|gpui-no-adhoc-tabs|gpui-no-local-dialog|gpui-no-local-header-or-toast|gpui-no-local-row|gpui-no-raw-color|gpui-no-raw-text-size|gpui-no-zpx-spacing|gpui-one-primary-per-region|gpui-row-selected-token|ui-copy-brand-spelling|ui-copy-ellipsis|ui-copy-no-yes-no|ui-copy-sentence-case)$'",
     "design:audit": "node scripts/design-audit.mjs",
     "icons:generate": "node scripts/generate-icons.js && npx @tauri-apps/cli icon assets/logo-white.imageset/logo-white-rounded.svg && node scripts/flatten-ios-icons.js"
   },

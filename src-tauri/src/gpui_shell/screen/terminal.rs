@@ -10,8 +10,8 @@
 //! [`terminal_data`]: super::terminal_data
 //! [`terminal_emu`]: super::terminal_emu
 
-use crate::gpui_shell::native::Toast;
 use crate::core::pty_remote_supervisor::clean_title;
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::lock_ext::LockExt as _;
@@ -47,7 +47,7 @@ use super::{
   ActionSink, ScreenAction,
 };
 use crate::gpui_shell::{
-  native::{NativeEvent, ToastTone},
+  native::NativeEvent,
   popup::{PopupSink, Side, TooltipContent},
   theme::{self, Palette},
   tooltips::{HasTooltips, Tooltips},
@@ -2048,7 +2048,12 @@ impl TerminalPane {
       .host
       .set_repo_settings(&repo, &[(ENVIRONMENT_SETTING.into(), value.into())]);
     if let Err(error) = saved {
-      super::workspace_data::WorkspaceHost::notify(&*self.host, Toast::error("Failed to save setting").description(error).into());
+      super::workspace_data::WorkspaceHost::notify(
+        &*self.host,
+        Toast::error("Failed to save setting")
+          .description(error)
+          .into(),
+      );
       cx.notify();
       return;
     }
@@ -2085,7 +2090,12 @@ impl TerminalPane {
                 environment.status = Some(status);
               }
             }
-            Err(error) => super::workspace_data::WorkspaceHost::notify(&*pane.host, Toast::error("Devcontainer did not start").description(error).into()),
+            Err(error) => super::workspace_data::WorkspaceHost::notify(
+              &*pane.host,
+              Toast::error("Devcontainer did not start")
+                .description(error)
+                .into(),
+            ),
           }
           cx.notify();
         })
@@ -2166,7 +2176,12 @@ impl TerminalPane {
           return;
         };
         if let Err(error) = self.host.rename_session(repo_path, session_id, &title) {
-          return super::workspace_data::WorkspaceHost::notify(&*self.host, Toast::error("Couldn't rename the agent").description(error).into());
+          return super::workspace_data::WorkspaceHost::notify(
+            &*self.host,
+            Toast::error("Couldn't rename the agent")
+              .description(error)
+              .into(),
+          );
         }
         let mut kind = kind;
         if let Kind::Agent { name, .. } = &mut kind {
@@ -2187,7 +2202,12 @@ impl TerminalPane {
           pane
             .update(cx, |pane, cx| match kept {
               Ok(title) => pane.set_title(&id, title, cx),
-              Err(error) => super::workspace_data::WorkspaceHost::notify(&*pane.host, Toast::error("Couldn't rename the session").description(error).into()),
+              Err(error) => super::workspace_data::WorkspaceHost::notify(
+                &*pane.host,
+                Toast::error("Couldn't rename the session")
+                  .description(error)
+                  .into(),
+              ),
             })
             .ignore_closed();
         })
@@ -2508,12 +2528,11 @@ impl TerminalPane {
       TermEvent::Toast { title, description } => {
         super::workspace_data::WorkspaceHost::notify(
           &*self.host,
-          crate::gpui_shell::native::NativeEvent::Toast {
+          NativeEvent::from(Toast::new(
+            crate::gpui_shell::native::ToastTone::Warning,
             title,
             description,
-            tone: crate::gpui_shell::native::ToastTone::Warning,
-            action: None,
-          },
+          )),
         );
       }
     }

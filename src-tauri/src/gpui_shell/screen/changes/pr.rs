@@ -415,7 +415,12 @@ impl ChangesView {
   }
 
   fn draft_failed(&self, err: String) {
-    super::tell(self.host.as_ref(), Toast::error("Failed to save draft comment").description(err).into());
+    super::tell(
+      self.host.as_ref(),
+      Toast::error("Failed to save draft comment")
+        .description(err)
+        .into(),
+    );
   }
 
   /// `addComment`: the draft is kept with the hash of its lines.

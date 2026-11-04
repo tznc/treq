@@ -42,7 +42,7 @@ use crate::{
   github::GhPullRequest,
   gpui_shell::{
     form::SelectOption,
-    native::{NativeEvent, ToastTone},
+    native::NativeEvent,
     theme::{self, Palette},
     ui::{self, Button, TextSize, Variant},
   },
@@ -732,7 +732,10 @@ impl OpenWorkspacesDialog {
     }
     let opened = summary(created, reused);
     if self.errors.is_empty() {
-      WorkspaceHost::notify(&*self.host, Toast::success(opened.trim_end_matches('.')).into());
+      WorkspaceHost::notify(
+        &*self.host,
+        Toast::success(opened.trim_end_matches('.')).into(),
+      );
       if let Some((repo_path, id)) = first {
         (self.sink)(
           ScreenAction::Field {
@@ -744,7 +747,12 @@ impl OpenWorkspacesDialog {
       }
       self.close(cx);
     } else {
-      WorkspaceHost::notify(&*self.host, Toast::error("Some workspaces could not be opened").description(format!("{} failed. {opened}", self.errors.len())).into());
+      WorkspaceHost::notify(
+        &*self.host,
+        Toast::error("Some workspaces could not be opened")
+          .description(format!("{} failed. {opened}", self.errors.len()))
+          .into(),
+      );
       // What opened is open now, and a retry should say so.
       self.checks.clear();
       self.open_branches.extend(
