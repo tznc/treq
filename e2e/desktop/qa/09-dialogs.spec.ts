@@ -43,6 +43,18 @@ test("dialogs: create workspace", async ({ page, context }) => {
       "Backdrop dims the window evenly",
     ],
   });
+  for (let i = 0; i < 3; i++) await page.keyboard.press("Tab");
+  await settle(page, 500);
+  await capture(page, {
+    name: "09-create-workspace-dialog-tab-focus",
+    title: "New workspace dialog after Tab x3",
+    screen: true,
+    rest: false,
+    expectations: [
+      "A visible focus ring on a control inside the dialog",
+      "Focus has not left the dialog",
+    ],
+  });
   // Opening Advanced only makes the left column taller: the heading keeps
   // its place.
   {
@@ -217,6 +229,18 @@ test("dialogs: rename workspace from the context menu", async ({ page, context }
     expectations: [
       "Branch Name prefilled with the current name and focused",
       "Rename disabled until the name changes",
+    ],
+  });
+  for (let i = 0; i < 2; i++) await page.keyboard.press("Tab");
+  await settle(page, 500);
+  await capture(page, {
+    name: "09-rename-dialog-tab-focus",
+    title: "Rename Workspace dialog after Tab x2",
+    screen: true,
+    rest: false,
+    expectations: [
+      "A visible focus ring on a control inside the dialog",
+      "Focus has not left the dialog",
     ],
   });
   await name(dialog).fill("feat/keyvalues-cache");
