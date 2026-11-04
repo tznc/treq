@@ -3383,12 +3383,12 @@ impl ChangesView {
           .font_family(theme::MONO_FONT)
           .child(
             div()
-              .text_color(Tone::GitOpen.color(p))
+              .text_color(Tone::DiffAdded.color(p))
               .child(format!("+{additions}")),
           )
           .child(
             div()
-              .text_color(Tone::GitClosed.color(p))
+              .text_color(Tone::DiffRemoved.color(p))
               .child(format!("-{deletions}")),
           ),
       );
@@ -3486,8 +3486,8 @@ impl ChangesView {
         continue;
       }
       let bg = match side {
-        ConflictLineRole::Left => Some(Tone::Danger.tint(p)),
-        ConflictLineRole::Right => Some(Tone::Success.tint(p)),
+        ConflictLineRole::Left => Some(Tone::DiffRemoved.tint(p)),
+        ConflictLineRole::Right => Some(Tone::DiffAdded.tint(p)),
         ConflictLineRole::Base => Some(Tone::Warning.tint(p)),
         _ => None,
       };
@@ -3496,9 +3496,9 @@ impl ChangesView {
         .flatten();
       let label_el = label.map(|label| {
         let tone = match label {
-          "Side #1" => Tone::Danger,
+          "Side #1" => Tone::DiffRemoved,
           "Base" => Tone::Warning,
-          _ => Tone::Success,
+          _ => Tone::DiffAdded,
         };
         ui::text(div(), TextSize::Xs)
           .debug_selector(move || format!("conflict-label-{label}"))
@@ -3545,10 +3545,10 @@ impl ChangesView {
           .child(format!("{side} deleted this file"))
       };
       if kind == ConflictLineKind::Marker && role == ConflictLineRole::Start && left_deleted {
-        pre = pre.child(deleted_notice("Side #1", Tone::Danger));
+        pre = pre.child(deleted_notice("Side #1", Tone::DiffRemoved));
       }
       if kind == ConflictLineKind::Marker && role == ConflictLineRole::Separator && right_deleted {
-        pre = pre.child(deleted_notice("Side #2", Tone::Success));
+        pre = pre.child(deleted_notice("Side #2", Tone::DiffAdded));
       }
     }
     let number = if region.total_conflicts > 0 {

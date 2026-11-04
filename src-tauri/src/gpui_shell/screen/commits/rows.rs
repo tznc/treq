@@ -688,8 +688,8 @@ impl CommitsView {
       Some(ui::Tone::Primary.tint(p))
     } else {
       match kind {
-        LineKind::Added => Some(ui::Tone::GitOpen.tint(p)),
-        LineKind::Removed => Some(ui::Tone::GitClosed.tint(p)),
+        LineKind::Added => Some(ui::Tone::DiffAdded.tint(p)),
+        LineKind::Removed => Some(ui::Tone::DiffRemoved.tint(p)),
         LineKind::Context => None,
       }
     };

@@ -49,11 +49,9 @@ impl Tone {
     let (dark, light) = match self {
       Tone::Neutral => return p.muted_foreground,
       Tone::Primary => return p.primary,
-      Tone::GitOpen
-      | Tone::GitMerged
-      | Tone::GitClosed
-      | Tone::DiffAdded
-      | Tone::DiffRemoved => return self.color(p),
+      Tone::GitOpen | Tone::GitMerged | Tone::GitClosed | Tone::DiffAdded | Tone::DiffRemoved => {
+        return self.color(p)
+      }
       Tone::Success => (tw::GREEN_400, tw::GREEN_700),
       Tone::Warning => (tw::YELLOW_400, tw::YELLOW_700),
       Tone::Danger => (tw::RED_400, tw::RED_700),

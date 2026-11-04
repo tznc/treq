@@ -903,6 +903,9 @@ fn added_file_letter_uses_the_diff_token() {
     let (letter, color) = workspace_dialog::file_status("added", &p);
     assert_eq!(letter, "A");
     assert_eq!(color, p.diff_added());
-    assert_eq!(workspace_dialog::file_status("deleted", &p).1, p.diff_removed());
+    assert_eq!(
+      workspace_dialog::file_status("deleted", &p).1,
+      p.diff_removed()
+    );
   }
 }

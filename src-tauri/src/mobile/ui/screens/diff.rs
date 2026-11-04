@@ -53,9 +53,10 @@ pub fn tap(picked: Option<&Picked>, hunks: &[JjDiffHunk], at: LineRef) -> Option
 
 pub fn diff_line(line: &str, cx: &App) -> Div {
   let theme = cx.theme();
+  let palette = treq_ui::theme::current(cx);
   let (bg, fg) = match line_kind(line) {
-    LineKind::Added => (theme.success.opacity(0.15), theme.success),
-    LineKind::Removed => (theme.danger.opacity(0.15), theme.danger),
+    LineKind::Added => (palette.diff_added().opacity(0.15), palette.diff_added()),
+    LineKind::Removed => (palette.diff_removed().opacity(0.15), palette.diff_removed()),
     LineKind::Context => (gpui_kit::transparent_black(), theme.foreground),
   };
   widgets::mono(
