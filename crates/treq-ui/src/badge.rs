@@ -15,11 +15,15 @@ pub enum Tone {
   Success,
   Warning,
   Danger,
-  /// An open pull request, or added lines.
+  /// An open pull request.
   GitOpen,
   GitMerged,
-  /// A closed pull request, or removed lines.
+  /// A closed pull request.
   GitClosed,
+  /// Added lines, files and counts in a diff.
+  DiffAdded,
+  /// Removed lines, files and counts in a diff.
+  DiffRemoved,
 }
 
 impl Tone {
@@ -33,6 +37,8 @@ impl Tone {
       Tone::GitOpen => p.pr_open,
       Tone::GitMerged => p.pr_merged,
       Tone::GitClosed => p.pr_closed,
+      Tone::DiffAdded => p.diff_added(),
+      Tone::DiffRemoved => p.diff_removed(),
     }
   }
 
@@ -43,7 +49,11 @@ impl Tone {
     let (dark, light) = match self {
       Tone::Neutral => return p.muted_foreground,
       Tone::Primary => return p.primary,
-      Tone::GitOpen | Tone::GitMerged | Tone::GitClosed => return self.color(p),
+      Tone::GitOpen
+      | Tone::GitMerged
+      | Tone::GitClosed
+      | Tone::DiffAdded
+      | Tone::DiffRemoved => return self.color(p),
       Tone::Success => (tw::GREEN_400, tw::GREEN_700),
       Tone::Warning => (tw::YELLOW_400, tw::YELLOW_700),
       Tone::Danger => (tw::RED_400, tw::RED_700),
@@ -232,6 +242,16 @@ fn pill(cx: &App) -> gpui::Div {
 
 #[cfg(test)]
 mod tests {
+  /// Diff tones paint with the diff tokens, never the state green or red.
+  #[test]
+  fn diff_tones_use_the_diff_tokens() {
+    for dark in [false, true] {
+      let p = crate::theme::palette(dark);
+      assert_eq!(super::Tone::DiffAdded.color(&p), p.diff_added());
+      assert_eq!(super::Tone::DiffRemoved.color(&p), p.diff_removed());
+      assert_eq!(super::Tone::DiffAdded.text(&p), p.diff_added());
+    }
+  }
   use super::*;
   use crate::theme;
 

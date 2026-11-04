@@ -894,3 +894,15 @@ fn the_move_confirmation_cancels_on_escape_and_moves_on_enter(cx: &mut TestAppCo
   h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![press("changeMove.cancel")]);
 }
+
+/// The A letter of an added file paints with the diff token, not state green.
+#[test]
+fn added_file_letter_uses_the_diff_token() {
+  for dark in [false, true] {
+    let p = crate::gpui_shell::theme::palette(dark);
+    let (letter, color) = workspace_dialog::file_status("added", &p);
+    assert_eq!(letter, "A");
+    assert_eq!(color, p.diff_added());
+    assert_eq!(workspace_dialog::file_status("deleted", &p).1, p.diff_removed());
+  }
+}

@@ -384,3 +384,12 @@ fn an_unreadable_file_is_an_error_state_with_retry(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   assert_eq!(reads(), before + 1);
 }
+
+/// An added file's dot is the diff tone, not state green.
+#[test]
+fn added_file_dot_uses_the_diff_tone() {
+  use crate::gpui_shell::screen::file_browser::status_dot;
+  assert_eq!(status_dot("A"), Some(crate::gpui_shell::ui::Tone::DiffAdded));
+  assert_eq!(status_dot("??"), Some(crate::gpui_shell::ui::Tone::DiffAdded));
+  assert_eq!(status_dot("D"), Some(crate::gpui_shell::ui::Tone::DiffRemoved));
+}

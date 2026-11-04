@@ -547,6 +547,18 @@ impl Palette {
     }
   }
 
+  /// Added lines, letters and `+N` counts in a diff: green-600 in light
+  /// and green-400 in dark, legible as text. Separate from `success`, which
+  /// means a passed or done state.
+  pub fn diff_added(&self) -> Hsla {
+    rgb(if self.dark { 0x4ade80 } else { 0x16a34a }).into()
+  }
+
+  /// Removed lines, letters and `-N` counts in a diff: red-600 or red-400.
+  pub fn diff_removed(&self) -> Hsla {
+    rgb(if self.dark { 0xf87171 } else { 0xdc2626 }).into()
+  }
+
   /// The GitHub button's fill, GitHub's own near-black in both themes.
   pub fn github(&self) -> Hsla {
     tw::color(tw::GITHUB)
@@ -650,6 +662,20 @@ mod tests {
     assert_eq!(body, 15.);
     assert!(mono >= 13.);
     assert!(Density::Touch.caption() >= 13.);
+  }
+
+  /// Diff colours are their own tokens, so state green can change alone.
+  #[test]
+  fn diff_tokens_are_separate_from_state_colours() {
+    let differs = [false, true].iter().any(|&dark| {
+      let p = palette(dark);
+      p.diff_added() != p.success && p.diff_removed() != p.destructive
+    });
+    assert!(differs);
+    for dark in [false, true] {
+      let p = palette(dark);
+      assert_ne!(p.diff_added(), p.diff_removed());
+    }
   }
 
   #[test]

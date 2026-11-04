@@ -1017,7 +1017,7 @@ fn stack_dot(highlighted: bool, p: &Palette) -> Div {
 }
 
 /// `statusIcon` and `statusColor`.
-fn file_status(status: &str, p: &Palette) -> (&'static str, Hsla) {
+pub(crate) fn file_status(status: &str, p: &Palette) -> (&'static str, Hsla) {
   match status {
     "modified" => ("M", p.warning),
     "added" => ("A", p.success),

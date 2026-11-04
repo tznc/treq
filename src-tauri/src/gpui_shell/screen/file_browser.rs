@@ -1975,7 +1975,7 @@ impl FileBrowserView {
 }
 
 /// The dot after a file's name; `None` for a neutral one.
-fn status_dot(status: &str) -> Option<ui::Tone> {
+pub(crate) fn status_dot(status: &str) -> Option<ui::Tone> {
   match status {
     "??" | "A" => Some(ui::Tone::Success),
     "D" => Some(ui::Tone::Danger),
