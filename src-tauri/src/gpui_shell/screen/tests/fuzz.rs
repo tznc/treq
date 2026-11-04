@@ -823,3 +823,179 @@ fn machine_terminal_controls_change_nothing_unconfirmed() {
     },
   );
 }
+
+// Projects: Project home's tabs, with the Save project or Project
+// instructions dialog over it. Nothing is saved without its Save.
+
+const PROJECT_CLICKS: &[&str] = &[
+  "project-home-tab-code",
+  "project-home-tab-changes",
+  "project-home-tab-commits",
+  "save-project-discard",
+  "save-project-cancel",
+  "save-project-submit",
+  "project-context-add-files",
+  "project-context-cancel",
+  "project-context-save",
+];
+
+const PROJECT_FIELDS: &[&str] = &[
+  "save-project-name",
+  "project-context-prompt",
+  "project-context-paths",
+];
+
+/// Project home on `name` (`None`: unsaved), with `modal` over it.
+fn project_home(name: Option<&str>, modal: serde_json::Value) -> ScreenSnapshot {
+  serde_json::from_value(serde_json::json!({
+    "kind": "projectHome",
+    "dark": false,
+    "name": name,
+    "repos": [
+      {"path": "/r/web", "label": "acme/web", "homeRef": "main", "missing": false,
+       "github": "acme/web", "workspaces": [["treq/login", 0], ["treq/login-2", 1]]},
+      {"path": "/r/api", "label": "api", "homeRef": null, "missing": true, "workspaces": []},
+    ],
+    "revision": 1,
+    "modal": modal,
+  }))
+  .expect("snapshot")
+}
+
+fn project_modal(which: u8) -> serde_json::Value {
+  match which % 4 {
+    0 => serde_json::Value::Null,
+    1 => serde_json::json!({
+      "kind": "saveProject", "repoPath": "/r/web", "name": "web + api",
+      "saved": false, "closing": false, "repos": ["/r/web", "/r/api"],
+    }),
+    2 => serde_json::json!({
+      "kind": "saveProject", "repoPath": "/r/web", "name": "web + api",
+      "saved": false, "closing": true, "repos": ["/r/web", "/r/api"],
+    }),
+    _ => serde_json::json!({
+      "kind": "projectContext", "repoPath": "/r/web", "name": "Checkout",
+      "prompt": "Use npm.", "contextPaths": ["/docs/a.md"],
+    }),
+  }
+}
+
+fn project_writes(host: &FakeHost) -> Vec<String> {
+  effects(host)
+    .into_iter()
+    .filter(|c| c.starts_with("save project ") || c.starts_with("project context "))
+    .collect()
+}
+
+#[test]
+fn projects_save_nothing_unconfirmed() {
+  fuzz::check(
+    "projects_save_nothing_unconfirmed",
+    6,
+    (vec(step(), 1..20), 0u8..4, any::<bool>()),
+    |cx, (steps, which, failing)| {
+      let scenario = Scenario {
+        snapshot: project_home((which == 3).then_some("Checkout"), project_modal(which)),
+        host: FakeHost {
+          failing: if failing {
+            vec!["save_project", "set_project_context"]
+          } else {
+            Vec::new()
+          },
+          ..FakeHost::default()
+        },
+        wide: true,
+        clicks: PROJECT_CLICKS,
+        fields: PROJECT_FIELDS,
+        layers: &[],
+      };
+      let mut run = fuzz(cx, scenario, &steps);
+      run.settle();
+      let writes = project_writes(&run.host);
+      // Each write follows a Save: a click on it, or Enter/Space.
+      let confirmed = run
+        .log
+        .iter()
+        .filter(|l| {
+          l.contains("save-project-submit")
+            || l.contains("project-context-save")
+            || l.ends_with("\"Save project\"")
+            || l.ends_with("\"Save\"")
+            || *l == "key {Enter}"
+            || *l == "key {Space}"
+        })
+        .count();
+      assert!(
+        writes.len() <= confirmed,
+        "{writes:?} for {confirmed} confirmations {}",
+        run.context()
+      );
+      // A successful save closes the dialog, so it saves once at most.
+      if !failing {
+        assert!(writes.len() <= 1, "{writes:?} {}", run.context());
+      }
+      for call in &writes {
+        if let Some(name) = call.strip_prefix("save project ") {
+          let name: String = serde_json::from_str(name).unwrap_or_default();
+          assert!(
+            !name.is_empty() && name == name.trim(),
+            "{call} {}",
+            run.context()
+          );
+        }
+      }
+    },
+  );
+}
+
+/// Two clicks on Save before the first save returns write once.
+#[gpui::test]
+fn double_clicking_save_project_saves_once(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, project_home(None, project_modal(1)), host.clone());
+  assert!(h.drawn("save-project-submit"));
+  let at = h.cx.debug_bounds("save-project-submit").unwrap().center();
+  h.cx.simulate_click(at, gpui::Modifiers::none());
+  h.cx.simulate_click(at, gpui::Modifiers::none());
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert_eq!(project_writes(&host), ["save project \"web + api\""]);
+}
+
+#[gpui::test]
+fn double_clicking_save_instructions_saves_once(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(
+    cx,
+    project_home(Some("Checkout"), project_modal(3)),
+    host.clone(),
+  );
+  assert!(h.drawn("project-context-save"));
+  let at = h.cx.debug_bounds("project-context-save").unwrap().center();
+  h.cx.simulate_click(at, gpui::Modifiers::none());
+  h.cx.simulate_click(at, gpui::Modifiers::none());
+  h.cx.run_until_parked();
+  assert_eq!(
+    project_writes(&host),
+    ["project context \"Use npm.\" [\"/docs/a.md\"]"]
+  );
+}
+
+/// Picked files with stray spaces join the box once, trimmed.
+#[gpui::test]
+fn picking_context_files_twice_adds_them_once(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(
+    cx,
+    project_home(Some("Checkout"), project_modal(3)),
+    host.clone(),
+  );
+  h.click("project-context-add-files");
+  h.click("project-context-add-files");
+  h.click("project-context-save");
+  h.cx.run_until_parked();
+  assert_eq!(
+    project_writes(&host),
+    ["project context \"Use npm.\" [\"/docs/a.md\", \"/picked/a.md\", \"/picked/spaced.md\"]"]
+  );
+}

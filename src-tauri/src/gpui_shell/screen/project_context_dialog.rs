@@ -34,9 +34,9 @@ pub struct ProjectContextRoute {
 /// `text` with `added` appended one per line, skipping paths it lists already.
 pub(super) fn append_paths(text: &str, added: &[String]) -> String {
   let mut lines = parse_paths(text);
-  for path in added {
-    if !lines.contains(path) {
-      lines.push(path.clone());
+  for path in added.iter().map(|p| p.trim()) {
+    if !path.is_empty() && !lines.iter().any(|l| l == path) {
+      lines.push(path.to_string());
     }
   }
   lines.join("\n")
@@ -344,5 +344,54 @@ mod tests {
       parse_paths(" /docs/a.md\n\n https://x.dev \n"),
       ["/docs/a.md", "https://x.dev"]
     );
+  }
+
+  /// Dropped paths come in with stray spaces: they join trimmed, once.
+  #[test]
+  fn appending_a_spaced_path_twice_adds_it_once() {
+    let once = super::append_paths("", &[" /a b.md ".into()]);
+    assert_eq!(once, "/a b.md");
+    assert_eq!(super::append_paths(&once, &[" /a b.md ".into()]), once);
+  }
+
+  mod props {
+    use super::super::{append_paths, parse_paths};
+    use crate::test_repo::proptest_config;
+    use proptest::prelude::*;
+
+    fn path() -> impl Strategy<Value = String> {
+      prop_oneof![
+        3 => "[ ]{0,2}[a-z/._-]{0,8}[ ]{0,2}",
+        1 => "[^\\n\\r]{0,8}",
+        1 => prop::sample::select(vec!["", " ", "/a.md", "https://x.dev", "日本/ö.md", "🚀"])
+          .prop_map(str::to_string),
+      ]
+    }
+
+    proptest! {
+      #![proptest_config(proptest_config(64))]
+
+      #[test]
+      fn appending_is_idempotent_and_keeps_what_was_there(
+        lines in prop::collection::vec(path(), 0..6),
+        added in prop::collection::vec(path(), 0..6),
+      ) {
+        let text = lines.join("\n");
+        let once = append_paths(&text, &added);
+        prop_assert_eq!(&append_paths(&once, &added), &once);
+        let parsed = parse_paths(&once);
+        // What the box held stays first, in order.
+        prop_assert!(parsed.starts_with(&parse_paths(&text)));
+        // Each added path is there, once more than the box held it.
+        for path in added.iter().map(|p| p.trim()).filter(|p| !p.is_empty()) {
+          let had = parse_paths(&text).iter().filter(|l| *l == path).count();
+          let has = parsed.iter().filter(|l| *l == path).count();
+          prop_assert_eq!(has, had.max(1), "{}", path);
+        }
+        // Parsing is a fixed point: no blank or untrimmed lines.
+        prop_assert!(parsed.iter().all(|l| !l.is_empty() && l.trim() == l));
+        prop_assert_eq!(parse_paths(&parsed.join("\n")), parsed);
+      }
+    }
   }
 }

@@ -497,6 +497,7 @@ pub fn suggested_name(repos: &[String]) -> String {
         .and_then(|n| n.to_str())
         .unwrap_or(repo)
     })
+    .filter(|name| !name.trim().is_empty())
     .collect();
   if names.is_empty() {
     "Untitled project".to_string()
@@ -871,6 +872,12 @@ mod tests {
   }
 
   #[test]
+  fn suggests_fallback_name_for_blank_repo_paths() {
+    assert_eq!(suggested_name(&repos(&["", "  "])), "Untitled project");
+    assert_eq!(suggested_name(&repos(&["", "/r/web"])), "web");
+  }
+
+  #[test]
   fn closing_unsaved_project_prompts_to_save() {
     assert_eq!(
       close_action(None, &repos(&["/r/web", "/r/api"])),
@@ -906,5 +913,280 @@ mod tests {
     ];
     assert_eq!(window_for_project(&windows, "p1"), Some("treq-1"));
     assert_eq!(window_for_project(&windows, "p2"), None);
+  }
+}
+
+#[cfg(test)]
+mod proptests {
+  use super::*;
+  use crate::test_repo::proptest_config;
+  use proptest::prelude::*;
+  use std::collections::BTreeMap;
+  use std::path::Component;
+
+  fn conn() -> Connection {
+    let conn = Connection::open_in_memory().expect("open");
+    init(&conn).expect("init");
+    conn
+  }
+
+  /// Names a user might type: plain, unicode, whitespace-only, very long.
+  fn name() -> impl Strategy<Value = String> {
+    prop_oneof![
+      3 => "[a-zA-Z0-9 ._-]{0,12}",
+      2 => "\\PC{0,8}",
+      1 => prop::sample::select(vec![
+        "", "   ", "\t\n", " Checkout ", "日本語", "🚀 launch", "\u{200b}", "é\u{301}",
+        "\u{202e}rtl", "a + b", "'; DROP TABLE projects; --",
+      ])
+      .prop_map(str::to_string),
+      1 => (1usize..2000).prop_map(|n| "x".repeat(n)),
+    ]
+  }
+
+  /// A small pool so the same repository comes up again.
+  fn repo() -> impl Strategy<Value = String> {
+    prop::sample::select(vec![
+      "/r/web",
+      "/r/api",
+      "/r/web/",
+      "/r/ünï 日本",
+      "C:\\code\\api",
+      "/r/a b",
+    ])
+    .prop_map(str::to_string)
+  }
+
+  #[derive(Debug, Clone)]
+  enum Op {
+    Save(String, Vec<String>),
+    Rename(usize, String),
+    AddRepo(usize, String),
+    RemoveRepo(usize, String),
+    Delete(usize),
+    SetContext(usize, String, Vec<String>),
+    MarkOpened(usize),
+    /// An operation on an id no project has.
+    Unknown(String),
+  }
+
+  fn op() -> impl Strategy<Value = Op> {
+    let paths = || prop::collection::vec(prop_oneof![repo(), name()], 0..4);
+    prop_oneof![
+      3 => (name(), prop::collection::vec(repo(), 0..4)).prop_map(|(n, r)| Op::Save(n, r)),
+      2 => (any::<usize>(), name()).prop_map(|(i, n)| Op::Rename(i, n)),
+      2 => (any::<usize>(), repo()).prop_map(|(i, r)| Op::AddRepo(i, r)),
+      2 => (any::<usize>(), repo()).prop_map(|(i, r)| Op::RemoveRepo(i, r)),
+      1 => any::<usize>().prop_map(Op::Delete),
+      2 => (any::<usize>(), name(), paths()).prop_map(|(i, p, c)| Op::SetContext(i, p, c)),
+      1 => any::<usize>().prop_map(Op::MarkOpened),
+      1 => name().prop_map(Op::Unknown),
+    ]
+  }
+
+  #[derive(Debug, Clone, PartialEq)]
+  struct Model {
+    name: String,
+    repos: Vec<String>,
+    prompt: String,
+    paths: Vec<String>,
+  }
+
+  fn pick(model: &BTreeMap<String, Model>, i: usize) -> Option<String> {
+    (!model.is_empty()).then(|| {
+      model
+        .keys()
+        .nth(i % model.len())
+        .cloned()
+        .expect("in range")
+    })
+  }
+
+  fn dedup(items: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for item in items {
+      if !out.contains(&item) {
+        out.push(item);
+      }
+    }
+    out
+  }
+
+  /// Applies `op` to the model, returning whether the store must accept it.
+  fn apply(model: &mut BTreeMap<String, Model>, conn: &Connection, op: &Op) {
+    match op {
+      Op::Save(name, repos) => {
+        let result = save(conn, name, repos);
+        let valid = !name.trim().is_empty() && !repos.is_empty();
+        assert_eq!(result.is_ok(), valid, "save {name:?} {repos:?}: {result:?}");
+        if let Ok(project) = result {
+          model.insert(
+            project.id,
+            Model {
+              name: name.trim().to_string(),
+              repos: dedup(repos.iter().cloned()),
+              prompt: String::new(),
+              paths: Vec::new(),
+            },
+          );
+        }
+      }
+      Op::Rename(i, name) => {
+        let Some(id) = pick(model, *i) else { return };
+        let result = rename(conn, &id, name);
+        assert_eq!(result.is_ok(), !name.trim().is_empty(), "{result:?}");
+        if result.is_ok() {
+          model.get_mut(&id).unwrap().name = name.trim().to_string();
+        }
+      }
+      Op::AddRepo(i, repo) => {
+        let Some(id) = pick(model, *i) else { return };
+        add_repo(conn, &id, repo).expect("add repo");
+        let m = model.get_mut(&id).unwrap();
+        if !m.repos.contains(repo) {
+          m.repos.push(repo.clone());
+        }
+      }
+      Op::RemoveRepo(i, repo) => {
+        let Some(id) = pick(model, *i) else { return };
+        let m = model.get_mut(&id).unwrap();
+        let last = m.repos.len() <= 1 && m.repos.contains(repo);
+        let result = remove_repo(conn, &id, repo);
+        assert_eq!(result.is_ok(), !last, "{result:?}");
+        if result.is_ok() {
+          m.repos.retain(|r| r != repo);
+        }
+      }
+      Op::Delete(i) => {
+        let Some(id) = pick(model, *i) else { return };
+        delete(conn, &id).expect("delete");
+        model.remove(&id);
+      }
+      Op::SetContext(i, prompt, paths) => {
+        let Some(id) = pick(model, *i) else { return };
+        set_context(conn, &id, prompt, paths).expect("set context");
+        let m = model.get_mut(&id).unwrap();
+        m.prompt = prompt.trim().to_string();
+        m.paths = dedup(
+          paths
+            .iter()
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty()),
+        );
+      }
+      Op::MarkOpened(i) => {
+        let Some(id) = pick(model, *i) else { return };
+        mark_opened(conn, &id).expect("mark opened");
+      }
+      Op::Unknown(name) => {
+        let id = "no-such-project";
+        assert!(rename(conn, id, &format!("{name}x")).is_err());
+        assert!(add_repo(conn, id, "/r/web").is_err());
+        assert!(remove_repo(conn, id, "/r/web").is_err());
+        assert!(set_context(conn, id, name, &[]).is_err());
+        assert!(mark_opened(conn, id).is_err());
+        assert_eq!(get(conn, id).unwrap(), None);
+        delete(conn, id).expect("deleting nothing is fine");
+      }
+    }
+  }
+
+  fn check(model: &BTreeMap<String, Model>, conn: &Connection) {
+    let listed = list(conn).expect("list");
+    assert_eq!(listed.len(), model.len());
+    // Most recently opened first, then by name.
+    for pair in listed.windows(2) {
+      assert!(
+        (pair[0].last_opened_at.as_str(), &pair[1].name)
+          >= (pair[1].last_opened_at.as_str(), &pair[0].name),
+        "out of order: {pair:?}"
+      );
+    }
+    for project in &listed {
+      let m = model
+        .get(&project.id)
+        .expect("listed project is in the model");
+      let got = get(conn, &project.id).unwrap().expect("get");
+      assert_eq!(&got, project);
+      assert_eq!(
+        (&got.name, &got.repos, &got.prompt, &got.context_paths),
+        (&m.name, &m.repos, &m.prompt, &m.paths)
+      );
+      assert!(!got.repos.is_empty(), "a project keeps a repository");
+      assert!(got.created_at <= got.last_opened_at);
+    }
+    for (id, m) in model {
+      for repo in &m.repos {
+        assert!(projects_with_repo(conn, repo)
+          .unwrap()
+          .iter()
+          .any(|p| &p.id == id));
+      }
+    }
+  }
+
+  proptest! {
+    #![proptest_config(proptest_config(32))]
+
+    /// Any sequence of project writes leaves the store equal to a simple
+    /// in-memory model.
+    #[test]
+    fn project_store_follows_the_model(ops in prop::collection::vec(op(), 1..25)) {
+      let conn = conn();
+      let mut model = BTreeMap::new();
+      for op in &ops {
+        apply(&mut model, &conn, op);
+        check(&model, &conn);
+      }
+    }
+
+    #[test]
+    fn suggested_name_is_never_empty(repos in prop::collection::vec(
+      prop_oneof![repo(), name(), Just("/".to_string()), Just(String::new())], 0..4)
+    ) {
+      prop_assert!(!suggested_name(&repos).trim().is_empty(), "{:?}", suggested_name(&repos));
+    }
+
+    /// Only an unsaved project of two or more repositories asks to save.
+    #[test]
+    fn close_action_prompts_only_for_unsaved_multi_repo(
+      saved in any::<bool>(),
+      repos in prop::collection::vec(repo(), 0..5),
+    ) {
+      let id = saved.then_some("p1");
+      let action = close_action(id, &repos);
+      if !saved && repos.len() >= 2 {
+        prop_assert_eq!(action, CloseAction::PromptSave { suggested_name: suggested_name(&repos) });
+      } else {
+        prop_assert_eq!(action, CloseAction::Close);
+      }
+    }
+
+    /// Whatever the spec, Treq's clone of it stays under the clones root.
+    #[test]
+    fn managed_clone_path_stays_under_root(spec in prop_oneof![
+      2 => "[a-z]{1,4}(://|@|:)?[a-z.@:/]{0,6}(\\.\\./|/\\.\\.|//|/)[a-z./]{0,8}",
+      2 => "\\PC{0,16}",
+      1 => prop::sample::select(vec![
+        "../../etc/passwd", "https://h/../../x", "https://h/o/..", "git@h:../../x",
+        "git@h:/etc/passwd", "ssh://git@h//abs/olute", "/abs/o/n", "C:\\x\\y\\z",
+        "https://h/o/n/..", "https://h/./o/n", "https://日本/ö/ñ.git", "file:///etc/passwd",
+        "https://h/o/n%2F..", "a/b", "../b", "a/..", "https://h/o/..git", ":/a/b/c",
+      ]).prop_map(str::to_string),
+    ]) {
+      let root = Path::new("/clones/root");
+      if let Some(path) = managed_clone_path(root, &spec) {
+        prop_assert!(path.starts_with(root), "{spec:?} -> {path:?}");
+        let below = path.strip_prefix(root).unwrap();
+        prop_assert!(
+          below.components().all(|c| matches!(c, Component::Normal(_))),
+          "{spec:?} -> {path:?}"
+        );
+        prop_assert!(below.components().count() >= 3, "{spec:?} -> {path:?}");
+      }
+      // owner/name expands to GitHub, and nothing else is rewritten.
+      let url = clone_url(&spec);
+      prop_assert!(url == spec.trim() || url.starts_with("https://github.com/"), "{url}");
+    }
   }
 }

@@ -141,7 +141,8 @@ pub fn open_tab_press(tab: &str, path: &str) -> ScreenAction {
 pub fn band_at(timestamp: &str, today: NaiveDate) -> Option<(NaiveDate, String)> {
   let date = time::day(timestamp)?;
   let age = (today - date).num_days();
-  if (0..7).contains(&age) {
+  // A future day (a clock ahead) gets its own band too.
+  if age < 7 {
     return Some((date, time::day_label_at(timestamp, today)));
   }
   let monday = date - Duration::days(date.weekday().num_days_from_monday() as i64);
@@ -954,5 +955,108 @@ mod tests {
   fn bands_skip_unreadable_timestamps() {
     let today = day(2026, 11, 4);
     assert!(bands(&[vec!["not a date".into()]], today).is_empty());
+  }
+
+  /// A commit tomorrow (a clock ahead, another time zone) gets a band of
+  /// its own, not the one of a day earlier this week.
+  #[test]
+  fn future_commits_do_not_merge_into_this_weeks_days() {
+    let today = day(2026, 11, 4); // a Wednesday
+    let monday = stamp(day(2026, 11, 2));
+    let tomorrow = stamp(day(2026, 11, 5));
+    let bands = bands(&[vec![monday, tomorrow]], today);
+    assert_eq!(bands.len(), 2, "{bands:?}");
+    assert_eq!(bands[0].1, vec![vec![1]]);
+    assert_eq!(bands[1].1, vec![vec![0]]);
+  }
+
+  mod props {
+    use super::*;
+    use crate::test_repo::proptest_config;
+    use proptest::prelude::*;
+
+    /// A commit time from two months ago to three days ahead, or junk.
+    fn stamp_near(today: NaiveDate) -> impl Strategy<Value = String> {
+      prop_oneof![
+        6 => (-3i64..70).prop_map(move |age| stamp(today - Duration::days(age))),
+        1 => prop::sample::select(vec!["", "not a date", "2026-13-40T99:00:00Z"])
+          .prop_map(str::to_string),
+      ]
+    }
+
+    fn today() -> impl Strategy<Value = NaiveDate> {
+      (0i64..30).prop_map(|d| day(2026, 10, 1) + Duration::days(d))
+    }
+
+    proptest! {
+      #![proptest_config(proptest_config(64))]
+
+      /// Every readable commit is in exactly one band, bands run newest
+      /// first and no two share a label.
+      #[test]
+      fn bands_hold_each_commit_once_in_order(
+        (today, columns) in today().prop_flat_map(|t| {
+          (Just(t), prop::collection::vec(prop::collection::vec(stamp_near(t), 0..8), 0..4))
+        })
+      ) {
+        let bands = bands(&columns, today);
+        for (c, stamps) in columns.iter().enumerate() {
+          for (i, s) in stamps.iter().enumerate() {
+            let found = bands.iter().filter(|(_, cells)| cells[c].contains(&i)).count();
+            let readable = time::day(s).is_some();
+            prop_assert_eq!(found, usize::from(readable), "{} in {:?}", s, bands);
+          }
+        }
+        let keys: Vec<NaiveDate> = bands
+          .iter()
+          .map(|(_, cells)| {
+            let (c, i) = cells
+              .iter()
+              .enumerate()
+              .find_map(|(c, v)| v.first().map(|i| (c, *i)))
+              .expect("a band holds a commit");
+            band_at(&columns[c][i], today).unwrap().0
+          })
+          .collect();
+        prop_assert!(keys.windows(2).all(|k| k[0] > k[1]), "{:?}", keys);
+        let mut labels: Vec<&String> = bands.iter().map(|(l, _)| l).collect();
+        labels.sort();
+        labels.dedup();
+        prop_assert_eq!(labels.len(), bands.len());
+        for (_, cells) in &bands {
+          prop_assert_eq!(cells.len(), columns.len());
+        }
+      }
+
+      #[test]
+      fn daily_activity_counts_the_days_it_covers(
+        (today, stamps) in today().prop_flat_map(|t| {
+          (Just(t), prop::collection::vec(stamp_near(t), 0..40))
+        }),
+        days in 0usize..40,
+      ) {
+        let counts = daily_activity(&stamps, today, days);
+        prop_assert_eq!(counts.len(), days);
+        let inside = stamps
+          .iter()
+          .filter_map(|s| time::day(s))
+          .filter(|d| (0..days as i64).contains(&(today - *d).num_days()))
+          .count();
+        prop_assert_eq!(counts.iter().sum::<u32>() as usize, inside);
+      }
+
+      /// More bytes never read as fewer gigabytes.
+      #[test]
+      fn format_gb_never_decreases(a in any::<u64>(), b in any::<u64>()) {
+        let value = |bytes: u64| {
+          let text = format_gb(bytes);
+          let number = text.trim_end_matches(" GB");
+          if number == "<0.01" { 0.005 } else { number.parse::<f64>().expect("a number") }
+        };
+        let (lo, hi) = (a.min(b), a.max(b));
+        prop_assert!(value(lo) <= value(hi), "{} {} / {} {}", lo, format_gb(lo), hi, format_gb(hi));
+        prop_assert!(format_gb(hi).ends_with(" GB"));
+      }
+    }
   }
 }
