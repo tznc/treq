@@ -1107,7 +1107,10 @@ fn project_button_opens_the_project_menu(cx: &mut TestAppContext) {
   let button = h.bounds("project-button").expect("button");
   let at = h.sidebar.read_with(&h.cx, |s, _| s.menu_anchor());
   assert!(at.y >= button.bottom(), "{at:?} below {button:?}");
-  assert!((at.x - button.left()).abs() <= gpui::px(2.), "{at:?} {button:?}");
+  assert!(
+    (at.x - button.left()).abs() <= gpui::px(2.),
+    "{at:?} {button:?}"
+  );
 }
 
 #[gpui::test]

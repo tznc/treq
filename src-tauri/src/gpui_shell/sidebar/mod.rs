@@ -1080,6 +1080,7 @@ impl Sidebar {
           div()
             .min_w_0()
             .truncate()
+            .line_height(zpx(16.))
             .font_weight(gpui::FontWeight::MEDIUM)
             .child(name.clone()),
         )
@@ -1090,6 +1091,7 @@ impl Sidebar {
               ui::text(div(), TextSize::Xs)
                 .min_w_0()
                 .truncate()
+                .line_height(zpx(14.))
                 .font_family(theme::MONO_FONT)
                 .text_color(palette.muted_foreground)
                 .child(home_ref),
@@ -1122,11 +1124,7 @@ impl Sidebar {
       })
       .role(Role::Button)
       .label(label)
-      .density(if repo.label.is_some() {
-        ui::RowDensity::TwoLine
-      } else {
-        ui::RowDensity::Default
-      })
+      .density(ui::RowDensity::Default)
       .selected(repo.home_selected)
       .relative()
       .gap_1p5()
