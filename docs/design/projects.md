@@ -7,13 +7,16 @@ Status: draft spec, no implementation. Date: 2026-11-03.
 - **Synced from day one** via Supabase.
 - **Treq manages clones**: users never clone by hand. Adding a repo by URL, or an agent touching a project repo that is not on this machine, makes Treq clone it to a managed location, register it, and create and link workspaces. Agents drive this through the CLI.
 - **Personal only**: a project belongs to one user; no team sharing.
-- **Repos stay standalone; projects are opt-in**: users open a repo directly, as today, with no project. A project is created and named only when the user adds a second repo to work on alongside the first. Repos are many-to-many with projects (like Claude Code projects): a repo can be in zero, one or more projects. The repo itself is not owned by any project: its checkout, `.treq` state and workspaces are shared, and each project adds its own grouping, prompts and context on top.
+- **Projects group workspaces, not repos**: a project is a named group of workspaces, picked from any repositories. Project P can hold workspaces from repo A while project Q holds other workspaces from the same repo A; a repo is never owned by a project. A workspace belongs to at most one project.
+- **Home repository = the repo's cloned checkout** (the sidebar's home row, as today). Each repo has exactly one home checkout per machine, shared by every project that has workspaces from it. "Home" never means a project-level repo.
+- **Standalone repos stay as today**: users open a repo directly, no project needed. Projects and standalone repos sit intermingled at the sidebar's top level; there is no separate repos section.
+- **Creating a project**: select workspaces (Cmd/Ctrl- or Shift-click, across repos), right-click › **Add to project…**, then pick an existing project or **New project** with a name.
 
 ## Relationship to supporting repositories
 
 Projects are **v2 of supporting repositories** and replace them. The current feature (v1):
 
-- `supporting_repos(repo_path, added_at)` in the home repo's `.treq` DB (`local_db::list_supporting_repo_paths`, `add_supporting_repo_path`); linked via **File > Add Repository…**.
+- `supporting_repos(repo_path, added_at)` in the window's primary repo's `.treq` DB (`local_db::list_supporting_repo_paths`, `add_supporting_repo_path`); linked via **File > Add Repository…**.
 - CLI `-r <repo>` on `add`, `set`, `st`, `diff`, `agent`, `commit` (`--repo` on `mv`) to act on a linked repo.
 - `agent_command::system_prompt()` lists supporting repos; `claude_filesystem_settings()` grants read on them. The agent is told to write only via `treq add -r` + `treq agent -r`, and to check with `treq st -r`.
 
@@ -21,13 +24,13 @@ What v1 lacks and Projects add:
 
 | v1 supporting repos | v2 projects |
 |---|---|
-| Links are local to one home repo's DB, one direction | Project is a synced, first-class group; repos are many-to-many |
+| Links are local to one primary repo's DB, one direction | Project is a synced group of workspaces from any repos |
 | No shared prompts or context | Project prompts and context (D9–D12) |
 | Sub-agents are fire-and-forget, checked one at a time with `st -r` | Orchestration: the home agent spawns, tracks and reads all sub-agents' workspaces in one call |
 | No cross-repo grouping of work | Project workspaces, shared branch, grouped PRs |
 | Repo identity = local path | `repo_key`, synced, path per machine |
 
-**Superseding plan**: keep the `-r` flag and the agent's read-only rule; resolve `-r` against the project's repos instead of `supporting_repos`. Migrate each home repo with supporting repos into one project (home repo + its supporting repos), then stop reading `supporting_repos` (table kept one release for rollback, then dropped). **Add Repository…** on a standalone repo now creates a project (see "Creating a project" under UX); on a repo opened inside a project it adds to that project.
+**Superseding plan**: keep the `-r` flag and the agent's read-only rule; resolve `-r` against the project's repos instead of `supporting_repos`. Migrate each primary repo with supporting repos into one project holding the workspaces of the primary and supporting repos, then stop reading `supporting_repos` (table kept one release for rollback, then dropped). **Add Repository…** keeps opening a repo standalone; grouping happens with **Add to project…** on workspaces.
 
 ## Current model (what this builds on)
 
@@ -66,6 +69,7 @@ Work that spans repos (API + client, service + infra, lib + consumer) is done as
 5. Launch one agent with all repos of the workspace in view, or one agent per repo.
 6. Commit per repo; push all; open one PR per repo, grouped in Treq.
 7. See one status row: "A: 2 ahead, PR open, checks green · B: conflict".
+7a. Select workspaces from several repos, right-click › **Add to project…**, and create "Checkout revamp" in one step.
 8. On a second machine, the project appears; repos not yet on that machine are cloned by Treq in the background the first time anything (the user, the orchestrator, a sub-agent) needs them.
 9. The orchestrator agent adds a repo it needs by URL (`treq project add-repo <url>`); Treq clones it, adds it to the project and the agent can start working in it straight away.
 
@@ -113,12 +117,12 @@ A keeps PR descriptions owned by the author and needs no sync of PR bodies. B ad
 
 Repo config is checked in and shared with teammates; a personal project must not override it. Project config adds defaults (pattern, agent, model) and project-only keys (agent scope).
 
-### D7a. Repo membership
-- A. A repo belongs to exactly one project.
-- B. Many-to-many: a repo can be standalone or in one or more projects, sharing one checkout. **(Recommended, matches Claude Code projects)**
-- C. Many-to-many with a separate checkout per project.
+### D7a. What a project contains
+- A. Repos (all of a repo's workspaces belong to the project).
+- B. Workspaces, from any repos; a repo appears in a project only through its workspaces. **(Chosen)**
+- C. Repos plus an explicit workspace filter.
 
-B lets "payments" and "platform" both include the same shared library without duplicate clones or diverging state. C wastes disk and splits workspaces.
+B lets two projects use the same repo for unrelated work without sharing workspaces. The repo's home checkout, `.treq` state and clone stay shared (one per machine). A workspace is in at most one project, so its prompts, context and agent scope are never ambiguous.
 
 ### D7. Sessions/agents scope
 - A. Session belongs to one repo workspace (today).
@@ -126,7 +130,7 @@ B lets "payments" and "platform" both include the same shared library without du
 - C. Only project-level sessions.
 
 ### D8. Migrating existing users
-- A. No change for plain repos; only home repos with `supporting_repos` become a project (home repo + its supporting repos, named after the home repo, renameable). **(Recommended)**
+- A. No change for plain repos; only primary repos with `supporting_repos` become a project (their workspaces, named after the primary repo, renameable). **(Recommended)**
 - B. Auto-create one project per repo.
 - C. One "Default" project containing all repos.
 
@@ -142,7 +146,7 @@ create table public.projects (
   owner_user_id uuid not null references auth.users(id) on delete cascade,
   name text not null check (length(name) between 1 and 100),
   slug text not null,
-  home_repo_key text,                     -- orchestrator repo (D13)
+  lead_workspace text,                    -- orchestrator's workspace, "<repo_key>#<branch>" (D13)
   config jsonb not null default '{}',     -- branch pattern, default agent/model
   version bigint not null default 1,      -- optimistic concurrency
   deleted_at timestamptz,                 -- soft delete, tombstone for sync
@@ -151,15 +155,16 @@ create table public.projects (
   unique (owner_user_id, slug)
 );
 
-create table public.project_repos (
+create table public.project_members (
   project_id uuid not null references public.projects(id) on delete cascade,
   repo_key text not null,                 -- normalised remote URL or local:<uuid>
-  github_node_id text,
-  display_name text,
+  branch text not null,                   -- the workspace's bookmark; identifies it across machines
   position int not null default 0,
-  overrides jsonb not null default '{}',  -- e.g. {"branch_pattern": ...}
-  primary key (project_id, repo_key)
+  added_at timestamptz not null default now(),
+  primary key (project_id, repo_key, branch)
 );
+create unique index project_members_one_project
+  on public.project_members (repo_key, branch);  -- a workspace is in one project (per owner via RLS join)
 
 create table public.project_workspaces (
   id uuid primary key default gen_random_uuid(),
@@ -177,21 +182,21 @@ RLS: enable on all three; `revoke all from anon`. Policy: `owner_user_id = (sele
 
 ### Local (app-level `db.rs`)
 
-- `projects_cache`, `project_repos_cache`, `project_workspaces_cache`: mirrors + `sync_state` (`clean|dirty|conflict`).
+- `projects_cache`, `project_members_cache`, `project_workspaces_cache`: mirrors + `sync_state` (`clean|dirty|conflict`).
 - `repo_locations(repo_key, machine_path)`: per-machine path map. Never synced.
 - Per-repo `.treq` DB: add nullable `workspaces.project_id TEXT`, `workspaces.project_workspace_id TEXT`, `sessions.project_id TEXT`, `sessions.project_workspace_id TEXT`. `project_id` records the project a workspace or session was created from, which decides its prompts and context. Repo DBs stay authoritative for workspace state.
 
 ### Migration
 
 - Local DB migration adds columns (tested with an upgrade fixture in `local_db/upgrade_fixtures`).
-- First launch after upgrade: for each home repo with `supporting_repos` rows, create a project (D8); other repos stay standalone. Push when signed in, stay `dirty` while offline/signed out.
+- First launch after upgrade: for each primary repo with `supporting_repos` rows, create a project (D8); other repos stay standalone. Push when signed in, stay `dirty` while offline/signed out.
 - Signed-out users: projects work locally; sync on sign-in, merge by `repo_key`.
 
 ## UX (GPUI shell)
 
 - **Opening**: the launcher lists recent repos and projects side by side. Opening a repo works as today; no project UI appears for a standalone repo beyond **Add Repository…**.
-- **Creating a project**: from a standalone repo, **Add Repository…** → pick folder / paste a repo URL or `owner/name` / recent repo (Treq clones URLs itself) → "Name this project" (prefilled with the current repo's name) → done. The current repo becomes the home repo (D13). A project can also be created empty from the launcher, but this is the main path.
-- **Sidebar**: all active projects at once, as a three-level tree: project › repository › workspace. Clicking a project opens its project home; a repository row is a group header (click opens the repo-scoped view, chevron collapses); clicking a workspace opens it in its repo. There is no separate repo list; standalone repos keep their own section below the projects. Opening a repo card on project home expands, highlights and scrolls to that repo group. A repo in two projects appears under both.
+- **Creating a project**: select one or more workspaces in the sidebar (Cmd/Ctrl-click, Shift-click; across repos), right-click › **Add to project…** (also a button in the multi-select bar). The dialog lists existing projects and **New project** with a name field. Workspaces already in another project move. **Remove from project** returns a workspace to its repo at the top level. New workspaces created from a project row or project home join that project automatically.
+- **Sidebar**: one top-level list mixing projects and standalone repos, ordered by recent activity. A project expands to project › repository › workspace: each repository group shows that repo's home row (its checkout and branch, as today) and only this project's workspaces, stacked as today. A repo appears at the top level only while it has workspaces not in any project (or none at all); once every workspace is in projects it shows only under those projects. The same repo can appear under several projects and the top level, always with the same home row. Clicking a project opens project home; opening a repo card on project home expands, highlights and scrolls to that project › repo group. Existing row behaviour (status dot, agent spinner, PR badge, multi-select, drag to restack, right-click menu) is unchanged.
 - **Project home** (project with 2+ repos): replaces the single-repo home screen. Header shows the project title. Same three tabs as today's workspace screen (`gpui_shell/screen/workspace.rs`: Code, Changes, Commits), each project-wide, each drilling into today's repo-scoped screen. Detailed below.
 - **Project settings** (settings screen, new "Project" section): name, branch pattern, default agent/model, repo list with reorder/remove, per-repo overrides.
 - **New project workspace**: name → checkboxes of repos (default all) → creates workspaces in parallel; partial failure shows per-repo result with retry, never rolls back successful ones silently.
@@ -202,11 +207,11 @@ RLS: enable on all three; `revoke all from anon`. Policy: `owner_user_id = (sele
 
 Shown when a project has two or more repos. A standalone repo, or a one-repo project, keeps today's home screen.
 
-**Header**: project title (rename inline), repo count, home repo marker. Breadcrumb `Project › repo` once drilled into a repo.
+**Header**: project title (rename inline), repo and workspace counts, **Start agent**, **Project settings**. Breadcrumb `Project › repo` once drilled into a repo.
 
 **Code tab**
 - Two-column grid of repo cards (one column under ~720px width). Card: repo name, home-repo badge, current branch, uncommitted/conflict counts, workspace count, last commit time, "unavailable" state for repos missing on this machine.
-- Order follows `project_repos.position`; home repo first.
+- Order follows `project_members.position`.
 - Clicking a card opens that repo's Code tab content as today (file browser and workspace list), scoped to the repo, with a back control to the grid.
 
 **Changes tab**
@@ -216,7 +221,7 @@ Shown when a project has two or more repos. A standalone repo, or a one-repo pro
 - Review comments and viewed-file state stay per repo (existing `pending_reviews` in each repo DB).
 
 **Commits tab**
-- One column per repo, side by side (horizontal scroll past ~4 columns; home repo first). Each column card shows that repo's linear commit history (first-parent of the default branch, newest at top).
+- One column per repo, side by side (horizontal scroll past ~4 columns; in member order). Each column shows the commits on this project's workspaces in that repo, newest at top.
 - Rows are time-aligned across columns: the vertical axis is time, grouped into bands (e.g. Today, Yesterday, then by day, then by week), so commits made at the same time line up across repos and empty bands show gaps.
 - A commit shared by a project workspace branch is marked with the workspace name so related commits across repos are easy to spot.
 - Clicking a column card opens that repo's full-width Commits list (today's `commits` screen), scoped to the repo, with a back control.
@@ -274,9 +279,9 @@ A matches "the user should not need to clone": any command that names a repo jus
 **D19. Where managed clones live**
 - A. One managed root `~/.treq/repos/<host>/<owner>/<name>`, shared by all projects. **(Recommended)**
 - B. Inside the project root, per project.
-- C. Next to the home repo.
+- C. Next to the first repo the user opened.
 
-A gives one checkout per repo per machine (D7a) and stable paths for agents. B duplicates repos shared by projects; C depends on where the home repo happens to be.
+A gives one checkout per repo per machine (D7a) and stable paths for agents. B duplicates repos shared by projects; C depends on where that repo happens to be.
 
 ### CLI for agents
 
@@ -301,7 +306,7 @@ treq project spawn --plan plan.json       # clones any missing repos first, in p
 
 ## Project prompts and context
 
-A project carries **common prompts** and **context references** that Treq adds to every terminal agent it launches in any of the project's repos: per-repo workspaces, the home repo, and project workspaces.
+A project carries **common prompts** and **context references** that Treq adds to every terminal agent it launches in any of the project's workspaces.
 
 ### Today's injection point
 
@@ -391,23 +396,23 @@ treq project prompt preview <project> [--repo r]   # prints the final system pro
 
 ### Agent orchestration across project repos
 
-A terminal agent in the project's **home repo** is the orchestrator. It can start several terminal agents across the project's repos, each in its own workspace, stacked where needed, and read the state of every workspace in the project.
+A terminal agent in the project's **lead workspace** is the orchestrator. It can start several terminal agents across the project's repos, each in its own workspace, stacked where needed, and read the state of every workspace in the project.
 
-### Home repo
+### Lead workspace
 
 **D13. What the orchestrator runs in**
-- A. A designated home repo per project (`projects.home_repo_key`), defaulting to the first repo added. **(Recommended)**
+- A. A designated lead workspace per project (`projects.lead_workspace`), defaulting to the first workspace added; changeable from its right-click menu. **(Recommended)**
 - B. The project root folder (D3) with no repo of its own.
 - C. Any repo in the project.
 
-A matches v1 (the agent starts in a real repo, with its own `AGENTS.md`/skills) and gives `treq` a repo to resolve against. B has no git state to commit plans or notes into. C makes "which project context applies" ambiguous for repos in several projects. If the home repo is not on this machine, Treq clones it before starting the orchestrator.
+A matches v1 (the agent starts in a real repo, with its own `AGENTS.md`/skills) and gives `treq` a repo to resolve against. B has no git state to commit plans or notes into. C has no stable place to start from. If the lead workspace's repo is not on this machine, Treq clones it and recreates the workspace from its branch before starting the orchestrator.
 
 ### Spawning sub-agents
 
 - Same commands as v1, resolved against the project: `treq add -r <repo> <branch> [-s <parent>]` then `treq agent -r <repo> <branch> "<prompt>"`.
 - **Stacking**: `-s/--source-branch` stacks a workspace on another workspace's branch in the same repo, as today. Stacks never cross repos; cross-repo ordering is expressed as a dependency note in the workspace description, not as a jj parent.
 - One call for fan-out: `treq project spawn --plan plan.json` (or stdin) creates N workspaces and agents. Plan entries: `{repo, branch, source_branch?, prompt, mode?}`. Each entry succeeds or fails on its own; the result lists per-entry status.
-- Every sub-agent gets the project's prompts and context (D11), plus a short parent note: "Started by the orchestrator in <home repo> for project <name>; report progress with `treq set -d`."
+- Every sub-agent gets the project's prompts and context (D11), plus a short parent note: "Started by the orchestrator in <lead workspace> for project <name>; report progress with `treq set -d`."
 - Sub-agents record `sessions.parent_session_id` (new, nullable) so the UI shows the tree and the orchestrator can list its own children.
 
 **D14. Can sub-agents spawn agents?**
@@ -433,7 +438,7 @@ A is simple and works for every agent CLI. B is a Phase-3 addition behind a sett
 
 ### Permissions
 
-- Orchestrator: write only in its own cwd (home repo or its workspace), read on all project repos (v1 rule, now over project repos). Writes elsewhere only through sub-agents.
+- Orchestrator: write only in its own cwd (the lead workspace), read on all project repos (v1 rule, now over project repos). Writes elsewhere only through sub-agents.
 - Sub-agent: write in its own workspace; read on other project repos.
 - `claude_filesystem_settings()` takes the project repo list instead of `supporting_repo_paths`.
 - Limits: per-project cap on concurrent agents (default 8, in project config); `spawn` refuses beyond it.
@@ -453,7 +458,7 @@ A is simple and works for every agent CLI. B is a Phase-3 addition behind a sett
 
 ## Edge cases
 
-- **Same repo in multiple projects**: the normal case (many-to-many through `project_repos`). One checkout per machine, shared by all its projects; repo state stays in the repo's `.treq`. Each project lists all of the repo's workspaces, tagged with the project they were created from; a filter shows "this project only". A workspace belongs to at most one project workspace. Removing a repo from one project does not touch others; a repo removed from its last project stays a standalone repo. Removing the second-to-last repo leaves a one-repo project, which stays (it keeps its prompts and context) until the user deletes it; deleting a project never touches its repos.
+- **Same repo in multiple projects**: the normal case. One checkout (home row) per machine, shared; each project shows only its own workspaces of that repo. Removing a workspace from a project returns it to the repo at the top level. Deleting a project never touches workspaces or repos; its workspaces return to the top level.
 - **Missing access** (clone fails: no GitHub permission, auth expired, private fork): repo shown with the failure reason and **Retry**; project workspace ops skip it with a visible warning; the Summary tab omits PRs we cannot read.
 - **Renamed repo**: match on `github_node_id`, update `repo_key`; local detection via remote URL change on fetch.
 - **Deleted repo / missing path**: mark unavailable, keep row; user removes explicitly. `jj.rs` path-validating functions already return defaults on missing paths.
