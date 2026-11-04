@@ -350,11 +350,11 @@ impl ProjectHomeView {
             )
           })
           .when(count == 0 && !repo.missing, |this| {
-            this.child(
-              ui::text(div(), TextSize::Sm)
-                .text_color(p.muted_foreground)
-                .child("No workspaces"),
-            )
+            this.child(ui::EmptyState::new(
+              format!("project-card-empty-{i}"),
+              "No workspaces",
+              p,
+            ))
           }),
       )
       .on_click(self.send(open_press(&repo.path)))
