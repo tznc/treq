@@ -3,6 +3,7 @@
 //! highlighted regions (`ImageHighlightLayer`), text files line comments
 //! (`TextAssetLineReview`).
 
+use crate::gpui_shell::native::Toast;
 use crate::core::review::parse_suggestion;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
@@ -47,11 +48,7 @@ pub enum LightboxEvent {
   Close,
   /// The review, to type into the agent.
   SendReview(String),
-  Toast {
-    title: String,
-    description: String,
-    tone: ToastTone,
-  },
+  Toast(crate::gpui_shell::native::Toast),
 }
 
 /// The line range being commented on, before its comment is added.
@@ -441,20 +438,12 @@ impl Lightbox {
     cx.notify();
   }
 
-  fn toast(&self, title: &str, description: String, tone: ToastTone, cx: &mut Context<Self>) {
-    cx.emit(LightboxEvent::Toast {
-      title: title.into(),
-      description,
-      tone,
-    });
-  }
-
   fn copy(&mut self, cx: &mut Context<Self>) {
     let Some(asset) = self.current() else {
       return;
     };
     cx.write_to_clipboard(ClipboardItem::new_string(shell_quote(&asset.path)));
-    self.toast("Asset path copied", String::new(), ToastTone::Success, cx);
+    cx.emit(LightboxEvent::Toast(Toast::success("Asset path copied")));
   }
 
   fn reveal(&mut self) {
@@ -508,12 +497,7 @@ impl Lightbox {
           let annotated = match annotated {
             Some(Ok(path)) => Some(path),
             Some(Err(error)) => {
-              view.toast(
-                "Could not attach highlighted image",
-                error,
-                ToastTone::Error,
-                cx,
-              );
+              cx.emit(LightboxEvent::Toast(Toast::error("Could not attach highlighted image").description(error)));
               None
             }
             None => None,

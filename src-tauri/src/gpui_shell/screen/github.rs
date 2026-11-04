@@ -860,15 +860,6 @@ impl GithubView {
     );
   }
 
-  pub(super) fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    self.host.notify(NativeEvent::Toast {
-      title: title.into(),
-      description: description.into(),
-      tone,
-      action: None,
-    });
-  }
-
   /// Every run's key in the repository: React's, and those GPUI runs
   /// ([`checks_run`]).
   pub(super) fn running_keys(&self, cx: &App) -> Vec<String> {

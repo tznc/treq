@@ -4,6 +4,7 @@
 //! issue picked from the integrations beside it, all at once and stacked on
 //! one branch.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -679,18 +680,6 @@ impl OpenWorkspacesDialog {
     cx.notify();
   }
 
-  fn toast(&self, tone: ToastTone, title: &str, description: String) {
-    WorkspaceHost::notify(
-      &*self.host,
-      NativeEvent::Toast {
-        title: title.into(),
-        description,
-        tone,
-        action: None,
-      },
-    );
-  }
-
   /// Opens every target, a repository at a time.
   fn submit(&mut self, cx: &mut Context<Self>) {
     if !self.can_submit() {
@@ -743,11 +732,7 @@ impl OpenWorkspacesDialog {
     }
     let opened = summary(created, reused);
     if self.errors.is_empty() {
-      self.toast(
-        ToastTone::Success,
-        opened.trim_end_matches('.'),
-        String::new(),
-      );
+      WorkspaceHost::notify(&*self.host, Toast::success(opened.trim_end_matches('.')).into());
       if let Some((repo_path, id)) = first {
         (self.sink)(
           ScreenAction::Field {
@@ -759,11 +744,7 @@ impl OpenWorkspacesDialog {
       }
       self.close(cx);
     } else {
-      self.toast(
-        ToastTone::Error,
-        "Some workspaces could not be opened",
-        format!("{} failed. {opened}", self.errors.len()),
-      );
+      WorkspaceHost::notify(&*self.host, Toast::error("Some workspaces could not be opened").description(format!("{} failed. {opened}", self.errors.len())).into());
       // What opened is open now, and a retry should say so.
       self.checks.clear();
       self.open_branches.extend(

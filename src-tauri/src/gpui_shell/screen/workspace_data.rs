@@ -341,7 +341,7 @@ impl WorkspaceHost for Backend {
     }
     match core::repo::rebase_home_branch(repo_path, branch, DEFAULT_BRANCH) {
       Ok(result) if result.success => Outcome::ok(
-        "Rebase complete",
+        "Rebased",
         if result.message.is_empty() {
           "Branch rebased onto target".to_string()
         } else {

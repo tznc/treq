@@ -466,7 +466,7 @@ mod toast_tests {
   fn test_toast_keeps_at_most_one_action() {
     let first = ToastAction { label: "Open".into(), id: 1 };
     let second = ToastAction { label: "View".into(), id: 2 };
-    let toast = Toast::new(ToastTone::Error, "Push failed", "rejected")
+    let toast = Toast::error("Push failed").description("rejected")
       .action(first)
       .action(second.clone());
     let NativeEvent::Toast { tone, action, .. } = toast.into() else {

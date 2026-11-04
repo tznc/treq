@@ -10,6 +10,7 @@
 //!
 //! [`pr_review_data`]: super::pr_review_data
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -174,18 +175,6 @@ impl PrReviewView {
     .detach();
   }
 
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    super::workspace_data::WorkspaceHost::notify(
-      self.host.as_ref(),
-      NativeEvent::Toast {
-        title: title.into(),
-        description: description.into(),
-        tone,
-        action: None,
-      },
-    );
-  }
-
   fn send(&self, action: ScreenAction, cx: &mut App) {
     let react = self.react.clone();
     cx.defer(move |cx| react(action, cx));
@@ -293,7 +282,7 @@ impl PrReviewView {
       |view, result, _cx| {
         view.starting = false;
         if let Err(err) = result {
-          view.toast(ToastTone::Error, "Failed to start review", err);
+          super::workspace_data::WorkspaceHost::notify(view.host.as_ref(), Toast::error("Failed to start review").description(err).into());
         }
       },
       cx,
@@ -346,11 +335,7 @@ impl PrReviewView {
                 c.read_drafts(cx);
               });
             }
-            view.toast(
-              ToastTone::Success,
-              "Review submitted",
-              format!("#{number}: {}", event.label()),
-            );
+            super::workspace_data::WorkspaceHost::notify(view.host.as_ref(), Toast::success("Review submitted").description(format!("#{number}: {}", event.label())).into());
             view.send(
               ScreenAction::Press {
                 id: "prReview.submitted".into(),
@@ -358,7 +343,7 @@ impl PrReviewView {
               cx,
             );
           }
-          Err(err) => view.toast(ToastTone::Error, "Failed to submit review", err),
+          Err(err) => super::workspace_data::WorkspaceHost::notify(view.host.as_ref(), Toast::error("Failed to submit review").description(err).into()),
         }
       },
       cx,

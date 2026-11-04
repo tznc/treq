@@ -1,6 +1,7 @@
 //! `NewPrDialog`: a pull request from a workspace (`CreatePrFromWorkspaceForm`)
 //! or from any branch (`CreatePrForm`).
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use tauri_plugin_gpui::gpui::{
@@ -239,7 +240,7 @@ impl GithubView {
             view.reload_list(false, cx);
             view.press(format!("github.created:{number}"), cx);
           }
-          Err(err) => view.toast(ToastTone::Error, "Failed to create PR", err),
+          Err(err) => view.host.notify(Toast::error("Failed to create PR").description(err).into()),
         }
       },
     );

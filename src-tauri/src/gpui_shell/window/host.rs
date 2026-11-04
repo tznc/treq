@@ -5,6 +5,7 @@
 //! disk for a local one, and has nothing of what only a local checkout
 //! has (pull requests, supporting repositories).
 
+use crate::gpui_shell::native::Toast;
 use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
@@ -115,7 +116,8 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String>;
   fn remove_supporting(&self, main_repo: &str, path: &str) -> Result<(), String>;
   fn launch(&self, request: &LaunchRequest, select: bool) -> Result<(), String>;
-  fn toast(&self, tone: ToastTone, title: &str, description: &str);
+  /// Shows `toast` in the window.
+  fn show_toast(&self, toast: Toast);
   /// An AI review of workspace `workspace_id` finished: toasts how many
   /// open comments it left, with Show comments opening its Changes tab.
   fn review_done(&self, repo_path: &str, workspace_id: i64);
@@ -543,8 +545,8 @@ impl WindowHost for Backend {
     self.launch_session(request, select).map(drop)
   }
 
-  fn toast(&self, tone: ToastTone, title: &str, description: &str) {
-    Backend::toast(self, tone, title, description);
+  fn show_toast(&self, toast: Toast) {
+    self.notify(toast.into());
   }
 
   fn review_done(&self, repo_path: &str, workspace_id: i64) {

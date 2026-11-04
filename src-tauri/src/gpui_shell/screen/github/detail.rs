@@ -1,6 +1,7 @@
 //! `PrDetailPanel`, `IssueDetailPanel` and their actions, and the PR's
 //! workspace checks (`PrWorkspaceChecks`).
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use tauri_plugin_gpui::gpui::{
@@ -70,7 +71,7 @@ impl GithubView {
             if busy == Busy::Delete && current {
               view.detail.confirm_delete = false;
             }
-            view.toast(ToastTone::Error, fail, err);
+            view.host.notify(Toast::error(fail).description(err).into());
           }
         }
       },
@@ -171,7 +172,7 @@ impl GithubView {
             view.detail.editing = None;
             view.reload_list(false, cx);
           }
-          Err(err) => view.toast(ToastTone::Error, "Failed to update issue", err),
+          Err(err) => view.host.notify(Toast::error("Failed to update issue").description(err).into()),
         }
       },
     );
@@ -225,11 +226,11 @@ impl GithubView {
             } else {
               "Workspace opened"
             };
-            view.toast(ToastTone::Success, title, head);
+            view.host.notify(Toast::success(title).description(head).into());
             view.load_workspaces(cx);
             view.press(format!("github.openWorkspace:{id}"), cx);
           }
-          Err(err) => view.toast(ToastTone::Error, "Failed to open workspace", err),
+          Err(err) => view.host.notify(Toast::error("Failed to open workspace").description(err).into()),
         }
       },
     );
@@ -1751,7 +1752,7 @@ impl Reacts for GithubView {
           if let Some(comment) = view.comment_mut(&id) {
             reactions::toggle(&mut comment.reactions, content);
           }
-          view.toast(ToastTone::Error, "Failed to react", err);
+          view.host.notify(Toast::error("Failed to react").description(err).into());
         }
       },
     );

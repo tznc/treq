@@ -6,6 +6,7 @@
 //! carries out (reading the backend, asking for a folder, starting an
 //! agent). [`super::snapshots`] draws it.
 
+use crate::gpui_shell::native::Toast;
 use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
@@ -350,6 +351,17 @@ pub enum Effect {
   OpenUrl(String),
   /// The remote side's ([`super::remote`]).
   Remote(Box<RemoteEffect>),
+}
+
+impl From<Toast> for Effect {
+  /// The window's toasts have no button: `toast.action` is dropped.
+  fn from(toast: Toast) -> Self {
+    Self::Toast {
+      tone: toast.tone,
+      title: toast.title,
+      description: toast.description,
+    }
+  }
 }
 
 impl From<RemoteEffect> for Effect {

@@ -3,6 +3,7 @@
 //! the PR's, the comments are review drafts kept in the local database
 //! (`github_pr`), and the review threads take replies.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -414,7 +415,7 @@ impl ChangesView {
   }
 
   fn draft_failed(&self, err: String) {
-    self.toast(ToastTone::Error, "Failed to save draft comment", err);
+    super::tell(self.host.as_ref(), Toast::error("Failed to save draft comment").description(err).into());
   }
 
   /// `addComment`: the draft is kept with the hash of its lines.

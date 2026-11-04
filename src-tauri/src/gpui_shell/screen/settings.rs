@@ -5,6 +5,7 @@
 //! React still owns which tab shows, closing the page, and the Supabase
 //! session the Account and Integrations tabs show (see `account`).
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -790,7 +791,7 @@ impl SettingsView {
         if let Err(err) = result {
           view
             .host
-            .notify(toast(ToastTone::Error, "Review prompt", err));
+            .notify(NativeEvent::from(Toast::error("Review prompt").description(err.to_string())));
         }
         view.load_prompt_edits(cx);
       },
@@ -836,16 +837,12 @@ impl SettingsView {
             {
               fields.review_prompt = prompt.clone();
             }
-            view.host.notify(toast(
-              ToastTone::Success,
-              "Review prompt updated",
-              String::new(),
-            ));
+            view.host.notify(NativeEvent::from(Toast::success("Review prompt updated").description(String::new().to_string())));
           }
         }
         Err(err) => view
           .host
-          .notify(toast(ToastTone::Error, "Review prompt", err)),
+          .notify(NativeEvent::from(Toast::error("Review prompt").description(err.to_string()))),
       }
       view.load_prompt_edits(cx);
     });
@@ -932,8 +929,8 @@ impl SettingsView {
         match (result, success) {
           (Err(err), _) => view
             .host
-            .notify(toast(ToastTone::Error, "Skill library", err)),
-          (Ok(()), Some((title, body))) => view.host.notify(toast(ToastTone::Success, title, body)),
+            .notify(NativeEvent::from(Toast::error("Skill library").description(err.to_string()))),
+          (Ok(()), Some((title, body))) => view.host.notify(NativeEvent::from(Toast::success(title).description(body.to_string()))),
           (Ok(()), None) => {}
         }
         if let Some(skills) = &mut view.skills {
@@ -1126,7 +1123,7 @@ impl SettingsView {
         }
         Err(err) => view
           .host
-          .notify(toast(ToastTone::Error, "Skill library", err)),
+          .notify(NativeEvent::from(Toast::error("Skill library").description(err.to_string()))),
       }
       view.load_skills(cx);
     });
@@ -1328,7 +1325,7 @@ impl SettingsView {
         }
         Err(err) => view
           .host
-          .notify(toast(ToastTone::Error, "Review prompt", err)),
+          .notify(NativeEvent::from(Toast::error("Review prompt").description(err.to_string()))),
       },
     );
   }
@@ -1885,15 +1882,6 @@ impl SettingsView {
         cx,
       )
     }
-  }
-}
-
-fn toast(tone: ToastTone, title: &str, description: impl ToString) -> NativeEvent {
-  NativeEvent::Toast {
-    title: title.into(),
-    description: description.to_string(),
-    tone,
-    action: None,
   }
 }
 

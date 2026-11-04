@@ -10,6 +10,7 @@
 //!
 //! [`workspace_data`]: super::workspace_data
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -1912,7 +1913,7 @@ impl WorkspaceView {
         if value["useIdleAgent"].as_bool() == Some(true) {
           match self.send_to_idle(&markdown, cx) {
             None => return (self.react)(ScreenAction::Field { field, value }, cx),
-            Some(true) => return self.toast(ToastTone::Success, "Review sent to agent", ""),
+            Some(true) => return self.host.notify(Toast::success("Review sent to agent").into()),
             Some(false) => {}
           }
         }
@@ -1932,7 +1933,7 @@ impl WorkspaceView {
         let prompt = crate::core::agent_launch::review_comment_prompt(&comment, &dir);
         match self.send_to_idle(&prompt, cx) {
           None => return (self.react)(ScreenAction::Field { field, value }, cx),
-          Some(true) => return self.toast(ToastTone::Success, "Comment sent to agent", ""),
+          Some(true) => return self.host.notify(Toast::success("Comment sent to agent").into()),
           Some(false) => {}
         }
         let done = ("Comment sent to agent", "");
@@ -2003,24 +2004,16 @@ impl WorkspaceView {
       this
         .update(cx, |view, _| match (result, done) {
           (Ok(_), Some((title, description))) => {
-            view.toast(ToastTone::Success, &title, description)
+            view.host.notify(Toast::success(&title).description(description).into())
           }
           (Ok(_), None) => {}
-          (Err(err), _) => view.toast(ToastTone::Error, failed, err),
+          (Err(err), _) => view.host.notify(Toast::error(failed).description(err).into()),
         })
         .ignore_closed();
     })
     .detach();
   }
 
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    self.host.notify(NativeEvent::Toast {
-      title: title.into(),
-      description: description.into(),
-      tone,
-      action: None,
-    });
-  }
 }
 
 impl WorkspaceView {

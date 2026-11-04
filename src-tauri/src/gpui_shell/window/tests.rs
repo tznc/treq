@@ -245,8 +245,8 @@ impl WindowHost for FakeHost {
     Ok(())
   }
 
-  fn toast(&self, _: ToastTone, title: &str, _: &str) {
-    self.record(format!("toast {title}"));
+  fn show_toast(&self, toast: crate::gpui_shell::native::Toast) {
+    self.record(format!("toast {}", toast.title));
   }
 
   fn review_done(&self, repo_path: &str, workspace_id: i64) {
@@ -1137,7 +1137,7 @@ fn factory_reset_asks_then_returns_to_onboarding(cx: &mut TestAppContext) {
   window.click_in_confirm(cx, "Reset");
   let calls = host.calls();
   assert!(calls.contains(&"factory reset".to_string()));
-  assert!(calls.contains(&"toast Factory reset complete".to_string()));
+  assert!(calls.contains(&"toast Settings reset to defaults".to_string()));
   assert!(matches!(
     window.last().screen.unwrap().view,
     View::Onboarding(_)
@@ -1242,7 +1242,7 @@ fn force_rebases_the_selected_workspace(cx: &mut TestAppContext) {
   cx.run_until_parked();
   let calls = host.calls();
   assert!(calls.contains(&"rebase 2 a".to_string()));
-  assert!(calls.contains(&"toast Force rebase complete".to_string()));
+  assert!(calls.contains(&"toast Rebased".to_string()));
 }
 
 #[gpui::test]

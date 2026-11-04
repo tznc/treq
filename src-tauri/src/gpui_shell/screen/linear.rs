@@ -11,6 +11,7 @@
 //! Issues are created from the toolbar's "New issue", and edited or deleted
 //! from their page.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -539,18 +540,6 @@ impl LinearView {
     }
   }
 
-  fn toast(&self, title: &str, description: impl Into<String>) {
-    super::workspace_data::WorkspaceHost::notify(
-      self.host.as_ref(),
-      NativeEvent::Toast {
-        title: title.into(),
-        description: description.into(),
-        tone: ToastTone::Error,
-        action: None,
-      },
-    );
-  }
-
   fn send_react(&self, action: ScreenAction, cx: &mut App) {
     let react = self.react.clone();
     cx.defer(move |cx| react(action, cx));
@@ -840,7 +829,7 @@ impl LinearView {
             view.editing = None;
             view.load_issues(cx);
           }
-          Err(err) => view.toast("Failed to update issue", err),
+          Err(err) => super::workspace_data::WorkspaceHost::notify(view.host.as_ref(), Toast::error("Failed to update issue").description(err).into()),
         }
       },
       cx,
@@ -867,7 +856,7 @@ impl LinearView {
             view.editing = None;
             view.load_issues(cx);
           }
-          Err(err) => view.toast("Failed to delete issue", err),
+          Err(err) => super::workspace_data::WorkspaceHost::notify(view.host.as_ref(), Toast::error("Failed to delete issue").description(err).into()),
         }
       },
       cx,
@@ -948,7 +937,7 @@ impl LinearView {
       move |view, result, _cx| {
         view.starting.remove(&of);
         if let Err(err) = result {
-          view.toast("Failed to start review", err);
+          super::workspace_data::WorkspaceHost::notify(view.host.as_ref(), Toast::error("Failed to start review").description(err).into());
         }
       },
       cx,
@@ -973,7 +962,7 @@ impl LinearView {
         match result {
           Ok(()) if action == Action::Apply => view.content_changed(&of, cx),
           Ok(()) => {}
-          Err(err) => view.toast("Review comment action failed", err),
+          Err(err) => super::workspace_data::WorkspaceHost::notify(view.host.as_ref(), Toast::error("Review comment action failed").description(err).into()),
         }
         view.load_reviews(of, cx);
       },

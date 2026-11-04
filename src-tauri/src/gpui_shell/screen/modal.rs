@@ -138,15 +138,6 @@ impl Env {
     super::workspace_data::WorkspaceHost::notify(self.host.as_ref(), event);
   }
 
-  pub fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    self.notify(NativeEvent::Toast {
-      title: title.into(),
-      description: description.into(),
-      tone,
-      action: None,
-    });
-  }
-
   /// Tells React the repository's state changed (a stash was applied).
   pub fn workspace_changed(&self, repo_path: &str) {
     self.notify(NativeEvent::WorkspaceChanged {

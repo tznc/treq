@@ -10,6 +10,7 @@
 //! [`account_data`]: crate::gpui_shell::screen::account_data
 //! [`Account`]: crate::gpui_shell::screen::account_data::Account
 
+use crate::gpui_shell::native::Toast;
 use crate::core::cloud_catalog::{Notification, SpendState};
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
@@ -21,7 +22,7 @@ use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, AnyElement, Context, Focusable as _, FontWeight, SharedString, Window,
 };
 
-use super::{help, toast, SettingsView, Tab};
+use super::{help, SettingsView, Tab};
 use crate::gpui_shell::{
   form,
   native::{self, NativeEvent, ToastTone},
@@ -1279,9 +1280,9 @@ impl SettingsView {
           match &result {
             Ok(()) => {
               host.notify(NativeEvent::RepoSettingsChanged { repo_path: path });
-              host.notify(toast(ToastTone::Success, "API key saved", ""));
+              host.notify(NativeEvent::from(Toast::success("API key saved")));
             }
-            Err(err) => host.notify(toast(ToastTone::Error, "Error saving API key", err)),
+            Err(err) => host.notify(NativeEvent::from(Toast::error("Error saving API key").description(err.to_string()))),
           }
           result
         }
@@ -1454,11 +1455,7 @@ impl SettingsView {
         Ok(()) => {
           view.account.delete_account = None;
           view.account.farewell = true;
-          view.host.notify(toast(
-            ToastTone::Success,
-            "Account deleted",
-            "Your Treq account and its data have been deleted.",
-          ));
+          view.host.notify(NativeEvent::from(Toast::success("Account deleted").description("Your Treq account and its data have been deleted.")));
         }
         Err(error) => {
           if let Some(dialog) = &mut view.account.delete_account {
@@ -1501,11 +1498,7 @@ impl SettingsView {
               }),
             });
           }
-          Err(error) => host.notify(toast(
-            ToastTone::Error,
-            "Error starting OAuth flow",
-            error.message,
-          )),
+          Err(error) => host.notify(NativeEvent::from(Toast::error("Error starting OAuth flow").description(error.message.to_string()))),
         }
       },
     );

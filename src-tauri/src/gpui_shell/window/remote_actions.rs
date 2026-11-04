@@ -4,6 +4,7 @@
 //! `startRemoteAgent`), and what a remote repository opening does to the
 //! window.
 
+use crate::gpui_shell::native::Toast;
 use serde_json::{json, Value};
 
 use super::{
@@ -19,14 +20,6 @@ use crate::{
 
 fn remote(effects: Vec<RemoteEffect>) -> Vec<Effect> {
   effects.into_iter().map(Effect::from).collect()
-}
-
-fn toast(tone: ToastTone, title: &str, description: &str) -> Effect {
-  Effect::Toast {
-    tone,
-    title: title.into(),
-    description: description.into(),
-  }
 }
 
 impl Model {
@@ -225,11 +218,7 @@ impl Model {
         self.terminal("openRemote", json!({"remote": target}));
         Vec::new()
       }
-      Err(why) => vec![toast(
-        ToastTone::Warning,
-        "Remote terminal unavailable",
-        why,
-      )],
+      Err(why) => vec![Effect::from(Toast::warning("Remote terminal unavailable").description(why))],
     }
   }
 

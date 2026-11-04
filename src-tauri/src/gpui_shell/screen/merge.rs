@@ -5,6 +5,7 @@
 //! ahead and its diff, and merges it. React still owns leaving the page,
 //! which a merge does too (its caches refresh then).
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
@@ -363,7 +364,7 @@ impl MergeView {
             return;
           }
           if let Some(err) = &preview.error {
-            view.toast(ToastTone::Error, "Failed to load merge preview", err);
+            view.host.notify(Toast::error("Failed to load merge preview").description(err).into());
           }
           view.preview = Some(Rc::new(preview));
           view.rows = Rows::default();
@@ -372,15 +373,6 @@ impl MergeView {
         .ignore_closed();
     })
     .detach();
-  }
-
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    self.host.notify(NativeEvent::Toast {
-      title: title.into(),
-      description: description.into(),
-      tone,
-      action: None,
-    });
   }
 
   fn workspace(&self) -> Option<&Workspace> {
@@ -611,7 +603,7 @@ impl MergeView {
     };
     let message = self.message();
     if !self.on_github && self.strategy != Strategy::Rebase && message.trim().is_empty() {
-      self.toast(ToastTone::Error, "Commit message required", "");
+      self.host.notify(Toast::error("Commit message required").into());
       return;
     }
     let github = self.open_pr().filter(|_| self.on_github).map(|g| {
@@ -657,14 +649,10 @@ impl MergeView {
             Ok(result) => {
               view.merged(cx);
               match &github {
-                Some(request) => view.toast(
-                  ToastTone::Success,
-                  "Pull request merged",
-                  format!(
+                Some(request) => view.host.notify(Toast::success("Pull request merged").description(format!(
                     "Merged PR #{} on GitHub and synced {target}",
                     request.pr_number
-                  ),
-                ),
+                  )).into()),
                 None => {
                   let (title, done) = match strategy {
                     Strategy::Squash => ("Workspace squashed", "squashed"),
@@ -672,16 +660,12 @@ impl MergeView {
                     Strategy::Merge => ("Workspace merged", "merged"),
                   };
                   let pushed = if options.push { " and pushed it" } else { "" };
-                  view.toast(
-                    ToastTone::Success,
-                    title,
-                    format!("{} {done} into {target}{pushed}", ws.branch_name),
-                  );
+                  view.host.notify(Toast::success(title).description(format!("{} {done} into {target}{pushed}", ws.branch_name)).into());
                 }
               }
               view.report_notes(&result);
             }
-            Err(err) => view.toast(ToastTone::Error, "Merge failed", err),
+            Err(err) => view.host.notify(Toast::error("Merge failed").description(err).into()),
           }
           cx.notify();
         })
@@ -707,14 +691,10 @@ impl MergeView {
           match result {
             Ok(result) => {
               view.merged(cx);
-              view.toast(
-                ToastTone::Success,
-                "Workspace synced",
-                format!("Synced {} from origin", result.plan.target_branch),
-              );
+              view.host.notify(Toast::success("Workspace synced").description(format!("Synced {} from origin", result.plan.target_branch)).into());
               view.report_notes(&result);
             }
-            Err(err) => view.toast(ToastTone::Error, "Sync failed", err),
+            Err(err) => view.host.notify(Toast::error("Sync failed").description(err).into()),
           }
           cx.notify();
         })
@@ -742,11 +722,7 @@ impl MergeView {
     } else {
       ToastTone::Success
     };
-    self.toast(
-      tone,
-      "Stacked pull requests updated",
-      result.notes.join("\n"),
-    );
+    self.host.notify(Toast::new(tone, "Stacked pull requests updated", result.notes.join("\n")).into());
   }
 
   fn press(&self, id: impl Into<String>) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) {

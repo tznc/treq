@@ -3,6 +3,7 @@
 //! `handleTargetBranchSelect` and Dashboard's `handleDelete` ran: workflow
 //! checks, pull requests, retargeting and the More menu's Reset to remote and Delete Workspace.
 
+use crate::gpui_shell::{native::Toast, screen::workspace_data::WorkspaceHost};
 use crate::result_ext::ResultExt;
 use tauri_plugin_gpui::gpui::{prelude::*, App, Context};
 
@@ -460,7 +461,7 @@ impl WorkspaceView {
               view.host.open_url(&url);
             }
             Err(err) => {
-              workspace_ops::toast(&*view.host, ToastTone::Error, "Failed to push branch", &err)
+              WorkspaceHost::notify(&*view.host, Toast::error("Failed to push branch").description(&err).into())
             }
           }
           view.rebuild(cx);
@@ -495,13 +496,8 @@ impl WorkspaceView {
         .update(cx, |view, cx| {
           view.busy.retargeting = false;
           match done {
-            Ok(()) => workspace_ops::toast(
-              &*view.host,
-              ToastTone::Success,
-              &format!("Rebased onto {branch}"),
-              "",
-            ),
-            Err(err) => workspace_ops::toast(&*view.host, ToastTone::Error, "Rebase failed", &err),
+            Ok(()) => WorkspaceHost::notify(&*view.host, Toast::success(&format!("Rebased onto {branch}")).into()),
+            Err(err) => WorkspaceHost::notify(&*view.host, Toast::error("Rebase failed").description(&err).into()),
           }
           view
             .host

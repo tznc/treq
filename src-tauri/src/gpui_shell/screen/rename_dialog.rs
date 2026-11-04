@@ -1,6 +1,7 @@
 //! `RenameWorkspaceDialog`: renames a workspace's branch, checking each
 //! typed name with a dry run first.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{sync::Arc, time::Duration};
@@ -170,18 +171,6 @@ impl RenameDialog {
     cx.notify();
   }
 
-  fn toast(&self, tone: ToastTone, title: &str, description: String) {
-    WorkspaceHost::notify(
-      &*self.host,
-      NativeEvent::Toast {
-        title: title.into(),
-        description,
-        tone,
-        action: None,
-      },
-    );
-  }
-
   /// The form's action.
   fn submit(&mut self, cx: &mut Context<Self>) {
     if !self.can_submit() {
@@ -206,11 +195,7 @@ impl RenameDialog {
             Ok(result) if !result.success => view.error = result.message,
             Ok(_) => {
               view.error.clear();
-              view.toast(
-                ToastTone::Success,
-                &format!("Renamed to {next}"),
-                String::new(),
-              );
+              WorkspaceHost::notify(&*view.host, Toast::success(&format!("Renamed to {next}")).into());
               WorkspaceHost::notify(
                 &*view.host,
                 NativeEvent::WorkspaceChanged {
@@ -220,7 +205,7 @@ impl RenameDialog {
               view.close(cx);
             }
             Err(err) => {
-              view.toast(ToastTone::Error, "Failed to rename workspace", err.clone());
+              WorkspaceHost::notify(&*view.host, Toast::error("Failed to rename workspace").description(err.clone()).into());
               view.error = err;
             }
           }

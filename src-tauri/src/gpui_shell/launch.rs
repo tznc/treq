@@ -7,6 +7,7 @@
 //! ([`NativeEvent::AgentSessionStarted`]), since React still routes the
 //! selection.
 
+use crate::gpui_shell::native::Toast;
 use crate::result_ext::ResultExt;
 use tauri::{AppHandle, Manager};
 
@@ -282,14 +283,10 @@ fn start_request(app: &AppHandle, label: String, request: AgentDeepLinkRequest) 
 pub(super) fn start_deep_link(host: &dyn WindowHost, request: &AgentDeepLinkRequest) {
   let workspaces = host.workspaces(&request.repo).unwrap_or_default();
   let Some(workspace) = launch::find_workspace_by_branch(&workspaces, &request.branch) else {
-    host.toast(
-      ToastTone::Error,
-      "Workspace not found",
-      &format!(
+    host.show_toast(Toast::error("Workspace not found").description(&format!(
         "Branch '{}' is not available in this window.",
         request.branch
-      ),
-    );
+      )));
     return;
   };
   let launched = LaunchRequest {
@@ -304,7 +301,7 @@ pub(super) fn start_deep_link(host: &dyn WindowHost, request: &AgentDeepLinkRequ
     Ok(()) => launch::deep_links()
       .lock_or_recover()
       .mark_processed(&request.request_id),
-    Err(err) => host.toast(ToastTone::Error, "Failed to start agent", &err),
+    Err(err) => host.show_toast(Toast::error("Failed to start agent").description(&err)),
   }
 }
 

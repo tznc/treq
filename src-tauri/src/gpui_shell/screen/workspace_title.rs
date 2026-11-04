@@ -3,6 +3,7 @@
 //! pull request, Save writes the title to the PR too, unless "Save as local
 //! draft" keeps it here until the next push.
 
+use crate::gpui_shell::native::Toast;
 use std::sync::Arc;
 
 use gpui_kit::component::input::{Enter, Escape, InputEvent, Textarea, TextareaState};
@@ -141,14 +142,10 @@ impl TitleEditor {
                 repo_path: view.repo_path.clone(),
               });
               if let Some(err) = pr_error {
-                view.toast(
-                  ToastTone::Error,
-                  "Saved as a local draft",
-                  format!("The pull request wasn't updated: {err}"),
-                );
+                view.tell(Toast::error("Saved as a local draft").description(format!("The pull request wasn't updated: {err}")).into());
               }
             }
-            Err(err) => view.toast(ToastTone::Error, "Failed to save title", err),
+            Err(err) => view.tell(Toast::error("Failed to save title").description(err).into()),
           }
           cx.notify();
         })
@@ -159,15 +156,6 @@ impl TitleEditor {
 
   fn tell(&self, event: NativeEvent) {
     super::workspace_data::WorkspaceHost::notify(self.host.as_ref(), event);
-  }
-
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    self.tell(NativeEvent::Toast {
-      title: title.into(),
-      description: description.into(),
-      tone,
-      action: None,
-    });
   }
 
   fn save_button(&self, disabled: bool, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {

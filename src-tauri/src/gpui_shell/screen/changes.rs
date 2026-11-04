@@ -14,6 +14,7 @@ mod rows;
 pub(in crate::gpui_shell::screen) mod search;
 pub(super) mod threads;
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -93,15 +94,6 @@ pub struct Options {
 /// Tells React what the tab changed.
 fn tell(host: &dyn ChangesHost, event: NativeEvent) {
   super::workspace_data::WorkspaceHost::notify(host, event);
-}
-
-fn toast_event(tone: ToastTone, title: &str, description: impl Into<String>) -> NativeEvent {
-  NativeEvent::Toast {
-    title: title.into(),
-    description: description.into(),
-    tone,
-    action: None,
-  }
 }
 
 /// Which side of a hunk "Show more lines" reads.
@@ -480,10 +472,6 @@ impl ChangesView {
     );
   }
 
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    tell(self.host.as_ref(), toast_event(tone, title, description));
-  }
-
   /// Everything React read from the repository is stale.
   fn changed(host: &dyn ChangesHost, parent: &Parent) {
     tell(
@@ -649,7 +637,7 @@ impl ChangesView {
           }
           Ok(snapshot) => view.apply(snapshot, cx),
           Err(err) => {
-            view.toast(ToastTone::Error, "JJ Error", err);
+            tell(view.host.as_ref(), Toast::error("JJ Error").description(err).into());
             view.snapshot.get_or_insert_with(Snapshot::default);
             view.layout_gen += 1;
             true
@@ -1109,7 +1097,7 @@ impl ChangesView {
             view.staging.selected.clear();
             view.discarded(workspace, snapshot, discarded(&paths), cx);
           }
-          Err(err) => view.toast(ToastTone::Error, "Discard failed", err),
+          Err(err) => tell(view.host.as_ref(), Toast::error("Discard failed").description(err).into()),
         }
       },
       cx,
@@ -1131,7 +1119,7 @@ impl ChangesView {
         Ok((workspace, snapshot)) => {
           view.discarded(workspace, snapshot, "All changes discarded".into(), cx)
         }
-        Err(err) => view.toast(ToastTone::Error, "Discard all failed", err),
+        Err(err) => tell(view.host.as_ref(), Toast::error("Discard all failed").description(err).into()),
       },
       cx,
     );
@@ -1151,9 +1139,9 @@ impl ChangesView {
       let event = match host.restore_snapshot(&workspace, &snapshot) {
         Ok(()) => {
           Self::changed(host.as_ref(), &parent);
-          toast_event(ToastTone::Success, "Changes restored", "")
+          NativeEvent::from(Toast::success("Changes restored"))
         }
-        Err(err) => toast_event(ToastTone::Error, "Undo failed", err),
+        Err(err) => NativeEvent::from(Toast::error("Undo failed").description(err)),
       };
       tell(host.as_ref(), event);
     });
@@ -1178,12 +1166,12 @@ impl ChangesView {
       |host, parent| host.stash_all(&parent.repo_path, parent.workspace_id()),
       |view, result, cx| match result {
         Ok(entry) => {
-          view.toast(ToastTone::Success, "Changes stashed", stashed(&entry));
+          tell(view.host.as_ref(), Toast::success("Changes stashed").description(stashed(&entry)).into());
           Self::changed(view.host.as_ref(), &view.parent);
           view.field("commits.stashed", serde_json::Value::Null, cx);
           view.load(cx);
         }
-        Err(err) => view.toast(ToastTone::Error, "Stash failed", err),
+        Err(err) => tell(view.host.as_ref(), Toast::error("Stash failed").description(err).into()),
       },
       cx,
     );
@@ -1253,7 +1241,7 @@ impl ChangesView {
     let message = match check_message(&message) {
       Ok(m) => m,
       Err(err) => {
-        self.toast(ToastTone::Error, "Commit message", err);
+        tell(self.host.as_ref(), Toast::error("Commit message").description(err).into());
         return;
       }
     };
@@ -1295,7 +1283,7 @@ impl ChangesView {
           }
           match committed {
             Ok(result) => {
-              view.toast(ToastTone::Success, "Commit created", result.trim());
+              tell(view.host.as_ref(), Toast::success("Commit created").description(result.trim()).into());
               view.committed_collapsed = true;
               if action == CommitAction::Pr {
                 view.send_react(
@@ -1306,7 +1294,7 @@ impl ChangesView {
                 );
               }
             }
-            Err(err) => view.toast(ToastTone::Error, "Commit failed", err),
+            Err(err) => tell(view.host.as_ref(), Toast::error("Commit failed").description(err).into()),
           }
           Self::changed(view.host.as_ref(), &view.parent);
           view.load(cx);
@@ -1326,8 +1314,8 @@ impl ChangesView {
           }
           view.pending = None;
           match pushed {
-            Ok(_) => view.toast(ToastTone::Success, "Pushed to remote", ""),
-            Err(err) => view.toast(ToastTone::Error, "Failed to push", err),
+            Ok(_) => tell(view.host.as_ref(), Toast::success("Pushed to remote").into()),
+            Err(err) => tell(view.host.as_ref(), Toast::error("Failed to push").description(err).into()),
           }
           Self::changed(view.host.as_ref(), &view.parent);
           view.load(cx);
@@ -1577,7 +1565,7 @@ impl ChangesView {
 
   fn copy(&self, text: String, title: String, cx: &mut App) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
-    self.toast(ToastTone::Success, &title, "");
+    tell(self.host.as_ref(), Toast::success(&title).into());
   }
 
   fn open_in(&self, scheme: &str, path: &str) {
