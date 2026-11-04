@@ -9,7 +9,7 @@ use std::sync::Arc;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  div, prelude::*, Context, Entity, FocusHandle, FontWeight, Subscription, Window,
+  div, prelude::*, Context, Entity, ExternalPaths, FocusHandle, FontWeight, Subscription, Window,
 };
 
 use super::{
@@ -29,6 +29,17 @@ pub struct ProjectContextRoute {
   pub name: String,
   pub prompt: String,
   pub context_paths: Vec<String>,
+}
+
+/// `text` with `added` appended one per line, skipping paths it lists already.
+pub(super) fn append_paths(text: &str, added: &[String]) -> String {
+  let mut lines = parse_paths(text);
+  for path in added {
+    if !lines.contains(path) {
+      lines.push(path.clone());
+    }
+  }
+  lines.join("\n")
 }
 
 /// One context path per line, trimmed, blank lines dropped.
@@ -91,6 +102,35 @@ impl ProjectContextDialog {
     self.dismissed = true;
     press(&self.sink, "projectContext.close", cx);
     cx.notify();
+  }
+
+  /// Adds dropped or picked files to the context box.
+  fn add_paths(&mut self, added: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+    if added.is_empty() {
+      return;
+    }
+    self.paths = append_paths(&self.paths, &added);
+    if let Some((_, input)) = &self.fields {
+      let value = self.paths.clone();
+      input.update(cx, |input, cx| input.set_value(value, window, cx));
+    }
+    cx.notify();
+  }
+
+  /// "Add files…": the system file picker; the picks join the context box.
+  fn pick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let host = self.host.clone();
+    cx.spawn_in(window, async move |this, cx| {
+      let files = cx
+        .background_spawn(async move { host.pick_context_files() })
+        .await;
+      if let Some(files) = files {
+        this
+          .update_in(cx, |view, window, cx| view.add_paths(files, window, cx))
+          .ignore_closed();
+      }
+    })
+    .detach();
   }
 
   fn submit(&mut self, cx: &mut Context<Self>) {
@@ -223,12 +263,43 @@ impl Render for ProjectContextDialog {
               .min_h(zpx(90.))
               .child(ui::text(Textarea::new(&prompt), TextSize::Sm)),
           )
-          .child(label("Context files and links"))
           .child(
             div()
+              .flex()
+              .items_center()
+              .justify_between()
+              .child(label("Context files and links"))
+              .child(
+                Button::new("project-context-add-files", &p)
+                  .variant(Variant::Outline)
+                  .icon(theme::ICON_PAPERCLIP, 14.)
+                  .label("Add files…")
+                  .on_click(cx.listener(|view, _, window, cx| view.pick(window, cx))),
+              ),
+          )
+          .child(
+            div()
+              .id("project-context-paths")
               .debug_selector(|| "project-context-paths".into())
               .min_h(zpx(70.))
+              .rounded_md()
+              .drag_over::<ExternalPaths>(move |style, _, _, _| {
+                style.border_1().border_color(p.primary)
+              })
+              .on_drop(cx.listener(|view, paths: &ExternalPaths, window, cx| {
+                let added = paths
+                  .paths()
+                  .iter()
+                  .map(|p| p.to_string_lossy().to_string())
+                  .collect();
+                view.add_paths(added, window, cx);
+              }))
               .child(ui::text(Textarea::new(&paths), TextSize::Sm)),
+          )
+          .child(
+            ui::text(div(), TextSize::Xs)
+              .text_color(p.muted_foreground)
+              .child("Drop files here, pick them with Add files…, or type a path or URL per line."),
           )
           .when(!self.error.is_empty(), |this| {
             this.child(
@@ -258,6 +329,14 @@ impl Render for ProjectContextDialog {
 #[cfg(test)]
 mod tests {
   use super::parse_paths;
+
+  #[test]
+  fn appends_new_paths_once() {
+    assert_eq!(
+      super::append_paths("/a.md\n", &["/b.md".into(), "/a.md".into()]),
+      "/a.md\n/b.md"
+    );
+  }
 
   #[test]
   fn parses_one_path_per_line() {

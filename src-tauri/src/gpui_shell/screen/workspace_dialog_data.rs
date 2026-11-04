@@ -48,6 +48,10 @@ pub trait WorkspaceDialogHost: ChangesHost {
   }
   /// Closes this window without asking to save again.
   fn close_window(&self) {}
+  /// Blocks: asks for files to add as project context; `None` when cancelled.
+  fn pick_context_files(&self) -> Option<Vec<String>> {
+    None
+  }
   /// Sets this window's saved project's agent instructions and context.
   fn set_project_context(&self, _prompt: &str, _paths: &[String]) -> Result<(), String> {
     Err("Projects are not available here".into())
@@ -85,6 +89,10 @@ pub trait WorkspaceDialogHost: ChangesHost {
 impl WorkspaceDialogHost for Backend {
   fn save_project(&self, name: &str) -> Result<(), String> {
     crate::gpui_shell::projects::save_window_project(self.app(), self.label(), name).map(drop)
+  }
+
+  fn pick_context_files(&self) -> Option<Vec<String>> {
+    super::code_data::CodeHost::pick_files(self)
   }
 
   fn set_project_context(&self, prompt: &str, paths: &[String]) -> Result<(), String> {

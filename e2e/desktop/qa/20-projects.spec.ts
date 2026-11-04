@@ -89,7 +89,7 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await settle(page, 5000);
 
-  await page.getByRole("button", { name: "Project home" }).click();
+  await page.getByRole("button", { name: "Home", exact: true }).click();
   await settle(page, 1500);
   await expect(page.getByRole("heading", { name: "Event platform" })).toBeVisible();
   await capture(page, {

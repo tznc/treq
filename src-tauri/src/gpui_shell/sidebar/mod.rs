@@ -632,8 +632,9 @@ impl Sidebar {
 /// Indentation of a row's content, matching the React sidebar's
 /// `16 + (depth - 1) * 6` px.
 /// How far a grouped repository's workspace rows sit right of a lone
-/// repository's, so they line up under the group header's repository name.
-const GROUP_INDENT: f32 = 22.;
+/// repository's, so their branch text (not their icon) starts under the
+/// group header's repository name.
+const GROUP_INDENT: f32 = 4.;
 
 fn row_indent(depth: u32) -> f32 {
   16. + (depth as f32 - 1.) * 6.
@@ -755,8 +756,8 @@ impl Render for Sidebar {
     if let Some(active) = snapshot.project_home {
       sidebar = sidebar.child(self.nav_row(
         "project-home",
-        theme::ICON_FOLDER_OPEN,
-        "Project home",
+        theme::ICON_HOUSE,
+        "Home",
         active,
         SidebarAction::OpenProjectHome,
         &palette,
@@ -1078,16 +1079,15 @@ impl Sidebar {
     let label = repo.home_ref.clone().unwrap_or_else(|| "…".into());
     let key = SharedString::from(format!("home:{}", repo.path));
     let title: gpui::AnyElement = match &repo.label {
-      // Several repositories: the name, then the checked-out branch.
+      // Several repositories: the name over the checked-out branch.
       Some(name) => div()
         .flex()
+        .flex_col()
         .flex_1()
         .min_w_0()
-        .items_baseline()
-        .gap_1p5()
         .child(
           div()
-            .flex_none()
+            .min_w_0()
             .truncate()
             .font_weight(gpui::FontWeight::MEDIUM)
             .child(name.clone()),
@@ -1096,7 +1096,7 @@ impl Sidebar {
           repo.home_ref.clone().filter(|_| !repo.missing),
           |this, home_ref| {
             this.child(
-              div()
+              ui::text(div(), TextSize::Xs)
                 .min_w_0()
                 .truncate()
                 .font_family(theme::MONO_FONT)
@@ -1131,7 +1131,11 @@ impl Sidebar {
       })
       .role(Role::Button)
       .label(label)
-      .density(ui::RowDensity::Default)
+      .density(if repo.label.is_some() {
+        ui::RowDensity::TwoLine
+      } else {
+        ui::RowDensity::Default
+      })
       .selected(repo.home_selected)
       .relative()
       .gap_1p5()

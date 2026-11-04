@@ -209,7 +209,12 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
       RepoSection {
         path: path.clone(),
         // The React sidebar shows the branch only for the repository on screen.
-        home_ref: if active { data.home_ref(path) } else { None },
+        // A group header shows every repository's branch under its name.
+        home_ref: if active || multi {
+          data.home_ref(path)
+        } else {
+          None
+        },
         home_selected: page_selects && active && model.selected.is_none(),
         active,
         loading: !missing && !loaded && workspaces.is_empty(),
