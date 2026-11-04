@@ -625,6 +625,10 @@ impl Sidebar {
 
 /// Indentation of a row's content, matching the React sidebar's
 /// `16 + (depth - 1) * 6` px.
+/// How far a grouped repository's workspace rows sit right of a lone
+/// repository's, so they line up under the group header's repository name.
+const GROUP_INDENT: f32 = 22.;
+
 fn row_indent(depth: u32) -> f32 {
   16. + (depth as f32 - 1.) * 6.
 }
@@ -1066,7 +1070,7 @@ impl Sidebar {
             .flex_none()
             .truncate()
             .font_weight(gpui::FontWeight::MEDIUM)
-            .child(name.clone()),
+            .child(name.to_uppercase()),
         )
         .when_some(
           repo.home_ref.clone().filter(|_| !repo.missing),
@@ -1115,7 +1119,11 @@ impl Sidebar {
       .rounded_md()
       .text_color(palette.sidebar_foreground)
       .when(repo.missing, |this| this.opacity(0.5))
-      .leading(icon(theme::ICON_HOUSE, 16., palette.sidebar_foreground))
+      // A group header names its repository; only a lone home row keeps
+      // the house.
+      .when(repo.label.is_none(), |this| {
+        this.leading(icon(theme::ICON_HOUSE, 16., palette.sidebar_foreground))
+      })
       .child(title)
       .when(repo.missing, |this| {
         this.child(
@@ -1406,6 +1414,11 @@ impl Sidebar {
   ) -> impl IntoElement {
     let id = row.id;
     let repo_active = repo.active;
+    let group_indent = if repo.label.is_some() {
+      GROUP_INDENT
+    } else {
+      0.
+    };
     // Ids are per repository; rows of other repositories get their own keys.
     let prefix = if repo_active {
       String::new()
@@ -1500,7 +1513,7 @@ impl Sidebar {
       .group(group.clone())
       .relative()
       .gap_1p5()
-      .pl(zpx(row_indent(row.depth)))
+      .pl(zpx(row_indent(row.depth) + group_indent))
       .pr_2()
       .rounded_md()
       .text_color(palette.sidebar_foreground)
@@ -1511,7 +1524,7 @@ impl Sidebar {
           div()
             .absolute()
             .top_0()
-            .left(zpx(guide_left(row.depth)))
+            .left(zpx(guide_left(row.depth) + group_indent))
             .h(zpx(16.))
             .w(zpx(6.))
             .border_l_1()

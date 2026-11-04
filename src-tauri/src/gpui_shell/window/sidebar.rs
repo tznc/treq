@@ -214,7 +214,13 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
         active,
         loading: !missing && !loaded && workspaces.is_empty(),
         workspaces,
-        label: labels.as_ref().and_then(|l| l.get(path).cloned()),
+        // A GitHub origin names the repository as GitHub does: owner/name.
+        label: labels.as_ref().and_then(|l| {
+          repo
+            .and_then(|r| r.remote.as_ref())
+            .map(|remote| remote.full_name.clone())
+            .or_else(|| l.get(path).cloned())
+        }),
         missing,
         collapsed: multi && !missing && model.collapsed.contains(path),
       }
@@ -295,6 +301,31 @@ mod tests {
     assert_eq!(labels["/a/app"], "a/app");
     assert_eq!(labels["/b/app"], "b/app");
     assert_eq!(labels["/c/lib"], "lib");
+  }
+
+  #[test]
+  fn labels_github_repositories_owner_slash_name() {
+    let mut data = data_with(vec![workspace(1, "login", Some("main"))]);
+    data.set_supporting(vec![crate::core::supporting_repos::SupportingRepo {
+      path: "/src/lib".into(),
+      exists: true,
+    }]);
+    data.apply(
+      "/repo",
+      RepoRead {
+        remote: Some(Some(crate::github::GitRemoteInfo {
+          owner: "tznc".into(),
+          repo: "my-repo".into(),
+          full_name: "tznc/my-repo".into(),
+        })),
+        ..RepoRead::default()
+      },
+    );
+    let model = Model::new(Some("/repo".into()));
+    let snapshot = snapshot(&model, &data).unwrap();
+    assert_eq!(snapshot.repos[0].label.as_deref(), Some("tznc/my-repo"));
+    // Without a GitHub origin, the folder name.
+    assert_eq!(snapshot.repos[1].label.as_deref(), Some("lib"));
   }
 
   #[test]
