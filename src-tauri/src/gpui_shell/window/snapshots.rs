@@ -189,6 +189,7 @@ fn project_home(model: &Model, data: &Data) -> Value {
     "kind": "projectHome",
     "name": data.project().map(|p| p.name.clone()),
     "repos": repos,
+    "revision": data.revision,
   })
 }
 

@@ -211,6 +211,7 @@ pub struct Screen {
   terminal: Option<Entity<terminal::TerminalPane>>,
   merge: Option<Entity<merge::MergeView>>,
   linear: Option<Entity<linear::LinearView>>,
+  project_home: Option<Entity<project_home::ProjectHomeView>>,
   github: Option<Entity<github::GithubView>>,
   pr_review: Option<Entity<pr_review::PrReviewView>>,
   /// The dialog drawn over the screen, whichever it is, and its views.
@@ -285,6 +286,7 @@ impl Screen {
       terminal: None,
       merge: None,
       linear: None,
+      project_home: None,
       github: None,
       pr_review: None,
       modal: None,
@@ -579,6 +581,9 @@ impl Render for Screen {
     if !matches!(self.snapshot.view, View::Linear(_)) {
       self.linear = None;
     }
+    if !matches!(self.snapshot.view, View::ProjectHome(_)) {
+      self.project_home = None;
+    }
     if !matches!(self.snapshot.view, View::Github(_)) && self.github.take().is_some() {
       // A tooltip the view showed would outlive it.
       (self.popups)(PopupRequest::HideTooltip, cx);
@@ -609,7 +614,22 @@ impl Render for Screen {
       sink: &self.sink,
     };
     let body = match &self.snapshot.view {
-      View::ProjectHome(route) => project_home::render(route, &ctx),
+      View::ProjectHome(route) => {
+        let route = route.clone();
+        match &self.project_home {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let host: Arc<dyn workspace_dialog_data::WorkspaceDialogHost> = self.host.clone();
+            let sink = self.sink.clone();
+            let view = cx.new(|cx| project_home::ProjectHomeView::new(route, host, sink, dark, cx));
+            self.project_home = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
       View::Onboarding(route) => {
         let route = route.clone();
         match &self.onboarding {

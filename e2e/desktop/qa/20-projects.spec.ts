@@ -101,6 +101,26 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
       "The Project home row is selected in the sidebar",
     ],
   });
+  await page.getByRole("tab", { name: "Changes" }).click();
+  await settle(page, 3000);
+  await capture(page, {
+    name: "20-projects-07b-home-changes",
+    title: "Home › Changes",
+    expectations: [
+      "Uncommitted changes of each repository's home checkout, grouped by repository, or a 'No changes' line",
+    ],
+  });
+  await page.getByRole("tab", { name: "Commits" }).click();
+  await settle(page, 3000);
+  await capture(page, {
+    name: "20-projects-07c-home-commits",
+    title: "Home › Commits",
+    expectations: [
+      "A column per repository with its commits, in shared time bands (Today, Yesterday, …) labelled on the left",
+    ],
+  });
+  await page.getByRole("tab", { name: "Code" }).click();
+  await settle(page, 800);
   await page.getByRole("button", { name: "Open docs-site" }).click();
   await settle(page, 1500);
   await capture(page, {

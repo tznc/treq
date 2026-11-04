@@ -48,6 +48,16 @@ pub trait WorkspaceDialogHost: ChangesHost {
   }
   /// Closes this window without asking to save again.
   fn close_window(&self) {}
+  /// Blocks: the uncommitted files of a repository's home checkout (Home's
+  /// Changes tab).
+  fn home_changes(&self, _repo: &str) -> Vec<super::project_home::HomeChange> {
+    Vec::new()
+  }
+  /// Blocks: a repository's recent home history, newest first (Home's
+  /// Commits tab).
+  fn home_commits(&self, _repo: &str, _limit: usize) -> Vec<super::project_home::HomeCommit> {
+    Vec::new()
+  }
   /// Blocks: asks for files to add as project context; `None` when cancelled.
   fn pick_context_files(&self) -> Option<Vec<String>> {
     None
@@ -93,6 +103,32 @@ impl WorkspaceDialogHost for Backend {
 
   fn pick_context_files(&self) -> Option<Vec<String>> {
     super::code_data::CodeHost::pick_files(self)
+  }
+
+  fn home_changes(&self, repo: &str) -> Vec<super::project_home::HomeChange> {
+    crate::core::changes::list_changed_files(repo, None)
+      .unwrap_or_default()
+      .into_iter()
+      .map(|f| super::project_home::HomeChange {
+        status: f.status,
+        path: f.path,
+        lines: f.changed_line_count,
+      })
+      .collect()
+  }
+
+  fn home_commits(&self, repo: &str, limit: usize) -> Vec<super::project_home::HomeCommit> {
+    crate::core::commits::list_commits(repo, None, false, None, Some(limit))
+      .map(|log| log.commits)
+      .unwrap_or_default()
+      .into_iter()
+      .filter(|c| !c.is_working_copy)
+      .map(|c| super::project_home::HomeCommit {
+        short_id: c.short_id,
+        description: c.description,
+        timestamp: c.timestamp,
+      })
+      .collect()
   }
 
   fn set_project_context(&self, prompt: &str, paths: &[String]) -> Result<(), String> {

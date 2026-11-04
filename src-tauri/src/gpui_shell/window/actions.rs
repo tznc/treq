@@ -278,6 +278,21 @@ impl Model {
       "openWorkspaces.close" => self.dialogs.open_workspaces = None,
       "workspaceDeletion.close" => self.dialogs.deletion = false,
       "saveProject.close" => self.dialogs.save_project = None,
+      "projectHome.changes" | "projectHome.commits" => {
+        self.page = Page::Workspace;
+        let effects = self.sidebar_action(
+          &SidebarAction::SelectHome {
+            repo_path: arg.to_string(),
+          },
+          data,
+        );
+        self.view.tab = if name == "projectHome.changes" {
+          Tab::Changes
+        } else {
+          Tab::Commits
+        };
+        return effects;
+      }
       "projectHome.open" => {
         self.page = Page::Workspace;
         return self.sidebar_action(
@@ -1215,6 +1230,12 @@ mod tests {
     model.screen_action(&press("projectHome.open:/repo"), &data);
     assert_eq!(model.page, Page::Workspace);
     assert_eq!(model.selected, None, "the repository's home");
+    model.open_project_home();
+    model.screen_action(&press("projectHome.commits:/repo"), &data);
+    assert_eq!(model.view.tab, Tab::Commits);
+    model.open_project_home();
+    model.screen_action(&press("projectHome.changes:/repo"), &data);
+    assert_eq!(model.view.tab, Tab::Changes);
   }
 
   #[test]
