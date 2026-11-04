@@ -1,5 +1,5 @@
 //! The workspace Code tab (`ShowWorkspace`'s Overview): the workspace's
-//! title, its action row (Agent, alerts, Go to file), description and stack, its files and README, and its commit
+//! title, its action row (Agent, alerts, Go to file), description and stack, its files (and, on home, the README), and its commit
 //! history in a column on the right.
 //!
 //! Drawn from the backend directly ([`code_data`]). What stays React's goes
@@ -2303,6 +2303,10 @@ impl CodeView {
   }
 
   fn readme(&self, p: &Palette) -> Option<impl IntoElement> {
+    // Only the home (main tree) Code view shows the README; a workspace's does not.
+    if self.parent.workspace.is_some() {
+      return None;
+    }
     let overview = self.overview.as_ref()?;
     // A failed read says so above; it is not a missing README.
     if overview.error.is_some() {
@@ -2417,29 +2421,24 @@ impl CodeView {
         Some(err) => ui::EmptyState::new("code-history-error", "Couldn't load commits", p)
           .error(true)
           .icon(theme::ICON_CIRCLE_ALERT)
-          .message("Its commit history could not be read.")
           .action(
-            div()
-              .flex()
-              .gap_2()
-              .child(retry_button("code-history-retry", p, cx))
-              .child(
-                div()
-                  .child(
-                    Button::new("code-history-show-error", p)
-                      .variant(Variant::Outline)
-                      .size(Size::Sm)
-                      .label("Show error")
-                      // A press outside the open popover closes it, so this only opens.
-                      .on_click(cx.listener(|view, _, _, cx| {
-                        view.history_error_open = true;
-                        cx.notify();
-                      })),
-                  )
-                  .when(self.history_error_open, |el| {
-                    el.child(self.history_error_popover(&err, p, window, cx))
-                  }),
-              ),
+            div().flex().gap_2().child(
+              div()
+                .child(
+                  Button::new("code-history-show-error", p)
+                    .variant(Variant::Outline)
+                    .size(Size::Sm)
+                    .label("Show error")
+                    // A press outside the open popover closes it, so this only opens.
+                    .on_click(cx.listener(|view, _, _, cx| {
+                      view.history_error_open = true;
+                      cx.notify();
+                    })),
+                )
+                .when(self.history_error_open, |el| {
+                  el.child(self.history_error_popover(&err, p, window, cx))
+                }),
+            ),
           )
           .into_any_element(),
         None => ui::delayed(

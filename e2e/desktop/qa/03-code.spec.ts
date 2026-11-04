@@ -89,16 +89,16 @@ test("code: workspace Code tab, action row, alerts and Agent", async ({ page, co
     expectations: ["Tooltip explains stacks and is fully on screen"],
   });
 
-  // The file tree: scroll to it and open README.md, the last row.
+  // The file tree: scroll to it. A workspace's Code tab draws no README.
   await page.mouse.move(800, 700);
   await page.mouse.wheel(0, 600);
   await settle(page, 800);
   await capture(page, {
     name: "03-code-tree-and-readme",
-    title: "Code tab scrolled: file tree and README preview",
+    title: "Code tab scrolled: file tree, no README preview",
     expectations: [
       "Tree rows (packages, .gitignore, README.md) aligned; names in the neutral text colour, packages has a changed dot after its name",
-      "README card renders headings, inline code and bullets",
+      "No README card or 'No README.md' box under the tree on a workspace",
     ],
   });
 });
