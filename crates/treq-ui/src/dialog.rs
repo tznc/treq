@@ -550,7 +550,7 @@ impl Dialog {
 /// `container`, wrapping at its ends, so the keyboard never leaves it. GPUI's
 /// tab order spans the window, so this steps through it until it is back
 /// inside, at most once round.
-fn trap_tab(container: &FocusHandle, back: bool, window: &mut Window, cx: &mut App) {
+pub fn trap_tab(container: &FocusHandle, back: bool, window: &mut Window, cx: &mut App) {
   let advance = if back {
     Window::focus_prev
   } else {
@@ -569,7 +569,7 @@ fn trap_tab(container: &FocusHandle, back: bool, window: &mut Window, cx: &mut A
 }
 
 /// Whether `keystroke` is Tab (`Some(false)`) or Shift+Tab (`Some(true)`).
-fn tab_key(keystroke: &Keystroke) -> Option<bool> {
+pub fn tab_key(keystroke: &Keystroke) -> Option<bool> {
   let m = keystroke.modifiers;
   (keystroke.key == "tab" && !(m.control || m.alt || m.platform || m.function)).then_some(m.shift)
 }

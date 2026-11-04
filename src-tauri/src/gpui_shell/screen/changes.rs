@@ -2347,6 +2347,8 @@ impl ChangesView {
     let fg = p.foreground;
     div()
       .id(id)
+      .role(gpui::Role::Button)
+      .aria_label(if collapsed { "Expand" } else { "Collapse" })
       .debug_selector(move || id.into())
       .flex()
       .items_center()
@@ -2511,7 +2513,11 @@ impl ChangesView {
         },
         theme::ICON_UNDO,
         // It opens the "Discard all changes" confirmation.
-        "Discard all changes…",
+        if staged {
+          "Discard selected changes…"
+        } else {
+          "Discard all changes…"
+        },
         muted,
         p,
       )
@@ -2559,6 +2565,8 @@ impl ChangesView {
           } else {
             "move-changes-files"
           })
+          .role(gpui::Role::Button)
+          .aria_label("Move to a new workspace")
           .p_1()
           .rounded(radius::SM)
           .cursor_pointer()
@@ -2641,6 +2649,12 @@ impl ChangesView {
     let fg = p.foreground;
     let header = div()
       .id("committed-section-toggle")
+      .role(gpui::Role::Button)
+      .aria_label(if collapsed {
+        "Show committed"
+      } else {
+        "Hide committed"
+      })
       .debug_selector(|| "committed-section-toggle".into())
       .flex()
       .items_center()
@@ -3223,6 +3237,8 @@ impl ChangesView {
     } else {
       div()
         .id(SharedString::from(format!("collapse-{path}")))
+        .role(gpui::Role::Button)
+        .aria_label(if shut { "Expand file" } else { "Collapse file" })
         .cursor_pointer()
         .child(ui::icon(
           if shut {
@@ -3280,6 +3296,8 @@ impl ChangesView {
                 move |copied| {
                   div()
                     .id(id.clone())
+                    .role(gpui::Role::Button)
+                    .aria_label("Copy path")
                     .flex_none()
                     .cursor_pointer()
                     .child(ui::copy_feedback::copy_icon(
@@ -3301,6 +3319,8 @@ impl ChangesView {
           "Add file comment",
           div()
             .id(SharedString::from(format!("add-file-comment-{path}")))
+            .role(gpui::Role::Button)
+            .aria_label("Add file comment")
             .debug_selector(|| "add-file-comment-button".into())
             .p_1()
             .rounded(radius::SM)
@@ -3324,23 +3344,15 @@ impl ChangesView {
         } else {
           "Mark as viewed"
         },
-        div()
-          .id(SharedString::from(format!("viewed-{path}")))
-          .debug_selector({
-            let id = format!("viewed-{path}");
-            move || id
-          })
-          .flex()
-          .items_center()
+        ui::Checkbox::new(format!("viewed-{path}"), p)
+          .checked(viewed)
+          .label("Viewed")
           .gap_1()
           .px_2()
           .py_0p5()
           .rounded(radius::SM)
-          .cursor_pointer()
           .text_color(muted)
           .hover(move |s| s.bg(p.hover()))
-          .child(ui::Checkbox::new(format!("viewed-box-{path}"), p).checked(viewed))
-          .child("Viewed")
           .on_click(cx.listener(move |view, _, _, cx| {
             cx.stop_propagation();
             view.toggle_viewed(&file, cx);
@@ -3387,6 +3399,8 @@ impl ChangesView {
       right = right.child(
         div()
           .id(SharedString::from(key.clone()))
+          .role(gpui::Role::Button)
+          .aria_label("More actions")
           .relative()
           .p_1()
           .rounded(radius::SM)

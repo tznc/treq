@@ -840,6 +840,8 @@ impl AgentPromptView {
             let selector = SharedString::from(format!("agent-prompt-workspace-{}", label));
             ui::text(div(), TextSize::Sm)
               .id(selector.clone())
+              .role(gpui::Role::MenuItemCheckBox)
+              .aria_label(label.clone())
               .debug_selector(move || selector.to_string())
               .flex()
               .items_center()
@@ -961,6 +963,8 @@ impl AgentPromptView {
           .child(
             div()
               .id("issue-chip-remove")
+              .role(gpui::Role::Button)
+              .aria_label("Remove issue")
               .debug_selector(|| "issue-chip-remove".into())
               .ml_0p5()
               .p_0p5()

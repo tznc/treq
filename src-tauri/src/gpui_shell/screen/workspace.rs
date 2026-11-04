@@ -1347,6 +1347,8 @@ impl WorkspaceView {
       right = right.child(
         ui::text(div(), TextSize::Xs)
           .id("workspace-linear")
+          .role(gpui::Role::Link)
+          .aria_label(linear.key.clone())
           .debug_selector(|| "workspace-linear".into())
           .flex()
           .flex_none()

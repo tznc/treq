@@ -2251,6 +2251,8 @@ impl CommitsView {
           .child(
             div()
               .id(SharedString::from(format!("load-diff-{}", file.path)))
+              .role(gpui::Role::Button)
+              .aria_label("Load diff")
               .debug_selector(|| "load-deferred-diff".into())
               .rounded(radius::MD)
               .border_1()
@@ -2610,6 +2612,8 @@ impl CommitsView {
           Some(TooltipContent::Text(RESOLVE_HELP.into())),
           div()
             .id("resolve-conflicts-help")
+            .role(gpui::Role::Button)
+            .aria_label("Learn about resolving conflicts")
             .debug_selector(|| "resolve-conflicts-help".into())
             .cursor_pointer()
             .child(ui::icon(

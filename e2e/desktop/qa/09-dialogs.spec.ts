@@ -45,11 +45,11 @@ test("dialogs: create workspace", async ({ page, context }) => {
   });
   // The Workspaces field takes Tab to indent, so start from the search field.
   await page.getByRole("textbox", { name: "Search pull requests" }).click();
-  for (let i = 0; i < 2; i++) await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
   await settle(page, 500);
   await capture(page, {
     name: "09-create-workspace-dialog-tab-focus",
-    title: "New workspace dialog: Tab x2 from the pull request search",
+    title: "New workspace dialog: Tab from the pull request search",
     screen: true,
     rest: false,
     expectations: [

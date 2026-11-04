@@ -547,6 +547,8 @@ impl ChangesView {
           "Quote this comment",
           div()
             .id(SharedString::from(format!("quote-{}", comment.id)))
+            .role(gpui::Role::Button)
+            .aria_label("Quote")
             .debug_selector(|| "github-comment-quote".into())
             .absolute()
             .top_2()
@@ -717,6 +719,8 @@ fn profile_link(login: &str, p: &Palette, cx: &mut Context<ChangesView>) -> impl
   let url = format!("https://github.com/{login}");
   ui::text(div(), TextSize::Xs)
     .id(SharedString::from(format!("profile-{login}")))
+    .role(gpui::Role::Link)
+    .aria_label(format!("@{login}"))
     .flex_none()
     .font_weight(FontWeight::MEDIUM)
     .text_color(p.foreground)

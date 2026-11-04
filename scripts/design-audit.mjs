@@ -34,6 +34,7 @@ const RULES = [
   "gpui-name-no-status-color",
   "gpui-one-primary-per-region",
   "gpui-list-nav-shared",
+  "gpui-clickable-needs-role",
   "ui-copy-no-yes-no",
   "ui-copy-sentence-case",
   "ui-copy-ellipsis",

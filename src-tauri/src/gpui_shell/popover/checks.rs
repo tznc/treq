@@ -168,6 +168,8 @@ impl Popover {
       let logs = input.logs.then(|| {
         ui::text(div(), TextSize::Xs)
           .id("checks-view-logs")
+          .role(gpui::Role::Button)
+          .aria_label("View logs")
           .debug_selector(|| "checks-view-logs".into())
           .px_2()
           .pb_1()
@@ -347,6 +349,9 @@ impl Popover {
       let selector = id.to_string();
       ui::text(div(), TextSize::Sm)
         .id(id)
+        .when(link.is_some(), |el| {
+          el.role(gpui::Role::Link).aria_label(check.name.clone())
+        })
         .debug_selector(move || selector)
         .w_full()
         .flex()

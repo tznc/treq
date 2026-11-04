@@ -1118,6 +1118,8 @@ impl Render for Overlay {
     };
     div()
       .id("overlay-backdrop")
+      // A dismiss target, not a control.
+      .cursor_default()
       .debug_selector(|| "overlay-backdrop".into())
       .key_context(KEY_CONTEXT)
       .track_focus(&self.focus)

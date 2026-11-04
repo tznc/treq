@@ -546,6 +546,9 @@ impl ChangesView {
         gutter_cols(
           div()
             .id(SharedString::from(format!("hunk-header-{path}-{h}")))
+            .when(expandable, |this| {
+              this.role(gpui::Role::Button).aria_label("Show more lines")
+            })
             .debug_selector({
               let id = format!("hunk-header-{path}-{h}");
               move || id
@@ -660,6 +663,8 @@ impl ChangesView {
         gutter_cols(
           div()
             .id(SharedString::from(format!("expand-after-{path}-{h}")))
+            .role(gpui::Role::Button)
+            .aria_label("Show more lines")
             .debug_selector({
               let id = format!("expand-after-{path}-{h}");
               move || id
@@ -715,6 +720,8 @@ impl ChangesView {
     let hover = p.foreground;
     ui::text(div(), TextSize::Xs)
       .id(SharedString::from(id.clone()))
+      .role(gpui::Role::Button)
+      .aria_label("Show more lines")
       .debug_selector(move || id)
       .ml_3()
       .flex_none()

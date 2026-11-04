@@ -1,0 +1,125 @@
+id: gpui-clickable-needs-role
+language: rust
+severity: error
+message: >
+  A clickable element needs a role, or screen readers, the keyboard and
+  gpui-testing-library's `get_by_role` cannot find it. Build it from
+  `ui::Button`, `ui::IconButton`, `ui::Checkbox` or `ui::Row`, which set
+  their role, name and tab stop, or give the `div()` a `.role(..)` and
+  `.aria_label(..)` in the same builder chain. A click target that is not
+  a control, such as a backdrop, says so with `.cursor_default()`.
+note: >
+  Checked: a `div()` chain that takes `.on_click(..)` or a left
+  `.on_mouse_down(..)` that does more than stop the press. A chain that starts from a helper's result is not
+  checked, so a helper that builds a clickable element sets the role itself.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+utils:
+  # A step of the builder chain the element is built in: a method call on
+  # it, a plain function that takes and returns it (`ui::text(el, ..)`), or
+  # a `.when(..)`/`.map(..)`-style closure that continues it.
+  in-chain:
+    any:
+      - kind: field_expression
+      - kind: call_expression
+      - kind: closure_expression
+      - kind: block
+        inside:
+          kind: closure_expression
+      - kind: arguments
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            any:
+              - kind: identifier
+              - kind: scoped_identifier
+              - kind: field_expression
+                has:
+                  field: field
+                  regex: ^(when|when_some|when_none|map)$
+  sets-role:
+    any:
+      - kind: call_expression
+        has:
+          field: function
+          kind: scoped_identifier
+          regex: (^|::)Button::new$
+      - kind: call_expression
+        has:
+          field: function
+          kind: field_expression
+          has:
+            field: field
+            regex: ^role$
+      # Not a control: a backdrop or empty area (`.cursor_default()`), a
+      # drag handle, or a surface that takes a text selection.
+      - kind: call_expression
+        has:
+          field: function
+          kind: field_expression
+          has:
+            field: field
+            regex: ^cursor_(default|text|crosshair|[a-z]+_resize)$
+  # Built from a `div()` in this chain, not by a helper (`ui::Button` or a
+  # function returning a styled element), which is checked where it is built.
+  div-chain:
+    inside:
+      stopBy:
+        not:
+          matches: in-chain
+      has:
+        stopBy:
+          not:
+            matches: in-chain
+        pattern: div()
+  clicked:
+    kind: call_expression
+    has:
+      field: function
+      kind: field_expression
+      has:
+        field: field
+        regex: ^on_click$
+  pressed:
+    kind: call_expression
+    all:
+      - has:
+          field: function
+          kind: field_expression
+          has:
+            field: field
+            regex: ^on_mouse_down$
+      - has:
+          field: arguments
+          regex: MouseButton::Left
+      # Not a handler that only keeps the press from the element under it.
+      - not:
+          has:
+            field: arguments
+            regex: '^\(\s*(gpui::)?MouseButton::Left,\s*\|[^|]*\|\s*\{?\s*(cx|window|_cx)\.(stop_propagation|prevent_default)\(\);?\s*\}?,?\s*\)$'
+rule:
+  any:
+    - matches: clicked
+    - matches: pressed
+  matches: div-chain
+  not:
+    any:
+      - inside:
+          stopBy:
+            not:
+              matches: in-chain
+          has:
+            stopBy:
+              not:
+                matches: in-chain
+            matches: sets-role
+      - inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end

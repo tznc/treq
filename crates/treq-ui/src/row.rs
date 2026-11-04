@@ -57,7 +57,7 @@ pub struct Row {
   palette: Palette,
   density: RowDensity,
   role: Option<Role>,
-  clickable: bool,
+  on_click: Option<crate::OnClick>,
   label: Option<SharedString>,
   icon: Option<&'static str>,
   leading: Vec<AnyElement>,
@@ -83,7 +83,7 @@ impl Row {
       palette: *palette,
       density: RowDensity::default(),
       role: None,
-      clickable: false,
+      on_click: None,
       label: None,
       icon: None,
       leading: Vec::new(),
@@ -133,20 +133,20 @@ impl Row {
   }
 
   /// Runs `listener` on a click, and makes the row a button unless its role
-  /// is set.
+  /// is set. The row is then a tab stop: Enter opens it, or Space toggles a
+  /// checkbox or radio row. A click leaves focus where it was.
   pub fn on_click(
     mut self,
     listener: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
   ) -> Self {
-    self.clickable = true;
-    self.base = self.base.on_click(listener);
+    self.on_click = Some(std::rc::Rc::new(listener));
     self
   }
 
   /// The role the row draws with: [`Row::role`], else by whether it takes
   /// a click.
   pub fn resolved_role(&self) -> Role {
-    self.role.unwrap_or(if self.clickable {
+    self.role.unwrap_or(if self.on_click.is_some() {
       Role::Button
     } else {
       Role::ListItem
@@ -276,7 +276,7 @@ impl Styled for Row {
 }
 
 impl RenderOnce for Row {
-  fn render(mut self, _: &mut Window, _: &mut App) -> impl IntoElement {
+  fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = self.palette;
     let touch = self.density == RowDensity::Touch;
     let two_line = self.density == RowDensity::TwoLine || touch;
@@ -290,6 +290,19 @@ impl RenderOnce for Row {
     let role = self.resolved_role();
     let selectable = !matches!(role, Role::CheckBox | Role::MenuItemCheckBox) && !self.centered;
     let centered = self.centered;
+    let on_click = self.on_click.take().filter(|_| !self.disabled);
+    let focus = on_click.as_ref().map(|_| {
+      let key = SharedString::from(format!("{:?}-focus", self.base.interactivity().element_id));
+      crate::tab_stop(key, window, cx)
+    });
+    let focused = focus.as_ref().is_some_and(|f| f.is_focused(window));
+    // The key that activates it: Space toggles, Enter opens.
+    let key = match role {
+      Role::CheckBox | Role::MenuItemCheckBox | Role::RadioButton | Role::MenuItemRadio => {
+        gpui::KeyboardButton::Space
+      }
+      _ => gpui::KeyboardButton::Enter,
+    };
     let title = self.title.map(|title| {
       text(div(), TextSize::Sm)
         .when(touch, |el| {
@@ -341,6 +354,21 @@ impl RenderOnce for Row {
     base.style().refine(&user);
     base
       .when_some(fill, |el, fill| el.bg(fill))
+      .when_some(focus, |el, focus| {
+        el.track_focus(&focus)
+          .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
+            window.prevent_default()
+          })
+      })
+      .when(focused, |el| el.shadow(vec![crate::focus_ring(&p, true)]))
+      .when_some(on_click, move |el, f| {
+        el.on_click(move |event, window, cx| {
+          if matches!(event, gpui::ClickEvent::Keyboard(_)) && !crate::keyboard_click(event, key) {
+            return;
+          }
+          f(event, window, cx)
+        })
+      })
       .when_some(hover, |el, hover| el.hover(move |s| s.bg(hover)))
       .when(touch && interactive, |el| {
         let pressed = p.hover();

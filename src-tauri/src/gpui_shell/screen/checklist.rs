@@ -141,6 +141,8 @@ fn tool_row(tool: &Tool, ctx: &Ctx) -> impl IntoElement {
         TextSize::Xs,
       )
       .label("Install")
+      // Each missing tool has one: the name says which.
+      .aria_label(format!("Install {}", tool.label))
       .icon(theme::ICON_EXTERNAL_LINK, 12.)
       .on_click(ctx.send(ScreenAction::OpenUrl {
         url: tool.install_url.clone(),
