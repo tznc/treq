@@ -152,6 +152,30 @@ impl Frame {
     !self.dialogs().is_empty() || !self.layers.is_empty()
   }
 
+  /// Visible controls that share a role and a name with another, which a
+  /// screen reader user can't tell apart: the role and name of each pair.
+  /// Inside an open dialog only its controls count.
+  fn shared_names(&self) -> Vec<(Role, String)> {
+    let dialog = self.dialogs().first().copied();
+    let mut seen = std::collections::HashSet::new();
+    let mut shared = Vec::new();
+    for s in &self.elements {
+      let (Some(role), Some(name)) = (s.role(), s.name().map(str::to_string)) else {
+        continue;
+      };
+      if !CLICK_ROLES.contains(&role) || name.is_empty() || !s.is_visible() {
+        continue;
+      }
+      if dialog.is_some_and(|d| !d.contains(s)) {
+        continue;
+      }
+      if !seen.insert((role, name.clone())) && !shared.contains(&(role, name.clone())) {
+        shared.push((role, name));
+      }
+    }
+    shared
+  }
+
   /// Whether an element `before` showed is gone, as a closed popup is.
   fn lost_any_of(&self, before: &Frame) -> bool {
     before
@@ -371,6 +395,12 @@ fn fuzz_from(mut run: Run, steps: &[Step]) -> Run {
       "{:?} and {:?} are open together {}",
       dialogs.iter().map(|d| d.name()).collect::<Vec<_>>(),
       after.layers,
+      run.context()
+    );
+    let shared = after.shared_names();
+    assert!(
+      shared.is_empty(),
+      "controls share a name: {shared:?} {}",
       run.context()
     );
     if let Some(focused) = after.focused() {
@@ -658,8 +688,15 @@ fn the_changes_tab_survives_random_review() {
       for call in effects(&run.host) {
         // Discarding everything needs its confirmation.
         if call.starts_with("discard /") {
+          // Enter runs the open confirmation's verb.
+          let opened = log
+            .find("#discard-all-changes")
+            .or_else(|| log.find("\"Discard all changes…\""));
+          let entered = opened.is_some_and(|at| log[at..].contains("key {Enter}"));
           assert!(
-            log.contains("#discard-all-dialog-confirm") || log.contains("\"Discard all changes\""),
+            log.contains("#discard-all-dialog-confirm")
+              || log.contains("\"Discard all changes\"")
+              || entered,
             "{call} {}",
             run.context()
           );

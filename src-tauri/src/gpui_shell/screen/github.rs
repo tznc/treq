@@ -1354,6 +1354,8 @@ impl GithubView {
           named(div(), format!("github-filter-{}", filter.value())),
           TextSize::Sm,
         )
+        .role(gpui::Role::Button)
+        .aria_label(filter.label())
         .px_2()
         .py_0p5()
         .rounded(radius::SM)

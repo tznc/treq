@@ -1146,19 +1146,10 @@ impl WorkspaceDialog {
           .border_color(p.border.opacity(0.5))
           .pt_3()
           .child(
-            div()
-              .id("move-to-existing")
-              .debug_selector(|| "move-to-existing".into())
-              .flex()
-              .items_center()
-              .gap_2()
-              .cursor_pointer()
-              .child(ui::Checkbox::new("move-to-existing-box", &p).checked(on))
-              .child(
-                ui::text(div(), TextSize::Xs)
-                  .text_color(p.muted_foreground)
-                  .child("Move to existing workspace instead"),
-              )
+            ui::text(ui::Checkbox::new("move-to-existing", &p), TextSize::Xs)
+              .checked(on)
+              .label("Move to existing workspace instead")
+              .text_color(p.muted_foreground)
               .on_click(cx.listener(move |view, _, _, cx| view.set_move_to_existing(!on, cx))),
           ),
       );
@@ -1690,6 +1681,8 @@ impl WorkspaceDialog {
           };
           div()
             .id(id)
+            .role(gpui::Role::CheckBox)
+            .aria_label(message.clone())
             .debug_selector(move || selector)
             .flex()
             .items_center()
@@ -1809,6 +1802,12 @@ impl WorkspaceDialog {
             .child(
               div()
                 .id(SharedString::from(format!("dialog-file-expand-{i}")))
+                .role(gpui::Role::Button)
+                .aria_label(if expanded {
+                  "Collapse file"
+                } else {
+                  "Expand file"
+                })
                 .flex_none()
                 .size(zpx(16.))
                 .flex()
@@ -1851,6 +1850,8 @@ impl WorkspaceDialog {
             .child(
               ui::text(div(), TextSize::Xs)
                 .id(SharedString::from(format!("dialog-file-path-{i}")))
+                .role(gpui::Role::Button)
+                .aria_label(path.clone())
                 .debug_selector({
                   let selector = format!("dialog-file-path-{i}");
                   move || selector
@@ -1933,6 +1934,8 @@ impl WorkspaceDialog {
           let selector = format!("dialog-hunk-{file}-{i}");
           div()
             .id(SharedString::from(selector.clone()))
+            .role(gpui::Role::CheckBox)
+            .aria_label(hunk.header.clone())
             .debug_selector(move || selector)
             .flex()
             .items_start()

@@ -269,6 +269,8 @@ impl Render for FilePicker {
       anchored().position(point(px(0.), px(0.))).child(
         div()
           .id("file-picker-backdrop")
+          // A dismiss target, not a control.
+          .cursor_default()
           .w(viewport.width)
           .h(viewport.height)
           .bg(p.scrim())

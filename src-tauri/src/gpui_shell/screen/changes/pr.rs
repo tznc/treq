@@ -614,6 +614,8 @@ impl ChangesView {
       return Some(
         ui::text(div(), TextSize::Xs)
           .id(SharedString::from(format!("reply-{id}")))
+          .role(gpui::Role::Button)
+          .aria_label("Reply")
           .debug_selector(|| "github-thread-reply".into())
           .font_family(theme::SANS_FONT)
           .text_color(muted)
@@ -666,6 +668,8 @@ impl ChangesView {
             .child(
               ui::text(div(), TextSize::Xs)
                 .id(SharedString::from(format!("reply-cancel-{id}")))
+                .role(gpui::Role::Button)
+                .aria_label("Cancel")
                 .text_color(muted)
                 .cursor_pointer()
                 .hover(move |s| s.text_color(fg))
@@ -675,6 +679,8 @@ impl ChangesView {
             .child({
               ui::text(div(), TextSize::Xs)
                 .id(SharedString::from(format!("reply-send-{id}")))
+                .role(gpui::Role::Button)
+                .aria_label("Send reply")
                 .debug_selector(|| "github-thread-reply-send".into())
                 .rounded(radius::SM)
                 .bg(p.primary)

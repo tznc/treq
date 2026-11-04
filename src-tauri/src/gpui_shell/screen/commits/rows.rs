@@ -702,6 +702,8 @@ impl CommitsView {
       let (id, file) = (commit.commit_id.clone(), path.to_string());
       div()
         .id(SharedString::from(format!("gutter-{which}-{h}-{l}")))
+        .role(gpui::Role::Button)
+        .aria_label(format!("Line {}", n.unwrap_or_default()))
         .w_10()
         .flex_none()
         .pr_1()
@@ -729,6 +731,8 @@ impl CommitsView {
         .child(
           div()
             .id(SharedString::from(format!("add-comment-{h}-{l}")))
+            .role(gpui::Role::Button)
+            .aria_label("Add comment")
             .debug_selector(move || format!("add-comment-{h}-{l}"))
             .p_px()
             .rounded(radius::SM)

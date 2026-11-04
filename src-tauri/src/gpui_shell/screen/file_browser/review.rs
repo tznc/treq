@@ -88,6 +88,8 @@ impl FileBrowserView {
               Side::Top,
               div()
                 .id(SharedString::from(format!("delete-comment-{}", c.id)))
+                .role(gpui::Role::Button)
+                .aria_label("Delete comment")
                 .debug_selector(|| "delete-comment".into())
                 .flex_none()
                 .p_1()
@@ -339,6 +341,8 @@ impl FileBrowserView {
     let checked = self.use_idle;
     let checkbox = div()
       .id("use-idle-agent")
+      .role(gpui::Role::CheckBox)
+      .aria_label("Use an idle agent")
       .debug_selector(|| "use-idle-agent".into())
       .flex()
       .items_center()

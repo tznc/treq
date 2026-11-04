@@ -182,6 +182,8 @@ impl Popover {
         .child(
           ui::text(div(), TextSize::Xs)
             .id("details-view-full")
+            .role(gpui::Role::Button)
+            .aria_label("View full prompt")
             .debug_selector(|| "details-view-full".into())
             .mt_1()
             .cursor_pointer()

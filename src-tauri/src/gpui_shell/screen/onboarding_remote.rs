@@ -446,16 +446,13 @@ fn selector(form: &Form, inputs: &Inputs, react: &ActionSink, p: &Palette, cx: &
           )
         })
         .child(
-          ui::text(div(), TextSize::Sm)
-            .id("remote-repo-confirm-init")
-            .debug_selector(|| "remote-repo-confirm-init".into())
-            .flex()
-            .items_center()
-            .gap_2()
-            .cursor_pointer()
-            .on_click(field(react, "remoteRepo.confirmInit", (!confirm).into()))
-            .child(ui::Checkbox::new("remote-repo-confirm-init-box", p).checked(confirm))
-            .child("Initialize an empty repository in this folder"),
+          ui::text(
+            ui::Checkbox::new("remote-repo-confirm-init", p),
+            TextSize::Sm,
+          )
+          .checked(confirm)
+          .label("Initialize an empty repository in this folder")
+          .on_click(field(react, "remoteRepo.confirmInit", (!confirm).into())),
         )
         .child(
           div().flex().child(

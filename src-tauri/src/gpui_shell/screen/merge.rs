@@ -1237,6 +1237,8 @@ impl MergeView {
               let selector = id.to_string();
               ui::text(div(), TextSize::Sm)
                 .id(id)
+                .role(gpui::Role::RadioButton)
+                .aria_label(title)
                 .debug_selector(move || selector)
                 .relative()
                 .flex()
