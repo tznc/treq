@@ -52,6 +52,7 @@ import {
   updateInstance,
 } from "./instance-store.ts";
 import { logWithCorrelation } from "./correlation.ts";
+import { storedError } from "./error-scrub.ts";
 import { MANAGED_SSHD_HOST, MANAGED_SSHD_PORT } from "./ssh-vm-config.ts";
 
 const MANAGED_SSH_USERNAME = "treq";
@@ -193,7 +194,7 @@ async function requireOwnedInstance(deps: RemoteInstanceDeps, suppliedInstanceId
 }
 
 function requireProvisioned(instance: InstanceRow): string {
-  if (!instance.provider_resource_id) throw new HttpError("Instance has no provider resource yet", 409, undefined);
+  if (!instance.provider_resource_id) throw new HttpError("Instance has no provider resource yet", 409, "no_provider_resource");
   return instance.provider_resource_id;
 }
 
@@ -262,9 +263,10 @@ async function tracked(
     return row.id;
   } catch (err) {
     await onFailure?.();
-    const errorMessage = (err as Error).message;
-    await completeOperation(supabase, row.id, { status: "failed", errorMessage });
-    await audit(event("failed"), { detail: { error: errorMessage }, durationMs: elapsed() });
+    // The owner can read both rows: store a code and a scrubbed message.
+    const stored = storedError(err);
+    await completeOperation(supabase, row.id, { status: "failed", errorMessage: `${stored.code}: ${stored.message}` });
+    await audit(event("failed"), { detail: { error_code: stored.code, error: stored.message }, durationMs: elapsed() });
     throw err;
   }
 }

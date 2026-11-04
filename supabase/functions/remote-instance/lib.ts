@@ -10,7 +10,7 @@
 
 import { spendCapRefusal } from "../_shared/billing/spend-cap.ts";
 import { PRO_REQUIRED_MESSAGES, refuseGatedAction } from "../_shared/billing/entitlement.ts";
-import { REGION_CODES, SIZE_PRESETS } from "../_shared/remote/catalog.ts";
+import { isRegionCode, isSizePreset, REGION_CODES, SIZE_PRESETS } from "../_shared/remote/catalog.ts";
 import { ProviderError, providerClientMessage } from "../_shared/remote/provider.ts";
 import { BYOS_ACTIONS, handleByosAction, providerErrorCode } from "../_shared/remote/byos.ts";
 import { acknowledgeMigration } from "../_shared/remote/migration-ack.ts";
@@ -66,6 +66,41 @@ const ACTIONS: Record<string, Handler> = {
   delete: handleDelete,
 };
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_ACTION_LENGTH = 64;
+
+const invalid = (error: string, code = "validation_error"): Reply => ({ status: 400, body: { error, code } });
+
+/**
+ * The checks every action shares, run once before dispatch. An action checks
+ * its own required fields; this refuses a body no action could accept, and
+ * values for the shared fields that are present but wrong (instead of
+ * falling back to a default).
+ */
+export function validateRequestBody(body: unknown): Reply | null {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return invalid("Request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+  if (typeof b.action !== "string" || b.action.length === 0 || b.action.length > MAX_ACTION_LENGTH) {
+    return invalid("Unknown action", "unknown_action");
+  }
+  if (b.region !== undefined && b.region !== null && !isRegionCode(b.region)) {
+    return invalid(`region must be one of ${REGION_CODES.join(", ")}`);
+  }
+  if (b.size_preset !== undefined && b.size_preset !== null && !isSizePreset(b.size_preset)) {
+    return invalid(`size_preset must be one of ${SIZE_PRESETS.join(", ")}`);
+  }
+  if (b.instance_id !== undefined && b.instance_id !== null &&
+      (typeof b.instance_id !== "string" || !UUID.test(b.instance_id))) {
+    return invalid("instance_id must be a UUID");
+  }
+  if (b.idempotency_key !== undefined && typeof b.idempotency_key !== "string") {
+    return invalid("idempotency_key must be a string");
+  }
+  return null;
+}
+
 const PROVIDER_ERROR_STATUS: Record<string, number> = {
   not_found: 404,
   already_exists: 409,
@@ -77,11 +112,14 @@ const PROVIDER_ERROR_STATUS: Record<string, number> = {
 };
 
 export async function handleRemoteInstanceAction(
-  body: Record<string, unknown>,
+  input: unknown,
   deps: RemoteInstanceDeps,
 ): Promise<Response> {
-  const action = body.action;
   const reply = (r: Reply) => json(r.body, r.status, deps.correlationId);
+  const rejected = validateRequestBody(input);
+  if (rejected) return reply(rejected);
+  const body = input as Record<string, unknown>;
+  const action = body.action as string;
 
   try {
     if (typeof action === "string" && BYOS_ACTIONS.has(action)) {
@@ -97,7 +135,7 @@ export async function handleRemoteInstanceAction(
     const capped = spendCapRefusal(action, deps.spendStatus ? await deps.spendStatus() : null);
     if (capped) return reply(capped);
     const handler = typeof action === "string" && Object.hasOwn(ACTIONS, action) ? ACTIONS[action] : null;
-    if (!handler) return reply({ status: 400, body: { error: `Unknown action '${action}'` } });
+    if (!handler) return reply(invalid(`Unknown action '${action}'`, "unknown_action"));
     return reply(await handler(body, deps));
   } catch (err) {
     if (err instanceof HttpError) return reply({ status: err.status, body: { error: err.message, code: err.code } });
