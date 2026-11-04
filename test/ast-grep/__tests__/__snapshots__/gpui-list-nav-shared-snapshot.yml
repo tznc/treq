@@ -1,0 +1,107 @@
+id: gpui-list-nav-shared
+snapshots:
+  ? |
+    fn arm(key: &str) -> Option<Move> {
+      match key {
+        "down" => Some(Move::Step(1)),
+        "up" => Some(Move::Step(-1)),
+        _ => None,
+      }
+    }
+  : labels:
+    - source: '"down"'
+      style: primary
+      start: 54
+      end: 60
+    - source: '"down"'
+      style: secondary
+      start: 54
+      end: 60
+  ? |
+    fn compare(key: &str) -> bool {
+      key == "down"
+    }
+  : labels:
+    - source: key == "down"
+      style: primary
+      start: 34
+      end: 47
+    - source: ==
+      style: secondary
+      start: 38
+      end: 40
+    - source: '"down"'
+      style: secondary
+      start: 41
+      end: 47
+  ? |
+    fn either(key: &str) {
+      match key {
+        "down" | "up" => move_line(),
+        "left" => comment(),
+        _ => {}
+      }
+    }
+  : labels:
+    - source: '"down"'
+      style: primary
+      start: 41
+      end: 47
+    - source: '"down" | "up"'
+      style: secondary
+      start: 41
+      end: 54
+  ? |
+    fn guarded(key: &str, m: Modifiers) -> Option<Move> {
+      match key {
+        "down" if m.platform => Some(Move::Last),
+        _ => None,
+      }
+    }
+  : labels:
+    - source: '"down"'
+      style: primary
+      start: 72
+      end: 78
+    - source: '"down" if m.platform'
+      style: secondary
+      start: 72
+      end: 92
+  ? |
+    fn macro_form(key: &str) -> bool {
+      matches!(key, "up" | "down")
+    }
+  : labels:
+    - source: '"up"'
+      style: primary
+      start: 51
+      end: 55
+    - source: matches
+      style: secondary
+      start: 37
+      end: 44
+    - source: matches!(key, "up" | "down")
+      style: secondary
+      start: 37
+      end: 65
+    - source: (key, "up" | "down")
+      style: secondary
+      start: 45
+      end: 65
+  ? |
+    fn reversed(k: &Keystroke) -> bool {
+      "up" == k.key
+    }
+  : labels:
+    - source: '"up" == k.key'
+      style: primary
+      start: 39
+      end: 52
+    - source: ==
+      style: secondary
+      start: 44
+      end: 46
+    - source: '"up"'
+      style: secondary
+      start: 39
+      end: 43

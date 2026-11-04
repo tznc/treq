@@ -1864,7 +1864,7 @@ impl Render for ChangesView {
         let held = crate::gpui_shell::keys::held(k.modifiers);
         if view.focus.is_focused(window)
           && !(held.platform || held.control || held.alt)
-          && view.diff_key(&k.key, held.shift, cx)
+          && view.diff_key(&k.key, held, cx)
         {
           cx.stop_propagation();
         } else if k.key == "c"

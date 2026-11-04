@@ -149,21 +149,14 @@ impl Popover {
   pub(super) fn target_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
     let key = event.keystroke.key.as_str();
     let m = crate::gpui_shell::keys::held(event.keystroke.modifiers);
-    let step = match key {
-      "down" if m.platform => Some(cmdk::Move::Last),
-      "up" if m.platform => Some(cmdk::Move::First),
-      "down" => Some(cmdk::Move::Step(1)),
-      "up" => Some(cmdk::Move::Step(-1)),
-      "n" | "j" if m.control => Some(cmdk::Move::Step(1)),
-      "p" | "k" if m.control => Some(cmdk::Move::Step(-1)),
-      "home" => Some(cmdk::Move::First),
-      "end" => Some(cmdk::Move::Last),
-      _ => None,
-    };
+    let nav = ui::ListKey::from_key_with_emacs(key, m);
+    let step = nav
+      .filter(|k| *k != ui::ListKey::Open)
+      .map(cmdk::Move::from);
     if let Some(step) = step {
       self.target_step(step, cx);
       cx.stop_propagation();
-    } else if key == "enter" {
+    } else if nav == Some(ui::ListKey::Open) {
       let selected = match &self.content {
         super::Content::Target(state) => state.selected,
         _ => None,

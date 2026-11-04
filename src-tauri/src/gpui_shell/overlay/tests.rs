@@ -344,6 +344,18 @@ fn palette_moves_the_selection_with_the_arrow_keys(cx: &mut TestAppContext) {
   assert_eq!(h.sent(), vec![press("palette.open-prompt-history")]);
 }
 
+/// PageDown and PageUp skip a page of commands and stop at the ends.
+#[gpui::test]
+fn palette_pages_the_selection(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
+  h.keys("pagedown pagedown pagedown");
+  assert_eq!(h.selected().as_deref(), Some("View stashed changes"));
+  h.keys("pageup pageup pageup");
+  assert_eq!(h.selected().as_deref(), Some("Go to home"));
+  h.keys("down");
+  assert_eq!(h.selected().as_deref(), Some("Go to settings"));
+}
+
 #[gpui::test]
 fn palette_filters_as_cmdk_does(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, palette_json(false), FakeHost::default());

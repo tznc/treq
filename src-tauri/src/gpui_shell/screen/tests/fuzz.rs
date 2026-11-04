@@ -25,10 +25,13 @@ enum Step {
   Key(&'static str),
   /// Time passes: debounced checks and saves run.
   Advance(u64),
+  /// Tab (or Shift+Tab, `true`) while a dialog is open.
+  Tab(bool),
 }
 
-/// No Tab: unhandled, gpui-testing-library moves the focus as a browser
-/// does, but the shell's windows have no Tab navigation to emulate.
+/// No Tab here: outside a dialog it is unhandled, and gpui-testing-library
+/// would move the focus as a browser does, but the shell's windows have no
+/// Tab navigation to emulate. [`Step::Tab`] presses it inside a dialog.
 const KEYS: &[&str] = &[
   "{Escape}",
   "{Enter}",
@@ -68,6 +71,7 @@ fn step() -> impl Strategy<Value = Step> {
     3 => (any::<Index>(), text()).prop_map(|(i, t)| Step::Type(i, t)),
     3 => gpui::proptest::sample::select(KEYS).prop_map(Step::Key),
     1 => (0u64..1500).prop_map(Step::Advance),
+    2 => any::<bool>().prop_map(Step::Tab),
   ]
 }
 
@@ -267,6 +271,18 @@ impl Run {
         self.screen.user().keyboard(keys);
         format!("key {keys}")
       }
+      Step::Tab(back) => {
+        if self.frame().dialogs().is_empty() {
+          return "tab: no dialog open".into();
+        }
+        let keys = if *back {
+          "{Shift>}{Tab}{/Shift}"
+        } else {
+          "{Tab}"
+        };
+        self.screen.user().keyboard(keys);
+        format!("key {keys}")
+      }
       Step::Advance(ms) => {
         self
           .h
@@ -324,13 +340,15 @@ fn confirms_nothing(step: &Step, done: &str) -> bool {
   match step {
     Step::Type(_, text) => done.contains(" into ") || !text.contains(' '),
     Step::Key(keys) => !matches!(*keys, "{Enter}" | "{Space}"),
+    Step::Tab(_) => true,
     Step::Click(_) | Step::Advance(_) => false,
   }
 }
 
 /// Runs `steps` on `scenario`, checking after each that:
 /// - at most one dialog is open;
-/// - the focus is inside the dialog while one is open;
+/// - the focus is inside the dialog while one is open, whatever Tab and
+///   Shift+Tab were pressed;
 /// - Escape closes the dialog, or a popup inside it;
 /// - typing and moving around write nothing to the backend.
 fn fuzz(cx: &mut TestAppContext, scenario: Scenario, steps: &[Step]) -> Run {

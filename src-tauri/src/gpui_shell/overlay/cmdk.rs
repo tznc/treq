@@ -4,6 +4,8 @@
 
 use std::collections::HashMap;
 
+use crate::gpui_shell::ui;
+
 const SCORE_CONTINUE_MATCH: f64 = 1.;
 const SCORE_SPACE_WORD_JUMP: f64 = 0.9;
 const SCORE_NON_SPACE_WORD_JUMP: f64 = 0.8;
@@ -203,8 +205,23 @@ pub enum Move {
   First,
   /// End, or Cmd+Down.
   Last,
+  /// PageUp and PageDown: a page back or on, stopping at the ends.
+  Page(isize),
   /// Alt+arrow: the first item of the next or previous group.
   Group(isize),
+}
+
+impl From<ui::ListKey> for Move {
+  fn from(key: ui::ListKey) -> Self {
+    match key {
+      ui::ListKey::Prev => Move::Step(-1),
+      ui::ListKey::Next | ui::ListKey::Open => Move::Step(1),
+      ui::ListKey::First => Move::First,
+      ui::ListKey::Last => Move::Last,
+      ui::ListKey::PagePrev => Move::Page(-1),
+      ui::ListKey::PageNext => Move::Page(1),
+    }
+  }
 }
 
 /// The entry selected after `step` from `selected`, among `order` (as
@@ -222,18 +239,24 @@ pub fn moved(
     .filter(|&i| !entries[i].disabled)
     .collect();
   let at = selected.and_then(|s| enabled.iter().position(|&i| i == s));
-  let by = |delta: isize| -> Option<usize> {
-    let from = at.map_or(-1, |a| a as isize);
-    let to = from + delta;
-    (to >= 0)
-      .then(|| enabled.get(to as usize).copied())
-      .flatten()
-      .or(selected)
+  let nav = ui::ListNav::new(enabled.len());
+  let list = |key: ui::ListKey| nav.moved(at, key).map(|i| enabled[i]).or(selected);
+  let by = |delta: isize| {
+    list(if delta < 0 {
+      ui::ListKey::Prev
+    } else {
+      ui::ListKey::Next
+    })
   };
   match step {
     Move::Step(delta) => by(delta),
-    Move::First => enabled.first().copied().or(selected),
-    Move::Last => enabled.last().copied().or(selected),
+    Move::First => list(ui::ListKey::First),
+    Move::Last => list(ui::ListKey::Last),
+    Move::Page(delta) => list(if delta < 0 {
+      ui::ListKey::PagePrev
+    } else {
+      ui::ListKey::PageNext
+    }),
     Move::Group(delta) => {
       let current = selected.map(|s| entries[s].group);
       let Some(Some(group)) = current else {
@@ -351,6 +374,8 @@ mod tests {
     assert_eq!(moved(&entries, &order, None, Move::Step(1)), Some(0));
     assert_eq!(moved(&entries, &order, Some(1), Move::Last), Some(2));
     assert_eq!(moved(&entries, &order, Some(1), Move::First), Some(0));
+    assert_eq!(moved(&entries, &order, Some(0), Move::Page(1)), Some(2));
+    assert_eq!(moved(&entries, &order, Some(2), Move::Page(-1)), Some(0));
     entries[1].disabled = true;
     assert_eq!(moved(&entries, &order, Some(0), Move::Step(1)), Some(2));
   }
