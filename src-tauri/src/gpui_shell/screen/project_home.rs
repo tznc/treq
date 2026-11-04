@@ -119,7 +119,7 @@ pub fn bands(columns: &[Vec<String>], today: NaiveDate) -> Vec<(String, Vec<Vec<
         .push(i);
     }
   }
-  keyed.sort_by(|a, b| b.0.cmp(&a.0));
+  keyed.sort_by_key(|k| std::cmp::Reverse(k.0));
   keyed
     .into_iter()
     .map(|(key, label)| (label, cells.remove(&key).unwrap_or_default()))
