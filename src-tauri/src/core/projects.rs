@@ -60,7 +60,9 @@ fn exists(conn: &Connection, id: &str) -> Result<(), String> {
     .query_row("SELECT 1 FROM projects WHERE id = ?1", [id], |r| r.get(0))
     .optional()
     .map_err(err)?;
-  found.map(drop).ok_or_else(|| format!("No project with id '{id}'"))
+  found
+    .map(drop)
+    .ok_or_else(|| format!("No project with id '{id}'"))
 }
 
 fn clean_name(name: &str) -> Result<String, String> {
@@ -114,7 +116,13 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<Project>, String> {
     .query_row(
       "SELECT name, created_at, last_opened_at FROM projects WHERE id = ?1",
       [id],
-      |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+      |r| {
+        Ok((
+          r.get::<_, String>(0)?,
+          r.get::<_, String>(1)?,
+          r.get::<_, String>(2)?,
+        ))
+      },
     )
     .optional()
     .map_err(err)?;
@@ -150,7 +158,10 @@ pub fn rename(conn: &Connection, id: &str, name: &str) -> Result<(), String> {
   let name = clean_name(name)?;
   exists(conn, id)?;
   conn
-    .execute("UPDATE projects SET name = ?2 WHERE id = ?1", params![id, name])
+    .execute(
+      "UPDATE projects SET name = ?2 WHERE id = ?1",
+      params![id, name],
+    )
     .map_err(err)
     .map(drop)
 }
@@ -302,10 +313,18 @@ mod tests {
     let a = save(&conn, "A", &repos(&["/r/a"])).expect("a");
     let b = save(&conn, "B", &repos(&["/r/b"])).expect("b");
     mark_opened(&conn, &a.id).expect("open a");
-    let names: Vec<String> = list(&conn).expect("list").into_iter().map(|p| p.name).collect();
+    let names: Vec<String> = list(&conn)
+      .expect("list")
+      .into_iter()
+      .map(|p| p.name)
+      .collect();
     assert_eq!(names, vec!["A".to_string(), "B".to_string()]);
     mark_opened(&conn, &b.id).expect("open b");
-    let names: Vec<String> = list(&conn).expect("list").into_iter().map(|p| p.name).collect();
+    let names: Vec<String> = list(&conn)
+      .expect("list")
+      .into_iter()
+      .map(|p| p.name)
+      .collect();
     assert_eq!(names, vec!["B".to_string(), "A".to_string()]);
   }
 
@@ -330,7 +349,10 @@ mod tests {
     let p = save(&conn, "P", &repos(&["/r/a"])).expect("save");
     add_repo(&conn, &p.id, "/r/b").expect("add");
     add_repo(&conn, &p.id, "/r/b").expect("add again is a no-op");
-    assert_eq!(get(&conn, &p.id).unwrap().unwrap().repos, repos(&["/r/a", "/r/b"]));
+    assert_eq!(
+      get(&conn, &p.id).unwrap().unwrap().repos,
+      repos(&["/r/a", "/r/b"])
+    );
   }
 
   #[test]
@@ -354,7 +376,10 @@ mod tests {
     let a = save(&conn, "A", &repos(&["/r/api"])).expect("a");
     let b = save(&conn, "B", &repos(&["/r/api", "/r/ios"])).expect("b");
     remove_repo(&conn, &b.id, "/r/api").expect("remove from b");
-    assert_eq!(get(&conn, &a.id).unwrap().unwrap().repos, repos(&["/r/api"]));
+    assert_eq!(
+      get(&conn, &a.id).unwrap().unwrap().repos,
+      repos(&["/r/api"])
+    );
   }
 
   #[test]
@@ -379,7 +404,10 @@ mod tests {
 
   #[test]
   fn suggests_name_from_repo_folders() {
-    assert_eq!(suggested_name(&repos(&["/r/web", "/code/api/"])), "web + api");
+    assert_eq!(
+      suggested_name(&repos(&["/r/web", "/code/api/"])),
+      "web + api"
+    );
   }
 
   #[test]
@@ -399,7 +427,10 @@ mod tests {
 
   #[test]
   fn closing_saved_project_just_closes() {
-    assert_eq!(close_action(Some("p1"), &repos(&["/r/web"])), CloseAction::Close);
+    assert_eq!(
+      close_action(Some("p1"), &repos(&["/r/web"])),
+      CloseAction::Close
+    );
   }
 
   #[test]

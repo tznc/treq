@@ -213,7 +213,6 @@ impl Database {
         .warn_on_err("delete old repo_path setting");
     }
 
-
     crate::core::projects::init(&self.conn)?;
     Ok(())
   }

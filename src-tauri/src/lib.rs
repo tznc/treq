@@ -670,7 +670,10 @@ pub fn run() {
             .lock_or_recover()
             .remove(&label);
           state.window_projects.lock_or_recover().remove(&label);
-          state.window_close_confirmed.lock_or_recover().remove(&label);
+          state
+            .window_close_confirmed
+            .lock_or_recover()
+            .remove(&label);
         }
         unwatch_unshown_repos(&app_handle);
         if is_last_repo_window(&label, repo_windows(&app_handle).keys()) {

@@ -16,7 +16,11 @@ use crate::{
 /// The saved project window `label` shows, if any.
 pub fn window_project(app: &AppHandle, label: &str) -> Option<Project> {
   let state = app.state::<AppState>();
-  let id = state.window_projects.lock_or_recover().get(label).cloned()?;
+  let id = state
+    .window_projects
+    .lock_or_recover()
+    .get(label)
+    .cloned()?;
   let db = state.db.lock_or_recover();
   projects::get(db.conn(), &id).ok().flatten()
 }
@@ -32,7 +36,11 @@ pub fn list(app: &AppHandle) -> Vec<Project> {
 /// others in sidebar order.
 pub fn window_repos(app: &AppHandle, label: &str) -> Vec<String> {
   let state = app.state::<AppState>();
-  let main = state.window_repo_paths.lock_or_recover().get(label).cloned();
+  let main = state
+    .window_repo_paths
+    .lock_or_recover()
+    .get(label)
+    .cloned();
   let rest = state
     .window_supporting_repo_paths
     .lock_or_recover()
@@ -119,10 +127,18 @@ pub fn close_requested(app: &AppHandle, label: &str) -> bool {
   let Some(state) = app.try_state::<AppState>() else {
     return false;
   };
-  if state.window_close_confirmed.lock_or_recover().contains(label) {
+  if state
+    .window_close_confirmed
+    .lock_or_recover()
+    .contains(label)
+  {
     return false;
   }
-  if !state.window_repo_paths.lock_or_recover().contains_key(label) {
+  if !state
+    .window_repo_paths
+    .lock_or_recover()
+    .contains_key(label)
+  {
     return false;
   }
   let project = state.window_projects.lock_or_recover().get(label).cloned();

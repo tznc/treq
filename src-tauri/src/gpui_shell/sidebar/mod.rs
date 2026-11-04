@@ -697,13 +697,9 @@ impl Render for Sidebar {
           .hover(|style| style.bg(palette.hover()))
           .text_color(palette.muted_foreground)
           .child(icon(theme::ICON_SEARCH, 16., palette.muted_foreground))
-          .child(
-            div()
-              .flex_1()
-              .min_w_0()
-              .truncate()
-              .child(snapshot.repo_name.clone()),
-          )
+          // The project button names the window now; the palette keeps
+          // the room for its shortcut.
+          .child(div().flex_1().min_w_0())
           .child(ui::Kbd::new("secondary-k", &palette))
           .on_click(self.on_action(SidebarAction::OpenCommandPalette)),
       )
@@ -1162,7 +1158,7 @@ impl Sidebar {
       .snapshot
       .project
       .clone()
-      .unwrap_or_else(|| "Unsaved project".into())
+      .unwrap_or_else(|| "Unsaved".into())
       .into();
     let saved = self.snapshot.project.is_some();
     let initial: SharedString = name
@@ -1188,7 +1184,7 @@ impl Sidebar {
           .gap_1p5()
           .px_2()
           .h(zpx(32.))
-          .max_w(zpx(120.))
+          .max_w(zpx(110.))
           .rounded_lg()
           .border_1()
           .border_color(palette.border)
@@ -1203,7 +1199,9 @@ impl Sidebar {
               .size(zpx(18.))
               .rounded_md()
               .when(saved, |this| {
-                this.bg(palette.primary).text_color(palette.primary_foreground)
+                this
+                  .bg(palette.primary)
+                  .text_color(palette.primary_foreground)
               })
               .when(!saved, |this| {
                 this
@@ -1233,12 +1231,21 @@ impl Sidebar {
           .on_click(self.on_action(SidebarAction::ProjectMenu)),
       )
       .when(self.tooltip_shown("project-button"), |this| {
-        this.child(self.tooltip_anchor(
-          "project-button".into(),
-          Side::Bottom,
-          TooltipContent::Text("Switch project".into()),
-          0.,
-        ))
+        this.child(
+          self.tooltip_anchor(
+            "project-button".into(),
+            Side::Bottom,
+            TooltipContent::Text(
+              if self.snapshot.project.is_some() {
+                "Switch project"
+              } else {
+                "Unsaved project: save it or switch"
+              }
+              .into(),
+            ),
+            0.,
+          ),
+        )
       })
   }
 
@@ -1280,7 +1287,13 @@ impl Sidebar {
             repo_path: repo.path.clone(),
           })),
       )
-      .child(div().flex_1().min_w_0().ml(zpx(-6.)).child(self.home_row(repo, palette, cx)))
+      .child(
+        div()
+          .flex_1()
+          .min_w_0()
+          .ml(zpx(-6.))
+          .child(self.home_row(repo, palette, cx)),
+      )
   }
 
   /// A row above the workspace list: GitHub or Linear.

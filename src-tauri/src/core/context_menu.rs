@@ -382,7 +382,13 @@ mod tests {
     let items = project_items(&[entry("a", "Checkout"), entry("b", "Refunds")], Some("b"));
     assert_eq!(
       labels(&items),
-      ["Checkout", "✓ Refunds", "---", "Rename Project…", "New Window…"]
+      [
+        "Checkout",
+        "✓ Refunds",
+        "---",
+        "Rename Project…",
+        "New Window…"
+      ]
     );
   }
 
