@@ -1120,6 +1120,15 @@ fn project_button_sits_left_of_the_command_palette(cx: &mut TestAppContext) {
   let palette = h.bounds("command-palette").expect("palette");
   assert!(project.origin.x < palette.origin.x);
   assert!((project.center().y - palette.center().y).abs() < gpui::px(1.));
+  let settings = h.bounds("settings").expect("settings");
+  assert_eq!(
+    project.size.height, palette.size.height,
+    "same height as search"
+  );
+  assert_eq!(
+    project.size.height, settings.size.height,
+    "same height as settings"
+  );
 }
 
 #[gpui::test]

@@ -1208,7 +1208,7 @@ impl Sidebar {
           .items_center()
           .gap_1p5()
           .px_2()
-          .h(zpx(32.))
+          .h(zpx(ui::IconButtonSize::Medium.metrics().0))
           .w_full()
           .rounded_lg()
           .border_1()
