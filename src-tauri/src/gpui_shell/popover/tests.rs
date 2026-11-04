@@ -536,6 +536,20 @@ fn target_picks_with_the_keyboard(cx: &mut TestAppContext) {
   assert!(h.closed.get());
 }
 
+/// The arrows, End, Home and PageDown move the selection; Enter picks it.
+#[gpui::test]
+fn target_moves_the_selection_with_list_keys(cx: &mut TestAppContext) {
+  let (kind, host) = target(vec!["main", "develop", "release"]);
+  let mut h = Harness::new(cx, kind, host);
+  h.cx.run_until_parked();
+  h.keys("end");
+  h.keys("up");
+  h.keys("home");
+  h.keys("pagedown");
+  h.keys("enter");
+  assert_eq!(h.sent(), vec![field("workspace.target", "release")]);
+}
+
 #[gpui::test]
 fn target_picks_with_a_click(cx: &mut TestAppContext) {
   let (kind, host) = target(vec!["main", "develop"]);

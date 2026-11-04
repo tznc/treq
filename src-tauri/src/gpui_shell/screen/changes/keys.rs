@@ -7,7 +7,7 @@ use super::review::LineSelection;
 use super::*;
 use crate::gpui_shell::screen::{
   changes_review::{edge_line, pending_for_line, step_line},
-  commits_data::selection,
+  commits_data::{selection, LineRef},
 };
 
 /// How many frames a moved cursor waits to be drawn before it is scrolled to.
@@ -36,14 +36,49 @@ pub(super) fn autoscroll_step(y: Pixels, view: Bounds<Pixels>) -> Pixels {
 
 impl ChangesView {
   /// The keys the diff takes while it has focus; `true` when handled.
-  pub(super) fn diff_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) -> bool {
-    match key {
-      "down" | "up" => self.move_line(key == "down", shift, cx),
-      "left" if !shift => self.comment_selection(cx),
-      "enter" if !shift => return self.edit_cursor_comment(cx),
+  pub(super) fn diff_key(
+    &mut self,
+    key: &str,
+    held: tauri_plugin_gpui::gpui::Modifiers,
+    cx: &mut Context<Self>,
+  ) -> bool {
+    let shift = held.shift;
+    match ui::ListKey::from_key(key, held) {
+      Some(ui::ListKey::Next) => self.move_line(true, shift, cx),
+      Some(ui::ListKey::Prev) => self.move_line(false, shift, cx),
+      Some(ui::ListKey::First) => self.move_to_edge(true, shift, cx),
+      Some(ui::ListKey::Last) => self.move_to_edge(false, shift, cx),
+      Some(ui::ListKey::Open) if !shift => return self.edit_cursor_comment(cx),
+      _ if key == "left" && !shift => self.comment_selection(cx),
       _ => return false,
     }
     true
+  }
+
+  /// Home and End: the first line of the first drawn file, or the last of
+  /// the last. With Shift the selection grows to it within its file.
+  fn move_to_edge(&mut self, first: bool, extend: bool, cx: &mut Context<Self>) {
+    let files = self.line_files();
+    let current = self.cursor(&files);
+    let path = if extend {
+      current.as_ref().map(|(p, _, _)| p.clone())
+    } else if first {
+      files.first().cloned()
+    } else {
+      files.last().cloned()
+    };
+    let next = path.and_then(|p| edge_line(&self.lines_of(&p), first).map(|at| (p, at)));
+    self.set_cursor(current, next, extend, cx);
+  }
+
+  /// The selection's file, anchor and head, while its file is drawn.
+  fn cursor(&self, files: &[String]) -> Option<(String, LineRef, LineRef)> {
+    self
+      .review
+      .selection
+      .as_ref()
+      .filter(|s| files.contains(&s.path))
+      .map(|s| (s.path.clone(), s.anchor, s.head))
   }
 
   /// The files whose diff lines are drawn, in the order they are drawn.
@@ -96,12 +131,7 @@ impl ChangesView {
   /// its file, as comments take one file's lines.
   fn move_line(&mut self, down: bool, extend: bool, cx: &mut Context<Self>) {
     let files = self.line_files();
-    let current = self
-      .review
-      .selection
-      .as_ref()
-      .filter(|s| files.contains(&s.path))
-      .map(|s| (s.path.clone(), s.anchor, s.head));
+    let current = self.cursor(&files);
     let next = match &current {
       None => self
         .active
@@ -123,6 +153,18 @@ impl ChangesView {
         }
       },
     };
+    self.set_cursor(current, next, extend, cx);
+  }
+
+  /// Puts the line cursor on `next`; with `extend`, the selection keeps its
+  /// anchor when `next` is in its file.
+  fn set_cursor(
+    &mut self,
+    current: Option<(String, LineRef, LineRef)>,
+    next: Option<(String, LineRef)>,
+    extend: bool,
+    cx: &mut Context<Self>,
+  ) {
     let Some((path, head)) = next else {
       return;
     };

@@ -1,0 +1,60 @@
+id: gpui-list-nav-shared
+valid:
+  - |
+    fn step(key: &str, m: Modifiers) -> Option<ListKey> {
+      ListKey::from_key(key, m)
+    }
+  - |
+    fn encode(key: &str) -> Vec<u8> {
+      match key {
+        "up" => cursor('A'),
+        "down" => cursor('B'),
+        "right" => cursor('C'),
+        "left" => cursor('D'),
+        _ => vec![],
+      }
+    }
+  - |
+    fn synthesize(lines: i32) -> &'static str {
+      if lines > 0 { "up" } else { "down" }
+    }
+  - |
+    fn other(key: &str) -> bool {
+      key == "left"
+    }
+invalid:
+  - |
+    fn arm(key: &str) -> Option<Move> {
+      match key {
+        "down" => Some(Move::Step(1)),
+        "up" => Some(Move::Step(-1)),
+        _ => None,
+      }
+    }
+  - |
+    fn guarded(key: &str, m: Modifiers) -> Option<Move> {
+      match key {
+        "down" if m.platform => Some(Move::Last),
+        _ => None,
+      }
+    }
+  - |
+    fn either(key: &str) {
+      match key {
+        "down" | "up" => move_line(),
+        "left" => comment(),
+        _ => {}
+      }
+    }
+  - |
+    fn compare(key: &str) -> bool {
+      key == "down"
+    }
+  - |
+    fn reversed(k: &Keystroke) -> bool {
+      "up" == k.key
+    }
+  - |
+    fn macro_form(key: &str) -> bool {
+      matches!(key, "up" | "down")
+    }

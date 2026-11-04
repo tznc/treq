@@ -13,6 +13,7 @@ pub mod empty_state;
 pub mod icon_button;
 pub mod image;
 pub mod kbd;
+pub mod list_nav;
 pub mod menu;
 pub mod picker;
 pub mod popover;
@@ -30,6 +31,7 @@ pub use dialog::{handler, ConfirmDialog, Dialog};
 pub use empty_state::{error_actions, EmptyState, Loading, Skeleton};
 pub use icon_button::{IconButton, IconButtonSize};
 pub use kbd::Kbd;
+pub use list_nav::{ListKey, ListNav};
 pub use menu::{MenuItem, MenuLabel, MenuSeparator};
 pub use picker::{Picker, PickerPlacement};
 pub use popover::{floating, Popover};
@@ -540,9 +542,9 @@ impl RenderOnce for Button {
     let mut el = gpui_bootstrap::button::Button::new(self.id)
       .colors(colors)
       .disabled(disabled)
-      // As before the facade: a press leaves focus in the editor or list
-      // the button acts on.
-      .focusable(false)
+      // A press leaves focus in the editor or list the button acts on; Tab
+      // still reaches it, as inside a dialog.
+      .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
       .when(self.variant == Variant::Link, |b| {
         b.button_style(gpui_bootstrap::button::ButtonStyle::Link)
       })

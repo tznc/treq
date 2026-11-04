@@ -1,14 +1,19 @@
 //! Modal dialogs and confirmations.
 
-use std::{cell::Cell, rc::Rc, time::Instant};
+use std::{
+  cell::{Cell, RefCell},
+  collections::HashMap,
+  rc::Rc,
+  time::Instant,
+};
 
 use gpui::{
   anchored, canvas, deferred, div, point, prelude::*, px, AnyElement, App, DispatchPhase, EntityId,
-  FocusHandle, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, SharedString, Size,
-  Window,
+  FocusHandle, KeyDownEvent, Keystroke, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels,
+  SharedString, Size, Subscription, Window, WindowId,
 };
 
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{FocusTrapElement as _, TestSupportExt as _};
 
 use crate::{text, theme, theme::Palette, zpx, Button, IconButton, TextSize, Variant};
 
@@ -231,6 +236,8 @@ impl RenderOnce for Dialog {
         .read(cx)
         .clone()
     });
+    return_focus_on_close(&self.id, &focus, window, cx);
+    let trap_focus = focus.clone();
     let x = self
       .on_close
       .clone()
@@ -344,8 +351,12 @@ impl RenderOnce for Dialog {
       .justify_center()
       .bg(p.scrim())
       .occlude()
-      .track_focus(&focus)
       .on_key_down(move |event: &KeyDownEvent, window, cx| {
+        if let Some(back) = tab_key(&event.keystroke) {
+          cx.stop_propagation();
+          trap_tab(&trap_focus, back, window, cx);
+          return;
+        }
         let m = event.keystroke.modifiers;
         let plain = !(m.control || m.alt || m.shift || m.platform || m.function);
         let secondary = !(m.alt || m.shift || m.function);
@@ -365,6 +376,7 @@ impl RenderOnce for Dialog {
         })
       })
       .child(panel);
+    let scrim = trapped(scrim, &self.id, &focus, cx);
     match viewport {
       Some(_) => deferred(anchored().position(point(px(0.), px(0.))).child(scrim))
         .with_priority(priority)
@@ -379,6 +391,16 @@ impl Dialog {
     let p = self.palette;
     let id = self.id.clone();
     let selector = id.to_string();
+    let focus = self.focus.clone().unwrap_or_else(|| {
+      window
+        .use_keyed_state(SharedString::from(format!("{id}-focus")), cx, |_, cx| {
+          cx.focus_handle()
+        })
+        .read(cx)
+        .clone()
+    });
+    return_focus_on_close(&id, &focus, window, cx);
+    let trap_focus = focus.clone();
     let drag = window
       .use_keyed_state(SharedString::from(format!("{id}-drag")), cx, |_, _| {
         Rc::new(SheetDrag::default())
@@ -498,7 +520,7 @@ impl Dialog {
           .map(|child| div().flex_none().child(child)),
       )
       .when(has_body, |el| el.child(body));
-    div()
+    let scrim = div()
       .id(SharedString::from(format!("{id}-scrim")))
       .size_full()
       .flex()
@@ -507,9 +529,11 @@ impl Dialog {
       .bg(p.scrim())
       // The tap that closes the sheet must not reach the page below.
       .occlude()
-      .when_some(self.focus, |el, focus| el.track_focus(&focus))
       .on_key_down(move |event: &KeyDownEvent, window, cx| {
-        if event.keystroke.key == "escape" {
+        if let Some(back) = tab_key(&event.keystroke) {
+          cx.stop_propagation();
+          trap_tab(&trap_focus, back, window, cx);
+        } else if event.keystroke.key == "escape" {
           cx.stop_propagation();
           close_on_key(window, cx);
         }
@@ -517,8 +541,101 @@ impl Dialog {
       .on_mouse_down(MouseButton::Left, move |_, window, cx| {
         close_on_scrim(window, cx)
       })
-      .child(panel)
+      .child(panel);
+    trapped(scrim, &id, &focus, cx)
+  }
+}
+
+/// Tab and Shift+Tab inside a dialog: the next or previous tab stop within
+/// `container`, wrapping at its ends, so the keyboard never leaves it. GPUI's
+/// tab order spans the window, so this steps through it until it is back
+/// inside, at most once round.
+fn trap_tab(container: &FocusHandle, back: bool, window: &mut Window, cx: &mut App) {
+  let advance = if back {
+    Window::focus_prev
+  } else {
+    Window::focus_next
+  };
+  advance(window, cx);
+  let first = window.focused(cx);
+  while !container.contains_focused(window, cx) {
+    advance(window, cx);
+    if window.focused(cx) == first {
+      // No tab stop inside: the dialog itself keeps the keyboard.
+      container.focus(window, cx);
+      break;
+    }
+  }
+}
+
+/// Whether `keystroke` is Tab (`Some(false)`) or Shift+Tab (`Some(true)`).
+fn tab_key(keystroke: &Keystroke) -> Option<bool> {
+  let m = keystroke.modifiers;
+  (keystroke.key == "tab" && !(m.control || m.alt || m.platform || m.function)).then_some(m.shift)
+}
+
+thread_local! {
+  /// Each open dialog's watch for its close, by window and dialog id. A
+  /// dialog opened again replaces its old one.
+  static OPENERS: RefCell<HashMap<(WindowId, SharedString), Subscription>> =
+    RefCell::default();
+}
+
+/// Remembers what had focus as dialog `id` opened and gives it focus back
+/// once the dialog is gone. An opener inside the dialog (a screen that
+/// focuses a field as it opens one) is no opener.
+fn return_focus_on_close(
+  id: &SharedString,
+  container: &FocusHandle,
+  window: &mut Window,
+  cx: &mut App,
+) {
+  let open = window.use_keyed_state(SharedString::from(format!("{id}-opener")), cx, |_, _| {
+    Cell::new(false)
+  });
+  if open.read(cx).replace(true) {
+    return;
+  }
+  let opener = Rc::new(RefCell::new(window.focused(cx)));
+  window.defer(cx, {
+    let (opener, container) = (opener.clone(), container.clone());
+    move |window, _| {
+      let inside = opener
+        .borrow()
+        .as_ref()
+        .is_some_and(|o| container.contains(o, window));
+      if inside {
+        opener.borrow_mut().take();
+      }
+    }
+  });
+  let open = open.downgrade();
+  let watch = window.on_focus_out(container, cx, move |_, window, cx| {
+    // Focus left the dialog because it is no longer drawn.
+    if open.upgrade().is_none() {
+      if let Some(opener) = opener.borrow_mut().take() {
+        opener.focus(window, cx);
+      }
+    }
+  });
+  let key = (window.window_handle().window_id(), id.clone());
+  OPENERS.with(|o| o.borrow_mut().insert(key, watch));
+}
+
+/// Confines Tab to the dialog where gpui-kit's root takes the key (mobile),
+/// as the dialog's own handler does where nothing does (the desktop).
+fn trapped(
+  scrim: gpui::Stateful<gpui::Div>,
+  id: &SharedString,
+  focus: &FocusHandle,
+  cx: &App,
+) -> AnyElement {
+  if cx.has_global::<gpui_kit::base::Theme>() {
+    scrim
+      .focus_trap(SharedString::from(format!("{id}-trap")), focus)
       .into_any_element()
+  } else {
+    scrim.track_focus(focus).into_any_element()
   }
 }
 
@@ -838,6 +955,179 @@ mod tests {
       cx.simulate_keystrokes("enter");
       cx.simulate_keystrokes("escape");
       assert_eq!(*log.0.borrow(), ["close"]);
+    }
+  }
+
+  /// Tab and Shift+Tab stay inside an open dialog, and closing it gives the
+  /// keyboard back to what had it.
+  mod focus {
+    use gpui::{Entity, FocusHandle, Focusable as _, TestAppContext, VisualTestContext};
+    use gpui_kit::component::input::InputState;
+
+    use super::*;
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum Kind {
+      Dialog,
+      Sheet,
+    }
+
+    struct Host {
+      kind: Kind,
+      open: bool,
+      opener: FocusHandle,
+      dialog: FocusHandle,
+      input: Entity<InputState>,
+    }
+
+    impl Render for Host {
+      fn render(&mut self, _: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let p = theme::palette(false);
+        let dialog = Dialog::new("trap", &p)
+          .title("Rename workspace")
+          .when(self.kind == Kind::Sheet, |d| d.sheet(px(0.)))
+          .focus(&self.dialog)
+          .on_close(handler(cx, |host: &mut Host, _, cx| {
+            host.open = false;
+            cx.notify();
+          }))
+          .child(crate::input(&self.input))
+          .footer([
+            Button::new("trap-cancel", &p)
+              .label("Cancel")
+              .into_any_element(),
+            Button::new("trap-ok", &p)
+              .label("Rename")
+              .into_any_element(),
+          ]);
+        div()
+          .size_full()
+          .child(div().id("opener").track_focus(&self.opener).child("Open"))
+          .when(self.open, |el| el.child(dialog))
+      }
+    }
+
+    fn draw(cx: &mut VisualTestContext) {
+      cx.update(|window, cx| window.draw(cx).clear(cx));
+      cx.run_until_parked();
+      cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    /// Mounts the host with its opener focused, then opens the dialog.
+    fn mount(cx: &mut TestAppContext, kind: Kind) -> (VisualTestContext, Entity<Host>) {
+      cx.update(theme::init);
+      let window = cx.add_window(move |window, cx| Host {
+        kind,
+        open: false,
+        opener: cx.focus_handle().tab_stop(true),
+        dialog: cx.focus_handle(),
+        input: cx.new(|cx| InputState::new(window, cx)),
+      });
+      let host = window.root(cx).unwrap();
+      let mut cx = VisualTestContext::from_window(*window, cx);
+      cx.update(|window, _| window.activate_window());
+      draw(&mut cx);
+      cx.update(|window, cx| host.read(cx).opener.clone().focus(window, cx));
+      draw(&mut cx);
+      host.update(&mut cx, |host, cx| {
+        host.open = true;
+        cx.notify();
+      });
+      draw(&mut cx);
+      (cx, host)
+    }
+
+    fn input_focused(cx: &mut VisualTestContext, host: &Entity<Host>) -> bool {
+      cx.update(|window, cx| {
+        host
+          .read(cx)
+          .input
+          .focus_handle(cx)
+          .contains_focused(window, cx)
+      })
+    }
+
+    /// Presses `keys`, checking after each that focus is inside the dialog.
+    fn press_inside(cx: &mut VisualTestContext, host: &Entity<Host>, keys: &str) {
+      for key in keys.split(' ') {
+        cx.simulate_keystrokes(key);
+        draw(cx);
+        let (inside, opener) = cx.update(|window, cx| {
+          let host = host.read(cx);
+          (
+            host.dialog.contains_focused(window, cx),
+            host.opener.is_focused(window),
+          )
+        });
+        assert!(inside && !opener, "{key} took focus out of the dialog");
+      }
+    }
+
+    fn focus_input(cx: &mut VisualTestContext, host: &Entity<Host>) {
+      cx.update(|window, cx| {
+        let input = host.read(cx).input.clone();
+        input.update(cx, |input, cx| input.focus(window, cx));
+      });
+      draw(cx);
+      assert!(input_focused(cx, host));
+    }
+
+    fn tab_wraps(cx: &mut TestAppContext, kind: Kind) {
+      let (mut cx, host) = mount(cx, kind);
+      focus_input(&mut cx, &host);
+      // The field, Cancel, Rename: Tab from Rename wraps to the field.
+      press_inside(&mut cx, &host, "tab");
+      assert!(!input_focused(&mut cx, &host), "Tab reaches the buttons");
+      press_inside(&mut cx, &host, "tab tab");
+      assert!(input_focused(&mut cx, &host), "Tab from the last wraps");
+      // Shift+Tab from the field wraps to Rename, the last control.
+      press_inside(&mut cx, &host, "shift-tab");
+      assert!(!input_focused(&mut cx, &host));
+      press_inside(&mut cx, &host, "tab");
+      assert!(input_focused(&mut cx, &host), "Shift+Tab went to the last");
+      press_inside(
+        &mut cx,
+        &host,
+        "shift-tab shift-tab shift-tab tab shift-tab",
+      );
+    }
+
+    #[gpui::test]
+    fn tab_and_shift_tab_wrap_inside_a_dialog(cx: &mut TestAppContext) {
+      tab_wraps(cx, Kind::Dialog);
+    }
+
+    #[gpui::test]
+    fn tab_and_shift_tab_wrap_inside_a_sheet(cx: &mut TestAppContext) {
+      tab_wraps(cx, Kind::Sheet);
+    }
+
+    /// Opened with focus outside it, the first Tab lands inside.
+    #[gpui::test]
+    fn tab_from_the_dialog_itself_stays_inside(cx: &mut TestAppContext) {
+      let (mut cx, host) = mount(cx, Kind::Dialog);
+      cx.update(|window, cx| host.read(cx).dialog.clone().focus(window, cx));
+      draw(&mut cx);
+      press_inside(&mut cx, &host, "tab");
+      let on_control = cx.update(|window, cx| !host.read(cx).dialog.is_focused(window));
+      assert!(on_control, "Tab moves onto a control");
+      press_inside(&mut cx, &host, "tab tab tab shift-tab");
+    }
+
+    /// Escape closes the dialog and the opener has the keyboard again.
+    #[gpui::test]
+    fn closing_returns_focus_to_the_opener(cx: &mut TestAppContext) {
+      for kind in [Kind::Dialog, Kind::Sheet] {
+        let (mut cx, host) = mount(cx, kind);
+        focus_input(&mut cx, &host);
+        press_inside(&mut cx, &host, "tab");
+        cx.simulate_keystrokes("escape");
+        draw(&mut cx);
+        let (open, opener) =
+          cx.update(|window, cx| (host.read(cx).open, host.read(cx).opener.is_focused(window)));
+        assert!(!open, "Escape closed it");
+        assert!(opener, "the opener has focus again");
+      }
     }
   }
 

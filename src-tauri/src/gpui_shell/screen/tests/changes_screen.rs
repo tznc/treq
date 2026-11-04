@@ -825,6 +825,22 @@ fn arrow_keys_move_and_extend_the_line_selection(cx: &mut TestAppContext) {
   assert_eq!(selected_lines(&mut h), None);
 }
 
+/// End and Home take the line cursor to the last and first drawn lines.
+#[gpui::test]
+fn end_and_home_move_the_line_cursor_to_the_ends(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  // a.rs: " a", "+b", "+c"; b.rs: "+d".
+  h.click("gutter-a.rs-0-1");
+  h.cx.simulate_keystrokes("end");
+  assert_eq!(selected_lines(&mut h), Some(("b.rs".into(), vec![(0, 0)])));
+  h.cx.simulate_keystrokes("up");
+  assert_eq!(selected_lines(&mut h), Some(("a.rs".into(), vec![(0, 2)])));
+  h.cx.simulate_keystrokes("home");
+  assert_eq!(selected_lines(&mut h), Some(("a.rs".into(), vec![(0, 0)])));
+  h.cx.simulate_keystrokes("down");
+  assert_eq!(selected_lines(&mut h), Some(("a.rs".into(), vec![(0, 1)])));
+}
+
 #[gpui::test]
 fn enter_edits_the_comment_on_the_cursor_line(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
