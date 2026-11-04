@@ -197,7 +197,7 @@ impl RenameDialog {
               view.error.clear();
               WorkspaceHost::notify(
                 &*view.host,
-                Toast::success(&format!("Renamed to {next}")).into(),
+                Toast::success(format!("Renamed to {next}")).into(),
               );
               WorkspaceHost::notify(
                 &*view.host,

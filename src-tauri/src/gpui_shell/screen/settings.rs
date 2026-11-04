@@ -790,7 +790,7 @@ impl SettingsView {
         }
         if let Err(err) = result {
           view.host.notify(NativeEvent::from(
-            Toast::error("Review prompt").description(err.to_string()),
+            Toast::error("Review prompt").description(err),
           ));
         }
         view.load_prompt_edits(cx);
@@ -838,12 +838,12 @@ impl SettingsView {
               fields.review_prompt = prompt.clone();
             }
             view.host.notify(NativeEvent::from(
-              Toast::success("Review prompt updated").description(String::new().to_string()),
+              Toast::success("Review prompt updated").description(String::new()),
             ));
           }
         }
         Err(err) => view.host.notify(NativeEvent::from(
-          Toast::error("Review prompt").description(err.to_string()),
+          Toast::error("Review prompt").description(err),
         )),
       }
       view.load_prompt_edits(cx);
@@ -930,11 +930,11 @@ impl SettingsView {
       |view, result, cx| {
         match (result, success) {
           (Err(err), _) => view.host.notify(NativeEvent::from(
-            Toast::error("Skill library").description(err.to_string()),
+            Toast::error("Skill library").description(err),
           )),
-          (Ok(()), Some((title, body))) => view.host.notify(NativeEvent::from(
-            Toast::success(title).description(body.to_string()),
-          )),
+          (Ok(()), Some((title, body))) => view
+            .host
+            .notify(NativeEvent::from(Toast::success(title).description(body))),
           (Ok(()), None) => {}
         }
         if let Some(skills) = &mut view.skills {
@@ -1126,7 +1126,7 @@ impl SettingsView {
           view.start_skill_agent(prompt, cx);
         }
         Err(err) => view.host.notify(NativeEvent::from(
-          Toast::error("Skill library").description(err.to_string()),
+          Toast::error("Skill library").description(err),
         )),
       }
       view.load_skills(cx);
@@ -1328,7 +1328,7 @@ impl SettingsView {
           );
         }
         Err(err) => view.host.notify(NativeEvent::from(
-          Toast::error("Review prompt").description(err.to_string()),
+          Toast::error("Review prompt").description(err),
         )),
       },
     );

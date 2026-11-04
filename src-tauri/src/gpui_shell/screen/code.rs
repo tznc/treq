@@ -760,7 +760,7 @@ impl CodeView {
       Err(err) => {
         tell(
           self.host.as_ref(),
-          Toast::error(&format!("Failed to save {what}"))
+          Toast::error(format!("Failed to save {what}"))
             .description(err)
             .into(),
         );

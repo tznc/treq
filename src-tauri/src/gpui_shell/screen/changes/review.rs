@@ -950,7 +950,7 @@ impl ChangesView {
     cx.write_to_clipboard(ClipboardItem::new_string(outdated_markdown(&all)));
     super::tell(
       self.host.as_ref(),
-      Toast::success(&format!(
+      Toast::success(format!(
         "{} copied",
         count_label(all.len(), "outdated comment")
       ))

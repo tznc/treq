@@ -1283,7 +1283,7 @@ impl SettingsView {
               host.notify(NativeEvent::from(Toast::success("API key saved")));
             }
             Err(err) => host.notify(NativeEvent::from(
-              Toast::error("Error saving API key").description(err.to_string()),
+              Toast::error("Error saving API key").description(err.clone()),
             )),
           }
           result
@@ -1494,7 +1494,7 @@ impl SettingsView {
             });
             host.notify(NativeEvent::from(
               Toast::warning("Linear OAuth needs Pro")
-                .description("Add a personal Linear API key above to use Linear on the Free plan.")
+                .description("Add a personal Linear API key above to use Linear on the free plan.")
                 .action(native::ToastAction {
                   label: "Upgrade to Pro".into(),
                   id,
@@ -1502,7 +1502,7 @@ impl SettingsView {
             ));
           }
           Err(error) => host.notify(NativeEvent::from(
-            Toast::error("Error starting OAuth flow").description(error.message.to_string()),
+            Toast::error("Error starting OAuth flow").description(error.message),
           )),
         }
       },

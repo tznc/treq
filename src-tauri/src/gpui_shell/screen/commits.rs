@@ -714,7 +714,7 @@ impl CommitsView {
             let event = match host.undo_operation(&parent.repo_path, ws, &operation) {
               Ok(()) => {
                 Self::changed(host.as_ref(), &parent);
-                NativeEvent::from(Toast::success(&format!("Restored commit {short}")))
+                NativeEvent::from(Toast::success(format!("Restored commit {short}")))
               }
               Err(err) => NativeEvent::from(Toast::error("Undo failed").description(err)),
             };
@@ -791,7 +791,7 @@ impl CommitsView {
           Self::changed(view.host.as_ref(), &view.parent);
           tell(
             view.host.as_ref(),
-            Toast::success(&format!("Undid commit {}", commit.short_id)).into(),
+            Toast::success(format!("Undid commit {}", commit.short_id)).into(),
           );
         }
         Err(err) => tell(
@@ -829,7 +829,7 @@ impl CommitsView {
               Self::changed(view.host.as_ref(), &view.parent);
               tell(
                 view.host.as_ref(),
-                Toast::success(&format!("Reverted commit {}", commit.short_id)).into(),
+                Toast::success(format!("Reverted commit {}", commit.short_id)).into(),
               );
             }
             Err(err) => tell(
@@ -2158,7 +2158,7 @@ impl CommitsView {
           .update(cx, |view, _| {
             tell(
               view.host.as_ref(),
-              Toast::success(&format!("{what} copied")).into(),
+              Toast::success(format!("{what} copied")).into(),
             )
           })
           .ignore_closed();

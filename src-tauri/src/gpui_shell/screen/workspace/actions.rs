@@ -496,7 +496,7 @@ impl WorkspaceView {
           match done {
             Ok(()) => WorkspaceHost::notify(
               &*view.host,
-              Toast::success(&format!("Rebased onto {branch}")).into(),
+              Toast::success(format!("Rebased onto {branch}")).into(),
             ),
             Err(err) => WorkspaceHost::notify(
               &*view.host,

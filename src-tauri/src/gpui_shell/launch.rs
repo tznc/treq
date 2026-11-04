@@ -283,7 +283,7 @@ fn start_request(app: &AppHandle, label: String, request: AgentDeepLinkRequest) 
 pub(super) fn start_deep_link(host: &dyn WindowHost, request: &AgentDeepLinkRequest) {
   let workspaces = host.workspaces(&request.repo).unwrap_or_default();
   let Some(workspace) = launch::find_workspace_by_branch(&workspaces, &request.branch) else {
-    host.show_toast(Toast::error("Workspace not found").description(&format!(
+    host.show_toast(Toast::error("Workspace not found").description(format!(
       "Branch '{}' is not available in this window.",
       request.branch
     )));

@@ -163,7 +163,7 @@ pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> V
     let s = if n > 1 { "s" } else { "" };
     WorkspaceHost::notify(
       host,
-      Toast::success(&format!("{n} workspace{s} archived")).into(),
+      Toast::success(format!("{n} workspace{s} archived")).into(),
     );
     removed(
       host,
@@ -178,7 +178,7 @@ pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> V
     WorkspaceHost::notify(
       host,
       Toast::error("Archive failed")
-        .description(&failures.join("\n"))
+        .description(failures.join("\n"))
         .into(),
     );
   }

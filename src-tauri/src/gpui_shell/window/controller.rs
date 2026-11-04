@@ -815,7 +815,7 @@ impl WindowController {
                   .find(|s| !s.is_empty())
                   .unwrap_or(&added)
                   .to_string();
-                Effect::from(Toast::success(&format!("Added {name}")))
+                Effect::from(Toast::success(format!("Added {name}")))
               }
               Err(err) => Effect::from(Toast::error("Failed to add repository").description(&err)),
             };
