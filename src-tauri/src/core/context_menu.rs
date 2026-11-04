@@ -60,6 +60,8 @@ pub enum MenuAction {
   SwitchProject(String),
   /// Saves (or renames) this window's project.
   SaveProject,
+  /// Edits the saved project's agent instructions and context.
+  ProjectContext,
   /// A new window on the welcome page, to open another project or repository.
   NewWindow,
 }
@@ -353,6 +355,11 @@ pub fn project_items(projects: &[ProjectEntry], current: Option<&str>) -> Vec<Me
     "Save Project…"
   };
   items.push(MenuItem::item(save, MenuAction::SaveProject).icon(MenuIcon::Pencil));
+  if current.is_some() {
+    items.push(
+      MenuItem::item("Project Instructions…", MenuAction::ProjectContext).icon(MenuIcon::Settings),
+    );
+  }
   items.push(MenuItem::item("New Window…", MenuAction::NewWindow).icon(MenuIcon::FolderPlus));
   items
 }
@@ -387,6 +394,7 @@ mod tests {
         "✓ Refunds",
         "---",
         "Rename Project…",
+        "Project Instructions…",
         "New Window…"
       ]
     );

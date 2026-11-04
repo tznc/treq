@@ -18,6 +18,10 @@ pub struct Project {
   pub repos: Vec<String>,
   pub created_at: String,
   pub last_opened_at: String,
+  /// Instructions added to every agent started in the project's windows.
+  pub prompt: String,
+  /// Files, folders or URLs agents may read for context.
+  pub context_paths: Vec<String>,
 }
 
 /// What closing a window should do.
@@ -43,7 +47,28 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
        position INTEGER NOT NULL,
        PRIMARY KEY (project_id, repo_path)
      );",
-  )
+  )?;
+  // Added after the first prototype: an older table gains them here.
+  for (column, ddl) in [
+    (
+      "prompt",
+      "ALTER TABLE projects ADD COLUMN prompt TEXT NOT NULL DEFAULT ''",
+    ),
+    (
+      "context_paths",
+      "ALTER TABLE projects ADD COLUMN context_paths TEXT NOT NULL DEFAULT '[]'",
+    ),
+  ] {
+    let has: i64 = conn.query_row(
+      "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name = ?1",
+      [column],
+      |r| r.get(0),
+    )?;
+    if has == 0 {
+      conn.execute(ddl, [])?;
+    }
+  }
+  Ok(())
 }
 
 fn now() -> String {
@@ -114,19 +139,21 @@ pub fn save(conn: &Connection, name: &str, repos: &[String]) -> Result<Project, 
 pub fn get(conn: &Connection, id: &str) -> Result<Option<Project>, String> {
   let row = conn
     .query_row(
-      "SELECT name, created_at, last_opened_at FROM projects WHERE id = ?1",
+      "SELECT name, created_at, last_opened_at, prompt, context_paths FROM projects WHERE id = ?1",
       [id],
       |r| {
         Ok((
           r.get::<_, String>(0)?,
           r.get::<_, String>(1)?,
           r.get::<_, String>(2)?,
+          r.get::<_, String>(3)?,
+          r.get::<_, String>(4)?,
         ))
       },
     )
     .optional()
     .map_err(err)?;
-  let Some((name, created_at, last_opened_at)) = row else {
+  let Some((name, created_at, last_opened_at, prompt, context)) = row else {
     return Ok(None);
   };
   Ok(Some(Project {
@@ -135,6 +162,8 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<Project>, String> {
     repos: repos_of(conn, id)?,
     created_at,
     last_opened_at,
+    prompt,
+    context_paths: serde_json::from_str(&context).unwrap_or_default(),
   }))
 }
 
@@ -152,6 +181,31 @@ pub fn list(conn: &Connection) -> Result<Vec<Project>, String> {
     .iter()
     .filter_map(|id| get(conn, id).transpose())
     .collect()
+}
+
+/// Sets the project's agent instructions and context paths. Blank and
+/// repeated paths are dropped.
+pub fn set_context(
+  conn: &Connection,
+  id: &str,
+  prompt: &str,
+  context_paths: &[String],
+) -> Result<(), String> {
+  exists(conn, id)?;
+  let mut paths: Vec<String> = Vec::new();
+  for path in context_paths.iter().map(|p| p.trim()) {
+    if !path.is_empty() && !paths.iter().any(|p| p == path) {
+      paths.push(path.to_string());
+    }
+  }
+  let json = serde_json::to_string(&paths).map_err(|e| e.to_string())?;
+  conn
+    .execute(
+      "UPDATE projects SET prompt = ?2, context_paths = ?3 WHERE id = ?1",
+      params![id, prompt.trim(), json],
+    )
+    .map_err(err)
+    .map(drop)
 }
 
 pub fn rename(conn: &Connection, id: &str, name: &str) -> Result<(), String> {
@@ -400,6 +454,59 @@ mod tests {
     assert!(rename(&conn, "missing", "X").is_err());
     assert!(add_repo(&conn, "missing", "/r/a").is_err());
     assert!(mark_opened(&conn, "missing").is_err());
+  }
+
+  #[test]
+  fn new_project_has_no_prompt_or_context() {
+    let conn = conn();
+    let p = save(&conn, "P", &repos(&["/r/a"])).expect("save");
+    assert_eq!(p.prompt, "");
+    assert!(p.context_paths.is_empty());
+  }
+
+  #[test]
+  fn stores_prompt_and_context_paths() {
+    let conn = conn();
+    let p = save(&conn, "P", &repos(&["/r/a"])).expect("save");
+    set_context(
+      &conn,
+      &p.id,
+      "  Use pnpm.\nKeep API and web in sync.  ",
+      &repos(&[
+        "/docs/style.md",
+        " ",
+        "/docs/style.md",
+        "https://x.dev/spec",
+      ]),
+    )
+    .expect("set");
+    let p = get(&conn, &p.id).unwrap().unwrap();
+    assert_eq!(p.prompt, "Use pnpm.\nKeep API and web in sync.");
+    assert_eq!(
+      p.context_paths,
+      repos(&["/docs/style.md", "https://x.dev/spec"])
+    );
+  }
+
+  #[test]
+  fn setting_context_on_unknown_project_fails() {
+    let conn = conn();
+    assert!(set_context(&conn, "missing", "x", &[]).is_err());
+  }
+
+  #[test]
+  fn init_adds_context_columns_to_an_older_table() {
+    let conn = Connection::open_in_memory().expect("open");
+    conn
+      .execute_batch(
+        "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL,
+           created_at TEXT NOT NULL, last_opened_at TEXT NOT NULL);
+         INSERT INTO projects VALUES ('p', 'Old', 'a', 'a');",
+      )
+      .expect("old schema");
+    init(&conn).expect("init");
+    let p = get(&conn, "p").unwrap().unwrap();
+    assert_eq!(p.prompt, "");
   }
 
   #[test]

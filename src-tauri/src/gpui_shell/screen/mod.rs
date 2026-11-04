@@ -67,6 +67,7 @@ mod onboarding_remote;
 mod pr_review;
 mod pr_review_data;
 pub(super) mod prefetch;
+mod project_context_dialog;
 mod remote;
 pub(super) mod remote_chrome;
 mod remote_data;

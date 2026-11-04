@@ -177,6 +177,8 @@ pub struct Dialogs {
   pub deletion: bool,
   /// The Save project dialog; `true` while the window waits to close.
   pub save_project: Option<bool>,
+  /// The Project instructions dialog.
+  pub project_context: bool,
   pub change_move: Option<ChangeMove>,
   pub agent_prompt: Option<AgentPrompt>,
   /// The prompt history, focused on an entry.
@@ -201,6 +203,7 @@ impl Dialogs {
       || self.rename.is_some()
       || self.deletion
       || self.save_project.is_some()
+      || self.project_context
       || self.change_move.is_some()
       || self.agent_prompt.is_some()
       || self.prompt_history.is_some()

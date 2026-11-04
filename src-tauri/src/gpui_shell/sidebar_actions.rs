@@ -281,6 +281,7 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
   match action {
     MenuAction::OpenBranchSwitcher => open(OpenRequest::BranchSwitcher),
     MenuAction::SaveProject => open(OpenRequest::SaveProject { closing: false }),
+    MenuAction::ProjectContext => open(OpenRequest::ProjectContext),
     MenuAction::SwitchProject(id) => {
       let main = app.clone();
       main

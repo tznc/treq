@@ -286,6 +286,15 @@ fn workspace_modal(model: &Model, data: &Data) -> Option<Value> {
       "repos": repos,
     }));
   }
+  if let (true, Some(project)) = (dialogs.project_context, data.project()) {
+    return Some(json!({
+      "kind": "projectContext",
+      "repoPath": repo,
+      "name": project.name,
+      "prompt": project.prompt,
+      "contextPaths": project.context_paths,
+    }));
+  }
   if dialogs.deletion && !repo.is_empty() {
     return Some(json!({
       "kind": "workspaceDeletion",

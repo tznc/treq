@@ -891,7 +891,7 @@ impl Sidebar {
       .cursor_pointer()
       .hover(|style| style.bg(palette.hover()))
       .child(icon(
-        theme::ICON_BRANCH_PLUS,
+        theme::ICON_PR_CREATE,
         12.,
         palette.sidebar_foreground.opacity(0.7),
       ))
@@ -1038,7 +1038,11 @@ impl Sidebar {
       ))
       .child(self.row_button(
         format!("{prefix}-stack").into(),
-        theme::ICON_LAYERS,
+        if id.is_none() {
+          theme::ICON_PR_CREATE
+        } else {
+          theme::ICON_LAYERS
+        },
         stack_label(id),
         None,
         SidebarAction::Stack { id },
@@ -1450,7 +1454,7 @@ impl Sidebar {
       ui::spinner(("archiving", id as u64), 12., palette.muted_foreground).into_any_element()
     } else {
       // The React sidebar flips the branch icon vertically.
-      icon(theme::ICON_BRANCH, 12., branch_color)
+      icon(theme::ICON_PR, 12., branch_color)
         .with_transformation(Transformation::scale(gpui::size(1., -1.)))
         .into_any_element()
     };

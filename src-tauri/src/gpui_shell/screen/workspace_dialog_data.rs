@@ -48,6 +48,10 @@ pub trait WorkspaceDialogHost: ChangesHost {
   }
   /// Closes this window without asking to save again.
   fn close_window(&self) {}
+  /// Sets this window's saved project's agent instructions and context.
+  fn set_project_context(&self, _prompt: &str, _paths: &[String]) -> Result<(), String> {
+    Err("Projects are not available here".into())
+  }
   /// `create_workspace`, with the repository's copy files and setup script.
   fn new_workspace(
     &self,
@@ -81,6 +85,12 @@ pub trait WorkspaceDialogHost: ChangesHost {
 impl WorkspaceDialogHost for Backend {
   fn save_project(&self, name: &str) -> Result<(), String> {
     crate::gpui_shell::projects::save_window_project(self.app(), self.label(), name).map(drop)
+  }
+
+  fn set_project_context(&self, prompt: &str, paths: &[String]) -> Result<(), String> {
+    let project = crate::gpui_shell::projects::window_project(self.app(), self.label())
+      .ok_or("Save the project first")?;
+    self.with_db(|db| crate::core::projects::set_context(db.conn(), &project.id, prompt, paths))
   }
 
   fn close_window(&self) {

@@ -274,6 +274,10 @@ impl Model {
       "openWorkspaces.close" => self.dialogs.open_workspaces = None,
       "workspaceDeletion.close" => self.dialogs.deletion = false,
       "saveProject.close" => self.dialogs.save_project = None,
+      "projectContext.close" => {
+        self.dialogs.project_context = false;
+        return with(Effect::Refresh { revision: false });
+      }
       "saveProject.saved" => {
         self.dialogs.save_project = None;
         return with(Effect::Refresh { revision: false });
@@ -1018,6 +1022,10 @@ impl Model {
         self.dialogs.save_project = Some(*closing)
       }
       OpenRequest::SaveProject { .. } => {}
+      OpenRequest::ProjectContext if self.has_repo() && data.project().is_some() => {
+        self.dialogs.project_context = true
+      }
+      OpenRequest::ProjectContext => {}
       OpenRequest::WorkspaceChanges {
         repo_path,
         workspace_id,
@@ -1184,6 +1192,18 @@ mod tests {
     let effects = model.screen_action(&press("saveProject.saved"), &data);
     assert_eq!(model.dialogs.save_project, None);
     assert!(format!("{effects:?}").contains("Refresh"));
+  }
+
+  #[test]
+  fn project_instructions_need_a_saved_project() {
+    let (mut model, data) = (model(), data());
+    model.native_event(
+      &NativeEvent::Open {
+        what: OpenRequest::ProjectContext,
+      },
+      &data,
+    );
+    assert!(!model.dialogs.project_context, "unsaved: nothing to edit");
   }
 
   #[test]

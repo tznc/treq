@@ -118,6 +118,8 @@ pub enum OpenRequest {
   SaveProject {
     closing: bool,
   },
+  /// The Project instructions dialog of this window's saved project.
+  ProjectContext,
   /// The pull request in Treq's PR view (`onViewPrInApp`).
   PrReview {
     number: u64,
