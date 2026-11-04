@@ -1,0 +1,94 @@
+id: gpui-no-local-header-or-toast
+snapshots:
+  ? |
+    fn group_heading(label: &str, p: &Palette) -> Div {
+      div().text_color(p.muted_foreground).child(label.to_uppercase())
+    }
+  : labels:
+    - source: |-
+        fn group_heading(label: &str, p: &Palette) -> Div {
+          div().text_color(p.muted_foreground).child(label.to_uppercase())
+        }
+      style: primary
+      start: 0
+      end: 120
+    - source: group_heading
+      style: secondary
+      start: 3
+      end: 16
+    - source: to_uppercase
+      style: secondary
+      start: 103
+      end: 115
+    - source: label.to_uppercase
+      style: secondary
+      start: 97
+      end: 115
+  ? |
+    fn section(p: &Palette, title: &str) -> Div {
+      ui::text(div(), TextSize::Xs).child(title.to_uppercase())
+    }
+  : labels:
+    - source: |-
+        fn section(p: &Palette, title: &str) -> Div {
+          ui::text(div(), TextSize::Xs).child(title.to_uppercase())
+        }
+      style: primary
+      start: 0
+      end: 107
+    - source: section
+      style: secondary
+      start: 3
+      end: 10
+    - source: to_uppercase
+      style: secondary
+      start: 90
+      end: 102
+    - source: title.to_uppercase
+      style: secondary
+      start: 84
+      end: 102
+  ? |
+    fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
+      self.host.notify(NativeEvent::Toast {
+        title: title.into(),
+        description: description.into(),
+        tone,
+        action: None,
+      });
+    }
+  : labels:
+    - source: |-
+        fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
+          self.host.notify(NativeEvent::Toast {
+            title: title.into(),
+            description: description.into(),
+            tone,
+            action: None,
+          });
+        }
+      style: primary
+      start: 0
+      end: 217
+    - source: toast
+      style: secondary
+      start: 3
+      end: 8
+  ? |
+    impl View {
+      fn toast(&self, title: &str) {
+        self.host.toast(ToastTone::Error, title, "");
+      }
+    }
+  : labels:
+    - source: |-
+        fn toast(&self, title: &str) {
+            self.host.toast(ToastTone::Error, title, "");
+          }
+      style: primary
+      start: 14
+      end: 98
+    - source: toast
+      style: secondary
+      start: 17
+      end: 22

@@ -164,6 +164,62 @@ pub fn run_toast_action(id: u64) {
   }
 }
 
+/// A toast, the one way a screen shows one: a title that states the result
+/// in the past tense ("Pushed", not "Push successful"), a description, a
+/// tone and at most one action. It becomes a [`NativeEvent::Toast`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Toast {
+  pub tone: ToastTone,
+  pub title: String,
+  pub description: String,
+  pub action: Option<ToastAction>,
+}
+
+impl Toast {
+  pub fn new(tone: ToastTone, title: impl Into<String>, description: impl Into<String>) -> Self {
+    Self {
+      tone,
+      title: title.into(),
+      description: description.into(),
+      action: None,
+    }
+  }
+
+  pub fn success(title: impl Into<String>) -> Self {
+    Self::new(ToastTone::Success, title, "")
+  }
+
+  pub fn warning(title: impl Into<String>) -> Self {
+    Self::new(ToastTone::Warning, title, "")
+  }
+
+  pub fn error(title: impl Into<String>) -> Self {
+    Self::new(ToastTone::Error, title, "")
+  }
+
+  pub fn description(mut self, description: impl Into<String>) -> Self {
+    self.description = description.into();
+    self
+  }
+
+  /// The toast's one button. A second call replaces the first.
+  pub fn action(mut self, action: ToastAction) -> Self {
+    self.action = Some(action);
+    self
+  }
+}
+
+impl From<Toast> for NativeEvent {
+  fn from(toast: Toast) -> Self {
+    NativeEvent::Toast {
+      title: toast.title,
+      description: toast.description,
+      tone: toast.tone,
+      action: toast.action,
+    }
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ToastTone {
@@ -383,5 +439,40 @@ impl Transport for Backend {
   fn reads(&self) -> &Reads {
     static READS: std::sync::OnceLock<Reads> = std::sync::OnceLock::new();
     READS.get_or_init(Reads::default)
+  }
+}
+
+#[cfg(test)]
+mod toast_tests {
+  use super::*;
+
+  #[test]
+  fn test_toast_builds_its_native_event() {
+    let event: NativeEvent = Toast::success("Pushed")
+      .description("feat/x is on origin.")
+      .into();
+    assert_eq!(
+      event,
+      NativeEvent::Toast {
+        title: "Pushed".into(),
+        description: "feat/x is on origin.".into(),
+        tone: ToastTone::Success,
+        action: None,
+      }
+    );
+  }
+
+  #[test]
+  fn test_toast_keeps_at_most_one_action() {
+    let first = ToastAction { label: "Open".into(), id: 1 };
+    let second = ToastAction { label: "View".into(), id: 2 };
+    let toast = Toast::new(ToastTone::Error, "Push failed", "rejected")
+      .action(first)
+      .action(second.clone());
+    let NativeEvent::Toast { tone, action, .. } = toast.into() else {
+      panic!("not a toast");
+    };
+    assert_eq!(tone, ToastTone::Error);
+    assert_eq!(action, Some(second));
   }
 }
