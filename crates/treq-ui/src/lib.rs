@@ -397,7 +397,9 @@ impl Button {
     }
   }
 
-  fn filled(&self) -> bool {
+  /// Drawn with a solid fill (Primary, Destructive or a state colour),
+  /// which a region holds at most one of.
+  pub fn filled(&self) -> bool {
     matches!(
       self.variant,
       Variant::Default

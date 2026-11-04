@@ -1330,6 +1330,67 @@ impl LinearView {
       .children(chips)
   }
 
+  /// A second level of choice under a tab strip: the current view in a
+  /// "View" picker whose menu lists `items`.
+  fn view_picker<V: Copy + PartialEq + 'static>(
+    &self,
+    id: &'static str,
+    items: Vec<(V, &'static str)>,
+    current: V,
+    p: &Palette,
+    set: fn(&mut Self, V),
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let value = items
+      .iter()
+      .find(|(v, _)| *v == current)
+      .map_or("", |(_, l)| *l);
+    let (anchors, dark) = (self.anchors.clone(), self.dark);
+    let view = cx.entity().downgrade();
+    div()
+      .relative()
+      .child(
+        ui::Picker::new(id, p)
+          .label("View")
+          .value(value)
+          .placement(ui::PickerPlacement::Toolbar)
+          .on_click(move |_, _, cx| {
+            let Some(anchor) = anchors.borrow().get(id).copied() else {
+              return;
+            };
+            let entries: Vec<NativeMenuItem> = items
+              .iter()
+              .map(|(v, l)| {
+                let (v, view) = (*v, view.clone());
+                NativeMenuItem::item(*l, move |cx: &mut App| {
+                  view
+                    .update(cx, |view, cx| {
+                      set(view, v);
+                      cx.notify();
+                    })
+                    .ignore_closed();
+                })
+                .radio(v == current)
+              })
+              .collect();
+            let view = view.clone();
+            view
+              .update(cx, |view, cx| {
+                view.popup(
+                  PopupRequest::ShowDropdown {
+                    entries: popup::native_entries(entries),
+                    anchor,
+                    dark,
+                  },
+                  cx,
+                )
+              })
+              .ignore_closed();
+          }),
+      )
+      .child(self.anchor(id))
+  }
+
   fn team_selector(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let teams = self.teams.data.clone().unwrap_or_default();
     let label = match &self.team {
@@ -1556,20 +1617,13 @@ impl LinearView {
       },
     ];
 
-    let views = div().px_4().pb_2().flex_none().child(
-      div().flex().child(tab_strip(
-        "linear-view",
-        IssueView::ALL
-          .into_iter()
-          .map(|v| (v, v.value(), v.label()))
-          .collect(),
-        self.issue_view,
-        p,
-        cx.listener(|view, v: &IssueView, _, cx| {
-          view.issue_view = *v;
-          cx.notify();
-        }),
-      )),
+    let views = self.view_picker(
+      "linear-view-picker",
+      IssueView::ALL.into_iter().map(|v| (v, v.label())).collect(),
+      self.issue_view,
+      p,
+      |view, v| view.issue_view = v,
+      cx,
     );
     let toolbar = div()
       .flex()
@@ -1592,6 +1646,7 @@ impl LinearView {
           cx.notify();
         }),
       ))
+      .child(views)
       .child(self.filter_menu("linear-issues-filter-trigger", groups, false, p, cx))
       .child(div().flex_1())
       .child(
@@ -1673,7 +1728,6 @@ impl LinearView {
       .min_h_0()
       .flex()
       .flex_col()
-      .child(views)
       .child(toolbar)
       .child(content)
   }
@@ -2403,28 +2457,27 @@ impl LinearView {
           view.load_projects(cx)
         }),
       );
-    let views = div().px_4().pb_2().flex_none().child(
-      div().flex().child(tab_strip(
-        "linear-project-view",
-        ProjectView::ALL
-          .into_iter()
-          .map(|v| (v, v.value(), v.label()))
-          .collect(),
-        self.project_view,
-        p,
-        cx.listener(|view, v: &ProjectView, _, cx| {
-          view.project_view = *v;
-          cx.notify();
-        }),
-      )),
-    );
-    let filter = div().px_4().pb_2().flex_none().child(self.filter_menu(
-      "linear-projects-filter-trigger",
-      groups,
-      true,
-      p,
-      cx,
-    ));
+    let filter = div()
+      .px_4()
+      .pb_2()
+      .flex_none()
+      .flex()
+      .items_center()
+      .gap_2()
+      .child(
+        self.view_picker(
+          "linear-project-view-picker",
+          ProjectView::ALL
+            .into_iter()
+            .map(|v| (v, v.label()))
+            .collect(),
+          self.project_view,
+          p,
+          |view, v| view.project_view = v,
+          cx,
+        ),
+      )
+      .child(self.filter_menu("linear-projects-filter-trigger", groups, true, p, cx));
     let list = div()
       .id("linear-projects-scroll")
       .flex_1()
@@ -2524,7 +2577,6 @@ impl LinearView {
       .flex_col()
       .min_h_0()
       .child(header)
-      .child(views)
       .child(filter)
       .child(list);
     let right = div()

@@ -2652,6 +2652,7 @@ impl SettingsView {
     let rows = keys.rows.iter().map(|row| {
       let create = row.can_create.then(|| {
         Button::new(format!("byos-key-create-{}", row.kind), p)
+          .variant(Variant::Outline)
           .size(Size::Sm)
           .disabled(keys.saving)
           .label("Create workspace on this account")
@@ -2808,6 +2809,7 @@ impl SettingsView {
         .children(org.keys.iter().map(|row| {
           let create = row.can_create.then(|| {
             Button::new(format!("team-{id}-key-create-{}", row.kind), p)
+              .variant(Variant::Outline)
               .size(Size::Sm)
               .disabled(org.saving)
               .label("Create workspace on this account")

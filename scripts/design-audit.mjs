@@ -32,6 +32,7 @@ const RULES = [
   "gpui-no-local-dialog",
   "gpui-no-adhoc-feedback",
   "gpui-name-no-status-color",
+  "gpui-one-primary-per-region",
   "ui-copy-no-yes-no",
   "ui-copy-sentence-case",
   "ui-copy-ellipsis",
