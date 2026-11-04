@@ -66,8 +66,8 @@ test("rows: commits", async ({ page }) => {
 
 test("rows: github pull requests", async ({ page }) => {
   await ready(page);
-  await page.getByRole("button", { name: "Github", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Github", selected: true })).toBeVisible();
+  await page.getByRole("button", { name: "GitHub", exact: true }).click();
+  await expect(page.getByRole("button", { name: "GitHub", selected: true })).toBeVisible();
   await settle(page, 2000);
   await page.mouse.click(PRS_TAB.x, PRS_TAB.y);
   await settle(page, 2000);

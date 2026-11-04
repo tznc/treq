@@ -17,8 +17,8 @@ const FIRST_ROW = { x: 700, y: 147 };
 
 async function github(page: Page): Promise<void> {
   await ready(page);
-  await page.getByRole("button", { name: "Github", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Github", selected: true })).toBeVisible();
+  await page.getByRole("button", { name: "GitHub", exact: true }).click();
+  await expect(page.getByRole("button", { name: "GitHub", selected: true })).toBeVisible();
   await settle(page, 2000);
 }
 

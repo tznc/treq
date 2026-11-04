@@ -14,7 +14,7 @@ test.afterAll(() => rmSync(signedOut(), { force: true }));
 test("github-errors: signed-out gh", async ({ page }) => {
   writeFileSync(signedOut(), "");
   await ready(page);
-  await page.getByRole("button", { name: "Github", exact: true }).click();
+  await page.getByRole("button", { name: "GitHub", exact: true }).click();
   await settle(page, 2500);
   await capture(page, {
     name: "20-github-issues-unauthenticated",

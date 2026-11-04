@@ -752,7 +752,7 @@ impl Render for Sidebar {
       .child(self.nav_row(
         "github",
         theme::ICON_GITHUB,
-        "Github",
+        "GitHub",
         snapshot.github,
         SidebarAction::OpenGithub,
         &palette,

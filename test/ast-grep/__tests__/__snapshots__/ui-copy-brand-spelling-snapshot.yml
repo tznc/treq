@@ -1,0 +1,44 @@
+id: ui-copy-brand-spelling
+snapshots:
+  ? |
+    fn others() -> &'static str { "Built for Jujitsu" }
+  : labels:
+    - source: '"Built for Jujitsu"'
+      style: primary
+      start: 30
+      end: 49
+  ? |
+    fn others() -> &'static str { "Gitlab" }
+  : labels:
+    - source: '"Gitlab"'
+      style: primary
+      start: 30
+      end: 38
+  ? |
+    fn others() -> &'static str { "Iphone app" }
+  : labels:
+    - source: '"Iphone app"'
+      style: primary
+      start: 30
+      end: 42
+  ? |
+    fn others() -> &'static str { "Javascript and Typescript" }
+  : labels:
+    - source: '"Javascript and Typescript"'
+      style: primary
+      start: 30
+      end: 57
+  ? |
+    fn others() -> &'static str { "Runs on MacOS" }
+  : labels:
+    - source: '"Runs on MacOS"'
+      style: primary
+      start: 30
+      end: 45
+  ? |
+    fn sidebar() -> Row { Row::new("gh", "Github", p) }
+  : labels:
+    - source: '"Github"'
+      style: primary
+      start: 37
+      end: 45

@@ -21,7 +21,7 @@ const ROW_401 = "feat: keyvalues cache";
 
 async function openPr(page: Page, title: string): Promise<void> {
   await ready(page);
-  await page.getByRole("button", { name: "Github", exact: true }).click();
+  await page.getByRole("button", { name: "GitHub", exact: true }).click();
   await settle(page, 2000);
   await page.getByRole("tab", { name: "Pull requests" }).click();
   await settle(page, 1500);
