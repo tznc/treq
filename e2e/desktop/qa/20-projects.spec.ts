@@ -97,7 +97,7 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
     title: "Project home",
     expectations: [
       "Heading 'Event platform' with the repository and workspace counts",
-      "Two cards: LOREM-IPSUM/EVENT-BUS with its workspaces, DOCS-SITE with its workspace",
+      "Two cards: lorem-ipsum/event-bus with its workspaces, docs-site with its workspace",
       "The Project home row is selected in the sidebar",
     ],
   });

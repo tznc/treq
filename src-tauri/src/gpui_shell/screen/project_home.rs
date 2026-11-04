@@ -73,7 +73,7 @@ fn card(repo: &RepoCard, i: usize, ctx: &Ctx) -> AnyElement {
           ui::text(div(), TextSize::Lg)
             .font_weight(FontWeight::SEMIBOLD)
             .truncate()
-            .child(repo.label.to_uppercase()),
+            .child(repo.label.clone()),
         )
         .children(repo.home_ref.clone().map(|branch| {
           ui::text(div(), TextSize::Xs)

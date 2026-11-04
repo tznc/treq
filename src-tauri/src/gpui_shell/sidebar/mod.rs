@@ -1090,7 +1090,7 @@ impl Sidebar {
             .flex_none()
             .truncate()
             .font_weight(gpui::FontWeight::MEDIUM)
-            .child(name.to_uppercase()),
+            .child(name.clone()),
         )
         .when_some(
           repo.home_ref.clone().filter(|_| !repo.missing),
