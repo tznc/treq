@@ -63,6 +63,9 @@ pub struct SidebarSnapshot {
   pub bulk_archive: Option<u32>,
   /// The window's repositories: the main one first.
   pub repos: Vec<RepoSection>,
+  /// The window's saved project name; `None` for an unsaved project.
+  #[serde(default)]
+  pub project: Option<String>,
   /// The opacity of an open webview modal's backdrop, continued over the
   /// sidebar; `None` with no modal open.
   #[serde(default)]
@@ -181,6 +184,8 @@ pub enum SidebarAction {
   ClearSelection,
   OpenSettings,
   OpenCommandPalette,
+  /// The project button: lists projects to switch to and saves this one.
+  ProjectMenu,
   OpenGithub,
   OpenLinear,
   /// The Open button beside WORKSPACES: opens workspaces from branches,
@@ -669,6 +674,7 @@ impl Render for Sidebar {
       .items_center()
       .gap_2()
       .p_2()
+      .child(self.project_button(&palette, cx))
       .child(
         div()
           .id("command-palette")
@@ -733,8 +739,12 @@ impl Render for Sidebar {
       })
       .child(header);
 
-    for repo in &snapshot.repos {
-      sidebar = sidebar.child(self.home_row(repo, &palette, cx));
+    // With several repositories each group header is its repository's home
+    // row; a single repository keeps its home row up here.
+    if !snapshot.repos.iter().any(|repo| repo.label.is_some()) {
+      for repo in &snapshot.repos {
+        sidebar = sidebar.child(self.home_row(repo, &palette, cx));
+      }
     }
     sidebar = sidebar
       .child(self.nav_row(
@@ -1145,6 +1155,134 @@ impl Sidebar {
       )
   }
 
+  /// The project button at the sidebar's top left: the project's initial
+  /// and name, or "Unsaved project". A click opens the project menu.
+  fn project_button(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let name: SharedString = self
+      .snapshot
+      .project
+      .clone()
+      .unwrap_or_else(|| "Unsaved project".into())
+      .into();
+    let saved = self.snapshot.project.is_some();
+    let initial: SharedString = name
+      .chars()
+      .next()
+      .filter(|_| saved)
+      .map(|c| c.to_uppercase().to_string())
+      .unwrap_or_else(|| "?".into())
+      .into();
+    let key = SharedString::from("project-button");
+    div()
+      .relative()
+      .flex_none()
+      .child(
+        div()
+          .id("project-button")
+          .debug_selector(|| "project-button".into())
+          .role(Role::Button)
+          .aria_label(SharedString::from(format!("Project: {name}")))
+          .test_support()
+          .flex()
+          .items_center()
+          .gap_1p5()
+          .px_2()
+          .h(zpx(32.))
+          .max_w(zpx(120.))
+          .rounded_lg()
+          .border_1()
+          .border_color(palette.border)
+          .cursor_pointer()
+          .hover(|style| style.bg(palette.hover()))
+          .child(
+            div()
+              .flex()
+              .flex_none()
+              .items_center()
+              .justify_center()
+              .size(zpx(18.))
+              .rounded_md()
+              .when(saved, |this| {
+                this.bg(palette.primary).text_color(palette.primary_foreground)
+              })
+              .when(!saved, |this| {
+                this
+                  .border_1()
+                  .border_dashed()
+                  .border_color(palette.muted_foreground)
+                  .text_color(palette.muted_foreground)
+              })
+              .child(ui::text(div(), TextSize::Xs).child(initial)),
+          )
+          .child(
+            ui::text(div(), TextSize::Xs)
+              .min_w_0()
+              .truncate()
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .when(!saved, |this| this.text_color(palette.muted_foreground))
+              .child(name),
+          )
+          .child(icon(
+            theme::ICON_CHEVRON_DOWN,
+            14.,
+            palette.muted_foreground,
+          ))
+          .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+            this.hover_tooltip(key.clone(), *hovered, cx)
+          }))
+          .on_click(self.on_action(SidebarAction::ProjectMenu)),
+      )
+      .when(self.tooltip_shown("project-button"), |this| {
+        this.child(self.tooltip_anchor(
+          "project-button".into(),
+          Side::Bottom,
+          TooltipContent::Text("Switch project".into()),
+          0.,
+        ))
+      })
+  }
+
+  /// A repository's group header in a window with several: a fold chevron,
+  /// then the repository's home row (its clone and checked-out branch).
+  fn group_header(
+    &self,
+    repo: &RepoSection,
+    name: &str,
+    palette: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let chevron = if repo.collapsed {
+      theme::ICON_CHEVRON_RIGHT
+    } else {
+      theme::ICON_CHEVRON_DOWN
+    };
+    let selector = format!("group-{name}");
+    div()
+      .flex()
+      .items_center()
+      .child(
+        div()
+          .id("group-label")
+          .debug_selector(move || selector)
+          .role(Role::Button)
+          .aria_label(SharedString::from(format!("Fold {name}")))
+          .test_support()
+          .flex()
+          .flex_none()
+          .items_center()
+          .justify_center()
+          .size(zpx(20.))
+          .rounded_md()
+          .cursor_pointer()
+          .hover(|style| style.bg(palette.hover()))
+          .child(icon(chevron, 14., palette.sidebar_foreground.opacity(0.7)))
+          .on_click(self.on_action(SidebarAction::ToggleRepo {
+            repo_path: repo.path.clone(),
+          })),
+      )
+      .child(div().flex_1().min_w_0().ml(zpx(-6.)).child(self.home_row(repo, palette, cx)))
+  }
+
   /// A row above the workspace list: GitHub or Linear.
   fn nav_row(
     &self,
@@ -1216,7 +1354,9 @@ impl Sidebar {
     let content = match item {
       Item::Label(_) => {
         let name = repo.label.as_deref().unwrap_or_default();
-        self.group_label(repo, name, &palette).into_any_element()
+        self
+          .group_header(repo, name, &palette, cx)
+          .into_any_element()
       }
       Item::Skeleton(_, i) => skeleton_row(i, &palette).into_any_element(),
       Item::Row(_, row) => match repo.workspaces.get(row) {
@@ -1241,34 +1381,6 @@ impl Sidebar {
       .when(ix + 1 == self.items.len(), |this| this.pb_2())
       .child(content)
       .into_any_element()
-  }
-
-  /// A repository's workspace group label in a window with several; a
-  /// click folds the group.
-  fn group_label(&self, repo: &RepoSection, name: &str, palette: &Palette) -> impl IntoElement {
-    let chevron = if repo.collapsed {
-      theme::ICON_CHEVRON_RIGHT
-    } else {
-      theme::ICON_CHEVRON_DOWN
-    };
-    let selector = format!("group-{name}");
-    ui::text(div(), TextSize::Xs)
-      .id("group-label")
-      .debug_selector(move || selector)
-      .flex()
-      .items_center()
-      .gap_1()
-      .px_2()
-      .h(zpx(32.))
-      .rounded_md()
-      .text_color(palette.sidebar_foreground.opacity(0.7))
-      .cursor_pointer()
-      .hover(|style| style.bg(palette.hover()))
-      .child(icon(chevron, 16., palette.sidebar_foreground.opacity(0.7)))
-      .child(div().min_w_0().truncate().child(name.to_uppercase()))
-      .on_click(self.on_action(SidebarAction::ToggleRepo {
-        repo_path: repo.path.clone(),
-      }))
   }
 
   fn workspace_row(

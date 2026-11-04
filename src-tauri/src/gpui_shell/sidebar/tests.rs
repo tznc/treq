@@ -41,6 +41,7 @@ fn snapshot(workspaces: Vec<SidebarRow>) -> SidebarSnapshot {
       missing: false,
       collapsed: false,
     }],
+    project: None,
     modal: None,
   }
 }
@@ -1093,4 +1094,44 @@ impl Render for Other {
   fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
     div().size_full().child("screen")
   }
+}
+
+#[gpui::test]
+fn project_button_opens_the_project_menu(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  assert!(h.bounds("project-button").is_some());
+  h.click("project-button");
+  assert_eq!(h.sent(), vec![SidebarAction::ProjectMenu]);
+}
+
+#[gpui::test]
+fn project_button_sits_left_of_the_command_palette(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  let project = h.bounds("project-button").expect("project button");
+  let palette = h.bounds("command-palette").expect("palette");
+  assert!(project.origin.x < palette.origin.x);
+  assert_eq!(project.origin.y.round(), palette.origin.y.round());
+}
+
+#[gpui::test]
+fn repo_group_headers_are_home_rows(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, two_repos());
+  let header = h.bounds("home-lib").expect("lib home in its group header");
+  let row = h.bounds("repo1-workspace-7").expect("lib workspace");
+  assert!(header.origin.y < row.origin.y);
+  h.click("home-lib");
+  assert_eq!(
+    h.sent(),
+    vec![SidebarAction::SelectHome {
+      repo_path: "/src/lib".into()
+    }]
+  );
+}
+
+#[gpui::test]
+fn single_repo_keeps_its_home_row_above_the_list(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(1, "feat-a", 0)]));
+  let home = h.bounds("home").expect("home row");
+  let github = h.bounds("github").expect("github row");
+  assert!(home.origin.y < github.origin.y);
 }

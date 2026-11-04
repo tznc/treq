@@ -273,6 +273,11 @@ impl Model {
       "renameWorkspace.close" => self.dialogs.rename = None,
       "openWorkspaces.close" => self.dialogs.open_workspaces = None,
       "workspaceDeletion.close" => self.dialogs.deletion = false,
+      "saveProject.close" => self.dialogs.save_project = None,
+      "saveProject.saved" => {
+        self.dialogs.save_project = None;
+        return with(Effect::Refresh { revision: false });
+      }
       "changeMove.done" => {
         self.dialogs.change_move = None;
         self.view.changes_revision += 1;
@@ -1009,6 +1014,10 @@ impl Model {
         }
       }
       OpenRequest::PrReview { number, state } => self.open_github_pr(*number, state),
+      OpenRequest::SaveProject { closing } if self.has_repo() => {
+        self.dialogs.save_project = Some(*closing)
+      }
+      OpenRequest::SaveProject { .. } => {}
       OpenRequest::WorkspaceChanges {
         repo_path,
         workspace_id,
@@ -1160,6 +1169,29 @@ mod tests {
       &data,
     );
     assert_eq!(model.selected, None);
+  }
+
+  #[test]
+  fn save_project_request_opens_the_dialog_and_saving_rereads() {
+    let (mut model, data) = (model(), data());
+    model.native_event(
+      &NativeEvent::Open {
+        what: OpenRequest::SaveProject { closing: true },
+      },
+      &data,
+    );
+    assert_eq!(model.dialogs.save_project, Some(true));
+    let effects = model.screen_action(&press("saveProject.saved"), &data);
+    assert_eq!(model.dialogs.save_project, None);
+    assert!(format!("{effects:?}").contains("Refresh"));
+  }
+
+  #[test]
+  fn save_project_cancel_closes_the_dialog() {
+    let (mut model, data) = (model(), data());
+    model.dialogs.save_project = Some(false);
+    model.screen_action(&press("saveProject.close"), &data);
+    assert_eq!(model.dialogs.save_project, None);
   }
 
   #[test]

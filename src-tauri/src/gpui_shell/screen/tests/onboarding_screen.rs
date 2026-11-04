@@ -873,3 +873,31 @@ fn the_palette_covers_and_centres_on_the_whole_window(cx: &mut TestAppContext) {
     window.width / 2.
   );
 }
+
+#[gpui::test]
+fn onboarding_lists_projects_and_opens_one(cx: &mut TestAppContext) {
+  let mut with_projects = listing();
+  with_projects.projects = vec![machines::ProjectSummary {
+    id: "p1".into(),
+    name: "Checkout revamp".into(),
+    repos: vec!["/home/me/web".into(), "/home/me/api".into()],
+  }];
+  let host = Arc::new(FakeHost {
+    listing: with_projects,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  assert!(h.drawn("onboarding-projects"));
+  h.click("project-p1");
+  assert!(host.calls().contains(&"open_project p1".to_string()));
+}
+
+#[gpui::test]
+fn onboarding_hides_projects_without_any(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(!h.drawn("onboarding-projects"));
+}

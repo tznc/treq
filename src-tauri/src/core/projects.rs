@@ -30,52 +30,210 @@ pub enum CloseAction {
 }
 
 pub fn init(conn: &Connection) -> rusqlite::Result<()> {
-  todo!()
+  conn.execute_batch(
+    "CREATE TABLE IF NOT EXISTS projects (
+       id TEXT PRIMARY KEY,
+       name TEXT NOT NULL,
+       created_at TEXT NOT NULL,
+       last_opened_at TEXT NOT NULL
+     );
+     CREATE TABLE IF NOT EXISTS project_repos (
+       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+       repo_path TEXT NOT NULL,
+       position INTEGER NOT NULL,
+       PRIMARY KEY (project_id, repo_path)
+     );",
+  )
+}
+
+fn now() -> String {
+  // Nanoseconds keep two saves in one second in order.
+  chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+}
+
+fn err(e: rusqlite::Error) -> String {
+  e.to_string()
+}
+
+fn exists(conn: &Connection, id: &str) -> Result<(), String> {
+  let found: Option<i64> = conn
+    .query_row("SELECT 1 FROM projects WHERE id = ?1", [id], |r| r.get(0))
+    .optional()
+    .map_err(err)?;
+  found.map(drop).ok_or_else(|| format!("No project with id '{id}'"))
+}
+
+fn clean_name(name: &str) -> Result<String, String> {
+  let name = name.trim();
+  if name.is_empty() {
+    return Err("A project needs a name".to_string());
+  }
+  Ok(name.to_string())
+}
+
+fn repos_of(conn: &Connection, id: &str) -> Result<Vec<String>, String> {
+  let mut stmt = conn
+    .prepare("SELECT repo_path FROM project_repos WHERE project_id = ?1 ORDER BY position")
+    .map_err(err)?;
+  let rows = stmt.query_map([id], |r| r.get(0)).map_err(err)?;
+  rows.collect::<Result<_, _>>().map_err(err)
 }
 
 pub fn save(conn: &Connection, name: &str, repos: &[String]) -> Result<Project, String> {
-  todo!()
+  let name = clean_name(name)?;
+  let mut unique: Vec<String> = Vec::new();
+  for repo in repos {
+    if !unique.contains(repo) {
+      unique.push(repo.clone());
+    }
+  }
+  if unique.is_empty() {
+    return Err("A project needs at least one repository".to_string());
+  }
+  let id = uuid::Uuid::new_v4().to_string();
+  let at = now();
+  conn
+    .execute(
+      "INSERT INTO projects (id, name, created_at, last_opened_at) VALUES (?1, ?2, ?3, ?3)",
+      params![id, name, at],
+    )
+    .map_err(err)?;
+  for (position, repo) in unique.iter().enumerate() {
+    conn
+      .execute(
+        "INSERT INTO project_repos (project_id, repo_path, position) VALUES (?1, ?2, ?3)",
+        params![id, repo, position as i64],
+      )
+      .map_err(err)?;
+  }
+  get(conn, &id)?.ok_or_else(|| "The project was not saved".to_string())
 }
 
 pub fn get(conn: &Connection, id: &str) -> Result<Option<Project>, String> {
-  todo!()
+  let row = conn
+    .query_row(
+      "SELECT name, created_at, last_opened_at FROM projects WHERE id = ?1",
+      [id],
+      |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+    )
+    .optional()
+    .map_err(err)?;
+  let Some((name, created_at, last_opened_at)) = row else {
+    return Ok(None);
+  };
+  Ok(Some(Project {
+    id: id.to_string(),
+    name,
+    repos: repos_of(conn, id)?,
+    created_at,
+    last_opened_at,
+  }))
 }
 
 /// Saved projects, most recently opened first.
 pub fn list(conn: &Connection) -> Result<Vec<Project>, String> {
-  todo!()
+  let mut stmt = conn
+    .prepare("SELECT id FROM projects ORDER BY last_opened_at DESC, name")
+    .map_err(err)?;
+  let ids: Vec<String> = stmt
+    .query_map([], |r| r.get(0))
+    .map_err(err)?
+    .collect::<Result<_, _>>()
+    .map_err(err)?;
+  ids
+    .iter()
+    .filter_map(|id| get(conn, id).transpose())
+    .collect()
 }
 
 pub fn rename(conn: &Connection, id: &str, name: &str) -> Result<(), String> {
-  todo!()
+  let name = clean_name(name)?;
+  exists(conn, id)?;
+  conn
+    .execute("UPDATE projects SET name = ?2 WHERE id = ?1", params![id, name])
+    .map_err(err)
+    .map(drop)
 }
 
 pub fn add_repo(conn: &Connection, id: &str, repo: &str) -> Result<(), String> {
-  todo!()
+  exists(conn, id)?;
+  conn
+    .execute(
+      "INSERT OR IGNORE INTO project_repos (project_id, repo_path, position)
+       VALUES (?1, ?2, (SELECT COALESCE(MAX(position), -1) + 1 FROM project_repos WHERE project_id = ?1))",
+      params![id, repo],
+    )
+    .map_err(err)
+    .map(drop)
 }
 
 pub fn remove_repo(conn: &Connection, id: &str, repo: &str) -> Result<(), String> {
-  todo!()
+  let repos = {
+    exists(conn, id)?;
+    repos_of(conn, id)?
+  };
+  if repos.len() <= 1 && repos.iter().any(|r| r == repo) {
+    return Err("A project keeps at least one repository".to_string());
+  }
+  conn
+    .execute(
+      "DELETE FROM project_repos WHERE project_id = ?1 AND repo_path = ?2",
+      params![id, repo],
+    )
+    .map_err(err)
+    .map(drop)
 }
 
 pub fn delete(conn: &Connection, id: &str) -> Result<(), String> {
-  todo!()
+  conn
+    .execute("DELETE FROM project_repos WHERE project_id = ?1", [id])
+    .map_err(err)?;
+  conn
+    .execute("DELETE FROM projects WHERE id = ?1", [id])
+    .map_err(err)
+    .map(drop)
 }
 
 pub fn mark_opened(conn: &Connection, id: &str) -> Result<(), String> {
-  todo!()
+  exists(conn, id)?;
+  conn
+    .execute(
+      "UPDATE projects SET last_opened_at = ?2 WHERE id = ?1",
+      params![id, now()],
+    )
+    .map_err(err)
+    .map(drop)
 }
 
 /// The name offered when saving an unsaved project: its repository folder
 /// names joined with " + ".
 pub fn suggested_name(repos: &[String]) -> String {
-  todo!()
+  let names: Vec<&str> = repos
+    .iter()
+    .map(|repo| {
+      Path::new(repo.trim_end_matches(['/', '\\']))
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(repo)
+    })
+    .collect();
+  if names.is_empty() {
+    "Untitled project".to_string()
+  } else {
+    names.join(" + ")
+  }
 }
 
-/// Closing a window on an unsaved project asks to save it; a saved project,
-/// or a window with no repositories, just closes.
+/// Closing a window on an unsaved project of two or more repositories asks
+/// to save it; a saved project or a single repository just closes.
 pub fn close_action(project_id: Option<&str>, repos: &[String]) -> CloseAction {
-  todo!()
+  // A plain single-repository window is today's behaviour; it closes quietly.
+  if project_id.is_some() || repos.len() < 2 {
+    return CloseAction::Close;
+  }
+  CloseAction::PromptSave {
+    suggested_name: suggested_name(repos),
+  }
 }
 
 /// The window already showing `project_id`, which switching focuses instead
@@ -84,7 +242,10 @@ pub fn window_for_project<'a>(
   windows: &'a [(String, Option<String>)],
   project_id: &str,
 ) -> Option<&'a str> {
-  todo!()
+  windows
+    .iter()
+    .find(|(_, project)| project.as_deref() == Some(project_id))
+    .map(|(label, _)| label.as_str())
 }
 
 #[cfg(test)]
@@ -239,6 +400,11 @@ mod tests {
   #[test]
   fn closing_saved_project_just_closes() {
     assert_eq!(close_action(Some("p1"), &repos(&["/r/web"])), CloseAction::Close);
+  }
+
+  #[test]
+  fn closing_unsaved_single_repo_just_closes() {
+    assert_eq!(close_action(None, &repos(&["/r/web"])), CloseAction::Close);
   }
 
   #[test]

@@ -953,6 +953,7 @@ impl WindowController {
   ) {
     if let Some(supporting) = supporting {
       self.data.set_supporting(supporting);
+      self.data.set_project(self.host.project());
     }
     let paths: Vec<String> = reads.iter().map(|(path, _)| path.clone()).collect();
     for (path, read) in reads {

@@ -71,6 +71,7 @@ mod remote;
 pub(super) mod remote_chrome;
 mod remote_data;
 mod rename_dialog;
+mod save_project_dialog;
 mod settings;
 mod settings_data;
 mod terminal;

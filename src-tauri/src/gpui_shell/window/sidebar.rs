@@ -242,6 +242,7 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
     agent_unavailable: None,
     shell_unavailable: None,
     bulk_archive: (!model.multi.is_empty()).then_some(model.multi.len() as u32),
+    project: data.project().map(|p| p.name.clone()),
     repos,
     modal: None,
   })

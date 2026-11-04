@@ -56,6 +56,12 @@ pub enum MenuAction {
     draft: bool,
   },
   CreatePrManually,
+  /// Shows saved project `id`: focuses its window or opens a new one.
+  SwitchProject(String),
+  /// Saves (or renames) this window's project.
+  SaveProject,
+  /// A new window on the welcome page, to open another project or repository.
+  NewWindow,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -317,9 +323,85 @@ pub fn create_pr_items() -> Vec<MenuItem> {
   ]
 }
 
+/// A saved project as the project menu lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectEntry {
+  pub id: String,
+  pub name: String,
+}
+
+/// The sidebar's project menu: every saved project (this window's one
+/// marked), then Save or Rename, then a new window.
+pub fn project_items(projects: &[ProjectEntry], current: Option<&str>) -> Vec<MenuItem> {
+  let mut items: Vec<MenuItem> = projects
+    .iter()
+    .map(|p| {
+      let text = if current == Some(p.id.as_str()) {
+        format!("✓ {}", p.name)
+      } else {
+        p.name.clone()
+      };
+      MenuItem::item(&text, MenuAction::SwitchProject(p.id.clone())).icon(MenuIcon::FolderOpen)
+    })
+    .collect();
+  if !items.is_empty() {
+    items.push(MenuItem::Separator);
+  }
+  let save = if current.is_some() {
+    "Rename Project…"
+  } else {
+    "Save Project…"
+  };
+  items.push(MenuItem::item(save, MenuAction::SaveProject).icon(MenuIcon::Pencil));
+  items.push(MenuItem::item("New Window…", MenuAction::NewWindow).icon(MenuIcon::FolderPlus));
+  items
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  fn entry(id: &str, name: &str) -> ProjectEntry {
+    ProjectEntry {
+      id: id.into(),
+      name: name.into(),
+    }
+  }
+
+  #[test]
+  fn project_menu_offers_save_for_an_unsaved_window() {
+    let items = project_items(&[entry("a", "Checkout"), entry("b", "Refunds")], None);
+    assert_eq!(
+      labels(&items),
+      ["Checkout", "Refunds", "---", "Save Project…", "New Window…"]
+    );
+  }
+
+  #[test]
+  fn project_menu_marks_this_windows_project_and_offers_rename() {
+    let items = project_items(&[entry("a", "Checkout"), entry("b", "Refunds")], Some("b"));
+    assert_eq!(
+      labels(&items),
+      ["Checkout", "✓ Refunds", "---", "Rename Project…", "New Window…"]
+    );
+  }
+
+  #[test]
+  fn project_menu_without_projects_only_saves_and_opens() {
+    assert_eq!(
+      labels(&project_items(&[], None)),
+      ["Save Project…", "New Window…"]
+    );
+  }
+
+  #[test]
+  fn picking_a_project_switches_to_it() {
+    let items = project_items(&[entry("a", "Checkout")], None);
+    assert!(matches!(
+      &items[0],
+      MenuItem::Item { action: MenuAction::SwitchProject(id), .. } if id == "a"
+    ));
+  }
 
   const NO_EDITORS: EditorApps = EditorApps {
     cursor: false,

@@ -41,6 +41,13 @@ pub trait WorkspaceDialogHost: ChangesHost {
   /// `jj_check_branch_exists`.
   fn branch_status(&self, repo_path: &str, branch: &str) -> Result<BranchStatus, String>;
   fn gitignore_suggestions(&self, repo_path: &str) -> Vec<String>;
+  /// Saves this window's project as `name` (`core::projects`): renames a
+  /// saved one, or saves the window's repositories as a new project.
+  fn save_project(&self, _name: &str) -> Result<(), String> {
+    Err("Projects are not available here".into())
+  }
+  /// Closes this window without asking to save again.
+  fn close_window(&self) {}
   /// `create_workspace`, with the repository's copy files and setup script.
   fn new_workspace(
     &self,
@@ -72,6 +79,18 @@ pub trait WorkspaceDialogHost: ChangesHost {
 }
 
 impl WorkspaceDialogHost for Backend {
+  fn save_project(&self, name: &str) -> Result<(), String> {
+    crate::gpui_shell::projects::save_window_project(self.app(), self.label(), name).map(drop)
+  }
+
+  fn close_window(&self) {
+    let (app, label) = (self.app().clone(), self.label().to_string());
+    let main = app.clone();
+    main
+      .run_on_main_thread(move || crate::gpui_shell::projects::close_confirmed(&app, &label))
+      .ok();
+  }
+
   fn all_workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String> {
     if let Some(remote) = self.remote(repo_path) {
       return remote.workspaces();

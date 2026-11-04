@@ -263,6 +263,29 @@ fn workspace_modal(model: &Model, data: &Data) -> Option<Value> {
       "branchName": branch,
     }));
   }
+  if let (Some(closing), false) = (dialogs.save_project, repo.is_empty()) {
+    let repos: Vec<String> = std::iter::once(model.main_repo.clone())
+      .chain(
+        data
+          .supporting()
+          .iter()
+          .filter(|r| r.exists)
+          .map(|r| r.path.clone()),
+      )
+      .collect();
+    let name = data
+      .project()
+      .map(|p| p.name.clone())
+      .unwrap_or_else(|| crate::core::projects::suggested_name(&repos));
+    return Some(json!({
+      "kind": "saveProject",
+      "repoPath": repo,
+      "name": name,
+      "saved": data.project().is_some(),
+      "closing": closing,
+      "repos": repos,
+    }));
+  }
   if dialogs.deletion && !repo.is_empty() {
     return Some(json!({
       "kind": "workspaceDeletion",
@@ -524,6 +547,22 @@ mod tests {
       matches!(screen(&model, &data()).unwrap().view, View::Workspace(_)),
       "Linear needs its preview feature"
     );
+  }
+
+  #[test]
+  fn builds_the_save_project_dialog_with_a_suggested_name() {
+    let mut model = Model::new(Some("/r/web".into()));
+    let mut data = data();
+    data.set_supporting(vec![crate::core::supporting_repos::SupportingRepo {
+      path: "/r/api".into(),
+      exists: true,
+    }]);
+    model.dialogs.save_project = Some(true);
+    let modal = format!("{:?}", screen(&model, &data).unwrap().modal.expect("modal"));
+    assert!(modal.starts_with("SaveProject"), "{modal}");
+    assert!(modal.contains("name: \"web + api\""), "{modal}");
+    assert!(modal.contains("closing: true"), "{modal}");
+    assert!(modal.contains("saved: false"), "{modal}");
   }
 
   #[test]

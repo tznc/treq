@@ -175,6 +175,8 @@ pub struct Dialogs {
   /// (`None`: the default branch).
   pub open_workspaces: Option<Option<String>>,
   pub deletion: bool,
+  /// The Save project dialog; `true` while the window waits to close.
+  pub save_project: Option<bool>,
   pub change_move: Option<ChangeMove>,
   pub agent_prompt: Option<AgentPrompt>,
   /// The prompt history, focused on an entry.
@@ -198,6 +200,7 @@ impl Dialogs {
       || self.open_workspaces.is_some()
       || self.rename.is_some()
       || self.deletion
+      || self.save_project.is_some()
       || self.change_move.is_some()
       || self.agent_prompt.is_some()
       || self.prompt_history.is_some()

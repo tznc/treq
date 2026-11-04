@@ -330,6 +330,10 @@ impl machines::MachinesHost for FakeHost {
     self.record(format!("open_local {path}"));
   }
 
+  fn open_project(&self, id: &str) {
+    self.record(format!("open_project {id}"));
+  }
+
   fn remove_machine(&self, place: &machines::Place) -> bool {
     self.record(format!("remove {place:?}"));
     true
@@ -1962,6 +1966,7 @@ fn listing() -> machines::Listing {
     signed_out: false,
     ssh: false,
     containers: false,
+    projects: Vec::new(),
   }
 }
 
