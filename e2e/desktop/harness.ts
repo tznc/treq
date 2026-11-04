@@ -2,7 +2,7 @@
 // dir, a fake `claude` agent on PATH, and the `treq` binary built with
 // `--features e2e`, started with gpui-playwright listening.
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, createWriteStream, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appBinary, fixtureFile, port } from "./env.ts";
@@ -91,8 +91,11 @@ export function startApp(
 ): void {
   mkdirSync(join(fixtureFile, ".."), { recursive: true });
   writeFileSync(fixtureFile, JSON.stringify(fixture, null, 2));
+  // Echoed as before, and kept in `<root>/app.log` so a spec can look for
+  // `panicked` after each step.
+  const log = createWriteStream(join(fixture.root, "app.log"));
   const app = spawn(appBinary, [], {
-    stdio: "inherit",
+    stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...appEnv(fixture),
       GPUI_PLAYWRIGHT: String(port),
@@ -100,8 +103,14 @@ export function startApp(
       ...extra,
     },
   });
+  app.stdout?.on("data", (d) => (process.stdout.write(d), log.write(d)));
+  app.stderr?.on("data", (d) => (process.stderr.write(d), log.write(d)));
   const stop = () => app.kill("SIGTERM");
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
-  app.on("exit", (code) => process.exit(code ?? 0));
+  app.on("exit", (code, signal) => {
+    log.write(`\n[harness] app exited: code=${code} signal=${signal}\n`);
+    console.log(`[harness] app exited: code=${code} signal=${signal}`);
+    process.exit(code ?? 0);
+  });
 }
