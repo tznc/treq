@@ -1077,7 +1077,12 @@ impl Render for Overlay {
                     .bordered(false)
                     .px_0()
                     .flex_1(),
-                ),
+                )
+                // The shortcut that opens it, now that the sidebar button
+                // is an icon.
+                .when(palette, |this| {
+                  this.child(div().ml_2().child(ui::Kbd::new("secondary-k", &p)))
+                }),
             )
             .child(
               div()

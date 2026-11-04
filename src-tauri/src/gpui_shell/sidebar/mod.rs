@@ -304,6 +304,8 @@ pub struct Sidebar {
   tooltip_sent: Rc<RefCell<Option<SharedString>>>,
   /// Where the last right-click was, for placing its menu.
   menu_anchor: Rc<Cell<Point<Pixels>>>,
+  /// The project button's last painted bounds, for its menu's anchor.
+  project_button_bounds: Rc<Cell<gpui::Bounds<Pixels>>>,
   /// The element the pointer rests on, and whether its tooltip shows yet.
   tooltip: Option<(SharedString, bool)>,
   /// The row under the pointer. A button inside it takes the tooltip, and
@@ -376,6 +378,7 @@ impl Sidebar {
       popups,
       tooltip_sent: Rc::default(),
       menu_anchor: Rc::default(),
+      project_button_bounds: Rc::default(),
       tooltip: None,
       hovered_row: None,
       drag_width: None,
@@ -686,34 +689,16 @@ impl Render for Sidebar {
       .gap_2()
       .p_2()
       .child(self.project_button(&palette, cx))
-      .child(
-        div()
-          .id("command-palette")
-          .debug_selector(|| "command-palette".into())
-          .role(Role::Button)
-          .aria_label("Command palette")
-          .test_support()
-          .flex()
-          .flex_1()
-          .min_w_0()
-          .items_center()
-          .gap_2()
-          .px_3()
-          .h(zpx(32.))
-          .rounded_lg()
-          .border_1()
-          .border_color(palette.border)
-          .bg(palette.muted.opacity(0.5))
-          .cursor_pointer()
-          .hover(|style| style.bg(palette.hover()))
-          .text_color(palette.muted_foreground)
-          .child(icon(theme::ICON_SEARCH, 16., palette.muted_foreground))
-          // The project button names the window now; the palette keeps
-          // the room for its shortcut.
-          .child(div().flex_1().min_w_0())
-          .child(ui::Kbd::new("secondary-k", &palette))
-          .on_click(self.on_action(SidebarAction::OpenCommandPalette)),
-      )
+      .child(self.header_button(
+        "command-palette",
+        theme::ICON_SEARCH,
+        PALETTE_TOOLTIP,
+        None,
+        false,
+        SidebarAction::OpenCommandPalette,
+        &palette,
+        cx,
+      ))
       .child(self.header_button(
         "settings",
         theme::ICON_SETTINGS,
@@ -875,6 +860,12 @@ fn modal_backdrop(palette: &Palette, opacity: f32) -> gpui::Stateful<gpui::Div> 
     .bg(palette.scrim().alpha(opacity.clamp(0., 1.)))
     .occlude()
 }
+
+/// The search button's name and tooltip, with the shortcut it stands for.
+#[cfg(target_os = "macos")]
+const PALETTE_TOOLTIP: &str = "Command palette (⌘K)";
+#[cfg(not(target_os = "macos"))]
+const PALETTE_TOOLTIP: &str = "Command palette (Ctrl+K)";
 
 /// The WORKSPACES heading's create button.
 pub(super) const OPEN_WORKSPACES_LABEL: &str = "New workspace…";
@@ -1201,9 +1192,13 @@ impl Sidebar {
       .unwrap_or_else(|| "?".into())
       .into();
     let key = SharedString::from("project-button");
+    let bounds = self.project_button_bounds.clone();
+    let anchor = self.menu_anchor.clone();
+    let sink = self.sink.clone();
     div()
       .relative()
-      .flex_none()
+      .flex_1()
+      .min_w_0()
       .child(
         div()
           .id("project-button")
@@ -1216,7 +1211,7 @@ impl Sidebar {
           .gap_1p5()
           .px_2()
           .h(zpx(32.))
-          .max_w(zpx(110.))
+          .w_full()
           .rounded_lg()
           .border_1()
           .border_color(palette.border)
@@ -1260,7 +1255,20 @@ impl Sidebar {
           .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
             this.hover_tooltip(key.clone(), *hovered, cx)
           }))
-          .on_click(self.on_action(SidebarAction::ProjectMenu)),
+          // Where the button is, so its menu opens under it.
+          .child({
+            let bounds = bounds.clone();
+            gpui::canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
+              .absolute()
+              .top_0()
+              .left_0()
+              .size_full()
+          })
+          .on_click(move |_, _, cx| {
+            let b = bounds.get();
+            anchor.set(gpui::point(b.left(), b.bottom() + gpui::px(4.)));
+            sink(SidebarAction::ProjectMenu, cx);
+          }),
       )
       .when(self.tooltip_shown("project-button"), |this| {
         this.child(

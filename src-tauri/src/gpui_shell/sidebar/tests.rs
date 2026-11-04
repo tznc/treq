@@ -1103,6 +1103,11 @@ fn project_button_opens_the_project_menu(cx: &mut TestAppContext) {
   assert!(h.bounds("project-button").is_some());
   h.click("project-button");
   assert_eq!(h.sent(), vec![SidebarAction::ProjectMenu]);
+  // The menu opens under the button, not over it.
+  let button = h.bounds("project-button").expect("button");
+  let at = h.sidebar.read_with(&h.cx, |s, _| s.menu_anchor());
+  assert!(at.y >= button.bottom(), "{at:?} below {button:?}");
+  assert!((at.x - button.left()).abs() <= gpui::px(2.), "{at:?} {button:?}");
 }
 
 #[gpui::test]
@@ -1111,7 +1116,7 @@ fn project_button_sits_left_of_the_command_palette(cx: &mut TestAppContext) {
   let project = h.bounds("project-button").expect("project button");
   let palette = h.bounds("command-palette").expect("palette");
   assert!(project.origin.x < palette.origin.x);
-  assert_eq!(project.origin.y.round(), palette.origin.y.round());
+  assert!((project.center().y - palette.center().y).abs() < gpui::px(1.));
 }
 
 #[gpui::test]
