@@ -58,6 +58,11 @@ pub trait WorkspaceDialogHost: ChangesHost {
   fn home_commits(&self, _repo: &str, _limit: usize) -> Vec<super::project_home::HomeCommit> {
     Vec::new()
   }
+  /// Blocks: a Home card's numbers for repository `repo` (`github` is its
+  /// `owner/name` when its origin is on GitHub).
+  fn repo_stats(&self, _repo: &str, _github: Option<&str>) -> super::project_home::RepoStats {
+    super::project_home::RepoStats::default()
+  }
   /// Blocks: asks for files to add as project context; `None` when cancelled.
   fn pick_context_files(&self) -> Option<Vec<String>> {
     None
@@ -115,6 +120,10 @@ impl WorkspaceDialogHost for Backend {
         lines: f.changed_line_count,
       })
       .collect()
+  }
+
+  fn repo_stats(&self, repo: &str, github: Option<&str>) -> super::project_home::RepoStats {
+    crate::core::projects::repo_stats(repo, github)
   }
 
   fn home_commits(&self, repo: &str, limit: usize) -> Vec<super::project_home::HomeCommit> {

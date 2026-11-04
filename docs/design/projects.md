@@ -267,7 +267,7 @@ treq project ws pr <project> <name> [--draft]
 Treq, not the user, gets every project repo onto the machine.
 
 - **Location**: `~/.treq/repos/<host>/<owner>/<name>` (configurable root in app settings). Path recorded in `repo_locations`. A repo the user already opened from elsewhere is reused, never cloned twice (match on `repo_key`).
-- **When**: on `add-repo <url>`; on first use of a project repo with no local path (open, workspace create, `treq agent -r`, `treq project spawn`); optionally eagerly for all project repos when a project syncs to a new machine (setting, default off for repos over 1 GB).
+- **When**: on `add-repo <url>`; on first use of a project repo with no local path (open, workspace create, `treq agent -r`); optionally eagerly for all project repos when a project syncs to a new machine (setting, default off for repos over 1 GB).
 - **How**: in Rust via `gix` (AGENTS.md: no shelling out to `git`). Partial clone (`blob:none`) by default, then Treq's normal colocated jj setup, so the clone is a regular Treq repo with `.treq/` and workspaces.
 - **Auth**: the GitHub token Treq already holds (`github.rs`), then the user's git credential helper / SSH agent. No new credential store.
 - **Concurrency**: one clone per `repo_key` at a time (lock file under the managed root); concurrent callers wait on it and then continue. Agents block on the clone with progress output, up to a timeout, then fail with a clear message.
@@ -295,7 +295,6 @@ treq project add-repo [<project>] <url|owner/name|path> [--no-clone]   # clones 
 treq repo ensure <repo>          # clone if missing; print path; idempotent
 treq add -r <repo> <branch>      # clones on demand, then creates the workspace
 treq agent -r <repo> <branch> "<prompt>"  # clones and creates the workspace on demand
-treq project spawn --plan plan.json       # clones any missing repos first, in parallel
 ```
 
 `<project>` defaults to the project of the current directory. Output reports `cloned`, `already present` or the failure reason, and `--json` for agents. The orchestrator's system prompt says repos are cloned on demand, so it never runs `git clone` itself.
@@ -416,11 +415,11 @@ A matches v1 (the agent starts in a real repo, with its own `AGENTS.md`/skills) 
 
 - Same commands as v1, resolved against the project: `treq add -r <repo> <branch> [-s <parent>]` then `treq agent -r <repo> <branch> "<prompt>"`.
 - **Stacking**: `-s/--source-branch` stacks a workspace on another workspace's branch in the same repo, as today. Stacks never cross repos; cross-repo ordering is expressed as a dependency note in the workspace description, not as a jj parent.
-- One call for fan-out: `treq project spawn --plan plan.json` (or stdin) creates N workspaces and agents. Plan entries: `{repo, branch, source_branch?, prompt, mode?}`. Each entry succeeds or fails on its own; the result lists per-entry status.
+- One-call fan-out is **out of scope for now**. When it is needed it will be `treq project run plan.yaml` (or YAML on stdin): a list of `{repo, branch, source_branch?, prompt, mode?}` entries, each succeeding or failing on its own. Until then agents fan out with `treq add -r` and `treq agent -r`.
 - Every sub-agent gets the project's prompts and context (D11), plus a short parent note: "Started by the orchestrator in <lead repo> for project <name>; report progress with `treq set -d`."
 - Sub-agents record `sessions.parent_session_id` (new, nullable) so the UI shows the tree and the orchestrator can list its own children.
 
-**D14. Can sub-agents spawn agents?**
+**D14. Can sub-agents start agents?**
 - A. No: only the home-repo agent orchestrates. **(Recommended for v2)**
 - B. Yes, to a depth limit.
 - C. Yes, unlimited.
@@ -446,7 +445,7 @@ A is simple and works for every agent CLI. B is a Phase-3 addition behind a sett
 - Orchestrator: write only in its own cwd (its cwd in the lead repo), read on all project repos (v1 rule, now over project repos). Writes elsewhere only through sub-agents.
 - Sub-agent: write in its own workspace; read on other project repos.
 - `claude_filesystem_settings()` takes the project repo list instead of `supporting_repo_paths`.
-- Limits: per-project cap on concurrent agents (default 8, in project config); `spawn` refuses beyond it.
+- Limits: per-project cap on concurrent agents (default 8, in project config); `treq agent` refuses beyond it.
 
 ### UI
 
@@ -482,7 +481,7 @@ A is simple and works for every agent CLI. B is a Phase-3 addition behind a sett
 4. **Project prompts and context** (D9–D12): injection in `system_prompt()`, settings section, CLI.
 5. **Project workspaces**: shared-branch creation, project root symlinks, project-scoped sessions/agents, summary tab, CLI.
 6. **Grouped PRs + push all**, rolled-up checks.
-7. **Orchestration**: `treq project spawn`, `parent_session_id`, child list UI, concurrency cap, optional push notifications (D15 B).
+7. **Orchestration**: `parent_session_id`, child list UI, concurrency cap, optional push notifications (D15 B).
 8. **Polish**: merge-order hint, sparse monorepo scoping, remove flag.
 
 ## Test strategy (TDD)
@@ -492,9 +491,9 @@ Each step starts with a failing test.
 - `core/projects/` unit tests: repo_key normalisation (ssh/https/.git suffix), override resolution order, branch-name collision detection, status roll-up, PR grouping by project workspace, sync merge rules. Proptests for normalisation and merge.
 - Prompt assembly: `system_prompt()` with project prompts in D11 order, repo scoping, disabled prompts skipped, missing context path skipped with warning, size cap, Claude settings/`--add-dir` include context dirs read-only, Cursor prompt file includes them; extend the existing tests in `agent_command.rs`.
 - Windows and switching: opening a standalone repo gives an Unsaved project window; **Save project…** persists it and it appears on the welcome page; the project button lists projects; switching to a project opens a new window, or focuses the window already showing it; an agent started in a window records that window's project and keeps it after other windows switch. New workspace without a repo is refused; the group **+** presets the repo. Sidebar shows one group per project repo with the home header and stacked workspaces, and no project rows.
-- Managed clones: `ensure` is idempotent; two concurrent `ensure` calls clone once (lock); existing checkout with same `repo_key` reused; `add -r`/`agent -r`/`spawn` clone missing repos then proceed; auth failure surfaces reason and leaves no partial dir; uses `gix`, never a `git` subprocess (test against a local bare repo fixture, no network).
+- Managed clones: `ensure` is idempotent; two concurrent `ensure` calls clone once (lock); existing checkout with same `repo_key` reused; `add -r`/`agent -r` clone missing repos then proceed; auth failure surfaces reason and leaves no partial dir; uses `gix`, never a `git` subprocess (test against a local bare repo fixture, no network).
 - Supporting-repos migration: fixture DB with `supporting_repos` → one project with the same repos; `-r` resolves the same names before and after (extend `cli/tests.rs` `-r` cases).
-- Orchestration: `spawn` plan parsing and per-entry partial failure; concurrency cap; sub-agent spawn refused (D14); `project st --json` shape across 2 temp repos with stacked workspaces; filesystem settings use project repos.
+- Orchestration: concurrency cap; sub-agent spawn refused (D14); `project st --json` shape across 2 temp repos with stacked workspaces; filesystem settings use project repos.
 - `local_db` migration tests with upgrade fixtures for new columns; `db.rs` cache tables.
 - Integration (`src-tauri/tests/`): create project workspace across 2 temp jj repos; partial failure leaves successful repos intact; missing path returns defaults.
 - CLI tests in `cli/tests.rs` for each subcommand, `--json` shape snapshot.

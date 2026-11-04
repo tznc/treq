@@ -44,6 +44,9 @@ pub struct RepoCard {
   pub label: String,
   pub home_ref: Option<String>,
   pub missing: bool,
+  /// GitHub's `owner/name` when the origin is on GitHub.
+  #[serde(default)]
+  pub github: Option<String>,
   /// Branches, in stack order, with their depth.
   pub workspaces: Vec<(String, u32)>,
 }
@@ -62,6 +65,52 @@ pub struct HomeCommit {
   pub short_id: String,
   pub description: String,
   pub timestamp: String,
+}
+
+pub use crate::core::projects::RepoStats;
+
+/// Days the activity chart covers.
+pub const ACTIVITY_DAYS: usize = 30;
+
+/// Commits per day for the `days` days ending `today`, oldest first.
+pub fn daily_activity(stamps: &[String], today: NaiveDate, days: usize) -> Vec<u32> {
+  let mut counts = vec![0; days];
+  for stamp in stamps {
+    let Some(date) = time::day(stamp) else {
+      continue;
+    };
+    let age = (today - date).num_days();
+    if age >= 0 && (age as usize) < days {
+      counts[days - 1 - age as usize] += 1;
+    }
+  }
+  counts
+}
+
+/// Bytes as gigabytes, to two places for small sizes.
+pub fn format_gb(bytes: u64) -> String {
+  if bytes == 0 {
+    return "0 GB".into();
+  }
+  let gb = bytes as f64 / 1_073_741_824.;
+  if gb < 0.01 {
+    return "<0.01 GB".into();
+  }
+  let text = if gb >= 1. {
+    format!("{gb:.1}")
+  } else {
+    format!("{gb:.2}")
+  };
+  format!("{} GB", text.trim_end_matches('0').trim_end_matches('.'))
+}
+
+/// A GitHub count as read, "30+" when the first page was full.
+pub fn count_label(count: Option<(usize, bool)>) -> String {
+  match count {
+    Some((n, true)) => format!("{n}+"),
+    Some((n, false)) => n.to_string(),
+    None => "–".into(),
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -132,6 +181,7 @@ struct Loaded {
   revision: Option<u64>,
   changes: HashMap<String, Vec<HomeChange>>,
   commits: HashMap<String, Vec<HomeCommit>>,
+  stats: HashMap<String, RepoStats>,
   loading: bool,
 }
 
@@ -179,20 +229,17 @@ impl ProjectHomeView {
 
   /// Reads every repository's changes and history once per revision.
   fn load(&mut self, cx: &mut Context<Self>) {
-    if self.tab == HomeTab::Code
-      || self.loaded.loading
-      || self.loaded.revision == Some(self.route.revision)
-    {
+    if self.loaded.loading || self.loaded.revision == Some(self.route.revision) {
       return;
     }
     self.loaded.loading = true;
     let host = self.host.clone();
-    let repos: Vec<String> = self
+    let repos: Vec<(String, Option<String>)> = self
       .route
       .repos
       .iter()
       .filter(|r| !r.missing)
-      .map(|r| r.path.clone())
+      .map(|r| (r.path.clone(), r.github.clone()))
       .collect();
     let revision = self.route.revision;
     cx.spawn(async move |this, cx| {
@@ -200,10 +247,11 @@ impl ProjectHomeView {
         .background_spawn(async move {
           repos
             .into_iter()
-            .map(|path| {
+            .map(|(path, github)| {
               let changes = host.home_changes(&path);
               let commits = host.home_commits(&path, COMMITS_PER_REPO);
-              (path, changes, commits)
+              let stats = host.repo_stats(&path, github.as_deref());
+              (path, changes, commits, stats)
             })
             .collect::<Vec<_>>()
         })
@@ -214,9 +262,11 @@ impl ProjectHomeView {
           view.loaded.revision = Some(revision);
           view.loaded.changes.clear();
           view.loaded.commits.clear();
-          for (path, changes, commits) in read {
+          view.loaded.stats.clear();
+          for (path, changes, commits, stats) in read {
             view.loaded.changes.insert(path.clone(), changes);
-            view.loaded.commits.insert(path, commits);
+            view.loaded.commits.insert(path.clone(), commits);
+            view.loaded.stats.insert(path, stats);
           }
           cx.notify();
         })
@@ -254,6 +304,13 @@ impl ProjectHomeView {
       .hover(|s| s.border_color(p.primary))
       .when(repo.missing, |this| this.opacity(0.5))
       .child(repo_title(repo, p))
+      .children(
+        self
+          .loaded
+          .stats
+          .get(&repo.path)
+          .map(|stats| stats_block(repo, stats, p)),
+      )
       .child(
         ui::text(div(), TextSize::Xs)
           .text_color(p.muted_foreground)
@@ -557,6 +614,108 @@ impl ProjectHomeView {
   }
 }
 
+/// A card's numbers: the 30-day activity line, then the counts.
+fn stats_block(repo: &RepoCard, stats: &RepoStats, p: &theme::Palette) -> impl IntoElement {
+  let activity = daily_activity(
+    &stats.commit_times,
+    Local::now().date_naive(),
+    ACTIVITY_DAYS,
+  );
+  let total: u32 = activity.iter().sum();
+  let stat = |label: &'static str, value: String| {
+    div()
+      .flex()
+      .flex_col()
+      .min_w_0()
+      .px_2()
+      .py_1()
+      .rounded_md()
+      .bg(p.muted.opacity(0.5))
+      .child(
+        ui::text(div(), TextSize::Xs)
+          .text_color(p.muted_foreground)
+          .child(label),
+      )
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .font_weight(FontWeight::SEMIBOLD)
+          .child(value),
+      )
+  };
+  let mut cells = Vec::new();
+  if repo.github.is_some() {
+    cells.push(stat("Open issues", count_label(stats.open_issues)));
+    cells.push(stat("Open PRs", count_label(stats.open_prs)));
+  }
+  cells.push(stat(
+    "Workspaces",
+    format!("{} · {} archived", stats.workspaces, stats.archived),
+  ));
+  cells.push(stat("Workspace size", format_gb(stats.workspace_bytes)));
+  div()
+    .flex()
+    .flex_col()
+    .gap_2()
+    .child(
+      div()
+        .flex()
+        .items_end()
+        .gap_2()
+        .child(activity_chart(activity, p.primary, p.border))
+        .child(
+          ui::text(div(), TextSize::Xs)
+            .flex_none()
+            .text_color(p.muted_foreground)
+            .child(format!(
+              "{total} {} / 30d",
+              if total == 1 { "commit" } else { "commits" }
+            )),
+        ),
+    )
+    .child(div().flex().flex_wrap().gap_2().children(cells))
+}
+
+/// A daily line chart of commit counts, scaled to the busiest day.
+fn activity_chart(counts: Vec<u32>, line: gpui::Hsla, base: gpui::Hsla) -> impl IntoElement {
+  let max = counts.iter().copied().max().unwrap_or(0).max(1) as f32;
+  div()
+    .debug_selector(|| "project-home-activity".into())
+    .flex_1()
+    .h(zpx(36.))
+    .child(
+      gpui::canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+          let n = counts.len().max(2) as f32 - 1.;
+          let point = |i: usize, c: u32| {
+            gpui::point(
+              bounds.origin.x + bounds.size.width * (i as f32 / n),
+              bounds.origin.y + bounds.size.height * (1. - c as f32 / max) - gpui::px(1.),
+            )
+          };
+          let mut axis = gpui::PathBuilder::stroke(gpui::px(1.));
+          axis.move_to(gpui::point(bounds.origin.x, bounds.bottom() - gpui::px(1.)));
+          axis.line_to(gpui::point(bounds.right(), bounds.bottom() - gpui::px(1.)));
+          if let Ok(path) = axis.build() {
+            window.paint_path(path, base);
+          }
+          let mut path = gpui::PathBuilder::stroke(gpui::px(1.5));
+          for (i, c) in counts.iter().enumerate() {
+            if i == 0 {
+              path.move_to(point(i, *c));
+            } else {
+              path.line_to(point(i, *c));
+            }
+          }
+          if let Ok(path) = path.build() {
+            window.paint_path(path, line);
+          }
+        },
+      )
+      .size_full(),
+    )
+}
+
 /// A repository's name over its checked-out branch.
 fn repo_title(repo: &RepoCard, p: &theme::Palette) -> impl IntoElement {
   div()
@@ -650,6 +809,33 @@ impl Render for ProjectHomeView {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn daily_activity_counts_commits_per_day_oldest_first() {
+    let today = day(2026, 11, 4);
+    let stamps = vec![
+      stamp(today),
+      stamp(today),
+      stamp(day(2026, 11, 2)),
+      stamp(day(2026, 9, 1)),
+    ];
+    assert_eq!(daily_activity(&stamps, today, 4), vec![0, 1, 0, 2]);
+  }
+
+  #[test]
+  fn formats_sizes_in_gigabytes() {
+    assert_eq!(format_gb(0), "0 GB");
+    assert_eq!(format_gb(1_610_612_736), "1.5 GB");
+    assert_eq!(format_gb(52_428_800), "0.05 GB");
+    assert_eq!(format_gb(4_096), "<0.01 GB");
+  }
+
+  #[test]
+  fn counts_show_a_plus_when_there_are_more() {
+    assert_eq!(count_label(Some((30, true))), "30+");
+    assert_eq!(count_label(Some((4, false))), "4");
+    assert_eq!(count_label(None), "–");
+  }
 
   fn day(y: i32, m: u32, d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(y, m, d).unwrap()

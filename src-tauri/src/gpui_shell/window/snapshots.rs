@@ -181,6 +181,7 @@ fn project_home(model: &Model, data: &Data) -> Value {
         "label": label,
         "homeRef": data.home_ref(path),
         "missing": missing,
+        "github": repo.and_then(|r| r.remote.as_ref()).map(|r| r.full_name.clone()),
         "workspaces": workspaces,
       })
     })

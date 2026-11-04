@@ -407,6 +407,75 @@ pub fn overview(project: &Project) -> Vec<RepoOverview> {
     .collect()
 }
 
+/// A Home card's numbers for one repository.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RepoStats {
+  /// Commit timestamps of the recent history, for the activity chart.
+  pub commit_times: Vec<String>,
+  /// Open issues and pull requests on GitHub: the count read and whether
+  /// there are more; `None` without GitHub or `gh`.
+  pub open_issues: Option<(usize, bool)>,
+  pub open_prs: Option<(usize, bool)>,
+  pub workspaces: usize,
+  pub archived: usize,
+  /// Bytes on disk under the repository's workspaces folder.
+  pub workspace_bytes: u64,
+}
+
+/// Bytes of the files under `dir`, not following symlinks; 0 if missing.
+pub fn dir_size(dir: &Path) -> u64 {
+  let Ok(entries) = std::fs::read_dir(dir) else {
+    return 0;
+  };
+  entries
+    .flatten()
+    .map(|entry| match entry.file_type() {
+      Ok(t) if t.is_dir() => dir_size(&entry.path()),
+      Ok(t) if t.is_file() => entry.metadata().map(|m| m.len()).unwrap_or(0),
+      _ => 0,
+    })
+    .sum()
+}
+
+/// Commits read for the activity chart.
+const ACTIVITY_COMMITS: usize = 300;
+
+/// Blocks: everything a Home card shows for `repo`.
+pub fn repo_stats(repo: &str, github: Option<&str>) -> RepoStats {
+  let workspaces = crate::local_db::get_workspaces(repo).unwrap_or_default();
+  let archived = workspaces.iter().filter(|w| w.archived).count();
+  let commit_times =
+    crate::core::commits::list_commits(repo, None, false, None, Some(ACTIVITY_COMMITS))
+      .map(|log| {
+        log
+          .commits
+          .into_iter()
+          .filter(|c| !c.is_working_copy)
+          .map(|c| c.timestamp)
+          .collect()
+      })
+      .unwrap_or_default();
+  let (open_issues, open_prs) = match github {
+    Some(name) => (
+      crate::core::github_cli::list_issues(name, "open", None)
+        .ok()
+        .map(|page| (page.items.len(), page.has_more)),
+      crate::core::github_cli::list_prs(name, "open", 1)
+        .ok()
+        .map(|page| (page.items.len(), page.has_more)),
+    ),
+    None => (None, None),
+  };
+  RepoStats {
+    commit_times,
+    open_issues,
+    open_prs,
+    workspaces: workspaces.len() - archived,
+    archived,
+    workspace_bytes: dir_size(&Path::new(repo).join(".treq").join("workspaces")),
+  }
+}
+
 /// Saved projects that list repository `repo`.
 pub fn projects_with_repo(conn: &Connection, repo: &str) -> Result<Vec<Project>, String> {
   Ok(
@@ -776,6 +845,16 @@ mod tests {
     let overview = overview(&project);
     assert_eq!(overview.len(), 1);
     assert!(!overview[0].exists && overview[0].workspaces.is_empty());
+  }
+
+  #[test]
+  fn dir_size_adds_up_nested_files() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join("a/b")).unwrap();
+    std::fs::write(dir.path().join("a/one"), vec![0u8; 100]).unwrap();
+    std::fs::write(dir.path().join("a/b/two"), vec![0u8; 50]).unwrap();
+    assert_eq!(dir_size(dir.path()), 150);
+    assert_eq!(dir_size(&dir.path().join("missing")), 0);
   }
 
   #[test]
