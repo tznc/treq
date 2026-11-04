@@ -1153,3 +1153,55 @@ fn single_repo_keeps_its_home_row_above_the_list(cx: &mut TestAppContext) {
   let github = h.bounds("github").expect("github row");
   assert!(home.origin.y < github.origin.y);
 }
+
+#[test]
+fn project_label_of_unsaved_window_is_unsaved() {
+  assert_eq!(project_label(None), ("Unsaved".into(), "?".into()));
+}
+
+#[test]
+fn project_label_of_saved_project_is_its_name_and_initial() {
+  assert_eq!(
+    project_label(Some("checkout")),
+    ("checkout".into(), "C".into())
+  );
+  assert_eq!(project_label(Some("ébène")), ("ébène".into(), "É".into()));
+}
+
+#[gpui::test]
+fn project_home_row_hides_without_a_project_home(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, two_repos());
+  assert!(h.bounds("project-home").is_none());
+}
+
+#[gpui::test]
+fn project_home_row_opens_the_project_home(cx: &mut TestAppContext) {
+  let mut s = two_repos();
+  s.project_home = Some(false);
+  let mut h = Harness::new(cx, s);
+  let home = h.bounds("project-home").expect("home row");
+  let github = h.bounds("github").expect("github row");
+  assert!(home.origin.y < github.origin.y, "Home above Github");
+  h.click("project-home");
+  assert_eq!(h.sent(), vec![SidebarAction::OpenProjectHome]);
+}
+
+#[gpui::test]
+fn project_home_row_stays_drawn_while_selected(cx: &mut TestAppContext) {
+  let mut s = two_repos();
+  s.project_home = Some(true);
+  s.repos[0].home_selected = false;
+  let mut h = Harness::new(cx, s);
+  assert!(h.bounds("project-home").is_some());
+  h.update(|s| s.project_home = None);
+  assert!(h.bounds("project-home").is_none());
+}
+
+#[gpui::test]
+fn project_button_draws_for_saved_and_unsaved_projects(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, two_repos());
+  assert!(h.bounds("project-button").is_some());
+  h.update(|s| s.project = Some("Checkout".into()));
+  h.click("project-button");
+  assert_eq!(h.sent(), vec![SidebarAction::ProjectMenu]);
+}

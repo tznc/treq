@@ -832,6 +832,146 @@ mod tests {
     assert!(dest.join("README.md").exists());
   }
 
+  /// A local git repository at `<tmp>/host/owner/name` with one commit,
+  /// standing in for a remote: no network.
+  fn local_origin() -> (tempfile::TempDir, String) {
+    let src = tempfile::TempDir::new().unwrap();
+    let work = src.path().join("host/owner/name");
+    std::fs::create_dir_all(&work).unwrap();
+    let git = |args: &[&str]| {
+      let ok = std::process::Command::new("git")
+        .args(args)
+        .current_dir(&work)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+        .status()
+        .unwrap()
+        .success();
+      assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    std::fs::write(work.join("README.md"), "hi").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "init"]);
+    let url = format!("file://{}", work.display());
+    (src, url)
+  }
+
+  #[test]
+  fn ensure_repo_clones_a_url_under_root_then_reuses_it() {
+    let (_src, url) = local_origin();
+    let root = tempfile::TempDir::new().unwrap();
+    let expected = managed_clone_path(root.path(), &url).unwrap();
+    let (path, cloned) = ensure_repo(&url, root.path()).unwrap();
+    assert!(cloned);
+    assert_eq!(Path::new(&path), expected);
+    assert!(expected.join("README.md").exists());
+    assert!(expected.starts_with(root.path()));
+    let (again, cloned) = ensure_repo(&url, root.path()).unwrap();
+    assert!(!cloned, "the second call reuses the clone");
+    assert_eq!(again, path);
+  }
+
+  #[test]
+  fn ensure_repo_rejects_what_is_neither_folder_nor_url() {
+    let root = tempfile::TempDir::new().unwrap();
+    let err = ensure_repo("no such thing", root.path()).unwrap_err();
+    assert!(err.contains("not a folder or a repository URL"), "{err}");
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+  }
+
+  #[test]
+  fn ensure_repo_trims_a_folder_spec() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let spec = format!("  {}  ", dir.path().display());
+    let (path, cloned) = ensure_repo(&spec, Path::new("/unused")).unwrap();
+    assert!(!cloned);
+    assert_eq!(Path::new(&path), std::fs::canonicalize(dir.path()).unwrap());
+  }
+
+  #[test]
+  fn ensure_repo_fails_when_the_clone_fails() {
+    let root = tempfile::TempDir::new().unwrap();
+    let missing = tempfile::TempDir::new().unwrap();
+    let url = format!("file://{}/host/owner/gone", missing.path().display());
+    let (result, dest) = (
+      ensure_repo(&url, root.path()),
+      managed_clone_path(root.path(), &url).unwrap(),
+    );
+    assert!(result.is_err());
+    assert!(!dest.join(".git").exists());
+  }
+
+  #[test]
+  fn overview_lists_an_existing_repo_without_workspaces() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().to_string_lossy().to_string();
+    let project = Project {
+      id: "p".into(),
+      name: "P".into(),
+      repos: vec![path.clone(), "/definitely/missing".into()],
+      created_at: String::new(),
+      last_opened_at: String::new(),
+      prompt: String::new(),
+      context_paths: Vec::new(),
+    };
+    let overview = overview(&project);
+    crate::local_db::release_connections_under(dir.path());
+    assert_eq!(overview.len(), 2);
+    assert_eq!(overview[0].path, path);
+    assert!(overview[0].exists);
+    assert!(overview[0].workspaces.is_empty());
+    assert!(!overview[1].exists);
+  }
+
+  #[test]
+  fn repo_stats_of_a_plain_folder_counts_workspace_bytes_only() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let ws = dir.path().join(".treq/workspaces/a");
+    std::fs::create_dir_all(&ws).unwrap();
+    std::fs::write(ws.join("f"), vec![0u8; 42]).unwrap();
+    let stats = repo_stats(dir.path().to_str().unwrap(), None);
+    crate::local_db::release_connections_under(dir.path());
+    assert_eq!(stats.workspace_bytes, 42);
+    assert_eq!(stats.workspaces, 0);
+    assert_eq!(stats.archived, 0);
+    assert!(stats.commit_times.is_empty());
+    assert_eq!(stats.open_issues, None);
+    assert_eq!(stats.open_prs, None);
+  }
+
+  #[test]
+  fn repo_stats_reads_commit_times_of_a_repo() {
+    let repo = crate::test_repo::TestRepo::new().unwrap();
+    let stats = repo_stats(&repo.repo_path, None);
+    assert!(!stats.commit_times.is_empty(), "{stats:?}");
+    assert_eq!(stats.workspaces, 0);
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn dir_size_does_not_follow_symlinks() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let outside = tempfile::TempDir::new().unwrap();
+    std::fs::write(outside.path().join("big"), vec![0u8; 1000]).unwrap();
+    std::fs::write(dir.path().join("small"), vec![0u8; 10]).unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+    assert_eq!(dir_size(dir.path()), 10);
+  }
+
+  #[test]
+  fn window_for_project_is_none_without_windows() {
+    assert_eq!(window_for_project(&[], "p1"), None);
+  }
+
+  #[test]
+  fn window_for_project_ignores_unsaved_windows() {
+    let windows = vec![("main".to_string(), None), ("w2".to_string(), None)];
+    assert_eq!(window_for_project(&windows, ""), None);
+  }
+
   #[test]
   fn overview_lists_missing_repos_without_workspaces() {
     let project = Project {

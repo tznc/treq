@@ -162,6 +162,22 @@ impl PrState {
   }
 }
 
+/// The project button's name and initial: the saved project's, or
+/// "Unsaved" and "?".
+fn project_label(project: Option<&str>) -> (String, String) {
+  match project {
+    Some(name) => {
+      let initial = name
+        .chars()
+        .next()
+        .map(|c| c.to_uppercase().to_string())
+        .unwrap_or_else(|| "?".into());
+      (name.to_string(), initial)
+    }
+    None => ("Unsaved".into(), "?".into()),
+  }
+}
+
 /// A click in the GPUI sidebar, for React to carry out. A workspace `id` of
 /// `None` means the active repository's home.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1173,20 +1189,9 @@ impl Sidebar {
   /// The project button at the sidebar's top left: the project's initial
   /// and name, or "Unsaved project". A click opens the project menu.
   fn project_button(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let name: SharedString = self
-      .snapshot
-      .project
-      .clone()
-      .unwrap_or_else(|| "Unsaved".into())
-      .into();
+    let (name, initial) = project_label(self.snapshot.project.as_deref());
+    let (name, initial): (SharedString, SharedString) = (name.into(), initial.into());
     let saved = self.snapshot.project.is_some();
-    let initial: SharedString = name
-      .chars()
-      .next()
-      .filter(|_| saved)
-      .map(|c| c.to_uppercase().to_string())
-      .unwrap_or_else(|| "?".into())
-      .into();
     let key = SharedString::from("project-button");
     let bounds = self.project_button_bounds.clone();
     let anchor = self.menu_anchor.clone();
