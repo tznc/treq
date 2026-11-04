@@ -83,6 +83,7 @@ icons! {
   ICON_PLUG => "plug",
   ICON_PLUS => "plus",
   ICON_PR => "git-pull-request",
+  ICON_PR_CREATE => "git-pull-request-create",
   ICON_PR_CLOSED => "git-pull-request-closed",
   ICON_PR_DRAFT => "git-pull-request-draft",
   ICON_REFRESH => "refresh-cw",

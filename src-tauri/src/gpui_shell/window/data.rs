@@ -101,6 +101,8 @@ pub struct Flags {
 pub struct Data {
   repos: HashMap<String, RepoData>,
   supporting: Vec<SupportingRepo>,
+  /// The window's saved project; `None` for an unsaved project.
+  project: Option<crate::core::projects::Project>,
   /// Bumped on every invalidation, so screens read again.
   pub revision: u64,
   /// Bumped when a session list changes, so the terminal pane reads again.
@@ -145,6 +147,15 @@ impl Data {
   /// The main repository's supporting repositories.
   pub fn supporting(&self) -> &[SupportingRepo] {
     &self.supporting
+  }
+
+  /// The window's saved project, if it has one.
+  pub fn project(&self) -> Option<&crate::core::projects::Project> {
+    self.project.as_ref()
+  }
+
+  pub fn set_project(&mut self, project: Option<crate::core::projects::Project>) {
+    self.project = project;
   }
 
   pub fn set_supporting(&mut self, repos: Vec<SupportingRepo>) -> bool {

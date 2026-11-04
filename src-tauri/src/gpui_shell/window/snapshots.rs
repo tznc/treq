@@ -140,6 +140,7 @@ fn view(model: &Model, data: &Data) -> Value {
       }),
     },
     Page::Linear if data.flags.linear => json!({"kind": "linear", "repoPath": repo}),
+    Page::ProjectHome => project_home(model, data),
     Page::MergePreview { workspace_id } => {
       match data.workspaces(repo).iter().find(|w| w.id == *workspace_id) {
         Some(workspace) => json!({
@@ -152,6 +153,45 @@ fn view(model: &Model, data: &Data) -> Value {
     }
     _ => workspace_view(model, data),
   }
+}
+
+/// The window's repositories as project home cards.
+fn project_home(model: &Model, data: &Data) -> Value {
+  let order = super::sidebar::order(model, data);
+  let labels = super::sidebar::display_labels(&order);
+  let repos: Vec<Value> = order
+    .iter()
+    .map(|path| {
+      let repo = data.repo(path);
+      let missing = data
+        .supporting()
+        .iter()
+        .any(|r| &r.path == path && !r.exists);
+      let label = repo
+        .and_then(|r| r.remote.as_ref())
+        .map(|r| r.full_name.clone())
+        .or_else(|| labels.get(path).cloned())
+        .unwrap_or_else(|| path.clone());
+      let workspaces: Vec<Value> = super::sidebar::nodes(data, path)
+        .into_iter()
+        .map(|n| json!([n.workspace.branch_name, n.depth]))
+        .collect();
+      json!({
+        "path": path,
+        "label": label,
+        "homeRef": data.home_ref(path),
+        "missing": missing,
+        "github": repo.and_then(|r| r.remote.as_ref()).map(|r| r.full_name.clone()),
+        "workspaces": workspaces,
+      })
+    })
+    .collect();
+  json!({
+    "kind": "projectHome",
+    "name": data.project().map(|p| p.name.clone()),
+    "repos": repos,
+    "revision": data.revision,
+  })
 }
 
 /// `ShowWorkspace`'s route, with GPUI drawing every tab and the terminal.
@@ -261,6 +301,38 @@ fn workspace_modal(model: &Model, data: &Data) -> Option<Value> {
       "repoPath": repo_path,
       "workspaceId": id,
       "branchName": branch,
+    }));
+  }
+  if let (Some(closing), false) = (dialogs.save_project, repo.is_empty()) {
+    let repos: Vec<String> = std::iter::once(model.main_repo.clone())
+      .chain(
+        data
+          .supporting()
+          .iter()
+          .filter(|r| r.exists)
+          .map(|r| r.path.clone()),
+      )
+      .collect();
+    let name = data
+      .project()
+      .map(|p| p.name.clone())
+      .unwrap_or_else(|| crate::core::projects::suggested_name(&repos));
+    return Some(json!({
+      "kind": "saveProject",
+      "repoPath": repo,
+      "name": name,
+      "saved": data.project().is_some(),
+      "closing": closing,
+      "repos": repos,
+    }));
+  }
+  if let (true, Some(project)) = (dialogs.project_context, data.project()) {
+    return Some(json!({
+      "kind": "projectContext",
+      "repoPath": repo,
+      "name": project.name,
+      "prompt": project.prompt,
+      "contextPaths": project.context_paths,
     }));
   }
   if dialogs.deletion && !repo.is_empty() {
@@ -524,6 +596,38 @@ mod tests {
       matches!(screen(&model, &data()).unwrap().view, View::Workspace(_)),
       "Linear needs its preview feature"
     );
+  }
+
+  #[test]
+  fn builds_project_home_cards_for_every_repository() {
+    let mut model = Model::new(Some("/repo".into()));
+    let mut data = data();
+    data.set_supporting(vec![crate::core::supporting_repos::SupportingRepo {
+      path: "/src/lib".into(),
+      exists: false,
+    }]);
+    model.page = crate::gpui_shell::window::model::Page::ProjectHome;
+    let view = format!("{:?}", screen(&model, &data).unwrap().view);
+    assert!(view.starts_with("ProjectHome"), "{view}");
+    assert!(view.contains("label: \"repo\""), "{view}");
+    assert!(view.contains("path: \"/src/lib\""), "{view}");
+    assert!(view.contains("missing: true"), "{view}");
+  }
+
+  #[test]
+  fn builds_the_save_project_dialog_with_a_suggested_name() {
+    let mut model = Model::new(Some("/r/web".into()));
+    let mut data = data();
+    data.set_supporting(vec![crate::core::supporting_repos::SupportingRepo {
+      path: "/r/api".into(),
+      exists: true,
+    }]);
+    model.dialogs.save_project = Some(true);
+    let modal = format!("{:?}", screen(&model, &data).unwrap().modal.expect("modal"));
+    assert!(modal.starts_with("SaveProject"), "{modal}");
+    assert!(modal.contains("name: \"web + api\""), "{modal}");
+    assert!(modal.contains("closing: true"), "{modal}");
+    assert!(modal.contains("saved: false"), "{modal}");
   }
 
   #[test]

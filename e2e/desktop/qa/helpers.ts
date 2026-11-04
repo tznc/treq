@@ -64,15 +64,14 @@ export function popupBox(): { x: number; y: number; w: number; h: number } | nul
 
 /**
  * The demo repository's home view. Only the selected repository's home row
- * has an accessible name (its branch), so event-bus's row, the first under
- * the palette button, is clicked by place.
+ * has an accessible name (its branch, "main").
  */
 export async function home(page: Page): Promise<void> {
   await ready(page);
   await page.keyboard.press("Escape");
-  const palette = await page.getByRole("button", { name: "Command palette" }).boundingBox();
-  if (!palette) throw new Error("no palette button");
-  await page.mouse.click(100, palette.y + palette.height + 23);
+  // The on-screen repository's home row is named by its branch; with
+  // several repositories it heads that repository's group.
+  await row(page, "main").first().click();
   await expect(page.getByRole("tab", { name: "Code" })).toBeVisible();
   await page.waitForTimeout(800);
 }

@@ -54,6 +54,10 @@ pub struct FileWatch {
 }
 
 pub trait WindowHost: RemoteHost + Send + Sync {
+  /// The saved project this window shows, if any (`core::projects`).
+  fn project(&self) -> Option<crate::core::projects::Project> {
+    None
+  }
   fn workspaces(&self, repo: &str) -> Result<Vec<Workspace>, String>;
   fn statuses(&self, repo: &str) -> Result<Vec<WorkspaceSidebarStatus>, String>;
   /// `has_changes` of `useWorkspaceGitDetail`.
@@ -396,7 +400,24 @@ impl WindowHost for Backend {
     if Backend::remote(self, main_repo).is_some() {
       return Vec::new();
     }
+    // A saved project lists its repositories; an unsaved one keeps the
+    // main repository's supporting list, as before projects.
+    if let Some(project) = crate::gpui_shell::projects::window_project(self.app(), self.label()) {
+      return project
+        .repos
+        .into_iter()
+        .filter(|path| path != main_repo)
+        .map(|path| SupportingRepo {
+          exists: std::path::Path::new(&path).is_dir(),
+          path,
+        })
+        .collect();
+    }
     supporting_repos::list(main_repo).unwrap_or_default()
+  }
+
+  fn project(&self) -> Option<crate::core::projects::Project> {
+    crate::gpui_shell::projects::window_project(self.app(), self.label())
   }
 
   fn setting(&self, key: &str) -> Option<String> {
@@ -497,12 +518,24 @@ impl WindowHost for Backend {
   }
 
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String> {
+    if let Some(project) = self.project() {
+      let added = std::fs::canonicalize(path)
+        .map_err(|e| format!("Cannot open '{path}': {e}"))?
+        .to_string_lossy()
+        .to_string();
+      core::init(&added).map_err(|err| err.to_string())?;
+      self.with_db(|db| crate::core::projects::add_repo(db.conn(), &project.id, &added))?;
+      return Ok(added);
+    }
     let added = supporting_repos::add(main_repo, path)?;
     core::init(&added).map_err(|err| err.to_string())?;
     Ok(added)
   }
 
   fn remove_supporting(&self, main_repo: &str, path: &str) -> Result<(), String> {
+    if let Some(project) = self.project() {
+      return self.with_db(|db| crate::core::projects::remove_repo(db.conn(), &project.id, path));
+    }
     supporting_repos::remove(main_repo, path)
   }
 

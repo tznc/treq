@@ -112,6 +112,12 @@ pub(crate) struct AppState {
   window_last_focused_at: Mutex<HashMap<String, u64>>,
   /// Supporting repository paths shown in each window, by window label.
   window_supporting_repo_paths: Mutex<HashMap<String, Vec<String>>>,
+  /// The saved project each window shows (`core::projects`), by window
+  /// label. A window missing here shows an unsaved project.
+  pub(crate) window_projects: Mutex<HashMap<String, String>>,
+  /// Windows whose close was already confirmed (saved or "Don't save"), so
+  /// the close request goes through.
+  pub(crate) window_close_confirmed: Mutex<std::collections::HashSet<String>>,
   dispatch_instance_id: String,
   dispatch_started_at: u64,
   dispatch_endpoint: String,
@@ -135,6 +141,8 @@ impl AppState {
       window_repo_paths: Mutex::new(HashMap::new()),
       window_last_focused_at: Mutex::new(HashMap::new()),
       window_supporting_repo_paths: Mutex::new(HashMap::new()),
+      window_projects: Mutex::new(HashMap::new()),
+      window_close_confirmed: Mutex::new(std::collections::HashSet::new()),
       dispatch_instance_id,
       dispatch_started_at,
       dispatch_endpoint,
@@ -634,6 +642,15 @@ pub fn run() {
           _ => {}
         }
       }
+      // Closing a window on an unsaved project of several repositories
+      // asks to save it first (`core::projects::close_action`).
+      #[cfg(feature = "gpui-shell")]
+      #[cfg(desktop)]
+      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        if gpui_shell::close_requested(window.app_handle(), window.label()) {
+          api.prevent_close();
+        }
+      }
       // Fires once, after the window is actually gone (not on a
       // cancellable close request), whichever UI path closed it. A
       // window's terminals outlive it while another repo window is open,
@@ -650,6 +667,11 @@ pub fn run() {
           state.window_repo_paths.lock_or_recover().remove(&label);
           state
             .window_supporting_repo_paths
+            .lock_or_recover()
+            .remove(&label);
+          state.window_projects.lock_or_recover().remove(&label);
+          state
+            .window_close_confirmed
             .lock_or_recover()
             .remove(&label);
         }

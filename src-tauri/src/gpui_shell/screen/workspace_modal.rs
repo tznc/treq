@@ -18,7 +18,9 @@ use super::{
   change_move::{ChangeMoveDialog, ChangeMoveRoute},
   open_workspaces::OpenWorkspacesDialog,
   open_workspaces_data,
+  project_context_dialog::{ProjectContextDialog, ProjectContextRoute},
   rename_dialog::{RenameDialog, RenameRoute},
+  save_project_dialog::{SaveProjectDialog, SaveProjectRoute},
   workspace_deletion::{DeletionRoute, WorkspaceDeletion},
   workspace_dialog::WorkspaceDialog,
   workspace_dialog_data::{self, WorkspaceDialogHost},
@@ -40,6 +42,10 @@ pub enum ModalRoute {
   ConfirmChangeMove(ChangeMoveRoute),
   /// The sidebar's Open Workspaces dialog.
   OpenWorkspaces(open_workspaces_data::Route),
+  /// The project menu's Save project, or the close-window prompt.
+  SaveProject(SaveProjectRoute),
+  /// The project menu's Project Instructions….
+  ProjectContext(ProjectContextRoute),
 }
 
 impl ModalRoute {
@@ -52,6 +58,8 @@ impl ModalRoute {
       ModalRoute::WorkspaceDeletion(_) => (2, String::new()),
       ModalRoute::ConfirmChangeMove(route) => (3, route.files.join("\0")),
       ModalRoute::OpenWorkspaces(route) => (4, route.repo_path.clone()),
+      ModalRoute::SaveProject(route) => (5, route.closing.to_string()),
+      ModalRoute::ProjectContext(_) => (6, String::new()),
     }
   }
 }
@@ -63,6 +71,8 @@ pub enum Modal {
   WorkspaceDeletion(Entity<WorkspaceDeletion>),
   ConfirmChangeMove(Entity<ChangeMoveDialog>),
   OpenWorkspaces(Entity<OpenWorkspacesDialog>),
+  SaveProject(Entity<SaveProjectDialog>),
+  ProjectContext(Entity<ProjectContextDialog>),
 }
 
 /// A dialog and the route it was opened for.
@@ -92,6 +102,12 @@ impl OpenModal {
       }
       ModalRoute::WorkspaceDeletion(route) => {
         Modal::WorkspaceDeletion(cx.new(|cx| WorkspaceDeletion::new(route, sink, dark, cx)))
+      }
+      ModalRoute::ProjectContext(route) => Modal::ProjectContext(
+        cx.new(|cx| ProjectContextDialog::new(route, dialogs.clone(), sink, dark, cx)),
+      ),
+      ModalRoute::SaveProject(route) => {
+        Modal::SaveProject(cx.new(|cx| SaveProjectDialog::new(route, dialogs, sink, dark, cx)))
       }
       ModalRoute::ConfirmChangeMove(route) => {
         Modal::ConfirmChangeMove(cx.new(|cx| ChangeMoveDialog::new(route, dialogs, sink, dark, cx)))
@@ -126,6 +142,12 @@ impl OpenModal {
       (Modal::OpenWorkspaces(view), ModalRoute::OpenWorkspaces(_)) => {
         view.update(cx, |view, cx| view.set_dark(dark, cx))
       }
+      (Modal::ProjectContext(view), ModalRoute::ProjectContext(_)) => {
+        view.update(cx, |view, cx| view.set_dark(dark, cx))
+      }
+      (Modal::SaveProject(view), ModalRoute::SaveProject(_)) => {
+        view.update(cx, |view, cx| view.set_dark(dark, cx))
+      }
       _ => {}
     }
   }
@@ -139,6 +161,8 @@ impl OpenModal {
       Modal::WorkspaceDeletion(view) => !view.read(cx).dismissed,
       Modal::ConfirmChangeMove(view) => !view.read(cx).dismissed,
       Modal::OpenWorkspaces(view) => !view.read(cx).dismissed,
+      Modal::SaveProject(view) => !view.read(cx).dismissed,
+      Modal::ProjectContext(view) => !view.read(cx).dismissed,
     }
   }
 
@@ -149,6 +173,8 @@ impl OpenModal {
       Modal::WorkspaceDeletion(view) => view.clone().into_any_element(),
       Modal::ConfirmChangeMove(view) => view.clone().into_any_element(),
       Modal::OpenWorkspaces(view) => view.clone().into_any_element(),
+      Modal::SaveProject(view) => view.clone().into_any_element(),
+      Modal::ProjectContext(view) => view.clone().into_any_element(),
     }
   }
 }

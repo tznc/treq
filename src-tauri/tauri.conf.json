@@ -843,6 +843,30 @@
               "description": "Output format: human or json (default: human)"
             }
           ]
+        },
+        "project": {
+          "description": "Show and extend the saved project that holds this repository",
+          "afterHelp": "Examples:\n  treq project status --format json\n  treq project add-repo tznc/my-repo\n  treq project list",
+          "args": [
+            {
+              "name": "action",
+              "index": 1,
+              "takesValue": true,
+              "required": true,
+              "description": "Action: list, status, add-repo"
+            },
+            {
+              "name": "value",
+              "index": 2,
+              "takesValue": true,
+              "description": "add-repo: a folder, a clone URL, or owner/name (cloned under ~/.treq/repos)"
+            },
+            {
+              "name": "format",
+              "takesValue": true,
+              "description": "Output format: human or json (default: human)"
+            }
+          ]
         }
       }
     },

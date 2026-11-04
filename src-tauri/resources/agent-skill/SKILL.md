@@ -107,6 +107,30 @@ treq diff -r <repo> <workspace_name>
 - `treq agent` returns once the agent is started. Poll `treq st -r` to follow
   its progress.
 
+## Projects
+
+A project is the set of repositories a Treq window shows. When the system
+prompt says the work is part of a Treq project, every repository in it is
+yours to read, and the project may add instructions and context files: follow
+the instructions and read the context paths it names (never edit them).
+
+```bash
+treq project status [--format json]   # every repository and its workspaces
+treq project add-repo <owner/name|url|path>   # add one; Treq clones it once
+treq project list                      # saved projects on this machine
+```
+
+- Run `treq project status` first to see what is there; do not search the
+  disk for sibling repositories.
+- Need a repository the project does not have yet? `treq project add-repo`
+  clones it under `~/.treq/repos/<host>/<owner>/<name>` and adds it. Never run
+  `git clone` yourself.
+- Work in another project repository the same way as a supporting one:
+  `treq add -r <repo> <branch>` then `treq agent -r <repo> <branch> "<prompt>"`.
+  `<repo>` can be the folder name or the `owner/name` tail of its path.
+- One branch name across repositories keeps related work easy to find
+  (for example `treq/checkout-quotes` in both the API and the web repo).
+
 ## Send files to the user
 
 Use `treq send` when the user should see a file, screenshot, or text preview

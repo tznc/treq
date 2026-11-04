@@ -17,6 +17,27 @@ pub struct AgentPaths<'a> {
   pub repo_path: &'a str,
   /// Supporting repositories of the main repository; readable, never written.
   pub supporting_repo_paths: &'a [String],
+  /// The saved project of the window the agent starts in.
+  pub project: Option<&'a ProjectContext>,
+}
+
+/// What a project adds to its agents (`core::projects`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProjectContext {
+  pub name: String,
+  pub prompt: String,
+  pub context_paths: Vec<String>,
+}
+
+impl ProjectContext {
+  /// The local paths agents may read (URLs are only named in the prompt).
+  fn local_paths(&self) -> impl Iterator<Item = String> + '_ {
+    self
+      .context_paths
+      .iter()
+      .filter(|p| !p.contains("://"))
+      .cloned()
+  }
 }
 
 /// Append an agent prompt as a positional argument, never as a CLI option.
@@ -65,12 +86,39 @@ pub fn system_prompt(paths: &AgentPaths<'_>) -> String {
       .map(String::from),
     );
   }
+  if let Some(project) = paths.project {
+    parts.push(format!(
+      "This work is part of the Treq project \"{}\".",
+      project.name
+    ));
+    parts.push(
+      "Run `treq project status` to see every repository and workspace in the project, and `treq project add-repo <owner/name|url|path>` to add (and clone) a repository; never clone it yourself.".into(),
+    );
+    let prompt = project
+      .prompt
+      .split_whitespace()
+      .collect::<Vec<_>>()
+      .join(" ");
+    if !prompt.is_empty() {
+      parts.push(format!("Project instructions: {prompt}"));
+    }
+    if !project.context_paths.is_empty() {
+      parts.push(format!(
+        "Project context you may read (never write): {}.",
+        project.context_paths.join(", ")
+      ));
+    }
+  }
   parts.join(" ")
 }
 
 /// Workspace/home filesystem allow and deny lists for Claude `--settings`.
 pub fn claude_filesystem_settings(paths: &AgentPaths<'_>) -> Value {
-  let supporting = paths.supporting_repo_paths.iter().cloned();
+  let supporting = paths
+    .supporting_repo_paths
+    .iter()
+    .cloned()
+    .chain(paths.project.into_iter().flat_map(|p| p.local_paths()));
   match paths.workspace_path {
     Some(workspace) => json!({
       "denyRead": [paths.repo_path],
@@ -331,6 +379,7 @@ mod tests {
       workspace_path: Some("/repos/treq/.treq/workspaces/fix-parser"),
       repo_path: "/repos/treq",
       supporting_repo_paths: NONE,
+      project: None,
     });
     assert!(prompt.contains("You are operating inside a Treq workspace."));
     assert!(prompt.contains(
@@ -349,6 +398,7 @@ mod tests {
       workspace_path: None,
       repo_path: "/repos/app",
       supporting_repo_paths: &supporting,
+      project: None,
     });
     assert!(prompt.contains("You are operating in the Treq home repository."));
     assert!(!prompt.contains("sibling workspaces"));
@@ -364,6 +414,7 @@ mod tests {
         workspace_path: Some("/repos/app/.treq/workspaces/feat"),
         repo_path: "/repos/app",
         supporting_repo_paths: &supporting,
+        project: None,
       }),
       json!({
         "denyRead": ["/repos/app"],
@@ -376,8 +427,48 @@ mod tests {
         workspace_path: None,
         repo_path: "/repos/app",
         supporting_repo_paths: NONE,
+        project: None,
       }),
       json!({ "allowRead": ["/repos/app"], "allowWrite": ["/repos/app"] })
+    );
+  }
+
+  fn project() -> ProjectContext {
+    ProjectContext {
+      name: "Checkout".into(),
+      prompt: "Use pnpm.\nKeep the API and web in sync.".into(),
+      context_paths: vec!["/docs/style.md".into(), "https://x.dev/spec".into()],
+    }
+  }
+
+  #[test]
+  fn adds_project_instructions_and_context_on_one_line() {
+    let project = project();
+    let prompt = system_prompt(&AgentPaths {
+      workspace_path: None,
+      repo_path: "/repos/app",
+      supporting_repo_paths: NONE,
+      project: Some(&project),
+    });
+    assert!(prompt.contains("Treq project \"Checkout\""));
+    assert!(prompt.contains("treq project status"));
+    assert!(prompt.contains("Project instructions: Use pnpm. Keep the API and web in sync."));
+    assert!(prompt
+      .contains("Project context you may read (never write): /docs/style.md, https://x.dev/spec."));
+    assert!(!prompt.contains('\n'));
+  }
+
+  #[test]
+  fn lets_claude_read_local_project_context_only() {
+    let project = project();
+    assert_eq!(
+      claude_filesystem_settings(&AgentPaths {
+        workspace_path: None,
+        repo_path: "/repos/app",
+        supporting_repo_paths: NONE,
+        project: Some(&project),
+      }),
+      json!({ "allowRead": ["/repos/app", "/docs/style.md"], "allowWrite": ["/repos/app"] })
     );
   }
 
@@ -511,6 +602,7 @@ mod tests {
         workspace_path: None,
         repo_path: cwd,
         supporting_repo_paths: NONE,
+        project: None,
       },
       &AutoCommand {
         pending_prompt: Some("hi"),
@@ -539,6 +631,7 @@ mod tests {
         workspace_path: workspace.to_str(),
         repo_path: dir.path().to_str().unwrap(),
         supporting_repo_paths: NONE,
+        project: None,
       },
       &opts("claude"),
     )

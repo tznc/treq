@@ -195,6 +195,10 @@ impl Model {
         self.new_workspaces(None);
         done()
       }
+      SidebarAction::OpenProjectHome => {
+        self.open_project_home();
+        done()
+      }
       SidebarAction::OpenLinear => {
         self.open_linear();
         done()
@@ -273,6 +277,39 @@ impl Model {
       "renameWorkspace.close" => self.dialogs.rename = None,
       "openWorkspaces.close" => self.dialogs.open_workspaces = None,
       "workspaceDeletion.close" => self.dialogs.deletion = false,
+      "saveProject.close" => self.dialogs.save_project = None,
+      "projectHome.changes" | "projectHome.commits" => {
+        self.page = Page::Workspace;
+        let effects = self.sidebar_action(
+          &SidebarAction::SelectHome {
+            repo_path: arg.to_string(),
+          },
+          data,
+        );
+        self.view.tab = if name == "projectHome.changes" {
+          Tab::Changes
+        } else {
+          Tab::Commits
+        };
+        return effects;
+      }
+      "projectHome.open" => {
+        self.page = Page::Workspace;
+        return self.sidebar_action(
+          &SidebarAction::SelectHome {
+            repo_path: arg.to_string(),
+          },
+          data,
+        );
+      }
+      "projectContext.close" => {
+        self.dialogs.project_context = false;
+        return with(Effect::Refresh { revision: false });
+      }
+      "saveProject.saved" => {
+        self.dialogs.save_project = None;
+        return with(Effect::Refresh { revision: false });
+      }
       "changeMove.done" => {
         self.dialogs.change_move = None;
         self.view.changes_revision += 1;
@@ -1009,6 +1046,14 @@ impl Model {
         }
       }
       OpenRequest::PrReview { number, state } => self.open_github_pr(*number, state),
+      OpenRequest::SaveProject { closing } if self.has_repo() => {
+        self.dialogs.save_project = Some(*closing)
+      }
+      OpenRequest::SaveProject { .. } => {}
+      OpenRequest::ProjectContext if self.has_repo() && data.project().is_some() => {
+        self.dialogs.project_context = true
+      }
+      OpenRequest::ProjectContext => {}
       OpenRequest::WorkspaceChanges {
         repo_path,
         workspace_id,
@@ -1160,6 +1205,57 @@ mod tests {
       &data,
     );
     assert_eq!(model.selected, None);
+  }
+
+  #[test]
+  fn save_project_request_opens_the_dialog_and_saving_rereads() {
+    let (mut model, data) = (model(), data());
+    model.native_event(
+      &NativeEvent::Open {
+        what: OpenRequest::SaveProject { closing: true },
+      },
+      &data,
+    );
+    assert_eq!(model.dialogs.save_project, Some(true));
+    let effects = model.screen_action(&press("saveProject.saved"), &data);
+    assert_eq!(model.dialogs.save_project, None);
+    assert!(format!("{effects:?}").contains("Refresh"));
+  }
+
+  #[test]
+  fn project_home_opens_and_a_card_opens_its_repository() {
+    let (mut model, data) = (model(), data());
+    model.sidebar_action(&SidebarAction::OpenProjectHome, &data);
+    assert_eq!(model.page, Page::ProjectHome);
+    model.screen_action(&press("projectHome.open:/repo"), &data);
+    assert_eq!(model.page, Page::Workspace);
+    assert_eq!(model.selected, None, "the repository's home");
+    model.open_project_home();
+    model.screen_action(&press("projectHome.commits:/repo"), &data);
+    assert_eq!(model.view.tab, Tab::Commits);
+    model.open_project_home();
+    model.screen_action(&press("projectHome.changes:/repo"), &data);
+    assert_eq!(model.view.tab, Tab::Changes);
+  }
+
+  #[test]
+  fn project_instructions_need_a_saved_project() {
+    let (mut model, data) = (model(), data());
+    model.native_event(
+      &NativeEvent::Open {
+        what: OpenRequest::ProjectContext,
+      },
+      &data,
+    );
+    assert!(!model.dialogs.project_context, "unsaved: nothing to edit");
+  }
+
+  #[test]
+  fn save_project_cancel_closes_the_dialog() {
+    let (mut model, data) = (model(), data());
+    model.dialogs.save_project = Some(false);
+    model.screen_action(&press("saveProject.close"), &data);
+    assert_eq!(model.dialogs.save_project, None);
   }
 
   #[test]

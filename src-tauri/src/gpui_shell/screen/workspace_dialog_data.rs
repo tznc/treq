@@ -41,6 +41,36 @@ pub trait WorkspaceDialogHost: ChangesHost {
   /// `jj_check_branch_exists`.
   fn branch_status(&self, repo_path: &str, branch: &str) -> Result<BranchStatus, String>;
   fn gitignore_suggestions(&self, repo_path: &str) -> Vec<String>;
+  /// Saves this window's project as `name` (`core::projects`): renames a
+  /// saved one, or saves the window's repositories as a new project.
+  fn save_project(&self, _name: &str) -> Result<(), String> {
+    Err("Projects are not available here".into())
+  }
+  /// Closes this window without asking to save again.
+  fn close_window(&self) {}
+  /// Blocks: the uncommitted files of a repository's home checkout (Home's
+  /// Changes tab).
+  fn home_changes(&self, _repo: &str) -> Vec<super::project_home::HomeChange> {
+    Vec::new()
+  }
+  /// Blocks: a repository's recent home history, newest first (Home's
+  /// Commits tab).
+  fn home_commits(&self, _repo: &str, _limit: usize) -> Vec<super::project_home::HomeCommit> {
+    Vec::new()
+  }
+  /// Blocks: a Home card's numbers for repository `repo` (`github` is its
+  /// `owner/name` when its origin is on GitHub).
+  fn repo_stats(&self, _repo: &str, _github: Option<&str>) -> super::project_home::RepoStats {
+    super::project_home::RepoStats::default()
+  }
+  /// Blocks: asks for files to add as project context; `None` when cancelled.
+  fn pick_context_files(&self) -> Option<Vec<String>> {
+    None
+  }
+  /// Sets this window's saved project's agent instructions and context.
+  fn set_project_context(&self, _prompt: &str, _paths: &[String]) -> Result<(), String> {
+    Err("Projects are not available here".into())
+  }
   /// `create_workspace`, with the repository's copy files and setup script.
   fn new_workspace(
     &self,
@@ -72,6 +102,60 @@ pub trait WorkspaceDialogHost: ChangesHost {
 }
 
 impl WorkspaceDialogHost for Backend {
+  fn save_project(&self, name: &str) -> Result<(), String> {
+    crate::gpui_shell::projects::save_window_project(self.app(), self.label(), name).map(drop)
+  }
+
+  fn pick_context_files(&self) -> Option<Vec<String>> {
+    super::code_data::CodeHost::pick_files(self)
+  }
+
+  fn home_changes(&self, repo: &str) -> Vec<super::project_home::HomeChange> {
+    crate::core::changes::list_changed_files(repo, None)
+      .unwrap_or_default()
+      .into_iter()
+      .map(|f| super::project_home::HomeChange {
+        status: f.status,
+        path: f.path,
+        lines: f.changed_line_count,
+      })
+      .collect()
+  }
+
+  fn repo_stats(&self, repo: &str, github: Option<&str>) -> super::project_home::RepoStats {
+    crate::core::projects::repo_stats(repo, github)
+  }
+
+  fn home_commits(&self, repo: &str, limit: usize) -> Vec<super::project_home::HomeCommit> {
+    crate::core::commits::list_commits(repo, None, false, None, Some(limit))
+      .map(|log| log.commits)
+      .unwrap_or_default()
+      .into_iter()
+      .filter(|c| !c.is_working_copy)
+      .map(|c| super::project_home::HomeCommit {
+        short_id: c.short_id,
+        description: c.description,
+        timestamp: c.timestamp,
+        insertions: c.insertions,
+        deletions: c.deletions,
+      })
+      .collect()
+  }
+
+  fn set_project_context(&self, prompt: &str, paths: &[String]) -> Result<(), String> {
+    let project = crate::gpui_shell::projects::window_project(self.app(), self.label())
+      .ok_or("Save the project first")?;
+    self.with_db(|db| crate::core::projects::set_context(db.conn(), &project.id, prompt, paths))
+  }
+
+  fn close_window(&self) {
+    let (app, label) = (self.app().clone(), self.label().to_string());
+    let main = app.clone();
+    main
+      .run_on_main_thread(move || crate::gpui_shell::projects::close_confirmed(&app, &label))
+      .ok();
+  }
+
   fn all_workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String> {
     if let Some(remote) = self.remote(repo_path) {
       return remote.workspaces();

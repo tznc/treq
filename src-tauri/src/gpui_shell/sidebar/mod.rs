@@ -63,6 +63,13 @@ pub struct SidebarSnapshot {
   pub bulk_archive: Option<u32>,
   /// The window's repositories: the main one first.
   pub repos: Vec<RepoSection>,
+  /// The window's saved project name; `None` for an unsaved project.
+  #[serde(default)]
+  pub project: Option<String>,
+  /// The Project home row, with whether its page shows; `None` hides it
+  /// (a single repository).
+  #[serde(default)]
+  pub project_home: Option<bool>,
   /// The opacity of an open webview modal's backdrop, continued over the
   /// sidebar; `None` with no modal open.
   #[serde(default)]
@@ -181,6 +188,10 @@ pub enum SidebarAction {
   ClearSelection,
   OpenSettings,
   OpenCommandPalette,
+  /// The project button: lists projects to switch to and saves this one.
+  ProjectMenu,
+  /// The Project home row.
+  OpenProjectHome,
   OpenGithub,
   OpenLinear,
   /// The Open button beside WORKSPACES: opens workspaces from branches,
@@ -293,6 +304,8 @@ pub struct Sidebar {
   tooltip_sent: Rc<RefCell<Option<SharedString>>>,
   /// Where the last right-click was, for placing its menu.
   menu_anchor: Rc<Cell<Point<Pixels>>>,
+  /// The project button's last painted bounds, for its menu's anchor.
+  project_button_bounds: Rc<Cell<gpui::Bounds<Pixels>>>,
   /// The element the pointer rests on, and whether its tooltip shows yet.
   tooltip: Option<(SharedString, bool)>,
   /// The row under the pointer. A button inside it takes the tooltip, and
@@ -365,6 +378,7 @@ impl Sidebar {
       popups,
       tooltip_sent: Rc::default(),
       menu_anchor: Rc::default(),
+      project_button_bounds: Rc::default(),
       tooltip: None,
       hovered_row: None,
       drag_width: None,
@@ -620,6 +634,11 @@ impl Sidebar {
 
 /// Indentation of a row's content, matching the React sidebar's
 /// `16 + (depth - 1) * 6` px.
+/// How far a grouped repository's workspace rows sit right of a lone
+/// repository's, so their branch text (not their icon) starts under the
+/// group header's repository name.
+const GROUP_INDENT: f32 = 4.;
+
 fn row_indent(depth: u32) -> f32 {
   16. + (depth as f32 - 1.) * 6.
 }
@@ -669,38 +688,17 @@ impl Render for Sidebar {
       .items_center()
       .gap_2()
       .p_2()
-      .child(
-        div()
-          .id("command-palette")
-          .debug_selector(|| "command-palette".into())
-          .role(Role::Button)
-          .aria_label("Command palette")
-          .test_support()
-          .flex()
-          .flex_1()
-          .min_w_0()
-          .items_center()
-          .gap_2()
-          .px_3()
-          .h(zpx(32.))
-          .rounded_lg()
-          .border_1()
-          .border_color(palette.border)
-          .bg(palette.muted.opacity(0.5))
-          .cursor_pointer()
-          .hover(|style| style.bg(palette.hover()))
-          .text_color(palette.muted_foreground)
-          .child(icon(theme::ICON_SEARCH, 16., palette.muted_foreground))
-          .child(
-            div()
-              .flex_1()
-              .min_w_0()
-              .truncate()
-              .child(snapshot.repo_name.clone()),
-          )
-          .child(ui::Kbd::new("secondary-k", &palette))
-          .on_click(self.on_action(SidebarAction::OpenCommandPalette)),
-      )
+      .child(self.project_button(&palette, cx))
+      .child(self.header_button(
+        "command-palette",
+        theme::ICON_SEARCH,
+        PALETTE_TOOLTIP,
+        None,
+        false,
+        SidebarAction::OpenCommandPalette,
+        &palette,
+        cx,
+      ))
       .child(self.header_button(
         "settings",
         theme::ICON_SETTINGS,
@@ -733,8 +731,22 @@ impl Render for Sidebar {
       })
       .child(header);
 
-    for repo in &snapshot.repos {
-      sidebar = sidebar.child(self.home_row(repo, &palette, cx));
+    // With several repositories each group header is its repository's home
+    // row; a single repository keeps its home row up here.
+    if !snapshot.repos.iter().any(|repo| repo.label.is_some()) {
+      for repo in &snapshot.repos {
+        sidebar = sidebar.child(self.home_row(repo, &palette, cx));
+      }
+    }
+    if let Some(active) = snapshot.project_home {
+      sidebar = sidebar.child(self.nav_row(
+        "project-home",
+        theme::ICON_HOUSE,
+        "Home",
+        active,
+        SidebarAction::OpenProjectHome,
+        &palette,
+      ));
     }
     sidebar = sidebar
       .child(self.nav_row(
@@ -849,6 +861,12 @@ fn modal_backdrop(palette: &Palette, opacity: f32) -> gpui::Stateful<gpui::Div> 
     .occlude()
 }
 
+/// The search button's name and tooltip, with the shortcut it stands for.
+#[cfg(target_os = "macos")]
+const PALETTE_TOOLTIP: &str = "Command palette (⌘K)";
+#[cfg(not(target_os = "macos"))]
+const PALETTE_TOOLTIP: &str = "Command palette (Ctrl+K)";
+
 /// The WORKSPACES heading's create button.
 pub(super) const OPEN_WORKSPACES_LABEL: &str = "New workspace…";
 
@@ -881,7 +899,7 @@ impl Sidebar {
       .cursor_pointer()
       .hover(|style| style.bg(palette.hover()))
       .child(icon(
-        theme::ICON_BRANCH_PLUS,
+        theme::ICON_PR_CREATE,
         12.,
         palette.sidebar_foreground.opacity(0.7),
       ))
@@ -1028,7 +1046,11 @@ impl Sidebar {
       ))
       .child(self.row_button(
         format!("{prefix}-stack").into(),
-        theme::ICON_LAYERS,
+        if id.is_none() {
+          theme::ICON_PR_CREATE
+        } else {
+          theme::ICON_LAYERS
+        },
         stack_label(id),
         None,
         SidebarAction::Stack { id },
@@ -1048,16 +1070,15 @@ impl Sidebar {
     let label = repo.home_ref.clone().unwrap_or_else(|| "…".into());
     let key = SharedString::from(format!("home:{}", repo.path));
     let title: gpui::AnyElement = match &repo.label {
-      // Several repositories: the name, then the checked-out branch.
+      // Several repositories: the name over the checked-out branch.
       Some(name) => div()
         .flex()
+        .flex_col()
         .flex_1()
         .min_w_0()
-        .items_baseline()
-        .gap_1p5()
         .child(
           div()
-            .flex_none()
+            .min_w_0()
             .truncate()
             .font_weight(gpui::FontWeight::MEDIUM)
             .child(name.clone()),
@@ -1066,7 +1087,7 @@ impl Sidebar {
           repo.home_ref.clone().filter(|_| !repo.missing),
           |this, home_ref| {
             this.child(
-              div()
+              ui::text(div(), TextSize::Xs)
                 .min_w_0()
                 .truncate()
                 .font_family(theme::MONO_FONT)
@@ -1109,7 +1130,11 @@ impl Sidebar {
       .rounded_md()
       .text_color(palette.sidebar_foreground)
       .when(repo.missing, |this| this.opacity(0.5))
-      .leading(icon(theme::ICON_HOUSE, 16., palette.sidebar_foreground))
+      // A group header names its repository; only a lone home row keeps
+      // the house.
+      .when(repo.label.is_none(), |this| {
+        this.leading(icon(theme::ICON_HOUSE, 16., palette.sidebar_foreground))
+      })
       .child(title)
       .when(repo.missing, |this| {
         this.child(
@@ -1142,6 +1167,168 @@ impl Sidebar {
           },
           cx,
         ),
+      )
+  }
+
+  /// The project button at the sidebar's top left: the project's initial
+  /// and name, or "Unsaved project". A click opens the project menu.
+  fn project_button(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let name: SharedString = self
+      .snapshot
+      .project
+      .clone()
+      .unwrap_or_else(|| "Unsaved".into())
+      .into();
+    let saved = self.snapshot.project.is_some();
+    let initial: SharedString = name
+      .chars()
+      .next()
+      .filter(|_| saved)
+      .map(|c| c.to_uppercase().to_string())
+      .unwrap_or_else(|| "?".into())
+      .into();
+    let key = SharedString::from("project-button");
+    let bounds = self.project_button_bounds.clone();
+    let anchor = self.menu_anchor.clone();
+    let sink = self.sink.clone();
+    div()
+      .relative()
+      .flex_1()
+      .min_w_0()
+      .child(
+        div()
+          .id("project-button")
+          .debug_selector(|| "project-button".into())
+          .role(Role::Button)
+          .aria_label(SharedString::from(format!("Project: {name}")))
+          .test_support()
+          .flex()
+          .items_center()
+          .gap_1p5()
+          .px_2()
+          .h(zpx(ui::IconButtonSize::Medium.metrics().0))
+          .w_full()
+          .rounded_lg()
+          .border_1()
+          .border_color(palette.border)
+          .cursor_pointer()
+          .hover(|style| style.bg(palette.hover()))
+          .child(
+            div()
+              .flex()
+              .flex_none()
+              .items_center()
+              .justify_center()
+              .size(zpx(18.))
+              .rounded_md()
+              .when(saved, |this| {
+                this
+                  .bg(palette.primary)
+                  .text_color(palette.primary_foreground)
+              })
+              .when(!saved, |this| {
+                this
+                  .border_1()
+                  .border_dashed()
+                  .border_color(palette.muted_foreground)
+                  .text_color(palette.muted_foreground)
+              })
+              .child(ui::text(div(), TextSize::Xs).child(initial)),
+          )
+          .child(
+            ui::text(div(), TextSize::Xs)
+              .min_w_0()
+              .truncate()
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .when(!saved, |this| this.text_color(palette.muted_foreground))
+              .child(name),
+          )
+          .child(icon(
+            theme::ICON_CHEVRON_DOWN,
+            14.,
+            palette.muted_foreground,
+          ))
+          .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+            this.hover_tooltip(key.clone(), *hovered, cx)
+          }))
+          // Where the button is, so its menu opens under it.
+          .child({
+            let bounds = bounds.clone();
+            gpui::canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
+              .absolute()
+              .top_0()
+              .left_0()
+              .size_full()
+          })
+          .on_click(move |_, _, cx| {
+            let b = bounds.get();
+            anchor.set(gpui::point(b.left(), b.bottom() + gpui::px(4.)));
+            sink(SidebarAction::ProjectMenu, cx);
+          }),
+      )
+      .when(self.tooltip_shown("project-button"), |this| {
+        this.child(
+          self.tooltip_anchor(
+            "project-button".into(),
+            Side::Bottom,
+            TooltipContent::Text(
+              if self.snapshot.project.is_some() {
+                "Switch project"
+              } else {
+                "Unsaved project: save it or switch"
+              }
+              .into(),
+            ),
+            0.,
+          ),
+        )
+      })
+  }
+
+  /// A repository's group header in a window with several: a fold chevron,
+  /// then the repository's home row (its clone and checked-out branch).
+  fn group_header(
+    &self,
+    repo: &RepoSection,
+    name: &str,
+    palette: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let chevron = if repo.collapsed {
+      theme::ICON_CHEVRON_RIGHT
+    } else {
+      theme::ICON_CHEVRON_DOWN
+    };
+    let selector = format!("group-{name}");
+    div()
+      .flex()
+      .items_center()
+      .child(
+        div()
+          .id("group-label")
+          .debug_selector(move || selector)
+          .role(Role::Button)
+          .aria_label(SharedString::from(format!("Fold {name}")))
+          .test_support()
+          .flex()
+          .flex_none()
+          .items_center()
+          .justify_center()
+          .size(zpx(20.))
+          .rounded_md()
+          .cursor_pointer()
+          .hover(|style| style.bg(palette.hover()))
+          .child(icon(chevron, 14., palette.sidebar_foreground.opacity(0.7)))
+          .on_click(self.on_action(SidebarAction::ToggleRepo {
+            repo_path: repo.path.clone(),
+          })),
+      )
+      .child(
+        div()
+          .flex_1()
+          .min_w_0()
+          .ml_neg_1p5()
+          .child(self.home_row(repo, palette, cx)),
       )
   }
 
@@ -1216,7 +1403,9 @@ impl Sidebar {
     let content = match item {
       Item::Label(_) => {
         let name = repo.label.as_deref().unwrap_or_default();
-        self.group_label(repo, name, &palette).into_any_element()
+        self
+          .group_header(repo, name, &palette, cx)
+          .into_any_element()
       }
       Item::Skeleton(_, i) => skeleton_row(i, &palette).into_any_element(),
       Item::Row(_, row) => match repo.workspaces.get(row) {
@@ -1243,34 +1432,6 @@ impl Sidebar {
       .into_any_element()
   }
 
-  /// A repository's workspace group label in a window with several; a
-  /// click folds the group.
-  fn group_label(&self, repo: &RepoSection, name: &str, palette: &Palette) -> impl IntoElement {
-    let chevron = if repo.collapsed {
-      theme::ICON_CHEVRON_RIGHT
-    } else {
-      theme::ICON_CHEVRON_DOWN
-    };
-    let selector = format!("group-{name}");
-    ui::text(div(), TextSize::Xs)
-      .id("group-label")
-      .debug_selector(move || selector)
-      .flex()
-      .items_center()
-      .gap_1()
-      .px_2()
-      .h(zpx(32.))
-      .rounded_md()
-      .text_color(palette.sidebar_foreground.opacity(0.7))
-      .cursor_pointer()
-      .hover(|style| style.bg(palette.hover()))
-      .child(icon(chevron, 16., palette.sidebar_foreground.opacity(0.7)))
-      .child(div().min_w_0().truncate().child(name.to_uppercase()))
-      .on_click(self.on_action(SidebarAction::ToggleRepo {
-        repo_path: repo.path.clone(),
-      }))
-  }
-
   fn workspace_row(
     &self,
     row: &SidebarRow,
@@ -1281,6 +1442,11 @@ impl Sidebar {
   ) -> impl IntoElement {
     let id = row.id;
     let repo_active = repo.active;
+    let group_indent = if repo.label.is_some() {
+      GROUP_INDENT
+    } else {
+      0.
+    };
     // Ids are per repository; rows of other repositories get their own keys.
     let prefix = if repo_active {
       String::new()
@@ -1312,7 +1478,7 @@ impl Sidebar {
       ui::spinner(("archiving", id as u64), 12., palette.muted_foreground).into_any_element()
     } else {
       // The React sidebar flips the branch icon vertically.
-      icon(theme::ICON_BRANCH, 12., branch_color)
+      icon(theme::ICON_PR, 12., branch_color)
         .with_transformation(Transformation::scale(gpui::size(1., -1.)))
         .into_any_element()
     };
@@ -1375,7 +1541,7 @@ impl Sidebar {
       .group(group.clone())
       .relative()
       .gap_1p5()
-      .pl(zpx(row_indent(row.depth)))
+      .pl(zpx(row_indent(row.depth) + group_indent))
       .pr_2()
       .rounded_md()
       .text_color(palette.sidebar_foreground)
@@ -1386,7 +1552,7 @@ impl Sidebar {
           div()
             .absolute()
             .top_0()
-            .left(zpx(guide_left(row.depth)))
+            .left(zpx(guide_left(row.depth) + group_indent))
             .h(zpx(16.))
             .w(zpx(6.))
             .border_l_1()

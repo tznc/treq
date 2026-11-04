@@ -213,7 +213,14 @@ impl Database {
         .warn_on_err("delete old repo_path setting");
     }
 
+    crate::core::projects::init(&self.conn)?;
     Ok(())
+  }
+
+  /// The connection, for stores that keep their own tables here
+  /// (`core::projects`).
+  pub fn conn(&self) -> &Connection {
+    &self.conn
   }
 
   pub fn get_setting(&self, key: &str) -> Result<Option<String>> {

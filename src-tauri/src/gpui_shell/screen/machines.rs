@@ -84,8 +84,19 @@ pub struct Recent {
   pub saved_id: Option<String>,
 }
 
+/// A saved project as the welcome page lists it (`core::projects`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProjectSummary {
+  pub id: String,
+  pub name: String,
+  /// Its repository paths, in sidebar order.
+  pub repos: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Listing {
+  /// Saved projects, most recently opened first.
+  pub projects: Vec<ProjectSummary>,
   pub machines: Vec<Machine>,
   pub recents: Vec<Recent>,
   /// Not signed in to Treq: no cloud row, a sign-in button instead.
@@ -109,6 +120,8 @@ pub trait MachinesHost: ToolsHost {
   fn machine_tools(&self, place: &Place) -> Result<Vec<PrerequisiteStatus>, String>;
   /// Opens the local repository at `path` in this window.
   fn open_local(&self, path: &str);
+  /// Opens saved project `id`: focuses its window, or opens a new one.
+  fn open_project(&self, _id: &str) {}
   /// Forgets the saved SSH host; whether it did.
   fn remove_machine(&self, place: &Place) -> bool;
   /// Blocks: switches an SSH host's terminals to `backend`, first ending
@@ -254,6 +267,14 @@ impl MachinesHost for Backend {
     });
     listing.machines.extend(cloud);
     listing.signed_out = signed_out(self);
+    listing.projects = crate::gpui_shell::projects::list(self.app())
+      .into_iter()
+      .map(|p| ProjectSummary {
+        id: p.id,
+        name: p.name,
+        repos: p.repos,
+      })
+      .collect();
     listing.ssh = remote_ssh;
     listing.containers = containers;
     // Most recently opened first, then the rest in saved order.
@@ -357,6 +378,14 @@ impl MachinesHost for Backend {
   fn open_local(&self, path: &str) {
     let (backend, path) = (self.clone(), path.to_string());
     tauri::async_runtime::spawn_blocking(move || super::onboarding::open_repo_at(&backend, &path));
+  }
+
+  fn open_project(&self, id: &str) {
+    let (app, id) = (self.app().clone(), id.to_string());
+    let main = app.clone();
+    main
+      .run_on_main_thread(move || crate::gpui_shell::projects::open_project(&app, &id))
+      .ok();
   }
 
   fn pick_folder(&self) -> Option<String> {

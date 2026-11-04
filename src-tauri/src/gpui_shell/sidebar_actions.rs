@@ -24,6 +24,7 @@ use crate::{
     context_menu::{self, EditorApps, HomeMenu, MenuAction},
   },
   local_db::Workspace,
+  result_ext::ResultExt,
 };
 
 /// Whether GPUI may handle `action` (a window the model does not drive
@@ -32,6 +33,7 @@ pub fn handles(action: &SidebarAction) -> bool {
   matches!(
     action,
     SidebarAction::HomeMenu { .. }
+      | SidebarAction::ProjectMenu
       | SidebarAction::WorkspaceMenu { .. }
       | SidebarAction::RepoWorkspaceMenu { .. }
       | SidebarAction::BulkArchive
@@ -53,6 +55,19 @@ pub fn handle(
     return false;
   };
   match action {
+    SidebarAction::ProjectMenu => {
+      let current = super::projects::window_project(app, label).map(|p| p.id);
+      let entries: Vec<context_menu::ProjectEntry> = super::projects::list(app)
+        .into_iter()
+        .map(|p| context_menu::ProjectEntry {
+          id: p.id,
+          name: p.name,
+        })
+        .collect();
+      let items = context_menu::project_items(&entries, current.as_deref());
+      show(app, label, backend, items);
+      true
+    }
     SidebarAction::HomeMenu { repo_path } => {
       let Some(index) = snapshot.repos.iter().position(|r| &r.path == repo_path) else {
         return false;
@@ -265,6 +280,31 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
   let open = |what| WorkspaceHost::notify(&*backend, NativeEvent::Open { what });
   match action {
     MenuAction::OpenBranchSwitcher => open(OpenRequest::BranchSwitcher),
+    MenuAction::SaveProject => open(OpenRequest::SaveProject { closing: false }),
+    MenuAction::ProjectContext => open(OpenRequest::ProjectContext),
+    MenuAction::SwitchProject(id) => {
+      let main = app.clone();
+      main
+        .run_on_main_thread({
+          let app = app.clone();
+          move || super::projects::open_project(&app, &id)
+        })
+        .ignore_closed();
+    }
+    MenuAction::NewWindow => {
+      let main = app.clone();
+      main
+        .run_on_main_thread({
+          let app = app.clone();
+          move || {
+            let label = crate::open_new_window::new_repo_window_label();
+            if let Err(err) = super::open_window(&app, &label, None, "Treq") {
+              log::error!("failed to open window: {err}");
+            }
+          }
+        })
+        .ignore_closed();
+    }
     MenuAction::AddRepository => open(OpenRequest::AddRepository),
     MenuAction::OpenRepoSettings(repo_path) => open(OpenRequest::RepoSettings { repo_path }),
     MenuAction::LocateRepo(repo_path) => open(OpenRequest::LocateRepo { repo_path }),

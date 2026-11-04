@@ -313,6 +313,7 @@ impl OnboardingView {
       cx.notify();
     }
     match name {
+      "projects.open" => self.host.open_project(arg),
       "machines.toggleOther" => {
         self.other_open = !self.other_open;
         cx.notify();
@@ -1166,6 +1167,34 @@ impl OnboardingView {
         )
       })
       .collect();
+    let projects = (!self.listing.projects.is_empty()).then(|| {
+      div()
+        .debug_selector(|| "onboarding-projects".into())
+        .pb_5()
+        .child(
+          ui::text(div(), TextSize::Sm)
+            .px_2()
+            .pb_3()
+            .font_weight(FontWeight::SEMIBOLD)
+            .child("Projects"),
+        )
+        .children(self.listing.projects.iter().map(|project| {
+          let repos = project
+            .repos
+            .iter()
+            .map(|r| r.trim_end_matches('/').rsplit('/').next().unwrap_or(r))
+            .collect::<Vec<_>>()
+            .join(", ");
+          Row::new(format!("project-{}", project.id), &p)
+            .role(gpui::Role::ListItem)
+            .density(RowDensity::Default)
+            .icon(theme::ICON_FOLDER_OPEN)
+            .title(project.name.clone())
+            .meta(repos)
+            .on_click(ctx.send(press(format!("projects.open:{}", project.id))))
+            .into_any_element()
+        }))
+    });
     let empty = groups.is_empty().then(|| {
       EmptyState::new("onboarding-no-recents", "No recent repositories", &p)
         .icon(theme::ICON_FOLDER_GIT)
@@ -1202,7 +1231,7 @@ impl OnboardingView {
               .child(
                 ui::text(div(), TextSize::Sm)
                   .text_color(p.muted_foreground)
-                  .child("Pick a recent repository, or a machine to open one on."),
+                  .child("Pick a project, a recent repository, or a machine to open one on. A repository opens as an unsaved project."),
               ),
           )
           .child(
@@ -1222,6 +1251,7 @@ impl OnboardingView {
           .overflow_y_scroll()
           .px_4()
           .pb_6()
+          .children(projects)
           .child(
             ui::text(div(), TextSize::Sm)
               .px_2()

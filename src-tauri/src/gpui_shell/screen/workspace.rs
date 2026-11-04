@@ -1305,7 +1305,7 @@ impl WorkspaceView {
         .size(Size::Sm)
         .gap_1()
         .px_2()
-        .icon(theme::ICON_LAYERS, 16.)
+        .icon(theme::ICON_PR_CREATE, 16.)
         .label(stack_label(h.home))
         .on_click(self.press("workspace.stack"));
       left = left.child(self.with_tooltip(

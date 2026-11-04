@@ -113,6 +113,13 @@ pub enum OpenRequest {
     repo_path: String,
     workspace_id: i64,
   },
+  /// The Save project dialog; `closing` when the window is closing and
+  /// asks first.
+  SaveProject {
+    closing: bool,
+  },
+  /// The Project instructions dialog of this window's saved project.
+  ProjectContext,
   /// The pull request in Treq's PR view (`onViewPrInApp`).
   PrReview {
     number: u64,

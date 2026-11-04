@@ -33,6 +33,7 @@ pub mod native;
 mod overlay;
 mod popover;
 mod popup;
+pub mod projects;
 pub mod remote_repo;
 mod screen;
 #[doc(hidden)]
@@ -795,6 +796,8 @@ pub fn cutoff_cleared(app: &AppHandle, endpoint_id: &str) {
 pub fn forget_terminals() {
   screen::forget_terminals();
 }
+
+pub use projects::close_requested;
 
 pub fn forget_window(label: &str) {
   popup::forget_owner(label);

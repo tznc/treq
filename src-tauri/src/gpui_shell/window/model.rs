@@ -103,6 +103,8 @@ pub enum Page {
   },
   Github(Github),
   Linear,
+  /// The window's repositories as cards.
+  ProjectHome,
   MergePreview {
     workspace_id: i64,
   },
@@ -175,6 +177,10 @@ pub struct Dialogs {
   /// (`None`: the default branch).
   pub open_workspaces: Option<Option<String>>,
   pub deletion: bool,
+  /// The Save project dialog; `true` while the window waits to close.
+  pub save_project: Option<bool>,
+  /// The Project instructions dialog.
+  pub project_context: bool,
   pub change_move: Option<ChangeMove>,
   pub agent_prompt: Option<AgentPrompt>,
   /// The prompt history, focused on an entry.
@@ -198,6 +204,8 @@ impl Dialogs {
       || self.open_workspaces.is_some()
       || self.rename.is_some()
       || self.deletion
+      || self.save_project.is_some()
+      || self.project_context
       || self.change_move.is_some()
       || self.agent_prompt.is_some()
       || self.prompt_history.is_some()
@@ -632,6 +640,10 @@ impl Model {
   }
 
   /// `openLinear`.
+  pub fn open_project_home(&mut self) {
+    self.leave_for(Page::ProjectHome);
+  }
+
   pub fn open_linear(&mut self) {
     self.leave_for(Page::Linear);
   }

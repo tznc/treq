@@ -83,8 +83,22 @@ pub(super) fn resolve_command_repo(matches: &Matches) -> Result<String, String> 
     Some(spec) => {
       let cwd = std::env::current_dir().map_err(|e| format!("Failed to get CWD: {}", e))?;
       core::supporting_repos::resolve(&repo_path, &spec, &cwd)
+        .or_else(|err| resolve_in_projects(&repo_path, &spec).ok_or(err))
     }
   }
+}
+
+/// `-r <spec>` for a repository of a saved project holding `repo_path`:
+/// its folder name, `owner/name` tail, or full path.
+fn resolve_in_projects(repo_path: &str, spec: &str) -> Option<String> {
+  let db = crate::db::Database::new(core::resolve_app_db_path(repo_path)).ok()?;
+  db.init().ok()?;
+  let spec = spec.trim_end_matches('/');
+  core::projects::projects_with_repo(db.conn(), repo_path)
+    .ok()?
+    .into_iter()
+    .flat_map(|p| p.repos)
+    .find(|path| path == spec || path.ends_with(&format!("/{spec}")))
 }
 
 pub(super) fn lookup_workspace_from_cwd(repo_path: &str) -> Option<local_db::Workspace> {
@@ -862,6 +876,9 @@ pub fn handle_cli_command(subcommand: &SubcommandMatches) -> Option<i32> {
     "resolve" => workspace_handlers::handle_resolve(&subcommand.matches),
     "send" => workspace_handlers::handle_send(&subcommand.matches),
     "notify" => workspace_handlers::handle_notify(&subcommand.matches),
+    "project" => run_structured(&subcommand.matches, |format| {
+      project_handlers::handle_project_command(&subcommand.matches, format)
+    }),
     "repo" => run_structured(&subcommand.matches, |format| {
       handle_repo_command(&subcommand.matches, format)
     }),
@@ -1217,6 +1234,7 @@ fn send_json_dispatch_request<T: serde::Serialize>(
 }
 
 pub mod args;
+mod project_handlers;
 mod workspace_handlers;
 
 mod agent_review_handlers;
