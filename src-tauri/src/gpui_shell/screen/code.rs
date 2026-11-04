@@ -2719,18 +2719,21 @@ impl CodeView {
         this.bg(yellow_bg).border_1().border_color(yellow_border)
       })
       .when(target, |this| this.opacity(0.6))
-      .child(
-        div().relative().flex_none().child(
-          div()
-            .size(zpx(14.))
-            .rounded_full()
-            .border_2()
-            .border_color(p.background)
-            .bg(dot),
-        ),
-      )
+      .child(history_dot(dot, p))
       .child(body)
   }
+}
+
+/// A commit's dot on the history track.
+pub(super) fn history_dot(color: gpui::Hsla, p: &Palette) -> impl IntoElement {
+  div().relative().flex_none().child(
+    div()
+      .size(zpx(14.))
+      .rounded_full()
+      .border_2()
+      .border_color(p.background)
+      .bg(color),
+  )
 }
 
 #[derive(Debug, Clone)]

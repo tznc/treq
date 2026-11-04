@@ -136,6 +136,8 @@ impl WorkspaceDialogHost for Backend {
         short_id: c.short_id,
         description: c.description,
         timestamp: c.timestamp,
+        insertions: c.insertions,
+        deletions: c.deletions,
       })
       .collect()
   }

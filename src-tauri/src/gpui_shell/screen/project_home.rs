@@ -65,6 +65,8 @@ pub struct HomeCommit {
   pub short_id: String,
   pub description: String,
   pub timestamp: String,
+  pub insertions: u32,
+  pub deletions: u32,
 }
 
 pub use crate::core::projects::RepoStats;
@@ -435,7 +437,11 @@ impl ProjectHomeView {
                 ui::text(div(), TextSize::Xs)
                   .ml_auto()
                   .text_color(p.muted_foreground)
-                  .child(format!("{} files", files.len())),
+                  .child(format!(
+                    "{} {}",
+                    files.len(),
+                    if files.len() == 1 { "file" } else { "files" }
+                  )),
               )
               .on_click(self.send(open_tab_press("changes", &repo.path))),
           )
@@ -464,12 +470,15 @@ impl ProjectHomeView {
                   .truncate()
                   .child(file.path.clone()),
               )
-              .child(
-                ui::text(div(), TextSize::Xs)
-                  .ml_auto()
-                  .text_color(p.muted_foreground)
-                  .child(format!("{} lines", file.lines)),
-              )
+              // jj leaves the count at 0 when it defers the diff: say nothing.
+              .when(file.lines > 0, |this| {
+                this.child(
+                  ui::text(div(), TextSize::Xs)
+                    .ml_auto()
+                    .text_color(p.muted_foreground)
+                    .child(format!("{} lines", file.lines)),
+                )
+              })
           }))
           .into_any_element(),
       );
@@ -494,6 +503,81 @@ impl ProjectHomeView {
       .into_any_element()
   }
 
+  /// One repository's commits in one band, drawn as the Code tab's
+  /// history: a track line, a dot per commit, then its title, time and
+  /// line counts.
+  fn history_cell(
+    &self,
+    commits: Vec<&HomeCommit>,
+    newest: bool,
+    p: &theme::Palette,
+  ) -> AnyElement {
+    if commits.is_empty() {
+      return div().into_any_element();
+    }
+    let (green, red) = (ui::Tone::GitOpen.text(p), ui::Tone::GitClosed.text(p));
+    div()
+      .relative()
+      .flex()
+      .flex_col()
+      .child(
+        div()
+          .absolute()
+          .left(zpx(7.))
+          .top_2()
+          .bottom_2()
+          .w(zpx(2.))
+          .bg(p.border),
+      )
+      .children(commits.into_iter().enumerate().map(|(i, c)| {
+        let dot = if newest && i == 0 {
+          p.primary
+        } else {
+          p.muted_foreground
+        };
+        div()
+          .flex()
+          .items_start()
+          .gap_3()
+          .py_2()
+          .child(super::code::history_dot(dot, p))
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .pt_0p5()
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .truncate()
+                  .child(c.description.lines().next().unwrap_or("").to_string()),
+              )
+              .child(
+                div()
+                  .flex()
+                  .items_center()
+                  .gap_2()
+                  .mt_0p5()
+                  .child(
+                    ui::text(div(), TextSize::Xs)
+                      .text_color(p.muted_foreground)
+                      .child(time::relative(&c.timestamp)),
+                  )
+                  .when(c.insertions > 0 || c.deletions > 0, |this| {
+                    this.child(
+                      ui::text(div(), TextSize::Xs)
+                        .ml_auto()
+                        .flex()
+                        .child(div().text_color(green).child(format!("+{}", c.insertions)))
+                        .child("\u{a0}")
+                        .child(div().text_color(red).child(format!("-{}", c.deletions))),
+                    )
+                  }),
+              ),
+          )
+      }))
+      .into_any_element()
+  }
+
   fn commits_tab(&self, p: &theme::Palette) -> AnyElement {
     let repos: Vec<&RepoCard> = self.route.repos.iter().filter(|r| !r.missing).collect();
     let columns: Vec<Vec<HomeCommit>> = repos
@@ -515,8 +599,7 @@ impl ProjectHomeView {
     let label_w = zpx(110.);
     let header = div()
       .flex()
-      .border_b_1()
-      .border_color(p.border)
+      .gap_6()
       .child(div().w(label_w).flex_none())
       .children(repos.iter().enumerate().map(|(i, repo)| {
         div()
@@ -528,79 +611,52 @@ impl ProjectHomeView {
           )))
           .test_support()
           .flex_1()
-          .min_w(zpx(200.))
-          .px_3()
-          .py_2()
-          .border_l_1()
-          .border_color(p.border)
+          .min_w(zpx(220.))
+          .px_2()
+          .py_1()
+          .rounded_md()
           .cursor_pointer()
           .hover(|s| s.bg(p.hover()))
           .child(repo_title(repo, p))
           .on_click(self.send(open_tab_press("commits", &repo.path)))
       }));
-    let rows = bands.into_iter().map(|(label, cells)| {
-      div()
-        .flex()
-        .border_b_1()
-        .border_color(p.border)
-        .child(
-          ui::text(div(), TextSize::Xs)
-            .w(label_w)
-            .flex_none()
-            .px_3()
-            .py_2()
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(p.muted_foreground)
-            .child(label),
-        )
-        .children(cells.into_iter().enumerate().map(|(col, indices)| {
-          let empty = indices.is_empty();
-          div()
-            .flex_1()
-            .min_w(zpx(200.))
-            .flex()
-            .flex_col()
-            .gap_1()
-            .p_1p5()
-            .border_l_1()
-            .border_color(p.border)
-            .when(empty, |this| this.bg(p.muted.opacity(0.3)))
-            .children(
-              indices
-                .into_iter()
-                .filter_map(|i| columns[col].get(i))
-                .map(|c| {
-                  div()
-                    .flex()
-                    .flex_col()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(p.border)
-                    .bg(p.card)
-                    .child(
-                      ui::text(div(), TextSize::Sm)
-                        .min_w_0()
-                        .truncate()
-                        .child(c.description.lines().next().unwrap_or("").to_string()),
-                    )
-                    .child(
-                      ui::text(div(), TextSize::Xs)
-                        .text_color(p.muted_foreground)
-                        .font_family(theme::MONO_FONT)
-                        .child(format!("{} · {}", c.short_id, time::relative(&c.timestamp))),
-                    )
-                }),
-            )
-        }))
-    });
+    let mut seen = vec![false; repos.len()];
+    let rows: Vec<AnyElement> = bands
+      .into_iter()
+      .map(|(label, cells)| {
+        div()
+          .flex()
+          .gap_6()
+          .pt_3()
+          .child(
+            ui::text(div(), TextSize::Xs)
+              .w(label_w)
+              .flex_none()
+              .pt_2()
+              .text_color(p.muted_foreground)
+              .child(label),
+          )
+          .children(cells.into_iter().enumerate().map(|(col, indices)| {
+            let newest = !seen[col] && !indices.is_empty();
+            if !indices.is_empty() {
+              seen[col] = true;
+            }
+            let commits: Vec<&HomeCommit> = indices
+              .into_iter()
+              .filter_map(|i| columns[col].get(i))
+              .collect();
+            div()
+              .flex_1()
+              .min_w(zpx(220.))
+              .px_2()
+              .child(self.history_cell(commits, newest, p))
+          }))
+          .into_any_element()
+      })
+      .collect();
     div()
       .id("project-home-commits")
       .debug_selector(|| "project-home-commits".into())
-      .rounded_lg()
-      .border_1()
-      .border_color(p.border)
       .overflow_x_scroll()
       .child(
         div()

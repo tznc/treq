@@ -3,11 +3,35 @@
 // its menu, the Save project dialog, and the welcome page's project list.
 // On a build without projects the same steps capture the old sidebar, so
 // one spec makes the before/after pair.
+import { readdirSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { home, popupBox, ready, settle, xPointer } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
+
+/** The QA seed's fixture folder (`launch.ts`): the newest treq-qa-* in tmp. */
+function fixtureRoot(): string {
+  const dirs = readdirSync(tmpdir())
+    .filter((d) => d.startsWith("treq-qa-"))
+    .map((d) => join(tmpdir(), d))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  if (!dirs[0]) throw new Error("no QA fixture");
+  return dirs[0];
+}
+
+/** Uncommitted edits in both home checkouts, for Home's Changes tab. */
+function editHomeCheckouts(): void {
+  const root = fixtureRoot();
+  writeFileSync(
+    join(root, "event-bus/README.md"),
+    "# event-bus\n\nLorem ipsum ingest pipeline, now with quotes.\n",
+  );
+  writeFileSync(join(root, "event-bus/CHANGELOG.md"), "## Unreleased\n\n- Quote events\n");
+  writeFileSync(join(root, "docs-site/quotes.md"), "# Quotes\n\nHow quote events reach the docs.\n");
+}
 
 test("projects: sidebar, project menu, save and welcome list", async ({ page }) => {
   await ready(page);
@@ -89,6 +113,7 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await settle(page, 5000);
 
+  editHomeCheckouts();
   await page.getByRole("button", { name: "Home", exact: true }).click();
   await settle(page, 1500);
   await expect(page.getByRole("heading", { name: "Event platform" })).toBeVisible();
@@ -107,7 +132,7 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
     name: "20-projects-07b-home-changes",
     title: "Home › Changes",
     expectations: [
-      "Uncommitted changes of each repository's home checkout, grouped by repository, or a 'No changes' line",
+      "event-bus lists README.md (M) and CHANGELOG.md (A); docs-site lists quotes.md (A)",
     ],
   });
   await page.getByRole("tab", { name: "Commits" }).click();
@@ -116,7 +141,8 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
     name: "20-projects-07c-home-commits",
     title: "Home › Commits",
     expectations: [
-      "A column per repository with its commits, in shared time bands (Today, Yesterday, …) labelled on the left",
+      "Each repository column draws the Code tab's history (track line, dots, title, time, +/-), no table borders",
+      "Rows are shared time bands labelled on the left (Today, …)",
     ],
   });
   await page.getByRole("tab", { name: "Code" }).click();
