@@ -273,3 +273,30 @@ it("the sweep marks a provisioning row untouched past the threshold failed", asy
     await deleteTestUser(admin, fresh.user.id);
   }
 }, 30_000);
+
+it("concurrent ensures answer 200 and leave one live instance", async () => {
+  const same = await createTestUser();
+  const distinct = await createTestUser();
+  try {
+    const key = `ensure-${randomUUID()}`;
+    const sameKey = await Promise.all(
+      Array.from({ length: 20 }, () => call(same.user.id, { action: "ensure", idempotency_key: key })),
+    );
+    const distinctKeys = await Promise.all(Array.from({ length: 30 }, () => ensure(distinct.user.id)));
+    expect(sameKey.map((r) => r.status)).toEqual(Array(20).fill(200));
+    expect(distinctKeys.map((r) => r.status)).toEqual(Array(30).fill(200));
+    expect((await rows(admin, same.user.id)).filter((r) => r.status !== "deleted")).toHaveLength(1);
+    expect((await rows(admin, distinct.user.id)).filter((r) => r.status !== "deleted")).toHaveLength(1);
+
+    await recordOutcome("remote-instance-chaos-07-concurrent-ensure", {
+      expectations: [
+        "20 parallel ensures with one key and 30 with distinct keys all answer 200.",
+        "Each owner ends with exactly one live remote_instances row.",
+      ],
+      details: { sameKey: sameKey.map((r) => r.json.status), distinct: distinctKeys.map((r) => r.json.status) },
+    });
+  } finally {
+    await deleteTestUser(admin, same.user.id);
+    await deleteTestUser(admin, distinct.user.id);
+  }
+}, 60_000);
