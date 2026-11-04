@@ -270,6 +270,153 @@ pub fn mark_opened(conn: &Connection, id: &str) -> Result<(), String> {
     .map(drop)
 }
 
+/// `owner/name` alone means a GitHub repository; anything else is a clone URL
+/// as given.
+pub fn clone_url(spec: &str) -> String {
+  let spec = spec.trim();
+  let parts: Vec<&str> = spec.split('/').collect();
+  if parts.len() == 2
+    && !spec.contains(':')
+    && parts
+      .iter()
+      .all(|p| !p.is_empty() && *p != "." && *p != "..")
+  {
+    return format!("https://github.com/{spec}.git");
+  }
+  spec.to_string()
+}
+
+/// Where Treq keeps its own clone of `url`: `<root>/<host>/<owner>/<name>`.
+/// `None` for a local path or anything it cannot read as a repository URL.
+pub fn managed_clone_path(root: &Path, url: &str) -> Option<std::path::PathBuf> {
+  let url = clone_url(url);
+  let rest = if let Some((_, rest)) = url.split_once("://") {
+    // ssh://git@host/owner/name, https://host/owner/name
+    let rest = rest.rsplit_once('@').map(|(_, r)| r).unwrap_or(rest);
+    rest.to_string()
+  } else if let Some((user_host, path)) = url.split_once(':') {
+    // git@host:owner/name
+    let host = user_host
+      .rsplit_once('@')
+      .map(|(_, h)| h)
+      .unwrap_or(user_host);
+    if host.contains('/') || host.is_empty() {
+      return None;
+    }
+    format!("{host}/{path}")
+  } else {
+    return None;
+  };
+  let parts: Vec<&str> = rest
+    .trim_end_matches('/')
+    .trim_end_matches(".git")
+    .split('/')
+    .filter(|p| !p.is_empty())
+    .collect();
+  if parts.len() < 3 || parts.iter().any(|p| *p == "." || *p == "..") {
+    return None;
+  }
+  let mut path = root.to_path_buf();
+  for part in parts {
+    path.push(part);
+  }
+  Some(path)
+}
+
+/// Where Treq clones repositories: `$TREQ_CLONES_DIR`, else
+/// `~/.treq/repos`.
+pub fn clones_root() -> std::path::PathBuf {
+  if let Some(dir) = std::env::var_os("TREQ_CLONES_DIR").filter(|d| !d.is_empty()) {
+    return dir.into();
+  }
+  let home = std::env::var_os("HOME")
+    .or_else(|| std::env::var_os("USERPROFILE"))
+    .unwrap_or_else(|| ".".into());
+  std::path::PathBuf::from(home).join(".treq").join("repos")
+}
+
+/// A repository on this machine for `spec`: an existing folder as it is, or
+/// a URL (or `owner/name`) cloned once under `root` and reused after.
+/// Returns the folder and whether this call cloned it.
+pub fn ensure_repo(spec: &str, root: &Path) -> Result<(String, bool), String> {
+  let as_path = Path::new(spec.trim());
+  if as_path.is_dir() {
+    let path = std::fs::canonicalize(as_path).map_err(|e| e.to_string())?;
+    return Ok((path.to_string_lossy().to_string(), false));
+  }
+  let dest = managed_clone_path(root, spec)
+    .ok_or_else(|| format!("'{spec}' is not a folder or a repository URL"))?;
+  if dest.join(".git").exists() {
+    return Ok((dest.to_string_lossy().to_string(), false));
+  }
+  if let Some(parent) = dest.parent() {
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+  }
+  let dest_str = dest.to_string_lossy().to_string();
+  crate::core::remote::clone_repository(&clone_url(spec), &dest_str)?;
+  Ok((dest_str, true))
+}
+
+/// One repository of a project as `treq project status` reports it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoOverview {
+  pub path: String,
+  pub exists: bool,
+  pub workspaces: Vec<WorkspaceOverview>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceOverview {
+  pub branch: String,
+  pub title: String,
+  pub target_branch: Option<String>,
+  pub path: String,
+}
+
+/// Every repository of `project` and the workspaces each one lists, read
+/// from the repositories' own databases. A missing repository lists none.
+pub fn overview(project: &Project) -> Vec<RepoOverview> {
+  project
+    .repos
+    .iter()
+    .map(|path| {
+      let exists = Path::new(path).is_dir();
+      let workspaces = if exists {
+        crate::local_db::get_workspaces(path)
+          .unwrap_or_default()
+          .into_iter()
+          .filter(|w| !w.archived)
+          .map(|w| WorkspaceOverview {
+            branch: w.branch_name,
+            title: w.title,
+            target_branch: w.target_branch,
+            path: w.workspace_path,
+          })
+          .collect()
+      } else {
+        Vec::new()
+      };
+      RepoOverview {
+        path: path.clone(),
+        exists,
+        workspaces,
+      }
+    })
+    .collect()
+}
+
+/// Saved projects that list repository `repo`.
+pub fn projects_with_repo(conn: &Connection, repo: &str) -> Result<Vec<Project>, String> {
+  Ok(
+    list(conn)?
+      .into_iter()
+      .filter(|p| p.repos.iter().any(|r| r == repo))
+      .collect(),
+  )
+}
+
 /// The name offered when saving an unsaved project: its repository folder
 /// names joined with " + ".
 pub fn suggested_name(repos: &[String]) -> String {
@@ -507,6 +654,128 @@ mod tests {
     init(&conn).expect("init");
     let p = get(&conn, "p").unwrap().unwrap();
     assert_eq!(p.prompt, "");
+  }
+
+  #[test]
+  fn managed_clone_path_follows_host_owner_and_name() {
+    let root = Path::new("/home/me/.treq/repos");
+    for url in [
+      "https://github.com/tznc/my-repo.git",
+      "https://github.com/tznc/my-repo",
+      "git@github.com:tznc/my-repo.git",
+      "ssh://git@github.com/tznc/my-repo",
+    ] {
+      assert_eq!(
+        managed_clone_path(root, url).expect(url),
+        root.join("github.com/tznc/my-repo"),
+        "{url}"
+      );
+    }
+    assert_eq!(
+      managed_clone_path(root, "tznc/my-repo").unwrap(),
+      root.join("github.com/tznc/my-repo")
+    );
+  }
+
+  #[test]
+  fn managed_clone_path_rejects_what_is_not_a_repo_url() {
+    let root = Path::new("/r");
+    assert!(managed_clone_path(root, "/home/me/code/app").is_none());
+    assert!(managed_clone_path(root, "https://github.com/../../etc").is_none());
+    assert!(managed_clone_path(root, "").is_none());
+  }
+
+  #[test]
+  fn clone_url_expands_owner_slash_name_to_github() {
+    assert_eq!(
+      clone_url("tznc/my-repo"),
+      "https://github.com/tznc/my-repo.git"
+    );
+    assert_eq!(
+      clone_url("git@github.com:a/b.git"),
+      "git@github.com:a/b.git"
+    );
+  }
+
+  #[test]
+  fn finds_projects_that_hold_a_repo() {
+    let conn = conn();
+    let a = save(&conn, "A", &repos(&["/r/api", "/r/web"])).expect("a");
+    save(&conn, "B", &repos(&["/r/ios"])).expect("b");
+    let found: Vec<String> = projects_with_repo(&conn, "/r/api")
+      .unwrap()
+      .into_iter()
+      .map(|p| p.id)
+      .collect();
+    assert_eq!(found, vec![a.id]);
+    assert!(projects_with_repo(&conn, "/r/none").unwrap().is_empty());
+  }
+
+  #[test]
+  fn ensure_repo_takes_an_existing_folder_as_is() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let (path, cloned) = ensure_repo(dir.path().to_str().unwrap(), Path::new("/unused")).unwrap();
+    assert!(!cloned);
+    assert_eq!(Path::new(&path), std::fs::canonicalize(dir.path()).unwrap());
+  }
+
+  #[test]
+  fn ensure_repo_reuses_an_earlier_clone() {
+    let root = tempfile::TempDir::new().unwrap();
+    let dest = root.path().join("github.com/tznc/app");
+    std::fs::create_dir_all(dest.join(".git")).unwrap();
+    let (path, cloned) = ensure_repo("tznc/app", root.path()).unwrap();
+    assert!(!cloned, "no second clone");
+    assert_eq!(Path::new(&path), dest);
+  }
+
+  #[test]
+  fn ensure_repo_clones_a_url_once() {
+    // A local bare repository stands in for the remote: no network.
+    let src = tempfile::TempDir::new().unwrap();
+    let work = src.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let git = |args: &[&str], dir: &Path| {
+      let ok = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+        .status()
+        .unwrap()
+        .success();
+      assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"], &work);
+    std::fs::write(work.join("README.md"), "hi").unwrap();
+    git(&["add", "."], &work);
+    git(&["commit", "-qm", "init"], &work);
+    let url = format!("file://{}", work.display());
+    // file:// URLs have no owner/name, so clone into an explicit layout.
+    let root = tempfile::TempDir::new().unwrap();
+    let spec = format!("{url}/x");
+    assert!(managed_clone_path(root.path(), &spec).is_some());
+    let dest = root.path().join("clone");
+    crate::core::remote::clone_repository(&url, dest.to_str().unwrap()).unwrap();
+    assert!(dest.join("README.md").exists());
+  }
+
+  #[test]
+  fn overview_lists_missing_repos_without_workspaces() {
+    let project = Project {
+      id: "p".into(),
+      name: "P".into(),
+      repos: repos(&["/definitely/missing/repo"]),
+      created_at: String::new(),
+      last_opened_at: String::new(),
+      prompt: String::new(),
+      context_paths: Vec::new(),
+    };
+    let overview = overview(&project);
+    assert_eq!(overview.len(), 1);
+    assert!(!overview[0].exists && overview[0].workspaces.is_empty());
   }
 
   #[test]

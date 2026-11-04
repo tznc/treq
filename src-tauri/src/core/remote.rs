@@ -1990,6 +1990,12 @@ pub use local::*;
 mod github;
 pub use github::*;
 mod host;
+
+/// Clones `repo_url` into `destination` (which must not exist), with `gix`.
+/// A failed clone leaves no partial folder.
+pub fn clone_repository(repo_url: &str, destination: &str) -> Result<(), String> {
+  host::clone_repo_local(repo_url, destination).map(drop)
+}
 pub use host::*;
 mod ssh;
 pub use ssh::*;
