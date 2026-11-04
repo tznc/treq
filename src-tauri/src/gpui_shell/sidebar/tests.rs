@@ -42,6 +42,7 @@ fn snapshot(workspaces: Vec<SidebarRow>) -> SidebarSnapshot {
       collapsed: false,
     }],
     project: None,
+    project_home: None,
     modal: None,
   }
 }

@@ -103,6 +103,8 @@ pub enum Page {
   },
   Github(Github),
   Linear,
+  /// The window's repositories as cards.
+  ProjectHome,
   MergePreview {
     workspace_id: i64,
   },
@@ -638,6 +640,10 @@ impl Model {
   }
 
   /// `openLinear`.
+  pub fn open_project_home(&mut self) {
+    self.leave_for(Page::ProjectHome);
+  }
+
   pub fn open_linear(&mut self) {
     self.leave_for(Page::Linear);
   }

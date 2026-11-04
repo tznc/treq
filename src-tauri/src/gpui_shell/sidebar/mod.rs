@@ -66,6 +66,10 @@ pub struct SidebarSnapshot {
   /// The window's saved project name; `None` for an unsaved project.
   #[serde(default)]
   pub project: Option<String>,
+  /// The Project home row, with whether its page shows; `None` hides it
+  /// (a single repository).
+  #[serde(default)]
+  pub project_home: Option<bool>,
   /// The opacity of an open webview modal's backdrop, continued over the
   /// sidebar; `None` with no modal open.
   #[serde(default)]
@@ -186,6 +190,8 @@ pub enum SidebarAction {
   OpenCommandPalette,
   /// The project button: lists projects to switch to and saves this one.
   ProjectMenu,
+  /// The Project home row.
+  OpenProjectHome,
   OpenGithub,
   OpenLinear,
   /// The Open button beside WORKSPACES: opens workspaces from branches,
@@ -745,6 +751,16 @@ impl Render for Sidebar {
       for repo in &snapshot.repos {
         sidebar = sidebar.child(self.home_row(repo, &palette, cx));
       }
+    }
+    if let Some(active) = snapshot.project_home {
+      sidebar = sidebar.child(self.nav_row(
+        "project-home",
+        theme::ICON_FOLDER_OPEN,
+        "Project home",
+        active,
+        SidebarAction::OpenProjectHome,
+        &palette,
+      ));
     }
     sidebar = sidebar
       .child(self.nav_row(

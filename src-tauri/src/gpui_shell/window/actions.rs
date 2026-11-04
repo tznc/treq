@@ -195,6 +195,10 @@ impl Model {
         self.new_workspaces(None);
         done()
       }
+      SidebarAction::OpenProjectHome => {
+        self.open_project_home();
+        done()
+      }
       SidebarAction::OpenLinear => {
         self.open_linear();
         done()
@@ -274,6 +278,15 @@ impl Model {
       "openWorkspaces.close" => self.dialogs.open_workspaces = None,
       "workspaceDeletion.close" => self.dialogs.deletion = false,
       "saveProject.close" => self.dialogs.save_project = None,
+      "projectHome.open" => {
+        self.page = Page::Workspace;
+        return self.sidebar_action(
+          &SidebarAction::SelectHome {
+            repo_path: arg.to_string(),
+          },
+          data,
+        );
+      }
       "projectContext.close" => {
         self.dialogs.project_context = false;
         return with(Effect::Refresh { revision: false });
@@ -1192,6 +1205,16 @@ mod tests {
     let effects = model.screen_action(&press("saveProject.saved"), &data);
     assert_eq!(model.dialogs.save_project, None);
     assert!(format!("{effects:?}").contains("Refresh"));
+  }
+
+  #[test]
+  fn project_home_opens_and_a_card_opens_its_repository() {
+    let (mut model, data) = (model(), data());
+    model.sidebar_action(&SidebarAction::OpenProjectHome, &data);
+    assert_eq!(model.page, Page::ProjectHome);
+    model.screen_action(&press("projectHome.open:/repo"), &data);
+    assert_eq!(model.page, Page::Workspace);
+    assert_eq!(model.selected, None, "the repository's home");
   }
 
   #[test]

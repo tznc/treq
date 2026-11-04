@@ -68,6 +68,7 @@ mod pr_review;
 mod pr_review_data;
 pub(super) mod prefetch;
 mod project_context_dialog;
+pub(crate) mod project_home;
 mod remote;
 pub(super) mod remote_chrome;
 mod remote_data;
@@ -129,6 +130,8 @@ pub enum View {
   Github(github_data::Route),
   /// A GitHub pull request's diff, reviewed and submitted to GitHub.
   PrReview(pr_review::Route),
+  /// The window's repositories as cards (`project_home`).
+  ProjectHome(project_home::Route),
 }
 
 /// What a click on a screen asks the window model to do, tagged by `kind`.
@@ -606,6 +609,7 @@ impl Render for Screen {
       sink: &self.sink,
     };
     let body = match &self.snapshot.view {
+      View::ProjectHome(route) => project_home::render(route, &ctx),
       View::Onboarding(route) => {
         let route = route.clone();
         match &self.onboarding {

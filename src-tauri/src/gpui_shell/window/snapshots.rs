@@ -140,6 +140,7 @@ fn view(model: &Model, data: &Data) -> Value {
       }),
     },
     Page::Linear if data.flags.linear => json!({"kind": "linear", "repoPath": repo}),
+    Page::ProjectHome => project_home(model, data),
     Page::MergePreview { workspace_id } => {
       match data.workspaces(repo).iter().find(|w| w.id == *workspace_id) {
         Some(workspace) => json!({
@@ -152,6 +153,43 @@ fn view(model: &Model, data: &Data) -> Value {
     }
     _ => workspace_view(model, data),
   }
+}
+
+/// The window's repositories as project home cards.
+fn project_home(model: &Model, data: &Data) -> Value {
+  let order = super::sidebar::order(model, data);
+  let labels = super::sidebar::display_labels(&order);
+  let repos: Vec<Value> = order
+    .iter()
+    .map(|path| {
+      let repo = data.repo(path);
+      let missing = data
+        .supporting()
+        .iter()
+        .any(|r| &r.path == path && !r.exists);
+      let label = repo
+        .and_then(|r| r.remote.as_ref())
+        .map(|r| r.full_name.clone())
+        .or_else(|| labels.get(path).cloned())
+        .unwrap_or_else(|| path.clone());
+      let workspaces: Vec<Value> = super::sidebar::nodes(data, path)
+        .into_iter()
+        .map(|n| json!([n.workspace.branch_name, n.depth]))
+        .collect();
+      json!({
+        "path": path,
+        "label": label,
+        "homeRef": data.home_ref(path),
+        "missing": missing,
+        "workspaces": workspaces,
+      })
+    })
+    .collect();
+  json!({
+    "kind": "projectHome",
+    "name": data.project().map(|p| p.name.clone()),
+    "repos": repos,
+  })
 }
 
 /// `ShowWorkspace`'s route, with GPUI drawing every tab and the terminal.
@@ -556,6 +594,22 @@ mod tests {
       matches!(screen(&model, &data()).unwrap().view, View::Workspace(_)),
       "Linear needs its preview feature"
     );
+  }
+
+  #[test]
+  fn builds_project_home_cards_for_every_repository() {
+    let mut model = Model::new(Some("/repo".into()));
+    let mut data = data();
+    data.set_supporting(vec![crate::core::supporting_repos::SupportingRepo {
+      path: "/src/lib".into(),
+      exists: false,
+    }]);
+    model.page = crate::gpui_shell::window::model::Page::ProjectHome;
+    let view = format!("{:?}", screen(&model, &data).unwrap().view);
+    assert!(view.starts_with("ProjectHome"), "{view}");
+    assert!(view.contains("label: \"repo\""), "{view}");
+    assert!(view.contains("path: \"/src/lib\""), "{view}");
+    assert!(view.contains("missing: true"), "{view}");
   }
 
   #[test]

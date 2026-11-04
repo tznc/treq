@@ -70,8 +70,43 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
     screen: true,
     rest: false,
     expectations: [
-      "Lists '✓ Event platform', then Rename Project… and New Window…",
+      "Lists '✓ Event platform', then Rename Project…, Project Instructions… and New Window…",
     ],
+  });
+  const menu2 = popupBox();
+  if (!menu2) throw new Error("no project menu");
+  // Rows: the project, a separator, Rename, Instructions, New Window.
+  await xPointer(page, menu2.x + 60, menu2.y + menu2.h - 41, 1);
+  await settle(page, 1200);
+  await page.keyboard.type("Use pnpm. Keep the API and the docs in sync.");
+  await capture(page, {
+    name: "20-projects-06-instructions",
+    title: "Project instructions dialog",
+    expectations: [
+      "Dialog 'Event platform instructions' with an Instructions box (typed text) and a Context files box",
+    ],
+  });
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await settle(page, 5000);
+
+  await page.getByRole("button", { name: "Project home" }).click();
+  await settle(page, 1500);
+  await expect(page.getByRole("heading", { name: "Event platform" })).toBeVisible();
+  await capture(page, {
+    name: "20-projects-07-project-home",
+    title: "Project home",
+    expectations: [
+      "Heading 'Event platform' with the repository and workspace counts",
+      "Two cards: LOREM-IPSUM/EVENT-BUS with its workspaces, DOCS-SITE with its workspace",
+      "The Project home row is selected in the sidebar",
+    ],
+  });
+  await page.getByRole("button", { name: "Open docs-site" }).click();
+  await settle(page, 1500);
+  await capture(page, {
+    name: "20-projects-08-card-opened",
+    title: "A card opens its repository",
+    expectations: ["docs-site's home shows; its header row is selected in the sidebar"],
   });
   // The welcome page's Projects list is covered by the headless screen
   // tests (onboarding_lists_projects_and_opens_one): a second window does

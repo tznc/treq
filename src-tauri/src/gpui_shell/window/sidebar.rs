@@ -157,7 +157,7 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
   let labels = multi.then(|| display_labels(&order));
   let page_selects = !matches!(
     model.page,
-    Page::Github(_) | Page::Linear | Page::Settings { .. }
+    Page::Github(_) | Page::Linear | Page::Settings { .. } | Page::ProjectHome
   );
   let repos = order
     .iter()
@@ -249,6 +249,7 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
     shell_unavailable: None,
     bulk_archive: (!model.multi.is_empty()).then_some(model.multi.len() as u32),
     project: data.project().map(|p| p.name.clone()),
+    project_home: multi.then_some(matches!(model.page, Page::ProjectHome)),
     repos,
     modal: None,
   })
