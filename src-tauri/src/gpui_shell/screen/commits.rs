@@ -166,6 +166,8 @@ pub struct CommitsView {
   tips: Tooltips,
   popups: PopupSink,
   pub(super) history: Option<History>,
+  /// Why the log could not be read, while there is no history to show.
+  history_error: Option<String>,
   loading_more: bool,
   pub(super) target_limit: usize,
   pub(super) home_limit: usize,
@@ -226,6 +228,7 @@ impl CommitsView {
       tips: Tooltips::new(popups.clone(), dark),
       popups,
       history: None,
+      history_error: None,
       loading_more: false,
       target_limit: TARGET_PAGE,
       home_limit: HOME_PAGE,
@@ -286,6 +289,7 @@ impl CommitsView {
     self.parent = parent;
     if moved {
       self.history = None;
+      self.history_error = None;
       self.layout_gen += 1;
       self.target_limit = TARGET_PAGE;
       self.home_limit = HOME_PAGE;
@@ -388,11 +392,15 @@ impl CommitsView {
             let unconfirmed = &view.unconfirmed;
             view.removed.retain(|id| unconfirmed.contains(id));
             view.history = Some(history);
+            view.history_error = None;
             view.layout_gen += 1;
           }
           Err(err) => {
             log::warn!("Failed to load commits: {err}");
-            view.history.get_or_insert_with(History::default);
+            // Keep what was read before; only an empty view says it failed.
+            if view.history.is_none() {
+              view.history_error = Some(err);
+            }
             view.layout_gen += 1;
           }
         }
@@ -1531,23 +1539,16 @@ impl CommitsView {
 }
 
 /// A diff with no files to list: too large to render, or empty.
-fn diff_message(diff: &JjRevisionDiff, p: &Palette) -> Div {
+fn diff_message(diff: &JjRevisionDiff, p: &Palette) -> ui::EmptyState {
   if diff.too_large_to_render {
-    return div()
-      .debug_selector(|| "commit-diff-blocked".into())
-      .p_3()
-      .text_color(p.muted_foreground)
-      .child(
-        diff
-          .render_block_reason
-          .clone()
-          .unwrap_or_else(|| "This commit diff is too large to render.".into()),
-      );
+    return ui::EmptyState::new("commit-diff-blocked", "Diff too large to show", p).message(
+      diff
+        .render_block_reason
+        .clone()
+        .unwrap_or_else(|| "This commit diff is too large to render.".into()),
+    );
   }
-  div()
-    .p_3()
-    .text_color(p.muted_foreground)
-    .child("No changes")
+  ui::EmptyState::new("commit-diff-empty", "No changes", p).message("This commit changes no files.")
 }
 
 impl Render for CommitsView {
@@ -1570,37 +1571,45 @@ impl Render for CommitsView {
         MouseButton::Left,
         cx.listener(|view, _, _, cx| view.end_drag(cx)),
       );
+    if let (None, Some(err)) = (&self.history, self.history_error.clone()) {
+      return root.child(
+        div()
+          .size_full()
+          .flex()
+          .items_center()
+          .justify_center()
+          .child(
+            ui::EmptyState::failed("commits-error", "Couldn't load commits", err.clone(), &p)
+              .action(ui::error_actions(
+                "commits",
+                err,
+                Some(Box::new(cx.listener(|view, _, _, cx| {
+                  view.history_error = None;
+                  view.load(cx);
+                  cx.notify();
+                }))),
+                &p,
+              )),
+          ),
+      );
+    }
     if self.history.is_none() {
       return root.child(ui::delayed(
         "commits-loading-row",
-        ui::text(div(), TextSize::Sm)
+        div()
           .size_full()
           .flex()
           .items_center()
           .justify_center()
           .p_4()
-          .child(
-            div()
-              .mr_2()
-              .child(ui::spinner("commits-loading", 16., p.foreground)),
-          )
-          .child(
-            div()
-              .text_color(p.muted_foreground)
-              .child("Loading commits…"),
-          ),
+          .child(ui::Loading::new("commits-loading", &p).label("Loading commits…")),
       ));
     }
     if self.feed_is_empty() {
       return root.child(
-        ui::text(div(), TextSize::Sm)
-          .p_4()
-          .flex()
-          .flex_col()
-          .items_center()
-          .text_color(p.muted_foreground)
-          .child("No commits yet.")
-          .child("Changes you commit will appear here."),
+        ui::EmptyState::new("commits-empty", "No commits yet", &p)
+          .icon(theme::ICON_COMMIT)
+          .message("Changes you commit will appear here."),
       );
     }
     let dialog = self.dialog_view(window, &p, cx);
@@ -2036,27 +2045,33 @@ impl CommitsView {
     let content = match self.diffs.get(&commit.commit_id) {
       Some(state) if state.loading => ui::delayed(
         format!("diff-loading-{}", commit.commit_id),
-        div()
-          .flex()
-          .items_center()
-          .gap_2()
-          .p_3()
-          .text_color(p.muted_foreground)
-          .child(ui::spinner(
-            SharedString::from(format!("diff-spin-{}", commit.commit_id)),
-            16.,
-            p.muted_foreground,
-          ))
-          .child("Loading diff…"),
+        div().flex().p_3().child(
+          ui::Loading::new(format!("diff-spin-{}", commit.commit_id), p).label("Loading diff…"),
+        ),
       )
       .into_any_element(),
       Some(DiffState {
         error: Some(err), ..
-      }) => div()
-        .p_3()
-        .text_color(p.destructive)
-        .child(format!("Failed to load diff: {err}"))
-        .into_any_element(),
+      }) => {
+        let id = commit.commit_id.clone();
+        ui::EmptyState::failed(
+          SharedString::from(format!("diff-error-{id}")),
+          "Couldn't load the diff",
+          err.clone(),
+          p,
+        )
+        .action(ui::error_actions(
+          &format!("diff-{id}"),
+          err.clone(),
+          Some(Box::new(cx.listener(move |view, _, _, cx| {
+            view.diffs.remove(&id);
+            view.expand(&id, cx);
+            cx.notify();
+          }))),
+          p,
+        ))
+        .into_any_element()
+      }
       Some(DiffState {
         diff: Some(diff), ..
       }) => diff_message(diff, p).into_any_element(),
@@ -2209,6 +2224,7 @@ impl CommitsView {
     };
     let busy = state.deferred_loading.contains(&file.path);
     let (id, path) = (commit.commit_id.clone(), file.path.clone());
+    let spin = SharedString::from(format!("load-diff-{id}-spin"));
     let muted = p.muted_foreground;
     let fg = p.foreground;
     div()
@@ -2249,7 +2265,10 @@ impl CommitsView {
                   .hover(move |s| s.bg(p.hover()).text_color(fg))
                   .on_click(cx.listener(move |view, _, _, cx| view.load_file_diff(&id, &path, cx)))
               })
-              .child(if busy { "Loading…" } else { "Load diff" }),
+              .when(busy, |this| {
+                this.child(ui::Loading::new(spin, p).label("Loading diff…"))
+              })
+              .when(!busy, |this| this.child("Load diff")),
           ),
       )
       .into_any_element()
@@ -2416,11 +2435,7 @@ impl CommitsView {
               .child(if fetching {
                 div()
                   .flex()
-                  .items_center()
-                  .gap_2()
-                  .text_color(p.muted_foreground)
-                  .child(ui::spinner("description-spin", 16., p.muted_foreground))
-                  .child("Loading description…")
+                  .child(ui::Loading::new("description-spin", p).label("Loading description…"))
                   .into_any_element()
               } else {
                 div()

@@ -237,12 +237,12 @@ impl Render for WorkspaceDeletion {
     let highlighted = self.highlighted(&rows);
     let no_deletable = self.route.deletable().next().is_none();
     let list = if rows.is_empty() {
-      ui::text(div(), TextSize::Sm)
-        .px_4()
-        .py_8()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child("No deletable workspaces found")
+      ui::EmptyState::new("workspace-deletion-empty", "No deletable workspaces", &p)
+        .message(if no_deletable {
+          "This repository has no workspaces to delete."
+        } else {
+          "No workspace matches this search."
+        })
         .into_any_element()
     } else {
       div()

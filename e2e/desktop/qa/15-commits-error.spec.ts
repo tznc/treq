@@ -23,7 +23,8 @@ test("commits-error: a failed commit read is reported, not left loading", async 
       name: "15-commits-error",
       title: "Code tab of a workspace whose checkout was deleted",
       expectations: [
-        "The Commits panel says 'Couldn't load commits' with a 'Show error' button under it",
+        "The Commits panel says 'Couldn't load commits' with only a 'Show error' button: no Retry, no message line",
+        "The files panel says 'Couldn't read the files' with the error and Retry; no 'No files found' and no README box",
         "No 'Loading commits…' text is left on screen",
       ],
     });

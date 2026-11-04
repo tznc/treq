@@ -163,12 +163,12 @@ fn the_code_tab_draws_the_root_entries_near_the_viewport(cx: &mut TestAppContext
   let second = h.cx.debug_bounds("code-entry-zz_00001.txt").expect("row");
   let third = h.cx.debug_bounds("code-entry-zz_00002.txt").expect("row");
   let at = first.center();
-  // Scrolled to the bottom: the last rows and the README follow the rows
-  // not drawn, at the height they would take.
+  // Scrolled to the bottom: the last rows follow the rows not drawn, at the
+  // height they would take. A workspace's Code tab draws no README.
   scroll_by(&mut h, at, 150, -2000.);
   assert!(h.drawn("code-entry-zz_04999.txt"));
   assert!(!h.drawn("code-entry-zz_00000.txt"));
-  assert!(h.drawn("code-readme"));
+  assert!(!h.drawn("code-readme"));
   // Every row but the first has a top border.
   let pitch = third.top() - second.top();
   let last = h.cx.debug_bounds("code-entry-zz_04999.txt").expect("row");

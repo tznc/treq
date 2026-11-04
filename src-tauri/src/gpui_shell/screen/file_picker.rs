@@ -155,17 +155,20 @@ impl Render for FilePicker {
     let width = viewport.width * 0.4;
     let selected = self.selected;
     let list = if self.results.is_empty() {
-      ui::text(div(), TextSize::Sm)
-        .px_4()
-        .py_8()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child(if self.query.trim().is_empty() {
-          "Type to search files…"
-        } else {
-          "No files found"
-        })
-        .into_any_element()
+      if self.query.trim().is_empty() {
+        ui::text(div(), TextSize::Sm)
+          .px_4()
+          .py_8()
+          .text_center()
+          .text_color(p.muted_foreground)
+          .child("Type to search files…")
+          .into_any_element()
+      } else {
+        ui::EmptyState::new("file-picker-empty", "No files match", &p)
+          .icon(theme::ICON_FILE_SEARCH)
+          .message("Try part of the file name or its folder.")
+          .into_any_element()
+      }
     } else {
       div()
         .children(self.results.iter().enumerate().map(|(i, path)| {

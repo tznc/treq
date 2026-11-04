@@ -358,3 +358,29 @@ fn file_browser_discard_review_keeps_on_escape_and_discards_on_enter(cx: &mut Te
     .calls()
     .contains(&"notify toast Review canceled".to_string()));
 }
+
+#[gpui::test]
+fn an_unreadable_file_is_an_error_state_with_retry(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let (mut h, host) = harness(cx, serde_json::json!({}));
+  h.click("file-tree-gone.txt");
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(Role::Status).name("Couldn't read gone.txt"))).to_be_visible();
+  let reads = || {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("read file") && c.ends_with("gone.txt"))
+      .count()
+  };
+  let before = reads();
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Retry")));
+  h.cx.run_until_parked();
+  assert_eq!(reads(), before + 1);
+}

@@ -1,0 +1,35 @@
+id: gpui-one-primary-per-region
+valid:
+  - |
+    fn rows(p: &Palette) -> Vec<Button> {
+      items.iter().map(|i| {
+        Button::new(format!("install-{i}"), p).variant(Variant::Outline).label("Install…")
+      }).collect()
+    }
+  - |
+    fn footer(p: &Palette) -> Button {
+      Button::new(format!("{id}-save"), p).label("Save")
+    }
+  - |
+    fn rows(p: &Palette) {
+      items.iter().map(|_| Button::new("one", p).label("Save"));
+    }
+  - |
+    mod tests {
+      fn t(p: &Palette) { (0..3).map(|i| Button::new(format!("b{i}"), p)); }
+    }
+invalid:
+  - |
+    fn rows(p: &Palette) -> Vec<Button> {
+      items.iter().map(|i| Button::new(format!("install-{i}"), p).size(Size::Sm).label("Install…")).collect()
+    }
+  - |
+    fn rows(p: &Palette) {
+      for i in items {
+        el = el.child(ui::Button::new(format!("del-{i}"), p).variant(Variant::Destructive));
+      }
+    }
+  - |
+    fn rows(p: &Palette) {
+      items.iter().map(|i| Button::new(format!("go-{i}"), p).variant(Variant::Default));
+    }

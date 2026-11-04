@@ -1339,6 +1339,7 @@ impl RemoteView {
             )
             .child(
               Button::new(format!("remote-reattach-{i}"), p)
+                .variant(Variant::Outline)
                 .size(Size::Sm)
                 .disabled(!session.running)
                 .label("Reattach")

@@ -762,18 +762,6 @@ fn heading(label: impl Into<SharedString>) -> gpui::Div {
     .child(label.into())
 }
 
-/// `border rounded-lg p-6 text-center text-muted-foreground`.
-fn empty(p: &Palette, label: String) -> gpui::Div {
-  ui::text(div(), TextSize::Sm)
-    .border_1()
-    .border_color(p.border)
-    .rounded(radius::LG)
-    .p_6()
-    .text_center()
-    .text_color(p.muted_foreground)
-    .child(label)
-}
-
 /// `border rounded-lg divide-y`.
 fn list(p: &Palette) -> gpui::Div {
   div()
@@ -1353,7 +1341,12 @@ impl MergeView {
             div()
               .child(heading(format!("Changed Files ({count})")))
               .when(count == 0, |this| {
-                this.child(empty(&p, "No file changes".into()))
+                this.child(
+                  list(&p).child(
+                    ui::EmptyState::new("merge-no-files", "No file changes", &p)
+                      .message("The commits to merge change no files."),
+                  ),
+                )
               }),
           )
           .into_any_element();
@@ -1535,7 +1528,16 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
           )
       }))
       .into_any_element(),
-    _ => empty(p, format!("No commits ahead of {target}")).into_any_element(),
+    _ => list(p)
+      .child(
+        ui::EmptyState::new(
+          "merge-no-commits",
+          format!("No commits ahead of {target}"),
+          p,
+        )
+        .message("There is nothing to merge until this workspace has a commit of its own."),
+      )
+      .into_any_element(),
   };
   div()
     .child(heading(format!("Commits to be merged ({total})")))

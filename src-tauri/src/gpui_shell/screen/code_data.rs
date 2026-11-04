@@ -87,6 +87,8 @@ pub struct Overview {
   pub readme: Option<String>,
   /// The repository is remote, which has no file tree yet.
   pub unavailable: bool,
+  /// The read failed for another reason, such as a deleted checkout.
+  pub error: Option<String>,
 }
 
 /// What the Code tab's file list says for a remote repository.
@@ -94,7 +96,7 @@ pub const REMOTE_FILE_TREE_REASON: &str = "Browsing the file tree is not availab
 
 impl Overview {
   /// `ShowWorkspace`'s overview read: a remote repository's refusal shows
-  /// as an empty, unavailable tree; any other failure as an empty one.
+  /// as an empty, unavailable tree; any other failure keeps its error.
   pub fn or_unavailable(read: Result<Overview, String>) -> Overview {
     read.unwrap_or_else(|err| {
       let unavailable = err.starts_with(UNSUPPORTED);
@@ -102,6 +104,7 @@ impl Overview {
         log::warn!("Failed to load workspace overview: {err}");
       }
       Overview {
+        error: (!unavailable).then_some(err),
         unavailable,
         ..Overview::default()
       }
@@ -221,6 +224,7 @@ impl CodeHost for Backend {
       entries,
       readme,
       unavailable: false,
+      error: None,
     })
   }
 

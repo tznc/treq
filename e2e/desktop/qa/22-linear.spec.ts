@@ -13,7 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 import { expect, test, type Page } from "@playwright/test";
 import { fixture } from "../fixture.ts";
 import { capture } from "./capture.ts";
-import { home, ready, settle } from "./helpers.ts";
+import { focusMain, home, popupBox, ready, settle, xPointer } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
@@ -75,22 +75,34 @@ test("linear: connect with an API key in Settings", async ({ page }) => {
   });
 });
 
+// The second level of view under the tabs is a picker; its menu is a popup
+// window, so its `row`th item (from 0) is clicked through the X pointer.
+async function pickView(page: Page, row: number) {
+  await page.getByRole("button", { name: /^View: / }).click();
+  await settle(page, 800);
+  focusMain();
+  const menu = popupBox();
+  if (!menu) throw new Error("no view menu");
+  await xPointer(page, menu.x + 60, menu.y + 20 + row * 32, 1);
+  await settle(page, 600);
+}
+
 test("linear: issues", async ({ page }) => {
   linearKey("lin_api_qa");
   await linear(page);
-  await expect(page.getByRole("tab", { name: "All issues", selected: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "View: All issues" })).toBeVisible();
   await settle(page, 1500);
   await capture(page, {
     name: "22-linear-03-all-issues",
     title: "Linear view: All Issues",
     expectations: [
-      "Header: Linear, an 'All teams' selector, Issues / Projects tabs; view tabs, List / Kanban, Filter and Refresh",
+      "Header: Linear, an 'All teams' selector, Issues / Projects tabs; List / Kanban, a 'View: All issues' picker, Filter and Refresh",
       "Two-line rows: the title, then identifier · state · priority · project · labels · assignee",
       "ENG-143 indented under ENG-142; a robot agent button at the right of each row; no spinner or error",
     ],
   });
 
-  await page.getByRole("tab", { name: "My issues" }).click();
+  await pickView(page, 2);
   await settle(page, 1000);
   await capture(page, {
     name: "22-linear-04-my-issues",
@@ -100,7 +112,7 @@ test("linear: issues", async ({ page }) => {
       "Same two-line rows as All Issues",
     ],
   });
-  await page.getByRole("tab", { name: "All issues" }).click();
+  await pickView(page, 0);
   await settle(page, 800);
 
   await page.getByRole("listitem", { name: "Retry webhook deliveries" }).click();
@@ -163,7 +175,7 @@ test("linear: projects", async ({ page }) => {
     name: "22-linear-08-projects",
     title: "Linear view: Projects",
     expectations: [
-      "Ingest, Docs and API listed with status and lead; view tabs All / Mine / Active / Backlog",
+      "Ingest, Docs and API listed with status and lead; a 'View: All' picker beside Filter",
       "The first project, Ingest, is selected with its detail on the right",
       "Ingest has no comments, so no comments section shows under its description",
     ],
@@ -183,14 +195,14 @@ test("linear: projects", async ({ page }) => {
   });
   await page.keyboard.press("Escape");
   await settle(page, 800);
-  await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+  await pickView(page, 3);
   await settle(page, 1200);
   await capture(page, {
     name: "22-linear-09b-projects-backlog",
     title: "Linear view: Backlog projects",
     expectations: ["The Backlog view lists projects not started yet: Docs (planned) and API (backlog)"],
   });
-  await page.getByRole("tab", { name: "All", exact: true }).click();
+  await pickView(page, 0);
   await page.getByRole("tab", { name: "Issues", exact: true }).click();
   await settle(page, 800);
 });
@@ -304,7 +316,7 @@ test("linear: a rejected key", async ({ page }) => {
   await capture(page, {
     name: "22-linear-15-rejected-key-dialog",
     title: "New workspace: Linear rejects the key",
-    expectations: ["'Could not load Linear issues' with the rejection message and a Try again button"],
+    expectations: ["'Couldn't load Linear issues' with the rejection message, Retry and Copy error"],
   });
   await page.keyboard.press("Escape");
   await settle(page, 600);

@@ -338,10 +338,8 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
     ),
     (None, false) => None,
     (Some(_), _) => Some(
-      ui::text(div(), TextSize::Sm)
-        .p_2()
-        .text_color(p.muted_foreground)
-        .child("No folders here.")
+      ui::EmptyState::new("remote-browse-empty", "No folders here", p)
+        .message("This folder has no subfolders. Go up or type a path.")
         .into_any_element(),
     ),
   };

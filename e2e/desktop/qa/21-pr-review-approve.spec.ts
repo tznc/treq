@@ -36,8 +36,8 @@ test("pr review approve: no treq checks note", async ({ page }) => {
     title: "PR #401: its workspace has no Treq checks",
     expectations: [
       "Checks collapsed to one line: 3/3 passed, with Show all",
-      "One muted line under it: No Treq checks configured for this repository.",
-      "No Treq checks heading or panel",
+      "An empty state under it: 'No Treq checks' and why (no checks in .treq/workflows/)",
+      "No checks list or Run buttons",
     ],
   });
 });

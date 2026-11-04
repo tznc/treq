@@ -380,3 +380,61 @@ fn commits_tab_resolve_dialog_submits_on_secondary_enter_and_closes_on_escape(
   h.cx.simulate_keystrokes("escape");
   assert!(!h.drawn("resolve-conflicts-dialog"));
 }
+
+fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  screen
+}
+
+#[gpui::test]
+fn commits_tab_says_when_the_log_fails_and_retries(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let host = FakeHost {
+    history: None,
+    ..commits_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, commits_route());
+  let page = screen(&mut h);
+  expect(page.get_by_role(by::role(Role::Status).name("Couldn't load commits"))).to_be_visible();
+  assert!(page
+    .query_by_role(by::role(Role::ProgressIndicator))
+    .is_none());
+  let reads = || {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("read log"))
+      .count()
+  };
+  let before = reads();
+  page
+    .user()
+    .click(&page.get_by_role(by::role(Role::Button).name("Retry")));
+  h.cx.run_until_parked();
+  assert!(reads() > before, "Retry reads the log again");
+}
+
+#[gpui::test]
+fn a_diff_that_fails_to_load_offers_retry(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let host = FakeHost {
+    diff: None,
+    ..commits_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, commits_route());
+  h.click("commit-row-a");
+  let page = screen(&mut h);
+  expect(page.get_by_role(by::role(Role::Status).name("Couldn't load the diff"))).to_be_visible();
+  let reads = || host.calls().iter().filter(|c| *c == "read diff a").count();
+  let before = reads();
+  page
+    .user()
+    .click(&page.get_by_role(by::role(Role::Button).name("Retry")));
+  h.cx.run_until_parked();
+  assert_eq!(reads(), before + 1);
+}

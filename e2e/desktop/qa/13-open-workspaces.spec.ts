@@ -253,20 +253,20 @@ test("open-workspaces: the pull request search shows loading, no matches and err
     name: "13-open-workspaces-search-empty",
     title: "Pull request search with no matches",
     expectations: [
-      "The list shows a PR icon and 'No pull requests match \"zzz\".', not 'No open pull requests.'",
+      "The list shows a PR icon, 'No pull requests match \"zzz\"' and one line saying what to try, not 'No open pull requests'",
       "No spinner in the search input",
     ],
   });
 
   await search.fill("unreachable");
-  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
   await expect(searching).toBeHidden();
   await settle(page, 300);
   await capture(page, {
     name: "13-open-workspaces-search-error",
     title: "Pull request search failed",
     expectations: [
-      "The list shows 'Could not load pull requests' with the gh error 'HTTP 502: Bad Gateway' and a retry action",
+      "The list shows 'Couldn't load pull requests' with the gh error 'HTTP 502: Bad Gateway' and a retry action",
       "No spinner in the search input",
     ],
   });

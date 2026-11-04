@@ -1,0 +1,88 @@
+id: gpui-no-adhoc-feedback
+valid:
+  - |
+    fn empty_list(p: &Palette) -> ui::EmptyState {
+      ui::EmptyState::new("prs-empty", "No pull requests", p).message("Push a branch to open one.")
+    }
+  - |
+    fn loading(p: &Palette) -> ui::Loading {
+      ui::Loading::new("prs-loading", p).label("Loading pull requests…")
+    }
+  - |
+    fn badge(p: &Palette) -> ui::Badge {
+      ui::Badge::new("No upstream", p)
+    }
+  - |
+    impl Draft {
+      fn message(&self) -> String {
+        self.text.clone()
+      }
+    }
+  - |
+    fn hint() -> Div {
+      div().child("Nothing selected yet")
+    }
+  - |
+    fn failed(p: &Palette, err: String) -> ui::EmptyState {
+      ui::EmptyState::failed("list-error", "Couldn't load issues", err.clone(), p)
+        .action(ui::error_actions("list", err, None, p))
+    }
+  - |
+    fn retry(p: &Palette) -> ui::Button {
+      ui::Button::new("retry", p).label("Retry")
+    }
+invalid:
+  - |
+    fn list(p: &Palette) -> Div {
+      div().text_color(p.muted_foreground).child("No files found")
+    }
+  - |
+    fn list(p: &Palette) -> Div {
+      ui::text(div(), TextSize::Sm).child("Loading commits…")
+    }
+  - |
+    fn list(p: &Palette) -> Div {
+      div().child("Fetching branches…")
+    }
+  - |
+    fn list(p: &Palette) -> Div {
+      div().child("Couldn't load commits")
+    }
+  - |
+    fn message(p: &Palette, text: impl Into<SharedString>) -> Div {
+      div().child(text.into())
+    }
+  - |
+    fn empty(p: &Palette, label: String) -> Div {
+      div().child(label)
+    }
+  - |
+    fn body(p: &Palette) -> Div {
+      let message = |text: &'static str| div().child(text);
+      message("x")
+    }
+  - |
+    pub fn error_state(id: &str, title: &str, error: &str, p: &Palette) -> Stateful<Div> {
+      div().id(id.to_string()).child(title.to_string())
+    }
+  - |
+    fn error_view(p: &Palette) -> Div {
+      div()
+    }
+  - |
+    fn body(p: &Palette) -> Div {
+      let error_state = |err: String| div().child(err);
+      error_state("x".into())
+    }
+  - |
+    fn body(p: &Palette) -> Div {
+      div().text_color(p.destructive).child("Failed to load comments")
+    }
+  - |
+    fn retry(p: &Palette) -> Button {
+      Button::new("retry", p).label("Try again")
+    }
+  - |
+    fn list(p: &Palette, empty: bool) -> Div {
+      div().child(if empty { "No files found" } else { "Type to search" })
+    }

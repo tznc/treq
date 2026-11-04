@@ -1330,6 +1330,67 @@ impl LinearView {
       .children(chips)
   }
 
+  /// A second level of choice under a tab strip: the current view in a
+  /// "View" picker whose menu lists `items`.
+  fn view_picker<V: Copy + PartialEq + 'static>(
+    &self,
+    id: &'static str,
+    items: Vec<(V, &'static str)>,
+    current: V,
+    p: &Palette,
+    set: fn(&mut Self, V),
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let value = items
+      .iter()
+      .find(|(v, _)| *v == current)
+      .map_or("", |(_, l)| *l);
+    let (anchors, dark) = (self.anchors.clone(), self.dark);
+    let view = cx.entity().downgrade();
+    div()
+      .relative()
+      .child(
+        ui::Picker::new(id, p)
+          .label("View")
+          .value(value)
+          .placement(ui::PickerPlacement::Toolbar)
+          .on_click(move |_, _, cx| {
+            let Some(anchor) = anchors.borrow().get(id).copied() else {
+              return;
+            };
+            let entries: Vec<NativeMenuItem> = items
+              .iter()
+              .map(|(v, l)| {
+                let (v, view) = (*v, view.clone());
+                NativeMenuItem::item(*l, move |cx: &mut App| {
+                  view
+                    .update(cx, |view, cx| {
+                      set(view, v);
+                      cx.notify();
+                    })
+                    .ignore_closed();
+                })
+                .radio(v == current)
+              })
+              .collect();
+            let view = view.clone();
+            view
+              .update(cx, |view, cx| {
+                view.popup(
+                  PopupRequest::ShowDropdown {
+                    entries: popup::native_entries(entries),
+                    anchor,
+                    dark,
+                  },
+                  cx,
+                )
+              })
+              .ignore_closed();
+          }),
+      )
+      .child(self.anchor(id))
+  }
+
   fn team_selector(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let teams = self.teams.data.clone().unwrap_or_default();
     let label = match &self.team {
@@ -1412,9 +1473,7 @@ impl LinearView {
     };
     div()
       .id("linear-connection")
-      .role(Role::Label)
-      .aria_label(SharedString::from(error.clone()))
-      .test_support()
+      // The empty state names itself and reads out its message.
       .flex_1()
       .min_h_0()
       .flex()
@@ -1558,20 +1617,13 @@ impl LinearView {
       },
     ];
 
-    let views = div().px_4().pb_2().flex_none().child(
-      div().flex().child(tab_strip(
-        "linear-view",
-        IssueView::ALL
-          .into_iter()
-          .map(|v| (v, v.value(), v.label()))
-          .collect(),
-        self.issue_view,
-        p,
-        cx.listener(|view, v: &IssueView, _, cx| {
-          view.issue_view = *v;
-          cx.notify();
-        }),
-      )),
+    let views = self.view_picker(
+      "linear-view-picker",
+      IssueView::ALL.into_iter().map(|v| (v, v.label())).collect(),
+      self.issue_view,
+      p,
+      |view, v| view.issue_view = v,
+      cx,
     );
     let toolbar = div()
       .flex()
@@ -1594,6 +1646,7 @@ impl LinearView {
           cx.notify();
         }),
       ))
+      .child(views)
       .child(self.filter_menu("linear-issues-filter-trigger", groups, false, p, cx))
       .child(div().flex_1())
       .child(
@@ -1611,24 +1664,6 @@ impl LinearView {
         }),
       );
 
-    let message = |id: &'static str, text: SharedString, color: Hsla| {
-      ui::text(div(), TextSize::Sm)
-        .id(id)
-        .debug_selector(move || id.into())
-        .role(Role::Label)
-        .aria_label(text.clone())
-        .test_support()
-        .size_full()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .text_center()
-        .p_8()
-        .gap_3()
-        .text_color(color)
-        .child(text)
-    };
     // The list and each Kanban column are virtual lists that scroll
     // themselves.
     let mut content = div()
@@ -1646,22 +1681,41 @@ impl LinearView {
       })
       .when_some(fetch.error.clone(), |this, error| {
         this.child(
-          message("linear-issues-error", error.into(), p.destructive).child(
-            Button::new("linear-issues-retry", p)
-              .variant(Variant::Outline)
-              .size(Size::Sm)
-              .label("Try again")
-              .on_click(cx.listener(|view, _, _, cx| view.load_issues(cx))),
-          ),
+          div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+              ui::EmptyState::new("linear-issues-error", "Couldn't load Linear issues", p)
+                .error(true)
+                .icon(theme::ICON_CIRCLE_ALERT)
+                .message(error)
+                .action(
+                  Button::new("linear-issues-retry", p)
+                    .size(Size::Sm)
+                    .label("Retry")
+                    .on_click(cx.listener(|view, _, _, cx| view.load_issues(cx))),
+                ),
+            ),
         )
       });
     if !loading && !fetch.failed() {
       content = if shown.is_empty() {
-        content.child(message(
-          "linear-no-issues",
-          "No issues found".into(),
-          p.muted_foreground,
-        ))
+        content.child(
+          div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+              ui::EmptyState::new("linear-no-issues", "No issues", p)
+                .icon(theme::ICON_LINEAR)
+                .message(
+                  "No issues match this view and search. Try another view or clear the search.",
+                ),
+            ),
+        )
       } else {
         match self.mode {
           IssueMode::List => content.child(self.issue_list(&shown, &all, window, cx)),
@@ -1674,7 +1728,6 @@ impl LinearView {
       .min_h_0()
       .flex()
       .flex_col()
-      .child(views)
       .child(toolbar)
       .child(content)
   }
@@ -2404,28 +2457,27 @@ impl LinearView {
           view.load_projects(cx)
         }),
       );
-    let views = div().px_4().pb_2().flex_none().child(
-      div().flex().child(tab_strip(
-        "linear-project-view",
-        ProjectView::ALL
-          .into_iter()
-          .map(|v| (v, v.value(), v.label()))
-          .collect(),
-        self.project_view,
-        p,
-        cx.listener(|view, v: &ProjectView, _, cx| {
-          view.project_view = *v;
-          cx.notify();
-        }),
-      )),
-    );
-    let filter = div().px_4().pb_2().flex_none().child(self.filter_menu(
-      "linear-projects-filter-trigger",
-      groups,
-      true,
-      p,
-      cx,
-    ));
+    let filter = div()
+      .px_4()
+      .pb_2()
+      .flex_none()
+      .flex()
+      .items_center()
+      .gap_2()
+      .child(
+        self.view_picker(
+          "linear-project-view-picker",
+          ProjectView::ALL
+            .into_iter()
+            .map(|v| (v, v.label()))
+            .collect(),
+          self.project_view,
+          p,
+          |view, v| view.project_view = v,
+          cx,
+        ),
+      )
+      .child(self.filter_menu("linear-projects-filter-trigger", groups, true, p, cx));
     let list = div()
       .id("linear-projects-scroll")
       .flex_1()
@@ -2440,37 +2492,28 @@ impl LinearView {
       })
       .when_some(self.projects.error.clone(), |this, error| {
         this.child(
-          ui::text(div(), TextSize::Sm)
-            .id("linear-projects-error")
-            .debug_selector(|| "linear-projects-error".into())
-            .role(Role::Label)
-            .aria_label(error.clone())
-            .test_support()
-            .p_4()
-            .flex()
-            .flex_col()
-            .items_start()
-            .gap_3()
-            .text_color(p.destructive)
-            .child(error)
-            .child(
-              Button::new("linear-projects-retry", p)
-                .variant(Variant::Outline)
-                .size(Size::Sm)
-                .label("Try again")
-                .on_click(cx.listener(|view, _, _, cx| view.load_projects(cx))),
-            ),
+          ui::EmptyState::failed(
+            "linear-projects-error",
+            "Couldn't load projects",
+            error.clone(),
+            p,
+          )
+          .action(ui::error_actions(
+            "linear-projects",
+            error,
+            Some(Box::new(
+              cx.listener(|view, _, _, cx| view.load_projects(cx)),
+            )),
+            p,
+          )),
         )
       })
       .when(
         !loading && !self.projects.failed() && shown.is_empty(),
         |this| {
           this.child(
-            ui::text(div(), TextSize::Sm)
-              .debug_selector(|| "linear-no-projects".into())
-              .p_4()
-              .text_color(p.muted_foreground)
-              .child("No projects found"),
+            ui::EmptyState::new("linear-no-projects", "No projects", p)
+              .message("No Linear projects match. Try another search."),
           )
         },
       )
@@ -2534,7 +2577,6 @@ impl LinearView {
       .flex_col()
       .min_h_0()
       .child(header)
-      .child(views)
       .child(filter)
       .child(list);
     let right = div()
@@ -2611,9 +2653,8 @@ impl LinearView {
         !docs.is_loading() && docs.data.as_ref().is_none_or(Vec::is_empty),
         |this| {
           this.child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child("No documents"),
+            ui::EmptyState::new("linear-no-documents", "No documents", p)
+              .message("This project has no documents yet."),
           )
         },
       )
@@ -2899,24 +2940,36 @@ impl LinearView {
           this
             .child(heading("COMMENTS"))
             .when(fetch.is_loading(), |this| {
-              this.child(ui::spinner(
-                format!("linear-comments-loading-{key}"),
-                16.,
-                p.muted_foreground,
-              ))
+              this.child(
+                div().flex().child(
+                  ui::Loading::new(format!("linear-comments-loading-{key}"), p)
+                    .label("Loading comments…"),
+                ),
+              )
             })
             .when(fetch.failed(), |this| {
               this.child(
-                ui::text(div(), TextSize::Sm)
-                  .text_color(p.destructive)
-                  .child("Failed to load comments"),
+                ui::EmptyState::failed(
+                  format!("linear-comments-error-{key}"),
+                  "Couldn't load comments",
+                  fetch.error.clone().unwrap_or_default(),
+                  p,
+                )
+                .action(ui::error_actions(
+                  &format!("linear-comments-{key}"),
+                  fetch.error.clone().unwrap_or_default(),
+                  Some(Box::new(cx.listener({
+                    let of = of.clone();
+                    move |view, _, _, cx| view.load_comments(of.clone(), cx)
+                  }))),
+                  p,
+                )),
               )
             })
             .when(empty, |this| {
               this.child(
-                ui::text(div(), TextSize::Sm)
-                  .text_color(p.muted_foreground)
-                  .child("No comments"),
+                ui::EmptyState::new(format!("linear-no-comments-{key}"), "No comments", p)
+                  .message("Nobody has commented yet."),
               )
             })
             .children(

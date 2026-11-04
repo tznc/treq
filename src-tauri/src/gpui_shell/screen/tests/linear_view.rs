@@ -23,6 +23,8 @@ pub(super) struct Fixture {
   comments: Vec<(String, LinearComment)>,
   /// Whether reading issues and projects fails, as with no API key.
   failing: bool,
+  /// Whether reading comments fails.
+  comments_failing: bool,
 }
 
 impl linear_data::LinearHost for FakeHost {
@@ -62,6 +64,9 @@ impl linear_data::LinearHost for FakeHost {
     of: &linear_data::Commented,
   ) -> Result<Vec<LinearComment>, String> {
     self.record(format!("read linear comments {}", of.id()));
+    if self.linear.comments_failing {
+      return Err("network down".into());
+    }
     Ok(
       self
         .linear
@@ -243,6 +248,7 @@ fn fixture() -> Fixture {
     }],
     comments: vec![("1".into(), comment("c1", Some("the API")))],
     failing: false,
+    comments_failing: false,
   }
 }
 
@@ -284,6 +290,21 @@ fn menu(h: &mut Harness) -> Vec<MenuEntry> {
     }
     _ => panic!("no menu is shown"),
   }
+}
+
+/// Opens the view picker `picker` and picks `text` in its menu.
+fn pick_view(h: &mut Harness, picker: &'static str, text: &str) {
+  h.click(picker);
+  let id = menu(h)
+    .iter()
+    .find_map(|e| match e {
+      MenuEntry::Item { id, text: t, .. } if t == text => Some(*id),
+      _ => None,
+    })
+    .unwrap_or_else(|| panic!("{text} is not in the {picker} menu"));
+  h.cx
+    .update(|_, cx| crate::gpui_shell::popup::pick_native(id, cx));
+  h.cx.run_until_parked();
 }
 
 /// Picks `text` in the submenu `submenu` of the menu shown last.
@@ -353,16 +374,32 @@ fn linear_lists_issues_and_kicks_one_off(cx: &mut TestAppContext) {
   assert!(h.drawn("linear-issue-2"));
 }
 
+/// One segmented control per toolbar row: List / Kanban is the toolbar's;
+/// the issue views are a picker beside it, not a second strip.
+#[gpui::test]
+fn linear_toolbar_has_one_segmented_control_and_a_view_picker(cx: &mut TestAppContext) {
+  let (mut h, _) = linear_harness(cx, linear_host());
+  assert!(h.drawn("linear-modes"));
+  assert!(!h.drawn("linear-views"), "the views are not a tab strip");
+  assert!(h.drawn("linear-view-picker"));
+  pick_view(&mut h, "linear-view-picker", "Backlog");
+  assert!(view(&mut h, |v| v.issue_view
+    == crate::gpui_shell::screen::linear_data::IssueView::Backlog));
+  h.click("linear-section-projects");
+  assert!(!h.drawn("linear-project-views"));
+  assert!(h.drawn("linear-project-view-picker"));
+}
+
 #[gpui::test]
 fn linear_standard_views_and_filters_narrow_the_list(cx: &mut TestAppContext) {
   let (mut h, _) = linear_harness(cx, linear_host());
-  h.click("linear-view-my-issues");
+  pick_view(&mut h, "linear-view-picker", "My issues");
   assert!(h.drawn("linear-issue-1"));
   assert!(!h.drawn("linear-issue-2"));
-  h.click("linear-view-backlog");
+  pick_view(&mut h, "linear-view-picker", "Backlog");
   assert!(!h.drawn("linear-issue-1"));
   assert!(h.drawn("linear-issue-2"));
-  h.click("linear-view-all");
+  pick_view(&mut h, "linear-view-picker", "All issues");
 
   h.click("linear-issues-filter-trigger");
   let entries = menu(&mut h);
@@ -398,7 +435,7 @@ fn linear_standard_views_and_filters_narrow_the_list(cx: &mut TestAppContext) {
   assert!(h.drawn("linear-issue-1"));
 
   // A filter that matches nothing.
-  h.click("linear-view-my-issues");
+  pick_view(&mut h, "linear-view-picker", "My issues");
   h.click("linear-issues-filter-trigger");
   pick_in(&mut h, "Label", "bug");
   assert!(h.drawn("linear-issue-1"));
@@ -550,7 +587,7 @@ fn linear_projects_show_details_and_documents(cx: &mut TestAppContext) {
     .calls()
     .contains(&"read linear documents p2".to_string()));
 
-  h.click("linear-project-view-active");
+  pick_view(&mut h, "linear-project-view-picker", "Active");
   assert!(h.drawn("linear-project-item-p1"));
   assert!(!h.drawn("linear-project-item-p2"));
 
@@ -820,12 +857,10 @@ mod lin_scale {
     let mut v: Vec<_> = (0..6)
       .map(|i| {
         timed(&mut h, |h| {
-          h.click(
-            [
-              "linear-view-active",
-              "linear-view-backlog",
-              "linear-view-all",
-            ][i % 3],
+          pick_view(
+            h,
+            "linear-view-picker",
+            ["Active", "Backlog", "All issues"][i % 3],
           )
         })
       })
@@ -871,4 +906,27 @@ fn linear_document_dialog_closes_on_escape_and_from_its_x(cx: &mut TestAppContex
   h.click("linear-document-item-d1");
   h.click("linear-document-dialog-close");
   assert!(!h.drawn("linear-document-dialog"));
+}
+
+#[gpui::test]
+fn linear_comments_that_fail_to_load_offer_retry(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.linear.comments_failing = true;
+  let (mut h, host) = linear_harness(cx, host);
+  h.click("linear-issue-1");
+  let page = screen(&mut h);
+  expect(page.get_by_role(by::role(Role::Status).name("Couldn't load comments"))).to_be_visible();
+  let reads = || {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("read linear comments"))
+      .count()
+  };
+  let before = reads();
+  page
+    .user()
+    .click(&page.get_by_role(by::role(Role::Button).name("Retry")));
+  h.cx.run_until_parked();
+  assert_eq!(reads(), before + 1);
 }

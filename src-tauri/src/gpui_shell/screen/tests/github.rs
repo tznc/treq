@@ -1433,3 +1433,24 @@ fn github_new_pr_closes_on_escape_and_creates_on_enter(cx: &mut TestAppContext) 
   h.cx.run_until_parked();
   assert_eq!(h.sent(), [press("github.close")]);
 }
+
+#[gpui::test]
+fn a_failed_list_is_an_error_state_with_retry(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = harness(
+    cx,
+    Fake {
+      fail: vec!["list_issues"],
+      ..issues()
+    },
+    route("issues", None, false),
+  );
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(gpui::Role::Status).name("Couldn't load issues")))
+    .to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Retry"))).to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Copy error"))).to_be_visible();
+}

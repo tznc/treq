@@ -191,12 +191,8 @@ impl Popover {
             .on_click(cx.listener(|this, _, _, cx| this.view_full_prompt(cx))),
         ),
       None => div().child(
-        ui::text(div(), TextSize::Sm)
-          .id("details-no-prompt")
-          .debug_selector(|| "details-no-prompt".into())
-          .mt_1()
-          .text_color(p.muted_foreground)
-          .child("No prompt recorded for this workspace yet."),
+        ui::EmptyState::new("details-no-prompt", "No prompt recorded", &p)
+          .message("This workspace was created without an agent prompt."),
       ),
     };
     let starting = div()

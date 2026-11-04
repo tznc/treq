@@ -12,15 +12,13 @@
 use std::sync::Arc;
 
 use serde::Deserialize;
-use tauri_plugin_gpui::gpui::{div, prelude::*, App, Div, SharedString, Stateful};
+use tauri_plugin_gpui::gpui::App;
 
 use super::{code_data::CodeHost, ActionSink, ScreenAction};
 use crate::{
   gpui_shell::{
     native::{Backend, NativeEvent, ToastTone},
     popup::PopupSink,
-    theme::Palette,
-    ui::{self, TextSize},
   },
   jj::JjRevisionDiff,
   local_db::{PromptHistoryEntry, StashEntry},
@@ -155,17 +153,6 @@ impl Env {
       repo_path: repo_path.into(),
     });
   }
-}
-
-/// `text-sm text-muted-foreground py-8 text-center`.
-pub fn message(id: &'static str, text: impl Into<SharedString>, p: &Palette) -> Stateful<Div> {
-  ui::text(div(), TextSize::Sm)
-    .id(id)
-    .debug_selector(move || id.into())
-    .py_8()
-    .text_center()
-    .text_color(p.muted_foreground)
-    .child(text.into())
 }
 
 /// `a` contains `b`'s letters in order, ignoring case (cmdk's filter).

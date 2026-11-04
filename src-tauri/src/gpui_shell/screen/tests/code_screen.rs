@@ -3,7 +3,7 @@ use gpui::TestAppContext;
 use super::*;
 
 #[gpui::test]
-fn code_tab_draws_files_history_and_readme(cx: &mut TestAppContext) {
+fn code_tab_draws_files_and_history(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
   for selector in [
     "workspace-code",
@@ -13,7 +13,6 @@ fn code_tab_draws_files_history_and_readme(cx: &mut TestAppContext) {
     "code-go-to-file",
     "code-entry-src",
     "code-entry-README.md",
-    "code-readme",
     "commit-item-a",
     "commit-item-b",
   ] {
@@ -627,4 +626,77 @@ fn the_deleted_branch_alert_names_its_archive_button(cx: &mut TestAppContext) {
   screen.redraw();
   expect(screen.get_by_role(by::role(gpui::Role::Button).name("Archive workspace")))
     .to_be_visible();
+}
+
+#[gpui::test]
+fn a_failed_read_shows_errors_with_retry_not_empty_boxes(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let host = FakeHost {
+    history: None,
+    failing: vec!["overview"],
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Status).name("Couldn't load commits"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Status).name("Couldn't read the files")))
+    .to_be_visible();
+  assert!(screen.query_by_text("No files found").is_none());
+  assert!(screen.query_by_text("No README.md found").is_none());
+  let retries = screen.get_all_by_role(by::role(Role::Button).name("Retry"));
+  assert!(!retries.is_empty());
+  let before = host.calls().len();
+  screen.user().click(&retries[0]);
+  h.cx.run_until_parked();
+  assert!(host.calls().len() > before, "Retry reads again");
+}
+
+#[gpui::test]
+fn the_commits_panel_error_has_show_error_but_no_retry_or_message(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let host = FakeHost {
+    history: None,
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.cx.run_until_parked();
+  assert!(h.drawn("code-history-error"));
+  assert!(h.drawn("code-history-show-error"));
+  assert!(
+    !h.drawn("code-history-retry"),
+    "no Retry in the Commits panel"
+  );
+  let screen = screen(&mut h);
+  assert!(screen.query_by_text("could not be read").is_none());
+  assert!(screen
+    .query_by_text("Its commit history could not be read.")
+    .is_none());
+}
+
+#[gpui::test]
+fn a_workspace_code_tab_draws_no_readme(cx: &mut TestAppContext) {
+  let host = code_host();
+  assert!(host.overview.readme.is_some(), "the overview has a readme");
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("workspace-code"));
+  assert!(!h.drawn("code-readme"));
+  assert!(!h.drawn("code-readme-none"));
+}
+
+#[gpui::test]
+fn a_workspace_code_tab_draws_no_missing_readme_box(cx: &mut TestAppContext) {
+  let mut host = code_host();
+  host.overview.readme = None;
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("workspace-code"));
+  assert!(!h.drawn("code-readme-none"));
+}
+
+#[gpui::test]
+fn the_home_code_view_still_draws_the_readme(cx: &mut TestAppContext) {
+  let mut host = code_host();
+  host.loaded.workspace = None;
+  let (mut h, _) = workspace_harness(cx, host, home_code_route());
+  assert!(h.drawn("code-readme"));
 }

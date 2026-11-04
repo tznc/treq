@@ -136,7 +136,7 @@ enum ListRow {
     sig: u64,
     branches: bool,
   },
-  /// "No loaded pull requests match the filters."
+  /// "No pull requests match", among those loaded.
   NoMatch,
   LoadMore,
 }
@@ -1255,18 +1255,17 @@ impl GithubView {
   ) -> impl IntoElement {
     let remote = self.remote.clone();
     let title = match &remote {
-      None => ui::text(div(), TextSize::Sm)
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(p.muted_foreground)
-        .child("Loading…"),
+      None => div()
+        .flex()
+        .child(ui::Loading::new("github-remote-loading", p).label("Reading the remote…")),
       Some(Some(info)) => ui::text(div(), TextSize::Sm)
         .font_weight(FontWeight::SEMIBOLD)
         .font_family(theme::MONO_FONT)
         .child(info.full_name.clone()),
+      // The body says why; the header only names the screen.
       Some(None) => ui::text(div(), TextSize::Sm)
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(p.destructive)
-        .child("No GitHub remote"),
+        .child("GitHub"),
     };
     let header = div()
       .flex()
@@ -1642,17 +1641,14 @@ impl GithubView {
         return div()
           .size_full()
           .flex()
-          .flex_col()
           .items_center()
           .justify_center()
-          .p_8()
-          .gap_3()
-          .text_center()
-          .child(ui::icon(theme::ICON_CIRCLE_ALERT, 32., p.muted_foreground))
           .child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child("No GitHub remote detected for this repository."),
+            ui::EmptyState::new("github-no-remote", "No GitHub remote", p)
+              .icon(theme::ICON_GITHUB)
+              .message(
+                "Add a github.com remote to this repository to see its pull requests and issues.",
+              ),
           )
           .into_any_element()
       }
@@ -1676,19 +1672,24 @@ impl GithubView {
         let issues = self.issue_items();
         if let (Some(err), true) = (&self.issues.error, issues.is_empty()) {
           return scrolled(
-            parts::error_state(
-              "github-list",
-              "Could not load issues",
-              err,
-              p,
-              Some(retry()),
-            )
-            .into_any_element(),
+            div()
+              .py_12()
+              .child(
+                ui::EmptyState::failed("github-list-error", "Couldn't load issues", err.clone(), p)
+                  .action(ui::error_actions(
+                    "github-list",
+                    err.clone(),
+                    Some(retry()),
+                    p,
+                  )),
+              )
+              .into_any_element(),
           );
         }
         if issues.is_empty() {
           return scrolled(
-            ui::EmptyState::new("github-no-issues", "No issues found.", p)
+            ui::EmptyState::new("github-no-issues", "No issues", p)
+              .message("This repository has no issues in this state.")
               .icon(theme::ICON_CIRCLE_DOT)
               .into_any_element(),
           );
@@ -1727,19 +1728,29 @@ impl GithubView {
         let prs = self.pr_items();
         if let (Some(err), true) = (&self.prs.error, prs.is_empty()) {
           return scrolled(
-            parts::error_state(
-              "github-list",
-              "Could not load pull requests",
-              err,
-              p,
-              Some(retry()),
-            )
-            .into_any_element(),
+            div()
+              .py_12()
+              .child(
+                ui::EmptyState::failed(
+                  "github-list-error",
+                  "Couldn't load pull requests",
+                  err.clone(),
+                  p,
+                )
+                .action(ui::error_actions(
+                  "github-list",
+                  err.clone(),
+                  Some(retry()),
+                  p,
+                )),
+              )
+              .into_any_element(),
           );
         }
         if prs.is_empty() {
           return scrolled(
-            ui::EmptyState::new("github-no-prs", "No pull requests found.", p)
+            ui::EmptyState::new("github-no-prs", "No pull requests", p)
+              .message("This repository has no pull requests in this state.")
               .icon(theme::ICON_PR)
               .into_any_element(),
           );
@@ -1838,10 +1849,11 @@ impl GithubView {
       }
       ListRow::NoMatch => ui::EmptyState::new(
         "github-no-matching-prs",
-        "No loaded pull requests match the filters.",
+        "No pull requests match",
         &p,
       )
       .icon(theme::ICON_PR)
+      .message("Only loaded pull requests are searched. Clear the search, change the filters or load more.")
       .into_any_element(),
       ListRow::LoadMore => self.load_more_row(&p, cx),
     }

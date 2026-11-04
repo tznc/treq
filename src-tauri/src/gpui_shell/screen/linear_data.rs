@@ -248,15 +248,6 @@ impl IssueView {
     IssueView::Backlog,
   ];
 
-  pub fn value(self) -> &'static str {
-    match self {
-      IssueView::All => "all",
-      IssueView::Active => "active",
-      IssueView::MyIssues => "my-issues",
-      IssueView::Backlog => "backlog",
-    }
-  }
-
   pub fn label(self) -> &'static str {
     match self {
       IssueView::All => "All issues",
@@ -481,15 +472,6 @@ impl ProjectView {
     ProjectView::Active,
     ProjectView::Backlog,
   ];
-
-  pub fn value(self) -> &'static str {
-    match self {
-      ProjectView::All => "all",
-      ProjectView::Mine => "my-projects",
-      ProjectView::Active => "active",
-      ProjectView::Backlog => "backlog",
-    }
-  }
 
   pub fn label(self) -> &'static str {
     match self {

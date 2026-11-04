@@ -167,63 +167,6 @@ pub fn section_heading(
     .child(label.to_uppercase())
 }
 
-/// `ErrorState`: the gh message, so auth or network trouble shows.
-pub fn error_state(
-  id: &str,
-  title: &str,
-  error: &str,
-  p: &Palette,
-  on_retry: Option<OnClick>,
-) -> Stateful<Div> {
-  named(div(), format!("{id}-error"))
-    .flex()
-    .flex_col()
-    .items_center()
-    .justify_center()
-    .py_12()
-    .px_6()
-    .gap_2()
-    .text_center()
-    .child(ui::icon(theme::ICON_CIRCLE_ALERT, 24., p.destructive))
-    .child(
-      ui::text(div(), TextSize::Sm)
-        .font_weight(FontWeight::MEDIUM)
-        .child(title.to_string()),
-    )
-    .child(
-      ui::text(div(), TextSize::Sm)
-        .max_w_full()
-        .text_color(p.muted_foreground)
-        .child(error.to_string()),
-    )
-    .child({
-      let error = error.to_string();
-      div()
-        .flex()
-        .flex_wrap()
-        .justify_center()
-        .gap_2()
-        .mt_1()
-        .children(on_retry.map(|retry| {
-          Button::new(SharedString::from(format!("{id}-retry")), p)
-            .variant(Variant::Outline)
-            .size(Size::Sm)
-            .label("Try again")
-            .on_click(retry)
-        }))
-        .child(
-          Button::new(SharedString::from(format!("{id}-copy-error")), p)
-            .variant(Variant::Ghost)
-            .size(Size::Sm)
-            .icon(theme::ICON_COPY, 12.)
-            .label("Copy error")
-            .on_click(move |_, _, cx| {
-              cx.write_to_clipboard(gpui::ClipboardItem::new_string(error.clone()))
-            }),
-        )
-    })
-}
-
 /// `OpenInWebButton`.
 pub fn open_in_web(id: &'static str, p: &Palette, on_click: OnClick) -> Button {
   Button::new(id, p)

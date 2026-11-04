@@ -209,37 +209,21 @@ impl Popover {
     let order = cmdk::visible(&entries, &state.search);
     let mut children: Vec<AnyElement> = Vec::new();
     state.rows.clear();
-    let message = |text: &'static str| {
-      ui::text(div(), TextSize::Sm)
-        .px_2()
-        .py_4()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child(text)
-    };
     match &state.branches {
       None => children.push(
         ui::delayed(
           "target-loading",
-          message("Loading branches…")
+          div()
             .id("target-loading")
             .debug_selector(|| "target-loading".into())
-            .flex()
-            .flex_col()
-            .items_center()
-            .child(
-              div()
-                .mb_1()
-                .child(ui::spinner("target-spin", 16., p.muted_foreground)),
-            )
-            .child("Loading branches…"),
+            .py_4()
+            .child(ui::Loading::new("target-spin", &p).label("Loading branches…")),
         )
         .into_any_element(),
       ),
       Some(_) if order.is_empty() => children.push(
-        message("No branches found")
-          .id("target-empty")
-          .debug_selector(|| "target-empty".into())
+        ui::EmptyState::new("target-empty", "No branches match", &p)
+          .message("Try another branch name.")
           .into_any_element(),
       ),
       Some(names) => {
