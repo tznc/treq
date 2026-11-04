@@ -901,3 +901,64 @@ fn onboarding_hides_projects_without_any(cx: &mut TestAppContext) {
   let mut h = Harness::with_host(cx, onboarding(), host);
   assert!(!h.drawn("onboarding-projects"));
 }
+
+#[gpui::test]
+fn onboarding_opens_the_project_of_the_row_clicked(cx: &mut TestAppContext) {
+  let mut with_projects = listing();
+  with_projects.projects = ["p1", "p2"]
+    .into_iter()
+    .map(|id| machines::ProjectSummary {
+      id: id.into(),
+      name: format!("Project {id}"),
+      repos: vec![format!("/home/me/{id}")],
+    })
+    .collect();
+  let host = Arc::new(FakeHost {
+    listing: with_projects,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  assert!(h.drawn("project-p1") && h.drawn("project-p2"));
+  h.click("project-p2");
+  let opened: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("open_project"))
+    .collect();
+  assert_eq!(opened, ["open_project p2"]);
+  // The screen opens it itself; nothing goes to the window model.
+  assert!(h.sent().is_empty(), "{:?}", h.sent());
+}
+
+#[gpui::test]
+fn onboarding_lists_projects_above_recent_repositories(cx: &mut TestAppContext) {
+  let mut with_projects = listing();
+  with_projects.projects = vec![machines::ProjectSummary {
+    id: "p1".into(),
+    name: "Checkout".into(),
+    repos: vec!["/home/me/web".into()],
+  }];
+  let host = Arc::new(FakeHost {
+    listing: with_projects,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(h.drawn("onboarding-projects"));
+  let projects = h.cx.debug_bounds("onboarding-projects").expect("projects");
+  let recent = h.cx.debug_bounds("recent-local-0").expect("recent");
+  assert!(projects.origin.y < recent.origin.y);
+}
+
+#[gpui::test]
+fn onboarding_with_nothing_shows_the_empty_state_and_no_projects(cx: &mut TestAppContext) {
+  let mut empty = listing();
+  empty.projects.clear();
+  empty.recents.clear();
+  let host = Arc::new(FakeHost {
+    listing: empty,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(!h.drawn("onboarding-projects"));
+  assert!(h.drawn("onboarding-no-recents"));
+}

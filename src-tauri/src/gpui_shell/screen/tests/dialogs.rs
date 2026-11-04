@@ -1048,3 +1048,92 @@ fn ambiguous_dialog_dismisses_on_escape_and_refreshes_on_enter(cx: &mut TestAppC
     ]
   );
 }
+
+// The save-project dialog: from the project menu, and as the close prompt.
+
+fn save_project_screen(closing: bool) -> ScreenSnapshot {
+  serde_json::from_value(serde_json::json!({
+    "kind": "projectHome",
+    "dark": false,
+    "name": null,
+    "repos": [
+      {"path": "/r/web", "label": "web", "homeRef": "main", "missing": false, "workspaces": []},
+      {"path": "/r/api", "label": "api", "homeRef": "main", "missing": false, "workspaces": []},
+    ],
+    "revision": 1,
+    "modal": {
+      "kind": "saveProject", "repoPath": "/r/web", "name": "web + api",
+      "saved": false, "closing": closing, "repos": ["/r/web", "/r/api"],
+    },
+  }))
+  .expect("snapshot")
+}
+
+fn project_calls(host: &FakeHost) -> Vec<String> {
+  host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("save project ") || c == "close window")
+    .collect()
+}
+
+#[gpui::test]
+fn close_prompt_dont_save_closes_without_saving(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, save_project_screen(true), host.clone());
+  h.click("save-project-discard");
+  h.cx.run_until_parked();
+  assert_eq!(project_calls(&host), ["close window"]);
+  assert!(h.sent().contains(&press("saveProject.close")));
+  assert!(!h.drawn("save-project-dialog"));
+}
+
+#[gpui::test]
+fn close_prompt_cancel_keeps_the_window_open(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, save_project_screen(true), host.clone());
+  h.click("save-project-cancel");
+  h.cx.run_until_parked();
+  assert!(project_calls(&host).is_empty());
+  assert!(h.sent().contains(&press("saveProject.close")));
+}
+
+#[gpui::test]
+fn close_prompt_save_saves_then_closes(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, save_project_screen(true), host.clone());
+  h.click("save-project-submit");
+  h.cx.run_until_parked();
+  assert_eq!(
+    project_calls(&host),
+    ["save project \"web + api\"", "close window"]
+  );
+  assert!(h.sent().contains(&press("saveProject.saved")));
+}
+
+#[gpui::test]
+fn close_prompt_failed_save_keeps_the_window_open(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    failing: vec!["save_project"],
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, save_project_screen(true), host.clone());
+  h.click("save-project-submit");
+  h.cx.run_until_parked();
+  assert_eq!(project_calls(&host), ["save project \"web + api\""]);
+  assert!(!h.sent().contains(&press("saveProject.saved")));
+  assert!(h.drawn("save-project-dialog"));
+}
+
+#[gpui::test]
+fn menu_save_project_saves_without_closing(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, save_project_screen(false), host.clone());
+  assert!(
+    !h.drawn("save-project-discard"),
+    "no Don't save from the menu"
+  );
+  h.click("save-project-submit");
+  h.cx.run_until_parked();
+  assert_eq!(project_calls(&host), ["save project \"web + api\""]);
+}

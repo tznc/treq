@@ -29,6 +29,16 @@ pub struct ProjectContext {
   pub context_paths: Vec<String>,
 }
 
+impl From<crate::core::projects::Project> for ProjectContext {
+  fn from(project: crate::core::projects::Project) -> Self {
+    Self {
+      name: project.name,
+      prompt: project.prompt,
+      context_paths: project.context_paths,
+    }
+  }
+}
+
 impl ProjectContext {
   /// The local paths agents may read (URLs are only named in the prompt).
   fn local_paths(&self) -> impl Iterator<Item = String> + '_ {
@@ -456,6 +466,99 @@ mod tests {
     assert!(prompt
       .contains("Project context you may read (never write): /docs/style.md, https://x.dev/spec."));
     assert!(!prompt.contains('\n'));
+  }
+
+  #[test]
+  fn leaves_project_out_of_the_prompt_without_a_project() {
+    let prompt = system_prompt(&AgentPaths {
+      workspace_path: None,
+      repo_path: "/repos/app",
+      supporting_repo_paths: NONE,
+      project: None,
+    });
+    assert!(!prompt.contains("Treq project"));
+    assert!(!prompt.contains("treq project status"));
+    assert!(!prompt.contains("Project instructions"));
+  }
+
+  #[test]
+  fn skips_blank_project_instructions_and_empty_context() {
+    let project = ProjectContext {
+      name: "Checkout".into(),
+      prompt: " \n\t ".into(),
+      context_paths: Vec::new(),
+    };
+    let prompt = system_prompt(&AgentPaths {
+      workspace_path: Some("/ws"),
+      repo_path: "/repos/app",
+      supporting_repo_paths: NONE,
+      project: Some(&project),
+    });
+    assert!(prompt.contains("Treq project \"Checkout\""));
+    assert!(!prompt.contains("Project instructions"));
+    assert!(!prompt.contains("Project context"));
+  }
+
+  #[test]
+  fn project_context_comes_from_the_saved_project() {
+    let saved = crate::core::projects::Project {
+      id: "p".into(),
+      name: "Checkout".into(),
+      repos: vec!["/r/web".into()],
+      created_at: String::new(),
+      last_opened_at: String::new(),
+      prompt: "Use npm".into(),
+      context_paths: vec!["/docs/a.md".into()],
+    };
+    assert_eq!(
+      ProjectContext::from(saved),
+      ProjectContext {
+        name: "Checkout".into(),
+        prompt: "Use npm".into(),
+        context_paths: vec!["/docs/a.md".into()],
+      }
+    );
+  }
+
+  #[test]
+  fn prepared_claude_command_carries_project_prompt_and_context() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let project = project();
+    let prepared = prepare_auto_command(
+      &AgentPaths {
+        workspace_path: None,
+        repo_path: repo,
+        supporting_repo_paths: NONE,
+        project: Some(&project),
+      },
+      &opts("claude"),
+    )
+    .unwrap();
+    let texts: Vec<String> = prepared
+      .file_paths
+      .iter()
+      .filter_map(|p| std::fs::read_to_string(p).ok())
+      .collect();
+    for p in &prepared.file_paths {
+      let _ = std::fs::remove_file(p);
+      let _ = std::fs::remove_dir_all(p);
+    }
+    assert!(
+      texts
+        .iter()
+        .any(|t| t.contains("Project instructions: Use pnpm.")),
+      "{texts:?}"
+    );
+    assert!(
+      texts
+        .iter()
+        .any(|t| t.contains("/docs/style.md") && t.contains("allowRead")),
+      "settings let claude read the context: {texts:?}"
+    );
+    assert!(!texts
+      .iter()
+      .any(|t| t.contains("allowRead") && t.contains("https://x.dev/spec")));
   }
 
   #[test]
