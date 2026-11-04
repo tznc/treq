@@ -1080,7 +1080,6 @@ impl Sidebar {
           div()
             .min_w_0()
             .truncate()
-            .line_height(zpx(16.))
             .font_weight(gpui::FontWeight::MEDIUM)
             .child(name.clone()),
         )
@@ -1091,7 +1090,6 @@ impl Sidebar {
               ui::text(div(), TextSize::Xs)
                 .min_w_0()
                 .truncate()
-                .line_height(zpx(14.))
                 .font_family(theme::MONO_FONT)
                 .text_color(palette.muted_foreground)
                 .child(home_ref),
@@ -1329,7 +1327,7 @@ impl Sidebar {
         div()
           .flex_1()
           .min_w_0()
-          .ml(zpx(-6.))
+          .ml_neg_1p5()
           .child(self.home_row(repo, palette, cx)),
       )
   }
