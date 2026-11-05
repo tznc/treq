@@ -737,7 +737,7 @@ impl Cloud {
           Ok(_) => self.poll_migration().await,
           Err(ResizeError::InProgress(migration)) => self.update_workspace(|w| {
             if let (Some(status), Some(migration)) = (w.instance_status.as_mut(), migration) {
-              status.migration = Some(migration);
+              status.migration = Some(*migration);
             }
           }),
           Err(ResizeError::UnpushedWork(preflight)) => {

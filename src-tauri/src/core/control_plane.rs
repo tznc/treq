@@ -289,7 +289,7 @@ pub enum ResizeError {
   /// `acknowledged_data_loss` to go ahead.
   UnpushedWork(Preflight),
   /// A switch already runs: its state, so the card shows it, not an error.
-  InProgress(Option<MigrationSummary>),
+  InProgress(Option<Box<MigrationSummary>>),
   Api(ApiError),
 }
 
@@ -334,7 +334,9 @@ pub async fn resize(
   }
   if status == 409 && value["code"] == "migration_in_progress" {
     return Err(ResizeError::InProgress(
-      serde_json::from_value(value["migration"].clone()).ok(),
+      serde_json::from_value(value["migration"].clone())
+        .ok()
+        .map(Box::new),
     ));
   }
   Err(ResizeError::Api(crate::core::supabase::api_error_from(
