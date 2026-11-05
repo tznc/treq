@@ -3046,6 +3046,8 @@ impl TerminalPane {
       };
       div()
         .id(SharedString::from(format!("terminal-send-preview-{id}")))
+        .role(gpui::Role::Button)
+        .aria_label("Open preview")
         .debug_selector({
           let id = id.clone();
           move || format!("terminal-send-preview-{id}")
@@ -3079,6 +3081,8 @@ impl TerminalPane {
           d.child(
             div()
               .id(SharedString::from(format!("terminal-send-dismiss-{id}")))
+              .role(gpui::Role::Button)
+              .aria_label("Remove")
               .debug_selector({
                 let id = id.clone();
                 move || format!("terminal-send-dismiss-{id}")
@@ -3180,6 +3184,8 @@ impl TerminalPane {
     Some(
       div()
         .id("terminal-row-scrollbar")
+        .role(gpui::Role::ScrollBar)
+        .aria_label("Scroll terminals")
         .debug_selector(|| "terminal-row-scrollbar".into())
         .absolute()
         .bottom_0()
@@ -3433,6 +3439,8 @@ impl TerminalPane {
     let label = |name: String, main: bool, key: String, react: ActionSink| {
       ui::text(div(), TextSize::Xs)
         .id(SharedString::from(format!("terminal-workspace-label-{id}")))
+        .role(gpui::Role::Button)
+        .aria_label(name.clone())
         .debug_selector(|| "terminal-workspace-label".into())
         .max_w(zpx(200.))
         .truncate()
@@ -3464,6 +3472,8 @@ impl TerminalPane {
     let close_id = column.id.clone();
     let close = div()
       .id(SharedString::from(format!("terminal-close-{}", column.id)))
+      .role(gpui::Role::Button)
+      .aria_label("Close terminal")
       .debug_selector(|| "terminal-close".into())
       .flex()
       .items_center()
@@ -3501,6 +3511,8 @@ impl TerminalPane {
         let view = column.view.clone();
         let search = div()
           .id(SharedString::from(format!("terminal-search-{}", column.id)))
+          .role(gpui::Role::Button)
+          .aria_label("Search terminal")
           .debug_selector(|| "terminal-search-button".into())
           .h_6()
           .px_2()

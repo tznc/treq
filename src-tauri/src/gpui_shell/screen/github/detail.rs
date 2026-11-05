@@ -1470,6 +1470,8 @@ impl GithubView {
     let open = self.detail.history_open.contains(filename);
     let file = filename.to_string();
     let toggle = ui::text(named(div(), format!("github-history-{w}")), TextSize::Xs)
+      .role(gpui::Role::Button)
+      .aria_label("Run history")
       .flex()
       .w_full()
       .items_center()
@@ -1517,6 +1519,8 @@ impl GithubView {
                 named(div(), format!("run-history-item-{run_id}")),
                 TextSize::Sm,
               )
+              .role(gpui::Role::Button)
+              .aria_label(format!("Run #{run_id}"))
               .flex()
               .w_full()
               .items_center()

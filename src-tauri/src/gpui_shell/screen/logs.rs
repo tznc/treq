@@ -1875,6 +1875,8 @@ impl LogsView {
           list = list.child(
             div()
               .id(("sql-template", i))
+              .role(gpui::Role::Button)
+              .aria_label(*label)
               .debug_selector(move || format!("sql-template-{label}"))
               .flex()
               .flex_col()

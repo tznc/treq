@@ -1220,6 +1220,8 @@ impl ChangesView {
       .child(
         div()
           .id(SharedString::from(format!("gutter-{path}-{h}-{l}")))
+          .role(gpui::Role::Button)
+          .aria_label(format!("Line {}", l + 1))
           .debug_selector({
             let id = format!("gutter-{path}-{h}-{l}");
             move || id
@@ -1466,6 +1468,8 @@ impl ChangesView {
               "Delete comment",
               div()
                 .id(SharedString::from(format!("delete-comment-{id}")))
+                .role(gpui::Role::Button)
+                .aria_label("Delete comment")
                 .debug_selector(|| "delete-comment".into())
                 .flex_none()
                 .p_1()
@@ -1881,6 +1885,8 @@ impl ChangesView {
               .child(
                 div()
                   .id(SharedString::from(format!("delete-outdated-{id}")))
+                  .role(gpui::Role::Button)
+                  .aria_label("Delete comment")
                   .p_1()
                   .rounded(radius::SM)
                   .cursor_pointer()
@@ -2205,6 +2211,8 @@ impl ChangesView {
       let checked = self.review.use_idle;
       div()
         .id("use-idle-agent")
+        .role(gpui::Role::CheckBox)
+        .aria_label("Use an idle agent")
         .debug_selector(|| "use-idle-agent".into())
         .flex()
         .items_center()

@@ -169,8 +169,18 @@ pub fn tab_for_key(key: &str, current: usize, disabled: &[bool]) -> Option<usize
 }
 
 impl RenderOnce for Tabs {
-  fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+  fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = self.palette;
+    // The list is one tab stop and the arrows move between its tabs; a
+    // caller that moves focus itself passes its own handle.
+    let focus = self.focus.clone().or_else(|| {
+      self.on_select.as_ref().map(|_| {
+        let key = SharedString::from(format!("{}-focus", self.id));
+        crate::tab_stop(key, window, cx)
+      })
+    });
+    let focused = focus.as_ref().is_some_and(|f| f.is_focused(window));
+    let own_focus = self.focus.is_none();
     // A phone is tapped, so every tab is at least the 44pt touch minimum.
     let touch = cx.try_global::<theme::Density>().copied() == Some(theme::Density::Touch);
     let segmented = self.style == TabsStyle::Segmented;
@@ -187,8 +197,14 @@ impl RenderOnce for Tabs {
       .test_support()
       .flex()
       .items_center()
-      .when_some(self.focus, |el, focus| {
+      .when_some(focus, |el, focus| {
         el.track_focus(&focus)
+          // A click on its own stop leaves focus where it was.
+          .when(own_focus, |el| {
+            el.on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
+              window.prevent_default()
+            })
+          })
           .when_some(on_key, move |el, on_select| {
             el.on_key_down(move |event: &KeyDownEvent, window, cx| {
               let key = event.keystroke.key.as_str();
@@ -250,6 +266,10 @@ impl RenderOnce for Tabs {
                   gpui::transparent_black()
                 })
             }
+          })
+          .when(focused && active, |el| {
+            el.rounded(zpx(theme::RADIUS_MD - 2.))
+              .shadow(vec![crate::focus_ring(&p, false)])
           })
           .when(!tab.disabled && !active, |el| {
             el.cursor_pointer().hover(move |s| {

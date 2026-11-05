@@ -1368,6 +1368,8 @@ impl FileBrowserView {
     let fg = p.foreground;
     let back = ui::text(div(), TextSize::Sm)
       .id("file-browser-back")
+      .role(gpui::Role::Button)
+      .aria_label("Back")
       .debug_selector(|| "file-browser-back".into())
       .flex()
       .items_center()
@@ -1870,6 +1872,8 @@ impl FileBrowserView {
       .child(
         div()
           .id(SharedString::from(format!("code-gutter-{n}")))
+          .role(gpui::Role::Button)
+          .aria_label(format!("Line {n}"))
           .debug_selector(move || format!("code-gutter-{n}"))
           .relative()
           .flex()
@@ -1877,6 +1881,7 @@ impl FileBrowserView {
           .items_start()
           // Room for the add-comment button's overhang past the number.
           .pr_1()
+          .cursor_pointer()
           .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |view, e: &MouseDownEvent, _, cx| view.press_line(n, e, cx)),
@@ -1909,6 +1914,8 @@ impl FileBrowserView {
                     Side::Top,
                     div()
                       .id(SharedString::from(format!("add-comment-{n}")))
+                      .role(gpui::Role::Button)
+                      .aria_label("Add comment")
                       .debug_selector(move || format!("add-comment-{n}"))
                       .size_5()
                       .flex()

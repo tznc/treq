@@ -891,3 +891,40 @@ fn an_empty_pull_request_pane_says_why(cx: &mut TestAppContext) {
   ))
   .to_be_visible();
 }
+
+/// Tab goes from the search field to Assigned to me, then into the list,
+/// and Space toggles the pull request it lands on.
+#[gpui::test]
+fn tab_reaches_assigned_to_me_and_the_pull_request_checkboxes(cx: &mut TestAppContext) {
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.open_workspaces.mine = vec![pr(5, "feat/a", "main")];
+  host.open_workspaces.assigned = vec![pr(5, "feat/a", "main")];
+  let (mut h, host) = dialog(host, cx);
+  let screen = screen(&mut h);
+  screen
+    .user()
+    .click(&screen.get_by_label_text("Search pull requests"));
+  screen.user().tab();
+  screen.user().keyboard(" ");
+  let screen = self::screen(&mut h);
+  assert!(
+    host
+      .calls()
+      .iter()
+      .any(|call| call.contains("assignee:@me")),
+    "Space on Assigned to me reads the assigned list: {:?}",
+    host.calls()
+  );
+  expect(screen.get_by_role(by::role(Role::Button).name("Assigned to me"))).to_be_pressed();
+
+  screen.user().tab();
+  screen.user().keyboard(" ");
+  let screen = self::screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::CheckBox).name("#5 Change 5"))).to_be_checked();
+  screen.user().keyboard(" ");
+  let screen = self::screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::CheckBox).name("#5 Change 5")))
+    .not()
+    .to_be_checked();
+}

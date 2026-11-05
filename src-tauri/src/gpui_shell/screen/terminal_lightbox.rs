@@ -361,6 +361,8 @@ impl Lightbox {
       .any(|c| start <= c.end && c.start <= end);
     let row = div()
       .id(SharedString::from(format!("treq-send-block-{b}")))
+      .role(gpui::Role::Button)
+      .aria_label(format!("Block {b}"))
       .debug_selector(move || format!("treq-send-block-{b}"))
       .px_8()
       .py_1p5()
@@ -1102,6 +1104,8 @@ impl Lightbox {
                 .id(SharedString::from(format!(
                   "treq-send-highlight-remove-{id}"
                 )))
+                .role(gpui::Role::Button)
+                .aria_label("Remove highlight")
                 .debug_selector(|| "treq-send-highlight-remove".into())
                 .size_6()
                 .flex()
@@ -1195,6 +1199,7 @@ impl Lightbox {
           .any(|c| n >= c.start && n <= c.end);
         let row = div()
           .id(SharedString::from(format!("treq-send-text-line-{n}")))
+          .cursor_text()
           .debug_selector(move || format!("treq-send-text-line-{n}"))
           .flex()
           .w_full()
@@ -1506,6 +1511,8 @@ impl Lightbox {
     content(
       div()
         .id(id)
+        .role(gpui::Role::Button)
+        .aria_label(if next { "Next" } else { "Previous" })
         .debug_selector(move || id.into())
         .absolute()
         .top(gpui::relative(0.5))
@@ -1634,6 +1641,8 @@ impl Render for Lightbox {
       .child(
         div()
           .id("treq-send-preview-backdrop")
+          // A dismiss target, not a control.
+          .cursor_default()
           .absolute()
           .inset_0()
           .bg(scrim(0.55))
@@ -1645,6 +1654,8 @@ impl Render for Lightbox {
       .child(
         div()
           .id("treq-send-preview-carousel-shell")
+          // A dismiss target, not a control.
+          .cursor_default()
           .debug_selector(|| "treq-send-preview-carousel-shell".into())
           .relative()
           .w(zpx(vw * 0.9))

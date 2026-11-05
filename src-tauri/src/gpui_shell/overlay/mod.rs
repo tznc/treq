@@ -624,23 +624,18 @@ impl Overlay {
       }
       return;
     }
-    let step = match key {
-      "down" if m.platform => Some(cmdk::Move::Last),
-      "up" if m.platform => Some(cmdk::Move::First),
-      "down" if m.alt => Some(cmdk::Move::Group(1)),
-      "up" if m.alt => Some(cmdk::Move::Group(-1)),
-      "down" => Some(cmdk::Move::Step(1)),
-      "up" => Some(cmdk::Move::Step(-1)),
-      "n" | "j" if m.control => Some(cmdk::Move::Step(1)),
-      "p" | "k" if m.control => Some(cmdk::Move::Step(-1)),
-      "home" => Some(cmdk::Move::First),
-      "end" => Some(cmdk::Move::Last),
-      _ => None,
+    let nav = ui::ListKey::from_key_with_emacs(key, m);
+    let step = match nav {
+      None | Some(ui::ListKey::Open) => None,
+      Some(list) => match list.delta() {
+        Some(delta) if m.alt => Some(cmdk::Move::Group(delta)),
+        _ => Some(list.into()),
+      },
     };
     if let Some(step) = step {
       self.step(step, cx);
       cx.stop_propagation();
-    } else if key == "enter" {
+    } else if nav == Some(ui::ListKey::Open) {
       if let Some(selected) = self.selected {
         self.choose(selected, cx);
       } else if matches!(self.body, Body::Palette { .. }) && !self.search.trim().is_empty() {
@@ -1123,6 +1118,8 @@ impl Render for Overlay {
     };
     div()
       .id("overlay-backdrop")
+      // A dismiss target, not a control.
+      .cursor_default()
       .debug_selector(|| "overlay-backdrop".into())
       .key_context(KEY_CONTEXT)
       .track_focus(&self.focus)

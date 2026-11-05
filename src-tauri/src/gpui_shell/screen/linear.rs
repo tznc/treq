@@ -1170,13 +1170,16 @@ impl LinearView {
     cx: &mut Context<Self>,
   ) -> Stateful<Div> {
     let (url, selector) = (url.to_string(), id.clone());
+    let text: SharedString = text.into();
     div()
       .id(SharedString::from(id))
+      .role(gpui::Role::Link)
+      .aria_label(text.clone())
       .debug_selector(move || selector)
       .text_color(color)
       .cursor_pointer()
       .hover(|s| s.underline())
-      .child(text.into())
+      .child(text)
       .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
         cx.stop_propagation();
         view.open_url(&url);
@@ -1306,6 +1309,8 @@ impl LinearView {
             let destructive = p.destructive;
             div()
               .id(SharedString::from(clear))
+              .role(gpui::Role::Button)
+              .aria_label("Clear filter")
               .debug_selector(move || selector)
               .cursor_pointer()
               .text_color(p.foreground)
@@ -2527,6 +2532,8 @@ impl LinearView {
             let selector = format!("linear-project-item-{id}");
             div()
               .id(SharedString::from(selector.clone()))
+              .role(gpui::Role::Button)
+              .aria_label(project.name.clone())
               .debug_selector(move || selector)
               .w_full()
               .px_4()
@@ -2668,6 +2675,8 @@ impl LinearView {
             let doc = doc.clone();
             ui::text(div(), TextSize::Sm)
               .id(SharedString::from(selector.clone()))
+              .role(gpui::Role::Link)
+              .aria_label(doc.title.clone())
               .debug_selector(move || selector)
               .px_3()
               .py_1()

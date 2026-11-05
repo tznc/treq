@@ -252,6 +252,8 @@ impl Render for WorkspaceDeletion {
           let value = row.value.clone();
           div()
             .id(id)
+            .role(tauri_plugin_gpui::gpui::Role::ListBoxOption)
+            .aria_label(row.workspace.branch_name.clone())
             .debug_selector(move || selector)
             .px_3()
             .py_1p5()
@@ -411,6 +413,8 @@ impl Render for WorkspaceDeletion {
       anchored().position(point(px(0.), px(0.))).child(
         div()
           .id("workspace-deletion-backdrop")
+          // A dismiss target, not a control.
+          .cursor_default()
           .w(viewport.width)
           .h(viewport.height)
           .bg(p.scrim())

@@ -43,6 +43,20 @@ test("dialogs: create workspace", async ({ page, context }) => {
       "Backdrop dims the window evenly",
     ],
   });
+  // The Workspaces field takes Tab to indent, so start from the search field.
+  await page.getByRole("textbox", { name: "Search pull requests" }).click();
+  await page.keyboard.press("Tab");
+  await settle(page, 500);
+  await capture(page, {
+    name: "09-create-workspace-dialog-tab-focus",
+    title: "New workspace dialog: Tab from the pull request search",
+    screen: true,
+    rest: false,
+    expectations: [
+      "A visible focus ring on a control inside the dialog",
+      "Focus has not left the dialog",
+    ],
+  });
   // Opening Advanced only makes the left column taller: the heading keeps
   // its place.
   {
@@ -219,6 +233,19 @@ test("dialogs: rename workspace from the context menu", async ({ page, context }
       "Rename disabled until the name changes",
     ],
   });
+  await page.keyboard.press("Tab");
+  await settle(page, 500);
+  await capture(page, {
+    name: "09-rename-dialog-tab-focus",
+    title: "Rename Workspace dialog after Tab",
+    screen: true,
+    rest: false,
+    expectations: [
+      "A visible focus ring on a control inside the dialog",
+      "Focus has not left the dialog",
+    ],
+  });
+  await page.keyboard.press("Shift+Tab");
   await name(dialog).fill("feat/keyvalues-cache");
   await settle(page, 1000);
   await capture(page, {

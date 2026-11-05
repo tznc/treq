@@ -404,3 +404,31 @@ test("open-workspaces: indented lines stack on the line above", async ({
     ],
   });
 });
+
+test("open-workspaces: Tab reaches a pull request checkbox and Space toggles it", async ({
+  page,
+}) => {
+  await home(page);
+  await page.getByRole("button", { name: "New workspace…" }).first().click();
+  await expect(
+    page.getByRole("heading", { name: "Your pull requests" }),
+  ).toBeVisible();
+  await settle(page, 800);
+  // Focus starts in the search field from a click; Tab goes to Assigned to
+  // me, then the first pull request.
+  await page.getByLabel("Search pull requests").click();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Space");
+  await expect(page.getByRole("checkbox", { checked: true })).toHaveCount(1);
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-tab-to-checkbox",
+    title: "Tab to a pull request checkbox, then Space",
+    expectations: [
+      "focus ring on the checkbox",
+      "the checkbox toggled from the keyboard",
+      "no ring after mouse use",
+    ],
+  });
+});

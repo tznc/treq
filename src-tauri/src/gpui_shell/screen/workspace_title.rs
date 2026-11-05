@@ -177,6 +177,7 @@ impl TitleEditor {
         .size(Size::Sm)
         .disabled(disabled)
         .label("Save")
+        .aria_label("Save title")
         .on_click(cx.listener(|view, _, _, cx| view.save(false, cx)))
         .into_any_element();
     }
@@ -280,6 +281,8 @@ impl Render for TitleEditor {
           .size(Size::Sm)
           .disabled(saving)
           .label("Cancel")
+          // A comment open beside it has its own Cancel.
+          .aria_label("Cancel title edit")
           .on_click(cx.listener(|view, _, _, cx| view.cancel(cx))),
       )
       .child(self.save_button(saving || empty, &p, cx))

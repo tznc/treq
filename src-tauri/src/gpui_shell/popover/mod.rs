@@ -248,6 +248,8 @@ impl Render for Popover {
       |this: &mut Self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>| this.close(cx);
     div()
       .id("header-popover-backdrop")
+      // A dismiss target, not a control.
+      .cursor_default()
       .debug_selector(|| "header-popover-backdrop".into())
       .track_focus(&self.focus)
       // The workspace view places it at the window's origin; it covers the
@@ -258,7 +260,15 @@ impl Render for Popover {
       .occlude()
       .font_family(theme::SANS_FONT)
       .text_color(p.foreground)
-      .capture_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key_down(event, cx)))
+      .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+        // Tab and Shift+Tab stay inside, as in a dialog.
+        if let Some(back) = crate::gpui_shell::ui::tab_key(&event.keystroke) {
+          crate::gpui_shell::ui::trap_tab(&this.focus, back, window, cx);
+          cx.stop_propagation();
+          return;
+        }
+        this.key_down(event, cx)
+      }))
       // Home and End reach the search field as its own actions.
       .capture_action(cx.listener(|this, _: &MoveHome, _, cx| {
         this.target_step(cmdk::Move::First, cx);

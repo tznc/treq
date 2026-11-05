@@ -399,6 +399,8 @@ impl GithubView {
           let id = ws.id;
           let picked = selected == Some(id);
           named(div(), format!("github-new-pr-ws-{id}"))
+            .role(tauri_plugin_gpui::gpui::Role::ListBoxOption)
+            .aria_label(ws.branch_name.clone())
             .w_full()
             .px_3()
             .py_2()
@@ -630,6 +632,8 @@ impl GithubView {
               ),
               TextSize::Sm,
             )
+            .role(tauri_plugin_gpui::gpui::Role::MenuItemRadio)
+            .aria_label(item)
             .relative()
             .flex()
             .flex_col()

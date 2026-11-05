@@ -1743,6 +1743,8 @@ impl CodeView {
       )),
       div()
         .id("stack-help")
+        .role(gpui::Role::Button)
+        .aria_label("Learn about stacks")
         .cursor_pointer()
         .child(ui::icon(
           theme::ICON_CIRCLE_HELP,
@@ -2133,96 +2135,93 @@ impl CodeView {
       let synced = entry.submodule_synced.unwrap_or(false);
       let path = entry.name.clone();
       let syncing = self.syncing_submodule;
-      list =
-        list.child(
-          div()
-            .debug_selector(move || selector)
-            .when(divided, |this| this.border_t_1().border_color(p.border))
-            .when(
-              count > ENTRIES_ALL && (i == shown.start || i == 1),
-              |this| {
-                this
-                  .relative()
-                  .child(self.measure_entry_row(i, shown.start, cx))
-              },
-            )
-            .flex()
-            .items_center()
-            .hover(move |s| s.bg(p.hover()))
-            .child(
-              ui::text(div(), TextSize::Sm)
-                .id(id)
-                .role(Role::Button)
-                .aria_label(entry.name.clone())
-                .test_support()
-                .flex()
-                .items_center()
-                .gap_3()
-                .px_4()
-                .py_1()
-                .flex_1()
-                .min_w_0()
-                .cursor_pointer()
-                .child(ui::icon(icon.0, 16., icon.1))
-                .child(
-                  div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .font_family(theme::MONO_FONT)
-                    .text_size(zpx(font))
-                    .line_height(zpx((font * 1.5).round()))
-                    .child(
-                      div()
-                        .min_w_0()
-                        .truncate()
-                        .text_color(name_color)
-                        .child(entry.name.clone()),
-                    )
-                    .when_some(pin, |this, pin| {
-                      this.child(div().flex_none().text_color(muted_fg).child(format!(
-                        "\u{a0}@ {}",
-                        pin.chars().take(7).collect::<String>()
-                      )))
-                    }),
-                )
-                .children(pip.map(|(color, label)| {
-                  div()
-                    .id(pip_id.clone())
-                    .role(Role::Image)
-                    .aria_label(label)
-                    .test_support()
-                    .size_2()
-                    .flex_none()
-                    .rounded_full()
-                    .bg(color)
-                }))
-                .on_click(cx.listener(move |view, _, _, cx| view.open_entry(&open, cx))),
-            )
-            .when(home && submodule, |this| {
-              this.child(
-                ui::text(div(), TextSize::Xs)
-                  .id(SharedString::from(format!("submodule-sync-{path}")))
+      list = list.child(
+        div()
+          .debug_selector(move || selector)
+          .when(divided, |this| this.border_t_1().border_color(p.border))
+          .when(
+            count > ENTRIES_ALL && (i == shown.start || i == 1),
+            |this| {
+              this
+                .relative()
+                .child(self.measure_entry_row(i, shown.start, cx))
+            },
+          )
+          .flex()
+          .items_center()
+          .hover(move |s| s.bg(p.hover()))
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .id(id)
+              .role(Role::Button)
+              .aria_label(entry.name.clone())
+              .test_support()
+              .flex()
+              .items_center()
+              .gap_3()
+              .px_4()
+              .py_1()
+              .flex_1()
+              .min_w_0()
+              .cursor_pointer()
+              .child(ui::icon(icon.0, 16., icon.1))
+              .child(
+                div()
+                  .flex_1()
+                  .min_w_0()
                   .flex()
-                  .items_center()
-                  .gap_1p5()
-                  .flex_none()
-                  .pr_4()
-                  .pl_2()
-                  .text_color(p.muted_foreground)
-                  .cursor_pointer()
-                  .when(syncing, |this| this.opacity(0.5))
-                  .child(ui::Checkbox::new(format!("submodule-sync-box-{path}"), p).checked(synced))
-                  .child("Sync")
-                  .when(!syncing, |this| {
-                    let path = path.clone();
-                    this.on_click(cx.listener(move |view, _, _, cx| {
-                      view.sync_submodule(path.clone(), !synced, cx)
-                    }))
+                  .font_family(theme::MONO_FONT)
+                  .text_size(zpx(font))
+                  .line_height(zpx((font * 1.5).round()))
+                  .child(
+                    div()
+                      .min_w_0()
+                      .truncate()
+                      .text_color(name_color)
+                      .child(entry.name.clone()),
+                  )
+                  .when_some(pin, |this, pin| {
+                    this.child(div().flex_none().text_color(muted_fg).child(format!(
+                      "\u{a0}@ {}",
+                      pin.chars().take(7).collect::<String>()
+                    )))
                   }),
               )
-            }),
-        );
+              .children(pip.map(|(color, label)| {
+                div()
+                  .id(pip_id.clone())
+                  .role(Role::Image)
+                  .aria_label(label)
+                  .test_support()
+                  .size_2()
+                  .flex_none()
+                  .rounded_full()
+                  .bg(color)
+              }))
+              .on_click(cx.listener(move |view, _, _, cx| view.open_entry(&open, cx))),
+          )
+          .when(home && submodule, |this| {
+            this.child(
+              ui::text(
+                ui::Checkbox::new(format!("submodule-sync-{path}"), p),
+                TextSize::Xs,
+              )
+              .checked(synced)
+              .disabled(syncing)
+              .label("Sync")
+              .gap_1p5()
+              .pr_4()
+              .pl_2()
+              .text_color(p.muted_foreground)
+              .when(!syncing, |this| {
+                let path = path.clone();
+                this.on_click(
+                  cx.listener(move |view, _, _, cx| view.sync_submodule(path.clone(), !synced, cx)),
+                )
+              }),
+            )
+          }),
+      );
     }
     // The toggle closes the list when nothing drawn follows it; one scrolled
     // above the drawn rows stays undrawn with them.
@@ -2625,6 +2624,8 @@ impl CodeView {
     let column = p.background.blend(p.muted.opacity(0.2));
     let body = div()
       .id(id)
+      .role(gpui::Role::Button)
+      .aria_label(title.clone())
       .debug_selector(move || selector)
       .flex_1()
       .min_w_0()

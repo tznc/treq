@@ -13,6 +13,9 @@ pub mod empty_state;
 pub mod icon_button;
 pub mod image;
 pub mod kbd;
+#[cfg(test)]
+mod keyboard_tests;
+pub mod list_nav;
 pub mod menu;
 pub mod picker;
 pub mod popover;
@@ -26,10 +29,11 @@ pub mod theme;
 pub use alert::{Alert, Severity};
 pub use badge::{Badge, Count, Dot, Tone};
 pub use checkbox::{CheckState, Checkbox};
-pub use dialog::{handler, ConfirmDialog, Dialog};
+pub use dialog::{handler, tab_key, trap_tab, ConfirmDialog, Dialog};
 pub use empty_state::{error_actions, EmptyState, Loading, Skeleton};
 pub use icon_button::{IconButton, IconButtonSize};
 pub use kbd::Kbd;
+pub use list_nav::{ListKey, ListNav};
 pub use menu::{MenuItem, MenuLabel, MenuSeparator};
 pub use picker::{Picker, PickerPlacement};
 pub use popover::{floating, Popover};
@@ -540,9 +544,9 @@ impl RenderOnce for Button {
     let mut el = gpui_bootstrap::button::Button::new(self.id)
       .colors(colors)
       .disabled(disabled)
-      // As before the facade: a press leaves focus in the editor or list
-      // the button acts on.
-      .focusable(false)
+      // A press leaves focus in the editor or list the button acts on; Tab
+      // still reaches it, as inside a dialog.
+      .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
       .when(self.variant == Variant::Link, |b| {
         b.button_style(gpui_bootstrap::button::ButtonStyle::Link)
       })
@@ -591,6 +595,36 @@ impl RenderOnce for Button {
     el.style().refine(&style);
     el
   }
+}
+
+/// A control's own tab stop, kept across frames under `key`.
+pub(crate) fn tab_stop(
+  key: impl Into<ElementId>,
+  window: &mut Window,
+  cx: &mut App,
+) -> gpui::FocusHandle {
+  window
+    .use_keyed_state(key, cx, |_, cx| cx.focus_handle().tab_stop(true))
+    .read(cx)
+    .clone()
+}
+
+/// The ring a control draws while it has keyboard focus. Controls keep
+/// focus where it was on a click, so it only shows for the keyboard.
+/// `inset` draws it inside, for a row a scrolling list would clip.
+pub fn focus_ring(p: &Palette, inset: bool) -> gpui::BoxShadow {
+  gpui::BoxShadow {
+    color: p.ring.opacity(0.55),
+    offset: gpui::point(gpui::px(0.), gpui::px(0.)),
+    blur_radius: gpui::px(0.),
+    spread_radius: gpui::px(2.),
+    inset,
+  }
+}
+
+/// Whether a click came from `key` ("enter" or "space") on the keyboard.
+pub(crate) fn keyboard_click(event: &ClickEvent, key: gpui::KeyboardButton) -> bool {
+  matches!(event, ClickEvent::Keyboard(k) if k.button == key)
 }
 
 /// Closes a click-to-open menu and says whether it was open.

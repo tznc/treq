@@ -99,7 +99,7 @@ fn code_tab_lists_submodules_with_their_pin_and_syncs_them_on_request(cx: &mut T
   });
   let (mut h, host) = workspace_harness(cx, host, home_code_route());
   assert!(h.drawn("submodule-row-vendor/lib"));
-  h.click("submodule-sync-box-vendor/lib");
+  h.click("submodule-sync-vendor/lib");
   h.cx.run_until_parked();
   assert!(
     host

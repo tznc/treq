@@ -1223,6 +1223,8 @@ impl PopupView {
               this.child(
                 div()
                   .id("action")
+                  .role(gpui::Role::Button)
+                  .aria_label(SharedString::from(action.clone()))
                   .mt_1()
                   .font_weight(gpui::FontWeight::MEDIUM)
                   .text_color(palette.primary)
@@ -1248,6 +1250,8 @@ impl PopupView {
             // hover:text-foreground`
             div()
               .id("close")
+              .role(gpui::Role::Button)
+              .aria_label("Dismiss")
               .group("close")
               .flex_none()
               .p_1()

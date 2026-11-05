@@ -802,6 +802,8 @@ impl RemoteView {
       let hover_border = p.primary.opacity(0.6);
       div()
         .id(id)
+        .role(gpui::Role::RadioButton)
+        .aria_label(title)
         .debug_selector(|| id.into())
         .flex_1()
         .min_w_0()
@@ -942,6 +944,8 @@ impl RemoteView {
         let (state, value) = (state.clone(), alias.clone());
         div()
           .id(SharedString::from(format!("{id}-suggestion-{i}")))
+          .role(gpui::Role::ListBoxOption)
+          .aria_label(alias.clone())
           .debug_selector(move || format!("{id}-suggestion-{i}"))
           .px_2()
           .py_1()
@@ -1048,15 +1052,9 @@ impl RemoteView {
         ))
       });
 
-    let alias_toggle = div()
-      .id("remote-alias-toggle")
-      .debug_selector(|| "remote-alias-toggle".into())
-      .flex()
-      .items_center()
-      .gap_2()
-      .cursor_pointer()
-      .child(ui::Checkbox::new("remote-alias-checkbox", p).checked(form.alias_mode))
-      .child(div().child("Use an explicit SSH alias for this endpoint (optional)"))
+    let alias_toggle = ui::Checkbox::new("remote-alias-toggle", p)
+      .checked(form.alias_mode)
+      .label("Use an explicit SSH alias for this endpoint (optional)")
       .on_click(cx.listener(|view, _, _, cx| {
         if let Some(form) = view.form() {
           form.alias_mode = !form.alias_mode;
