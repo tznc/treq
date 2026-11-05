@@ -227,6 +227,16 @@ export async function cancelOpenMigration(
   return (data as string | null) ?? null;
 }
 
+/**
+ * Rolls back resizes parked on a failed re-clone past their deadline
+ * (expire_clone_failure_parks), so the next run deletes their stopped new
+ * machine. Returns the migrations moved to rolling_back.
+ */
+export async function expireCloneFailureParks(supabase: SupabaseClient, limit: number): Promise<string[]> {
+  const data = must(await supabase.rpc("expire_clone_failure_parks", { p_limit: limit }), "expire clone-failure parks");
+  return ((data ?? []) as Array<{ id: string }>).map((r) => r.id);
+}
+
 export async function advanceMigration(
   supabase: SupabaseClient,
   id: string,

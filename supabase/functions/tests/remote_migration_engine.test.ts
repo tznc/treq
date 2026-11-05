@@ -17,6 +17,7 @@ import {
   runMigration,
   stepMigration,
   TERMINAL_STATES,
+  CLONE_FAILURE_PARK_MS,
 } from "../_shared/remote/migration-engine.ts";
 import { resumeParkedMigration } from "../_shared/remote/migration-resume.ts";
 import type { PreflightReport } from "../_shared/remote/preflight.ts";
@@ -578,4 +579,40 @@ Deno.test("an invalid BYOS key rolls back at once instead of retrying", async ()
   const r = await runMigration(depsFor(w), "mig", { deadlineMs: 1, maxSteps: 20 });
   assertEquals(r.state, "rolled_back");
   assertEquals(w.migration.attempt, 1);
+});
+
+Deno.test("a clone-failure park stops the new machine so it bills only its disk", async () => {
+  const w = await parkedOnClone();
+  const target = defined(w.migration.target_placement_id);
+  const resource = defined(w.placements.get(target)?.provider_resource_id);
+  assertEquals(w.machines.get(resource)?.state, "suspended");
+  assertEquals(w.placements.get(target)?.state, "suspended");
+  // The source the owner still works on is left running.
+  assertEquals(w.machines.get("m-src")?.state, "ready");
+});
+
+Deno.test("a clone-failure park sets a 12 hour deadline", async () => {
+  const w = await parkedOnClone();
+  assertEquals(w.migration.deadline, new Date(CLONE_FAILURE_PARK_MS).toISOString());
+  assertEquals(CLONE_FAILURE_PARK_MS, 12 * 3600_000);
+});
+
+Deno.test("a drain parked on a clone failure keeps its own deadline", async () => {
+  const w = new World();
+  w.failReclone = true;
+  w.migration.reason = "drain";
+  w.migration.deadline = "2030-01-01T00:00:00.000Z";
+  assertEquals(await runToEnd(w), "awaiting_ack");
+  assertEquals(w.migration.deadline, "2030-01-01T00:00:00.000Z");
+});
+
+Deno.test("acknowledging a stopped clone-failure park wakes the new machine and completes", async () => {
+  const w = await parkedOnClone();
+  const target = defined(w.migration.target_placement_id);
+  const resource = defined(w.placements.get(target)?.provider_resource_id);
+  const r = await resumeParkedMigration(depsFor(w), "mig", { acknowledge: true });
+  assert(r.resumed);
+  assertEquals(await runToEnd(w), "completed");
+  assert(w.afterWakes.includes(resource), "afterWake ran on the woken target");
+  assertEquals(w.activePlacement().id, target);
 });
