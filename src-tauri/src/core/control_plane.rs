@@ -53,6 +53,35 @@ pub struct InstanceStatus {
   pub instance: Option<ManagedInstance>,
   #[serde(default)]
   pub endpoint: Option<Value>,
+  /// The instance's open switch to a new machine, if one runs.
+  #[serde(default)]
+  pub migration: Option<MigrationSummary>,
+}
+
+/// `migrationSummary`: an open switch as `status` and `resize` report it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MigrationSummary {
+  pub id: String,
+  pub state: String,
+  #[serde(default)]
+  pub reason: String,
+  /// The last step's error (`{step, kind, message}`), while it retries.
+  #[serde(default)]
+  pub error: Option<Value>,
+}
+
+impl MigrationSummary {
+  /// The switch has ended or waits for the user, so polling stops.
+  pub fn settled(&self) -> bool {
+    matches!(
+      self.state.as_str(),
+      "completed" | "rolled_back" | "failed" | "cancelled" | "awaiting_ack"
+    )
+  }
+
+  pub fn error_message(&self) -> Option<String> {
+    self.error.as_ref()?["message"].as_str().map(str::to_string)
+  }
 }
 
 impl InstanceStatus {
@@ -259,6 +288,8 @@ pub enum ResizeError {
   /// The move to a new machine would lose this work; retry with
   /// `acknowledged_data_loss` to go ahead.
   UnpushedWork(Preflight),
+  /// A switch already runs: its state, so the card shows it, not an error.
+  InProgress(Option<MigrationSummary>),
   Api(ApiError),
 }
 
@@ -266,6 +297,7 @@ impl std::fmt::Display for ResizeError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       Self::UnpushedWork(_) => write!(f, "[unpushed_work] Resizing would lose unpushed work"),
+      Self::InProgress(_) => write!(f, "[migration_in_progress] A switch is already running"),
       Self::Api(error) => error.fmt(f),
     }
   }
@@ -299,6 +331,11 @@ pub async fn resize(
   if status == 409 && value["code"] == "unpushed_work" {
     let preflight = serde_json::from_value(value["preflight"].clone()).unwrap_or_default();
     return Err(ResizeError::UnpushedWork(preflight));
+  }
+  if status == 409 && value["code"] == "migration_in_progress" {
+    return Err(ResizeError::InProgress(
+      serde_json::from_value(value["migration"].clone()).ok(),
+    ));
   }
   Err(ResizeError::Api(crate::core::supabase::api_error_from(
     status, value,

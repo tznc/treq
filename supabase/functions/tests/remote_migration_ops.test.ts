@@ -55,7 +55,23 @@ Deno.test("the migration summary carries what the app needs to prompt", () => {
       reason: "drain",
       deadline: "2026-11-04T00:00:00Z",
       preflight: { repos: [], requires_ack: true },
+      error: null,
     },
   );
   assertEquals(migrationSummary(null), null);
+});
+
+Deno.test("the migration summary carries the last step error so the app can explain a stuck switch", () => {
+  const summary = migrationSummary({
+    id: "m2",
+    state: "rolling_back",
+    reason: "user_resize",
+    preflight: null,
+    error: { step: "rolling_back", kind: "unavailable", message: "vendor down" },
+  });
+  assertEquals(summary?.error, { step: "rolling_back", kind: "unavailable", message: "vendor down" });
+  assertEquals(
+    migrationSummary({ id: "m3", state: "verifying", reason: "user_resize", preflight: null })?.error,
+    null,
+  );
 });

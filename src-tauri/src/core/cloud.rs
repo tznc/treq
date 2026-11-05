@@ -39,6 +39,13 @@ const STATUS_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 #[cfg(test)]
 const STATUS_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// How often a running switch to a new machine is re-read, and for how long.
+#[cfg(not(test))]
+const MIGRATION_POLL: std::time::Duration = std::time::Duration::from_secs(3);
+#[cfg(test)]
+const MIGRATION_POLL: std::time::Duration = std::time::Duration::from_millis(5);
+const MIGRATION_POLL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
 /// The comment the desktop app registers its SSH key with.
 const KEY_COMMENT: &str = "treq-managed-vm";
 
@@ -727,7 +734,12 @@ impl Cloud {
         )
         .await
         {
-          Ok(_) => self.refresh_status().await,
+          Ok(_) => self.poll_migration().await,
+          Err(ResizeError::InProgress(migration)) => self.update_workspace(|w| {
+            if let (Some(status), Some(migration)) = (w.instance_status.as_mut(), migration) {
+              status.migration = Some(migration);
+            }
+          }),
           Err(ResizeError::UnpushedWork(preflight)) => {
             self.update_workspace(|w| w.resize_preflight = Some((tier_id.clone(), preflight)))
           }
@@ -740,6 +752,26 @@ impl Cloud {
   /// Drops a resize waiting for confirmation.
   pub fn cancel_resize(&self) {
     self.update_workspace(|w| w.resize_preflight = None);
+  }
+
+  /// Re-reads the status until the open switch ends or waits for the user,
+  /// so the card shows each step instead of freezing on "Resize".
+  async fn poll_migration(&self) {
+    let deadline = tokio::time::Instant::now() + MIGRATION_POLL_TIMEOUT;
+    loop {
+      self.refresh_status().await;
+      let running = self
+        .workspace
+        .lock_or_recover()
+        .instance_status
+        .as_ref()
+        .and_then(|s| s.migration.as_ref())
+        .is_some_and(|m| !m.settled());
+      if !running || tokio::time::Instant::now() >= deadline {
+        return;
+      }
+      tokio::time::sleep(MIGRATION_POLL).await;
+    }
   }
 
   async fn refresh_status(&self) {
@@ -1834,6 +1866,79 @@ mod tests {
     assert_eq!(resized[1]["tier_id"], "m");
     assert_eq!(resized[1]["acknowledged_data_loss"], true);
     assert_ne!(resized[0]["idempotency_key"], resized[1]["idempotency_key"]);
+  }
+
+  #[tokio::test]
+  async fn resizing_while_a_switch_runs_shows_its_state_instead_of_an_error() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    on_action(&server, "status", status("ready")).await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-instance"))
+      .and(body_partial_json(json!({"action": "resize"})))
+      .respond_with(ResponseTemplate::new(409).set_body_json(json!({
+        "error": "A switch is already running",
+        "code": "migration_in_progress",
+        "migration_id": "mig-1",
+        "migration": {
+          "id": "mig-1", "state": "rolling_back", "reason": "user_resize",
+          "deadline": null, "preflight": null,
+          "error": {"step": "rolling_back", "kind": "unavailable", "message": "vendor down"}
+        }
+      })))
+      .mount(&server)
+      .await;
+    cloud.refresh_status().await;
+    cloud.select_tier("m");
+    cloud.resize(false).await;
+    let workspace = cloud.snapshot().cloud;
+    assert_eq!(workspace.provisioning_error, None, "not a generic error");
+    let migration = workspace
+      .instance_status
+      .and_then(|s| s.migration)
+      .expect("the running switch is kept");
+    assert_eq!(migration.state, "rolling_back");
+    assert_eq!(migration.error_message().as_deref(), Some("vendor down"));
+  }
+
+  #[tokio::test]
+  async fn an_accepted_resize_polls_the_switch_until_it_finishes() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    let mut moving = status("ready");
+    moving["migration"] = json!({
+      "id": "mig-1", "state": "verifying", "reason": "user_resize", "deadline": null, "preflight": null, "error": null
+    });
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-instance"))
+      .and(body_partial_json(json!({"action": "status"})))
+      .respond_with(ResponseTemplate::new(200).set_body_json(moving))
+      .up_to_n_times(3)
+      .with_priority(1)
+      .mount(&server)
+      .await;
+    on_action(&server, "status", status("ready")).await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-instance"))
+      .and(body_partial_json(json!({"action": "resize"})))
+      .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+        "status": "accepted", "migration_id": "mig-1", "migration_state": "target_provisioning"
+      })))
+      .mount(&server)
+      .await;
+    cloud.refresh_status().await;
+    cloud.select_tier("m");
+    cloud.resize(false).await;
+    let workspace = cloud.snapshot().cloud;
+    assert_eq!(
+      workspace.instance_status.and_then(|s| s.migration),
+      None,
+      "polled until the switch ended"
+    );
+    assert!(
+      bodies(&server, "status").await.len() >= 4,
+      "status was polled"
+    );
   }
 
   #[tokio::test]

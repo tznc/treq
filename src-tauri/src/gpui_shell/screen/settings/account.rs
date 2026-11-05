@@ -77,6 +77,45 @@ pub struct AccountRoute {
   pub linear_oauth_loading: bool,
 }
 
+/// The cloud card's line for a running switch to a new machine.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MigrationView {
+  pub title: String,
+  /// The last error and what to do, while a step keeps failing.
+  pub detail: Option<String>,
+  /// A step is failing: shown as a warning with a support hint.
+  pub stuck: bool,
+}
+
+fn migration_step(state: &str) -> &'static str {
+  match state {
+    "requested" | "preflight" => "checking for unpushed work",
+    "awaiting_ack" => "waiting for you to confirm",
+    "target_provisioning" => "creating the new machine",
+    "target_bootstrapped" => "cloning repositories",
+    "verifying" => "checking the new machine",
+    "cutover" => "switching over",
+    "source_retiring" => "stopping the old machine",
+    "rolling_back" => "undoing the move",
+    _ => "working",
+  }
+}
+
+fn migration_view(m: &crate::core::control_plane::MigrationSummary) -> MigrationView {
+  let error = m.error_message();
+  MigrationView {
+    title: format!("Moving to a new machine: {}", migration_step(&m.state)),
+    stuck: error.is_some(),
+    detail: error.map(|e| {
+      format!(
+        "Last error: {}. If this doesn't clear, contact support with migration {}.",
+        e.trim_end_matches('.'),
+        m.id
+      )
+    }),
+  }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct User {
@@ -118,6 +157,8 @@ pub struct CloudRoute {
   pub selected_tier: Option<String>,
   /// This month's billed usage.
   pub billing: Option<crate::core::cloud_catalog::UsageTotals>,
+  /// The instance's open switch to a new machine.
+  pub migration: Option<crate::core::control_plane::MigrationSummary>,
   /// A resize waiting for the user to accept losing this work.
   pub resize_preflight: Option<(String, crate::core::control_plane::Preflight)>,
   /// The idle controller's last probe.
@@ -286,6 +327,8 @@ pub struct CloudCard {
   pub billing: Option<String>,
   /// What a resize would lose, while it waits for confirmation.
   pub resize_confirm: Option<Vec<String>>,
+  /// A running switch to a new machine.
+  pub migration: Option<MigrationView>,
   /// Where this month's spend stands against the cap.
   pub spend_state: Option<SpendState>,
   /// What the warning or capped state means.
@@ -792,7 +835,9 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
     processes,
     idle_stop,
     sizes,
+    migration: cloud.migration.as_ref().map(migration_view),
     resize: instance.is_some()
+      && cloud.migration.is_none()
       && cloud.selected_tier.is_some()
       && cloud.selected_tier != current_tier,
     billing: match spend {
@@ -2150,6 +2195,20 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       .label("Resize")
       .on_click(press("cloud.resize"))
   });
+  let migration = c.migration.clone().map(|m| {
+    div()
+      .mt_3()
+      .debug_selector(|| "cloud-migration-alert".into())
+      .child(
+        ui::Alert::new("cloud-migration", m.title, p)
+          .severity(if m.stuck {
+            ui::Severity::Warning
+          } else {
+            ui::Severity::Info
+          })
+          .message(m.detail.unwrap_or_default()),
+      )
+  });
   let resize_confirm = c.resize_confirm.clone().map(|lines| {
     div().debug_selector(|| "cloud-resize-confirm-alert".into()).child(
       ui::Alert::new("cloud-resize-unpushed", "Resizing loses unpushed work", p)
@@ -2268,6 +2327,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
         .children(processes)
         .children(sizes)
         .children(resize)
+        .children(migration)
         .children(resize_confirm)
         .children(buttons)
         .into_any_element()

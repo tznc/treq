@@ -108,6 +108,7 @@ pub(crate) fn cloud_route(cloud: &CloudWorkspace) -> CloudRoute {
     tiers: cloud.catalog.clone().unwrap_or_default(),
     selected_tier: cloud.selected_tier.clone(),
     billing: cloud.billing,
+    migration: status.and_then(|s| s.migration.clone()),
     resize_preflight: cloud.resize_preflight.clone(),
     activity: cloud.activity.clone(),
     spend: cloud.spend.clone(),

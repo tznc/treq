@@ -49,7 +49,10 @@ export async function resumeParkedMigration(
   return { resumed: ok, state, acknowledged, preflight };
 }
 
-type SummaryFields = Pick<MigrationRow, "id" | "state" | "reason" | "preflight"> & { deadline?: string | null };
+type SummaryFields = Pick<MigrationRow, "id" | "state" | "reason" | "preflight"> & {
+  deadline?: string | null;
+  error?: Record<string, unknown> | null;
+};
 
 /** What `status` and `resize` tell the app about an open migration. */
 export function migrationSummary(m: SummaryFields | null): {
@@ -58,9 +61,18 @@ export function migrationSummary(m: SummaryFields | null): {
   reason: string;
   deadline: string | null;
   preflight: PreflightReport | null;
+  /** The last step's error, so the app can explain a switch that is stuck. */
+  error: Record<string, unknown> | null;
 } | null {
   if (!m) return null;
-  return { id: m.id, state: m.state, reason: m.reason, deadline: m.deadline ?? null, preflight: m.preflight };
+  return {
+    id: m.id,
+    state: m.state,
+    reason: m.reason,
+    deadline: m.deadline ?? null,
+    preflight: m.preflight,
+    error: m.error ?? null,
+  };
 }
 
 /** A parked drain or retire past its deadline: ops must decide, nothing forces it. */
