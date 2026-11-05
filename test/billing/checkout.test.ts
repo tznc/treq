@@ -330,6 +330,45 @@ describe("createCheckout", () => {
   const user = { id: USER_ID, email: "dev@example.com" };
   const existing = { stripe_customer_id: "cus_old", trial_used_at: null };
 
+  it("applies the test coupon only when the email matches the test account exactly", async () => {
+    const testCoupon = { email: "dev@example.com", couponId: "coupon_free" };
+    const cases: [string, string | undefined][] = [
+      ["dev@example.com", "coupon_free"],
+      ["Dev@example.com", undefined],
+      ["dev@example.com.evil", undefined],
+    ];
+    for (const [email, expected] of cases) {
+      const { stripe, calls } = fakeStripe(STRIPE_OK);
+      const result = await createCheckout(
+        { plan: "pro" },
+        {
+          user: { id: USER_ID, email },
+          store: fakeStore({ getCustomer: vi.fn(async () => existing) }),
+          stripe,
+          webUrl: WEB_URL,
+          testCoupon,
+        },
+      );
+      expect(result.status).toBe(200);
+      expect(sessionParams(calls)?.["discounts[0][coupon]"]).toBe(expected);
+    }
+  });
+
+  it("applies no coupon when the test account is not configured", async () => {
+    const { stripe, calls } = fakeStripe(STRIPE_OK);
+    await createCheckout(
+      { plan: "pro" },
+      {
+        user,
+        store: fakeStore({ getCustomer: vi.fn(async () => existing) }),
+        stripe,
+        webUrl: WEB_URL,
+        testCoupon: { email: "", couponId: "" },
+      },
+    );
+    expect(sessionParams(calls)?.["discounts[0][coupon]"]).toBeUndefined();
+  });
+
   it("refuses a second Pro checkout while Stripe already has a live subscription the webhook has not recorded", async () => {
     for (const status of ["trialing", "active", "past_due", "incomplete"]) {
       const { stripe, calls } = fakeStripe({

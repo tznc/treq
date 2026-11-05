@@ -88,6 +88,8 @@ export function buildCheckoutSessionParams(input: {
    * prices take no quantity: Stripe bills what the meter recorded.
    */
   usagePriceId?: string;
+  /** A coupon applied at checkout. Only the internal test account gets one. */
+  couponId?: string;
 }): StripeParams {
   const ownerType = input.ownerType ?? "user";
   const params: StripeParams = {
@@ -107,6 +109,7 @@ export function buildCheckoutSessionParams(input: {
     "subscription_data[metadata][owner_id]": input.ownerId,
     return_url: checkoutReturnUrl(input.webUrl, ownerType),
   };
+  if (input.couponId) params["discounts[0][coupon]"] = input.couponId;
   if (input.trialEligible && ownerType === "user") {
     params["subscription_data[trial_period_days]"] = PRO_TRIAL_DAYS;
   }

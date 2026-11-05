@@ -4,7 +4,8 @@
 // with the user's Supabase JWT. The logic lives in lib.ts.
 // Env: STRIPE_SECRET_KEY, and WEB_URL for the return URL (default
 // https://treq.dev), and TREQ_STRIPE_USAGE_PRICE_LOOKUP_KEY for Pro's
-// metered usage price (default treq_sandbox_usage).
+// metered usage price (default treq_sandbox_usage). TREQ_TEST_ACCOUNT_EMAIL and
+// TREQ_TEST_COUPON_ID together give that one account a coupon at checkout.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import {
@@ -66,6 +67,10 @@ Deno.serve(async (req) => {
       webUrl: Deno.env.get("WEB_URL") ?? "https://treq.dev",
       usagePriceLookupKey:
         Deno.env.get("TREQ_STRIPE_USAGE_PRICE_LOOKUP_KEY") || undefined,
+      testCoupon: {
+        email: Deno.env.get("TREQ_TEST_ACCOUNT_EMAIL") ?? "",
+        couponId: Deno.env.get("TREQ_TEST_COUPON_ID") ?? "",
+      },
     });
     return json(result.body, result.status);
   } catch (err) {
