@@ -85,6 +85,9 @@ impl WindowController {
     cx: &mut Context<Self>,
   ) -> Self {
     let repo = repo.filter(|r| !r.is_empty());
+    // A project's remote repository opens on its machine, as its recent would.
+    let remote = repo.as_deref().and_then(crate::core::projects::remote_repo);
+    let repo = repo.filter(|_| remote.is_none());
     // A saved folder that is no longer a repository opens onboarding, and
     // opens the folder as the picker does, which offers to initialize it,
     // before a read writes `.treq/` into it.
@@ -137,7 +140,12 @@ impl WindowController {
         },
         cx,
       ),
-      None => effects.push(Effect::from(RemoteEffect::RestoreLast)),
+      None => effects.push(Effect::from(match remote {
+        Some(remote) => RemoteEffect::OpenSaved {
+          id: remote.saved_id(),
+        },
+        None => RemoteEffect::RestoreLast,
+      })),
     }
     if let Some(path) = refused {
       effects.push(Effect::OpenRepoAt(path));

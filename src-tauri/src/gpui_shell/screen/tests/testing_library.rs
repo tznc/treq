@@ -708,3 +708,95 @@ fn code_tab_hides_unchanged_files_again_in_another_workspace(cx: &mut TestAppCon
   assert!(h.drawn("code-unchanged-toggle"));
   assert!(!h.drawn("code-entry-.gitignore"), "hidden again by default");
 }
+
+// The project instructions dialog: Tab leaves the Instructions box.
+
+fn project_context_screen() -> ScreenSnapshot {
+  serde_json::from_value(serde_json::json!({
+    "kind": "projectHome",
+    "dark": false,
+    "name": "Checkout",
+    "repos": [
+      {"path": "/r/web", "label": "web", "homeRef": "main", "missing": false, "workspaces": []},
+    ],
+    "revision": 1,
+    "modal": {
+      "kind": "projectContext", "repoPath": "/r/web", "name": "Checkout",
+      "prompt": "", "contextPaths": [],
+    },
+  }))
+  .expect("snapshot")
+}
+
+#[gpui::test]
+fn tab_moves_between_the_instructions_and_the_context_paths(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, project_context_screen(), host.clone());
+  let screen = screen(&mut h);
+  let user = screen.user();
+  // `{Tab}` moves focus itself when unhandled, which the app does not: press the real key.
+  user.keyboard("a");
+  h.cx.simulate_keystrokes("tab");
+  user.keyboard("/p.md");
+  h.cx.simulate_keystrokes("shift-tab");
+  user.keyboard("b");
+  h.click("project-context-save");
+  h.cx.run_until_parked();
+  let writes: Vec<String> = host
+    .writes()
+    .into_iter()
+    .filter(|w| w.starts_with("project context "))
+    .collect();
+  assert_eq!(writes, ["project context \"ab\" [\"/p.md\"]"]);
+}
+
+// Home: a repository deleted from disk, and fresh reads.
+
+fn home_screen() -> ScreenSnapshot {
+  serde_json::from_value(serde_json::json!({
+    "kind": "projectHome",
+    "dark": false,
+    "name": "Checkout",
+    "repos": [
+      {"path": "/r/web", "label": "web", "homeRef": "main", "missing": false, "workspaces": []},
+      {"path": "/r/api", "label": "api", "homeRef": "main", "missing": false, "workspaces": []},
+    ],
+    "revision": 1,
+  }))
+  .expect("snapshot")
+}
+
+fn home_reads(host: &FakeHost, repo: &str) -> usize {
+  let call = format!("read home commits {repo}");
+  host.calls().iter().filter(|c| **c == call).count()
+}
+
+#[gpui::test]
+fn home_shows_a_repository_deleted_from_disk_as_not_on_this_machine(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    gone: vec!["/r/api"],
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, home_screen(), host.clone());
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Button).name("api: not on this machine")))
+    .to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Button).name("Open web"))).to_be_visible();
+  assert_eq!(
+    home_reads(&host, "/r/api"),
+    0,
+    "a missing repository is not read"
+  );
+  assert_eq!(home_reads(&host, "/r/web"), 1);
+}
+
+#[gpui::test]
+fn switching_home_tabs_reads_the_repositories_again(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, home_screen(), host.clone());
+  h.cx.run_until_parked();
+  assert_eq!(home_reads(&host, "/r/web"), 1);
+  h.click("project-home-tab-commits");
+  h.cx.run_until_parked();
+  assert_eq!(home_reads(&host, "/r/web"), 2);
+}

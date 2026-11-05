@@ -49,23 +49,28 @@ pub fn list(app: &AppHandle) -> Vec<Project> {
 }
 
 /// The repositories window `label` shows: its main repository, then the
-/// others in sidebar order.
+/// others in sidebar order. A remote window's repository is its key
+/// (`core::projects::remote_repo`).
 pub fn window_repos(app: &AppHandle, label: &str) -> Vec<String> {
   let state = app.state::<AppState>();
   let main = state.window_repo_paths.lock_or_recover();
   let rest = state.window_supporting_repo_paths.lock_or_recover();
-  repos_of(&main, &rest, label)
+  let remote = super::remote_repo::for_window(label).map(|r| r.cache_key);
+  repos_of(&main, &rest, remote, label)
 }
 
-/// Window `label`'s main repository, then its supporting ones.
+/// Window `label`'s main repository (local, else `remote`'s key), then its
+/// supporting ones.
 fn repos_of(
   main: &HashMap<String, String>,
   rest: &HashMap<String, Vec<String>>,
+  remote: Option<String>,
   label: &str,
 ) -> Vec<String> {
   main
     .get(label)
     .cloned()
+    .or(remote)
     .into_iter()
     .chain(rest.get(label).cloned().unwrap_or_default())
     .collect()
@@ -99,10 +104,8 @@ fn open_target(
     .map(|(label, project)| (label.clone(), Some(project.clone())))
     .collect();
   projects::mark_opened(conn, id).warn_on_err("mark project opened");
-  if let Some(label) = projects::window_for_project(&windows, id) {
-    if window_exists(label) {
-      return OpenTarget::Focus(label.to_string());
-    }
+  if let Some(label) = projects::window_for_project(&windows, id, window_exists) {
+    return OpenTarget::Focus(label.to_string());
   }
   let Some(project) = project_of(conn, Some(id)) else {
     log::warn!("no project with id {id}");
@@ -225,7 +228,7 @@ fn asks_to_save(
   }
   let project = window_projects.get(label).map(String::as_str);
   matches!(
-    projects::close_action(project, &repos_of(main, rest, label)),
+    projects::close_action(project, &repos_of(main, rest, None, label)),
     CloseAction::PromptSave { .. }
   )
 }
@@ -303,20 +306,23 @@ mod tests {
     let main = map(&[("w1", "/r/web".to_string())]);
     let rest = map(&[("w1", strings(&["/r/api", "/r/lib"]))]);
     assert_eq!(
-      repos_of(&main, &rest, "w1"),
+      repos_of(&main, &rest, None, "w1"),
       strings(&["/r/web", "/r/api", "/r/lib"])
     );
   }
 
   #[test]
   fn repos_of_unknown_window_is_empty() {
-    assert!(repos_of(&HashMap::new(), &HashMap::new(), "w1").is_empty());
+    assert!(repos_of(&HashMap::new(), &HashMap::new(), None, "w1").is_empty());
   }
 
   #[test]
   fn repos_of_window_without_supporting_repos_is_its_main() {
     let main = map(&[("w1", "/r/web".to_string())]);
-    assert_eq!(repos_of(&main, &HashMap::new(), "w1"), strings(&["/r/web"]));
+    assert_eq!(
+      repos_of(&main, &HashMap::new(), None, "w1"),
+      strings(&["/r/web"])
+    );
   }
 
   #[test]
@@ -344,6 +350,33 @@ mod tests {
         title: "Treq - Checkout".into(),
       }
     );
+  }
+
+  #[test]
+  fn open_target_focuses_a_live_window_when_another_is_stale() {
+    let conn = conn();
+    let p = projects::save(&conn, "Checkout", &strings(&["/r/web"])).unwrap();
+    let windows = map(&[
+      ("treq-2", p.id.clone()),
+      ("treq-3", p.id.clone()),
+      ("treq-4", p.id.clone()),
+    ]);
+    assert_eq!(
+      open_target(&conn, &windows, &p.id, |label| label == "treq-3"),
+      OpenTarget::Focus("treq-3".into())
+    );
+  }
+
+  #[test]
+  fn a_remote_windows_repos_are_its_remote_repository() {
+    let main = map::<String>(&[]);
+    let rest = map::<Vec<String>>(&[]);
+    let remote = Some("ssh:ep-1:gen0:/srv/app".to_string());
+    assert_eq!(
+      repos_of(&main, &rest, remote, "treq-2"),
+      strings(&["ssh:ep-1:gen0:/srv/app"])
+    );
+    assert!(repos_of(&main, &rest, None, "treq-2").is_empty());
   }
 
   #[test]

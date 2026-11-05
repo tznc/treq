@@ -9,7 +9,10 @@
 //!   the same time lines up across repositories. A column opens that
 //!   repository's Commits tab.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+  collections::{HashMap, HashSet},
+  sync::Arc,
+};
 
 use chrono::{Datelike, Duration, Local, NaiveDate};
 use gpui_kit::base::TestSupportExt as _;
@@ -49,6 +52,9 @@ pub struct RepoCard {
   pub github: Option<String>,
   /// Branches, in stack order, with their depth.
   pub workspaces: Vec<(String, u32)>,
+  /// The SSH machine a remote repository is on.
+  #[serde(default)]
+  pub host: Option<String>,
 }
 
 /// One uncommitted file in a repository's home checkout.
@@ -185,6 +191,8 @@ struct Loaded {
   changes: HashMap<String, Vec<HomeChange>>,
   commits: HashMap<String, Vec<HomeCommit>>,
   stats: HashMap<String, RepoStats>,
+  /// Repositories whose folder was gone at the last read.
+  gone: HashSet<String>,
   loading: bool,
 }
 
@@ -225,9 +233,18 @@ impl ProjectHomeView {
     }
   }
 
+  /// Shows `tab` and reads every repository again, so a commit or a
+  /// deleted folder since the last read shows.
   fn set_tab(&mut self, tab: HomeTab, cx: &mut Context<Self>) {
     self.tab = tab;
+    self.loaded.revision = None;
     cx.notify();
+  }
+
+  /// Whether `repo` is not on this machine: the snapshot says so, or its
+  /// folder was gone at the last read.
+  fn missing(&self, repo: &RepoCard) -> bool {
+    repo.missing || self.loaded.gone.contains(&repo.path)
   }
 
   /// Reads every repository's changes and history once per revision.
@@ -251,10 +268,13 @@ impl ProjectHomeView {
           repos
             .into_iter()
             .map(|(path, github)| {
+              if !host.repo_exists(&path) {
+                return (path, None);
+              }
               let changes = host.home_changes(&path);
               let commits = host.home_commits(&path, COMMITS_PER_REPO);
               let stats = host.repo_stats(&path, github.as_deref());
-              (path, changes, commits, stats)
+              (path, Some((changes, commits, stats)))
             })
             .collect::<Vec<_>>()
         })
@@ -266,7 +286,12 @@ impl ProjectHomeView {
           view.loaded.changes.clear();
           view.loaded.commits.clear();
           view.loaded.stats.clear();
-          for (path, changes, commits, stats) in read {
+          view.loaded.gone.clear();
+          for (path, read) in read {
+            let Some((changes, commits, stats)) = read else {
+              view.loaded.gone.insert(path);
+              continue;
+            };
             view.loaded.changes.insert(path.clone(), changes);
             view.loaded.commits.insert(path.clone(), commits);
             view.loaded.stats.insert(path, stats);
@@ -285,6 +310,12 @@ impl ProjectHomeView {
 
   fn card(&self, repo: &RepoCard, i: usize, p: &theme::Palette) -> AnyElement {
     let count = repo.workspaces.len();
+    let missing = self.missing(repo);
+    let name = if missing {
+      format!("{}: not on this machine", repo.label)
+    } else {
+      format!("Open {}", repo.label)
+    };
     div()
       .id(("project-home-card", i))
       .debug_selector({
@@ -292,7 +323,7 @@ impl ProjectHomeView {
         move || id
       })
       .role(gpui::Role::Button)
-      .aria_label(SharedString::from(format!("Open {}", repo.label)))
+      .aria_label(SharedString::from(name))
       .test_support()
       .flex()
       .flex_col()
@@ -305,23 +336,24 @@ impl ProjectHomeView {
       .bg(p.card)
       .cursor_pointer()
       .hover(|s| s.border_color(p.primary))
-      .when(repo.missing, |this| this.opacity(0.5))
+      .when(missing, |this| this.opacity(0.5))
       .child(repo_title(repo, p))
       .children(
         self
           .loaded
           .stats
           .get(&repo.path)
+          .filter(|_| !missing)
           .map(|stats| stats_block(repo, stats, p)),
       )
       .child(
         ui::text(div(), TextSize::Xs)
           .text_color(p.muted_foreground)
           .truncate()
-          .child(if repo.missing {
-            format!("{} (not on this machine)", repo.path)
-          } else {
-            repo.path.clone()
+          .child(match &repo.host {
+            Some(host) => format!("{} on {host}", repo.path),
+            None if missing => format!("{} (not on this machine)", repo.path),
+            None => repo.path.clone(),
           }),
       )
       .child(
@@ -350,7 +382,7 @@ impl ProjectHomeView {
                 .child(format!("+{} more", count - 6)),
             )
           })
-          .when(count == 0 && !repo.missing, |this| {
+          .when(count == 0 && !missing, |this| {
             this.child(ui::EmptyState::new(
               format!("project-card-empty-{i}"),
               "No workspaces",
@@ -390,8 +422,13 @@ impl ProjectHomeView {
 
   fn changes_tab(&self, p: &theme::Palette) -> AnyElement {
     let mut clean = Vec::new();
+    let mut gone = Vec::new();
     let mut groups = Vec::new();
     for (i, repo) in self.route.repos.iter().enumerate() {
+      if self.missing(repo) {
+        gone.push(repo.label.clone());
+        continue;
+      }
       let files = self
         .loaded
         .changes
@@ -497,6 +534,7 @@ impl ProjectHomeView {
       .gap_3()
       .children(groups)
       .children(empty)
+      .children(not_here(&gone, p))
       .into_any_element()
   }
 
@@ -576,7 +614,9 @@ impl ProjectHomeView {
   }
 
   fn commits_tab(&self, p: &theme::Palette) -> AnyElement {
-    let repos: Vec<&RepoCard> = self.route.repos.iter().filter(|r| !r.missing).collect();
+    let (gone, repos): (Vec<&RepoCard>, Vec<&RepoCard>) =
+      self.route.repos.iter().partition(|r| self.missing(r));
+    let gone: Vec<String> = gone.into_iter().map(|r| r.label.clone()).collect();
     let columns: Vec<Vec<HomeCommit>> = repos
       .iter()
       .map(|r| {
@@ -661,10 +701,22 @@ impl ProjectHomeView {
           .flex()
           .flex_col()
           .child(header)
-          .children(rows),
+          .children(rows)
+          .children(not_here(&gone, p)),
       )
       .into_any_element()
   }
+}
+
+/// The note naming the repositories whose folder is not on this machine,
+/// which a tab cannot read.
+fn not_here(labels: &[String], p: &theme::Palette) -> Option<impl IntoElement> {
+  (!labels.is_empty()).then(|| {
+    ui::text(div(), TextSize::Sm)
+      .pt_3()
+      .text_color(p.muted_foreground)
+      .child(format!("Not on this machine: {}", labels.join(", ")))
+  })
 }
 
 /// A card's numbers: the 30-day activity line, then the counts.

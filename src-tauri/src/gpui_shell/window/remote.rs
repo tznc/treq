@@ -98,6 +98,8 @@ pub struct Remote {
   pub setup_screen: Option<&'static str>,
   /// The "Your own VM" endpoint the form confirmed is being registered.
   pub registering: bool,
+  /// Why the last registration saved nothing.
+  pub register_error: Option<String>,
   /// `RemoteTerminalDialog` is open.
   pub terminal: bool,
   /// Why the last remote change could not be verified, until dismissed.
@@ -110,6 +112,8 @@ pub struct Remote {
   pub repository: Option<RemoteRepository>,
   /// Cut-off endpoints and why (`remoteCutoffStore`).
   pub cutoffs: BTreeMap<String, String>,
+  /// Endpoints the last read couldn't reach: the banner shows Offline.
+  pub unreachable: std::collections::BTreeSet<String>,
   /// The cloud workspace's instance state, for the connection banner.
   pub instance_state: Option<String>,
 }
@@ -350,10 +354,17 @@ impl Remote {
     }
   }
 
-  /// The "Your own VM" endpoint was saved.
-  pub fn registered(&mut self, endpoint: SshEndpoint) -> Vec<RemoteEffect> {
+  /// The "Your own VM" endpoint was saved, or the host refused the login
+  /// and nothing was.
+  pub fn registered(&mut self, endpoint: Result<SshEndpoint, String>) -> Vec<RemoteEffect> {
     self.registering = false;
-    self.list_repositories(endpoint, 0)
+    match endpoint {
+      Ok(endpoint) => self.list_repositories(endpoint, 0),
+      Err(error) => {
+        self.register_error = Some(error);
+        Vec::new()
+      }
+    }
   }
 
   /// `listenManagedEndpoint`: Rust connected to the cloud workspace, or
@@ -560,8 +571,9 @@ impl Remote {
 /// host.
 pub trait RemoteHost: Send + Sync {
   fn saved_repositories(&self, endpoint_id: &str, generation: u64) -> Vec<SavedRepository>;
-  /// Saves the endpoint the form confirmed and returns it.
-  fn register_user_managed(&self, values: &UserManagedValues) -> SshEndpoint;
+  /// Saves the endpoint the form confirmed and returns it, unless the host
+  /// refuses the login ([`check_login`]).
+  fn register_user_managed(&self, values: &UserManagedValues) -> Result<SshEndpoint, String>;
   /// `dispatchOverSsh`: a typed read on `endpoint`.
   fn remote_read(
     &self,
@@ -645,6 +657,24 @@ pub fn list_directories(
       },
     )
     .and_then(parse)
+}
+
+/// Logs in to `endpoint` before it is saved: the host-key probe never
+/// authenticates, so a wrong username or key shows here. Only a refused
+/// login fails; a host without `treq` still logged in.
+pub fn check_login(host: &dyn RemoteHost, endpoint: &SshEndpoint) -> Result<(), String> {
+  match list_directories(host, endpoint, "~") {
+    Err(error)
+      if error.contains("ssh authentication failed")
+        || error.contains("ssh key material unavailable") =>
+    {
+      Err(format!(
+        "Authentication failed for {}@{}. Check the username and SSH key. ({error})",
+        endpoint.username, endpoint.hostname
+      ))
+    }
+    _ => Ok(()),
+  }
 }
 
 /// `handleProbeExplicitEndpointRepo`: what is at `path` on `endpoint`.

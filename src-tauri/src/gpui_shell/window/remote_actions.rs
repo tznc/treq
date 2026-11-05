@@ -134,6 +134,7 @@ impl Model {
         match values {
           Ok(values) if self.remote.setup => {
             self.remote.registering = true;
+            self.remote.register_error = None;
             vec![Effect::from(RemoteEffect::RegisterUserManaged(values))]
           }
           _ => Vec::new(),

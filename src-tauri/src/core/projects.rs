@@ -220,7 +220,8 @@ pub fn rename(conn: &Connection, id: &str, name: &str) -> Result<(), String> {
     .map(drop)
 }
 
-pub fn add_repo(conn: &Connection, id: &str, repo: &str) -> Result<(), String> {
+/// Adds `repo` to project `id`; true when it was not there yet.
+pub fn add_repo(conn: &Connection, id: &str, repo: &str) -> Result<bool, String> {
   exists(conn, id)?;
   conn
     .execute(
@@ -229,7 +230,7 @@ pub fn add_repo(conn: &Connection, id: &str, repo: &str) -> Result<(), String> {
       params![id, repo],
     )
     .map_err(err)
-    .map(drop)
+    .map(|inserted| inserted > 0)
 }
 
 pub fn remove_repo(conn: &Connection, id: &str, repo: &str) -> Result<(), String> {
@@ -357,12 +358,54 @@ pub fn ensure_repo(spec: &str, root: &Path) -> Result<(String, bool), String> {
   Ok((dest_str, true))
 }
 
+/// A repository on an SSH machine, as a project stores it: the remote
+/// window's cache key, `ssh:<endpoint>:gen<generation>:<path>`
+/// (`gpui_shell::window::remote::cache_key`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoteRepoRef {
+  pub endpoint_id: String,
+  pub generation: u64,
+  pub path: String,
+}
+
+impl RemoteRepoRef {
+  /// The id of its saved remote repository record (`remote_records`).
+  pub fn saved_id(&self) -> String {
+    crate::core::remote_records::repository_id(&self.endpoint_id, self.generation, &self.path)
+  }
+}
+
+/// The remote repository project entry `repo` names; `None` for a local path.
+pub fn remote_repo(repo: &str) -> Option<RemoteRepoRef> {
+  let rest = repo.strip_prefix("ssh:")?;
+  rest.match_indices(":gen").find_map(|(at, _)| {
+    let (endpoint_id, after) = rest.split_at_checked(at)?;
+    let (generation, path) = after.strip_prefix(":gen")?.split_once(':')?;
+    Some(RemoteRepoRef {
+      endpoint_id: endpoint_id.to_string(),
+      generation: generation.parse().ok()?,
+      path: path.to_string(),
+    })
+  })
+}
+
+/// Where a remote repository of a project lives.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteOverview {
+  /// The machine's endpoint id; the CLI shows its host name when known.
+  pub host: String,
+  pub path: String,
+}
+
 /// One repository of a project as `treq project status` reports it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoOverview {
   pub path: String,
   pub exists: bool,
+  /// Set for a repository on an SSH machine, which this machine cannot read.
+  pub remote: Option<RemoteOverview>,
   pub workspaces: Vec<WorkspaceOverview>,
 }
 
@@ -382,6 +425,17 @@ pub fn overview(project: &Project) -> Vec<RepoOverview> {
     .repos
     .iter()
     .map(|path| {
+      if let Some(remote) = remote_repo(path) {
+        return RepoOverview {
+          path: remote.path.clone(),
+          exists: false,
+          remote: Some(RemoteOverview {
+            host: remote.endpoint_id,
+            path: remote.path,
+          }),
+          workspaces: Vec::new(),
+        };
+      }
       let exists = Path::new(path).is_dir();
       let workspaces = if exists {
         crate::local_db::get_workspaces(path)
@@ -401,6 +455,7 @@ pub fn overview(project: &Project) -> Vec<RepoOverview> {
       RepoOverview {
         path: path.clone(),
         exists,
+        remote: None,
         workspaces,
       }
     })
@@ -518,16 +573,20 @@ pub fn close_action(project_id: Option<&str>, repos: &[String]) -> CloseAction {
   }
 }
 
-/// The window already showing `project_id`, which switching focuses instead
-/// of opening another. `windows` pairs each window label with its project.
+/// A live window already showing `project_id`, which switching focuses
+/// instead of opening another. `windows` pairs each window label with its
+/// project; `is_live` says whether a label is still open, since a closed
+/// window can stay recorded.
 pub fn window_for_project<'a>(
   windows: &'a [(String, Option<String>)],
   project_id: &str,
+  is_live: impl Fn(&str) -> bool,
 ) -> Option<&'a str> {
   windows
     .iter()
-    .find(|(_, project)| project.as_deref() == Some(project_id))
+    .filter(|(_, project)| project.as_deref() == Some(project_id))
     .map(|(label, _)| label.as_str())
+    .find(|label| is_live(label))
 }
 
 #[cfg(test)]
@@ -962,14 +1021,74 @@ mod tests {
   }
 
   #[test]
+  fn add_repo_says_whether_the_repository_was_new() {
+    let conn = conn();
+    let p = save(&conn, "P", &repos(&["/r/web"])).unwrap();
+    assert!(add_repo(&conn, &p.id, "/r/api").unwrap());
+    assert!(!add_repo(&conn, &p.id, "/r/api").unwrap());
+    assert!(!add_repo(&conn, &p.id, "/r/web").unwrap());
+  }
+
+  #[test]
+  fn reads_a_remote_repository_key() {
+    assert_eq!(
+      remote_repo("ssh:ep-1:gen3:/srv/app"),
+      Some(RemoteRepoRef {
+        endpoint_id: "ep-1".into(),
+        generation: 3,
+        path: "/srv/app".into(),
+      })
+    );
+    // An endpoint id may hold colons; the path follows the generation.
+    let odd = remote_repo("ssh:a:b:gen0:~/x:gen1:y").unwrap();
+    assert_eq!(
+      (odd.endpoint_id.as_str(), odd.path.as_str()),
+      ("a:b", "~/x:gen1:y")
+    );
+    assert_eq!(
+      odd.saved_id(),
+      crate::core::remote_records::repository_id("a:b", 0, "~/x:gen1:y")
+    );
+  }
+
+  #[test]
+  fn local_paths_are_not_remote_keys() {
+    assert_eq!(remote_repo("/r/web"), None);
+    assert_eq!(remote_repo("ssh:nogen"), None);
+    assert_eq!(remote_repo("ssh:ep:genx:/p"), None);
+  }
+
+  #[test]
+  fn overview_names_the_host_of_a_remote_repository() {
+    let project = Project {
+      id: "p".into(),
+      name: "P".into(),
+      repos: repos(&["ssh:ep-1:gen0:/srv/app"]),
+      created_at: String::new(),
+      last_opened_at: String::new(),
+      prompt: String::new(),
+      context_paths: Vec::new(),
+    };
+    let repo = &overview(&project)[0];
+    assert_eq!(repo.path, "/srv/app");
+    assert_eq!(
+      repo.remote,
+      Some(RemoteOverview {
+        host: "ep-1".into(),
+        path: "/srv/app".into()
+      })
+    );
+  }
+
+  #[test]
   fn window_for_project_is_none_without_windows() {
-    assert_eq!(window_for_project(&[], "p1"), None);
+    assert_eq!(window_for_project(&[], "p1", |_| true), None);
   }
 
   #[test]
   fn window_for_project_ignores_unsaved_windows() {
     let windows = vec![("main".to_string(), None), ("w2".to_string(), None)];
-    assert_eq!(window_for_project(&windows, ""), None);
+    assert_eq!(window_for_project(&windows, "", |_| true), None);
   }
 
   #[test]
@@ -1051,8 +1170,8 @@ mod tests {
       ("main".to_string(), None),
       ("treq-1".to_string(), Some("p1".to_string())),
     ];
-    assert_eq!(window_for_project(&windows, "p1"), Some("treq-1"));
-    assert_eq!(window_for_project(&windows, "p2"), None);
+    assert_eq!(window_for_project(&windows, "p1", |_| true), Some("treq-1"));
+    assert_eq!(window_for_project(&windows, "p2", |_| true), None);
   }
 }
 

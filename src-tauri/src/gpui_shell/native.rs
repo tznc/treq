@@ -53,6 +53,12 @@ pub enum NativeEvent {
   /// A remote command found the endpoint cut off.
   #[serde(rename_all = "camelCase")]
   RemoteCutoff { endpoint_id: String, reason: String },
+  /// A remote read reached the endpoint's host, or couldn't.
+  #[serde(rename_all = "camelCase")]
+  RemoteReachability {
+    endpoint_id: String,
+    reachable: bool,
+  },
   /// The backend started an agent session (`gpui_shell::launch`). The
   /// model makes it the active session, and with `select` shows its
   /// workspace.
@@ -434,6 +440,15 @@ impl Transport for Backend {
       endpoint_id: endpoint_id.to_string(),
       reason: cutoff.id().to_string(),
     });
+  }
+
+  fn reachable(&self, endpoint_id: &str, reachable: bool) {
+    if remote_repo::record_reachable(endpoint_id, reachable) {
+      self.notify(NativeEvent::RemoteReachability {
+        endpoint_id: endpoint_id.to_string(),
+        reachable,
+      });
+    }
   }
 
   fn reads(&self) -> &Reads {

@@ -69,6 +69,8 @@ struct FakeHost {
   from_db: bool,
   /// What `summaries` answers, when the host reads in one round trip.
   summaries: Mutex<Option<Vec<WorkspaceSummary>>>,
+  /// Every remote read fails so, as when the host refuses the login.
+  read_error: Option<String>,
   /// Every call, in order.
   calls: Mutex<Vec<String>>,
   /// The watched checkouts, each with the sender that reports an edit.
@@ -334,9 +336,10 @@ impl RemoteHost for FakeHost {
     vec![saved(endpoint_id, generation, "/srv/app")]
   }
 
-  fn register_user_managed(&self, values: &UserManagedValues) -> SshEndpoint {
+  fn register_user_managed(&self, values: &UserManagedValues) -> Result<SshEndpoint, String> {
+    super::remote::check_login(self, &endpoint())?;
     self.record(format!("register {}", values.hostname));
-    endpoint()
+    Ok(endpoint())
   }
 
   fn remote_read(
@@ -345,6 +348,9 @@ impl RemoteHost for FakeHost {
     request: TreqCommandRequest,
   ) -> Result<serde_json::Value, String> {
     self.record(format!("read {}", request.kind_name()));
+    if let Some(error) = &self.read_error {
+      return Err(error.clone());
+    }
     match request {
       TreqCommandRequest::ProbeRepo { repo } => Ok(serde_json::json!({
         "host": "devbox.example", "path": repo, "exists": !self.no_repo,
@@ -1490,6 +1496,21 @@ fn opens_a_recent_remote_repository_by_its_saved_id(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn opens_a_remote_project_repository_on_its_host(cx: &mut TestAppContext) {
+  let descriptor = saved(&endpoint().id, 0, "/srv/app");
+  let host = Arc::new(FakeHost {
+    last_remote: Some(descriptor),
+    ..FakeHost::default()
+  });
+  let key = crate::gpui_shell::window::remote::cache_key(&endpoint().id, 0, "/srv/app");
+  let window = Window::open(cx, host.clone(), Some(&key));
+  let calls = host.calls();
+  assert!(calls.contains(&"restore /srv/app".to_string()), "{calls:?}");
+  assert!(!calls.iter().any(|c| c.contains("ssh:")), "{calls:?}");
+  assert!(window.screen_snapshot().repository.is_some());
+}
+
+#[gpui::test]
 fn a_failed_restore_stays_on_onboarding(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost {
     last_remote: Some(saved("ep-1", 0, "/srv/app")),
@@ -2086,4 +2107,56 @@ fn window_model_perf(cx: &mut TestAppContext) {
       .collect();
     report(&format!("{count} workspaces: unchanged poll"), &mut poll);
   }
+}
+
+/// A login the host refuses saves no host: the form stays open with why.
+#[gpui::test]
+fn a_refused_login_saves_no_host(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    read_error: Some(
+      "transport_error: ssh authentication failed: no authentication method succeeded".into(),
+    ),
+    ..FakeHost::default()
+  });
+  let window = Window::open(cx, host.clone(), None);
+  window.press(cx, "machines.addSsh");
+  window.field(
+    cx,
+    "remote.registerUserManaged",
+    serde_json::json!({
+      "display_name": "Dev box", "hostname": "devbox.example", "port": 22,
+      "username": "nobody", "host_key_fingerprint": "SHA256:x",
+      "auth_identity_reference": "/k",
+    }),
+  );
+  let calls = host.calls();
+  assert!(
+    !calls.iter().any(|c| c.starts_with("register")),
+    "{calls:?}"
+  );
+  let setup = window
+    .screen_snapshot()
+    .remote
+    .setup
+    .expect("setup stays open");
+  assert!(!setup.registering);
+  let error = setup.register_error.expect("an error");
+  assert!(error.starts_with("Authentication failed"), "{error}");
+}
+
+/// A host that runs no treq, or anything but a refused login, still saves.
+#[test]
+fn only_a_refused_login_fails_the_check() {
+  let refused = FakeHost {
+    read_error: Some("transport_error: ssh authentication failed: x".into()),
+    ..FakeHost::default()
+  };
+  assert!(super::remote::check_login(&refused, &endpoint()).is_err());
+  let no_treq = FakeHost {
+    read_error: Some(
+      "transport_error: remote command failed (exit=Some(127)): treq: not found".into(),
+    ),
+    ..FakeHost::default()
+  };
+  assert!(super::remote::check_login(&no_treq, &endpoint()).is_ok());
 }
