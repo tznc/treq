@@ -5,6 +5,7 @@
 //   requested → preflight → target_provisioning → target_bootstrapped
 //     → verifying → cutover → source_retiring → completed
 //   preflight → awaiting_ack            (unpushed work, no acknowledgement)
+//   target_bootstrapped → awaiting_ack  (a repo failed to re-clone)
 //   target_* / verifying → rolling_back → rolled_back
 //
 // The state names the step to run next. Each step does its work, then moves
@@ -437,6 +438,15 @@ export async function stepMigration(deps: EngineDeps, migrationId: string): Prom
           }
         }
         const config = await pullUserConfigOntoTarget(provider, resourceId, m);
+        // A repo that failed to clone would be missing on the target, and
+        // cutover then stops the source that still has it. Park for the
+        // owner instead; acknowledging resumes at `verifying`
+        // (resumeParkedMigration). A repo with no remote url is not parked
+        // on: preflight already counted its commits as unpushed.
+        const cloneFailed = repos.filter((r) => r.reason === "clone_failed");
+        if (cloneFailed.length > 0) {
+          return await advance("awaiting_ack", { repos, clone_failed: cloneFailed, config_restored: config.restored });
+        }
         return await advance("verifying", { repos, config_restored: config.restored });
       }
 
