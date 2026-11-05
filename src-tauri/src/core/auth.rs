@@ -580,8 +580,8 @@ mod tests {
   fn pkce_challenge_is_base64url_sha256() {
     // Vector from Node's `createHash("sha256").digest("base64url")`.
     assert_eq!(
-      pkce_challenge("dBjftJeZ4CVP-mJ92K9qQEG7-OTdoJkKTvXwThtXRqE"),
-      "W9_id8qLJ9amhQ9r2-se40canmWvfq1gCR0ZpAcK0-k"
+      pkce_challenge("treq-pkce-verifier-0123456789-abcdefghijklmnop"),
+      "-v_8IUGGvwNH6k6VXOlFcvF3OIoaQu81JfTaUZtUB1s"
     );
   }
 
