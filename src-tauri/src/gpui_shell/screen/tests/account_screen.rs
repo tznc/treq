@@ -678,6 +678,48 @@ fn cloud_workspace_resizes_after_confirming_the_unpushed_work_it_loses(cx: &mut 
 }
 
 #[gpui::test]
+fn cloud_card_shows_a_running_switch_and_a_stuck_one(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let instance = serde_json::json!({
+    "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 10,
+    "tierId": "s", "region": "us_east"
+  });
+  let mut h = signed_in_with_cloud(
+    cx,
+    host,
+    cloud(serde_json::json!({
+      "instance": instance, "tiers": tiers(), "selectedTier": "m",
+      "migration": {"id": "mig-1", "state": "verifying", "reason": "user_resize", "error": null},
+    })),
+  );
+  let card = cloud_card(&mut h);
+  let migration = card.migration.expect("switch shown");
+  assert_eq!(
+    migration.title,
+    "Moving to a new machine: checking the new machine"
+  );
+  assert!(!migration.stuck);
+  assert!(!card.resize, "no second resize while one runs");
+  assert!(h.drawn("cloud-migration-alert"));
+
+  set_cloud(
+    &mut h,
+    serde_json::json!({
+      "instance": instance, "tiers": tiers(), "selectedTier": "m",
+      "migration": {"id": "mig-1", "state": "rolling_back", "reason": "user_resize",
+        "error": {"step": "rolling_back", "kind": "unavailable", "message": "vendor down"}},
+    }),
+  );
+  let migration = cloud_card(&mut h).migration.expect("switch shown");
+  assert_eq!(migration.title, "Moving to a new machine: undoing the move");
+  assert!(migration.stuck);
+  assert_eq!(
+    migration.detail.as_deref(),
+    Some("Last error: vendor down. If this doesn't clear, contact support with migration mig-1.")
+  );
+}
+
+#[gpui::test]
 fn integrations_sign_in_when_signed_out(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::with_settings(&[(
     "feature_preview.linearIntegration",
