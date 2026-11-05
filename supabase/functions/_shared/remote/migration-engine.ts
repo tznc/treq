@@ -69,6 +69,9 @@ const ROLLBACK_ALLOWED: ReadonlySet<string> = new Set([
 
 // Transient provider errors are retried this many times before rolling back.
 export const MAX_ATTEMPTS = 3;
+// How long a migration parked on a failed re-clone waits for its owner
+// before the hourly run rolls it back and deletes the new machine.
+export const CLONE_FAILURE_PARK_MS = 12 * 3600_000;
 // After cutover nothing rolls back, so a failing step is retried; past this
 // many attempts the migration is marked failed for an operator.
 export const MAX_POST_CUTOVER_ATTEMPTS = 10;
@@ -147,7 +150,7 @@ export interface MigrationStore {
   advance(id: string, expected: string, next: string, detail?: Record<string, unknown>): Promise<boolean>;
   setMigrationFields(
     id: string,
-    fields: Partial<Pick<MigrationRow, "target_placement_id" | "preflight" | "attempt" | "acknowledged_data_loss">> & {
+    fields: Partial<Pick<MigrationRow, "target_placement_id" | "preflight" | "attempt" | "acknowledged_data_loss" | "deadline">> & {
       error?: Record<string, unknown> | null;
     },
   ): Promise<void>;
@@ -445,6 +448,17 @@ export async function stepMigration(deps: EngineDeps, migrationId: string): Prom
         // on: preflight already counted its commits as unpushed.
         const cloneFailed = repos.filter((r) => r.reason === "clone_failed");
         if (cloneFailed.length > 0) {
+          // While it waits, the new machine is stopped so it bills only its
+          // disk; `verifying` wakes it again on acknowledgement. Owner
+          // resizes get a deadline, after which the hourly run rolls the
+          // migration back; operator drains keep their own.
+          await ignoreNotFound(provider.stopInstance(resourceId));
+          if (target.state !== "suspended") await store.setPlacementState(target.id, "suspended");
+          if (m.reason !== "drain" && m.reason !== "retire") {
+            await store.setMigrationFields(m.id, {
+              deadline: new Date(deps.now() + CLONE_FAILURE_PARK_MS).toISOString(),
+            });
+          }
           return await advance("awaiting_ack", { repos, clone_failed: cloneFailed, config_restored: config.restored });
         }
         return await advance("verifying", { repos, config_restored: config.restored });
