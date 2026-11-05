@@ -525,3 +525,29 @@ Deno.test("an invalid BYOS key rolls back at once instead of retrying", async ()
   assertEquals(r.state, "rolled_back");
   assertEquals(w.migration.attempt, 1);
 });
+
+async function rollbackWithFailingDelete(err: ProviderError) {
+  const w = new World();
+  w.failBootstrap = true;
+  const base = depsFor(w);
+  const deps: EngineDeps = {
+    ...base,
+    providers: (k, id) => ({ ...base.providers(k, id), deleteInstance: () => Promise.reject(err) }),
+  };
+  for (let i = 0; i < 40 && !TERMINAL_STATES.has(w.migration.state); i++) {
+    await stepMigration(deps, w.migration.id);
+  }
+  return w;
+}
+
+Deno.test("a rollback whose delete keeps failing transiently ends failed", async () => {
+  const w = await rollbackWithFailingDelete(new ProviderError("unavailable", "vendor down"));
+  assertEquals(w.migration.state, "failed");
+  assertEquals(w.steps.at(-1)?.from, "rolling_back");
+});
+
+Deno.test("a rollback whose delete is refused ends failed with the error", async () => {
+  const w = await rollbackWithFailingDelete(new ProviderError("other", "403 forbidden"));
+  assertEquals(w.migration.state, "failed");
+  assertEquals((w.steps.at(-1)?.detail as { message: string } | undefined)?.message, "403 forbidden");
+});
