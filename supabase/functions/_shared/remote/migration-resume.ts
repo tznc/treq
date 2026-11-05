@@ -1,5 +1,6 @@
 // Resuming a parked migration (docs/design/sandbox-provider-adapter.md §7).
-// A migration whose preflight found unpushed work waits in `awaiting_ack`.
+// A migration whose preflight found unpushed work, or whose target failed
+// to re-clone a repo, waits in `awaiting_ack`.
 // The owner (`acknowledge_migration`) or an operator (`force_migration`)
 // moves it on. Preflight runs again first: if the work has been pushed
 // since, the migration goes ahead without recording an acknowledgement.
@@ -32,6 +33,16 @@ export async function resumeParkedMigration(
   if (m.state !== "awaiting_ack") {
     return { resumed: false, state: m.state, acknowledged: false, preflight: null };
   }
+  if (m.target_placement_id) {
+    // Parked after the target was bootstrapped, because a repo failed to
+    // re-clone: preflight already ran and the clones are done, so an
+    // acknowledgement goes straight to `verifying`.
+    if (!opts.acknowledge) return { resumed: false, state: m.state, acknowledged: false, preflight: null };
+    await store.setMigrationFields(m.id, { acknowledged_data_loss: true });
+    const ok = await store.advance(m.id, "awaiting_ack", "verifying", { resumed: true, acknowledged: true });
+    const state = ok ? "verifying" : (await store.getMigration(m.id))?.state ?? m.state;
+    return { resumed: ok, state, acknowledged: ok, preflight: null };
+  }
   const { report: preflight, woke } = await runPreflightOnSource(deps, m);
   const acknowledged = preflight.requires_ack && opts.acknowledge;
   await store.setMigrationFields(
@@ -49,7 +60,10 @@ export async function resumeParkedMigration(
   return { resumed: ok, state, acknowledged, preflight };
 }
 
-type SummaryFields = Pick<MigrationRow, "id" | "state" | "reason" | "preflight"> & { deadline?: string | null };
+type SummaryFields = Pick<MigrationRow, "id" | "state" | "reason" | "preflight"> & {
+  deadline?: string | null;
+  error?: Record<string, unknown> | null;
+};
 
 /** What `status` and `resize` tell the app about an open migration. */
 export function migrationSummary(m: SummaryFields | null): {
@@ -58,9 +72,18 @@ export function migrationSummary(m: SummaryFields | null): {
   reason: string;
   deadline: string | null;
   preflight: PreflightReport | null;
+  /** The last step's error, so the app can explain a switch that is stuck. */
+  error: Record<string, unknown> | null;
 } | null {
   if (!m) return null;
-  return { id: m.id, state: m.state, reason: m.reason, deadline: m.deadline ?? null, preflight: m.preflight };
+  return {
+    id: m.id,
+    state: m.state,
+    reason: m.reason,
+    deadline: m.deadline ?? null,
+    preflight: m.preflight,
+    error: m.error ?? null,
+  };
 }
 
 /** A parked drain or retire past its deadline: ops must decide, nothing forces it. */

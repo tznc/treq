@@ -51,6 +51,8 @@ class World {
   failBootstrap = false;
   failExecTransient = 0;
   failProbe = false;
+  // Re-clones on the target exit non-zero (auth failure, gone remote).
+  failReclone = false;
   failStopTransient = false;
   spendCapped = false;
   // Runs inside the provider's createInstance, before it returns: a
@@ -246,6 +248,9 @@ function providerFor(w: World, kind: ProviderKind): SandboxProvider {
       if (cmd[3] === "preflight") {
         const out = cmd.slice(4).map((p) => `REPO\t${p}\nVCS\tjj\nDIRTY\t0\nUNPUSHED\t${w.unpushed}\nAGENTS\t0\n`).join("");
         return Promise.resolve({ exitCode: 0, stdout: out, stderr: "" });
+      }
+      if (w.failReclone && cmd[3] === "reclone") {
+        return Promise.resolve({ exitCode: 128, stdout: "", stderr: "auth failed" });
       }
       if (w.failProbe && cmd.join(" ").includes("2222")) {
         return Promise.resolve({ exitCode: 1, stdout: "", stderr: "connection refused" });
@@ -480,6 +485,55 @@ Deno.test("resuming a migration that is not parked does nothing", async () => {
   assertEquals(w.writes, writes);
 });
 
+// A re-clone that fails parks the migration before cutover.
+
+async function parkedOnClone(): Promise<World> {
+  const w = new World();
+  w.failReclone = true;
+  assertEquals(await runToEnd(w), "awaiting_ack");
+  return w;
+}
+
+Deno.test("a failed re-clone parks the migration before cutover and keeps the source running", async () => {
+  const w = await parkedOnClone();
+  assertEquals(w.activePlacement().id, "p-src");
+  assertEquals(w.machines.get("m-src")?.state, "ready");
+  assertEquals(w.instance.fence, 0);
+  const park = w.steps.find((s) => s.to === "awaiting_ack")?.detail as {
+    clone_failed: Array<{ path: string; reason: string }>;
+  };
+  assertEquals(park.clone_failed.map((r) => r.path), ["/home/treq/a"]);
+});
+
+Deno.test("an acknowledged clone failure resumes at verifying, without a second preflight, and completes", async () => {
+  const w = await parkedOnClone();
+  const preflights = w.execs.filter((c) => c[3] === "preflight").length;
+  const reclones = w.execs.filter((c) => c[3] === "reclone").length;
+  const r = await resumeParkedMigration(depsFor(w), "mig", { acknowledge: true });
+  assertEquals(r.resumed, true);
+  assertEquals(r.state, "verifying");
+  assert(w.migration.acknowledged_data_loss);
+  assertEquals(await runToEnd(w), "completed");
+  assertEquals(w.execs.filter((c) => c[3] === "preflight").length, preflights);
+  assertEquals(w.execs.filter((c) => c[3] === "reclone").length, reclones);
+  assertEquals(w.liveMachines().length, 2);
+});
+
+Deno.test("an unacknowledged clone failure stays parked and never stops the source", async () => {
+  const w = await parkedOnClone();
+  const r = await resumeParkedMigration(depsFor(w), "mig", { acknowledge: false });
+  assertEquals(r.resumed, false);
+  assertEquals(w.migration.state, "awaiting_ack");
+  assertEquals(await runToEnd(w), "awaiting_ack");
+  assertEquals(w.machines.get("m-src")?.state, "ready");
+  assertEquals(w.activePlacement().id, "p-src");
+});
+
+Deno.test("a repo without a remote url does not park: preflight already counted its commits as unpushed", async () => {
+  const w = new World();
+  assertEquals(await runToEnd(w), "completed");
+});
+
 // ── BYOS (bring your own sandbox) ───────────────────────────────────────
 
 function byosWorld(target: string) {
@@ -524,4 +578,30 @@ Deno.test("an invalid BYOS key rolls back at once instead of retrying", async ()
   const r = await runMigration(depsFor(w), "mig", { deadlineMs: 1, maxSteps: 20 });
   assertEquals(r.state, "rolled_back");
   assertEquals(w.migration.attempt, 1);
+});
+
+async function rollbackWithFailingDelete(err: ProviderError) {
+  const w = new World();
+  w.failBootstrap = true;
+  const base = depsFor(w);
+  const deps: EngineDeps = {
+    ...base,
+    providers: (k, id) => ({ ...base.providers(k, id), deleteInstance: () => Promise.reject(err) }),
+  };
+  for (let i = 0; i < 40 && !TERMINAL_STATES.has(w.migration.state); i++) {
+    await stepMigration(deps, w.migration.id);
+  }
+  return w;
+}
+
+Deno.test("a rollback whose delete keeps failing transiently ends failed", async () => {
+  const w = await rollbackWithFailingDelete(new ProviderError("unavailable", "vendor down"));
+  assertEquals(w.migration.state, "failed");
+  assertEquals(w.steps.at(-1)?.from, "rolling_back");
+});
+
+Deno.test("a rollback whose delete is refused ends failed with the error", async () => {
+  const w = await rollbackWithFailingDelete(new ProviderError("other", "403 forbidden"));
+  assertEquals(w.migration.state, "failed");
+  assertEquals((w.steps.at(-1)?.detail as { message: string } | undefined)?.message, "403 forbidden");
 });

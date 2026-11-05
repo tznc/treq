@@ -5,6 +5,7 @@
 //   requested → preflight → target_provisioning → target_bootstrapped
 //     → verifying → cutover → source_retiring → completed
 //   preflight → awaiting_ack            (unpushed work, no acknowledgement)
+//   target_bootstrapped → awaiting_ack  (a repo failed to re-clone)
 //   target_* / verifying → rolling_back → rolled_back
 //
 // The state names the step to run next. Each step does its work, then moves
@@ -71,6 +72,9 @@ export const MAX_ATTEMPTS = 3;
 // After cutover nothing rolls back, so a failing step is retried; past this
 // many attempts the migration is marked failed for an operator.
 export const MAX_POST_CUTOVER_ATTEMPTS = 10;
+// A rollback that keeps failing ends `failed` after this many attempts, so
+// the instance can migrate again and the orphan sweep reclaims the target.
+export const MAX_ROLLBACK_ATTEMPTS = 10;
 
 // Seconds a step may take at worst, so the lease is extended to cover it
 // before the step starts (a second worker must not take an expired lease
@@ -434,6 +438,15 @@ export async function stepMigration(deps: EngineDeps, migrationId: string): Prom
           }
         }
         const config = await pullUserConfigOntoTarget(provider, resourceId, m);
+        // A repo that failed to clone would be missing on the target, and
+        // cutover then stops the source that still has it. Park for the
+        // owner instead; acknowledging resumes at `verifying`
+        // (resumeParkedMigration). A repo with no remote url is not parked
+        // on: preflight already counted its commits as unpushed.
+        const cloneFailed = repos.filter((r) => r.reason === "clone_failed");
+        if (cloneFailed.length > 0) {
+          return await advance("awaiting_ack", { repos, clone_failed: cloneFailed, config_restored: config.restored });
+        }
         return await advance("verifying", { repos, config_restored: config.restored });
       }
 
@@ -532,6 +545,9 @@ export async function stepMigration(deps: EngineDeps, migrationId: string): Prom
       return await advance("rolling_back", detail);
     }
     await store.setMigrationFields(m.id, { attempt, error: detail });
+    if (m.state === "rolling_back" && attempt >= MAX_ROLLBACK_ATTEMPTS) {
+      return await advance("failed", { ...detail, attempts: attempt });
+    }
     if (!mayRollBack && attempt >= MAX_POST_CUTOVER_ATTEMPTS && POST_CUTOVER_STATES.has(m.state)) {
       return await advance("failed", { ...detail, attempts: attempt });
     }
