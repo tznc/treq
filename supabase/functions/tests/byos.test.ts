@@ -255,6 +255,38 @@ Deno.test("saving a key validates it with the provider, then stores it", async (
   assert(!JSON.stringify(r?.body).includes("sk-user"), "the key is never echoed");
 });
 
+Deno.test("a provider that provisions on save stores the key it returns, not the pasted one", async () => {
+  const { store, saved } = fakeActionStore();
+  const build = (kind: ProviderKind, credential?: { apiKey: string }): SandboxProvider => {
+    const p = validatingProvider("ok")(kind, credential);
+    p.provisionCredential = () => Promise.resolve("sk-user|provisioned");
+    return p;
+  };
+  const r = await handleByosAction("save_provider_credential", { provider_kind: "boat", api_key: "sk-user" }, {
+    canByos: () => Promise.resolve(true),
+    store,
+    build,
+  });
+  assertEquals(r?.status, 200);
+  assertEquals(saved, [{ kind: "boat", key: "sk-user|provisioned", label: null }]);
+});
+
+Deno.test("a failed provisioning is refused and nothing is stored", async () => {
+  const { store, saved } = fakeActionStore();
+  const build = (kind: ProviderKind, credential?: { apiKey: string }): SandboxProvider => {
+    const p = validatingProvider("ok")(kind, credential);
+    p.provisionCredential = () => Promise.reject(new ProviderError("unavailable", "deploy failed"));
+    return p;
+  };
+  const r = await handleByosAction("save_provider_credential", { provider_kind: "boat", api_key: "sk-user" }, {
+    canByos: () => Promise.resolve(true),
+    store,
+    build,
+  });
+  assertEquals(r?.status, 502);
+  assertEquals(saved, []);
+});
+
 Deno.test("an invalid key is refused and not stored", async () => {
   const { store, saved } = fakeActionStore();
   const r = await handleByosAction("save_provider_credential", { provider_kind: "daytona", api_key: "sk-user" }, {

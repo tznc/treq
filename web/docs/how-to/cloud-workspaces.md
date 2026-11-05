@@ -67,7 +67,10 @@ With Pro, you can run the cloud workspace on your own Boat, Daytona, E2B, or Clo
 
 ### Cloudflare
 
-Cloudflare Sandboxes have no account API key, so you deploy Treq's bridge Worker to your Cloudflare account first. The steps are in `supabase/cloudflare-sandbox-bridge/README.md`. The key you paste is the Worker's URL with its token after a `#`: `https://treq-sandbox.<you>.workers.dev#<token>`.
+Cloudflare Sandboxes run inside a Worker, so Treq deploys a small bridge Worker named `treq-sandbox` to your Cloudflare account when you save the key.
+
+1. In the Cloudflare dashboard, create an API token with **Workers Scripts: Edit**, **Workers KV Storage: Edit**, and **Containers: Edit** for your account. The account needs the Workers Paid plan and a workers.dev subdomain.
+2. Paste `<account id>:<api token>` as the key. Saving deploys or updates the bridge, which takes up to a minute.
 
 - Only **Small** and **Medium** sizes exist. Cloudflare's largest instance has 4 vCPUs.
 - A Cloudflare workspace that stops restarts on a fresh disk. Push your work before it goes idle.

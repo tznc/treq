@@ -177,11 +177,12 @@ pub const BYOS_PROVIDERS: [(&str, &str); 4] = [
 ];
 
 /// The help line under a provider's key field. Cloudflare has no account
-/// API key: the key is the owner's bridge Worker URL with its token.
+/// API key to paste: the key is the account id and an API token, and
+/// saving it deploys treq's bridge Worker.
 pub fn byos_key_hint(kind: &str) -> &'static str {
   match kind {
     "cloudflare" => {
-      "Your bridge Worker URL with its token: https://treq-sandbox.<you>.workers.dev#<token>."
+      "Paste <account id>:<api token>. Treq deploys its bridge Worker to your account when you save."
     }
     _ => "Checked with the provider before it is saved.",
   }
@@ -338,8 +339,9 @@ mod tests {
   #[test]
   fn cloudflare_is_a_byos_provider_with_a_bridge_key_hint() {
     assert_eq!(super::provider_name("cloudflare"), "Cloudflare");
-    assert!(super::byos_key_hint("cloudflare").contains("https://"));
-    assert!(super::byos_key_hint("cloudflare").contains("#"));
+    let hint = super::byos_key_hint("cloudflare");
+    assert!(hint.contains("<account id>:<api token>"));
+    assert!(hint.contains("deploys"));
     assert_eq!(
       super::byos_key_hint("boat"),
       "Checked with the provider before it is saved."

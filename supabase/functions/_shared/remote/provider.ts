@@ -171,6 +171,10 @@ export interface SandboxProvider extends ManagedComputeProvider {
   // ProviderError("unauthorized") for a bad key. Providers without it take
   // no BYOS key (byos.ts).
   validateCredentials?(): Promise<void>;
+  // Sets up what the provider needs in the owner's account (Cloudflare's
+  // bridge Worker) and returns the key to store in place of the pasted one.
+  // byos.ts calls it after validateCredentials, before saving.
+  provisionCredential?(): Promise<string>;
 }
 
 /** A user's own provider API key (BYOS). Loaded server-side only; never logged. */

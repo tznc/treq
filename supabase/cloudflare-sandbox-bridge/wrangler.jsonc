@@ -3,9 +3,10 @@
   "name": "treq-sandbox",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
   "containers": [
-    { "class_name": "SandboxS", "image": "./Dockerfile", "instance_type": "standard-3", "max_instances": 20 },
-    { "class_name": "SandboxM", "image": "./Dockerfile", "instance_type": "standard-4", "max_instances": 20 }
+    { "class_name": "SandboxS", "image": "docker.io/cloudflare/sandbox:0.4.18", "instance_type": "standard-3", "max_instances": 20 },
+    { "class_name": "SandboxM", "image": "docker.io/cloudflare/sandbox:0.4.18", "instance_type": "standard-4", "max_instances": 20 }
   ],
   "durable_objects": {
     "bindings": [
