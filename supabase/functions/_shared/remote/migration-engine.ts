@@ -71,6 +71,9 @@ export const MAX_ATTEMPTS = 3;
 // After cutover nothing rolls back, so a failing step is retried; past this
 // many attempts the migration is marked failed for an operator.
 export const MAX_POST_CUTOVER_ATTEMPTS = 10;
+// A rollback that keeps failing ends `failed` after this many attempts, so
+// the instance can migrate again and the orphan sweep reclaims the target.
+export const MAX_ROLLBACK_ATTEMPTS = 10;
 
 // Seconds a step may take at worst, so the lease is extended to cover it
 // before the step starts (a second worker must not take an expired lease
@@ -532,6 +535,9 @@ export async function stepMigration(deps: EngineDeps, migrationId: string): Prom
       return await advance("rolling_back", detail);
     }
     await store.setMigrationFields(m.id, { attempt, error: detail });
+    if (m.state === "rolling_back" && attempt >= MAX_ROLLBACK_ATTEMPTS) {
+      return await advance("failed", { ...detail, attempts: attempt });
+    }
     if (!mayRollBack && attempt >= MAX_POST_CUTOVER_ATTEMPTS && POST_CUTOVER_STATES.has(m.state)) {
       return await advance("failed", { ...detail, attempts: attempt });
     }
