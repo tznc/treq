@@ -299,6 +299,10 @@ pub struct CodeView {
   history_error_text: Option<Entity<TextareaState>>,
   /// Whether "Show error" has the error's popover open.
   history_error_open: bool,
+  /// The failed file read's message, read-only so it can be copied.
+  files_error_text: Option<Entity<TextareaState>>,
+  /// Whether the files panel's "Show error" has its popover open.
+  files_error_open: bool,
   /// Whether the alerts button has its popover open.
   status_open: bool,
   pub(super) stack: Option<Vec<StackRow>>,
@@ -396,6 +400,8 @@ impl CodeView {
       history_error: None,
       history_error_text: None,
       history_error_open: false,
+      files_error_text: None,
+      files_error_open: false,
       status_open: false,
       stack: None,
       settings: None,
@@ -546,6 +552,7 @@ impl CodeView {
         self.history = None;
         self.history_error = None;
         self.history_error_open = false;
+        self.files_error_open = false;
         self.show_untouched = false;
         true
       }
@@ -1152,7 +1159,7 @@ impl Render for CodeView {
           .children(self.about(&p, window, cx))
           .child(self.action_row(&p, cx))
           .children(self.stack_panel(&p, cx))
-          .child(self.files(&p, cx))
+          .child(self.files(&p, window, cx))
           .children(self.readme(&p)),
       );
     div()
@@ -2063,7 +2070,12 @@ impl CodeView {
     .size_full()
   }
 
-  fn files(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+  fn files(
+    &mut self,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
     let all = self
       .overview
       .as_ref()
@@ -2234,11 +2246,11 @@ impl CodeView {
     let error = self.overview.as_ref().and_then(|o| o.error.clone());
     if let Some(err) = error {
       list = list.child(
-        ui::EmptyState::new("code-files-error", "Couldn't read the files", p)
+        ui::EmptyState::new("code-files-error", "Can't show this workspace's files", p)
           .error(true)
           .icon(theme::ICON_CIRCLE_ALERT)
-          .message(err)
-          .action(retry_button("code-files-retry", p, cx)),
+          .message("Its folder is missing or can't be read.")
+          .action(self.show_error(ErrorPanel::Files, &err, p, window, cx)),
       );
     } else if loaded && empty {
       list = list.child(if unavailable {
@@ -2334,14 +2346,19 @@ impl CodeView {
     )
   }
 
-  /// The read-only, wrapping text area that shows a failed commit read.
-  fn history_error_text(
+  /// The read-only, wrapping text area that shows a panel's failed read.
+  fn error_text(
     &mut self,
+    panel: ErrorPanel,
     err: &str,
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Entity<TextareaState> {
-    if let Some(text) = self.history_error_text.clone() {
+    let slot = match panel {
+      ErrorPanel::History => &self.history_error_text,
+      ErrorPanel::Files => &self.files_error_text,
+    };
+    if let Some(text) = slot.clone() {
       if text.read(cx).value() != err {
         text.update(cx, |s, cx| s.set_value(err.to_string(), window, cx));
       }
@@ -2354,29 +2371,77 @@ impl CodeView {
       state.set_readonly(true, cx);
       state
     });
-    self.history_error_text = Some(text.clone());
+    match panel {
+      ErrorPanel::History => self.history_error_text = Some(text.clone()),
+      ErrorPanel::Files => self.files_error_text = Some(text.clone()),
+    }
     text
   }
 
-  /// The failed read's message in a popover under "Show error", selectable
-  /// so it can be copied into a bug report.
-  fn history_error_popover(
+  fn set_error_open(&mut self, panel: ErrorPanel, open: bool) {
+    match panel {
+      ErrorPanel::History => self.history_error_open = open,
+      ErrorPanel::Files => self.files_error_open = open,
+    }
+  }
+
+  /// A panel's "Show error" button, with the raw error in a popover under
+  /// it once pressed.
+  fn show_error(
     &mut self,
+    panel: ErrorPanel,
     err: &str,
     p: &Palette,
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let text = self.history_error_text(err, window, cx);
-    let close = |view: &mut Self, cx: &mut Context<Self>| {
-      view.history_error_open = false;
+    let (id, open) = match panel {
+      ErrorPanel::History => ("code-history-show-error", self.history_error_open),
+      ErrorPanel::Files => ("code-files-show-error", self.files_error_open),
+    };
+    div().flex().gap_2().child(
+      div()
+        .child(
+          Button::new(id, p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .label("Show error")
+            // A press outside the open popover closes it, so this only opens.
+            .on_click(cx.listener(move |view, _, _, cx| {
+              view.set_error_open(panel, true);
+              cx.notify();
+            })),
+        )
+        .when(open, |el| {
+          el.child(self.error_popover(panel, err, p, window, cx))
+        }),
+    )
+  }
+
+  /// The failed read's message in a popover under "Show error", selectable
+  /// so it can be copied into a bug report.
+  fn error_popover(
+    &mut self,
+    panel: ErrorPanel,
+    err: &str,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let text = self.error_text(panel, err, window, cx);
+    let (id, label) = match panel {
+      ErrorPanel::History => ("code-history-error-popover", "Commit read error"),
+      ErrorPanel::Files => ("code-files-error-popover", "File read error"),
+    };
+    let close = move |view: &mut Self, cx: &mut Context<Self>| {
+      view.set_error_open(panel, false);
       cx.notify();
     };
     deferred(
       anchored().snap_to_window_with_margin(px(8.)).child(
         div()
-          .id("code-history-error-popover")
-          .debug_selector(|| "code-history-error-popover".into())
+          .id(id)
+          .debug_selector(move || id.into())
           .mt_1()
           .w(zpx(360.))
           .p_2()
@@ -2397,7 +2462,7 @@ impl CodeView {
             ui::text(
               Textarea::new(&text)
                 .readonly(true)
-                .aria_label("Commit read error")
+                .aria_label(label)
                 .px_3()
                 .py_2(),
               TextSize::Code,
@@ -2420,25 +2485,7 @@ impl CodeView {
         Some(err) => ui::EmptyState::new("code-history-error", "Couldn't load commits", p)
           .error(true)
           .icon(theme::ICON_CIRCLE_ALERT)
-          .action(
-            div().flex().gap_2().child(
-              div()
-                .child(
-                  Button::new("code-history-show-error", p)
-                    .variant(Variant::Outline)
-                    .size(Size::Sm)
-                    .label("Show error")
-                    // A press outside the open popover closes it, so this only opens.
-                    .on_click(cx.listener(|view, _, _, cx| {
-                      view.history_error_open = true;
-                      cx.notify();
-                    })),
-                )
-                .when(self.history_error_open, |el| {
-                  el.child(self.history_error_popover(&err, p, window, cx))
-                }),
-            ),
-          )
+          .action(self.show_error(ErrorPanel::History, &err, p, window, cx))
           .into_any_element(),
         None => ui::delayed(
           "code-history-loading",
@@ -2852,14 +2899,9 @@ fn loc_indicator(
 }
 
 /// Reads the whole tab again after a failed read.
-fn retry_button(id: &'static str, p: &Palette, cx: &mut Context<CodeView>) -> Button {
-  Button::new(id, p)
-    .size(Size::Sm)
-    .label("Retry")
-    .on_click(cx.listener(|view, _, _, cx| {
-      view.history_error = None;
-      view.history_error_open = false;
-      view.load(cx);
-      cx.notify();
-    }))
+/// A panel whose failed read can show its raw error.
+#[derive(Clone, Copy)]
+enum ErrorPanel {
+  History,
+  Files,
 }

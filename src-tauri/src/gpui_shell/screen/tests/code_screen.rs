@@ -629,7 +629,7 @@ fn the_deleted_branch_alert_names_its_archive_button(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_failed_read_shows_errors_with_retry_not_empty_boxes(cx: &mut TestAppContext) {
+fn a_failed_read_shows_errors_not_empty_boxes(cx: &mut TestAppContext) {
   use gpui::Role;
   use gpui_testing_library::prelude::*;
   let host = FakeHost {
@@ -637,19 +637,64 @@ fn a_failed_read_shows_errors_with_retry_not_empty_boxes(cx: &mut TestAppContext
     failing: vec!["overview"],
     ..code_host()
   };
-  let (mut h, host) = workspace_harness(cx, host, code_route());
+  let (mut h, _) = workspace_harness(cx, host, code_route());
   let screen = screen(&mut h);
   expect(screen.get_by_role(by::role(Role::Status).name("Couldn't load commits"))).to_be_visible();
-  expect(screen.get_by_role(by::role(Role::Status).name("Couldn't read the files")))
+  expect(screen.get_by_role(by::role(Role::Status).name("Can't show this workspace's files")))
     .to_be_visible();
   assert!(screen.query_by_text("No files found").is_none());
   assert!(screen.query_by_text("No README.md found").is_none());
-  let retries = screen.get_all_by_role(by::role(Role::Button).name("Retry"));
-  assert!(!retries.is_empty());
-  let before = host.calls().len();
-  screen.user().click(&retries[0]);
+}
+
+/// The user can't fix an unreadable checkout, so the files panel explains
+/// it in plain words, offers no Retry, and keeps the raw error behind
+/// "Show error".
+#[gpui::test]
+fn the_files_panel_error_is_plain_with_show_error_and_no_retry(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let raw = "No such file or directory (os error 2)";
+  let host = FakeHost {
+    failing: vec!["overview"],
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
   h.cx.run_until_parked();
-  assert!(host.calls().len() > before, "Retry reads again");
+  assert!(h.drawn("code-files-error"));
+  assert!(!h.drawn("code-files-retry"), "no Retry in the files panel");
+  assert!(!h.drawn("code-files-error-popover"));
+  {
+    let screen = screen(&mut h);
+    expect(screen.get_by_role(by::role(Role::Status).name("Can't show this workspace's files")))
+      .to_be_visible();
+    expect(screen.get_by_text("Its folder is missing or can't be read.")).to_be_visible();
+    assert!(
+      screen
+        .query_by_role(by::role(Role::Button).name("Retry"))
+        .is_none(),
+      "no Retry button"
+    );
+    assert!(
+      screen.query_by_text(raw).is_none(),
+      "no raw IO text in the panel"
+    );
+    expect(screen.get_by_role(by::role(Role::Button).name("Show error"))).to_be_visible();
+  }
+  h.click("code-files-show-error");
+  h.cx.run_until_parked();
+  assert!(
+    h.drawn("code-files-error-popover"),
+    "Show error opens the error"
+  );
+  let screen = screen(&mut h);
+  assert_eq!(
+    screen
+      .get_by_label_text("File read error")
+      .value()
+      .as_deref(),
+    Some(raw),
+    "the popover holds the raw error"
+  );
 }
 
 #[gpui::test]

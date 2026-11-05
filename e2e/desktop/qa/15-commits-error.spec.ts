@@ -1,7 +1,8 @@
 // A workspace whose checkout was deleted behind the app: the Code tab's
 // commit read fails, and the Commits panel says so instead of showing
 // "Loading commits…" forever, and "Show error" opens the error in a
-// popover to copy from. The checkout is moved back afterwards so
+// popover to copy from. The files panel says the folder can't be read,
+// with its own "Show error" and no Retry. The checkout is moved back afterwards so
 // later specs see the seed unchanged.
 import { renameSync } from "node:fs";
 import { expect, test } from "@playwright/test";
@@ -24,13 +25,15 @@ test("commits-error: a failed commit read is reported, not left loading", async 
       title: "Code tab of a workspace whose checkout was deleted",
       expectations: [
         "The Commits panel says 'Couldn't load commits' with only a 'Show error' button: no Retry, no message line",
-        "The files panel says 'Couldn't read the files' with the error and Retry; no 'No files found' and no README box",
+        "The files panel says 'Can't show this workspace's files' with one sentence and 'Show error': no Retry, no raw path, no README box",
         "No 'Loading commits…' text is left on screen",
       ],
     });
     await expect(page.getByRole("status", { name: "Couldn't load commits" })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Can't show this workspace's files" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Show error" }).click();
+    await page.getByTestId("code-history-show-error").click();
     await settle(page, 800);
     await capture(page, {
       name: "15-commits-error-popover",
@@ -41,6 +44,11 @@ test("commits-error: a failed commit read is reported, not left loading", async 
       ],
     });
     await expect(page.getByRole("textbox", { name: "Commit read error" })).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await page.getByTestId("code-files-show-error").click();
+    await settle(page, 800);
+    await expect(page.getByRole("textbox", { name: "File read error" })).toBeVisible();
   } finally {
     renameSync(`${dir}.gone`, dir);
   }
