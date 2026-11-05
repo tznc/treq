@@ -35,6 +35,7 @@ const RULES = [
   "gpui-one-primary-per-region",
   "gpui-list-nav-shared",
   "gpui-clickable-needs-role",
+  "ui-copy-brand-spelling",
   "ui-copy-no-yes-no",
   "ui-copy-sentence-case",
   "ui-copy-ellipsis",

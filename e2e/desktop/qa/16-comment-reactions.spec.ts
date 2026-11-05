@@ -13,7 +13,7 @@ test.describe.configure({ mode: "serial" });
 
 async function issueDetail(page: Page): Promise<void> {
   await ready(page);
-  await page.getByRole("button", { name: "Github", exact: true }).click();
+  await page.getByRole("button", { name: "GitHub", exact: true }).click();
   await settle(page, 2000);
   await page.getByRole("tab", { name: "Issues" }).click();
   await settle(page, 1500);

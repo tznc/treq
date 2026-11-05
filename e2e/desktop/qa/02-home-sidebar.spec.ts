@@ -16,7 +16,7 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
     name: "02-home-view",
     title: "Home view (event-bus main) with the sidebar",
     expectations: [
-      "Sidebar: event-bus and docs-site home rows, Github, Linear, then WORKSPACES grouped by repo",
+      "Sidebar: event-bus and docs-site home rows, GitHub, Linear, then WORKSPACES grouped by repo",
       "Stacked feat/empty-event-message is indented under feat/event-ingest; status dots aligned right",
       "Code tab: Agent and Go to file in one row, file tree, README preview and the Commits rail; no prompt box",
     ],

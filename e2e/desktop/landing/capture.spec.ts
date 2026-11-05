@@ -153,7 +153,7 @@ test("captures the landing screenshots", async ({ page }) => {
   await shot(page, "sidebar.png", SIDEBAR);
 
   // GitHub: issues, then pull requests (both from the fake `gh`).
-  await page.getByRole("button", { name: "Github", exact: true }).click();
+  await page.getByRole("button", { name: "GitHub", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "New", exact: true }),
   ).toBeVisible();

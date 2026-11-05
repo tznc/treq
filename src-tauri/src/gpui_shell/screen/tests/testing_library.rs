@@ -219,7 +219,7 @@ fn the_create_dialog_names_the_branch_from_the_title(cx: &mut TestAppContext) {
   let mut h = Harness::with_host(cx, snapshot, host.clone());
   let screen = screen(&mut h);
   let user = screen.user();
-  expect(screen.get_by_role(by::role(Role::Heading).name("Stack a new Workspace"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Heading).name("Stack a new workspace"))).to_be_visible();
 
   user.type_text(&screen.get_by_label_text("Title"), "Dark Mode");
   // The branch check is debounced.
@@ -238,7 +238,7 @@ fn the_create_dialog_names_the_branch_from_the_title(cx: &mut TestAppContext) {
     .any(|c| c.starts_with("create treq/dark-mode")));
   screen.redraw();
   assert!(screen
-    .query_by_role(by::role(Role::Heading).name("Stack a new Workspace"))
+    .query_by_role(by::role(Role::Heading).name("Stack a new workspace"))
     .is_none());
 }
 
@@ -365,7 +365,7 @@ fn the_workspace_header_names_the_create_pr_buttons(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, host, workspace_route());
   let screen = screen(&mut h);
   expect(screen.get_by_role(button("Create PR"))).to_be_visible();
-  expect(screen.get_by_role(button("More Create PR options"))).to_be_visible();
+  expect(screen.get_by_role(button("More create PR options"))).to_be_visible();
 }
 
 #[gpui::test]

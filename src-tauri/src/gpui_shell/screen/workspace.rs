@@ -1551,7 +1551,7 @@ impl WorkspaceView {
       )
       .px_1p5()
       .child(ui::icon(theme::ICON_CHEVRON_DOWN, 16., white))
-      .aria_label("More Create PR options")
+      .aria_label("More create PR options")
       .on_click(self.press("workspace.createPrMenu"));
     div()
       .flex()

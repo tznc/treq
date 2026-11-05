@@ -1,4 +1,4 @@
-//! `UnifiedWorkspaceDialog`: "Stack a new Workspace". Creates a workspace,
+//! `UnifiedWorkspaceDialog`: "Stack a new workspace". Creates a workspace,
 //! stacks one on another, or moves commits or files into a new or an
 //! existing workspace, all through the backend
 //! ([`workspace_dialog_data`]). React only says which dialog opened, with
@@ -2052,7 +2052,7 @@ impl Render for WorkspaceDialog {
     ui::Dialog::new("workspace-dialog", &p)
       .overlay(viewport)
       .width(640.)
-      .title("Stack a new Workspace")
+      .title("Stack a new workspace")
       .description(description)
       .focus(&self.focus)
       // Escape in the branch picker closes the picker only.

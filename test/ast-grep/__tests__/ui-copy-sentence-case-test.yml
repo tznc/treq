@@ -32,7 +32,51 @@ valid:
         .child(setting_row("API key", "Paste a Linear personal API key", button, p))
         .child(label("Included files and directories"))
     }
+  - |
+    fn control_copy() -> Div {
+      div()
+        .child(Dialog::new("d", p).title("Stack a new workspace"))
+        .child(Button::new("gh", p).label("Open PR in GitHub").tooltip("Copy the URL"))
+        .child(Tab::new("prs", "Pull requests"))
+        .child(MenuItem::new("ssh", "Copy SSH remote for Jujutsu", p))
+        .child(SectionHeader::new("li", "Linear issues", p))
+        .child(Row::new("r", p).aria_label("Press Enter to open the README").description("Ask Claude"))
+    }
+  - |
+    fn prose() -> Dialog {
+      Dialog::new("d", p)
+        .title("Upgrade to Pro")
+        .description("This cannot be undone. Deleting your account: Treq keeps nothing. Loading GitHub…")
+    }
 invalid:
+  - |
+    fn dialog_title() -> Dialog {
+      Dialog::new("d", p).title("Stack a new Workspace")
+    }
+  - |
+    fn tooltip() -> Button {
+      Button::new("b", p).tooltip("Open the Review")
+    }
+  - |
+    fn aria() -> Row {
+      Row::new("r", p).aria_label("Branch Name")
+    }
+  - |
+    fn description() -> Row {
+      Row::new("r", p).description("Create a new Workspace")
+    }
+  - |
+    fn tab() -> Tab {
+      Tab::new("all", "All Issues")
+    }
+  - |
+    fn menu_item() -> MenuItem {
+      MenuItem::new("rename", "Rename Workspace", p)
+    }
+  - |
+    fn section_header() -> SectionHeader {
+      SectionHeader::new("prs", "Pull Requests", p)
+    }
   - |
     fn acronym_label() -> Div {
       div().child(label("UI Zoom"))

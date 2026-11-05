@@ -75,7 +75,7 @@ async function openReview(page: Page): Promise<void> {
 test("pr review drafts: agent draft, your draft, moved and outdated after a push", async ({ page }) => {
   setDiff(BEFORE);
   await ready(page);
-  await page.getByRole("button", { name: "Github", exact: true }).click();
+  await page.getByRole("button", { name: "GitHub", exact: true }).click();
   await settle(page, 2000);
   await page.mouse.click(PRS_TAB.x, PRS_TAB.y);
   await settle(page, 1500);
