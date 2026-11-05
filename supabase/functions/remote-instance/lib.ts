@@ -14,6 +14,7 @@ import { isRegionCode, isSizePreset, REGION_CODES, SIZE_PRESETS } from "../_shar
 import { ProviderError, providerClientMessage } from "../_shared/remote/provider.ts";
 import { BYOS_ACTIONS, handleByosAction, providerErrorCode } from "../_shared/remote/byos.ts";
 import { acknowledgeMigration } from "../_shared/remote/migration-ack.ts";
+import { cancelDepsFor, cancelParkedMigration } from "../_shared/remote/migration-cancel.ts";
 import { handleProcessAction } from "../_shared/remote/process-actions.ts";
 import { logWithCorrelation } from "../_shared/remote/correlation.ts";
 import { rpc } from "../_shared/remote/db.ts";
@@ -56,6 +57,8 @@ const ACTIONS: Record<string, Handler> = {
   }),
   resize: handleResize,
   acknowledge_migration: (body, deps) => acknowledgeMigration({ ...deps, providers: deps.provider }, body),
+  // Not Pro-gated: declining a parked migration must always work.
+  cancel_migration: (body, deps) => cancelParkedMigration(cancelDepsFor(deps), body),
   pin_process: processAction,
   unpin_process: processAction,
   kill_process: processAction,
