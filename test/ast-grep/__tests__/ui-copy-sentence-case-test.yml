@@ -9,6 +9,10 @@ valid:
       ui::Button::new("gh", p).label("Open in GitHub")
     }
   - |
+    fn provider() -> Button {
+      ui::Button::new("google", p).label("Continue with Google")
+    }
+  - |
     fn product() -> &'static str {
       "Treq Cloud"
     }

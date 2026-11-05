@@ -31,7 +31,7 @@ rule:
         - not:
             any:
               # Proper nouns keep their capitals.
-              - regex: \b(GitHub|Github|Linear|Claude|Treq|Cursor|Codex|Opus|Sonnet|Haiku|Jujutsu|Docker|Git|Zed|Pro)\b
+              - regex: \b(GitHub|Github|Google|Linear|Claude|Treq|Cursor|Codex|Opus|Sonnet|Haiku|Jujutsu|Docker|Git|Zed|Pro)\b
               # Sidebar group labels, drawn in capitals.
               - inside:
                   kind: function_item
@@ -54,7 +54,7 @@ rule:
             # Allowed: the first word (or a product name), then only
             # lowercase words, product names, acronyms and key names; a new
             # sentence may start with a capital: "Undone. Refresh first".
-            regex: ^"(Claude Code|Treq Cloud|GitHub CLI|\S+)(\s+(([a-z0-9(…'"\\-]\S*|(GitHub|Linear|Claude Code|Claude|Treq Cloud|Treq|Codex|Cursor|Copilot|Jujutsu|Git|OAuth|Pro|PRs|Enter|Esc|Escape|Tab|Shift|Ctrl|Cmd|Alt|Option|Return|Space|Backspace|[A-Z0-9]{2,})[.,:;?!'s…]*)([.?!:] [A-Z]\S*)?))*"$
+            regex: ^"(Claude Code|Treq Cloud|GitHub CLI|\S+)(\s+(([a-z0-9(…'"\\-]\S*|(GitHub|Google|Linear|Claude Code|Claude|Treq Cloud|Treq|Codex|Cursor|Copilot|Jujutsu|Git|OAuth|Pro|PRs|Enter|Esc|Escape|Tab|Shift|Ctrl|Cmd|Alt|Option|Return|Space|Backspace|[A-Z0-9]{2,})[.,:;?!'s…]*)([.?!:] [A-Z]\S*)?))*"$
         # The label argument: the first, or a select's second (its name).
         - any:
             - all:
