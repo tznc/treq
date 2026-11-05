@@ -59,6 +59,7 @@ export type RemoteAuditEventType =
   | "migration_failed"
   | "placement_orphan_destroyed"
   | "migration_acknowledged"
+  | "migration_cancelled"
   | "placement_destroyed"
   | "placement_destroy_failed"
   | "admin_defaults_recomputed"
