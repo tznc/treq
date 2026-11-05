@@ -6,9 +6,7 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::sync::Arc;
 
-use gpui_kit::component::input::{
-  IndentInline, InputEvent, OutdentInline, Textarea, TextareaState,
-};
+use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   div, prelude::*, Context, Entity, ExternalPaths, FocusHandle, FontWeight, Subscription, Window,
@@ -258,15 +256,6 @@ impl Render for ProjectContextDialog {
           .flex_col()
           .gap_3()
           .py_4()
-          // Tab and Shift+Tab move between the boxes rather than typing a tab.
-          .capture_action(|_: &IndentInline, window, cx| {
-            window.focus_next(cx);
-            cx.stop_propagation();
-          })
-          .capture_action(|_: &OutdentInline, window, cx| {
-            window.focus_prev(cx);
-            cx.stop_propagation();
-          })
           .child(label("Instructions"))
           .child(
             div()

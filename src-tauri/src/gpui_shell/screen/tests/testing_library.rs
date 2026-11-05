@@ -735,10 +735,11 @@ fn tab_moves_between_the_instructions_and_the_context_paths(cx: &mut TestAppCont
   let screen = screen(&mut h);
   let user = screen.user();
   // `{Tab}` moves focus itself when unhandled, which the app does not: press the real key.
+  // The dialog's tab order: Instructions, Add files…, the context paths.
   user.keyboard("a");
-  h.cx.simulate_keystrokes("tab");
+  h.cx.simulate_keystrokes("tab tab");
   user.keyboard("/p.md");
-  h.cx.simulate_keystrokes("shift-tab");
+  h.cx.simulate_keystrokes("shift-tab shift-tab");
   user.keyboard("b");
   h.click("project-context-save");
   h.cx.run_until_parked();
