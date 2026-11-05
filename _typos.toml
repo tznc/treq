@@ -11,6 +11,8 @@ extend-exclude = [
   "src-tauri/tests/fixtures/",
   "src-tauri/src/local_db/upgrade_fixtures/",
   "supabase/migrations/",
+  # Minified bundle of the Cloudflare bridge Worker.
+  "*.generated.ts",
 ]
 
 [default]
