@@ -28,7 +28,7 @@ use tauri_plugin_gpui::{
 
 use super::{
   defer_main,
-  native::{NativeEvent, ToastTone},
+  native::NativeEvent,
   sidebar::PrState,
   theme::{self, Palette},
 };
@@ -318,12 +318,9 @@ pub fn copy_link_menu(
 ) -> PopupRequest {
   let item = NativeMenuItem::item("Copy link", move |cx| {
     cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
-    notify(NativeEvent::Toast {
-      title: "Link copied".into(),
-      description: String::new(),
-      tone: ToastTone::Success,
-      action: None,
-    });
+    notify(NativeEvent::from(
+      crate::gpui_shell::native::Toast::success("Link copied"),
+    ));
   })
   .icon(MenuIcon::Link);
   PopupRequest::ShowMenu {

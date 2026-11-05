@@ -3,6 +3,7 @@
 //! conflicts, the pending review the backend keeps, and sending it to an
 //! agent through React.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -572,11 +573,19 @@ impl ChangesView {
       move |view, result, cx| match result {
         Ok(()) => {
           view.delete_comment(&id, cx);
-          view.toast(ToastTone::Success, "Suggestion applied", "");
+          super::tell(
+            view.host.as_ref(),
+            Toast::success("Suggestion applied").into(),
+          );
           view.review.apply_next = true;
           view.load(cx);
         }
-        Err(err) => view.toast(ToastTone::Error, "Could not apply suggestion", err),
+        Err(err) => super::tell(
+          view.host.as_ref(),
+          Toast::error("Could not apply suggestion")
+            .description(err)
+            .into(),
+        ),
       },
       cx,
     );
@@ -779,7 +788,7 @@ impl ChangesView {
 
   fn discard_review(&mut self, cx: &mut Context<Self>) {
     self.reset_review(cx);
-    self.toast(ToastTone::Success, "Review canceled", "");
+    super::tell(self.host.as_ref(), Toast::success("Review canceled").into());
   }
 
   /// A refreshed list that adds, removes or changes a file waits while a
@@ -898,13 +907,14 @@ impl ChangesView {
     });
     let dropped = before - self.review.comments.len();
     if dropped > 0 {
-      self.toast(
-        ToastTone::Warning,
-        "Comments discarded",
-        format!(
-          "{} discarded (lines changed)",
-          count_label(dropped, "outdated comment")
-        ),
+      super::tell(
+        self.host.as_ref(),
+        Toast::warning("Comments discarded")
+          .description(format!(
+            "{} discarded (lines changed)",
+            count_label(dropped, "outdated comment")
+          ))
+          .into(),
       );
       self.save_review(cx);
     }
@@ -938,10 +948,13 @@ impl ChangesView {
       })
       .collect();
     cx.write_to_clipboard(ClipboardItem::new_string(outdated_markdown(&all)));
-    self.toast(
-      ToastTone::Success,
-      &format!("{} copied", count_label(all.len(), "outdated comment")),
-      "",
+    super::tell(
+      self.host.as_ref(),
+      Toast::success(format!(
+        "{} copied",
+        count_label(all.len(), "outdated comment")
+      ))
+      .into(),
     );
   }
 

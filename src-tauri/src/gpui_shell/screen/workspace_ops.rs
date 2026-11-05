@@ -6,11 +6,12 @@ use super::{
   code_data::CodeHost, github_data::GithubHost, workspace_data::WorkspaceHost,
   workspace_dialog_data::WorkspaceDialogHost,
 };
+use crate::gpui_shell::native::Toast;
 use crate::{
   core,
   gpui_shell::{
     confirm::Question,
-    native::{Backend, NativeEvent, ToastTone},
+    native::{Backend, NativeEvent},
   },
 };
 
@@ -36,18 +37,6 @@ impl WorkspaceActionsHost for Backend {
     }
     core::archive_workspace_removing_directory_later(repo_path, workspace_id)
   }
-}
-
-pub fn toast(host: &dyn WorkspaceHost, tone: ToastTone, title: &str, description: &str) {
-  WorkspaceHost::notify(
-    host,
-    NativeEvent::Toast {
-      title: title.into(),
-      description: description.into(),
-      tone,
-      action: None,
-    },
-  );
 }
 
 /// The workspace a removal is for.
@@ -115,12 +104,12 @@ pub fn delete(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
   match host.delete_workspace(&workspace.repo_path, workspace.id) {
     Ok(()) => {
       removed(host, &workspace.repo_path, vec![workspace.id]);
-      toast(host, ToastTone::Success, "Workspace deleted", "");
+      WorkspaceHost::notify(host, Toast::success("Workspace deleted").into());
       true
     }
     Err(err) => {
       restored(host, &workspace.repo_path, vec![workspace.id]);
-      toast(host, ToastTone::Error, "Delete failed", &err);
+      WorkspaceHost::notify(host, Toast::error("Delete failed").description(&err).into());
       false
     }
   }
@@ -132,12 +121,15 @@ pub fn archive(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
   match host.archive_workspace(&workspace.repo_path, workspace.id) {
     Ok(()) => {
       removed(host, &workspace.repo_path, vec![workspace.id]);
-      toast(host, ToastTone::Success, "Workspace archived", "");
+      WorkspaceHost::notify(host, Toast::success("Workspace archived").into());
       true
     }
     Err(err) => {
       restored(host, &workspace.repo_path, vec![workspace.id]);
-      toast(host, ToastTone::Error, "Archive failed", &err);
+      WorkspaceHost::notify(
+        host,
+        Toast::error("Archive failed").description(&err).into(),
+      );
       false
     }
   }
@@ -169,11 +161,9 @@ pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> V
   if let Some(first) = archived.first() {
     let n = archived.len();
     let s = if n > 1 { "s" } else { "" };
-    toast(
+    WorkspaceHost::notify(
       host,
-      ToastTone::Success,
-      &format!("{n} workspace{s} archived"),
-      "",
+      Toast::success(format!("{n} workspace{s} archived")).into(),
     );
     removed(
       host,
@@ -185,11 +175,11 @@ pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> V
     if let Some(first) = workspaces.first() {
       restored(host, &first.repo_path, failed_ids);
     }
-    toast(
+    WorkspaceHost::notify(
       host,
-      ToastTone::Error,
-      "Archive failed",
-      &failures.join("\n"),
+      Toast::error("Archive failed")
+        .description(failures.join("\n"))
+        .into(),
     );
   }
   archived
@@ -249,7 +239,12 @@ pub fn move_workspace(
         repo_path: repo_path.into(),
       },
     ),
-    Err(err) => toast(host, ToastTone::Error, "Failed to move workspace", &err),
+    Err(err) => WorkspaceHost::notify(
+      host,
+      Toast::error("Failed to move workspace")
+        .description(&err)
+        .into(),
+    ),
   }
 }
 

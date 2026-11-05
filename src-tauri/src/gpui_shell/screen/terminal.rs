@@ -11,6 +11,7 @@
 //! [`terminal_emu`]: super::terminal_emu
 
 use crate::core::pty_remote_supervisor::clean_title;
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::lock_ext::LockExt as _;
@@ -46,7 +47,7 @@ use super::{
   ActionSink, ScreenAction,
 };
 use crate::gpui_shell::{
-  native::{NativeEvent, ToastTone},
+  native::NativeEvent,
   popup::{PopupSink, Side, TooltipContent},
   theme::{self, Palette},
   tooltips::{HasTooltips, Tooltips},
@@ -2047,7 +2048,12 @@ impl TerminalPane {
       .host
       .set_repo_settings(&repo, &[(ENVIRONMENT_SETTING.into(), value.into())]);
     if let Err(error) = saved {
-      self.toast("Failed to save setting", error, ToastTone::Error);
+      super::workspace_data::WorkspaceHost::notify(
+        &*self.host,
+        Toast::error("Failed to save setting")
+          .description(error)
+          .into(),
+      );
       cx.notify();
       return;
     }
@@ -2084,7 +2090,12 @@ impl TerminalPane {
                 environment.status = Some(status);
               }
             }
-            Err(error) => pane.toast("Devcontainer did not start", error, ToastTone::Error),
+            Err(error) => super::workspace_data::WorkspaceHost::notify(
+              &*pane.host,
+              Toast::error("Devcontainer did not start")
+                .description(error)
+                .into(),
+            ),
           }
           cx.notify();
         })
@@ -2165,7 +2176,12 @@ impl TerminalPane {
           return;
         };
         if let Err(error) = self.host.rename_session(repo_path, session_id, &title) {
-          return self.toast("Couldn't rename the agent", error, ToastTone::Error);
+          return super::workspace_data::WorkspaceHost::notify(
+            &*self.host,
+            Toast::error("Couldn't rename the agent")
+              .description(error)
+              .into(),
+          );
         }
         let mut kind = kind;
         if let Kind::Agent { name, .. } = &mut kind {
@@ -2186,7 +2202,12 @@ impl TerminalPane {
           pane
             .update(cx, |pane, cx| match kept {
               Ok(title) => pane.set_title(&id, title, cx),
-              Err(error) => pane.toast("Couldn't rename the session", error, ToastTone::Error),
+              Err(error) => super::workspace_data::WorkspaceHost::notify(
+                &*pane.host,
+                Toast::error("Couldn't rename the session")
+                  .description(error)
+                  .into(),
+              ),
             })
             .ignore_closed();
         })
@@ -2271,18 +2292,6 @@ impl TerminalPane {
       .tooltips
       .wrap(tip, Side::Top, rename, title, cx)
       .into_any_element()
-  }
-
-  fn toast(&self, title: &str, description: String, tone: ToastTone) {
-    super::workspace_data::WorkspaceHost::notify(
-      &*self.host,
-      NativeEvent::Toast {
-        title: title.into(),
-        description,
-        tone,
-        action: None,
-      },
-    );
   }
 
   /// Whether the pane covers the tab (maximized and open).
@@ -2519,12 +2528,11 @@ impl TerminalPane {
       TermEvent::Toast { title, description } => {
         super::workspace_data::WorkspaceHost::notify(
           &*self.host,
-          crate::gpui_shell::native::NativeEvent::Toast {
+          NativeEvent::from(Toast::new(
+            crate::gpui_shell::native::ToastTone::Warning,
             title,
             description,
-            tone: crate::gpui_shell::native::ToastTone::Warning,
-            action: None,
-          },
+          )),
         );
       }
     }
@@ -2947,19 +2955,9 @@ impl TerminalPane {
           view.read(cx).send_message(&prompt);
         }
       }
-      LightboxEvent::Toast {
-        title,
-        description,
-        tone,
-      } => super::workspace_data::WorkspaceHost::notify(
-        &*self.host,
-        crate::gpui_shell::native::NativeEvent::Toast {
-          title,
-          description,
-          tone,
-          action: None,
-        },
-      ),
+      LightboxEvent::Toast(toast) => {
+        super::workspace_data::WorkspaceHost::notify(&*self.host, toast.into())
+      }
     }
   }
 

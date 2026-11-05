@@ -4,6 +4,7 @@
 //! new branch may take, the stack a new workspace joins, and the steps
 //! `useWorkspaceDialogSubmit` takes to create or move.
 
+use crate::gpui_shell::native::Toast;
 use crate::result_ext::ResultExt;
 use std::collections::HashSet;
 
@@ -15,7 +16,7 @@ use super::{
 };
 use crate::{
   core::{self, RenameWorkspaceResult, WorkspaceCommit, WorkspaceMoveRequest},
-  gpui_shell::native::{Backend, NativeEvent, ToastTone},
+  gpui_shell::native::Backend,
   jj::{BranchStatus, JjBranch},
   local_db::Workspace,
 };
@@ -557,18 +558,6 @@ pub enum Submitted {
   Failed(String),
 }
 
-fn toast(host: &dyn WorkspaceDialogHost, tone: ToastTone, title: &str, description: String) {
-  WorkspaceHost::notify(
-    host,
-    NativeEvent::Toast {
-      title: title.into(),
-      description,
-      tone,
-      action: None,
-    },
-  );
-}
-
 /// `useWorkspaceDialogSubmit`'s `handleSubmit`: creates, splits or moves,
 /// and reports it in a toast.
 pub fn submit(host: &dyn WorkspaceDialogHost, form: &Submit) -> Submitted {
@@ -580,23 +569,23 @@ pub fn submit(host: &dyn WorkspaceDialogHost, form: &Submit) -> Submitted {
     Ok(Err(message)) => Submitted::Failed(message),
     Err(message) => match created {
       Some(id) => {
-        toast(
+        WorkspaceHost::notify(
           host,
-          ToastTone::Error,
-          "Workspace created with errors",
-          format!(
-            "{} was created, but a follow-up step failed: {message}",
-            form.branch_name
-          ),
+          Toast::error("Workspace created with errors")
+            .description(format!(
+              "{} was created, but a follow-up step failed: {message}",
+              form.branch_name
+            ))
+            .into(),
         );
         Submitted::Done(id)
       }
       None => {
-        toast(
+        WorkspaceHost::notify(
           host,
-          ToastTone::Error,
-          "Failed to create workspace",
-          message.clone(),
+          Toast::error("Failed to create workspace")
+            .description(message.clone())
+            .into(),
         );
         Submitted::Failed(message)
       }
@@ -672,11 +661,11 @@ fn run_submit(
     if let Some((source_id, ..)) = &source {
       reparent_source(host, form, *source_id)?;
     }
-    toast(
+    WorkspaceHost::notify(
       host,
-      ToastTone::Success,
-      "Workspace created",
-      format!("Applied stash onto {branch}"),
+      Toast::success("Workspace created")
+        .description(format!("Applied stash onto {branch}"))
+        .into(),
     );
     return Ok(Ok(id));
   }
@@ -696,11 +685,11 @@ fn run_submit(
             ..Default::default()
           },
         )?;
-        toast(
+        WorkspaceHost::notify(
           host,
-          ToastTone::Success,
-          "Commits moved",
-          format!("Moved to workspace: {}", target.branch_name),
+          Toast::success("Commits moved")
+            .description(format!("Moved to workspace: {}", target.branch_name))
+            .into(),
         );
         return Ok(Ok(target_id));
       }
@@ -714,15 +703,15 @@ fn run_submit(
             ..Default::default()
           },
         )?;
-        toast(
+        WorkspaceHost::notify(
           host,
-          ToastTone::Success,
-          "Files moved",
-          format!(
-            "Moved {} file(s) to {}",
-            form.selected_files.len(),
-            target.branch_name
-          ),
+          Toast::success("Files moved")
+            .description(format!(
+              "Moved {} file(s) to {}",
+              form.selected_files.len(),
+              target.branch_name
+            ))
+            .into(),
         );
         return Ok(Ok(target_id));
       }
@@ -757,21 +746,24 @@ fn run_submit(
       host.move_changes(repo, source_branch, branch, request)?;
       reparent_source(host, form, *source_id)?;
       if commits {
-        toast(
+        WorkspaceHost::notify(
           host,
-          ToastTone::Success,
-          "Workspace created",
-          format!(
-            "Moved {} commit(s) to {branch}",
-            form.selected_commits.len()
-          ),
+          Toast::success("Workspace created")
+            .description(format!(
+              "Moved {} commit(s) to {branch}",
+              form.selected_commits.len()
+            ))
+            .into(),
         );
       } else {
-        toast(
+        WorkspaceHost::notify(
           host,
-          ToastTone::Success,
-          "Workspace split",
-          format!("Moved {} file(s) to {branch}", form.selected_files.len()),
+          Toast::success("Workspace split")
+            .description(format!(
+              "Moved {} file(s) to {branch}",
+              form.selected_files.len()
+            ))
+            .into(),
         );
       }
       return Ok(Ok(id));
@@ -789,14 +781,14 @@ fn run_submit(
     );
     let id = host.new_workspace(repo, branch, None, Some(&metadata))?;
     *created = Some(id);
-    toast(
+    WorkspaceHost::notify(
       host,
-      ToastTone::Success,
-      "Workspace created",
-      format!(
-        "Created {branch} with {} file(s) moved",
-        form.selected_files.len()
-      ),
+      Toast::success("Workspace created")
+        .description(format!(
+          "Created {branch} with {} file(s) moved",
+          form.selected_files.len()
+        ))
+        .into(),
     );
     return Ok(Ok(id));
   }
@@ -827,11 +819,11 @@ fn run_submit(
     &metadata,
     created,
   )?;
-  toast(
+  WorkspaceHost::notify(
     host,
-    ToastTone::Success,
-    "Workspace created",
-    branch.to_string(),
+    Toast::success("Workspace created")
+      .description(branch.to_string())
+      .into(),
   );
   Ok(Ok(id))
 }
@@ -915,11 +907,11 @@ fn create_stacked(
   if form.position == Position::Before {
     host.retarget(repo, parent, branch)?;
   }
-  toast(
+  WorkspaceHost::notify(
     host,
-    ToastTone::Success,
-    "Stacked workspace created",
-    format!("Created {branch} stacked on {effective_parent}"),
+    Toast::success("Stacked workspace created")
+      .description(format!("Created {branch} stacked on {effective_parent}"))
+      .into(),
   );
   Ok(id)
 }

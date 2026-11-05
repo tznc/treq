@@ -48,7 +48,7 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
     expectations: ["The Stack on this… icon's tooltip is readable and placed next to it"],
   });
 
-  await row(page, "main").click({ button: "right" });
+  await row(page, "main").first().click({ button: "right" });
   await settle(page, 1000);
   await capture(page, {
     name: "02-sidebar-home-context-menu",
@@ -112,7 +112,7 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
     await docsHome.click();
   } else {
     // The docs-site home row has no accessible name; it is the row under event-bus.
-    const main = await row(page, "main").boundingBox();
+    const main = await row(page, "main").first().boundingBox();
     if (main) await page.mouse.click(main.x + 60, main.y + main.height + 16);
   }
   await settle(page, 2500);

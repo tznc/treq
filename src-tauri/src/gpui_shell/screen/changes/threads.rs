@@ -2,6 +2,7 @@
 //! comments, drawn in the Changes tab's diff (`GithubCommentCard`,
 //! `GithubThreadsInlineList`, `AgentReviewCommentCard`).
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use gpui_kit::base::TestSupportExt as _;
@@ -206,7 +207,12 @@ impl ChangesView {
                 view.load(cx);
               }
             }
-            Err(err) => view.toast(ToastTone::Error, "Review comment action failed", err),
+            Err(err) => super::tell(
+              view.host.as_ref(),
+              Toast::error("Review comment action failed")
+                .description(err)
+                .into(),
+            ),
           }
           view.read_agent(cx);
         }
@@ -860,7 +866,10 @@ impl Reacts for ChangesView {
           if let Some(comment) = view.review_comment_mut(&id) {
             reactions::toggle(&mut comment.reactions, content);
           }
-          view.toast(ToastTone::Error, "Failed to react", err);
+          super::tell(
+            view.host.as_ref(),
+            Toast::error("Failed to react").description(err).into(),
+          );
         }
       },
       cx,

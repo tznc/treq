@@ -2,6 +2,7 @@
 //! and the selected one in full. It reads a page of them, and the next as the
 //! list scrolls near the end.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -15,7 +16,6 @@ use tauri_plugin_gpui::gpui::{
 use super::Env;
 use crate::{
   gpui_shell::{
-    native::ToastTone,
     theme::{self, Palette},
     time,
     ui::{self, Button, Size, TextSize, Variant},
@@ -233,7 +233,7 @@ impl PromptHistoryView {
   /// `handleCopy`.
   fn copy(&self, text: String, description: &str, cx: &mut Context<Self>) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
-    self.env.toast(ToastTone::Success, description, "");
+    self.env.notify(Toast::success(description).into());
   }
 
   fn close(&self, cx: &mut Context<Self>) {

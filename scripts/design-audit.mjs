@@ -28,6 +28,7 @@ const RULES = [
   "gpui-button-no-restyle",
   "gpui-row-selected-token",
   "gpui-no-local-row",
+  "gpui-no-local-header-or-toast",
   "gpui-no-adhoc-tabs",
   "gpui-no-local-dialog",
   "gpui-no-adhoc-feedback",

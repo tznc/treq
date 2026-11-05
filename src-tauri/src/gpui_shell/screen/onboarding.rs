@@ -10,6 +10,7 @@
 //! and opens local repositories itself. Connecting to a machine, opening a
 //! remote repository and the remote setup dialog go to the window.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{collections::HashMap, rc::Rc, sync::Arc, time::Instant};
@@ -675,14 +676,6 @@ fn place_icon(place: &Place) -> &'static str {
   }
 }
 
-/// A group's label in the machines panel, as the sidebar's.
-fn group_label(label: &str, p: &Palette) -> Div {
-  ui::text(div(), TextSize::Xs)
-    .font_weight(FontWeight::SEMIBOLD)
-    .text_color(p.muted_foreground)
-    .child(label.to_uppercase())
-}
-
 impl OnboardingView {
   fn machine_row(&self, machine: &Machine, ctx: &Ctx, cx: &mut Context<Self>) -> AnyElement {
     let p = ctx.palette;
@@ -1008,11 +1001,16 @@ impl OnboardingView {
                   .items_center()
                   .justify_between()
                   .pl_2()
-                  .child(group_label(section, &p))
-                  .children(add(section).map(|(id, label, action)| {
-                    IconButton::new(id, theme::ICON_PLUS, label, &p)
-                      .size(IconButtonSize::Small)
-                      .on_click(ctx.send(press(action)))
+                  .child(div().flex_1().min_w_0().child({
+                    let header = ui::SectionHeader::new(format!("{group}-heading"), section, &p);
+                    match add(section) {
+                      Some((id, label, action)) => header.action(
+                        IconButton::new(id, theme::ICON_PLUS, label, &p)
+                          .size(IconButtonSize::Small)
+                          .on_click(ctx.send(press(action))),
+                      ),
+                      None => header,
+                    }
                   })),
               )
               .children(rows)
@@ -1315,12 +1313,7 @@ where
   let toast = |tone, title: &str, description: String| {
     SettingsHost::notify(
       host,
-      NativeEvent::Toast {
-        title: title.into(),
-        description,
-        tone,
-        action: None,
-      },
+      NativeEvent::from(Toast::new(tone, title, description)),
     )
   };
   if !core::is_repository(path) {

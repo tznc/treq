@@ -1,6 +1,7 @@
 //! `PrDetailPanel`, `IssueDetailPanel` and their actions, and the PR's
 //! workspace checks (`PrWorkspaceChecks`).
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use tauri_plugin_gpui::gpui::{
@@ -18,7 +19,6 @@ use crate::{
   github::{GhIssue, GhIssueComment, GhPullRequest, PrCiStatus},
   gpui_shell::{
     form,
-    native::ToastTone,
     popup::{Side, TooltipContent},
     screen::{
       code::markdown,
@@ -70,7 +70,7 @@ impl GithubView {
             if busy == Busy::Delete && current {
               view.detail.confirm_delete = false;
             }
-            view.toast(ToastTone::Error, fail, err);
+            view.host.notify(Toast::error(fail).description(err).into());
           }
         }
       },
@@ -171,7 +171,11 @@ impl GithubView {
             view.detail.editing = None;
             view.reload_list(false, cx);
           }
-          Err(err) => view.toast(ToastTone::Error, "Failed to update issue", err),
+          Err(err) => view.host.notify(
+            Toast::error("Failed to update issue")
+              .description(err)
+              .into(),
+          ),
         }
       },
     );
@@ -225,11 +229,17 @@ impl GithubView {
             } else {
               "Workspace opened"
             };
-            view.toast(ToastTone::Success, title, head);
+            view
+              .host
+              .notify(Toast::success(title).description(head).into());
             view.load_workspaces(cx);
             view.press(format!("github.openWorkspace:{id}"), cx);
           }
-          Err(err) => view.toast(ToastTone::Error, "Failed to open workspace", err),
+          Err(err) => view.host.notify(
+            Toast::error("Failed to open workspace")
+              .description(err)
+              .into(),
+          ),
         }
       },
     );
@@ -378,15 +388,16 @@ impl GithubView {
         .flex()
         .flex_col()
         .gap_3()
-        .child(parts::section_heading(
-          if items.len() > comments.len() {
-            format!("Activity ({})", items.len())
+        .child({
+          let (title, n) = if items.len() > comments.len() {
+            ("Activity", items.len())
           } else {
-            format!("Comments ({})", comments.len())
-          },
-          Some(theme::ICON_MESSAGE),
-          p,
-        ))
+            ("Comments", comments.len())
+          };
+          ui::SectionHeader::new("github-comments-heading", title, p)
+            .icon(theme::ICON_MESSAGE)
+            .count(n)
+        })
         .children(shown.iter().map(|&shown_ix| match shown_ix {
           Some(ix) => {
             let c = match &items[ix] {
@@ -459,7 +470,11 @@ impl GithubView {
       .flex()
       .flex_col()
       .gap_2()
-      .child(parts::section_heading("Add comment", None, p))
+      .child(ui::SectionHeader::new(
+        "github-add-comment-heading",
+        "Add comment",
+        p,
+      ))
       .child(
         ui::text(div().id("github-comment-box"), TextSize::Sm)
           .debug_selector(|| "github-comment-box".into())
@@ -977,11 +992,10 @@ impl GithubView {
             .flex()
             .items_center()
             .justify_between()
-            .child(parts::section_heading(
-              "Checks",
-              Some(theme::ICON_LIST_CHECKS),
-              p,
-            ))
+            .child(
+              ui::SectionHeader::new("github-checks-heading", "Checks", p)
+                .icon(theme::ICON_LIST_CHECKS),
+            )
             .child(toggle),
         )
         .child(
@@ -1219,7 +1233,11 @@ impl GithubView {
       .flex()
       .items_center()
       .justify_between()
-      .child(parts::section_heading("Treq checks", None, p))
+      .child(ui::SectionHeader::new(
+        "github-treq-checks-heading",
+        "Treq checks",
+        p,
+      ))
       .when(self.logs_enabled, |d| {
         d.child(
           Button::new("github-open-logs", p)
@@ -1751,7 +1769,9 @@ impl Reacts for GithubView {
           if let Some(comment) = view.comment_mut(&id) {
             reactions::toggle(&mut comment.reactions, content);
           }
-          view.toast(ToastTone::Error, "Failed to react", err);
+          view
+            .host
+            .notify(Toast::error("Failed to react").description(err).into());
         }
       },
     );

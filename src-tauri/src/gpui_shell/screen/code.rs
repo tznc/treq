@@ -9,6 +9,7 @@
 //!
 //! [`code_data`]: super::code_data
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::result_ext::ResultExt;
@@ -51,7 +52,7 @@ use crate::{
   },
   gpui_shell::{
     checks_run,
-    native::{NativeEvent, ToastTone},
+    native::NativeEvent,
     popup::{PopupSink, Side, TooltipContent},
     theme::{self, Palette},
     time,
@@ -719,18 +720,6 @@ impl CodeView {
     }
   }
 
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    tell(
-      self.host.as_ref(),
-      NativeEvent::Toast {
-        title: title.into(),
-        description: description.into(),
-        tone,
-        action: None,
-      },
-    );
-  }
-
   fn send_react(&self, action: ScreenAction, cx: &mut App) {
     let react = self.react.clone();
     // Never inside this view's own update: React's sink may route back here.
@@ -759,16 +748,22 @@ impl CodeView {
           },
         );
         if let Some(err) = pr_error {
-          self.toast(
-            ToastTone::Error,
-            "Saved as a local draft",
-            format!("The pull request wasn't updated: {err}"),
+          tell(
+            self.host.as_ref(),
+            Toast::error("Saved as a local draft")
+              .description(format!("The pull request wasn't updated: {err}"))
+              .into(),
           );
         }
         true
       }
       Err(err) => {
-        self.toast(ToastTone::Error, &format!("Failed to save {what}"), err);
+        tell(
+          self.host.as_ref(),
+          Toast::error(format!("Failed to save {what}"))
+            .description(err)
+            .into(),
+        );
         false
       }
     }
@@ -794,10 +789,11 @@ impl CodeView {
               repo_path: view.parent.repo_path.clone(),
             },
           ),
-          Err(err) => view.toast(
-            ToastTone::Error,
-            "Failed to resync from the pull request",
-            err,
+          Err(err) => tell(
+            view.host.as_ref(),
+            Toast::error("Failed to resync from the pull request")
+              .description(err)
+              .into(),
           ),
         }
       },

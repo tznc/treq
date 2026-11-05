@@ -148,25 +148,6 @@ pub fn check_row(
   }
 }
 
-/// `text-base font-semibold uppercase tracking-widest text-muted-foreground`.
-pub fn section_heading(
-  label: impl Into<SharedString>,
-  icon: Option<&'static str>,
-  p: &Palette,
-) -> Div {
-  let label: SharedString = label.into();
-  ui::text(div(), TextSize::Sm)
-    .flex()
-    .items_center()
-    .gap_1()
-    .font_weight(FontWeight::SEMIBOLD)
-    .text_color(p.muted_foreground)
-    .children(icon.map(|icon| ui::icon(icon, 12., p.muted_foreground)))
-    // `tracking-widest` is 0.1em: GPUI has no letter spacing, so the
-    // capitals stand in.
-    .child(label.to_uppercase())
-}
-
 /// `OpenInWebButton`.
 pub fn open_in_web(id: &'static str, p: &Palette, on_click: OnClick) -> Button {
   Button::new(id, p)

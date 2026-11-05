@@ -10,6 +10,7 @@
 
 mod review;
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -48,7 +49,6 @@ use super::{
 use crate::{
   core::WorkspaceEntry,
   gpui_shell::{
-    native::{NativeEvent, ToastTone},
     popup::{self, MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
     theme::{self, Palette},
     time,
@@ -422,18 +422,6 @@ impl FileBrowserView {
     .detach();
   }
 
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    super::workspace_data::WorkspaceHost::notify(
-      self.host.as_ref(),
-      NativeEvent::Toast {
-        title: title.into(),
-        description: description.into(),
-        tone,
-        action: None,
-      },
-    );
-  }
-
   fn send_react(&self, action: ScreenAction, cx: &mut App) {
     let react = self.react.clone();
     cx.defer(move |cx| react(action, cx));
@@ -512,7 +500,12 @@ impl FileBrowserView {
         let entries = match result {
           Ok(entries) => entries,
           Err(err) => {
-            view.toast(ToastTone::Error, "Failed to load directory", err);
+            super::workspace_data::WorkspaceHost::notify(
+              view.host.as_ref(),
+              Toast::error("Failed to load directory")
+                .description(err)
+                .into(),
+            );
             Vec::new()
           }
         };
@@ -660,17 +653,21 @@ impl FileBrowserView {
         }
         match result {
           Ok(None) => {
-            view.toast(
-              ToastTone::Warning,
-              "File too large",
-              "Files larger than 1MB cannot be displayed.",
+            super::workspace_data::WorkspaceHost::notify(
+              view.host.as_ref(),
+              Toast::warning("File too large")
+                .description("Files larger than 1MB cannot be displayed.")
+                .into(),
             );
             view.selected = None;
             view.opened = None;
           }
           Ok(Some(read)) => view.show_content(read, refreshing, cx),
           Err(err) => {
-            view.toast(ToastTone::Error, "Failed to read file", err);
+            super::workspace_data::WorkspaceHost::notify(
+              view.host.as_ref(),
+              Toast::error("Failed to read file").description(err).into(),
+            );
             view.opened = Some(Opened::default());
             view.marks = LineMarks::default();
           }
@@ -995,7 +992,10 @@ impl FileBrowserView {
 
   fn discard_review(&mut self, cx: &mut Context<Self>) {
     self.reset_review(cx);
-    self.toast(ToastTone::Success, "Review canceled", "");
+    super::workspace_data::WorkspaceHost::notify(
+      self.host.as_ref(),
+      Toast::success("Review canceled").into(),
+    );
   }
 
   fn input_for(
@@ -1217,7 +1217,7 @@ impl FileBrowserView {
 
   fn copy_toast(&self, text: String, title: String, cx: &mut App) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
-    self.toast(ToastTone::Success, &title, "");
+    super::workspace_data::WorkspaceHost::notify(self.host.as_ref(), Toast::success(&title).into());
   }
 
   /// `FileTreeContextMenu`.
@@ -1711,12 +1711,12 @@ impl FileBrowserView {
       .flex()
       .flex_col()
       .bg(theme::palette(self.dark).code_background())
-      .child(self.content_header(&path, markdown, previewing, p, cx))
+      .child(self.path_bar(&path, markdown, previewing, p, cx))
       .child(div().flex_1().min_h_0().overflow_hidden().child(body))
       .into_any_element()
   }
 
-  fn content_header(
+  fn path_bar(
     &self,
     path: &str,
     markdown: bool,

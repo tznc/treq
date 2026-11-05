@@ -1434,3 +1434,20 @@ fn account_loading_is_a_progress_indicator(cx: &mut TestAppContext) {
   expect(screen.get_by_role(by::role(Role::ProgressIndicator).name("Loading account…")))
     .to_be_visible();
 }
+
+/// The Provider keys header is the shared section heading, named by its
+/// title, as written.
+#[gpui::test]
+fn the_provider_keys_header_is_a_heading(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let mut h = signed_in_with_cloud(
+    cx,
+    Arc::new(FakeHost::default()),
+    cloud(serde_json::json!({ "providerKeys": boat_key() })),
+  );
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(gpui::Role::Heading).name("Provider keys"))).to_be_visible();
+}

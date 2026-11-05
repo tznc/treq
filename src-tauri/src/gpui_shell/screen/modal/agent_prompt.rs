@@ -4,6 +4,7 @@
 //! session (`startAgentTask`, in `core::agent_launch`): it opens the issue's
 //! workspaces, records the prompt and tells React which session to show.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -24,7 +25,7 @@ use tauri_plugin_gpui::gpui::{
 use super::{fuzzy_matches, Env};
 use crate::core::agent_launch::{self as launch, IssueAttachment, TaskRequest};
 use crate::gpui_shell::{
-  native::{NativeEvent, ToastTone},
+  native::NativeEvent,
   popup::{Side, TooltipContent},
   screen::{
     code::{agent_icon, menu_panel},
@@ -352,10 +353,6 @@ impl AgentPromptView {
 
   fn close(&self, cx: &mut Context<Self>) {
     self.env.press("agentPrompt.close", cx);
-  }
-
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    self.env.toast(tone, title, description);
   }
 
   // The workspace combobox.
@@ -708,7 +705,11 @@ impl AgentPromptView {
       ),
       |view, result, cx| {
         if let Err(err) = result {
-          view.toast(ToastTone::Error, "Failed to save setting", err);
+          view.env.notify(
+            Toast::error("Failed to save setting")
+              .description(err)
+              .into(),
+          );
         } else {
           view.env.notify(NativeEvent::RepoSettingsChanged {
             repo_path: view.route.repo_path.clone(),
@@ -741,7 +742,11 @@ impl AgentPromptView {
               env.status = Some(status);
             }
           }
-          Err(err) => view.toast(ToastTone::Error, "Devcontainer did not start", err),
+          Err(err) => view.env.notify(
+            Toast::error("Devcontainer did not start")
+              .description(err)
+              .into(),
+          ),
         }
       }
     );
@@ -775,9 +780,11 @@ impl AgentPromptView {
         Ok(false) => view.submitted = false,
         Err(err) => {
           view.submitted = false;
-          view
-            .env
-            .toast(ToastTone::Error, "Failed to create task", err);
+          view.env.notify(
+            Toast::error("Failed to create task")
+              .description(err)
+              .into(),
+          );
         }
       }
     );

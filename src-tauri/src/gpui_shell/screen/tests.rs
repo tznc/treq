@@ -594,7 +594,7 @@ impl workspace_data::WorkspaceHost for FakeHost {
 
   fn rebase_home(&self, _: &str, branch: &str) -> workspace_data::Outcome {
     self.record(format!("rebase {branch}"));
-    workspace_data::Outcome::ok("Rebase complete", "Branch rebased onto target".into())
+    workspace_data::Outcome::ok("Rebased", "Branch rebased onto target".into())
   }
 
   fn notify(&self, event: crate::gpui_shell::native::NativeEvent) {

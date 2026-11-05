@@ -17,7 +17,7 @@ use tauri_plugin_gpui::gpui::App;
 use super::{code_data::CodeHost, ActionSink, ScreenAction};
 use crate::{
   gpui_shell::{
-    native::{Backend, NativeEvent, ToastTone},
+    native::{Backend, NativeEvent},
     popup::PopupSink,
   },
   jj::JjRevisionDiff,
@@ -136,15 +136,6 @@ impl Env {
   /// Tells React what the dialog changed.
   pub fn notify(&self, event: NativeEvent) {
     super::workspace_data::WorkspaceHost::notify(self.host.as_ref(), event);
-  }
-
-  pub fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    self.notify(NativeEvent::Toast {
-      title: title.into(),
-      description: description.into(),
-      tone,
-      action: None,
-    });
   }
 
   /// Tells React the repository's state changed (a stash was applied).

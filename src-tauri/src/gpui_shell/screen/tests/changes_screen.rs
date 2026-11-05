@@ -1492,3 +1492,14 @@ fn a_review_thread_folds_from_a_named_button(cx: &mut TestAppContext) {
     .to_be_visible();
   assert!(!h.drawn("github-thread-collapsed-preview"));
 }
+
+/// The Changes section's header is the shared section heading: a heading
+/// named by its title, with a toggle that names what it collapses.
+#[gpui::test]
+fn the_changes_section_header_is_a_heading(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  let screen = a11y_screen(&mut h);
+  expect(screen.get_by_role(by::role(gpui::Role::Heading).name("Changes"))).to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("Collapse Changes"))).to_be_visible();
+}

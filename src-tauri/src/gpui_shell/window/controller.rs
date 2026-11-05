@@ -3,6 +3,7 @@
 //! every invalidation, runs the [`Effect`]s the model asks for, and hands
 //! the shell what to draw ([`Presentation`]) whenever that changes.
 
+use crate::gpui_shell::native::Toast;
 use crate::result_ext::ResultExt;
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
@@ -24,7 +25,7 @@ use crate::{
   },
   gpui_shell::{
     confirm::Question,
-    native::{NativeEvent, ToastTone},
+    native::NativeEvent,
     overlay::OverlaySnapshot,
     screen::{file_picker::Scope, workspace_data, Modal, ScreenAction, ScreenSnapshot, View},
     sidebar::{SidebarAction, SidebarSnapshot},
@@ -493,7 +494,9 @@ impl WindowController {
           |this, result, cx| {
             if let Err(err) = result {
               this.run(
-                vec![toast(ToastTone::Error, "Failed to start session", &err)],
+                vec![Effect::from(
+                  Toast::error("Failed to start session").description(&err),
+                )],
                 cx,
               );
             }
@@ -515,7 +518,9 @@ impl WindowController {
         |this, result: Result<(), String>, cx| {
           if let Err(err) = result {
             this.run(
-              vec![toast(ToastTone::Error, "Failed to open repository", &err)],
+              vec![Effect::from(
+                Toast::error("Failed to open repository").description(&err),
+              )],
               cx,
             );
           }
@@ -552,7 +557,9 @@ impl WindowController {
               }
               vec![Effect::Refresh { revision: false }]
             }
-            Err(err) => vec![toast(ToastTone::Error, "Failed to remove repository", &err)],
+            Err(err) => vec![Effect::from(
+              Toast::error("Failed to remove repository").description(&err),
+            )],
           };
           this.run(effects, cx);
         },
@@ -570,7 +577,7 @@ impl WindowController {
           this.data.clear();
           this.host.show_remote(None);
           this.run(
-            vec![toast(ToastTone::Success, "Factory reset complete", "")],
+            vec![Effect::from(Toast::success("Settings reset to defaults"))],
             cx,
           );
         },
@@ -591,16 +598,12 @@ impl WindowController {
                 result.message
               };
               if result.success {
-                toast(ToastTone::Success, "Force rebase complete", &message)
+                Effect::from(Toast::success("Rebased").description(&message))
               } else {
-                toast(
-                  ToastTone::Warning,
-                  "Force rebase completed with errors",
-                  &message,
-                )
+                Effect::from(Toast::warning("Rebased with errors").description(&message))
               }
             }
-            Err(err) => toast(ToastTone::Error, "Force rebase failed", &err),
+            Err(err) => Effect::from(Toast::error("Force rebase failed").description(&err)),
           };
           this.run(vec![done, Effect::Refresh { revision: false }], cx);
         },
@@ -610,7 +613,7 @@ impl WindowController {
         tone,
         title,
         description,
-      } => self.host.toast(tone, &title, &description),
+      } => self.host.show_toast(Toast::new(tone, &title, &description)),
       Effect::ReviewDone {
         repo_path,
         workspace_id,
@@ -812,9 +815,9 @@ impl WindowController {
                   .find(|s| !s.is_empty())
                   .unwrap_or(&added)
                   .to_string();
-                toast(ToastTone::Success, &format!("Added {name}"), "")
+                Effect::from(Toast::success(format!("Added {name}")))
               }
-              Err(err) => toast(ToastTone::Error, "Failed to add repository", &err),
+              Err(err) => Effect::from(Toast::error("Failed to add repository").description(&err)),
             };
             this.run(vec![effect, Effect::Refresh { revision: false }], cx);
           },
@@ -1151,12 +1154,4 @@ fn settings_keys(main: &str) -> Vec<String> {
   .map(String::from)
   .chain([model::collapsed_key(main)])
   .collect()
-}
-
-fn toast(tone: ToastTone, title: &str, description: &str) -> Effect {
-  Effect::Toast {
-    tone,
-    title: title.into(),
-    description: description.into(),
-  }
 }

@@ -14,6 +14,7 @@ mod rows;
 pub(in crate::gpui_shell::screen) mod search;
 pub(super) mod threads;
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -57,7 +58,7 @@ use super::{
 use crate::{
   conflict_markers::{ConflictLineKind, ConflictLineRole},
   gpui_shell::{
-    native::{self, NativeEvent, ToastAction, ToastTone},
+    native::{self, NativeEvent, ToastAction},
     popup::{self, MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
     theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
@@ -93,15 +94,6 @@ pub struct Options {
 /// Tells React what the tab changed.
 fn tell(host: &dyn ChangesHost, event: NativeEvent) {
   super::workspace_data::WorkspaceHost::notify(host, event);
-}
-
-fn toast_event(tone: ToastTone, title: &str, description: impl Into<String>) -> NativeEvent {
-  NativeEvent::Toast {
-    title: title.into(),
-    description: description.into(),
-    tone,
-    action: None,
-  }
 }
 
 /// Which side of a hunk "Show more lines" reads.
@@ -480,10 +472,6 @@ impl ChangesView {
     );
   }
 
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    tell(self.host.as_ref(), toast_event(tone, title, description));
-  }
-
   /// Everything React read from the repository is stale.
   fn changed(host: &dyn ChangesHost, parent: &Parent) {
     tell(
@@ -649,7 +637,10 @@ impl ChangesView {
           }
           Ok(snapshot) => view.apply(snapshot, cx),
           Err(err) => {
-            view.toast(ToastTone::Error, "JJ Error", err);
+            tell(
+              view.host.as_ref(),
+              Toast::error("JJ Error").description(err).into(),
+            );
             view.snapshot.get_or_insert_with(Snapshot::default);
             view.layout_gen += 1;
             true
@@ -1109,7 +1100,10 @@ impl ChangesView {
             view.staging.selected.clear();
             view.discarded(workspace, snapshot, discarded(&paths), cx);
           }
-          Err(err) => view.toast(ToastTone::Error, "Discard failed", err),
+          Err(err) => tell(
+            view.host.as_ref(),
+            Toast::error("Discard failed").description(err).into(),
+          ),
         }
       },
       cx,
@@ -1131,7 +1125,10 @@ impl ChangesView {
         Ok((workspace, snapshot)) => {
           view.discarded(workspace, snapshot, "All changes discarded".into(), cx)
         }
-        Err(err) => view.toast(ToastTone::Error, "Discard all failed", err),
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Discard all failed").description(err).into(),
+        ),
       },
       cx,
     );
@@ -1151,23 +1148,22 @@ impl ChangesView {
       let event = match host.restore_snapshot(&workspace, &snapshot) {
         Ok(()) => {
           Self::changed(host.as_ref(), &parent);
-          toast_event(ToastTone::Success, "Changes restored", "")
+          NativeEvent::from(Toast::success("Changes restored"))
         }
-        Err(err) => toast_event(ToastTone::Error, "Undo failed", err),
+        Err(err) => NativeEvent::from(Toast::error("Undo failed").description(err)),
       };
       tell(host.as_ref(), event);
     });
     tell(
       self.host.as_ref(),
-      NativeEvent::Toast {
-        title: "Discarded".into(),
-        description,
-        tone: ToastTone::Success,
-        action: Some(ToastAction {
-          label: "Undo".into(),
-          id: undo,
-        }),
-      },
+      NativeEvent::from(
+        Toast::success("Discarded")
+          .description(description)
+          .action(ToastAction {
+            label: "Undo".into(),
+            id: undo,
+          }),
+      ),
     );
     self.load(cx);
   }
@@ -1178,12 +1174,20 @@ impl ChangesView {
       |host, parent| host.stash_all(&parent.repo_path, parent.workspace_id()),
       |view, result, cx| match result {
         Ok(entry) => {
-          view.toast(ToastTone::Success, "Changes stashed", stashed(&entry));
+          tell(
+            view.host.as_ref(),
+            Toast::success("Changes stashed")
+              .description(stashed(&entry))
+              .into(),
+          );
           Self::changed(view.host.as_ref(), &view.parent);
           view.field("commits.stashed", serde_json::Value::Null, cx);
           view.load(cx);
         }
-        Err(err) => view.toast(ToastTone::Error, "Stash failed", err),
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Stash failed").description(err).into(),
+        ),
       },
       cx,
     );
@@ -1253,7 +1257,10 @@ impl ChangesView {
     let message = match check_message(&message) {
       Ok(m) => m,
       Err(err) => {
-        self.toast(ToastTone::Error, "Commit message", err);
+        tell(
+          self.host.as_ref(),
+          Toast::error("Commit message").description(err).into(),
+        );
         return;
       }
     };
@@ -1295,7 +1302,12 @@ impl ChangesView {
           }
           match committed {
             Ok(result) => {
-              view.toast(ToastTone::Success, "Commit created", result.trim());
+              tell(
+                view.host.as_ref(),
+                Toast::success("Commit created")
+                  .description(result.trim())
+                  .into(),
+              );
               view.committed_collapsed = true;
               if action == CommitAction::Pr {
                 view.send_react(
@@ -1306,7 +1318,10 @@ impl ChangesView {
                 );
               }
             }
-            Err(err) => view.toast(ToastTone::Error, "Commit failed", err),
+            Err(err) => tell(
+              view.host.as_ref(),
+              Toast::error("Commit failed").description(err).into(),
+            ),
           }
           Self::changed(view.host.as_ref(), &view.parent);
           view.load(cx);
@@ -1326,8 +1341,14 @@ impl ChangesView {
           }
           view.pending = None;
           match pushed {
-            Ok(_) => view.toast(ToastTone::Success, "Pushed to remote", ""),
-            Err(err) => view.toast(ToastTone::Error, "Failed to push", err),
+            Ok(_) => tell(
+              view.host.as_ref(),
+              Toast::success("Pushed to remote").into(),
+            ),
+            Err(err) => tell(
+              view.host.as_ref(),
+              Toast::error("Failed to push").description(err).into(),
+            ),
           }
           Self::changed(view.host.as_ref(), &view.parent);
           view.load(cx);
@@ -1577,7 +1598,7 @@ impl ChangesView {
 
   fn copy(&self, text: String, title: String, cx: &mut App) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
-    self.toast(ToastTone::Success, &title, "");
+    tell(self.host.as_ref(), Toast::success(&title).into());
   }
 
   fn open_in(&self, scheme: &str, path: &str) {
@@ -2330,71 +2351,17 @@ impl ChangesView {
       .child(div().flex().w_full().child(main).child(menu))
   }
 
-  #[expect(
-    clippy::too_many_arguments,
-    reason = "flat argument list kept to match callers"
-  )]
-  fn section_header(
-    &mut self,
-    id: &'static str,
-    title: &'static str,
-    collapsed: bool,
-    color: Hsla,
-    p: &Palette,
-    cx: &mut Context<Self>,
-    on_toggle: impl Fn(&mut Self, &mut Context<Self>) + 'static,
-  ) -> Stateful<Div> {
-    let fg = p.foreground;
-    div()
-      .id(id)
-      .role(gpui::Role::Button)
-      .aria_label(if collapsed { "Expand" } else { "Collapse" })
-      .debug_selector(move || id.into())
-      .flex()
-      .items_center()
-      .gap_1()
-      .cursor_pointer()
-      .text_color(color)
-      .hover(move |s| s.text_color(fg))
-      .child(ui::icon(
-        if collapsed {
-          theme::ICON_CHEVRON_RIGHT
-        } else {
-          theme::ICON_CHEVRON_DOWN
-        },
-        12.,
-        color,
-      ))
-      .child(title)
-      .on_click(cx.listener(move |view, _, _, cx| on_toggle(view, cx)))
-  }
-
   fn conflicts_header(&mut self, count: usize, p: &Palette, cx: &mut Context<Self>) -> Div {
     let collapsed = self.collapsed_sections.contains(&Section::Conflicts);
-    let header = self.section_header(
-      "conflicts-section-toggle",
-      "Conflicts",
-      collapsed,
-      p.muted_foreground,
-      p,
-      cx,
-      |view, cx| view.toggle_section(Section::Conflicts, cx),
-    );
     div().pt_4().child(
-      div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .text_color(p.muted_foreground)
-        .child(
-          div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(header)
-            .child(ui::Dot::new(Tone::Danger, "Conflict", p)),
+      ui::SectionHeader::new("conflicts-section-title", "Conflicts", p)
+        .collapsible(
+          "conflicts-section-toggle",
+          collapsed,
+          cx.listener(|view, _, _, cx| view.toggle_section(Section::Conflicts, cx)),
         )
-        .child(ui::Count::new(count, p)),
+        .count(count)
+        .action(ui::Dot::new(Tone::Danger, "Conflict", p)),
     )
   }
 
@@ -2464,22 +2431,28 @@ impl ChangesView {
     } else {
       self.staging.selected.len()
     };
-    let header = self.section_header(
+    let header = ui::SectionHeader::new(
+      if staged {
+        "selected-section-title"
+      } else {
+        "changes-section-title"
+      },
+      if staged { "Selected" } else { "Changes" },
+      p,
+    )
+    .collapsible(
       if staged {
         "selected-section-toggle"
       } else {
         "changes-section-toggle"
       },
-      if staged { "Selected" } else { "Changes" },
       collapsed,
-      p.muted_foreground,
-      p,
-      cx,
-      move |view, cx| {
+      cx.listener(move |view, _, _, cx| {
         view.toggle_section(section, cx);
         view.deselect(list, cx);
-      },
-    );
+      }),
+    )
+    .count(count);
     let muted = p.muted_foreground;
     let mut buttons = div().flex().items_center().gap_1();
     if count > 0 {
@@ -2614,7 +2587,6 @@ impl ChangesView {
         ));
       }
     }
-    buttons = buttons.child(div().ml_1().child(ui::Count::new(count, p)));
     div()
       .id(if staged {
         "selected-section"
@@ -2636,54 +2608,24 @@ impl ChangesView {
           .text_color(p.muted_foreground)
           // A click on the header clears the selection; it is not a control.
           .cursor_default()
-          .child(header)
-          .child(buttons)
+          .child(div().flex_1().min_w_0().child(header.action(buttons)))
           .on_click(cx.listener(move |view, _, _, cx| view.deselect(list, cx))),
       )
   }
 
   fn committed_header(&mut self, p: &Palette, cx: &mut Context<Self>) -> Div {
-    let collapsed = self.committed_collapsed;
     let total = self.snapshot.as_ref().map_or(0, |s| s.committed.len());
-    let muted = p.muted_foreground;
-    let fg = p.foreground;
-    let header = div()
-      .id("committed-section-toggle")
-      .role(gpui::Role::Button)
-      .aria_label(if collapsed {
-        "Show committed"
-      } else {
-        "Hide committed"
-      })
-      .debug_selector(|| "committed-section-toggle".into())
-      .flex()
-      .items_center()
-      .gap_1()
-      .cursor_pointer()
-      .hover(move |s| s.text_color(fg))
-      .child(ui::icon(
-        if collapsed {
-          theme::ICON_CHEVRON_RIGHT
-        } else {
-          theme::ICON_CHEVRON_DOWN
-        },
-        12.,
-        muted,
-      ))
-      .child("Committed")
-      .child(div().ml_1().child(ui::Count::new(total, p)))
-      .on_click(cx.listener(|view, _, _, cx| {
-        view.committed_collapsed = !view.committed_collapsed;
-        cx.notify();
-      }));
     div().pt_4().child(
-      div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .w_full()
-        .text_color(muted)
-        .child(header),
+      ui::SectionHeader::new("committed-section-title", "Committed", p)
+        .collapsible(
+          "committed-section-toggle",
+          self.committed_collapsed,
+          cx.listener(|view, _, _, cx| {
+            view.committed_collapsed = !view.committed_collapsed;
+            cx.notify();
+          }),
+        )
+        .count(total),
     )
   }
 

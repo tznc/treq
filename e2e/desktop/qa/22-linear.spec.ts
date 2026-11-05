@@ -61,7 +61,7 @@ test("linear: connect with an API key in Settings", async ({ page }) => {
       "The field and Save sit on the API key row, aligned with its label",
     ],
   });
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("button", { name: "Update API key" })).toBeVisible();
   await settle(page, 800);
   await capture(page, {

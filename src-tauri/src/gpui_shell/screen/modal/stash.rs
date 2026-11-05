@@ -1,6 +1,7 @@
 //! `StashModal`: the repository's stashed changes, each one's diff, and
 //! applying, copying and deleting them.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
@@ -14,7 +15,6 @@ use tauri_plugin_gpui::gpui::{
 use super::Env;
 use crate::{
   gpui_shell::{
-    native::ToastTone,
     screen::{code::menu_panel, rows::Rows},
     theme::{self, Palette},
     time,
@@ -326,11 +326,11 @@ impl StashView {
           match patch {
             Ok(patch) => {
               cx.write_to_clipboard(ClipboardItem::new_string(patch));
-              view.env.toast(ToastTone::Success, "Patch copied", "");
+              view.env.notify(Toast::success("Patch copied").into());
             }
             Err(err) => view
               .env
-              .toast(ToastTone::Error, "Failed to copy patch", err),
+              .notify(Toast::error("Failed to copy patch").description(err).into()),
           }
           cx.notify();
         })
@@ -365,11 +365,13 @@ impl StashView {
               }
               view.env.workspace_changed(&repo);
               view.load(cx);
-              view.env.toast(ToastTone::Success, "Stash deleted", "");
+              view.env.notify(Toast::success("Stash deleted").into());
             }
-            Err(err) => view
-              .env
-              .toast(ToastTone::Error, "Failed to delete stash", err),
+            Err(err) => view.env.notify(
+              Toast::error("Failed to delete stash")
+                .description(err)
+                .into(),
+            ),
           }
           cx.notify();
         })
@@ -401,11 +403,13 @@ impl StashView {
           match result {
             Ok(()) => {
               view.env.workspace_changed(&repo);
-              view.env.toast(ToastTone::Success, "Stash applied", "");
+              view.env.notify(Toast::success("Stash applied").into());
             }
-            Err(err) => view
-              .env
-              .toast(ToastTone::Error, "Failed to apply stash", err),
+            Err(err) => view.env.notify(
+              Toast::error("Failed to apply stash")
+                .description(err)
+                .into(),
+            ),
           }
           cx.notify();
         })

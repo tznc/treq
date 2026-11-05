@@ -1,6 +1,7 @@
 //! Dashboard's `AlertDialog` that confirms moving files dropped on another
 //! workspace, and the move itself.
 
+use crate::gpui_shell::native::Toast;
 use crate::result_ext::ResultExt;
 use std::sync::Arc;
 
@@ -137,12 +138,7 @@ impl ChangeMoveDialog {
       };
       WorkspaceHost::notify(
         &*host,
-        NativeEvent::Toast {
-          title: title.into(),
-          description,
-          tone,
-          action: None,
-        },
+        NativeEvent::from(Toast::new(tone, title, description)),
       );
       this
         .update(cx, |view, cx| {

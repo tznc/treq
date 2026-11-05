@@ -5,6 +5,7 @@
 //! ahead and its diff, and merges it. React still owns leaving the page,
 //! which a merge does too (its caches refresh then).
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
@@ -32,7 +33,7 @@ use crate::{
   github::GhMergeMethod,
   gpui_shell::{
     form::{self, Controls},
-    native::{Backend, NativeEvent, ToastTone},
+    native::{Backend, ToastTone},
     theme::{self, Palette},
     ui::{self, Button, Size, TextSize, Tone, Variant},
   },
@@ -363,7 +364,11 @@ impl MergeView {
             return;
           }
           if let Some(err) = &preview.error {
-            view.toast(ToastTone::Error, "Failed to load merge preview", err);
+            view.host.notify(
+              Toast::error("Failed to load merge preview")
+                .description(err)
+                .into(),
+            );
           }
           view.preview = Some(Rc::new(preview));
           view.rows = Rows::default();
@@ -372,15 +377,6 @@ impl MergeView {
         .ignore_closed();
     })
     .detach();
-  }
-
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    self.host.notify(NativeEvent::Toast {
-      title: title.into(),
-      description: description.into(),
-      tone,
-      action: None,
-    });
   }
 
   fn workspace(&self) -> Option<&Workspace> {
@@ -611,7 +607,9 @@ impl MergeView {
     };
     let message = self.message();
     if !self.on_github && self.strategy != Strategy::Rebase && message.trim().is_empty() {
-      self.toast(ToastTone::Error, "Commit message required", "");
+      self
+        .host
+        .notify(Toast::error("Commit message required").into());
       return;
     }
     let github = self.open_pr().filter(|_| self.on_github).map(|g| {
@@ -657,13 +655,13 @@ impl MergeView {
             Ok(result) => {
               view.merged(cx);
               match &github {
-                Some(request) => view.toast(
-                  ToastTone::Success,
-                  "Pull request merged",
-                  format!(
-                    "Merged PR #{} on GitHub and synced {target}",
-                    request.pr_number
-                  ),
+                Some(request) => view.host.notify(
+                  Toast::success("Pull request merged")
+                    .description(format!(
+                      "Merged PR #{} on GitHub and synced {target}",
+                      request.pr_number
+                    ))
+                    .into(),
                 ),
                 None => {
                   let (title, done) = match strategy {
@@ -672,16 +670,18 @@ impl MergeView {
                     Strategy::Merge => ("Workspace merged", "merged"),
                   };
                   let pushed = if options.push { " and pushed it" } else { "" };
-                  view.toast(
-                    ToastTone::Success,
-                    title,
-                    format!("{} {done} into {target}{pushed}", ws.branch_name),
+                  view.host.notify(
+                    Toast::success(title)
+                      .description(format!("{} {done} into {target}{pushed}", ws.branch_name))
+                      .into(),
                   );
                 }
               }
               view.report_notes(&result);
             }
-            Err(err) => view.toast(ToastTone::Error, "Merge failed", err),
+            Err(err) => view
+              .host
+              .notify(Toast::error("Merge failed").description(err).into()),
           }
           cx.notify();
         })
@@ -707,14 +707,16 @@ impl MergeView {
           match result {
             Ok(result) => {
               view.merged(cx);
-              view.toast(
-                ToastTone::Success,
-                "Workspace synced",
-                format!("Synced {} from origin", result.plan.target_branch),
+              view.host.notify(
+                Toast::success("Workspace synced")
+                  .description(format!("Synced {} from origin", result.plan.target_branch))
+                  .into(),
               );
               view.report_notes(&result);
             }
-            Err(err) => view.toast(ToastTone::Error, "Sync failed", err),
+            Err(err) => view
+              .host
+              .notify(Toast::error("Sync failed").description(err).into()),
           }
           cx.notify();
         })
@@ -742,10 +744,13 @@ impl MergeView {
     } else {
       ToastTone::Success
     };
-    self.toast(
-      tone,
-      "Stacked pull requests updated",
-      result.notes.join("\n"),
+    self.host.notify(
+      Toast::new(
+        tone,
+        "Stacked pull requests updated",
+        result.notes.join("\n"),
+      )
+      .into(),
     );
   }
 
@@ -755,7 +760,8 @@ impl MergeView {
   }
 }
 
-fn heading(label: impl Into<SharedString>) -> gpui::Div {
+/// A form field's label.
+fn field_label(label: impl Into<SharedString>) -> gpui::Div {
   ui::text(div(), TextSize::Sm)
     .font_weight(FontWeight::SEMIBOLD)
     .mb_3()
@@ -952,7 +958,7 @@ impl MergeView {
         }))
         .child(
           div()
-            .child(heading(if rebase {
+            .child(field_label(if rebase {
               "Commit Message (not used for rebase)"
             } else if self.on_github {
               "Merge Commit Message (optional)"
@@ -1103,7 +1109,11 @@ impl MergeView {
       div().flex().justify_center().px_4().child(
         div()
           .w(relative(0.75))
-          .child(heading("What lands where"))
+          .child(div().mb_3().child(ui::SectionHeader::new(
+            "merge-lands-heading",
+            "What lands where",
+            p,
+          )))
           .child(
             div()
               .debug_selector(|| "merge-landing".into())
@@ -1341,7 +1351,9 @@ impl MergeView {
           .child(commits(&preview, &target, &p))
           .child(
             div()
-              .child(heading(format!("Changed Files ({count})")))
+              .child(div().mb_3().child(
+                ui::SectionHeader::new("merge-files-heading", "Changed files", &p).count(count),
+              ))
               .when(count == 0, |this| {
                 this.child(
                   list(&p).child(
@@ -1542,6 +1554,8 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
       .into_any_element(),
   };
   div()
-    .child(heading(format!("Commits to be merged ({total})")))
+    .child(div().mb_3().child(
+      ui::SectionHeader::new("merge-commits-heading", "Commits to be merged", p).count(total),
+    ))
     .child(body)
 }
