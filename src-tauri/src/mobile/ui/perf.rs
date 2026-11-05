@@ -590,11 +590,11 @@ struct DiffAsText {
 
 impl Render for DiffAsText {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    use gpui_kit::component::{v_flex, ActiveTheme as _};
+    use gpui_kit::component::v_flex;
     use gpui_kit::prelude::*;
     use gpui_kit::{HighlightStyle, StyledText};
-    let theme = cx.theme();
-    let (add, del) = (theme.success, theme.danger);
+    let palette = treq_ui::theme::current(cx);
+    let (add, del) = (palette.diff_added(), palette.diff_removed());
     div().size_full().child(
       v_flex()
         .id("diff")

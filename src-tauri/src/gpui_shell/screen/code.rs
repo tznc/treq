@@ -2664,7 +2664,7 @@ impl CodeView {
         .child(time::relative(&ts)),
       cx,
     );
-    let (green, red) = (ui::Tone::GitOpen.text(p), ui::Tone::GitClosed.text(p));
+    let (green, red) = (ui::Tone::DiffAdded.text(p), ui::Tone::DiffRemoved.text(p));
     let change = commit.change_id.clone();
     let id = SharedString::from(format!("commit-item-{}", commit.commit_id));
     let selector = id.to_string();
@@ -2851,7 +2851,7 @@ fn loc_indicator(
       ((n as f32 / max as f32) * HALF).round().max(1.)
     }
   };
-  let (added, removed) = (ui::Tone::GitOpen, ui::Tone::GitClosed);
+  let (added, removed) = (ui::Tone::DiffAdded, ui::Tone::DiffRemoved);
   let (green, red) = (added.color(p), removed.color(p));
   let count = |text: String, color: Hsla, ch: usize| {
     ui::text(div(), TextSize::Xs)

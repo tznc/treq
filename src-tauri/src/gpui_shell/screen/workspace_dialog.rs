@@ -1017,11 +1017,11 @@ fn stack_dot(highlighted: bool, p: &Palette) -> Div {
 }
 
 /// `statusIcon` and `statusColor`.
-fn file_status(status: &str, p: &Palette) -> (&'static str, Hsla) {
+pub(crate) fn file_status(status: &str, p: &Palette) -> (&'static str, Hsla) {
   match status {
     "modified" => ("M", p.warning),
-    "added" => ("A", p.success),
-    "deleted" => ("D", p.destructive),
+    "added" => ("A", p.diff_added()),
+    "deleted" => ("D", p.diff_removed()),
     "renamed" => ("R", p.primary),
     _ => ("?", p.muted_foreground),
   }
@@ -1971,9 +1971,9 @@ impl WorkspaceDialog {
                 )
                 .children(hunk.lines.iter().take(3).map(|line| {
                   let color = if line.starts_with('+') {
-                    p.success
+                    p.diff_added()
                   } else if line.starts_with('-') {
-                    p.destructive
+                    p.diff_removed()
                   } else {
                     p.muted_foreground
                   };

@@ -1448,9 +1448,9 @@ impl MergeView {
 /// at the card's edge like the other diffs.
 fn hunk_line(line: &str, p: &Palette) -> impl IntoElement {
   let bg = if line.starts_with('+') {
-    Some(Tone::GitOpen.tint(p))
+    Some(Tone::DiffAdded.tint(p))
   } else if line.starts_with('-') {
-    Some(Tone::GitClosed.tint(p))
+    Some(Tone::DiffRemoved.tint(p))
   } else {
     None
   };
@@ -1515,13 +1515,13 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
                         .flex()
                         .child(
                           div()
-                            .text_color(Tone::GitOpen.color(p))
+                            .text_color(Tone::DiffAdded.color(p))
                             .child(format!("+{}", commit.insertions)),
                         )
                         .child("\u{a0}")
                         .child(
                           div()
-                            .text_color(Tone::GitClosed.color(p))
+                            .text_color(Tone::DiffRemoved.color(p))
                             .child(format!("-{}", commit.deletions)),
                         ),
                     )

@@ -814,7 +814,7 @@ impl Overlay {
       } => {
         let row = &list[index];
         let (icon, color, tag) = match row.group {
-          0 => (theme::ICON_CHECK, p.success, Some("current".to_string())),
+          0 => (theme::ICON_CHECK, p.foreground, Some("current".to_string())),
           1 => (
             theme::ICON_BRANCH,
             p.muted_foreground,

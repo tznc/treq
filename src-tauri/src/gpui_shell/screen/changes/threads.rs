@@ -761,9 +761,9 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
         .font_family(theme::MONO_FONT);
       for row in rows {
         let (marker, bg, mark) = match row.kind {
-          RowKind::Removed => ("-", Some(Tone::GitClosed.tint(p)), Tone::GitClosed),
-          RowKind::Added => ("+", Some(Tone::GitOpen.tint(p)), Tone::GitOpen),
-          RowKind::Unchanged => (" ", None, Tone::GitOpen),
+          RowKind::Removed => ("-", Some(Tone::DiffRemoved.tint(p)), Tone::DiffRemoved),
+          RowKind::Added => ("+", Some(Tone::DiffAdded.tint(p)), Tone::DiffAdded),
+          RowKind::Unchanged => (" ", None, Tone::DiffAdded),
         };
         let mut text = String::new();
         let mut highlights = Vec::new();
@@ -813,7 +813,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
       .font_family(theme::MONO_FONT)
       .px_2()
       .py_1p5()
-      .bg(Tone::GitOpen.tint(p))
+      .bg(Tone::DiffAdded.tint(p))
       .child(suggested.to_string())
       .into_any_element(),
   };

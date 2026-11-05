@@ -160,6 +160,7 @@ impl WorkspaceScreen {
     cx: &mut Context<Self>,
   ) -> AnyElement {
     let theme = cx.theme();
+    let palette = treq_ui::theme::current(cx);
     let path = change.path.clone();
     // Borrowed from the diff, not cloned for every file on every render.
     let committed_hunks: Option<&[JjDiffHunk]> = committed.then(|| {
@@ -185,8 +186,8 @@ impl WorkspaceScreen {
     }
     let letter = status_letter(&change.status);
     let letter_color = match letter {
-      "A" => theme.success,
-      "D" => theme.danger,
+      "A" => palette.diff_added(),
+      "D" => palette.diff_removed(),
       _ => theme.warning,
     };
     let header = h_flex()

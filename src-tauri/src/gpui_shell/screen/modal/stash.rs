@@ -489,12 +489,12 @@ impl StashView {
                 .gap_2()
                 .child(
                   div()
-                    .text_color(ui::Tone::GitOpen.text(p))
+                    .text_color(ui::Tone::DiffAdded.text(p))
                     .child(format!("+{}", entry.additions)),
                 )
                 .child(
                   div()
-                    .text_color(ui::Tone::GitClosed.text(p))
+                    .text_color(ui::Tone::DiffRemoved.text(p))
                     .child(format!("-{}", entry.deletions)),
                 )
                 .child(
@@ -531,8 +531,8 @@ impl StashView {
       .pending
       .as_deref()
       .is_some_and(|a| !a.starts_with("apply-"));
-    let green = ui::Tone::GitOpen.text(p);
-    let red = ui::Tone::GitClosed.text(p);
+    let green = ui::Tone::DiffAdded.text(p);
+    let red = ui::Tone::DiffRemoved.text(p);
 
     let info = ui::text(div(), TextSize::Xs)
       .min_w_0()
@@ -908,10 +908,10 @@ impl StashView {
           .whitespace_nowrap()
           .overflow_hidden()
           .when(line.starts_with('+'), |this| {
-            this.bg(ui::Tone::GitOpen.tint(&p))
+            this.bg(ui::Tone::DiffAdded.tint(&p))
           })
           .when(line.starts_with('-'), |this| {
-            this.bg(ui::Tone::GitClosed.tint(&p))
+            this.bg(ui::Tone::DiffRemoved.tint(&p))
           })
           .child(
             div()

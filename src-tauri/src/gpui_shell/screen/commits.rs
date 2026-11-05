@@ -1842,13 +1842,13 @@ impl CommitsView {
                   .flex()
                   .child(
                     div()
-                      .text_color(ui::Tone::GitOpen.text(p))
+                      .text_color(ui::Tone::DiffAdded.text(p))
                       .child(format!("+{}", commit.insertions)),
                   )
                   .child("\u{a0}")
                   .child(
                     div()
-                      .text_color(ui::Tone::GitClosed.text(p))
+                      .text_color(ui::Tone::DiffRemoved.text(p))
                       .child(format!("-{}", commit.deletions)),
                   ),
               )
@@ -2285,9 +2285,9 @@ impl CommitsView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let (fg, bg) = match file.status.as_str() {
-      "A" => (ui::Tone::GitOpen.text(p), ui::Tone::GitOpen.tint(p)),
+      "A" => (ui::Tone::DiffAdded.text(p), ui::Tone::DiffAdded.tint(p)),
       "M" => (ui::Tone::Primary.text(p), ui::Tone::Primary.tint(p)),
-      "D" => (ui::Tone::GitClosed.text(p), ui::Tone::GitClosed.tint(p)),
+      "D" => (ui::Tone::DiffRemoved.text(p), ui::Tone::DiffRemoved.tint(p)),
       _ => (p.foreground, gpui::transparent_black()),
     };
     let (id, path) = (commit.commit_id.clone(), file.path.clone());

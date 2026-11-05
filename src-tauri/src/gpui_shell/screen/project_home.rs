@@ -456,11 +456,7 @@ impl ProjectHomeView {
                 ui::text(div(), TextSize::Xs)
                   .w(zpx(14.))
                   .font_weight(FontWeight::SEMIBOLD)
-                  .text_color(match file.status.as_str() {
-                    "A" => p.success,
-                    "D" => p.destructive,
-                    _ => p.warning,
-                  })
+                  .text_color(file_status_color(&file.status, p))
                   .child(file.status.clone()),
               )
               .child(
@@ -862,6 +858,16 @@ impl Render for ProjectHomeView {
   }
 }
 
+/// A changed file's status letter colour: diff tokens for added and
+/// removed, warning for the rest.
+fn file_status_color(status: &str, p: &theme::Palette) -> gpui::Hsla {
+  match status {
+    "A" => p.diff_added(),
+    "D" => p.diff_removed(),
+    _ => p.warning,
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -876,6 +882,15 @@ mod tests {
       stamp(day(2026, 9, 1)),
     ];
     assert_eq!(daily_activity(&stamps, today, 4), vec![0, 1, 0, 2]);
+  }
+
+  /// An added file's letter paints with the diff token, not state green.
+  #[test]
+  fn added_file_letter_uses_the_diff_token() {
+    let p = theme::palette(false);
+    assert_eq!(file_status_color("A", &p), p.diff_added());
+    assert_eq!(file_status_color("D", &p), p.diff_removed());
+    assert_eq!(file_status_color("M", &p), p.warning);
   }
 
   #[test]

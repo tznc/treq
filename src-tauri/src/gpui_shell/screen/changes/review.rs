@@ -1156,8 +1156,8 @@ impl ChangesView {
     let bg = row_fill(selected, has_comment, kind, p);
     // The characters this line changed against its pair, a shade deeper.
     let mark = match kind {
-      LineKind::Removed => Tone::GitClosed.color(p),
-      _ => Tone::GitOpen.color(p),
+      LineKind::Removed => Tone::DiffRemoved.color(p),
+      _ => Tone::DiffAdded.color(p),
     }
     .opacity(0.45);
     // The text selection first: where it overlaps a changed run, it shows.
@@ -1733,11 +1733,11 @@ impl ChangesView {
       .children(
         original
           .into_iter()
-          .map(|l| line("-", l, Tone::Danger))
+          .map(|l| line("-", l, Tone::DiffRemoved))
           .chain(
             suggested
               .split('\n')
-              .map(|l| line("+", l.to_string(), Tone::Success)),
+              .map(|l| line("+", l.to_string(), Tone::DiffAdded)),
           ),
       );
     Some(
@@ -2409,8 +2409,8 @@ pub(super) fn row_fill(
     return Some(p.commented());
   }
   match kind {
-    LineKind::Added => Some(Tone::GitOpen.tint(p)),
-    LineKind::Removed => Some(Tone::GitClosed.tint(p)),
+    LineKind::Added => Some(Tone::DiffAdded.tint(p)),
+    LineKind::Removed => Some(Tone::DiffRemoved.tint(p)),
     LineKind::Context => None,
   }
 }
@@ -2445,11 +2445,11 @@ mod row_paint_tests {
     let p = theme::palette(true);
     assert_eq!(
       row_fill(false, false, LineKind::Added, &p),
-      Some(Tone::GitOpen.tint(&p))
+      Some(Tone::DiffAdded.tint(&p))
     );
     assert_eq!(
       row_fill(false, false, LineKind::Removed, &p),
-      Some(Tone::GitClosed.tint(&p))
+      Some(Tone::DiffRemoved.tint(&p))
     );
     assert_eq!(row_fill(false, false, LineKind::Context, &p), None);
   }

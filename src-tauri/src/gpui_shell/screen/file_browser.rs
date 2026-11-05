@@ -1854,7 +1854,7 @@ impl FileBrowserView {
             .top_0()
             .w_1()
             .h_full()
-            .bg(ui::Tone::GitOpen.color(&p)),
+            .bg(ui::Tone::DiffAdded.color(&p)),
         )
       })
       .when(deleted, |this| {
@@ -1866,7 +1866,7 @@ impl FileBrowserView {
             .bottom(zpx(-1.5))
             .w_2()
             .h(zpx(3.))
-            .bg(ui::Tone::GitClosed.color(&p)),
+            .bg(ui::Tone::DiffRemoved.color(&p)),
         )
       })
       .child(
@@ -1975,10 +1975,10 @@ impl FileBrowserView {
 }
 
 /// The dot after a file's name; `None` for a neutral one.
-fn status_dot(status: &str) -> Option<ui::Tone> {
+pub(crate) fn status_dot(status: &str) -> Option<ui::Tone> {
   match status {
-    "??" | "A" => Some(ui::Tone::Success),
-    "D" => Some(ui::Tone::Danger),
+    "??" | "A" => Some(ui::Tone::DiffAdded),
+    "D" => Some(ui::Tone::DiffRemoved),
     "M" => Some(ui::Tone::Warning),
     "R" => Some(ui::Tone::Primary),
     _ => None,
@@ -2018,7 +2018,7 @@ fn line_fill(selected: bool, commented: bool, added: bool, p: &Palette) -> Optio
   } else if commented {
     Some(p.commented())
   } else if added {
-    Some(ui::Tone::GitOpen.tint(p))
+    Some(ui::Tone::DiffAdded.tint(p))
   } else {
     None
   }
@@ -2043,7 +2043,7 @@ mod line_fill_tests {
     );
     assert_eq!(
       line_fill(false, false, true, &p),
-      Some(ui::Tone::GitOpen.tint(&p))
+      Some(ui::Tone::DiffAdded.tint(&p))
     );
     assert_eq!(line_fill(false, false, false, &p), None);
   }

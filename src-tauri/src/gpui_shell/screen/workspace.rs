@@ -1786,7 +1786,7 @@ fn loc_marker(loc: &Loc, p: &Palette) -> Div {
       ((n as f32 / scale) * HALF).round().max(1.)
     }
   };
-  let (added, removed) = (ui::Tone::GitOpen, ui::Tone::GitClosed);
+  let (added, removed) = (ui::Tone::DiffAdded, ui::Tone::DiffRemoved);
   let (green, red) = (added.color(p), removed.color(p));
   let count = |text: String, color: Hsla| {
     ui::text(div(), TextSize::Xs)
