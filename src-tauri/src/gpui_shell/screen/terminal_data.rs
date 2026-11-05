@@ -425,11 +425,7 @@ impl TerminalHost for Backend {
   fn supporting_repos(&self, repo_path: &str) -> Vec<String> {
     // A saved project's window reads its repositories from the project.
     if let Some(project) = crate::gpui_shell::projects::window_project(self.app(), self.label()) {
-      return project
-        .repos
-        .into_iter()
-        .filter(|path| path != repo_path && std::path::Path::new(path).is_dir())
-        .collect();
+      return crate::gpui_shell::projects::supporting_repos(&project, repo_path);
     }
     crate::core::supporting_repos::list(repo_path)
       .unwrap_or_default()
@@ -450,13 +446,8 @@ impl TerminalHost for Backend {
       .flatten();
     let bin_dir = crate::commands::binary::get_treq_bin_dir().ok();
     let supporting = self.supporting_repos(&start.repo_path);
-    let project = crate::gpui_shell::projects::window_project(self.app(), self.label()).map(|p| {
-      agent_command::ProjectContext {
-        name: p.name,
-        prompt: p.prompt,
-        context_paths: p.context_paths,
-      }
-    });
+    let project = crate::gpui_shell::projects::window_project(self.app(), self.label())
+      .map(agent_command::ProjectContext::from);
     let prepared = agent_command::prepare_auto_command(
       &AgentPaths {
         workspace_path: start.workspace_path.as_deref(),

@@ -424,6 +424,48 @@ mod tests {
   };
 
   /// Menu labels, with "---" for separators and submenus as `text: [...]`.
+  mod project_props {
+    use super::*;
+    use crate::test_repo::proptest_config;
+    use proptest::prelude::*;
+
+    proptest! {
+      #![proptest_config(proptest_config(64))]
+
+      /// One switch per project, a mark only on this window's one, and
+      /// Instructions only for a saved project.
+      #[test]
+      fn project_menu_lists_each_project_once(
+        names in prop::collection::vec("\\PC{0,6}", 0..5),
+        current in prop::option::of(0usize..6),
+      ) {
+        let projects: Vec<ProjectEntry> = names
+          .iter()
+          .enumerate()
+          .map(|(i, n)| ProjectEntry { id: format!("p{i}"), name: n.clone() })
+          .collect();
+        let current = current.map(|i| format!("p{i}"));
+        let items = project_items(&projects, current.as_deref());
+        let switches: Vec<&str> = items
+          .iter()
+          .filter_map(|i| match i {
+            MenuItem::Item { action: MenuAction::SwitchProject(id), .. } => Some(id.as_str()),
+            _ => None,
+          })
+          .collect();
+        let ids: Vec<&str> = projects.iter().map(|p| p.id.as_str()).collect();
+        prop_assert_eq!(switches, ids);
+        let marked = labels(&items).iter().take(projects.len()).filter(|l| l.starts_with("✓ ")).count();
+        let expected = current.as_deref().is_some_and(|c| projects.iter().any(|p| p.id == c));
+        prop_assert!(marked <= usize::from(expected) + names.iter().filter(|n| n.starts_with("✓ ")).count());
+        let labels = labels(&items);
+        prop_assert_eq!(labels.contains(&"Project Instructions…".to_string()), current.is_some());
+        prop_assert_eq!(labels.contains(&"---".to_string()), !projects.is_empty());
+        prop_assert_eq!(labels.last().map(String::as_str), Some("New Window…"));
+      }
+    }
+  }
+
   fn labels(items: &[MenuItem]) -> Vec<String> {
     items
       .iter()

@@ -53,6 +53,7 @@ fn remote_dialogs(model: &Model, data: &Data) -> Value {
       "allowUserManaged": data.flags.remote_ssh,
       "screen": remote.setup_screen,
       "registering": remote.registering,
+      "registerError": remote.register_error,
     })
   });
   // The terminal dialog needs a connected endpoint and an open repository.
@@ -88,8 +89,14 @@ fn remote_chrome(model: &Model) -> Value {
     return Value::Null;
   };
   let cut_off = remote.cutoff().is_some();
+  let unreachable = repository
+    .endpoint_id
+    .as_ref()
+    .is_some_and(|id| remote.unreachable.contains(id));
   let state = if cut_off {
     "cutoff"
+  } else if unreachable {
+    "offline"
   } else {
     remote::connection_state(remote.instance_state.as_deref(), remote.endpoint.is_some())
   };
@@ -159,6 +166,12 @@ fn view(model: &Model, data: &Data) -> Value {
 fn project_home(model: &Model, data: &Data) -> Value {
   let order = super::sidebar::order(model, data);
   let labels = super::sidebar::display_labels(&order);
+  // A remote window's repository names the machine it is on.
+  let host = |path: &str| {
+    let remote = model.remote.repository.as_ref()?;
+    let endpoint = remote.endpoint.as_ref()?;
+    remote.matches(path).then(|| endpoint.hostname.clone())
+  };
   let repos: Vec<Value> = order
     .iter()
     .map(|path| {
@@ -183,6 +196,7 @@ fn project_home(model: &Model, data: &Data) -> Value {
         "missing": missing,
         "github": repo.and_then(|r| r.remote.as_ref()).map(|r| r.full_name.clone()),
         "workspaces": workspaces,
+        "host": host(path),
       })
     })
     .collect();
@@ -471,7 +485,7 @@ mod tests {
   };
   use crate::{
     core::repo::RepoBranch,
-    gpui_shell::{overlay::OverlayView, screen::View},
+    gpui_shell::{native::NativeEvent, overlay::OverlayView, screen::View, window::model::Effect},
   };
 
   fn data() -> Data {
@@ -686,6 +700,18 @@ mod tests {
   }
 
   #[test]
+  fn marks_a_remote_project_home_card_with_its_host() {
+    let mut model = remote_model();
+    model.page = crate::gpui_shell::window::model::Page::ProjectHome;
+    let host = model.remote.endpoint.clone().unwrap().hostname;
+    let View::ProjectHome(route) = screen(&model, &Data::default()).unwrap().view else {
+      panic!("not project home");
+    };
+    assert_eq!(route.repos[0].host.as_deref(), Some(host.as_str()));
+    assert!(!route.repos[0].missing);
+  }
+
+  #[test]
   fn shows_the_remote_repository_with_its_chrome_and_remote_shells() {
     let model = remote_model();
     let snapshot = screen(&model, &Data::default()).unwrap();
@@ -711,6 +737,33 @@ mod tests {
     let chrome = route.remote_chrome.unwrap();
     assert_eq!(chrome.state, "cutoff");
     assert!(chrome.cut_off);
+  }
+
+  /// A read that couldn't reach the host shows Offline until one lands.
+  #[test]
+  fn an_unreachable_host_shows_offline_until_it_answers() {
+    let mut model = remote_model();
+    let endpoint_id = model.remote.endpoint.clone().unwrap().id;
+    let state = |model: &Model| {
+      let View::Workspace(route) = screen(model, &Data::default()).unwrap().view else {
+        panic!("not the workspace view");
+      };
+      route.remote_chrome.unwrap().state
+    };
+    let event = |reachable| NativeEvent::RemoteReachability {
+      endpoint_id: endpoint_id.clone(),
+      reachable,
+    };
+    model.native_event(&event(false), &Data::default());
+    assert_eq!(state(&model), "offline");
+    let effects = model.native_event(&event(true), &Data::default());
+    assert_eq!(state(&model), "online");
+    assert!(
+      effects
+        .iter()
+        .any(|e| matches!(e, Effect::Refresh { revision: true })),
+      "what failed meanwhile reads again"
+    );
   }
 
   #[test]

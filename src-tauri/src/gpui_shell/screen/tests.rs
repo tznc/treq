@@ -24,6 +24,8 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
+  /// Repositories whose folder is gone from disk (Home shows them missing).
+  gone: Vec<&'static str>,
   /// Saving repository settings fails, as a full disk would.
   fail_repo_settings: bool,
   /// The tuning agent's proposed review prompt edits.
@@ -2772,6 +2774,40 @@ impl Harness {
 }
 
 impl workspace_dialog_data::WorkspaceDialogHost for FakeHost {
+  fn save_project(&self, name: &str) -> Result<(), String> {
+    self.record(format!("save project {name:?}"));
+    if self.failing.contains(&"save_project") {
+      return Err("save failed".into());
+    }
+    Ok(())
+  }
+
+  fn set_project_context(&self, prompt: &str, paths: &[String]) -> Result<(), String> {
+    self.record(format!("project context {prompt:?} {paths:?}"));
+    if self.failing.contains(&"set_project_context") {
+      return Err("save failed".into());
+    }
+    Ok(())
+  }
+
+  fn repo_exists(&self, repo: &str) -> bool {
+    !self.gone.contains(&repo)
+  }
+
+  fn home_commits(&self, repo: &str, _limit: usize) -> Vec<super::project_home::HomeCommit> {
+    self.record(format!("read home commits {repo}"));
+    Vec::new()
+  }
+
+  fn pick_context_files(&self) -> Option<Vec<String>> {
+    self.record("read context files".into());
+    Some(vec!["/picked/a.md".into(), " /picked/spaced.md ".into()])
+  }
+
+  fn close_window(&self) {
+    self.record("close window".into());
+  }
+
   fn all_workspaces(&self, _: &str) -> Result<Vec<crate::local_db::Workspace>, String> {
     let mut all = self.workspaces.clone();
     all.extend(self.created.lock().unwrap().iter().cloned());

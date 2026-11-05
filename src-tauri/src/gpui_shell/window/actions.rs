@@ -1014,6 +1014,24 @@ impl Model {
           .insert(endpoint_id.clone(), reason.clone());
         Vec::new()
       }
+      NativeEvent::RemoteReachability {
+        endpoint_id,
+        reachable: false,
+      } => {
+        self.remote.unreachable.insert(endpoint_id.clone());
+        Vec::new()
+      }
+      NativeEvent::RemoteReachability {
+        endpoint_id,
+        reachable: true,
+      } => {
+        if self.remote.unreachable.remove(endpoint_id) {
+          // Back online: what failed meanwhile reads again.
+          vec![Effect::Refresh { revision: true }]
+        } else {
+          Vec::new()
+        }
+      }
       NativeEvent::Toast { .. } => Vec::new(),
     }
   }

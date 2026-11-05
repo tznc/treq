@@ -220,7 +220,8 @@ pub fn rename(conn: &Connection, id: &str, name: &str) -> Result<(), String> {
     .map(drop)
 }
 
-pub fn add_repo(conn: &Connection, id: &str, repo: &str) -> Result<(), String> {
+/// Adds `repo` to project `id`; true when it was not there yet.
+pub fn add_repo(conn: &Connection, id: &str, repo: &str) -> Result<bool, String> {
   exists(conn, id)?;
   conn
     .execute(
@@ -229,7 +230,7 @@ pub fn add_repo(conn: &Connection, id: &str, repo: &str) -> Result<(), String> {
       params![id, repo],
     )
     .map_err(err)
-    .map(drop)
+    .map(|inserted| inserted > 0)
 }
 
 pub fn remove_repo(conn: &Connection, id: &str, repo: &str) -> Result<(), String> {
@@ -357,12 +358,54 @@ pub fn ensure_repo(spec: &str, root: &Path) -> Result<(String, bool), String> {
   Ok((dest_str, true))
 }
 
+/// A repository on an SSH machine, as a project stores it: the remote
+/// window's cache key, `ssh:<endpoint>:gen<generation>:<path>`
+/// (`gpui_shell::window::remote::cache_key`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoteRepoRef {
+  pub endpoint_id: String,
+  pub generation: u64,
+  pub path: String,
+}
+
+impl RemoteRepoRef {
+  /// The id of its saved remote repository record (`remote_records`).
+  pub fn saved_id(&self) -> String {
+    crate::core::remote_records::repository_id(&self.endpoint_id, self.generation, &self.path)
+  }
+}
+
+/// The remote repository project entry `repo` names; `None` for a local path.
+pub fn remote_repo(repo: &str) -> Option<RemoteRepoRef> {
+  let rest = repo.strip_prefix("ssh:")?;
+  rest.match_indices(":gen").find_map(|(at, _)| {
+    let (endpoint_id, after) = rest.split_at_checked(at)?;
+    let (generation, path) = after.strip_prefix(":gen")?.split_once(':')?;
+    Some(RemoteRepoRef {
+      endpoint_id: endpoint_id.to_string(),
+      generation: generation.parse().ok()?,
+      path: path.to_string(),
+    })
+  })
+}
+
+/// Where a remote repository of a project lives.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteOverview {
+  /// The machine's endpoint id; the CLI shows its host name when known.
+  pub host: String,
+  pub path: String,
+}
+
 /// One repository of a project as `treq project status` reports it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoOverview {
   pub path: String,
   pub exists: bool,
+  /// Set for a repository on an SSH machine, which this machine cannot read.
+  pub remote: Option<RemoteOverview>,
   pub workspaces: Vec<WorkspaceOverview>,
 }
 
@@ -382,6 +425,17 @@ pub fn overview(project: &Project) -> Vec<RepoOverview> {
     .repos
     .iter()
     .map(|path| {
+      if let Some(remote) = remote_repo(path) {
+        return RepoOverview {
+          path: remote.path.clone(),
+          exists: false,
+          remote: Some(RemoteOverview {
+            host: remote.endpoint_id,
+            path: remote.path,
+          }),
+          workspaces: Vec::new(),
+        };
+      }
       let exists = Path::new(path).is_dir();
       let workspaces = if exists {
         crate::local_db::get_workspaces(path)
@@ -401,6 +455,7 @@ pub fn overview(project: &Project) -> Vec<RepoOverview> {
       RepoOverview {
         path: path.clone(),
         exists,
+        remote: None,
         workspaces,
       }
     })
@@ -497,6 +552,7 @@ pub fn suggested_name(repos: &[String]) -> String {
         .and_then(|n| n.to_str())
         .unwrap_or(repo)
     })
+    .filter(|name| !name.trim().is_empty())
     .collect();
   if names.is_empty() {
     "Untitled project".to_string()
@@ -517,16 +573,20 @@ pub fn close_action(project_id: Option<&str>, repos: &[String]) -> CloseAction {
   }
 }
 
-/// The window already showing `project_id`, which switching focuses instead
-/// of opening another. `windows` pairs each window label with its project.
+/// A live window already showing `project_id`, which switching focuses
+/// instead of opening another. `windows` pairs each window label with its
+/// project; `is_live` says whether a label is still open, since a closed
+/// window can stay recorded.
 pub fn window_for_project<'a>(
   windows: &'a [(String, Option<String>)],
   project_id: &str,
+  is_live: impl Fn(&str) -> bool,
 ) -> Option<&'a str> {
   windows
     .iter()
-    .find(|(_, project)| project.as_deref() == Some(project_id))
+    .filter(|(_, project)| project.as_deref() == Some(project_id))
     .map(|(label, _)| label.as_str())
+    .find(|label| is_live(label))
 }
 
 #[cfg(test)]
@@ -831,6 +891,206 @@ mod tests {
     assert!(dest.join("README.md").exists());
   }
 
+  /// A local git repository at `<tmp>/host/owner/name` with one commit,
+  /// standing in for a remote: no network.
+  fn local_origin() -> (tempfile::TempDir, String) {
+    let src = tempfile::TempDir::new().unwrap();
+    let work = src.path().join("host/owner/name");
+    std::fs::create_dir_all(&work).unwrap();
+    let git = |args: &[&str]| {
+      let ok = std::process::Command::new("git")
+        .args(args)
+        .current_dir(&work)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+        .status()
+        .unwrap()
+        .success();
+      assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    std::fs::write(work.join("README.md"), "hi").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "init"]);
+    let url = format!("file://{}", work.display());
+    (src, url)
+  }
+
+  #[test]
+  fn ensure_repo_clones_a_url_under_root_then_reuses_it() {
+    let (_src, url) = local_origin();
+    let root = tempfile::TempDir::new().unwrap();
+    let expected = managed_clone_path(root.path(), &url).unwrap();
+    let (path, cloned) = ensure_repo(&url, root.path()).unwrap();
+    assert!(cloned);
+    assert_eq!(Path::new(&path), expected);
+    assert!(expected.join("README.md").exists());
+    assert!(expected.starts_with(root.path()));
+    let (again, cloned) = ensure_repo(&url, root.path()).unwrap();
+    assert!(!cloned, "the second call reuses the clone");
+    assert_eq!(again, path);
+  }
+
+  #[test]
+  fn ensure_repo_rejects_what_is_neither_folder_nor_url() {
+    let root = tempfile::TempDir::new().unwrap();
+    let err = ensure_repo("no such thing", root.path()).unwrap_err();
+    assert!(err.contains("not a folder or a repository URL"), "{err}");
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+  }
+
+  #[test]
+  fn ensure_repo_trims_a_folder_spec() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let spec = format!("  {}  ", dir.path().display());
+    let (path, cloned) = ensure_repo(&spec, Path::new("/unused")).unwrap();
+    assert!(!cloned);
+    assert_eq!(Path::new(&path), std::fs::canonicalize(dir.path()).unwrap());
+  }
+
+  #[test]
+  fn ensure_repo_fails_when_the_clone_fails() {
+    let root = tempfile::TempDir::new().unwrap();
+    let missing = tempfile::TempDir::new().unwrap();
+    let url = format!("file://{}/host/owner/gone", missing.path().display());
+    let (result, dest) = (
+      ensure_repo(&url, root.path()),
+      managed_clone_path(root.path(), &url).unwrap(),
+    );
+    assert!(result.is_err());
+    assert!(!dest.join(".git").exists());
+  }
+
+  #[test]
+  fn overview_lists_an_existing_repo_without_workspaces() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().to_string_lossy().to_string();
+    let project = Project {
+      id: "p".into(),
+      name: "P".into(),
+      repos: vec![path.clone(), "/definitely/missing".into()],
+      created_at: String::new(),
+      last_opened_at: String::new(),
+      prompt: String::new(),
+      context_paths: Vec::new(),
+    };
+    let overview = overview(&project);
+    crate::local_db::release_connections_under(dir.path());
+    assert_eq!(overview.len(), 2);
+    assert_eq!(overview[0].path, path);
+    assert!(overview[0].exists);
+    assert!(overview[0].workspaces.is_empty());
+    assert!(!overview[1].exists);
+  }
+
+  #[test]
+  fn repo_stats_of_a_plain_folder_counts_workspace_bytes_only() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let ws = dir.path().join(".treq/workspaces/a");
+    std::fs::create_dir_all(&ws).unwrap();
+    std::fs::write(ws.join("f"), vec![0u8; 42]).unwrap();
+    let stats = repo_stats(dir.path().to_str().unwrap(), None);
+    crate::local_db::release_connections_under(dir.path());
+    assert_eq!(stats.workspace_bytes, 42);
+    assert_eq!(stats.workspaces, 0);
+    assert_eq!(stats.archived, 0);
+    assert!(stats.commit_times.is_empty());
+    assert_eq!(stats.open_issues, None);
+    assert_eq!(stats.open_prs, None);
+  }
+
+  #[test]
+  fn repo_stats_reads_commit_times_of_a_repo() {
+    let repo = crate::test_repo::TestRepo::new().unwrap();
+    let stats = repo_stats(&repo.repo_path, None);
+    assert!(!stats.commit_times.is_empty(), "{stats:?}");
+    assert_eq!(stats.workspaces, 0);
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn dir_size_does_not_follow_symlinks() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let outside = tempfile::TempDir::new().unwrap();
+    std::fs::write(outside.path().join("big"), vec![0u8; 1000]).unwrap();
+    std::fs::write(dir.path().join("small"), vec![0u8; 10]).unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+    assert_eq!(dir_size(dir.path()), 10);
+  }
+
+  #[test]
+  fn add_repo_says_whether_the_repository_was_new() {
+    let conn = conn();
+    let p = save(&conn, "P", &repos(&["/r/web"])).unwrap();
+    assert!(add_repo(&conn, &p.id, "/r/api").unwrap());
+    assert!(!add_repo(&conn, &p.id, "/r/api").unwrap());
+    assert!(!add_repo(&conn, &p.id, "/r/web").unwrap());
+  }
+
+  #[test]
+  fn reads_a_remote_repository_key() {
+    assert_eq!(
+      remote_repo("ssh:ep-1:gen3:/srv/app"),
+      Some(RemoteRepoRef {
+        endpoint_id: "ep-1".into(),
+        generation: 3,
+        path: "/srv/app".into(),
+      })
+    );
+    // An endpoint id may hold colons; the path follows the generation.
+    let odd = remote_repo("ssh:a:b:gen0:~/x:gen1:y").unwrap();
+    assert_eq!(
+      (odd.endpoint_id.as_str(), odd.path.as_str()),
+      ("a:b", "~/x:gen1:y")
+    );
+    assert_eq!(
+      odd.saved_id(),
+      crate::core::remote_records::repository_id("a:b", 0, "~/x:gen1:y")
+    );
+  }
+
+  #[test]
+  fn local_paths_are_not_remote_keys() {
+    assert_eq!(remote_repo("/r/web"), None);
+    assert_eq!(remote_repo("ssh:nogen"), None);
+    assert_eq!(remote_repo("ssh:ep:genx:/p"), None);
+  }
+
+  #[test]
+  fn overview_names_the_host_of_a_remote_repository() {
+    let project = Project {
+      id: "p".into(),
+      name: "P".into(),
+      repos: repos(&["ssh:ep-1:gen0:/srv/app"]),
+      created_at: String::new(),
+      last_opened_at: String::new(),
+      prompt: String::new(),
+      context_paths: Vec::new(),
+    };
+    let repo = &overview(&project)[0];
+    assert_eq!(repo.path, "/srv/app");
+    assert_eq!(
+      repo.remote,
+      Some(RemoteOverview {
+        host: "ep-1".into(),
+        path: "/srv/app".into()
+      })
+    );
+  }
+
+  #[test]
+  fn window_for_project_is_none_without_windows() {
+    assert_eq!(window_for_project(&[], "p1", |_| true), None);
+  }
+
+  #[test]
+  fn window_for_project_ignores_unsaved_windows() {
+    let windows = vec![("main".to_string(), None), ("w2".to_string(), None)];
+    assert_eq!(window_for_project(&windows, "", |_| true), None);
+  }
+
   #[test]
   fn overview_lists_missing_repos_without_workspaces() {
     let project = Project {
@@ -871,6 +1131,12 @@ mod tests {
   }
 
   #[test]
+  fn suggests_fallback_name_for_blank_repo_paths() {
+    assert_eq!(suggested_name(&repos(&["", "  "])), "Untitled project");
+    assert_eq!(suggested_name(&repos(&["", "/r/web"])), "web");
+  }
+
+  #[test]
   fn closing_unsaved_project_prompts_to_save() {
     assert_eq!(
       close_action(None, &repos(&["/r/web", "/r/api"])),
@@ -904,7 +1170,282 @@ mod tests {
       ("main".to_string(), None),
       ("treq-1".to_string(), Some("p1".to_string())),
     ];
-    assert_eq!(window_for_project(&windows, "p1"), Some("treq-1"));
-    assert_eq!(window_for_project(&windows, "p2"), None);
+    assert_eq!(window_for_project(&windows, "p1", |_| true), Some("treq-1"));
+    assert_eq!(window_for_project(&windows, "p2", |_| true), None);
+  }
+}
+
+#[cfg(test)]
+mod proptests {
+  use super::*;
+  use crate::test_repo::proptest_config;
+  use proptest::prelude::*;
+  use std::collections::BTreeMap;
+  use std::path::Component;
+
+  fn conn() -> Connection {
+    let conn = Connection::open_in_memory().expect("open");
+    init(&conn).expect("init");
+    conn
+  }
+
+  /// Names a user might type: plain, unicode, whitespace-only, very long.
+  fn name() -> impl Strategy<Value = String> {
+    prop_oneof![
+      3 => "[a-zA-Z0-9 ._-]{0,12}",
+      2 => "\\PC{0,8}",
+      1 => prop::sample::select(vec![
+        "", "   ", "\t\n", " Checkout ", "日本語", "🚀 launch", "\u{200b}", "é\u{301}",
+        "\u{202e}rtl", "a + b", "'; DROP TABLE projects; --",
+      ])
+      .prop_map(str::to_string),
+      1 => (1usize..2000).prop_map(|n| "x".repeat(n)),
+    ]
+  }
+
+  /// A small pool so the same repository comes up again.
+  fn repo() -> impl Strategy<Value = String> {
+    prop::sample::select(vec![
+      "/r/web",
+      "/r/api",
+      "/r/web/",
+      "/r/ünï 日本",
+      "C:\\code\\api",
+      "/r/a b",
+    ])
+    .prop_map(str::to_string)
+  }
+
+  #[derive(Debug, Clone)]
+  enum Op {
+    Save(String, Vec<String>),
+    Rename(usize, String),
+    AddRepo(usize, String),
+    RemoveRepo(usize, String),
+    Delete(usize),
+    SetContext(usize, String, Vec<String>),
+    MarkOpened(usize),
+    /// An operation on an id no project has.
+    Unknown(String),
+  }
+
+  fn op() -> impl Strategy<Value = Op> {
+    let paths = || prop::collection::vec(prop_oneof![repo(), name()], 0..4);
+    prop_oneof![
+      3 => (name(), prop::collection::vec(repo(), 0..4)).prop_map(|(n, r)| Op::Save(n, r)),
+      2 => (any::<usize>(), name()).prop_map(|(i, n)| Op::Rename(i, n)),
+      2 => (any::<usize>(), repo()).prop_map(|(i, r)| Op::AddRepo(i, r)),
+      2 => (any::<usize>(), repo()).prop_map(|(i, r)| Op::RemoveRepo(i, r)),
+      1 => any::<usize>().prop_map(Op::Delete),
+      2 => (any::<usize>(), name(), paths()).prop_map(|(i, p, c)| Op::SetContext(i, p, c)),
+      1 => any::<usize>().prop_map(Op::MarkOpened),
+      1 => name().prop_map(Op::Unknown),
+    ]
+  }
+
+  #[derive(Debug, Clone, PartialEq)]
+  struct Model {
+    name: String,
+    repos: Vec<String>,
+    prompt: String,
+    paths: Vec<String>,
+  }
+
+  fn pick(model: &BTreeMap<String, Model>, i: usize) -> Option<String> {
+    (!model.is_empty()).then(|| {
+      model
+        .keys()
+        .nth(i % model.len())
+        .cloned()
+        .expect("in range")
+    })
+  }
+
+  fn dedup(items: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for item in items {
+      if !out.contains(&item) {
+        out.push(item);
+      }
+    }
+    out
+  }
+
+  /// Applies `op` to the model, returning whether the store must accept it.
+  fn apply(model: &mut BTreeMap<String, Model>, conn: &Connection, op: &Op) {
+    match op {
+      Op::Save(name, repos) => {
+        let result = save(conn, name, repos);
+        let valid = !name.trim().is_empty() && !repos.is_empty();
+        assert_eq!(result.is_ok(), valid, "save {name:?} {repos:?}: {result:?}");
+        if let Ok(project) = result {
+          model.insert(
+            project.id,
+            Model {
+              name: name.trim().to_string(),
+              repos: dedup(repos.iter().cloned()),
+              prompt: String::new(),
+              paths: Vec::new(),
+            },
+          );
+        }
+      }
+      Op::Rename(i, name) => {
+        let Some(id) = pick(model, *i) else { return };
+        let result = rename(conn, &id, name);
+        assert_eq!(result.is_ok(), !name.trim().is_empty(), "{result:?}");
+        if result.is_ok() {
+          model.get_mut(&id).unwrap().name = name.trim().to_string();
+        }
+      }
+      Op::AddRepo(i, repo) => {
+        let Some(id) = pick(model, *i) else { return };
+        add_repo(conn, &id, repo).expect("add repo");
+        let m = model.get_mut(&id).unwrap();
+        if !m.repos.contains(repo) {
+          m.repos.push(repo.clone());
+        }
+      }
+      Op::RemoveRepo(i, repo) => {
+        let Some(id) = pick(model, *i) else { return };
+        let m = model.get_mut(&id).unwrap();
+        let last = m.repos.len() <= 1 && m.repos.contains(repo);
+        let result = remove_repo(conn, &id, repo);
+        assert_eq!(result.is_ok(), !last, "{result:?}");
+        if result.is_ok() {
+          m.repos.retain(|r| r != repo);
+        }
+      }
+      Op::Delete(i) => {
+        let Some(id) = pick(model, *i) else { return };
+        delete(conn, &id).expect("delete");
+        model.remove(&id);
+      }
+      Op::SetContext(i, prompt, paths) => {
+        let Some(id) = pick(model, *i) else { return };
+        set_context(conn, &id, prompt, paths).expect("set context");
+        let m = model.get_mut(&id).unwrap();
+        m.prompt = prompt.trim().to_string();
+        m.paths = dedup(
+          paths
+            .iter()
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty()),
+        );
+      }
+      Op::MarkOpened(i) => {
+        let Some(id) = pick(model, *i) else { return };
+        mark_opened(conn, &id).expect("mark opened");
+      }
+      Op::Unknown(name) => {
+        let id = "no-such-project";
+        assert!(rename(conn, id, &format!("{name}x")).is_err());
+        assert!(add_repo(conn, id, "/r/web").is_err());
+        assert!(remove_repo(conn, id, "/r/web").is_err());
+        assert!(set_context(conn, id, name, &[]).is_err());
+        assert!(mark_opened(conn, id).is_err());
+        assert_eq!(get(conn, id).unwrap(), None);
+        delete(conn, id).expect("deleting nothing is fine");
+      }
+    }
+  }
+
+  fn check(model: &BTreeMap<String, Model>, conn: &Connection) {
+    let listed = list(conn).expect("list");
+    assert_eq!(listed.len(), model.len());
+    // Most recently opened first, then by name.
+    for pair in listed.windows(2) {
+      assert!(
+        (pair[0].last_opened_at.as_str(), &pair[1].name)
+          >= (pair[1].last_opened_at.as_str(), &pair[0].name),
+        "out of order: {pair:?}"
+      );
+    }
+    for project in &listed {
+      let m = model
+        .get(&project.id)
+        .expect("listed project is in the model");
+      let got = get(conn, &project.id).unwrap().expect("get");
+      assert_eq!(&got, project);
+      assert_eq!(
+        (&got.name, &got.repos, &got.prompt, &got.context_paths),
+        (&m.name, &m.repos, &m.prompt, &m.paths)
+      );
+      assert!(!got.repos.is_empty(), "a project keeps a repository");
+      assert!(got.created_at <= got.last_opened_at);
+    }
+    for (id, m) in model {
+      for repo in &m.repos {
+        assert!(projects_with_repo(conn, repo)
+          .unwrap()
+          .iter()
+          .any(|p| &p.id == id));
+      }
+    }
+  }
+
+  proptest! {
+    #![proptest_config(proptest_config(32))]
+
+    /// Any sequence of project writes leaves the store equal to a simple
+    /// in-memory model.
+    #[test]
+    fn project_store_follows_the_model(ops in prop::collection::vec(op(), 1..25)) {
+      let conn = conn();
+      let mut model = BTreeMap::new();
+      for op in &ops {
+        apply(&mut model, &conn, op);
+        check(&model, &conn);
+      }
+    }
+
+    #[test]
+    fn suggested_name_is_never_empty(repos in prop::collection::vec(
+      prop_oneof![repo(), name(), Just("/".to_string()), Just(String::new())], 0..4)
+    ) {
+      prop_assert!(!suggested_name(&repos).trim().is_empty(), "{:?}", suggested_name(&repos));
+    }
+
+    /// Only an unsaved project of two or more repositories asks to save.
+    #[test]
+    fn close_action_prompts_only_for_unsaved_multi_repo(
+      saved in any::<bool>(),
+      repos in prop::collection::vec(repo(), 0..5),
+    ) {
+      let id = saved.then_some("p1");
+      let action = close_action(id, &repos);
+      if !saved && repos.len() >= 2 {
+        prop_assert_eq!(action, CloseAction::PromptSave { suggested_name: suggested_name(&repos) });
+      } else {
+        prop_assert_eq!(action, CloseAction::Close);
+      }
+    }
+
+    /// Whatever the spec, Treq's clone of it stays under the clones root.
+    #[test]
+    fn managed_clone_path_stays_under_root(spec in prop_oneof![
+      2 => "[a-z]{1,4}(://|@|:)?[a-z.@:/]{0,6}(\\.\\./|/\\.\\.|//|/)[a-z./]{0,8}",
+      2 => "\\PC{0,16}",
+      1 => prop::sample::select(vec![
+        "../../etc/passwd", "https://h/../../x", "https://h/o/..", "git@h:../../x",
+        "git@h:/etc/passwd", "ssh://git@h//abs/olute", "/abs/o/n", "C:\\x\\y\\z",
+        "https://h/o/n/..", "https://h/./o/n", "https://日本/ö/ñ.git", "file:///etc/passwd",
+        "https://h/o/n%2F..", "a/b", "../b", "a/..", "https://h/o/..git", ":/a/b/c",
+      ]).prop_map(str::to_string),
+    ]) {
+      let root = Path::new("/clones/root");
+      if let Some(path) = managed_clone_path(root, &spec) {
+        prop_assert!(path.starts_with(root), "{spec:?} -> {path:?}");
+        let below = path.strip_prefix(root).unwrap();
+        prop_assert!(
+          below.components().all(|c| matches!(c, Component::Normal(_))),
+          "{spec:?} -> {path:?}"
+        );
+        prop_assert!(below.components().count() >= 3, "{spec:?} -> {path:?}");
+      }
+      // owner/name expands to GitHub, and nothing else is rewritten.
+      let url = clone_url(&spec);
+      prop_assert!(url == spec.trim() || url.starts_with("https://github.com/"), "{url}");
+    }
   }
 }
