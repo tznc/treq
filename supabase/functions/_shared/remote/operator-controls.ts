@@ -13,6 +13,7 @@ import { engineDeps, INLINE_BUDGET_MS, runLeasedMigrations } from "./migration-r
 import { isOverdueParked, resumeParkedMigration } from "./migration-resume.ts";
 import {
   createMigration,
+  expireCloneFailureParks,
   getOpenMigration,
   getPlacement,
   resolveDefaultMachineType,
@@ -279,7 +280,8 @@ export async function setPrice(ctx: OperatorContext, body: Record<string, unknow
 }
 
 /**
- * The hourly run: continues drains, advances runnable migrations, and
+ * The hourly run: continues drains, rolls back expired clone-failure
+ * parks, advances runnable migrations, and
  * reports parked drains past their deadline as `overdue` (never forced).
  */
 export async function advanceMigrations(
@@ -288,6 +290,9 @@ export async function advanceMigrations(
 ): Promise<Record<string, unknown>> {
   const single = typeof body.migration_id === "string";
   const drains = single ? { drains: [], retired: [] } : await continueDrains(ctx, batch(body.limit));
+  // Expired clone-failure parks move to rolling_back first, so this same
+  // run deletes their stopped new machines.
+  const expired = single ? [] : await expireCloneFailureParks(ctx.supabase, batch(body.limit));
   const result = await runLeasedMigrations({
     supabase: ctx.supabase,
     providers: ctx.providers,
@@ -299,7 +304,7 @@ export async function advanceMigrations(
     migrationId: typeof body.migration_id === "string" ? body.migration_id : undefined,
   });
   const overdue = single ? [] : await listOverdueParked(ctx.supabase);
-  return { ...result, ...drains, overdue };
+  return { ...result, ...drains, expired, overdue };
 }
 
 async function listOverdueParked(supabase: SupabaseClient): Promise<

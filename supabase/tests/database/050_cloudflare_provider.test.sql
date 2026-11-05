@@ -1,4 +1,4 @@
--- Cloudflare provider rows (070_cloudflare_provider.sql).
+-- Cloudflare provider rows (071_cloudflare_provider.sql).
 begin;
 select plan(5);
 

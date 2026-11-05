@@ -53,6 +53,35 @@ pub struct InstanceStatus {
   pub instance: Option<ManagedInstance>,
   #[serde(default)]
   pub endpoint: Option<Value>,
+  /// The instance's open switch to a new machine, if one runs.
+  #[serde(default)]
+  pub migration: Option<MigrationSummary>,
+}
+
+/// `migrationSummary`: an open switch as `status` and `resize` report it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MigrationSummary {
+  pub id: String,
+  pub state: String,
+  #[serde(default)]
+  pub reason: String,
+  /// The last step's error (`{step, kind, message}`), while it retries.
+  #[serde(default)]
+  pub error: Option<Value>,
+}
+
+impl MigrationSummary {
+  /// The switch has ended or waits for the user, so polling stops.
+  pub fn settled(&self) -> bool {
+    matches!(
+      self.state.as_str(),
+      "completed" | "rolled_back" | "failed" | "cancelled" | "awaiting_ack"
+    )
+  }
+
+  pub fn error_message(&self) -> Option<String> {
+    self.error.as_ref()?["message"].as_str().map(str::to_string)
+  }
 }
 
 impl InstanceStatus {
@@ -211,6 +240,12 @@ pub struct PreflightRepository {
   pub unpushed: u64,
   /// Agents still running.
   pub agents: u64,
+  /// Gitignored files a re-clone drops (such as `.env`), and some of their paths.
+  pub ignored: u64,
+  pub ignored_paths: Vec<String>,
+  pub stashes: u64,
+  /// Files in a folder with no version control.
+  pub files: u64,
   pub error: Option<String>,
 }
 
@@ -243,6 +278,23 @@ impl Preflight {
         if r.agents > 0 {
           parts.push(plural(r.agents, "running agent", "running agents"));
         }
+        if r.ignored > 0 {
+          let mut part = plural(r.ignored, "ignored file", "ignored files");
+          if !r.ignored_paths.is_empty() {
+            part = format!("{part} ({})", r.ignored_paths.join(", "));
+          }
+          parts.push(part);
+        }
+        if r.stashes > 0 {
+          parts.push(plural(r.stashes, "stash", "stashes"));
+        }
+        if r.files > 0 {
+          parts.push(plural(
+            r.files,
+            "file outside version control",
+            "files outside version control",
+          ));
+        }
         (!parts.is_empty()).then(|| format!("{}: {}", r.path, parts.join(", ")))
       })
       .collect()
@@ -259,6 +311,8 @@ pub enum ResizeError {
   /// The move to a new machine would lose this work; retry with
   /// `acknowledged_data_loss` to go ahead.
   UnpushedWork(Preflight),
+  /// A switch already runs: its state, so the card shows it, not an error.
+  InProgress(Option<Box<MigrationSummary>>),
   Api(ApiError),
 }
 
@@ -266,6 +320,7 @@ impl std::fmt::Display for ResizeError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       Self::UnpushedWork(_) => write!(f, "[unpushed_work] Resizing would lose unpushed work"),
+      Self::InProgress(_) => write!(f, "[migration_in_progress] A switch is already running"),
       Self::Api(error) => error.fmt(f),
     }
   }
@@ -299,6 +354,13 @@ pub async fn resize(
   if status == 409 && value["code"] == "unpushed_work" {
     let preflight = serde_json::from_value(value["preflight"].clone()).unwrap_or_default();
     return Err(ResizeError::UnpushedWork(preflight));
+  }
+  if status == 409 && value["code"] == "migration_in_progress" {
+    return Err(ResizeError::InProgress(
+      serde_json::from_value(value["migration"].clone())
+        .ok()
+        .map(Box::new),
+    ));
   }
   Err(ResizeError::Api(crate::core::supabase::api_error_from(
     status, value,
@@ -591,6 +653,22 @@ mod tests {
     );
     let done = resize(&supabase, "i1", "l", true, "k2").await.unwrap();
     assert_eq!(done["operation_id"], "o");
+  }
+
+  #[test]
+  fn summary_lines_name_ignored_files_stashes_and_untracked_folders() {
+    let preflight: Preflight = serde_json::from_value(json!({"requires_ack": true, "repos": [
+      {"path": "/home/treq/api", "vcs": "git", "ignored": 2, "ignored_paths": [".env", "local.db"], "stashes": 1},
+      {"path": "/home/treq/notes", "vcs": "none", "files": 3}
+    ]}))
+    .unwrap();
+    assert_eq!(
+      preflight.summary_lines(),
+      [
+        "/home/treq/api: 2 ignored files (.env, local.db), 1 stash",
+        "/home/treq/notes: 3 files outside version control",
+      ]
+    );
   }
 
   #[tokio::test]
