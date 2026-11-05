@@ -543,11 +543,11 @@ async function rollbackWithFailingDelete(err: ProviderError) {
 Deno.test("a rollback whose delete keeps failing transiently ends failed", async () => {
   const w = await rollbackWithFailingDelete(new ProviderError("unavailable", "vendor down"));
   assertEquals(w.migration.state, "failed");
-  assertEquals(w.steps.at(-1)!.from, "rolling_back");
+  assertEquals(w.steps.at(-1)?.from, "rolling_back");
 });
 
 Deno.test("a rollback whose delete is refused ends failed with the error", async () => {
   const w = await rollbackWithFailingDelete(new ProviderError("other", "403 forbidden"));
   assertEquals(w.migration.state, "failed");
-  assertEquals((w.steps.at(-1)!.detail as { message: string }).message, "403 forbidden");
+  assertEquals((w.steps.at(-1)?.detail as { message: string } | undefined)?.message, "403 forbidden");
 });
