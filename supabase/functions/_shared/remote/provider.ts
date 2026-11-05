@@ -145,7 +145,7 @@ export interface ProviderCapabilities {
   billingGranularitySec: number;
 }
 
-export type ProviderKind = "boat" | "local" | "daytona" | "fly_machines" | "e2b";
+export type ProviderKind = "boat" | "local" | "daytona" | "fly_machines" | "e2b" | "cloudflare";
 
 export interface SandboxProvider extends ManagedComputeProvider {
   readonly kind: ProviderKind;

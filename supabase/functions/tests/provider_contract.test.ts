@@ -28,6 +28,10 @@ import { FakeDaytona } from "./fake_daytona.ts";
 import { FakeFly } from "./fake_fly.ts";
 import { E2BProvider } from "../_shared/remote/e2b-adapter.ts";
 import { FakeE2B } from "./fake_e2b.ts";
+import { CloudflareProvider } from "../_shared/remote/cloudflare-adapter.ts";
+import { FakeCloudflare } from "./fake_cloudflare.ts";
+
+const CF_CONFIG = { bridgeUrl: "https://bridge.example.invalid", token: "cf_test", autoStopMinutes: 60 };
 
 const E2B_CONFIG = {
   baseUrl: "https://api.e2b.example.invalid",
@@ -91,6 +95,11 @@ const contenders: Contender[] = [
     name: "E2B",
     machineType: "s",
     make: () => new E2BProvider(E2B_CONFIG, { fetch: new FakeE2B().fetch }),
+  },
+  {
+    name: "Cloudflare",
+    machineType: "s",
+    make: () => new CloudflareProvider(CF_CONFIG, { fetch: new FakeCloudflare().fetch }),
   },
   {
     name: "Fly Machines",
@@ -229,6 +238,12 @@ const httpContenders: Array<{ name: string; make(forcedStatus: number): SandboxP
     extra: [[401, "unauthorized"], [403, "unauthorized"], [504, "timeout"]],
   },
   {
+    name: "Cloudflare",
+    make: (status) =>
+      new CloudflareProvider(CF_CONFIG, { fetch: Object.assign(new FakeCloudflare(), { forcedStatus: status }).fetch }),
+    extra: [[401, "unauthorized"], [403, "unauthorized"], [504, "timeout"]],
+  },
+  {
     name: "Fly Machines",
     make: (status) =>
       new FlyMachinesProvider(FLY_CONFIG, { fetch: Object.assign(new FakeFly(), { forcedStatus: status }).fetch }),
@@ -278,6 +293,16 @@ const backstops: { name: string; create(): Promise<{ provider: SandboxProvider; 
       await provider.createInstance(params("s"));
       const body = defined(fake.requests.find((r) => r.method === "POST" && r.path.endsWith("/sandboxes"))).body as { timeout: number };
       return { provider, seconds: body.timeout };
+    },
+  },
+  {
+    name: "Cloudflare",
+    async create() {
+      const fake = new FakeCloudflare();
+      const provider = new CloudflareProvider({ ...CF_CONFIG, autoStopMinutes: undefined }, { fetch: fake.fetch });
+      await provider.createInstance(params("s"));
+      const body = defined(fake.requests.find((r) => r.method === "PUT")).body as { sleepAfterSec: number };
+      return { provider, seconds: body.sleepAfterSec };
     },
   },
   {

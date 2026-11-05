@@ -2622,7 +2622,7 @@ impl SettingsView {
       let name = crate::core::cloud_catalog::provider_name(kind);
       setting_row(
         &format!("{name} API key"),
-        "Checked with the provider before it is saved.",
+        crate::core::cloud_catalog::byos_key_hint(kind),
         self.field_with_save(
           ("byos-key", "byos.key"),
           form::input_field("byos-key-input", &input, false, keys.saving),

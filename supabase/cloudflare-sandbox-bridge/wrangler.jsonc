@@ -1,0 +1,18 @@
+// One container class per treq tier: s → standard-3, m → standard-4.
+{
+  "name": "treq-sandbox",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "containers": [
+    { "class_name": "SandboxS", "image": "./Dockerfile", "instance_type": "standard-3", "max_instances": 20 },
+    { "class_name": "SandboxM", "image": "./Dockerfile", "instance_type": "standard-4", "max_instances": 20 }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "SANDBOX_S", "class_name": "SandboxS" },
+      { "name": "SANDBOX_M", "class_name": "SandboxM" }
+    ]
+  },
+  "kv_namespaces": [{ "binding": "TYPES", "id": "REPLACE_WITH_KV_ID" }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SandboxS", "SandboxM"] }]
+}

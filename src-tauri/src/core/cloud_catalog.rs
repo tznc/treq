@@ -169,8 +169,23 @@ pub struct Notification {
 // -- Bring your own sandbox (BYOS) ----------------------------------------
 
 /// The providers a user can bring their own key for: kind and name.
-pub const BYOS_PROVIDERS: [(&str, &str); 3] =
-  [("boat", "Boat"), ("daytona", "Daytona"), ("e2b", "E2B")];
+pub const BYOS_PROVIDERS: [(&str, &str); 4] = [
+  ("boat", "Boat"),
+  ("daytona", "Daytona"),
+  ("e2b", "E2B"),
+  ("cloudflare", "Cloudflare"),
+];
+
+/// The help line under a provider's key field. Cloudflare has no account
+/// API key: the key is the owner's bridge Worker URL with its token.
+pub fn byos_key_hint(kind: &str) -> &'static str {
+  match kind {
+    "cloudflare" => {
+      "Your bridge Worker URL with its token: https://treq-sandbox.<you>.workers.dev#<token>."
+    }
+    _ => "Checked with the provider before it is saved.",
+  }
+}
 
 /// A provider's display name.
 pub fn provider_name(kind: &str) -> String {
@@ -320,6 +335,17 @@ pub async fn dismiss_notification(supabase: &Supabase, id: &str) -> Result<(), A
 
 #[cfg(test)]
 mod tests {
+  #[test]
+  fn cloudflare_is_a_byos_provider_with_a_bridge_key_hint() {
+    assert_eq!(super::provider_name("cloudflare"), "Cloudflare");
+    assert!(super::byos_key_hint("cloudflare").contains("https://"));
+    assert!(super::byos_key_hint("cloudflare").contains("#"));
+    assert_eq!(
+      super::byos_key_hint("boat"),
+      "Checked with the provider before it is saved."
+    );
+  }
+
   use super::*;
 
   fn catalog() -> Value {

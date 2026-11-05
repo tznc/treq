@@ -1,0 +1,13 @@
+{
+  "name": "treq-sandbox-bridge",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "^0.4.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.40.0"
+  }
+}

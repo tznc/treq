@@ -58,12 +58,19 @@ The trash icon (**Delete cloud workspace**) removes the machine. The confirmatio
 
 ## Bring your own sandbox
 
-With Pro, you can run the cloud workspace on your own Boat, Daytona, or E2B account instead of Treq's. The provider bills you for the machine. Treq charges 5% of the provider's list price for the same usage, whatever rate your provider account pays.
+With Pro, you can run the cloud workspace on your own Boat, Daytona, E2B, or Cloudflare account instead of Treq's. The provider bills you for the machine. Treq charges 5% of the provider's list price for the same usage, whatever rate your provider account pays.
 
 1. Open Settings and choose **Account**.
-2. Under **Provider keys**, select **Add Boat key**, **Add Daytona key**, or **Add E2B key**.
+2. Under **Provider keys**, select **Add Boat key**, **Add Daytona key**, **Add E2B key**, or **Add Cloudflare key**.
 3. Paste the key into **API key** and save it. Treq checks the key with the provider before it saves it.
 4. Pick a size in the **Cloud workspace** card, then select **Create workspace on this account** on the saved key's row.
+
+### Cloudflare
+
+Cloudflare Sandboxes have no account API key, so you deploy Treq's bridge Worker to your Cloudflare account first. The steps are in `supabase/cloudflare-sandbox-bridge/README.md`. The key you paste is the Worker's URL with its token after a `#`: `https://treq-sandbox.<you>.workers.dev#<token>`.
+
+- Only **Small** and **Medium** sizes exist. Cloudflare's largest instance has 4 vCPUs.
+- A Cloudflare workspace that stops restarts on a fresh disk. Push your work before it goes idle.
 
 The **Create cloud workspace** button on the card always makes a Treq-managed workspace.
 
