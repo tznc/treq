@@ -124,7 +124,10 @@ treq project list                      # saved projects on this machine
   disk for sibling repositories.
 - Need a repository the project does not have yet? `treq project add-repo`
   clones it under `~/.treq/repos/<host>/<owner>/<name>` and adds it. Never run
-  `git clone` yourself.
+  `git clone` yourself. If the project already has it, it prints
+  `Already in <project>: <path>` (JSON `status`: `added` or `already_present`).
+- A repository on an SSH machine shows in `status` and `list` as
+  `<path> on <host>`; it cannot be read from this machine.
 - Work in another project repository the same way as a supporting one:
   `treq add -r <repo> <branch>` then `treq agent -r <repo> <branch> "<prompt>"`.
   `<repo>` can be the folder name or the `owner/name` tail of its path.

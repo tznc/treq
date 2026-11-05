@@ -48,6 +48,11 @@ pub trait WorkspaceDialogHost: ChangesHost {
   }
   /// Closes this window without asking to save again.
   fn close_window(&self) {}
+  /// Blocks: whether repository `repo` is still there to read (its folder,
+  /// or the remote repository this window shows).
+  fn repo_exists(&self, _repo: &str) -> bool {
+    true
+  }
   /// Blocks: the uncommitted files of a repository's home checkout (Home's
   /// Changes tab).
   fn home_changes(&self, _repo: &str) -> Vec<super::project_home::HomeChange> {
@@ -108,6 +113,11 @@ impl WorkspaceDialogHost for Backend {
 
   fn pick_context_files(&self) -> Option<Vec<String>> {
     super::code_data::CodeHost::pick_files(self)
+  }
+
+  fn repo_exists(&self, repo: &str) -> bool {
+    let remote = crate::gpui_shell::remote_repo::for_window(self.label());
+    remote.is_some_and(|r| r.contains(repo)) || std::path::Path::new(repo).is_dir()
   }
 
   fn home_changes(&self, repo: &str) -> Vec<super::project_home::HomeChange> {

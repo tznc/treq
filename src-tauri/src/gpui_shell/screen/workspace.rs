@@ -10,7 +10,6 @@
 //!
 //! [`workspace_data`]: super::workspace_data
 
-use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{
@@ -23,8 +22,8 @@ use std::{
 
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, Animation, AnimationExt as _, App, Bounds, Context, Div, Entity,
-  FontWeight, Hsla, MouseDownEvent, Pixels, SharedString, Stateful, Task, WeakEntity, Window,
+  self, div, prelude::*, App, Bounds, Context, Div, Entity, FontWeight, Hsla, MouseDownEvent,
+  Pixels, SharedString, Stateful, Task, WeakEntity, Window,
 };
 
 use super::launch_data::LaunchRequest;
@@ -107,7 +106,6 @@ pub struct Header {
   pub push: Option<Disabled>,
   pub view_pr: Option<ViewPr>,
   pub create_pr: Option<CreatePr>,
-  pub status_loading: bool,
   pub sync: Option<Sync>,
   pub checks: Option<Checks>,
   pub merge: Option<Merge>,
@@ -1378,23 +1376,6 @@ impl WorkspaceView {
     if let Some(create) = &h.create_pr {
       right = right.child(self.create_pr(create, p, cx));
     }
-    if h.status_loading {
-      right = right.child(ui::delayed(
-        "workspace-status-skeleton",
-        div().flex_none().child(
-          div()
-            .id("workspace-status-skeleton")
-            .debug_selector(|| "workspace-status-skeleton".into())
-            .h(zpx(theme::CONTROL_MD))
-            .w(zpx(56.))
-            .rounded(radius::SM)
-            .bg(p.muted.opacity(0.6))
-            .with_animation("workspace-status-pulse", pulse(), |el, delta| {
-              el.opacity(pulse_opacity(delta))
-            }),
-        ),
-      ));
-    }
     if let Some(sync) = &h.sync {
       right = right.child(self.sync(sync, p, cx));
     }
@@ -1760,17 +1741,6 @@ async fn in_front(this: &WeakEntity<WorkspaceView>, cx: &mut gpui::AsyncWindowCo
   if let Some(_watch) = watch {
     rx.await.ignore_closed();
   }
-}
-
-/// Tailwind's `animate-pulse`: 2s, opacity dipping to half midway.
-fn pulse() -> Animation {
-  Animation::new(Duration::from_secs(2))
-    .repeat()
-    .with_max_fps(ui::PULSE_FPS)
-}
-
-fn pulse_opacity(delta: f32) -> f32 {
-  1. - 0.5 * (1. - (2. * delta - 1.).abs())
 }
 
 /// `LocDiffMarker`: green `+N`, a centered insertion/deletion bar, red `-N`.

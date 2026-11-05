@@ -82,6 +82,8 @@ pub struct SetupRoute {
   pub screen: Option<String>,
   /// The window is registering the endpoint the form confirmed.
   pub registering: bool,
+  /// Why the last registration saved nothing (the host refused the login).
+  pub register_error: Option<String>,
 }
 
 /// `RemoteTerminalDialogProps`, less the handlers.
@@ -329,6 +331,9 @@ impl RemoteView {
         if was && !setup.registering {
           if let Some(form) = self.setup.as_mut().and_then(|s| s.form.as_mut()) {
             form.submitting = false;
+            if let Some(error) = &setup.register_error {
+              form.probe_error = error.clone();
+            }
           }
         }
       }
@@ -1205,6 +1210,11 @@ impl RemoteView {
     let show_continue = form.trust.is_none();
     let probing = form.probing;
     let probe_error = form.probe_error.clone();
+    let probe_title = if probe_error.starts_with("Authentication failed") {
+      "Couldn't sign in to the host"
+    } else {
+      "Couldn't reach the host"
+    };
     let back = if direct {
       Button::new("remote-setup-cancel", p)
         .variant(Variant::Outline)
@@ -1263,7 +1273,7 @@ impl RemoteView {
           div()
             .mt_4()
             .child(
-              ui::Alert::new("remote-probe-error", "Couldn't reach the host", p)
+              ui::Alert::new("remote-probe-error", probe_title, p)
                 .severity(ui::Severity::Danger)
                 .message(if clamp {
                   let cut: String = probe_error.chars().take(240).collect();

@@ -120,3 +120,33 @@ fn the_shown_commits_list_reads_again_when_the_checkout_changes(cx: &mut TestApp
   bump_changes_revision(&mut h);
   assert_eq!(count_calls(&host, "read log Some(7)"), reads + 1);
 }
+
+/// A remote workspace can't merge (the capability notice says so), so the
+/// header offers no Merge… under it.
+#[test]
+fn a_remote_workspace_offers_no_merge() {
+  let mut route = route_of(&workspace_route()).clone();
+  route.remote_chrome = Some(Default::default());
+  let (header, _) = workspace_data::workspace_view(
+    &route,
+    &feature_loaded(),
+    &open_pr(),
+    workspace_data::Pending::None,
+  );
+  assert!(header.merge.is_none());
+}
+
+/// A status read that failed leaves no empty placeholder in the header.
+#[gpui::test]
+fn a_failed_status_read_draws_no_placeholder(cx: &mut TestAppContext) {
+  let mut loaded = feature_loaded();
+  loaded.status = None;
+  let host = FakeHost {
+    loaded,
+    pr: open_pr(),
+    ..FakeHost::default()
+  };
+  let (mut h, _) = workspace_harness(cx, host, workspace_route());
+  assert!(h.drawn("workspace-tab-row"));
+  assert!(!h.drawn("workspace-status-skeleton"));
+}

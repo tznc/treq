@@ -785,7 +785,6 @@ pub fn workspace_view(
         draft: p.is_draft,
       }),
     create_pr,
-    status_loading: status.is_none(),
     sync: (!not_on_remote && (ahead > 0 || behind > 0)).then_some(Sync {
       ahead: ahead as u32,
       behind: behind as u32,
@@ -793,7 +792,8 @@ pub fn workspace_view(
       spinning: matches!(pending, Pending::Sync | Pending::Reset),
     }),
     checks,
-    merge: on_feature.then(|| Merge {
+    // A remote workspace can't merge; its capability notice says why.
+    merge: (on_feature && route.remote_chrome.is_none()).then(|| Merge {
       passing: ci_passing,
       disabled: merge_blocked,
       tooltip: merge_blocked.then(|| {

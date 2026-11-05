@@ -1137,3 +1137,23 @@ fn menu_save_project_saves_without_closing(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   assert_eq!(project_calls(&host), ["save project \"web + api\""]);
 }
+
+/// The window saved nothing because the host refused the login: the form
+/// says so and offers Continue again.
+#[gpui::test]
+fn a_refused_login_shows_on_the_form(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(cx, own_vm_host(), setup_route(true, serde_json::json!({})));
+  h.click("remote-setup-own-vm");
+  type_into(&mut h, "remote-hostname", "10.0.0.4");
+  type_into(&mut h, "remote-username", "nobody");
+  h.click("remote-continue");
+  h.click("remote-trust-connect");
+  h.update(|s| s.remote.setup.as_mut().expect("setup").registering = true);
+  h.update(|s| {
+    let setup = s.remote.setup.as_mut().expect("setup");
+    setup.registering = false;
+    setup.register_error = Some("Authentication failed for nobody@10.0.0.4.".into());
+  });
+  assert!(h.drawn("remote-probe-error"));
+  assert!(h.drawn("remote-continue"));
+}

@@ -24,6 +24,8 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
+  /// Repositories whose folder is gone from disk (Home shows them missing).
+  gone: Vec<&'static str>,
   /// Saving repository settings fails, as a full disk would.
   fail_repo_settings: bool,
   /// The tuning agent's proposed review prompt edits.
@@ -2782,6 +2784,15 @@ impl workspace_dialog_data::WorkspaceDialogHost for FakeHost {
       return Err("save failed".into());
     }
     Ok(())
+  }
+
+  fn repo_exists(&self, repo: &str) -> bool {
+    !self.gone.contains(&repo)
+  }
+
+  fn home_commits(&self, repo: &str, _limit: usize) -> Vec<super::project_home::HomeCommit> {
+    self.record(format!("read home commits {repo}"));
+    Vec::new()
   }
 
   fn pick_context_files(&self) -> Option<Vec<String>> {

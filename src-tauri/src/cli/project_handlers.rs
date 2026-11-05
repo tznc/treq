@@ -49,6 +49,24 @@ pub(super) fn handle_project_command(
   )
 }
 
+/// The host name of SSH machine `endpoint_id` when this device saved it;
+/// otherwise the id.
+fn host_name(db: &Database, endpoint_id: &str) -> String {
+  crate::core::remote_records::user_managed_endpoints(db)
+    .into_iter()
+    .find(|e| e.id == endpoint_id)
+    .map_or_else(|| endpoint_id.to_string(), |e| e.hostname)
+}
+
+/// A project repository as a person reads it: a local path, or a remote
+/// path and its host.
+fn repo_label(db: &Database, repo: &str) -> String {
+  match projects::remote_repo(repo) {
+    Some(remote) => format!("{} on {}", remote.path, host_name(db, &remote.endpoint_id)),
+    None => repo.to_string(),
+  }
+}
+
 fn write_json<T: serde::Serialize>(out: &mut dyn Write, value: &T) -> Result<(), String> {
   let json = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
   writeln!(out, "{json}").map_err(|e| e.to_string())
@@ -73,7 +91,8 @@ fn run(
         OutputFormat::Json => write_json(out, &all),
         OutputFormat::Human => {
           for p in all {
-            line(out, format!("{}  ({})", p.name, p.repos.join(", ")))?;
+            let repos: Vec<String> = p.repos.iter().map(|r| repo_label(db, r)).collect();
+            line(out, format!("{}  ({})", p.name, repos.join(", ")))?;
           }
           Ok(())
         }
@@ -81,7 +100,10 @@ fn run(
     }
     "status" => {
       let project = current_project(db, repo_path)?;
-      let repos = projects::overview(&project);
+      let mut repos = projects::overview(&project);
+      for remote in repos.iter_mut().filter_map(|r| r.remote.as_mut()) {
+        remote.host = host_name(db, &remote.host);
+      }
       match format {
         OutputFormat::Json => write_json(
           out,
@@ -95,6 +117,10 @@ fn run(
         OutputFormat::Human => {
           line(out, format!("Project: {}", project.name))?;
           for repo in repos {
+            if let Some(remote) = &repo.remote {
+              line(out, format!("{} on {} (remote)", remote.path, remote.host))?;
+              continue;
+            }
             let missing = if repo.exists {
               ""
             } else {
@@ -116,14 +142,16 @@ fn run(
       let project = current_project(db, repo_path)?;
       let (path, cloned) = projects::ensure_repo(spec, clones_root)?;
       core::init(&path).map_err(|e| e.to_string())?;
-      projects::add_repo(db.conn(), &project.id, &path)?;
+      let added = projects::add_repo(db.conn(), &project.id, &path)?;
       match format {
         OutputFormat::Json => write_json(
           out,
           &serde_json::json!({
             "project": project.name, "path": path, "cloned": cloned,
+            "status": if added { "added" } else { "already_present" },
           }),
         ),
+        OutputFormat::Human if !added => line(out, format!("Already in {}: {path}", project.name)),
         OutputFormat::Human => {
           let how = if cloned { "Cloned and added" } else { "Added" };
           line(out, format!("{how} {path} to {}", project.name))
@@ -309,7 +337,10 @@ mod tests {
     assert_eq!(json["project"], "Checkout");
     assert_eq!(json["path"], canonical.as_str());
     assert_eq!(json["cloned"], false);
-    // A second add is accepted and keeps one entry.
+    assert_eq!(json["status"], "added");
+    // A second add is accepted, says so, and keeps one entry.
+    let again = env.json("/r/web", "add-repo", Some(&other.repo_path));
+    assert_eq!(again["status"], "already_present");
     let human = env
       .run(
         "/r/web",
@@ -318,9 +349,28 @@ mod tests {
         OutputFormat::Human,
       )
       .unwrap();
-    assert_eq!(human, format!("Added {canonical} to Checkout\n"));
+    assert_eq!(human, format!("Already in Checkout: {canonical}\n"));
     let repos = projects::get(env.db.conn(), &p.id).unwrap().unwrap().repos;
     assert_eq!(repos, vec!["/r/web".to_string(), canonical]);
+  }
+
+  #[test]
+  fn status_and_list_show_a_remote_repository_with_its_host() {
+    let env = env();
+    let local = TestRepo::new().unwrap();
+    env.save("Checkout", &[&local.repo_path, "ssh:ep-1:gen0:/srv/app"]);
+    let status = env
+      .run(&local.repo_path, "status", None, OutputFormat::Human)
+      .unwrap();
+    assert!(status.contains("/srv/app on ep-1 (remote)"), "{status}");
+    assert!(!status.contains("not on this machine"), "{status}");
+    let json = env.json(&local.repo_path, "status", None);
+    assert_eq!(json["repos"][1]["remote"]["host"], "ep-1");
+    assert_eq!(json["repos"][1]["remote"]["path"], "/srv/app");
+    let list = env
+      .run(&local.repo_path, "list", None, OutputFormat::Human)
+      .unwrap();
+    assert!(list.contains("/srv/app on ep-1"), "{list}");
   }
 
   #[test]

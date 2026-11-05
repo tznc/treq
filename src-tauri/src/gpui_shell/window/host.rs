@@ -753,7 +753,7 @@ impl RemoteHost for Backend {
     self.with_db(|db| remote_records::saved_repositories(db, endpoint_id, generation))
   }
 
-  fn register_user_managed(&self, values: &UserManagedValues) -> SshEndpoint {
+  fn register_user_managed(&self, values: &UserManagedValues) -> Result<SshEndpoint, String> {
     let record = UserManagedEndpoint {
       id: format!("user-managed-{}", super::remote::now_ms()),
       display_name: values.display_name.clone(),
@@ -769,8 +769,9 @@ impl RemoteHost for Backend {
       terminal_backend: Default::default(),
     };
     let endpoint = record.to_endpoint();
+    super::remote::check_login(self, &endpoint)?;
     self.with_db(|db| remote_records::save_user_managed_endpoint(db, record));
-    endpoint
+    Ok(endpoint)
   }
 
   fn remote_read(

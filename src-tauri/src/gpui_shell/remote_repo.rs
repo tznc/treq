@@ -211,6 +211,35 @@ pub fn cutoff(endpoint_id: &str) -> Option<Cutoff> {
   cutoffs().lock_or_recover().get(endpoint_id).copied()
 }
 
+/// The host couldn't be reached: the connection failed, dropped or timed
+/// out, rather than the command failing on it.
+pub fn unreachable(error: &str) -> bool {
+  [
+    "ssh connection failed",
+    "ssh channel error",
+    "exceeded its deadline",
+  ]
+  .iter()
+  .any(|what| error.contains(what))
+}
+
+/// The endpoints the last read couldn't reach, app-wide.
+fn unreachable_endpoints() -> &'static Mutex<std::collections::HashSet<String>> {
+  static UNREACHABLE: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> =
+    std::sync::OnceLock::new();
+  UNREACHABLE.get_or_init(Mutex::default)
+}
+
+/// Records whether `endpoint_id` answered; true when that changed.
+pub fn record_reachable(endpoint_id: &str, reachable: bool) -> bool {
+  let mut set = unreachable_endpoints().lock_or_recover();
+  if reachable {
+    set.remove(endpoint_id)
+  } else {
+    set.insert(endpoint_id.to_string())
+  }
+}
+
 /// Runs typed commands on an endpoint and tells React how they went; faked
 /// in tests. Blocks.
 pub trait Transport: Send + Sync {
@@ -223,6 +252,9 @@ pub trait Transport: Send + Sync {
   fn report(&self, mutation: &Mutation);
   /// `noteCutoffFromError`: React blocks the endpoint behind reauthentication.
   fn cut_off(&self, endpoint_id: &str, cutoff: Cutoff);
+  /// A read reached the host (`true`) or couldn't (`false`), so the window's
+  /// banner shows it offline until one lands.
+  fn reachable(&self, endpoint_id: &str, reachable: bool);
   /// What reads through this transport share, where a [`Remote`] is made
   /// anew for every call.
   fn reads(&self) -> &Reads;
@@ -517,8 +549,15 @@ impl Remote {
       .single_flight(endpoint, request, |request| {
         self.transport.read(endpoint, request)
       })
-      .map_err(|e| self.note_cutoff(e))?;
-    parse(value)
+      .map_err(|e| self.note_cutoff(e));
+    if let Some(id) = &self.repo.endpoint_id {
+      match &value {
+        Ok(_) => self.transport.reachable(id, true),
+        Err(error) if unreachable(error) => self.transport.reachable(id, false),
+        Err(_) => {}
+      }
+    }
+    parse(value?)
   }
 
   fn dispatch_mutation(&self, request: TreqCommandRequest) -> Result<Mutation, String> {
@@ -1152,6 +1191,7 @@ pub(crate) mod tests {
     pub sent: Mutex<Vec<TreqCommandRequest>>,
     pub reported: Mutex<Vec<&'static str>>,
     pub cutoffs: Mutex<Vec<(String, Cutoff)>>,
+    pub reachability: Mutex<Vec<(String, bool)>>,
     /// How long each read takes, to overlap reads in a test.
     pub latency: Mutex<Duration>,
     pub reading: std::sync::atomic::AtomicUsize,
@@ -1214,6 +1254,14 @@ pub(crate) mod tests {
         .push((endpoint_id.to_string(), cutoff));
     }
 
+    fn reachable(&self, endpoint_id: &str, reachable: bool) {
+      self
+        .reachability
+        .lock()
+        .unwrap()
+        .push((endpoint_id.to_string(), reachable));
+    }
+
     fn reads(&self) -> &Reads {
       &self.reads
     }
@@ -1237,6 +1285,25 @@ pub(crate) mod tests {
       "title": "",
       "not_on_remote": false,
     })
+  }
+
+  /// A read that couldn't reach the host marks it unreachable; the next
+  /// one that lands marks it reachable again.
+  #[test]
+  fn reads_report_whether_the_host_answered() {
+    let (remote, transport) = remote();
+    transport.answers.lock().unwrap().insert(
+      "ListDirectories",
+      Err("transport_error: ssh connection failed: Connection refused".into()),
+    );
+    let list = || remote.read::<Value>(TreqCommandRequest::ListDirectories { path: "~".into() });
+    assert!(list().is_err());
+    transport.answer("ListDirectories", Value::Null);
+    assert!(list().is_ok());
+    assert_eq!(
+      *transport.reachability.lock().unwrap(),
+      [("ep-1".to_string(), false), ("ep-1".to_string(), true)]
+    );
   }
 
   #[test]
