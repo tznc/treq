@@ -8,9 +8,15 @@
   Keychain behind `.userPresence` (tauri-plugin-keystore) and is gated on
   tauri-plugin-biometric, both of which evaluate an LAContext. Without this
   key iOS refuses Face ID and the biometric plugin reports it as missing.
+
+  ITSAppUsesNonExemptEncryption: Treq only uses standard encryption (TLS,
+  SSH), which is exempt. Answering here skips App Store Connect's
+  export-compliance questionnaire, which otherwise holds every TestFlight build.
 -->
 <plist version="1.0">
 <dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Treq uses Face ID to unlock the SSH key that connects this device to your computer.</string>
 </dict>
