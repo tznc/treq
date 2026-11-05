@@ -34,6 +34,7 @@ use gpui_kit::{
 
 use std::collections::HashMap;
 
+use crate::core::auth::OAuthProvider;
 use crate::core::remote::RemoteHostCheck;
 
 use crate::mobile::{
@@ -697,18 +698,63 @@ fn cutoff_overlay(reason: String, managed: bool, cx: &App) -> impl IntoElement {
 
 // Actions on the app model, shared by several screens.
 
-pub fn sign_in(cx: &mut App) {
-  use tauri_plugin_opener::OpenerExt;
-  let result = backend::get().app.opener().open_url(
-    crate::core::auth::sign_in_url(&crate::mobile::config::env().web_url),
-    None::<&str>,
-  );
-  if let Err(error) = result {
-    model(cx).update(cx, |m, cx| {
-      m.auth_error = Some(error.to_string());
+/// Signs in with `provider` in an in-app auth session, straight against
+/// Supabase Auth (PKCE); no website hop. The sheet is the progress
+/// indicator: the buttons stay live, as an Android Custom Tab closed with
+/// Back never reports, and tapping again starts a fresh flow.
+pub fn sign_in(provider: OAuthProvider, cx: &mut App) {
+  let model = model(cx);
+  model.update(cx, |m, cx| {
+    m.auth_error = None;
+    m.auth_notice = None;
+    cx.notify();
+  });
+  let done = backend::spawn(async move {
+    backend::get()
+      .auth
+      .sign_in_oauth(provider, |url| async move { authenticate(url).await })
+      .await
+  });
+  cx.spawn(async move |cx| {
+    let result = done
+      .await
+      .unwrap_or_else(|_| Err("Sign-in was interrupted".into()));
+    model.update(cx, |m, cx| {
+      m.auth_error = result.err().filter(|e| !is_cancel(e));
       cx.notify();
     });
-  }
+  })
+  .detach();
+}
+
+/// The user closed the auth sheet: not an error worth showing.
+fn is_cancel(error: &str) -> bool {
+  let error = error.to_ascii_lowercase();
+  error.contains("cancel") || error.contains("error 1")
+}
+
+#[cfg(mobile)]
+async fn authenticate(url: String) -> Result<String, String> {
+  use tauri_plugin_web_auth::{AuthenticateRequest, WebAuthExt};
+  let app = backend::get().app.clone();
+  tokio::task::spawn_blocking(move || {
+    app
+      .web_auth()
+      .authenticate(AuthenticateRequest {
+        url,
+        callback_scheme: "treq".into(),
+      })
+      .map(|response| response.callback_url)
+      .map_err(|error| error.to_string())
+  })
+  .await
+  .map_err(|error| error.to_string())?
+}
+
+/// Desktop builds of the mobile UI (tests, previews) have no auth session.
+#[cfg(not(mobile))]
+async fn authenticate(_url: String) -> Result<String, String> {
+  Err("In-app sign-in needs iOS or Android".into())
 }
 
 pub fn sign_out(cx: &mut App) {

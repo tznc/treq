@@ -68,6 +68,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
   #[cfg(mobile)]
   let builder = builder
     .plugin(tauri_plugin_keystore::init())
+    .plugin(tauri_plugin_web_auth::init())
     .plugin(tauri_plugin_biometric::init());
   let app = builder
     .setup(|app| {
