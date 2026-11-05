@@ -190,9 +190,39 @@ pub trait TerminalHost:
   /// ([`Prepared::file_paths`]) and the images pasted into it. Paths that
   /// are not Treq's temporary files are left alone.
   fn remove_session_files(&self, _paths: &[String]) {}
+  /// `treq agent msg`: an agent terminal treq launched, `cols`×`rows`.
+  fn agent_msg_register(
+    &self,
+    _session: &crate::core::agent_msg::hub::SessionInfo,
+    _cols: u16,
+    _rows: u16,
+  ) {
+  }
+  /// A remote agent's persistent session attached as `pty`.
+  fn agent_msg_register_remote(&self, _pty: &str, _target: &RemoteTarget, _cols: u16, _rows: u16) {}
+  /// The user typed into terminal `pty`.
+  fn agent_msg_key(&self, _pty: &str) {}
+  fn agent_msg_resize(&self, _pty: &str, _cols: u16, _rows: u16) {}
+  fn agent_msg_waiting(&self, _pty: &str) -> Option<WaitingMessages> {
+    None
+  }
+  /// The banner's "Deliver".
+  fn agent_msg_deliver_now(&self, _pty: &str) {}
+  /// Moves whenever a terminal's waiting messages may have changed.
+  fn agent_msg_generation(&self) -> u64 {
+    0
+  }
 }
 
 pub type Host = Arc<dyn TerminalHost>;
+
+/// What `treq agent msg` has waiting for a terminal: its badge and banner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaitingMessages {
+  pub count: usize,
+  /// Who sent the newest one.
+  pub from: String,
+}
 
 /// Receives a PTY's output, as the bytes read.
 pub type OutputSink = Box<dyn Fn(&[u8]) + Send + Sync>;
@@ -211,6 +241,25 @@ impl Drop for Listening {
     if let Some(stop) = self.0.take() {
       stop();
     }
+  }
+}
+
+impl Backend {
+  /// Gives `treq agent msg` this window's ways to type into terminals and
+  /// to run commands on remote hosts. Once per process.
+  fn connect_agent_msg(&self) {
+    use crate::core::agent_msg::service;
+    static CONNECTED: std::sync::Once = std::sync::Once::new();
+    let backend = self.clone();
+    CONNECTED.call_once(move || {
+      let writer = backend.clone();
+      service::set_writer(Box::new(move |id: &str, text: &str| {
+        writer.write_pty(id, text)
+      }));
+      service::set_remote_runner(std::sync::Arc::new(move |endpoint, request| {
+        Transport::read(&backend, endpoint, request)
+      }));
+    });
   }
 }
 
@@ -299,8 +348,94 @@ impl TerminalHost for Backend {
       .resize_session(id, rows, cols)
   }
 
+  fn agent_msg_register(
+    &self,
+    session: &crate::core::agent_msg::hub::SessionInfo,
+    cols: u16,
+    rows: u16,
+  ) {
+    self.connect_agent_msg();
+    crate::core::agent_msg::service::register(session.clone(), cols, rows);
+  }
+
+  fn agent_msg_register_remote(&self, pty: &str, target: &RemoteTarget, cols: u16, rows: u16) {
+    use crate::core::agent_msg::{hub::SessionInfo, service};
+    use crate::core::remote_pty::RemoteAgentId;
+    let Some(PtyLaunchSpec::Agent { agent, .. }) = &target.launch else {
+      return;
+    };
+    let harness = match agent {
+      RemoteAgentId::Claude => "claude",
+      RemoteAgentId::Codex => "codex",
+      RemoteAgentId::CursorAgent => "cursor",
+      RemoteAgentId::Copilot => "copilot",
+    };
+    self.connect_agent_msg();
+    // The repository is on the host; what its agent sends is recorded on
+    // this machine, where the window keeps the repository's state.
+    let ledger = crate::gpui_shell::remote_repo::for_window(self.label())
+      .map(|repo| repo.scope(&repo.canonical_path))
+      .or_else(|| {
+        use tauri::Manager;
+        self
+          .app()
+          .state::<crate::AppState>()
+          .window_repo_paths
+          .lock()
+          .ok()?
+          .get(self.label())
+          .cloned()
+      });
+    service::register_remote(
+      SessionInfo {
+        pty_id: pty.to_string(),
+        handle: format!("{harness}-{}", target.label),
+        harness: harness.to_string(),
+        repo: target.repository_id.clone(),
+        workspace: Some(target.workspace_id.clone()),
+        ledger,
+      },
+      service::RemoteSession {
+        endpoint: target.endpoint.clone(),
+        repo: target.repository_id.clone(),
+        workspace: target.workspace_id.clone(),
+        label: target.label.clone(),
+      },
+      cols,
+      rows,
+    );
+  }
+
+  fn agent_msg_key(&self, pty: &str) {
+    crate::core::agent_msg::service::tracker().note_key(pty);
+  }
+
+  fn agent_msg_resize(&self, pty: &str, cols: u16, rows: u16) {
+    crate::core::agent_msg::service::tracker().resize(pty, cols, rows);
+  }
+
+  fn agent_msg_waiting(&self, pty: &str) -> Option<WaitingMessages> {
+    let hub = crate::core::agent_msg::service::hub();
+    let now = crate::agent_dispatch::now_millis();
+    let count = hub.waiting(pty, now);
+    let latest = hub.latest(pty, now)?;
+    (count > 0).then_some(WaitingMessages {
+      count,
+      from: latest.from,
+    })
+  }
+
+  fn agent_msg_deliver_now(&self, pty: &str) {
+    crate::core::agent_msg::service::deliver_now(pty);
+  }
+
+  fn agent_msg_generation(&self) -> u64 {
+    crate::core::agent_msg::service::generation()
+  }
+
   fn close_pty(&self, id: &str) -> Result<(), String> {
     use tauri::Manager;
+    crate::core::agent_msg::service::unregister(id);
     if is_remote_pty(id) {
       // Detach: the channel closes, the session keeps running on the host.
       remote_channel(self, id, RemoteOp::Close);

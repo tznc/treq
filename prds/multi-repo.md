@@ -89,7 +89,7 @@ Status and polling (workspace status, PR status) run for every repository in the
 
   ```bash
   treq add -r <repo> <branch>
-  treq agent -r <repo> <branch> "<prompt>"
+  treq agent start -r <repo> <branch> "<prompt>"
   treq st -r <repo> [<workspace>]
   ```
 
@@ -100,8 +100,8 @@ Status and polling (workspace status, PR status) run for every repository in the
 - `-r <repo>` targets a supporting repository of the repository the command runs in. It accepts an absolute or relative path, the repository directory name, or a trailing path such as `org/app`.
 - It is accepted by `add`, `agent`, `st`, `diff`, `set`, and `commit`. `mv` takes `--repo` only, because `-r` is its range flag.
 - `-r` only resolves repositories that are in the current main repository's supporting list. Any other value is an error.
-- `treq agent` never starts an agent in a home repository copy; it requires a workspace branch.
-- `treq agent` returns after dispatch. Callers check progress with `treq st -r`.
+- `treq agent start` never starts an agent in a home repository copy; it requires a workspace branch.
+- `treq agent start` returns after dispatch. Callers check progress with `treq st -r`.
 
 ### Window routing
 
@@ -113,7 +113,7 @@ Treq CLI requests (`agent`, `send`, `commit`) find the app window by repository 
 - Selecting a supporting home row or one of its workspaces shows the same pages as a single-repository window, for that repository.
 - Creating a workspace while a supporting repository is active creates it in that repository and lists it under that repository's group.
 - A main-repository Claude session can read a supporting repository's files and cannot write them.
-- `treq add -r <name> <branch>` followed by `treq agent -r <name> <branch> "<prompt>"` from a main-repository session starts an agent in the supporting-repository workspace, shown in the main repository's window.
-- `treq agent -r <name> .` is rejected.
+- `treq add -r <name> <branch>` followed by `treq agent start -r <name> <branch> "<prompt>"` from a main-repository session starts an agent in the supporting-repository workspace, shown in the main repository's window.
+- `treq agent start -r <name> .` is rejected.
 - Removing a supporting repository removes its sidebar group and leaves its files and workspaces untouched.
 - Invalid additions (main repository, duplicate, nested, containing, non-repository) are rejected with a message.

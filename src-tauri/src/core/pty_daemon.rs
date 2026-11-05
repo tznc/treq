@@ -559,6 +559,8 @@ fn ensure_session(daemon: &Arc<Daemon>, name: &str, spec: &StartSpec) -> Result<
   let mut command = portable_pty::CommandBuilder::new("/bin/sh");
   command.args(["-c", &format!("cd {quoted_dir} && exec {}", spec.program)]);
   command.env("TERM", "xterm-256color");
+  // `treq agent msg` on the host finds this session's mailbox by its name.
+  command.env("TREQ_PTY_SESSION_ID", name);
   let child = pair
     .slave
     .spawn_command(command)
@@ -1195,6 +1197,22 @@ mod tests {
     send(&second, &Frame::Input(b"typed-after\r".to_vec()));
     read_until(&mut second, "typed-after");
     assert_eq!(daemon.names(), vec!["s".to_string()]);
+  }
+
+  #[test]
+  fn a_session_knows_its_name_from_the_environment() {
+    let daemon = TestDaemon::start();
+    daemon.start_session(
+      "treq-app-1-agent",
+      "sh -c 'echo \"name=$TREQ_PTY_SESSION_ID.\"; exec cat'",
+    );
+    let mut reader = daemon.attach("treq-app-1-agent");
+    // Fails instead of waiting forever when the name never shows.
+    reader
+      .get_ref()
+      .set_read_timeout(Some(Duration::from_secs(10)))
+      .unwrap();
+    read_until(&mut reader, "name=treq-app-1-agent.");
   }
 
   fn listed(daemon: &TestDaemon) -> Vec<Listed> {
