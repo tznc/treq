@@ -135,7 +135,7 @@ export function parsePreflightOutput(
   const records = new Map<string, Map<string, string>>();
   const ignoredPaths = new Map<string, string[]>();
   let current: Map<string, string> | null = null;
-  let currentPath = "";
+  let currentIgnored: string[] = [];
   for (const line of stdout.split("\n")) {
     if (line.length === 0) continue;
     const tab = line.indexOf("\t");
@@ -143,11 +143,11 @@ export function parsePreflightOutput(
     const value = tab < 0 ? "" : line.slice(tab + 1);
     if (key === "REPO") {
       current = new Map();
-      currentPath = value;
+      currentIgnored = [];
       records.set(value, current);
-      ignoredPaths.set(value, []);
+      ignoredPaths.set(value, currentIgnored);
     } else if (current && key === "IGNORED_PATH") {
-      ignoredPaths.get(currentPath)!.push(value);
+      currentIgnored.push(value);
     } else if (current && !current.has(key)) {
       current.set(key, value);
     }
