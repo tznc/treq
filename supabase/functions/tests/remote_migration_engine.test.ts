@@ -497,9 +497,9 @@ async function parkedOnClone(): Promise<World> {
 Deno.test("a failed re-clone parks the migration before cutover and keeps the source running", async () => {
   const w = await parkedOnClone();
   assertEquals(w.activePlacement().id, "p-src");
-  assertEquals(w.machines.get("m-src")!.state, "ready");
+  assertEquals(w.machines.get("m-src")?.state, "ready");
   assertEquals(w.instance.fence, 0);
-  const park = w.steps.find((s) => s.to === "awaiting_ack")!.detail as {
+  const park = w.steps.find((s) => s.to === "awaiting_ack")?.detail as {
     clone_failed: Array<{ path: string; reason: string }>;
   };
   assertEquals(park.clone_failed.map((r) => r.path), ["/home/treq/a"]);
@@ -525,7 +525,7 @@ Deno.test("an unacknowledged clone failure stays parked and never stops the sour
   assertEquals(r.resumed, false);
   assertEquals(w.migration.state, "awaiting_ack");
   assertEquals(await runToEnd(w), "awaiting_ack");
-  assertEquals(w.machines.get("m-src")!.state, "ready");
+  assertEquals(w.machines.get("m-src")?.state, "ready");
   assertEquals(w.activePlacement().id, "p-src");
 });
 
