@@ -211,6 +211,12 @@ pub struct PreflightRepository {
   pub unpushed: u64,
   /// Agents still running.
   pub agents: u64,
+  /// Gitignored files a re-clone drops (such as `.env`), and some of their paths.
+  pub ignored: u64,
+  pub ignored_paths: Vec<String>,
+  pub stashes: u64,
+  /// Files in a folder with no version control.
+  pub files: u64,
   pub error: Option<String>,
 }
 
@@ -242,6 +248,23 @@ impl Preflight {
         }
         if r.agents > 0 {
           parts.push(plural(r.agents, "running agent", "running agents"));
+        }
+        if r.ignored > 0 {
+          let mut part = plural(r.ignored, "ignored file", "ignored files");
+          if !r.ignored_paths.is_empty() {
+            part = format!("{part} ({})", r.ignored_paths.join(", "));
+          }
+          parts.push(part);
+        }
+        if r.stashes > 0 {
+          parts.push(plural(r.stashes, "stash", "stashes"));
+        }
+        if r.files > 0 {
+          parts.push(plural(
+            r.files,
+            "file outside version control",
+            "files outside version control",
+          ));
         }
         (!parts.is_empty()).then(|| format!("{}: {}", r.path, parts.join(", ")))
       })
@@ -591,6 +614,22 @@ mod tests {
     );
     let done = resize(&supabase, "i1", "l", true, "k2").await.unwrap();
     assert_eq!(done["operation_id"], "o");
+  }
+
+  #[test]
+  fn summary_lines_name_ignored_files_stashes_and_untracked_folders() {
+    let preflight: Preflight = serde_json::from_value(json!({"requires_ack": true, "repos": [
+      {"path": "/home/treq/api", "vcs": "git", "ignored": 2, "ignored_paths": [".env", "local.db"], "stashes": 1},
+      {"path": "/home/treq/notes", "vcs": "none", "files": 3}
+    ]}))
+    .unwrap();
+    assert_eq!(
+      preflight.summary_lines(),
+      [
+        "/home/treq/api: 2 ignored files (.env, local.db), 1 stash",
+        "/home/treq/notes: 3 files outside version control",
+      ]
+    );
   }
 
   #[tokio::test]
