@@ -104,6 +104,8 @@ impl Network for InstanceNetwork {
       Op::List {
         repo: None,
         local_only: true,
+        pty: None,
+        everywhere: false,
       },
     )?;
     let agents = data["agents"].as_array().cloned().unwrap_or_default();
@@ -118,6 +120,7 @@ impl Network for InstanceNetwork {
             repo: agent["repo"].as_str()?.to_string(),
             workspace: agent["workspace"].as_str().map(str::to_string),
             ledger: agent["ledger"].as_str().map(str::to_string),
+            project: serde_json::from_value(agent["project"].clone()).unwrap_or_default(),
           })
         })
         .collect(),

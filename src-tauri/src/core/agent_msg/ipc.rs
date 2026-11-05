@@ -65,6 +65,8 @@ mod tests {
       op: Op::List {
         repo: None,
         local_only: true,
+        pty: None,
+        everywhere: false,
       },
     }
   }

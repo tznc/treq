@@ -132,18 +132,19 @@ Send messages between agents that Treq started, and read the messages sent to yo
 
 ```bash
 treq agent msg <agent> <text> [--ask] [--timeout <time>] [-r <repo>]
-treq agent msg --all <text> [-r <repo>]
+treq agent msg --all <text> [-r <repo>] [--everywhere]
 treq agent msg --inbox [--peek] [--wait] [--types <kinds>]
 treq agent msg --ack <id> [--ack <id>...]
 treq agent msg --reply <id> <text>
 treq agent msg --status <working|blocked|done> [--note <text>] [<agent>]
-treq agent msg --list [-r <repo>]
+treq agent msg --list [-r <repo>] [--everywhere]
 ```
 
-- `<agent>`: the agent's handle, such as `claude-2`. `--list` shows each handle with its repository and workspace.
+- `<agent>`: the agent's handle, such as `claude-2`. `--list` shows each handle with its repository and workspace. If one handle runs both in your project and outside it, the message goes to the one in your project.
 - `--ask`: wait for the reply and print it. Exits with status 3 when no reply comes in time.
 - `--timeout`: how long a message waits to be acknowledged or answered, such as `30s`. The default and the limit are `1m`. After that, the message leaves the inbox.
-- `--all`: send to every other agent. `-r` keeps only agents in that repository.
+- `--all`: send to every other agent in your project, meaning the repositories of the window the agent started in. `-r` keeps only agents in that repository.
+- `--everywhere`: with `--all` or `--list`, include agents outside your project. A message to a named agent reaches it whatever project it is in.
 - `--inbox`: list the messages waiting for you, oldest first, and mark them read. `--peek` leaves them unread, `--wait` waits up to a minute for one, and `--types` keeps only some kinds (`message`, `ask`, `reply`, `status`).
 - `--status`: report your state to the agent that last messaged you, or to the agent you name.
 - `--json`: print JSON.

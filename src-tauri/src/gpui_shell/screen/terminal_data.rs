@@ -355,7 +355,9 @@ impl TerminalHost for Backend {
     rows: u16,
   ) {
     self.connect_agent_msg();
-    crate::core::agent_msg::service::register(session.clone(), cols, rows);
+    let mut session = session.clone();
+    session.project = crate::gpui_shell::projects::window_repos(self.app(), self.label());
+    crate::core::agent_msg::service::register(session, cols, rows);
   }
 
   fn agent_msg_register_remote(&self, pty: &str, target: &RemoteTarget, cols: u16, rows: u16) {
@@ -394,6 +396,7 @@ impl TerminalHost for Backend {
         repo: target.repository_id.clone(),
         workspace: Some(target.workspace_id.clone()),
         ledger,
+        project: crate::gpui_shell::projects::window_repos(self.app(), self.label()),
       },
       service::RemoteSession {
         endpoint: target.endpoint.clone(),

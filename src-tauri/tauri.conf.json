@@ -229,7 +229,11 @@
                 },
                 {
                   "name": "all",
-                  "description": "Send to every other agent (narrow with --repo)"
+                  "description": "Send to every other agent in this project (narrow with --repo)"
+                },
+                {
+                  "name": "everywhere",
+                  "description": "With --all or --list: every agent treq can reach, not only this project's"
                 },
                 {
                   "name": "repo",

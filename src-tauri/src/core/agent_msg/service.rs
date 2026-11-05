@@ -274,6 +274,7 @@ mod tests {
         repo: "/srv/app".into(),
         workspace: Some("main".into()),
         ledger: Some("remote:app".into()),
+        project: Vec::new(),
       },
       RemoteSession {
         endpoint: serde_json::from_value(serde_json::json!({
@@ -361,6 +362,7 @@ mod tests {
         repo: "/src/app".into(),
         workspace: None,
         ledger: None,
+        project: Vec::new(),
       },
       80,
       24,

@@ -60,6 +60,11 @@ pub enum Op {
   List {
     #[serde(default)]
     repo: Option<String>,
+    /// The asking terminal: the list keeps to its project.
+    #[serde(default)]
+    pty: Option<String>,
+    #[serde(default)]
+    everywhere: bool,
     #[serde(default)]
     local_only: bool,
   },
@@ -151,6 +156,7 @@ fn answer(
           from_pty: pty.clone(),
           to: Some(to),
           all: false,
+          everywhere: false,
           repo,
           kind: Kind::Status,
           body: body.clone(),
@@ -171,7 +177,17 @@ fn answer(
       to_json(&reply)
     }
     Op::Rows { id } => rows(&request.repo, id),
-    Op::List { repo, local_only } => {
+    Op::List {
+      repo,
+      local_only,
+      pty,
+      everywhere,
+    } => {
+      let project = (!*everywhere)
+        .then(|| pty.as_deref().and_then(|pty| hub.session(pty)))
+        .flatten()
+        .map(|session| session.project)
+        .filter(|project| !project.is_empty());
       let peers = if *local_only {
         hub
           .sessions()
@@ -191,6 +207,11 @@ fn answer(
             .as_deref()
             .is_none_or(|repo| super::route::repo_matches(&peer.session.repo, repo))
         })
+        .filter(|peer| {
+          project
+            .as_deref()
+            .is_none_or(|repos| super::route::in_project(repos, &peer.session.repo))
+        })
         .map(|peer| {
           serde_json::json!({
             "handle": peer.session.handle,
@@ -198,6 +219,7 @@ fn answer(
             "repo": peer.session.repo,
             "workspace": peer.session.workspace,
             "pty_id": peer.session.pty_id,
+            "project": peer.session.project,
             "via": peer.via.label(),
             "waiting": hub.waiting(&peer.session.pty_id, now_ms),
           })
@@ -231,6 +253,7 @@ mod tests {
       repo: "/src/app".into(),
       workspace: Some("main".into()),
       ledger: None,
+      project: Vec::new(),
     }
   }
 
@@ -274,6 +297,7 @@ mod tests {
           from_pty: "pty-codex".into(),
           to: Some(to.into()),
           all: false,
+          everywhere: false,
           repo: None,
           kind,
           body: body.into(),
@@ -316,6 +340,8 @@ mod tests {
         op: Op::List {
           repo: repo.clone(),
           local_only: false,
+          pty: None,
+          everywhere: false,
         },
       };
       let json = serde_json::to_string(&request).unwrap();
@@ -337,6 +363,7 @@ mod tests {
         from_pty: "pty-codex".into(),
         to: Some("claude-2".into()),
         all: false,
+        everywhere: false,
         repo: Some("app".into()),
         kind: Kind::Ask,
         body: "hi".into(),
@@ -369,6 +396,7 @@ mod tests {
         from_pty: "pty-codex".into(),
         to: Some("nobody-9".into()),
         all: false,
+        everywhere: false,
         repo: None,
         kind: Kind::Message,
         body: "hi".into(),
@@ -492,12 +520,75 @@ mod tests {
   }
 
   #[test]
+  fn list_from_an_agent_keeps_to_its_project_unless_everywhere() {
+    let hub = Hub::new();
+    let mut me = session("pty-codex", "codex-1");
+    me.project = vec!["/src/app".into()];
+    hub.register(me);
+    let mut elsewhere = session("pty-claude", "claude-2");
+    elsewhere.repo = "/src/api".into();
+    hub.register(elsewhere);
+    let fixture = Fixture {
+      hub,
+      ledger: FakeLedger::default(),
+      network: FakeNetwork::default(),
+    };
+    let list = |everywhere: bool| -> Vec<String> {
+      let response = fixture.call(
+        Op::List {
+          repo: None,
+          local_only: false,
+          pty: Some("pty-codex".into()),
+          everywhere,
+        },
+        0,
+      );
+      response.data["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|agent| agent["handle"].as_str().unwrap().to_string())
+        .collect()
+    };
+    assert_eq!(list(false), vec!["codex-1"]);
+    assert_eq!(list(true), vec!["codex-1", "claude-2"]);
+  }
+
+  #[test]
+  fn list_carries_each_agents_project_to_other_instances() {
+    let hub = Hub::new();
+    let mut me = session("pty-codex", "codex-1");
+    me.project = vec!["/src/app".into(), "/src/web".into()];
+    hub.register(me);
+    let fixture = Fixture {
+      hub,
+      ledger: FakeLedger::default(),
+      network: FakeNetwork::default(),
+    };
+    let response = fixture.call(
+      Op::List {
+        repo: None,
+        local_only: true,
+        pty: None,
+        everywhere: false,
+      },
+      0,
+    );
+    assert_eq!(
+      response.data["agents"][0]["project"],
+      json!(["/src/app", "/src/web"])
+    );
+  }
+
+  #[test]
   fn list_names_each_agent_with_its_harness_and_where_it_runs() {
     let fixture = Fixture::new();
     let response = fixture.call(
       Op::List {
         repo: None,
         local_only: false,
+        pty: None,
+        everywhere: false,
       },
       0,
     );
@@ -520,6 +611,8 @@ mod tests {
       Op::List {
         repo: None,
         local_only: false,
+        pty: None,
+        everywhere: false,
       },
       0,
     );
@@ -527,6 +620,8 @@ mod tests {
       Op::List {
         repo: None,
         local_only: true,
+        pty: None,
+        everywhere: false,
       },
       0,
     );

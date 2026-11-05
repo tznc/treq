@@ -58,13 +58,16 @@ pub struct FakeNetwork {
   pub reported: RefCell<Vec<(String, Report)>>,
   pub mirrored: RefCell<Vec<Envelope>>,
   pub mirror_down: bool,
+  /// The repositories each `peers` call looked in.
+  pub asked_repos: RefCell<Vec<Vec<String>>>,
 }
 
 impl Network for FakeNetwork {
   fn own_endpoint(&self) -> String {
     "127.0.0.1:1".into()
   }
-  fn peers(&self, _repos: &[String]) -> Vec<String> {
+  fn peers(&self, repos: &[String]) -> Vec<String> {
+    self.asked_repos.borrow_mut().push(repos.to_vec());
     let mut endpoints: Vec<String> = self.remote.keys().cloned().collect();
     endpoints.sort();
     endpoints

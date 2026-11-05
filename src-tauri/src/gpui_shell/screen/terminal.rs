@@ -575,6 +575,7 @@ impl TerminalView {
       repo: start.repo_path.clone(),
       workspace: workspace_name.clone(),
       ledger: None,
+      project: Vec::new(),
     };
     self
       .host

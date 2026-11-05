@@ -52,6 +52,9 @@ pub struct SendRequest {
   pub to: Option<String>,
   #[serde(default)]
   pub all: bool,
+  /// `--all` past the sender's project, to every agent treq can reach.
+  #[serde(default)]
+  pub everywhere: bool,
   #[serde(default)]
   pub repo: Option<String>,
   /// On the wire as `message_kind`: an IPC request's `kind` names the
@@ -94,7 +97,14 @@ impl Coordinator<'_> {
   /// Every agent this instance and its peers run.
   pub fn peers(&self, repo: Option<&str>) -> Vec<Peer> {
     let local = self.hub.sessions();
-    let mut repos: Vec<String> = local.iter().map(|session| session.repo.clone()).collect();
+    // Other instances are found by repository: look in every repository of
+    // each local agent's project too, so a window on another project repo
+    // is found before any agent here works in it.
+    let mut repos: Vec<String> = local
+      .iter()
+      .flat_map(|session| std::iter::once(&session.repo).chain(&session.project))
+      .cloned()
+      .collect();
     repos.extend(repo.map(str::to_string));
     repos.sort();
     repos.dedup();
@@ -139,6 +149,7 @@ impl Coordinator<'_> {
       request.to.as_deref(),
       request.all,
       request.repo.as_deref(),
+      (!request.everywhere).then_some(from.project.as_slice()),
     )?;
     let ledger_repo = from.ledger.clone().unwrap_or_else(|| from.repo.clone());
     let message = Envelope {
@@ -266,6 +277,7 @@ impl Coordinator<'_> {
             from_pty: pty.to_string(),
             to: message.to.clone(),
             all: message.all,
+            everywhere: message.everywhere,
             repo: message.repo.clone(),
             kind: message.kind,
             body: message.body.clone(),
@@ -300,6 +312,7 @@ impl Coordinator<'_> {
         from_pty: pty.to_string(),
         to: Some(asked.from.clone()),
         all: false,
+        everywhere: false,
         repo: Some(asked.origin_repo.clone()),
         kind: Kind::Reply,
         body: body.to_string(),
@@ -327,6 +340,7 @@ mod tests {
       repo: repo.into(),
       workspace: None,
       ledger: None,
+      project: Vec::new(),
     }
   }
 
@@ -352,6 +366,7 @@ mod tests {
       from_pty: "pty-codex".into(),
       to: to.map(str::to_string),
       all,
+      everywhere: false,
       repo: None,
       kind: Kind::Ask,
       body: "rebase done?".into(),
@@ -455,6 +470,62 @@ mod tests {
     assert_eq!(delivered[0].0, "127.0.0.1:7");
     assert_eq!(delivered[0].1.to_pty, "pty-copilot");
     assert_eq!(delivered[0].1.id, result.id);
+  }
+
+  /// codex-1 works in a project of /src/app and /src/web; another
+  /// instance runs claude-5 in /src/api, outside it.
+  fn project_fixture() -> (Hub, FakeNetwork) {
+    let hub = Hub::new();
+    let mut sender = session("pty-codex", "codex-1", "/src/app");
+    sender.project = vec!["/src/app".into(), "/src/web".into()];
+    hub.register(sender);
+    hub.register(session("pty-claude", "claude-2", "/src/app"));
+    let network = FakeNetwork {
+      remote: HashMap::from([(
+        "127.0.0.1:7".to_string(),
+        vec![
+          session("pty-copilot", "copilot-3", "/src/web"),
+          session("pty-claude5", "claude-5", "/src/api"),
+        ],
+      )]),
+      ..FakeNetwork::default()
+    };
+    (hub, network)
+  }
+
+  #[test]
+  fn broadcast_stays_in_the_senders_project_unless_everywhere() {
+    let (hub, network) = project_fixture();
+    let ledger = FakeLedger::default();
+    let coordinator = Coordinator {
+      hub: &hub,
+      ledger: &ledger,
+      network: &network,
+    };
+    let handles = |result: SendResult| -> Vec<String> {
+      result.targets.into_iter().map(|t| t.handle).collect()
+    };
+    let in_project = coordinator.send(&ask(None, true), 1_000).unwrap();
+    assert_eq!(handles(in_project), vec!["claude-2", "copilot-3"]);
+
+    let mut everywhere = ask(None, true);
+    everywhere.everywhere = true;
+    let all = coordinator.send(&everywhere, 1_000).unwrap();
+    assert_eq!(handles(all), vec!["claude-2", "copilot-3", "claude-5"]);
+  }
+
+  #[test]
+  fn other_instances_are_looked_for_in_every_project_repo() {
+    let (hub, network) = project_fixture();
+    let ledger = FakeLedger::default();
+    let coordinator = Coordinator {
+      hub: &hub,
+      ledger: &ledger,
+      network: &network,
+    };
+    coordinator.send(&ask(None, true), 1_000).unwrap();
+    let asked = network.asked_repos.borrow();
+    assert!(asked[0].contains(&"/src/web".to_string()), "{asked:?}");
   }
 
   #[test]
@@ -594,6 +665,7 @@ mod tests {
         id: "m-host0001".into(),
         to: Some("codex-1".into()),
         all: false,
+        everywhere: false,
         repo: None,
         kind: Kind::Status,
         body: "done".into(),

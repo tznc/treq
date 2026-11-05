@@ -141,10 +141,10 @@ Treq window, or on a remote machine. Each agent has a handle such as
 `claude-2`.
 
 ```bash
-treq agent msg --list                         # who you can message
+treq agent msg --list                         # agents in this project
 treq agent msg <handle> "<text>"              # send
 treq agent msg <handle> "<question>" --ask    # send, then wait for the reply
-treq agent msg --all [--repo <repo>] "<text>" # every other agent
+treq agent msg --all [--repo <repo>] "<text>" # every other agent in the project
 treq agent msg --inbox [--wait]               # read what waits for you
 treq agent msg --ack <id>                     # done with a message
 treq agent msg --reply <id> "<text>"          # answer an --ask
@@ -155,6 +155,9 @@ treq agent msg --status <working|blocked|done> [--note "<text>"]
   `treq agent msg --inbox`, then ack or reply to each message.
 - A message waits one minute (`--timeout`, at most `1m`). `--ask` exits 3
   when no reply comes in time.
+- `--list` and `--all` cover the agents in this project, in any of its
+  repositories. Add `--everywhere` to reach agents outside it. A message to
+  a named handle reaches it in any project.
 - `--status` goes to the agent that last messaged you unless you name one.
 - Add `--json` for output you parse.
 

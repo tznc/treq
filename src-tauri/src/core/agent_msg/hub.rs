@@ -27,6 +27,10 @@ pub struct SessionInfo {
   /// remote terminal's repository exists only on its host.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub ledger: Option<String>,
+  /// The repositories of the project its window shows, when it was
+  /// registered: `--all` and `--list` stay inside them.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub project: Vec<String>,
 }
 
 /// `<harness>-<session id>`, as in `claude-2`.
@@ -395,6 +399,7 @@ mod tests {
       repo: "/repo".into(),
       workspace: Some("fix/rebase".into()),
       ledger: None,
+      project: Vec::new(),
     });
     hub
   }
@@ -438,6 +443,7 @@ mod tests {
       repo: "/repo".into(),
       workspace: Some("renamed".into()),
       ledger: None,
+      project: Vec::new(),
     });
     assert_eq!(hub.sessions().len(), 1);
     assert_eq!(

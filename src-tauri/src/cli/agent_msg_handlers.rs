@@ -20,6 +20,8 @@ pub enum Command {
   Send {
     to: Option<String>,
     all: bool,
+    /// `--all` to every agent, not only the sender's project.
+    everywhere: bool,
     repo: Option<String>,
     body: String,
     ask: bool,
@@ -43,6 +45,8 @@ pub enum Command {
   },
   List {
     repo: Option<String>,
+    /// Every agent treq can reach, not only this project's.
+    everywhere: bool,
   },
 }
 
@@ -119,7 +123,7 @@ pub fn parse(matches: &Matches) -> Result<Command, String> {
   if let Some(id) = reply {
     refuse(&send_flags, "--reply")?;
     refuse(&inbox_flags, "--reply")?;
-    refuse(&["note"], "--reply")?;
+    refuse(&["note", "everywhere"], "--reply")?;
     let [body] = positional.as_slice() else {
       return Err("usage: treq agent msg --reply <id> <text>".into());
     };
@@ -130,7 +134,7 @@ pub fn parse(matches: &Matches) -> Result<Command, String> {
   }
   if inbox {
     refuse(&send_flags, "--inbox")?;
-    refuse(&["note"], "--inbox")?;
+    refuse(&["note", "everywhere"], "--inbox")?;
     no_positional("--inbox")?;
     let kinds = match text("types") {
       None => Vec::new(),
@@ -153,12 +157,13 @@ pub fn parse(matches: &Matches) -> Result<Command, String> {
   refuse(&inbox_flags, "this command (they go with --inbox)")?;
   if !acks.is_empty() {
     refuse(&send_flags, "--ack")?;
-    refuse(&["note"], "--ack")?;
+    refuse(&["note", "everywhere"], "--ack")?;
     no_positional("--ack")?;
     return Ok(Command::Ack { ids: acks });
   }
   if let Some(state) = status {
     refuse(&send_flags, "--status")?;
+    refuse(&["everywhere"], "--status")?;
     if !["working", "blocked", "done"].contains(&state.as_str()) {
       return Err(format!(
         "unknown status '{state}'. Use working, blocked or done"
@@ -179,11 +184,17 @@ pub fn parse(matches: &Matches) -> Result<Command, String> {
   if list {
     refuse(&send_flags, "--list")?;
     no_positional("--list")?;
-    return Ok(Command::List { repo: text("repo") });
+    return Ok(Command::List {
+      repo: text("repo"),
+      everywhere: flag("everywhere"),
+    });
   }
 
   let all = flag("all");
   let ask = flag("ask");
+  if flag("everywhere") && !all {
+    return Err("--everywhere goes with --all or --list".into());
+  }
   if all && ask {
     return Err("--ask waits for one reply, so it takes one agent, not --all".into());
   }
@@ -200,6 +211,7 @@ pub fn parse(matches: &Matches) -> Result<Command, String> {
   Ok(Command::Send {
     to,
     all,
+    everywhere: flag("everywhere"),
     repo: text("repo"),
     body,
     ask,
@@ -321,10 +333,12 @@ pub fn run(
     })
   };
   match command {
-    Command::List { repo } => {
+    Command::List { repo, everywhere } => {
       let data = client.call(Op::List {
         repo: repo.clone(),
         local_only: false,
+        pty: pty.map(str::to_string),
+        everywhere: *everywhere,
       })?;
       if json {
         write(out, pretty(&data))?;
@@ -336,6 +350,7 @@ pub fn run(
     Command::Send {
       to,
       all,
+      everywhere,
       repo,
       body,
       ask,
@@ -346,6 +361,7 @@ pub fn run(
         from_pty: from_pty.clone(),
         to: to.clone(),
         all: *all,
+        everywhere: *everywhere,
         repo: repo.clone(),
         kind: if *ask { Kind::Ask } else { Kind::Message },
         body: body.clone(),
@@ -588,6 +604,7 @@ mod tests {
       Ok(Command::Send {
         to: Some("claude-2".into()),
         all: false,
+        everywhere: false,
         repo: None,
         body: "rebase done?".into(),
         ask: false,
@@ -611,6 +628,7 @@ mod tests {
       Ok(Command::Send {
         to: Some("cursor-4".into()),
         all: false,
+        everywhere: false,
         repo: Some("app".into()),
         body: "hit rate?".into(),
         ask: true,
@@ -626,12 +644,33 @@ mod tests {
       Ok(Command::Send {
         to: None,
         all: true,
+        everywhere: false,
         repo: Some("app".into()),
         body: "main moved".into(),
         ask: false,
         timeout: Duration::from_secs(60),
       })
     );
+  }
+
+  #[test]
+  fn everywhere_widens_a_broadcast_and_the_list() {
+    let Ok(Command::Send {
+      everywhere, all, ..
+    }) = parsed(&["--all", "--everywhere", "main moved"])
+    else {
+      panic!("a broadcast");
+    };
+    assert!(all && everywhere);
+    assert_eq!(
+      parsed(&["--list", "--everywhere"]),
+      Ok(Command::List {
+        repo: None,
+        everywhere: true,
+      })
+    );
+    assert!(parsed(&["claude-2", "hi", "--everywhere"]).is_err());
+    assert!(parsed(&["--inbox", "--everywhere"]).is_err());
   }
 
   #[test]
@@ -693,7 +732,8 @@ mod tests {
     assert_eq!(
       parsed(&["--list", "-r", "app"]),
       Ok(Command::List {
-        repo: Some("app".into())
+        repo: Some("app".into()),
+        everywhere: false,
       })
     );
   }
@@ -753,6 +793,7 @@ mod tests {
     Command::Send {
       to: Some("claude-2".into()),
       all: false,
+      everywhere: false,
       repo: None,
       body: "rebase done?".into(),
       ask,
@@ -873,7 +914,14 @@ mod tests {
     let client = FakeClient::new(vec![Ok(json!({ "agents": [
       { "handle": "claude-2", "harness": "claude", "repo": "/src/app", "workspace": "fix/x", "via": "local", "waiting": 1 }
     ]}))]);
-    let (code, out) = run_with(Command::List { repo: None }, false, &client);
+    let (code, out) = run_with(
+      Command::List {
+        repo: None,
+        everywhere: false,
+      },
+      false,
+      &client,
+    );
     assert_eq!(code, Ok(0));
     assert!(
       out.contains("HANDLE") && out.contains("claude-2") && out.contains("fix/x"),
@@ -894,7 +942,10 @@ mod tests {
     let client = FakeClient::new(vec![Ok(json!({ "agents": [] }))]);
     let mut out = Vec::new();
     let code = run(
-      &Command::List { repo: None },
+      &Command::List {
+        repo: None,
+        everywhere: false,
+      },
       None,
       false,
       &client,
