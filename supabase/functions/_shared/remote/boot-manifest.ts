@@ -28,7 +28,7 @@ export interface BootManifest {
   agents: BootManifestAgent[];
 }
 
-export const CURRENT_MANIFEST_VERSION = 4;
+export const CURRENT_MANIFEST_VERSION = 5;
 
 // sha256 of jj-v0.40.0-<arch>-unknown-linux-musl.tar.gz.
 const JJ_0_40_SHA256: TreqSha256 = {
@@ -93,7 +93,26 @@ const MANIFESTS: Record<number, BootManifest> = {
       { name: "codex", version: "1.0.0" },
     ],
   },
+  // Same pins as 4. Bootstrap now installs its own base packages (curl,
+  // CA certificates, sshd, ...), so bare images such as Cloudflare's
+  // sandbox image can run it.
+  5: {
+    manifest_version: 5,
+    treq_version: "0.4.0",
+    // The release workflow pins these (scripts/bump-boot-manifest.ts).
+    treq_sha256: { x86_64: "PLACEHOLDER-treq-0.4.0-x86_64", aarch64: "PLACEHOLDER-treq-0.4.0-aarch64" },
+    jj_version: "0.40.0",
+    jj_sha256: JJ_0_40_SHA256,
+    git_version: "2.45",
+    agents: [
+      { name: "claude", version: "1.0.0" },
+      { name: "codex", version: "1.0.0" },
+    ],
+  },
 };
+
+/** Debian/Ubuntu packages every machine needs: bootstrap's downloads, git, sshd, and sudo for non-root exec. */
+export const BASE_PACKAGES = ["curl", "ca-certificates", "tar", "git", "openssh-server", "sudo"] as const;
 
 export function manifestForVersion(version: number): BootManifest | null {
   return MANIFESTS[version] ?? null;
@@ -163,6 +182,21 @@ machine_arch() {
   esac
 }
 
+install_base_packages() {
+  # Only what is missing, so an image that already has them makes no apt call.
+  missing=""
+  for pkg in${BASE_PACKAGES.map((p) => " " + p).join("")}; do
+    dpkg -s "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"
+  done
+  if [ -z "$missing" ]; then
+    echo "treq bootstrap: base packages already installed"
+    return 0
+  fi
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -qq
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $missing
+  echo "treq bootstrap: installed$missing"
+}
+
 install_treq() {
   # The gateway (\`treq gateway\`) and the remote PTY supervisor run this binary.
   if [ "$(/usr/local/bin/treq --version 2>/dev/null)" = "treq $TREQ_VERSION" ]; then
@@ -219,6 +253,7 @@ install_git() {
   echo "treq bootstrap: installed $(git --version)"
 }
 
+install_base_packages
 install_treq
 install_jj
 install_git
