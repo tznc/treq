@@ -18,6 +18,7 @@ use gpui_kit::{
 use treq_ui::{Dot, Tone};
 
 use super::{model, screens, widgets, Machine, MachineState, MachineStatus};
+use crate::core::auth::OAuthProvider;
 use crate::core::pty_remote_supervisor::PtyBackend;
 use crate::mobile::{
   backend::MANAGED_MACHINE,
@@ -242,16 +243,7 @@ impl HomeScreen {
             "Sign in to reach your Treq Cloud machine.",
             cx,
           ))
-          .child(
-            h_flex().child(
-              Button::new("sign-in")
-                .primary()
-                .label("Sign in")
-                .loading(busy)
-                .on_click(|_, _, cx| super::sign_in(cx))
-                .touch(),
-            ),
-          )
+          .child(h_flex().gap_2().children(provider_buttons(busy, false)))
           .children(error.map(|e| widgets::error_text(e, cx).px_4().pb_3())),
       );
     }
@@ -381,17 +373,7 @@ impl HomeScreen {
       .child(
         v_flex()
           .gap_3()
-          .child(
-            Button::new("sign-in")
-              .primary()
-              .large()
-              .w_full()
-              .h(px(widgets::CTA_H))
-              .label("Sign in")
-              .loading(busy)
-              .on_click(|_, _, cx| super::sign_in(cx))
-              .touch(),
-          )
+          .children(provider_buttons(busy, true))
           .children(error.map(|e| widgets::error_text(e, cx).text_center()))
           .children(notice.map(|n| widgets::muted(n, cx).text_center()))
           .child(
@@ -432,6 +414,41 @@ impl Render for HomeScreen {
       .bg(cx.theme().background)
       .child(content)
   }
+}
+
+/// One sign-in button per OAuth provider; `cta` makes them full-width.
+fn provider_buttons(busy: bool, cta: bool) -> Vec<treq_ui::press::Press> {
+  [
+    (
+      "sign-in-github",
+      "Continue with GitHub",
+      OAuthProvider::Github,
+    ),
+    (
+      "sign-in-google",
+      "Continue with Google",
+      OAuthProvider::Google,
+    ),
+  ]
+  .into_iter()
+  .enumerate()
+  .map(|(i, (id, label, provider))| {
+    let button = Button::new(id).label(label).loading(busy).disabled(busy);
+    let button = if i == 0 {
+      button.primary()
+    } else {
+      button.outline()
+    };
+    let button = if cta {
+      button.large().w_full().h(px(widgets::CTA_H))
+    } else {
+      button
+    };
+    button
+      .on_click(move |_, _, cx| super::sign_in(provider, cx))
+      .touch()
+  })
+  .collect()
 }
 
 #[cfg(test)]

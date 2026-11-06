@@ -1,7 +1,9 @@
 //! The Supabase session: sign-in through the website, restore on launch,
 //! refresh and sign-out. Desktop and mobile share it.
 //!
-//! Sign-in opens `{web}/sign-in?source=desktop` in the browser. The website
+//! The mobile app signs in with GoTrue PKCE in an in-app auth session
+//! ([`Auth::sign_in_oauth`]). The desktop app opens
+//! `{web}/sign-in?source=desktop` in the browser. The website
 //! returns through `treq://auth/callback?token=<one-time token>`, which the
 //! `exchange-desktop-token` Edge Function trades for a session. Every
 //! refreshed token pair is written back to the `supabase_session` setting,
@@ -173,6 +175,102 @@ pub fn callback_token(link: &str) -> Option<String> {
     .filter(|token| !token.is_empty())
 }
 
+/// Where GoTrue sends the browser after an OAuth sign-in. Listed in
+/// `additional_redirect_urls` in `supabase/config.toml`.
+pub const OAUTH_REDIRECT: &str = "treq://auth/callback";
+
+/// An OAuth provider enabled on the Supabase project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OAuthProvider {
+  Github,
+  Google,
+}
+
+impl OAuthProvider {
+  pub fn id(self) -> &'static str {
+    match self {
+      Self::Github => "github",
+      Self::Google => "google",
+    }
+  }
+}
+
+/// A PKCE pair (RFC 7636). The verifier never leaves the app; only its
+/// challenge goes in the authorize URL, so a stolen callback code is useless.
+#[derive(Clone)]
+pub struct Pkce {
+  pub verifier: String,
+  pub challenge: String,
+}
+
+impl std::fmt::Debug for Pkce {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("Pkce").finish_non_exhaustive()
+  }
+}
+
+impl Pkce {
+  pub fn new() -> Result<Self, String> {
+    use base64::Engine as _;
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|e| format!("failed to source randomness: {e}"))?;
+    let verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    let challenge = pkce_challenge(&verifier);
+    Ok(Self {
+      verifier,
+      challenge,
+    })
+  }
+}
+
+/// `BASE64URL(SHA256(verifier))`, the S256 code challenge.
+pub fn pkce_challenge(verifier: &str) -> String {
+  use base64::Engine as _;
+  use sha2::Digest as _;
+  base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(verifier.as_bytes()))
+}
+
+/// GoTrue's authorize endpoint for `provider`, with a PKCE challenge.
+pub fn oauth_authorize_url(supabase_url: &str, provider: OAuthProvider, challenge: &str) -> String {
+  let Ok(mut url) = url::Url::parse(&format!(
+    "{}/auth/v1/authorize",
+    supabase_url.trim_end_matches('/')
+  )) else {
+    return String::new();
+  };
+  url
+    .query_pairs_mut()
+    .append_pair("provider", provider.id())
+    .append_pair("redirect_to", OAUTH_REDIRECT)
+    .append_pair("code_challenge", challenge)
+    .append_pair("code_challenge_method", "s256");
+  url.into()
+}
+
+/// The auth code of an OAuth `treq://auth/callback?code=...` link, or the
+/// provider's error.
+pub fn oauth_callback(link: &str) -> Result<String, String> {
+  let url = url::Url::parse(link).map_err(|e| e.to_string())?;
+  if url.scheme() != "treq" || url.host_str() != Some("auth") || url.path() != "/callback" {
+    return Err("Unexpected sign-in callback".into());
+  }
+  let param = |name: &str| {
+    url
+      .query_pairs()
+      .find(|(key, _)| key == name)
+      .map(|(_, value)| value.into_owned())
+      .filter(|value| !value.is_empty())
+  };
+  if let Some(code) = param("code") {
+    return Ok(code);
+  }
+  Err(
+    param("error_description")
+      .or_else(|| param("error"))
+      .unwrap_or_else(|| "Sign-in returned no code".into()),
+  )
+}
+
 type Listener = Arc<dyn Fn(&AuthStatus) + Send + Sync>;
 
 pub struct Auth {
@@ -279,17 +377,57 @@ impl Auth {
 
   /// Exchanges the one-time token from the sign-in deep link.
   pub async fn exchange_token(&self, token: &str) -> Result<(), String> {
+    self
+      .sign_in_with(
+        format!("{}/functions/v1/exchange-desktop-token", self.url),
+        json!({ "token": token }),
+      )
+      .await
+  }
+
+  /// Trades an OAuth auth code and its PKCE verifier for a session.
+  pub async fn exchange_code(&self, code: &str, verifier: &str) -> Result<(), String> {
+    self
+      .sign_in_with(
+        format!("{}/auth/v1/token?grant_type=pkce", self.url),
+        json!({ "auth_code": code, "code_verifier": verifier }),
+      )
+      .await
+  }
+
+  /// Signs in with `provider` through GoTrue's PKCE flow. `authenticate`
+  /// shows the authorize URL in an in-app auth session (ASWebAuthenticationSession
+  /// on iOS, a Custom Tab on Android) and returns the `treq://auth/callback`
+  /// URL it ended on.
+  pub async fn sign_in_oauth<F, Fut>(
+    &self,
+    provider: OAuthProvider,
+    authenticate: F,
+  ) -> Result<(), String>
+  where
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<String, String>>,
+  {
+    let pkce = Pkce::new()?;
+    let callback = authenticate(oauth_authorize_url(&self.url, provider, &pkce.challenge)).await;
+    match callback.and_then(|link| oauth_callback(&link)) {
+      Ok(code) => self.exchange_code(&code, &pkce.verifier).await,
+      Err(message) => {
+        self.update(|status| {
+          status.signing_in = false;
+          status.sign_in_error = Some(message.clone());
+        });
+        Err(message)
+      }
+    }
+  }
+
+  async fn sign_in_with(&self, url: String, body: Value) -> Result<(), String> {
     self.update(|status| {
       status.signing_in = true;
       status.sign_in_error = None;
     });
-    let result = self
-      .token_request(
-        format!("{}/functions/v1/exchange-desktop-token", self.url),
-        json!({ "token": token }),
-        None,
-      )
-      .await;
+    let result = self.token_request(url, body, None).await;
     match result {
       Ok(session) => {
         self.set_session(Some(session));
@@ -436,6 +574,141 @@ mod tests {
     assert_eq!(callback_token("treq://auth/callback?token="), None);
     assert_eq!(callback_token("treq://auth/other?token=abc"), None);
     assert_eq!(callback_token("https://auth/callback?token=abc"), None);
+  }
+
+  #[test]
+  fn pkce_challenge_is_base64url_sha256() {
+    // Vector from Node's `createHash("sha256").digest("base64url")`.
+    assert_eq!(
+      pkce_challenge("treq-pkce-verifier-0123456789-abcdefghijklmnop"),
+      "-v_8IUGGvwNH6k6VXOlFcvF3OIoaQu81JfTaUZtUB1s"
+    );
+  }
+
+  #[test]
+  fn pkce_verifiers_are_fresh_and_url_safe() {
+    let a = Pkce::new().unwrap();
+    let b = Pkce::new().unwrap();
+    assert_ne!(a.verifier, b.verifier);
+    assert!((43..=128).contains(&a.verifier.len()));
+    assert!(a
+      .verifier
+      .chars()
+      .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    assert_eq!(a.challenge, pkce_challenge(&a.verifier));
+  }
+
+  #[test]
+  fn builds_the_gotrue_authorize_url() {
+    let url = oauth_authorize_url("https://x.supabase.co/", OAuthProvider::Github, "chal");
+    let url = url::Url::parse(&url).unwrap();
+    assert_eq!(
+      url.as_str().split('?').next(),
+      Some("https://x.supabase.co/auth/v1/authorize")
+    );
+    let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+    assert_eq!(q["provider"], "github");
+    assert_eq!(q["redirect_to"], OAUTH_REDIRECT);
+    assert_eq!(q["code_challenge"], "chal");
+    assert_eq!(q["code_challenge_method"], "s256");
+  }
+
+  #[test]
+  fn parses_oauth_callback_codes_and_errors() {
+    assert_eq!(
+      oauth_callback("treq://auth/callback?code=abc"),
+      Ok("abc".into())
+    );
+    assert_eq!(
+      oauth_callback("treq://auth/callback?error=access_denied&error_description=User+denied"),
+      Err("User denied".into())
+    );
+    assert!(oauth_callback("treq://auth/callback?token=abc").is_err());
+    assert!(oauth_callback("https://auth/callback?code=abc").is_err());
+  }
+
+  #[tokio::test]
+  async fn exchanges_a_pkce_code_for_a_session() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .and(path("/auth/v1/token"))
+      .and(query_param("grant_type", "pkce"))
+      .and(body_json(
+        json!({ "auth_code": "the-code", "code_verifier": "the-verifier" }),
+      ))
+      .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+        "access_token": "a", "refresh_token": "r", "expires_in": 3600,
+        "user": { "id": "u", "email": "e@x.dev" }
+      })))
+      .mount(&server)
+      .await;
+    let (supabase, store) = client(&server.uri());
+    supabase
+      .auth
+      .exchange_code("the-code", "the-verifier")
+      .await
+      .unwrap();
+    assert_eq!(supabase.auth.session().unwrap().refresh_token, "r");
+    assert!(!supabase.auth.status().signing_in);
+    assert!(store.load().unwrap().contains("\"r\""));
+  }
+
+  #[tokio::test]
+  async fn oauth_sign_in_sends_the_verifier_of_the_challenge_it_opened() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .and(path("/auth/v1/token"))
+      .and(query_param("grant_type", "pkce"))
+      .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+        "access_token": "a", "refresh_token": "r", "expires_in": 3600,
+        "user": { "id": "u", "email": "e@x.dev" }
+      })))
+      .mount(&server)
+      .await;
+    let (supabase, _) = client(&server.uri());
+    let opened = Arc::new(Mutex::new(String::new()));
+    let seen = opened.clone();
+    supabase
+      .auth
+      .sign_in_oauth(OAuthProvider::Google, |url| async move {
+        *seen.lock().unwrap() = url;
+        Ok("treq://auth/callback?code=c1".to_string())
+      })
+      .await
+      .unwrap();
+    let opened = url::Url::parse(&opened.lock().unwrap()).unwrap();
+    let challenge = opened
+      .query_pairs()
+      .find(|(k, _)| k == "code_challenge")
+      .unwrap()
+      .1
+      .into_owned();
+    let request = &server.received_requests().await.unwrap()[0];
+    let body: Value = serde_json::from_slice(&request.body).unwrap();
+    assert_eq!(body["auth_code"], "c1");
+    assert_eq!(
+      pkce_challenge(body["code_verifier"].as_str().unwrap()),
+      challenge
+    );
+    assert!(supabase.auth.session().is_some());
+  }
+
+  #[tokio::test]
+  async fn oauth_sign_in_reports_a_cancelled_or_denied_session() {
+    let (supabase, _) = client("http://127.0.0.1:9");
+    let error = supabase
+      .auth
+      .sign_in_oauth(OAuthProvider::Github, |_| async {
+        Ok("treq://auth/callback?error=access_denied".to_string())
+      })
+      .await
+      .unwrap_err();
+    assert_eq!(error, "access_denied");
+    assert_eq!(
+      supabase.auth.status().sign_in_error.as_deref(),
+      Some("access_denied")
+    );
+    assert!(!supabase.auth.status().signing_in);
   }
 
   #[test]
