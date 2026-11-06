@@ -4,7 +4,7 @@ One image with the setup every treq machine needs: base packages, the treq CLI, 
 
 - `bootstrap.sh` and `install-sshd.sh` are rendered from `boot-manifest.ts` and `ssh-vm-config.ts`. Regenerate them with `deno run --allow-read --allow-write scripts/render-sandbox-image.ts`. A test fails if they are stale.
 - `BASE_IMAGE` picks the vendor base (default `ubuntu:24.04`). It must be Debian or Ubuntu.
-- The build needs real treq CLI digests in `boot-manifest.ts`; the release workflow pins them.
+- A local build without `bin/treq` downloads the treq release, which needs real CLI digests in `boot-manifest.ts`.
 - The gateway is started per placement by the control plane, not by the image.
 
-Nothing publishes this image yet.
+`.github/workflows/sandbox-image.yml` publishes it to `ghcr.io/tznc/treq-sandbox` from `release.yml` (`v<version>`) and `nightly.yml` (`nightly`): a multi-arch tag on `ubuntu:24.04` and an amd64 `<tag>-cloudflare` tag on Cloudflare's base. Those builds bake in the treq CLI built from the same commit (`bin/treq`), so they need no pinned digests.
