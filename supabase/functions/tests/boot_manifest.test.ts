@@ -108,3 +108,16 @@ Deno.test("bootstrap checks jj against its pinned digest before extracting", () 
   const extract = script.indexOf(`"$tmp/jj.tar.gz" -C /usr/local/bin`);
   assert(check > 0 && check < extract, "jj's checksum is verified before extraction");
 });
+
+Deno.test("bootstrap installs its own base packages before downloading anything", () => {
+  assertStringIncludes(script, "install_base_packages() {");
+  for (const pkg of ["curl", "ca-certificates", "tar", "git", "openssh-server", "sudo"]) {
+    assertStringIncludes(script, ` ${pkg}`);
+  }
+  const base = script.indexOf("\ninstall_base_packages\n");
+  assert(base > 0 && base < script.indexOf("\ninstall_treq\n"), "base packages come before the treq download");
+});
+
+Deno.test("a bare image re-runs bootstrap: the manifest version moves past 4", () => {
+  assert(CURRENT_MANIFEST_VERSION >= 5);
+});

@@ -445,6 +445,17 @@ jobs:
   # Attaches the mobile builds to the nightly release, which the release job
   # recreates. Still runs if a desktop target fails; the release exists
   # either way.
+  # Base sandbox image tagged nightly (sandbox-image/), on GHCR.
+  sandbox-image:
+    needs: [check, release]
+    if: needs.check.outputs.should_run == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/sandbox-image.yml
+    with:
+      channel: nightly
+
   mobile-assets:
     name: attach mobile builds
     needs: [check, release, android, ios]

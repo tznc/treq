@@ -28,7 +28,7 @@ export interface BootManifest {
   agents: BootManifestAgent[];
 }
 
-export const CURRENT_MANIFEST_VERSION = 4;
+export const CURRENT_MANIFEST_VERSION = 5;
 
 // sha256 of jj-v0.40.0-<arch>-unknown-linux-musl.tar.gz.
 const JJ_0_40_SHA256: TreqSha256 = {
@@ -93,7 +93,26 @@ const MANIFESTS: Record<number, BootManifest> = {
       { name: "codex", version: "1.0.0" },
     ],
   },
+  // Same pins as 4. Bootstrap now installs its own base packages (curl,
+  // CA certificates, sshd, ...), so bare images such as Cloudflare's
+  // sandbox image can run it.
+  5: {
+    manifest_version: 5,
+    treq_version: "0.4.0",
+    // The release workflow pins these (scripts/bump-boot-manifest.ts).
+    treq_sha256: { x86_64: "PLACEHOLDER-treq-0.4.0-x86_64", aarch64: "PLACEHOLDER-treq-0.4.0-aarch64" },
+    jj_version: "0.40.0",
+    jj_sha256: JJ_0_40_SHA256,
+    git_version: "2.45",
+    agents: [
+      { name: "claude", version: "1.0.0" },
+      { name: "codex", version: "1.0.0" },
+    ],
+  },
 };
+
+/** Debian/Ubuntu packages every machine needs: bootstrap's downloads, git, sshd, and sudo for non-root exec. */
+export const BASE_PACKAGES = ["curl", "ca-certificates", "tar", "git", "openssh-server", "sudo"] as const;
 
 export function manifestForVersion(version: number): BootManifest | null {
   return MANIFESTS[version] ?? null;
@@ -106,7 +125,12 @@ export function bootstrapCommand(manifestVersion: number): string[] {
   return ["/bin/sh", "-c", bootstrapScript(manifestVersion)];
 }
 
-export function bootstrapScript(requestedVersion: number): string {
+export interface BootstrapOverrides {
+  /** The treq version an image build bakes in, so install_treq finds it and skips the download. */
+  treqVersion?: string;
+}
+
+export function bootstrapScript(requestedVersion: number, overrides: BootstrapOverrides = {}): string {
   const requested = manifestForVersion(requestedVersion);
   // An unknown version falls back to the current manifest's contents *and*
   // version number, so the rendered script stays internally consistent.
@@ -122,7 +146,7 @@ export function bootstrapScript(requestedVersion: number): string {
 set -eu
 
 TREQ_MANIFEST_VERSION="${manifestVersion}"
-TREQ_VERSION="${manifest.treq_version}"
+TREQ_VERSION="${overrides.treqVersion ?? manifest.treq_version}"
 TREQ_SHA256_X86_64="${manifest.treq_sha256.x86_64}"
 TREQ_SHA256_AARCH64="${manifest.treq_sha256.aarch64}"
 JJ_VERSION="${manifest.jj_version}"
@@ -161,6 +185,21 @@ machine_arch() {
     aarch64|arm64) echo aarch64 ;;
     *) echo "treq bootstrap: unsupported arch $(uname -m)" >&2; exit 1 ;;
   esac
+}
+
+install_base_packages() {
+  # Only what is missing, so an image that already has them makes no apt call.
+  missing=""
+  for pkg in${BASE_PACKAGES.map((p) => " " + p).join("")}; do
+    dpkg -s "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"
+  done
+  if [ -z "$missing" ]; then
+    echo "treq bootstrap: base packages already installed"
+    return 0
+  fi
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -qq
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $missing
+  echo "treq bootstrap: installed$missing"
 }
 
 install_treq() {
@@ -219,6 +258,7 @@ install_git() {
   echo "treq bootstrap: installed $(git --version)"
 }
 
+install_base_packages
 install_treq
 install_jj
 install_git

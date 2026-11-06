@@ -8,4 +8,4 @@ After changing `src/index.ts` or bumping `@cloudflare/sandbox`, run `scripts/bui
 
 To deploy by hand instead: `npm install`, create a KV namespace and put its id in `wrangler.jsonc`, `wrangler secret put BRIDGE_TOKEN`, `npm run deploy`, then save `https://treq-sandbox.<you>.workers.dev#<token>` as the key.
 
-Sizes: Small runs on `standard-3` (2 vCPU / 8 GiB / 16 GB), Medium on `standard-4` (4 vCPU / 12 GiB / 20 GB). The base image has no sshd. The boot manifest installs git on each cold start but not sshd yet, so SSH into a Cloudflare workspace needs that step before it works. A container that sleeps restarts on a fresh disk.
+Sizes: Small runs on `standard-3` (2 vCPU / 8 GiB / 16 GB), Medium on `standard-4` (4 vCPU / 12 GiB / 20 GB). The base image has neither git nor sshd: bootstrap installs its base packages and machine setup installs sshd on each cold start, or build `sandbox-image/Dockerfile` on this base to bake them in. A container that sleeps restarts on a fresh disk.
