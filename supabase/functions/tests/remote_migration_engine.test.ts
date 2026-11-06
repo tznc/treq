@@ -6,7 +6,7 @@
 //
 // Run with: `deno test supabase/functions/tests/remote_migration_engine.test.ts`
 
-import { defined } from "./remote_fakes.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 import { assert, assertEquals, assertFalse } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   type EngineDeps,
@@ -31,7 +31,7 @@ import {
   type SandboxProvider,
 } from "../_shared/remote/provider.ts";
 import { DAYTONA_CAPABILITIES } from "../_shared/remote/daytona-adapter.ts";
-import { migrationRow, placementRow, providerInstance } from "./remote_fakes.ts";
+import { migrationRow, placementRow, providerInstance } from "./helpers/remote_fakes.ts";
 
 class Crash extends Error {}
 

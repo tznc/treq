@@ -3,7 +3,7 @@
 //
 // Run with: `deno test --allow-env supabase/functions/tests/byos.test.ts`
 
-import { defined } from "./remote_fakes.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 import {
   assert,
   assertEquals,

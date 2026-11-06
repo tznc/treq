@@ -2,8 +2,8 @@
 // fills the fields a test does not care about with one fixed world: user
 // u1's instance "inst" on Daytona in us_east.
 
-import type { MigrationRow, PlacementRow } from "../_shared/remote/migration-engine.ts";
-import type { ManagedInstanceState, ProviderInstance } from "../_shared/remote/provider.ts";
+import type { MigrationRow, PlacementRow } from "../../_shared/remote/migration-engine.ts";
+import type { ManagedInstanceState, ProviderInstance } from "../../_shared/remote/provider.ts";
 
 export function placementRow(id: string, fields: Partial<PlacementRow> = {}): PlacementRow {
   return {

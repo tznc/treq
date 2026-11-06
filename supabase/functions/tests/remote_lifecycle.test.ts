@@ -4,7 +4,7 @@
 //
 // Run with: `deno test supabase/functions/tests/remote_lifecycle.test.ts`
 
-import { defined } from "./remote_fakes.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 import { assert, assertEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { wakeIfStopped, wakeRecorded } from "../_shared/remote/wake.ts";
 import {
@@ -18,7 +18,7 @@ import { reensureServicesAfterWake } from "../_shared/remote/machine-setup.ts";
 import { deleteInstanceMachines } from "../_shared/remote/placement-store.ts";
 import { DAYTONA_CAPABILITIES } from "../_shared/remote/daytona-adapter.ts";
 import { ProviderError, type SandboxProvider } from "../_shared/remote/provider.ts";
-import { migrationRow, placementRow as placement, providerInstance } from "./remote_fakes.ts";
+import { migrationRow, placementRow as placement, providerInstance } from "./helpers/remote_fakes.ts";
 
 class FakeProvider {
   calls: string[] = [];

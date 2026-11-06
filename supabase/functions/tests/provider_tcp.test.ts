@@ -2,7 +2,7 @@
 // gateway proxy handshake, and one wake-and-retry.
 // No network.
 
-import { defined } from "./remote_fakes.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 import { assert, assertEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { GATEWAY_TOKEN_HEADER, verifyGatewayToken } from "../_shared/remote/gateway-token.ts";
 import { openTcp } from "../_shared/remote/provider-tcp.ts";

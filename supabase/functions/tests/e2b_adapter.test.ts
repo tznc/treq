@@ -4,7 +4,7 @@
 //
 // Run with: `deno test --allow-env supabase/functions/tests/e2b_adapter.test.ts`
 
-import { defined } from "./remote_fakes.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 import {
   assert,
   assertEquals,
@@ -18,7 +18,7 @@ import {
   normalizeE2BState,
 } from "../_shared/remote/e2b-adapter.ts";
 import { type CreateInstanceParams, ProviderError } from "../_shared/remote/provider.ts";
-import { FakeE2B } from "./fake_e2b.ts";
+import { FakeE2B } from "./helpers/fake_e2b.ts";
 
 const CONFIG = {
   baseUrl: "https://api.e2b.example.invalid/",

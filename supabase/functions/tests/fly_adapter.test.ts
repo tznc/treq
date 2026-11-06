@@ -3,7 +3,7 @@
 //
 // Run with: `deno test --allow-env supabase/functions/tests/fly_adapter.test.ts`
 
-import { defined } from "./remote_fakes.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 import { assert, assertEquals, assertRejects, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   FLY_CAPABILITIES,
@@ -13,7 +13,7 @@ import {
   normalizeFlyState,
 } from "../_shared/remote/fly-adapter.ts";
 import { type CreateInstanceParams, ProviderError } from "../_shared/remote/provider.ts";
-import { FakeFly } from "./fake_fly.ts";
+import { FakeFly } from "./helpers/fake_fly.ts";
 
 const CONFIG = {
   baseUrl: "https://fly.example.invalid/",

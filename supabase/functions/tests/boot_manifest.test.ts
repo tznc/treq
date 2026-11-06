@@ -3,7 +3,7 @@
 //
 // Run with: `deno test supabase/functions/tests/boot_manifest.test.ts`
 
-import { defined } from "./remote_fakes.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { bootstrapScript, CURRENT_MANIFEST_VERSION, manifestForVersion } from "../_shared/remote/boot-manifest.ts";
 import { TREQ_BINARY } from "../_shared/remote/ssh-vm-config.ts";
