@@ -125,7 +125,12 @@ export function bootstrapCommand(manifestVersion: number): string[] {
   return ["/bin/sh", "-c", bootstrapScript(manifestVersion)];
 }
 
-export function bootstrapScript(requestedVersion: number): string {
+export interface BootstrapOverrides {
+  /** The treq version an image build bakes in, so install_treq finds it and skips the download. */
+  treqVersion?: string;
+}
+
+export function bootstrapScript(requestedVersion: number, overrides: BootstrapOverrides = {}): string {
   const requested = manifestForVersion(requestedVersion);
   // An unknown version falls back to the current manifest's contents *and*
   // version number, so the rendered script stays internally consistent.
@@ -141,7 +146,7 @@ export function bootstrapScript(requestedVersion: number): string {
 set -eu
 
 TREQ_MANIFEST_VERSION="${manifestVersion}"
-TREQ_VERSION="${manifest.treq_version}"
+TREQ_VERSION="${overrides.treqVersion ?? manifest.treq_version}"
 TREQ_SHA256_X86_64="${manifest.treq_sha256.x86_64}"
 TREQ_SHA256_AARCH64="${manifest.treq_sha256.aarch64}"
 JJ_VERSION="${manifest.jj_version}"

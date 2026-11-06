@@ -188,6 +188,16 @@ jobs:
           sha256sum "$ASSET" > "$ASSET.sha256"
           gh release upload "v${VERSION}" "$ASSET" "$ASSET.sha256" --clobber
 
+  # Base sandbox image for this version (sandbox-image/), on GHCR.
+  sandbox-image:
+    needs: release
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/sandbox-image.yml
+    with:
+      channel: release
+
   # Pins the Linux CLI digests into the machine boot manifests and opens a
   # PR. Machines check the archive against the manifest, never against the
   # release's own .sha256, so the pin goes through review.

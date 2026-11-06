@@ -1,0 +1,146 @@
+name: Sandbox Image
+
+# Builds and publishes the base sandbox image (sandbox-image/) to GHCR.
+# Called by release.yml (tag v<version>) and nightly.yml (tag nightly) only.
+#
+# Each arch builds the musl treq CLI from the same commit and bakes it into
+# the image, with bootstrap rendered for that version, so the image never
+# downloads a treq release and nightly builds need no pinned digests.
+#
+# Tags: <tag> (amd64 + arm64, on ubuntu:24.04) and <tag>-cloudflare (amd64,
+# on Cloudflare's Sandbox SDK image; Cloudflare containers are amd64 only).
+
+defaults:
+  run:
+    shell: bash
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: "release or nightly"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "release or nightly"
+        required: true
+        type: choice
+        options: [nightly, release]
+
+env:
+  CLOUDFLARE_BASE: docker.io/cloudflare/sandbox:0.4.18
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: "ubuntu-22.04"
+            target: "x86_64-unknown-linux-musl"
+            arch: "amd64"
+          - platform: "ubuntu-22.04-arm"
+            target: "aarch64-unknown-linux-musl"
+            arch: "arm64"
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Image name and tag
+        id: meta
+        env:
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          case "$CHANNEL" in
+            release) TAG="v$(jq -r '.version' src-tauri/tauri.conf.json)" ;;
+            nightly) TAG=nightly ;;
+            *) echo "unknown channel: $CHANNEL" >&2; exit 1 ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/treq-sandbox" >> "$GITHUB_OUTPUT"
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: install musl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
+          workspaces: ". -> target"
+          key: ${{ matrix.target }}
+
+      - name: Build only the rlib for the CLI
+        run: |
+          sed -i 's/^crate-type = .*/crate-type = ["rlib"]/' src-tauri/Cargo.toml
+          grep -qx 'crate-type = \["rlib"\]' src-tauri/Cargo.toml
+
+      - name: Build headless CLI
+        run: cargo build --release --locked --no-default-features --bin treq --target ${{ matrix.target }}
+
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.5.6
+
+      - name: Stage the binary and render bootstrap for it
+        run: |
+          install -m 755 "target/${{ matrix.target }}/release/treq" sandbox-image/bin/treq
+          VERSION=$(sandbox-image/bin/treq --version | awk '{print $2}')
+          test -n "$VERSION"
+          deno run --allow-read --allow-write scripts/render-sandbox-image.ts --treq-version "$VERSION"
+
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build, smoke-test and push
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          build() {
+            docker build -f sandbox-image/Dockerfile -t "$1" \
+              --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+              --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+              "${@:2}" sandbox-image
+            docker run --rm --entrypoint sh "$1" -c \
+              'treq --version && jj --version && git --version && test -x /usr/local/bin/treq-sshd && id treq'
+            docker push "$1"
+          }
+          build "$IMAGE:$TAG-$ARCH"
+          if [ "$ARCH" = amd64 ]; then
+            build "$IMAGE:$TAG-cloudflare" --build-arg BASE_IMAGE="$CLOUDFLARE_BASE"
+          fi
+
+  manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - name: Publish the multi-arch tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker buildx imagetools create -t "$IMAGE:$TAG" "$IMAGE:$TAG-amd64" "$IMAGE:$TAG-arm64"
