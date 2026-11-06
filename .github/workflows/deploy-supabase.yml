@@ -42,7 +42,7 @@ jobs:
 
       - uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
         with:
-          version: latest
+          version: 3.0.0
 
       - name: Link project
         run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
@@ -59,12 +59,12 @@ jobs:
             > supabase/.temp/pooler-url
 
       - name: Show pending migrations
-        run: supabase db push --dry-run
+        run: supabase db push --remote --dry-run
 
       - name: Apply migrations
-        run: supabase db push
+        run: supabase db push --remote --yes
 
       # With no names, deploys every supabase/functions/*/index.ts (skipping
       # _shared and tests) and applies the verify_jwt settings in config.toml.
       - name: Deploy edge functions
-        run: supabase functions deploy --project-ref "$SUPABASE_PROJECT_REF" --use-api
+        run: supabase functions deploy --use-api --yes
