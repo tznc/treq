@@ -322,6 +322,10 @@ async function validateKey(body: Record<string, unknown>, deps: ByosActionDeps):
   }
   try {
     await provider.validateCredentials();
+    if (provider.provisionCredential) {
+      const provisioned = await provider.provisionCredential();
+      return { ok: true, kind: kind as ProviderKind, key: provisioned, label: (label as string | undefined) ?? null };
+    }
   } catch (err) {
     if (err instanceof ProviderError && err.kind === "unauthorized") {
       return refuse(400, "provider_credential_invalid", "The provider rejected this API key");

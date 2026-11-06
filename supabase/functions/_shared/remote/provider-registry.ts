@@ -7,6 +7,7 @@
 // so a new provider kind plugs in by accepting it the same way.
 
 import { BOAT_CAPABILITIES, BoatProvider, boatConfigFromEnv } from "./boat-adapter.ts";
+import { CLOUDFLARE_CAPABILITIES, CloudflareProvider, cloudflareConfigFromEnv } from "./cloudflare-adapter.ts";
 import { DAYTONA_CAPABILITIES, DaytonaProvider, daytonaConfigFromEnv } from "./daytona-adapter.ts";
 import { E2B_CAPABILITIES, E2BProvider, e2bConfigFromEnv } from "./e2b-adapter.ts";
 import { FLY_CAPABILITIES, FlyMachinesProvider, flyConfigFromEnv } from "./fly-adapter.ts";
@@ -30,6 +31,7 @@ const VENDOR_CAPABILITIES: Partial<Record<ProviderKind, Readonly<ProviderCapabil
   boat: BOAT_CAPABILITIES,
   daytona: DAYTONA_CAPABILITIES,
   e2b: E2B_CAPABILITIES,
+  cloudflare: CLOUDFLARE_CAPABILITIES,
   fly_machines: FLY_CAPABILITIES,
 };
 
@@ -53,6 +55,8 @@ export function providerFor(
       return new DaytonaProvider(daytonaConfigFromEnv(env, credential));
     case "e2b":
       return new E2BProvider(e2bConfigFromEnv(env, credential));
+    case "cloudflare":
+      return new CloudflareProvider(cloudflareConfigFromEnv(env, credential));
     case "fly_machines":
       return new FlyMachinesProvider(flyConfigFromEnv(env));
     case "local":

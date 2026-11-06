@@ -13,6 +13,7 @@ import { ProviderError } from "../_shared/remote/provider.ts";
 import { BOAT_CAPABILITIES, BoatProvider } from "../_shared/remote/boat-adapter.ts";
 import { DAYTONA_CAPABILITIES, DaytonaProvider } from "../_shared/remote/daytona-adapter.ts";
 import { E2B_CAPABILITIES, E2BProvider } from "../_shared/remote/e2b-adapter.ts";
+import { CLOUDFLARE_CAPABILITIES, CloudflareProvider } from "../_shared/remote/cloudflare-adapter.ts";
 import { FLY_CAPABILITIES, FlyMachinesProvider } from "../_shared/remote/fly-adapter.ts";
 import { LocalProvider } from "../_shared/remote/local-provider.ts";
 
@@ -142,4 +143,22 @@ Deno.test("fly_machines refuses a BYOS credential instead of falling back to tre
     ProviderError,
   );
   assertEquals(err.kind, "invalid_request");
+});
+
+Deno.test("cloudflare resolves to the real adapter with a BYOS bridge credential", () => {
+  const provider = providerFor("cloudflare", envOf({}), { apiKey: "https://u.workers.dev#t" });
+  assertInstanceOf(provider, CloudflareProvider);
+  assertEquals(provider.kind, "cloudflare");
+});
+
+Deno.test("the real cloudflare adapter needs a bridge", () => {
+  const err = assertThrows(() => providerFor("cloudflare", envOf({})), ProviderError);
+  assertEquals(err.kind, "invalid_request");
+});
+
+Deno.test("cloudflare resolves to an in-memory provider under TREQ_REMOTE_PROVIDER_STUB", () => {
+  const provider = providerFor("cloudflare", envOf({ TREQ_REMOTE_PROVIDER_STUB: "1" }));
+  assertInstanceOf(provider, LocalProvider);
+  assertEquals(provider.kind, "cloudflare");
+  assertEquals(provider.capabilities(), CLOUDFLARE_CAPABILITIES);
 });

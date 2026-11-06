@@ -27,7 +27,7 @@ import type { ProviderKind, SandboxProvider } from "./provider.ts";
 export const RETIRING_TTL_HOURS = 24;
 const DEFAULT_BATCH = 25;
 const DRAIN_NOTICE_DAYS = 7;
-const PROVIDER_KINDS: readonly ProviderKind[] = ["boat", "local", "daytona", "e2b", "fly_machines"];
+const PROVIDER_KINDS: readonly ProviderKind[] = ["boat", "local", "daytona", "e2b", "cloudflare", "fly_machines"];
 
 export class OperatorInputError extends Error {
   constructor(message: string, public readonly status = 400) {
