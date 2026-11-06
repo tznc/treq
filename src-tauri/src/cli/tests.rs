@@ -1245,6 +1245,18 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       idempotency_key: key(),
       backend: Default::default(),
     },
+    R::PtyMsgDeliver {
+      repo: repo(),
+      workspace: "1".into(),
+      label: "agent".into(),
+      envelope: "{\"id\":\"m-1\"}".into(),
+    },
+    R::PtyMsgPoll {
+      repo: repo(),
+      workspace: "1".into(),
+      label: "agent".into(),
+      since: 3,
+    },
     R::ReviewLoad {
       repo: repo(),
       workspace: "1".into(),
@@ -1899,7 +1911,6 @@ fn parsed_subcommand(args: &[&str]) -> SubcommandMatches {
 fn parses_repo_flag_on_workspace_commands() {
   for args in [
     &["treq", "add", "feat/x", "-r", "svc"][..],
-    &["treq", "agent", "feat/x", "do it", "--repo", "svc"][..],
     &["treq", "st", "-r", "svc"][..],
     &["treq", "commit", "feat/x", "-r", "svc", "-m", "msg"][..],
   ] {
@@ -1928,7 +1939,7 @@ fn mv_keeps_short_r_for_ranges_and_takes_long_repo() {
 
 #[test]
 fn agent_rejects_home_repo_branch() {
-  let sub = parsed_subcommand(&["treq", "agent", ".", "do it", "-r", "svc"]);
+  let sub = parsed_subcommand(&["treq", "agent", "start", ".", "do it", "-r", "svc"]);
   assert!(!super::workspace_handlers::handle_workspace_agent(
     &sub.matches
   ));
@@ -2008,6 +2019,36 @@ fn gateway_parses_its_flags() {
 }
 
 #[test]
+fn agent_start_parses_branch_prompt_and_repo() {
+  let sub = parsed_subcommand(&["treq", "agent", "start", "feat/x", "do it", "--repo", "svc"]);
+  assert_eq!(sub.name, "agent");
+  let start = sub.matches.subcommand.expect("start subcommand");
+  assert_eq!(start.name, "start");
+  let arg = |name: &str| {
+    start
+      .matches
+      .args
+      .get(name)
+      .and_then(|a| a.value.as_str().map(String::from))
+  };
+  assert_eq!(arg("branch").as_deref(), Some("feat/x"));
+  assert_eq!(arg("prompt").as_deref(), Some("do it"));
+  assert_eq!(arg("repo").as_deref(), Some("svc"));
+}
+
+#[test]
+fn agent_start_takes_the_harness_to_start() {
+  let sub = parsed_subcommand(&[
+    "treq", "agent", "start", "feat/x", "do it", "--agent", "codex",
+  ]);
+  let start = sub.matches.subcommand.expect("start subcommand");
+  assert_eq!(
+    super::workspace_handlers::start_agent_kind(&start.matches, "/no/repo"),
+    Ok("codex".to_string())
+  );
+}
+
+#[test]
 fn gateway_defaults_secret_file_and_listen() {
   let matches = super::args::parse(["treq", "gateway", "--placement-id", "pl_1"]).unwrap();
   let args = super::parse_gateway_args(&matches.subcommand.unwrap().matches).unwrap();
@@ -2026,4 +2067,19 @@ fn gateway_rejects_allow_without_port() {
 #[test]
 fn gateway_requires_placement_id() {
   assert!(super::args::parse(["treq", "gateway"]).is_err());
+}
+
+#[test]
+fn agent_start_refuses_a_harness_treq_does_not_launch() {
+  let sub = parsed_subcommand(&[
+    "treq", "agent", "start", "feat/x", "do it", "--agent", "gemini",
+  ]);
+  let start = sub.matches.subcommand.expect("start subcommand");
+  let error = super::workspace_handlers::start_agent_kind(&start.matches, "/no/repo").unwrap_err();
+  assert!(error.contains("claude, codex, cursor, copilot"), "{error}");
+}
+
+#[test]
+fn agent_without_start_no_longer_takes_a_branch() {
+  assert!(super::args::parse(["treq", "agent", "feat/x", "do it"]).is_err());
 }

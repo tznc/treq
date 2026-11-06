@@ -392,6 +392,8 @@ fn tmux_start(
       "-d",
       "-s",
       name,
+      "-e",
+      &format!("TREQ_PTY_SESSION_ID={name}"),
       "-x",
       &cols.to_string(),
       "-y",
@@ -852,9 +854,11 @@ fn tmux_attach_command(
   let command = build_launch_program(launch);
   let quoted_dir = crate::core::remote::shell_quote(remote_dir);
   let quoted_name = crate::core::remote::shell_quote(name);
+  // `treq agent msg` in the session finds its mailbox by the session's name.
+  let quoted_env = crate::core::remote::shell_quote(&format!("TREQ_PTY_SESSION_ID={name}"));
   // The pane is the whole terminal: no tmux status line under it.
   format!(
-    "cd {quoted_dir} && exec tmux new-session -A -s {quoted_name} -x {cols} -y {rows} {command} \\; set-option status off"
+    "cd {quoted_dir} && exec tmux new-session -A -s {quoted_name} -e {quoted_env} -x {cols} -y {rows} {command} \\; set-option status off"
   )
 }
 
@@ -1461,6 +1465,14 @@ mod tests {
       assert!(daemon::sessions(&served.paths).unwrap().is_empty());
       assert!(!served.paths.dir().exists());
     }
+  }
+
+  #[test]
+  fn tmux_sessions_know_their_name_from_the_environment() {
+    let name = session_name("/srv/repo", "ws1", "term");
+    let command = tmux_attach_command(&name, "/tmp", &PtyLaunchSpec::Shell, 80, 24);
+    let quoted = crate::core::remote::shell_quote(&format!("TREQ_PTY_SESSION_ID={name}"));
+    assert!(command.contains(&format!(" -e {quoted} ")), "{command}");
   }
 
   #[test]

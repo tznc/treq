@@ -94,17 +94,17 @@ workspace in that repository:
 
 ```bash
 treq add -r <repo> <branch_name> [-d <description>]
-treq agent -r <repo> <branch_name> "<prompt>"
+treq agent start -r <repo> <branch_name> "<prompt>" [-a <agent>]
 treq st -r <repo> [<workspace_name>]
 treq diff -r <repo> <workspace_name>
 ```
 
 - `<repo>` is the supporting repository's path or directory name.
-- `-r` works on `add`, `set`, `st`, `diff`, `agent`, and `commit`.
+- `-r` works on `add`, `set`, `st`, `diff`, `agent start`, and `commit`.
   `mv` takes `--repo` because `-r` is its range flag.
-- `treq agent` needs a workspace branch. It cannot start an agent in a home
+- `treq agent start` needs a workspace branch. It cannot start an agent in a home
   repository.
-- `treq agent` returns once the agent is started. Poll `treq st -r` to follow
+- `treq agent start` returns once the agent is started. Poll `treq st -r` to follow
   its progress.
 
 ## Projects
@@ -129,10 +129,37 @@ treq project list                      # saved projects on this machine
 - A repository on an SSH machine shows in `status` and `list` as
   `<path> on <host>`; it cannot be read from this machine.
 - Work in another project repository the same way as a supporting one:
-  `treq add -r <repo> <branch>` then `treq agent -r <repo> <branch> "<prompt>"`.
+  `treq add -r <repo> <branch>` then `treq agent start -r <repo> <branch> "<prompt>"`.
   `<repo>` can be the folder name or the `owner/name` tail of its path.
 - One branch name across repositories keeps related work easy to find
   (for example `treq/checkout-quotes` in both the API and the web repo).
+
+## Message other agents
+
+Agents treq started can message each other, in this window, in another
+Treq window, or on a remote machine. Each agent has a handle such as
+`claude-2`.
+
+```bash
+treq agent msg --list                         # agents in this project
+treq agent msg <handle> "<text>"              # send
+treq agent msg <handle> "<question>" --ask    # send, then wait for the reply
+treq agent msg --all [--repo <repo>] "<text>" # every other agent in the project
+treq agent msg --inbox [--wait]               # read what waits for you
+treq agent msg --ack <id>                     # done with a message
+treq agent msg --reply <id> "<text>"          # answer an --ask
+treq agent msg --status <working|blocked|done> [--note "<text>"]
+```
+
+- When a line starting with `[treq]` appears in your prompt, run
+  `treq agent msg --inbox`, then ack or reply to each message.
+- A message waits one minute (`--timeout`, at most `1m`). `--ask` exits 3
+  when no reply comes in time.
+- `--list` and `--all` cover the agents in this project, in any of its
+  repositories. Add `--everywhere` to reach agents outside it. A message to
+  a named handle reaches it in any project.
+- `--status` goes to the agent that last messaged you unless you name one.
+- Add `--json` for output you parse.
 
 ## Send files to the user
 
