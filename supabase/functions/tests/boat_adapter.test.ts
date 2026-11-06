@@ -3,7 +3,7 @@
 //
 // Run with: `deno test --allow-env supabase/functions/tests/boat_adapter.test.ts`
 
-import { defined } from "./remote_fakes.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 import {
   assert,
   assertEquals,
@@ -18,7 +18,7 @@ import {
 } from "../_shared/remote/boat-adapter.ts";
 import { shellQuote } from "../_shared/remote/provider-http.ts";
 import { ProviderError, type CreateInstanceParams } from "../_shared/remote/provider.ts";
-import { FakeBoat } from "./fake_boat.ts";
+import { FakeBoat } from "./helpers/fake_boat.ts";
 
 const CONFIG = { baseUrl: "https://boat.example.invalid/api/v1/", apiToken: "boat_test" };
 

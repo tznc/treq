@@ -13,7 +13,7 @@ import {
   idleTimeoutMinutes,
 } from "../_shared/remote/idle-controller.ts";
 import type { ManagedInstanceState, MachineExecResult } from "../_shared/remote/provider.ts";
-import { providerInstance } from "./remote_fakes.ts";
+import { providerInstance } from "./helpers/remote_fakes.ts";
 
 const NOW = new Date("2026-10-28T12:00:00Z");
 const NOW_SEC = NOW.getTime() / 1000;

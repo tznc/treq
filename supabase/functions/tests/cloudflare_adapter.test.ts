@@ -3,7 +3,7 @@
 //
 // Run with: `deno test --allow-env supabase/functions/tests/cloudflare_adapter.test.ts`
 
-import { defined } from "./remote_fakes.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 import { assert, assertEquals, assertRejects, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   CLOUDFLARE_CAPABILITIES,
@@ -13,7 +13,7 @@ import {
   parseCloudflareCredential,
 } from "../_shared/remote/cloudflare-adapter.ts";
 import { type CreateInstanceParams, ProviderError } from "../_shared/remote/provider.ts";
-import { FakeCloudflare } from "./fake_cloudflare.ts";
+import { FakeCloudflare } from "./helpers/fake_cloudflare.ts";
 
 const CONFIG = {
   bridgeUrl: "https://treq-sandbox.acme.example.invalid/",

@@ -4,7 +4,7 @@
 //
 // Run with: `deno test --allow-env supabase/functions/tests/cloudflare_provision.test.ts`
 
-import { defined } from "./remote_fakes.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 import { assert, assertEquals, assertMatch, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   BRIDGE_IMAGE,
@@ -14,7 +14,7 @@ import {
   provisionBridge,
 } from "../_shared/remote/cloudflare-adapter.ts";
 import { ProviderError } from "../_shared/remote/provider.ts";
-import { FakeCloudflareApi } from "./fake_cloudflare_api.ts";
+import { FakeCloudflareApi } from "./helpers/fake_cloudflare_api.ts";
 
 const API = "https://api.cloudflare.example.invalid/client/v4";
 

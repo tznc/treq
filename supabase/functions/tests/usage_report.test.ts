@@ -3,7 +3,7 @@
 //
 // Run with: `deno test --allow-env supabase/functions/tests/usage_report.test.ts`
 
-import { defined } from "./remote_fakes.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { StripeApiError, type StripeClient, type StripeParams } from "../_shared/billing/stripe-api.ts";
 import {

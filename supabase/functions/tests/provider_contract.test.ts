@@ -5,7 +5,7 @@
 //
 // Run with: `deno test --allow-env supabase/functions/tests/provider_contract.test.ts`
 
-import { defined } from "./remote_fakes.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 import {
   assert,
   assertEquals,
@@ -23,13 +23,13 @@ import {
   type SandboxProvider,
 } from "../_shared/remote/provider.ts";
 import { DEFAULT_IDLE_TIMEOUT_MIN } from "../_shared/remote/idle-controller.ts";
-import { FakeBoat } from "./fake_boat.ts";
-import { FakeDaytona } from "./fake_daytona.ts";
-import { FakeFly } from "./fake_fly.ts";
+import { FakeBoat } from "./helpers/fake_boat.ts";
+import { FakeDaytona } from "./helpers/fake_daytona.ts";
+import { FakeFly } from "./helpers/fake_fly.ts";
 import { E2BProvider } from "../_shared/remote/e2b-adapter.ts";
-import { FakeE2B } from "./fake_e2b.ts";
+import { FakeE2B } from "./helpers/fake_e2b.ts";
 import { CloudflareProvider } from "../_shared/remote/cloudflare-adapter.ts";
-import { FakeCloudflare } from "./fake_cloudflare.ts";
+import { FakeCloudflare } from "./helpers/fake_cloudflare.ts";
 
 const CF_CONFIG = { bridgeUrl: "https://bridge.example.invalid", token: "cf_test", autoStopMinutes: 60 };
 

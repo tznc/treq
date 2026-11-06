@@ -4,7 +4,7 @@
 //
 // Run with: `deno test --allow-env supabase/functions/tests/daytona_adapter.test.ts`
 
-import { defined } from "./remote_fakes.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 import {
   assert,
   assertEquals,
@@ -17,7 +17,7 @@ import {
   normalizeDaytonaState,
 } from "../_shared/remote/daytona-adapter.ts";
 import { type CreateInstanceParams, ProviderError } from "../_shared/remote/provider.ts";
-import { FakeDaytona } from "./fake_daytona.ts";
+import { FakeDaytona } from "./helpers/fake_daytona.ts";
 
 const CONFIG = { baseUrl: "https://daytona.example.invalid/api/", apiKey: "dtn_test" };
 
