@@ -15,6 +15,7 @@ export default defineConfig({
       "test/billing/**/*.test.ts",
       "test/account/**/*.test.ts",
       "test/linear-proxy/**/*.test.ts",
+      "test/integration-proxy/**/*.test.ts",
       "test/desktop-token/**/*.test.ts",
       "test/github/**/*.test.ts",
       "test/edge-http/**/*.test.ts",

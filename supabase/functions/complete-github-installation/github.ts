@@ -7,7 +7,8 @@
 // redirects to the App's callback URL with a `code`. POST
 // /login/oauth/access_token turns it into a user access token, and
 // GET /user/installations lists the installations of this App that the user
-// can access. The token is only passed to that call; nothing keeps it.
+// can access, and GET /user names the account. The token is only passed to
+// those calls; nothing keeps it.
 
 import { getInstallation } from "../_shared/github/app.ts";
 import type { GitHubInstallationAccess } from "./lib.ts";
@@ -96,6 +97,26 @@ export function githubInstallationAccess(
           return false;
       }
       return false;
+    },
+
+    async getUser(userToken) {
+      const res = await fetchImpl("https://api.github.com/user", {
+        headers: {
+          Authorization: `Bearer ${userToken}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": USER_AGENT,
+        },
+      });
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new Error(`GitHub GET /user → ${res.status}`);
+      }
+      const { id, login } = (await res.json()) as { id?: unknown; login?: unknown };
+      if (typeof id !== "number" || typeof login !== "string") {
+        throw new Error("GitHub GET /user answered without id or login");
+      }
+      return { id, login };
     },
 
     getInstallation,

@@ -299,6 +299,11 @@ verify_jwt = false
 # gateway can verify it; the function verifies it again and checks ownership.
 verify_jwt = true
 
+[functions.integration-proxy]
+# Agents in cloud sandboxes call this with a sandbox token that is not a
+# Supabase JWT; the function verifies it and users' JWTs itself.
+verify_jwt = false
+
 [functions.gtm-metrics]
 # Called by biz-tools with the x-gtm-metrics-secret header, checked inside
 # the function against GTM_METRICS_SECRET. Returns aggregate counts only.
