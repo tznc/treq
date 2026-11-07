@@ -1,5 +1,5 @@
 -- Organizations from 028_organizations_team.sql: creating one, invites
--- matched by a single-use token that expires after 7 days, no member cap
+-- matched by a single-use token that expires after 24 hours, no member cap
 -- (030_team_seat_billing.sql), last-owner protection, and row-level
 -- security on the new tables.
 begin;
@@ -100,10 +100,10 @@ select results_eq(
             '00000000-0000-0000-0000-0000000000e1'::uuid)$$,
   'the invite stores the email for display and only the SHA-256 of the token');
 select ok(
-  (select expires_at between now() + interval '7 days' - interval '1 minute'
-                         and now() + interval '7 days' + interval '1 minute'
+  (select expires_at between now() + interval '24 hours' - interval '1 minute'
+                         and now() + interval '24 hours' + interval '1 minute'
    from public.organization_invites where org_id = current_setting('test.org')::uuid),
-  'an invite expires 7 days after it is sent');
+  'an invite expires 24 hours after it is sent');
 select throws_ok(
   $$select public.organization_invite('00000000-0000-0000-0000-0000000000e3',
     current_setting('test.org')::uuid, 'someone@example.com')$$,
