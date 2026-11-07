@@ -14,6 +14,7 @@
 //                                              - force a stuck instance to degraded/failed
 //   "list_recent_failures" {limit?}            - read remote_recent_failures
 //   "prune_audit_events"                       - audit retention cleanup
+//   "prune_expired_invites"                    - delete organization invites that expired unaccepted
 //   "sweep_lapsed_instances"                   - stop workspaces whose owner's Pro ended,
 //                                                delete them 30 days later (lapse-sweep.ts)
 //   "reconcile_stale_subscriptions"            - re-read from Stripe each subscription that still
@@ -64,6 +65,7 @@ const ACTIONS: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   recover_instance: ops.recoverInstance,
   list_recent_failures: ops.listRecentFailures,
   prune_audit_events: ops.pruneAuditEvents,
+  prune_expired_invites: ops.pruneExpiredInvites,
   sweep_lapsed_instances: async (ctx) => ({
     ...await sweepLapsedInstances({
       store: supabaseLapseSweepStore(ctx.supabase, ctx.correlationId),
