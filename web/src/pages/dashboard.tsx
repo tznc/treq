@@ -1443,7 +1443,7 @@ function DeleteAccountSection({ email }: { email: string }) {
 // ── More menu (phones) ───────────────────────────────────────────────────────
 //
 // Under 768px the sidebar is a top bar with no room for Sign Out, so it moves
-// behind a ⋯ button. CSS shows this menu or the plain button, never both.
+// behind a ⋮ button. CSS shows this menu or the plain button, never both.
 
 function MoreMenu({ onSignOut }: { onSignOut: () => void }) {
   const [open, setOpen] = useState(false);
@@ -1476,9 +1476,9 @@ function MoreMenu({ onSignOut }: { onSignOut: () => void }) {
         style={styles.moreButton}
       >
         <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <circle cx="3" cy="8" r="1.5" />
+          <circle cx="8" cy="3" r="1.5" />
           <circle cx="8" cy="8" r="1.5" />
-          <circle cx="13" cy="8" r="1.5" />
+          <circle cx="8" cy="13" r="1.5" />
         </svg>
       </button>
       {open && (
