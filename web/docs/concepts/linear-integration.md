@@ -20,24 +20,16 @@ If the issue has sub-issues, you can optionally include them as separate nested 
 
 ## Authentication
 
-Treq supports two authentication methods for Linear:
+The Linear integration is a Pro feature.
 
-**Free tier:** Paste your personal Linear API key into Settings and store it locally per repository. Your key stays on your machine and is never sent to Treq's servers.
+Pro supports two authentication methods:
 
-**Pro tier:** Use OAuth2 to connect your Linear account. Authentication is proxied through Treq's servers, so the raw API token never reaches your browser or local machine. If both an API key and OAuth token are set, the API key takes priority.
+**Personal API key:** Paste your Linear API key into Settings, stored locally per repository. The key stays on your machine and is never sent to Treq's servers. It is device-local, so agents on remote machines cannot use it.
+
+**OAuth:** Connect your Linear account. Requests go through Treq's servers, which lets mobile and remote sandboxes use your Linear account without direct access to any API key. If both an API key and OAuth are set, the API key takes priority.
 
 ## Repository Settings
 
 | Setting | Type | Purpose |
 |---|---|---|
-| `linear_api_key` | String | Personal Linear API key (free tier) |
-
-## Availability
-
-| Features | Free | Pro |
-|---|---|---|
-| View Linear issues | ✅* | ✅ |
-| Create workspace from issue | ✅* | ✅ |
-| Include sub-issues as nested workspaces | ✅* | ✅ |
-
-\* Requires personal Linear API key
+| `linear_api_key` | String | Personal Linear API key (Pro) |

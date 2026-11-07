@@ -99,6 +99,8 @@ pub struct LinearProxySession {
   pub access_token: String,
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 // The frontend pushes the Supabase session on sign-in and every token
 // refresh so OAuth-connected repos reach Linear through the proxy. It is
 // never logged.
@@ -128,13 +130,35 @@ fn proxy_session() -> Option<LinearProxySession> {
   }
 }
 
+// Whether the signed-in account has Pro. The whole Linear integration,
+// API key included, is Pro-only; account snapshots keep this current.
+static PRO: AtomicBool = AtomicBool::new(false);
+
+pub fn set_pro(pro: bool) {
+  PRO.store(pro, Ordering::Relaxed);
+}
+
+fn is_pro() -> bool {
+  PRO.load(Ordering::Relaxed) || e2e_pro()
+}
+
+/// QA builds only: `TREQ_E2E_PRO` stands in for a Pro account, since the QA
+/// app has no Supabase session.
+pub fn e2e_pro() -> bool {
+  cfg!(feature = "e2e") && std::env::var_os("TREQ_E2E_PRO").is_some()
+}
+
 pub fn resolve_linear_client(
   repo_path: &str,
   db: &crate::db::Database,
 ) -> Result<LinearClientSource, String> {
   let api_key = crate::tracker::read_setting(db, repo_path, "linear_api_key")?;
-  resolve_client_source(api_key, proxy_session())
+  resolve_client_source(api_key, proxy_session(), is_pro())
 }
+
+/// Why a read fails without Pro.
+pub const PRO_REQUIRED: &str =
+  "Linear needs Pro. Start a trial or upgrade on your treq.dev dashboard.";
 
 /// Why a read fails when the repo has no API key and treq has no OAuth
 /// session: the Linear view shows it as the connect hint.
@@ -146,7 +170,11 @@ pub const NOT_CONNECTED: &str =
 fn resolve_client_source(
   api_key: Option<String>,
   session: Option<LinearProxySession>,
+  pro: bool,
 ) -> Result<LinearClientSource, String> {
+  if !pro {
+    return Err(PRO_REQUIRED.to_string());
+  }
   match (api_key, session) {
     (Some(key), _) => Ok(LinearClientSource::ApiKey(key)),
     (None, Some(session)) => Ok(LinearClientSource::Proxy(session)),
@@ -1420,20 +1448,36 @@ mod tests {
 
   #[test]
   fn api_key_wins_over_proxy_session() {
-    let source = resolve_client_source(Some("lin_api".into()), Some(session())).unwrap();
+    let source = resolve_client_source(Some("lin_api".into()), Some(session()), true).unwrap();
     assert!(matches!(source, LinearClientSource::ApiKey(key) if key == "lin_api"));
   }
 
   #[test]
   fn proxy_session_is_used_without_api_key() {
-    let source = resolve_client_source(None, Some(session())).unwrap();
+    let source = resolve_client_source(None, Some(session()), true).unwrap();
     assert!(matches!(source, LinearClientSource::Proxy(s) if s.access_token == "jwt"));
   }
 
   #[test]
   fn no_credentials_is_a_clear_error() {
-    let err = resolve_client_source(None, None).err().unwrap();
+    let err = resolve_client_source(None, None, true).err().unwrap();
     assert!(err.contains("not connected"), "{err}");
+  }
+
+  #[test]
+  fn free_plan_is_refused_for_api_key_and_oauth() {
+    for (key, s) in [(Some("lin_api".to_string()), None), (None, Some(session()))] {
+      let err = resolve_client_source(key, s, false).err().unwrap();
+      assert_eq!(err, PRO_REQUIRED);
+    }
+  }
+
+  #[test]
+  fn set_pro_round_trips() {
+    set_pro(true);
+    assert!(is_pro());
+    set_pro(false);
+    assert!(!is_pro());
   }
 
   #[test]
@@ -1747,7 +1791,7 @@ mod tests {
       access_token: "supabase-jwt".into(),
     };
 
-    let client = resolve_client_source(None, Some(session)).unwrap();
+    let client = resolve_client_source(None, Some(session), true).unwrap();
     let viewer = linear_get_viewer_impl(&client).await.unwrap();
     assert_eq!(viewer.id, "u1");
   }

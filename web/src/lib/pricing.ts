@@ -7,7 +7,7 @@ export const PRICING_SCHEMA = {
   '@type': 'Product',
   name: 'Treq',
   description:
-    'Open source desktop app for running coding agents in stacked workspaces. Free on your machine. Pro and Team add the Treq GitHub App and Linear OAuth. Cloud workspaces are pay-as-you-go at provider cost plus 20%, billed by the second.',
+    'Open source desktop app for running coding agents in stacked workspaces. Free on your machine. Pro and Team add the Treq GitHub App and Linear. Cloud workspaces are pay-as-you-go at provider cost plus 20%, billed by the second.',
   url: 'https://treq.dev/pricing',
   brand: {
     '@type': 'Brand',
@@ -20,7 +20,7 @@ export const PRICING_SCHEMA = {
       price: '0',
       priceCurrency: 'USD',
       description:
-        'The full desktop app. GitHub through your local gh CLI and Linear through a personal API key, for any repository.',
+        'The full desktop app. GitHub through your local gh CLI, for any repository.',
     },
     {
       '@type': 'Offer',
@@ -29,7 +29,7 @@ export const PRICING_SCHEMA = {
       priceCurrency: 'USD',
       unitText: 'user/month',
       description:
-        'The Treq GitHub App and Linear OAuth. Billed per user per month after a 14-day trial that needs a card. Cloud workspaces are pay-as-you-go at provider cost plus 20%, billed by the second.',
+        'The Treq GitHub App and the Linear integration (OAuth or personal API key). Billed per user per month after a 14-day trial that needs a card. Cloud workspaces are pay-as-you-go at provider cost plus 20%, billed by the second.',
     },
     {
       '@type': 'Offer',
@@ -47,7 +47,7 @@ export const FAQ_ITEMS = [
   {
     question: 'What is free, and what do I pay for?',
     answer:
-      "The desktop app is free and open source, and runs everything on your machine. GitHub works through your local gh CLI and Linear through a personal API key, for any repository. You pay for the features that run on Treq's servers: the Treq GitHub App and Linear OAuth on Pro. Cloud workspaces are pay-as-you-go on top of Pro, at provider cost plus 20%, billed by the second. If you bring your own Boat, Daytona, or E2B account, the provider bills you for the machine and Treq charges 5% of the provider's list price.",
+      "The desktop app is free and open source, and runs everything on your machine. GitHub works through your local gh CLI, for any repository. You pay for Pro features, some of which run on Treq's servers: the Treq GitHub App and the Linear integration. Cloud workspaces are pay-as-you-go on top of Pro, at provider cost plus 20%, billed by the second. If you bring your own Boat, Daytona, or E2B account, the provider bills you for the machine and Treq charges 5% of the provider's list price.",
   },
   {
     question: 'How does the Pro trial work?',

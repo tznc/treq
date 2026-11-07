@@ -77,8 +77,9 @@ describe("proxyLinearRequest", () => {
     const result = await run(deps);
     expect(result.status).toBe(402);
     expect(result.body.code).toBe("pro_required");
-    // The desktop app shows this message as is, so it names the free path.
-    expect(result.body.error).toMatch(/personal Linear API key/);
+    // Linear is Pro-only, API key included: no free fallback is offered.
+    expect(result.body.error).toMatch(/needs Pro/);
+    expect(result.body.error).not.toMatch(/API key|Free plan/);
     expect(deps.store.load).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });

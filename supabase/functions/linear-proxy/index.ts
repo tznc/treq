@@ -2,8 +2,7 @@
 // The client sends a GraphQL query/mutation, and this function forwards it
 // using the stored access token from linear_oauth_tokens. An access token
 // close to expiry is refreshed first and the new grant is stored. Requires
-// Pro: a Free user gets 402 pro_required and uses a personal API key
-// instead. The request logic lives in lib.ts so it can be unit tested.
+// Pro: a Free user gets 402 pro_required instead. The request logic lives in lib.ts so it can be unit tested.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";

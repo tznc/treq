@@ -797,7 +797,7 @@ fn integrations_cards_say_whether_each_is_connected(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn integrations_card_expands_and_collapses(cx: &mut TestAppContext) {
-  let (mut h, _) = linear_harness(cx, false, None);
+  let (mut h, _) = linear_harness(cx, true, None);
   assert!(!h.drawn("linear-api-key-edit"));
   h.click("integration-card-linear");
   assert!(h.drawn("linear-api-key-edit"));
@@ -838,11 +838,11 @@ fn linear_section(h: &mut Harness) -> settings::LinearSection {
 
 #[gpui::test]
 fn linear_saves_an_api_key_to_the_repository(cx: &mut TestAppContext) {
-  let (mut h, host) = linear_harness(cx, false, None);
+  let (mut h, host) = linear_harness(cx, true, None);
   let linear = linear_section(&mut h);
   assert_eq!(linear.description, "Paste a Linear personal API key");
   assert_eq!(linear.edit_label, "Add API key");
-  assert!(!linear.oauth);
+  assert!(!linear.upgrade);
   assert!(!linear.connected);
   h.click("integration-card-linear");
   h.click("linear-api-key-edit");
@@ -1493,4 +1493,22 @@ fn the_provider_keys_header_is_a_heading(cx: &mut TestAppContext) {
   let screen = gpui_testing_library::Screen::new(&h.cx, window);
   screen.redraw();
   expect(screen.get_by_role(by::role(gpui::Role::Heading).name("Provider keys"))).to_be_visible();
+}
+
+#[gpui::test]
+fn linear_on_free_offers_upgrade_instead_of_api_key(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, false, Some("lin_api_1"));
+  let linear = linear_section(&mut h);
+  assert!(linear.upgrade);
+  assert!(!linear.oauth);
+  h.click("integration-card-linear");
+  assert!(!h.drawn("linear-api-key-edit"));
+  assert!(h.drawn("linear-upgrade"));
+  h.click("linear-upgrade");
+  h.cx.run_until_parked();
+  assert!(
+    host.writes().iter().any(|w| w.contains("/dashboard")),
+    "{:?}",
+    host.writes()
+  );
 }
