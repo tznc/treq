@@ -9,6 +9,10 @@ description: >-
 
 # Service QA (Supabase CLI integration checks)
 
+> **Also the "web-qa" skill.** There is no separate `web-qa` skill: when a
+> request says web-qa (for example, capturing the signed-in treq.dev
+> dashboard), use this skill.
+
 ## When to use
 
 - User invokes `/service-qa`, optionally naming a flow ("service-qa desktop
