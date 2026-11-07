@@ -1440,6 +1440,66 @@ function DeleteAccountSection({ email }: { email: string }) {
   );
 }
 
+// ── More menu (phones) ───────────────────────────────────────────────────────
+//
+// Under 768px the sidebar is a top bar with no room for Sign Out, so it moves
+// behind a ⋯ button. CSS shows this menu or the plain button, never both.
+
+function MoreMenu({ onSignOut }: { onSignOut: () => void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const onPointer = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointer);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointer);
+    };
+  }, [open]);
+
+  return (
+    <div ref={root} className="dashboard-more">
+      <button
+        type="button"
+        aria-label="More options"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        style={styles.moreButton}
+      >
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <circle cx="3" cy="8" r="1.5" />
+          <circle cx="8" cy="8" r="1.5" />
+          <circle cx="13" cy="8" r="1.5" />
+        </svg>
+      </button>
+      {open && (
+        <div role="menu" style={styles.moreMenu}>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onSignOut();
+            }}
+            style={styles.moreMenuItem}
+          >
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Dashboard shell ──────────────────────────────────────────────────────────
 
 function DashboardContent() {
@@ -1559,6 +1619,8 @@ function DashboardContent() {
         <button type="button" onClick={handleSignOut} className="dashboard-signout" style={styles.signOutButton}>
           Sign Out
         </button>
+
+        <MoreMenu onSignOut={handleSignOut} />
       </div>
 
       <div className="dashboard-content" style={styles.content}>
@@ -1675,6 +1737,43 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "0.9rem",
     cursor: "pointer",
     marginTop: "auto",
+  },
+  moreButton: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "44px",
+    height: "44px",
+    borderRadius: "6px",
+    border: "none",
+    backgroundColor: "transparent",
+    color: "var(--ifm-font-color-base)",
+    cursor: "pointer",
+  },
+  moreMenu: {
+    position: "absolute",
+    right: 0,
+    top: "calc(100% + 4px)",
+    minWidth: "10rem",
+    padding: "0.25rem",
+    borderRadius: "8px",
+    border: "1px solid var(--ifm-color-emphasis-200)",
+    backgroundColor: "var(--ifm-background-color)",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+    zIndex: 10,
+  },
+  moreMenuItem: {
+    display: "block",
+    width: "100%",
+    minHeight: "44px",
+    padding: "0 0.75rem",
+    textAlign: "left",
+    border: "none",
+    borderRadius: "6px",
+    backgroundColor: "transparent",
+    color: "#ef4444",
+    fontSize: "0.9rem",
+    cursor: "pointer",
   },
   content: { flex: 1, minWidth: 0, overflowWrap: "anywhere" },
   pageTitle: { fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.25rem" },

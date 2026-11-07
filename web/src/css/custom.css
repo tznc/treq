@@ -530,6 +530,9 @@ a:hover {
 }
 
 /* Dashboard: sidebar becomes a top bar on tablets and phones. */
+.dashboard-more {
+  display: none;
+}
 @media (max-width: 768px) {
   .dashboard-page {
     flex-direction: column;
@@ -564,9 +567,11 @@ a:hover {
     padding: 0.5rem 1rem !important;
   }
   .dashboard-signout {
-    width: auto !important;
-    min-height: 44px;
-    margin-top: 0 !important;
+    display: none !important;
+  }
+  .dashboard-more {
+    display: block;
+    position: relative;
   }
   .dashboard-content .dashboard-row,
   .dashboard-content .dashboard-field,

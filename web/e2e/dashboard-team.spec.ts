@@ -595,6 +595,36 @@ test.describe('Dashboard account tab', () => {
     });
   }
 
+  test('on a phone, Sign Out sits in the more menu', async ({ browser }) => {
+    const { page, close } = await openTeamTab(browser, emptyTeam(), '/dashboard?tab=account');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect(page.getByRole('button', { name: 'Sign Out' })).toBeHidden();
+    const more = page.getByRole('button', { name: 'More options' });
+    await expect(more).toHaveAttribute('aria-expanded', 'false');
+    await more.click();
+    await expect(more).toHaveAttribute('aria-expanded', 'true');
+    await page.getByRole('menuitem', { name: 'Sign out' }).click();
+    await expect(page.getByRole('navigation', { name: 'Dashboard' })).toHaveCount(0);
+    await close();
+  });
+
+  test('the more menu closes on Escape', async ({ browser }) => {
+    const { page, close } = await openTeamTab(browser, emptyTeam(), '/dashboard?tab=account');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.getByRole('button', { name: 'More options' }).click();
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toBeHidden();
+    await close();
+  });
+
+  test('on desktop, Sign Out stays in the sidebar with no more menu', async ({ browser }) => {
+    const { page, close } = await openTeamTab(browser, emptyTeam(), '/dashboard?tab=account');
+    await expect(page.getByRole('button', { name: 'Sign Out' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'More options' })).toBeHidden();
+    await close();
+  });
+
   test('fits a phone screen without sideways scrolling', async ({ browser }) => {
     const { page, close } = await openTeamTab(browser, acmeTeam('owner'), '/dashboard?tab=account');
     await page.setViewportSize({ width: 375, height: 812 });
