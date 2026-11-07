@@ -751,9 +751,3 @@ export async function listRecentFailures(ctx: OperatorContext, body: Record<stri
 export async function pruneAuditEvents(ctx: OperatorContext) {
   return { deleted_count: await rpc(ctx.supabase, "prune_remote_audit_events") };
 }
-
-export async function pruneExpiredInvites(ctx: OperatorContext) {
-  return {
-    deleted_count: await rpc(ctx.supabase, "prune_expired_organization_invites"),
-  };
-}

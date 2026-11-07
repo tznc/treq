@@ -22,7 +22,6 @@ on:
         options:
           - sweep_lapsed_instances
           - prune_audit_events
-          - prune_expired_invites
           - report_usage
           - enforce_spend_caps
           - advance_migrations
@@ -58,7 +57,7 @@ jobs:
             "")                actions="$INPUT_ACTION" ;;
             "7 * * * *")       actions="report_usage" ;;
             "17 * * * *")      actions="sweep_lapsed_instances enforce_spend_caps" ;;
-            "23 3 * * *")      actions="prune_audit_events prune_expired_invites" ;;
+            "23 3 * * *")      actions="prune_audit_events" ;;
             "41 * * * *")      actions="advance_migrations destroy_retired_placements" ;;
             "*/5 * * * *")     actions="enforce_idle" ;;
             "2,32,47 * * * *") actions="enforce_spend_caps" ;;
