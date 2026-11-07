@@ -2,8 +2,15 @@
 //! with the same checks and results as the host's `github_write`.
 
 use super::GithubHttp;
-use crate::core::remote::GithubAction;
-use serde_json::Value;
+use crate::core::remote::{require_text, GithubAction};
+use crate::github;
+use reqwest::Method;
+use serde_json::{json, Value};
+
+const DELETE_ISSUE_MUTATION: &str =
+  "mutation($id: ID!) { deleteIssue(input: {issueId: $id}) { clientMutationId } }";
+const CONVERT_TO_DRAFT_MUTATION: &str = "mutation($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { clientMutationId } }";
+const MARK_READY_MUTATION: &str = "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { clientMutationId } }";
 
 /// [`GithubAction`] carried out over HTTPS on the repository `full_name`
 /// (`owner/name`), as the host's `github_write` carries it out.
@@ -12,8 +19,134 @@ pub async fn github_write(
   full_name: &str,
   action: GithubAction,
 ) -> Result<Value, String> {
-  let _ = (gh, full_name, action);
-  unimplemented!()
+  match &action {
+    GithubAction::CreateIssue { title, .. } | GithubAction::EditIssue { title, .. } => {
+      require_text(title, "the title")?;
+    }
+    GithubAction::CommentOnIssue { body, .. }
+    | GithubAction::CommentOnPr { body, .. }
+    | GithubAction::ReplyToReviewThread { body, .. } => require_text(body, "the comment")?,
+    _ => {}
+  }
+  let repo = format!("/repos/{full_name}");
+  match action {
+    GithubAction::CreateIssue { title, body } => {
+      let body = json!({ "title": title, "body": body });
+      let created = gh
+        .rest(Method::POST, &format!("{repo}/issues"), Some(&body))
+        .await?;
+      let number = created["number"]
+        .as_u64()
+        .ok_or_else(|| format!("Could not parse issue number from output: {created}"))?;
+      Ok(json!({ "number": number }))
+    }
+    GithubAction::EditIssue {
+      number,
+      title,
+      body,
+    } => {
+      let body = json!({ "title": title, "body": body });
+      patch(gh, &format!("{repo}/issues/{number}"), &body).await
+    }
+    // A pull request's conversation comments are its issue's comments.
+    GithubAction::CommentOnIssue { number, body } | GithubAction::CommentOnPr { number, body } => {
+      let path = format!("{repo}/issues/{number}/comments");
+      done(
+        gh.rest(Method::POST, &path, Some(&json!({ "body": body })))
+          .await,
+      )
+    }
+    GithubAction::CloseIssue { number, reason } => {
+      if !github::ISSUE_CLOSE_REASONS.contains(&reason.as_str()) {
+        return Err(format!("Unknown issue close reason: {reason}"));
+      }
+      // `gh issue close --reason "not planned"` sends `not_planned`.
+      let body = json!({ "state": "closed", "state_reason": reason.replace(' ', "_") });
+      patch(gh, &format!("{repo}/issues/{number}"), &body).await
+    }
+    GithubAction::ReopenIssue { number } => {
+      patch(
+        gh,
+        &format!("{repo}/issues/{number}"),
+        &json!({ "state": "open" }),
+      )
+      .await
+    }
+    GithubAction::DeleteIssue { number } => {
+      let id = node_id(gh, &format!("{repo}/issues/{number}")).await?;
+      done(gh.graphql(DELETE_ISSUE_MUTATION, json!({ "id": id })).await)
+    }
+    GithubAction::ClosePr { number } => {
+      patch(
+        gh,
+        &format!("{repo}/pulls/{number}"),
+        &json!({ "state": "closed" }),
+      )
+      .await
+    }
+    GithubAction::ReopenPr { number } => {
+      patch(
+        gh,
+        &format!("{repo}/pulls/{number}"),
+        &json!({ "state": "open" }),
+      )
+      .await
+    }
+    GithubAction::SetPrDraft { number, draft } => {
+      let id = node_id(gh, &format!("{repo}/pulls/{number}")).await?;
+      let mutation = if draft {
+        CONVERT_TO_DRAFT_MUTATION
+      } else {
+        MARK_READY_MUTATION
+      };
+      done(gh.graphql(mutation, json!({ "id": id })).await)
+    }
+    GithubAction::ReplyToReviewThread { thread_id, body } => {
+      let variables = json!({ "threadId": thread_id, "body": body });
+      done(gh.graphql(github::REPLY_THREAD_MUTATION, variables).await)
+    }
+    GithubAction::SubmitPrReview {
+      number,
+      event,
+      body,
+      comments,
+    } => {
+      let body = github::review_request_body(&event, &body, &comments)?;
+      let path = format!("{repo}/pulls/{number}/reviews");
+      done(gh.rest(Method::POST, &path, Some(&body)).await)
+    }
+    GithubAction::SetReaction {
+      comment_id,
+      content,
+      on,
+    } => {
+      let mutation = if on {
+        github::ADD_REACTION_MUTATION
+      } else {
+        github::REMOVE_REACTION_MUTATION
+      };
+      let variables = json!({ "id": comment_id, "content": content });
+      done(gh.graphql(mutation, variables).await)
+    }
+  }
+}
+
+/// `null`, as the host returns for a change that succeeded.
+fn done(result: Result<Value, String>) -> Result<Value, String> {
+  result.map(|_| Value::Null)
+}
+
+async fn patch(gh: &GithubHttp, path: &str, body: &Value) -> Result<Value, String> {
+  done(gh.rest(Method::PATCH, path, Some(body)).await)
+}
+
+/// The GraphQL node id of the issue or pull request at the REST `path`.
+async fn node_id(gh: &GithubHttp, path: &str) -> Result<String, String> {
+  let item = gh.rest(Method::GET, path, None).await?;
+  item["node_id"]
+    .as_str()
+    .map(str::to_string)
+    .ok_or_else(|| format!("GitHub sent no node id for {path}"))
 }
 
 #[cfg(test)]

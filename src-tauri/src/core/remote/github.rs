@@ -207,7 +207,7 @@ pub(super) fn github_full_name(repo: &str) -> Result<String, String> {
     .ok_or_else(|| "invalid_arguments: this repository has no GitHub remote".to_string())
 }
 
-pub(super) fn require_text(text: &str, what: &str) -> Result<(), String> {
+pub(crate) fn require_text(text: &str, what: &str) -> Result<(), String> {
   if text.trim().is_empty() {
     return Err(format!("invalid_arguments: {what} is empty"));
   }

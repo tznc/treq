@@ -772,7 +772,7 @@ pub fn gh_create_issue_comment_impl(
 }
 
 /// Close reasons `gh issue close --reason` accepts.
-const ISSUE_CLOSE_REASONS: [&str; 2] = ["completed", "not planned"];
+pub(crate) const ISSUE_CLOSE_REASONS: [&str; 2] = ["completed", "not planned"];
 
 pub fn gh_close_issue_impl(
   gh_path: &str,
@@ -1022,7 +1022,7 @@ pub fn gh_pr_diff_impl(
   Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-const REPLY_THREAD_MUTATION: &str = "mutation($threadId: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) { comment { id } } }";
+pub(crate) const REPLY_THREAD_MUTATION: &str = "mutation($threadId: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) { comment { id } } }";
 
 /// `gh api` exits 0 on GraphQL-level errors, so check the `errors` field.
 fn check_graphql_errors(bytes: &[u8]) -> Result<(), String> {
@@ -1137,8 +1137,8 @@ pub fn fill_comment_reactions(
   }
 }
 
-const ADD_REACTION_MUTATION: &str = "mutation($id: ID!, $content: ReactionContent!) { addReaction(input: {subjectId: $id, content: $content}) { clientMutationId } }";
-const REMOVE_REACTION_MUTATION: &str = "mutation($id: ID!, $content: ReactionContent!) { removeReaction(input: {subjectId: $id, content: $content}) { clientMutationId } }";
+pub(crate) const ADD_REACTION_MUTATION: &str = "mutation($id: ID!, $content: ReactionContent!) { addReaction(input: {subjectId: $id, content: $content}) { clientMutationId } }";
+pub(crate) const REMOVE_REACTION_MUTATION: &str = "mutation($id: ID!, $content: ReactionContent!) { removeReaction(input: {subjectId: $id, content: $content}) { clientMutationId } }";
 
 /// Adds or removes the viewer's `content` reaction (`THUMBS_UP`, ...) on a
 /// comment by its GraphQL node id.
@@ -1184,6 +1184,24 @@ pub fn gh_submit_pr_review_impl(
   comments: &[GhDraftReviewComment],
   extended_path: &str,
 ) -> Result<(), String> {
+  let input = review_request_body(event, body, comments)?;
+  let endpoint = format!("repos/{repo_full_name}/pulls/{pr_number}/reviews");
+  let out = run_gh_with_stdin(
+    gh_path,
+    &["api", &endpoint, "--method", "POST", "--input", "-"],
+    &input.to_string(),
+    extended_path,
+  )?;
+  check_gh_output(out).map(|_| ())
+}
+
+/// The body of `POST /repos/{repo}/pulls/{number}/reviews` for a review
+/// with `event` (`APPROVE`, `REQUEST_CHANGES` or `COMMENT`).
+pub(crate) fn review_request_body(
+  event: &str,
+  body: &str,
+  comments: &[GhDraftReviewComment],
+) -> Result<serde_json::Value, String> {
   if !matches!(event, "APPROVE" | "REQUEST_CHANGES" | "COMMENT") {
     return Err(format!("Invalid review event: {event}"));
   }
@@ -1203,15 +1221,7 @@ pub fn gh_submit_pr_review_impl(
       v
     })
     .collect();
-  let input = serde_json::json!({ "event": event, "body": body, "comments": comments });
-  let endpoint = format!("repos/{repo_full_name}/pulls/{pr_number}/reviews");
-  let out = run_gh_with_stdin(
-    gh_path,
-    &["api", &endpoint, "--method", "POST", "--input", "-"],
-    &input.to_string(),
-    extended_path,
-  )?;
-  check_gh_output(out).map(|_| ())
+  Ok(serde_json::json!({ "event": event, "body": body, "comments": comments }))
 }
 
 pub fn gh_close_pr_impl(
