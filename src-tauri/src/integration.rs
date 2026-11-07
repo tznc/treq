@@ -165,13 +165,50 @@ pub async fn fetch_tokens(
 /// A token for `repository`: from the cache at `cache_path` when it has
 /// time left, otherwise fetched with the config at `config_path` and cached.
 pub async fn token_for(
-  _client: &reqwest::Client,
-  _config_path: &Path,
-  _cache_path: &Path,
-  _repository: &str,
-  _now: i64,
+  client: &reqwest::Client,
+  config_path: &Path,
+  cache_path: &Path,
+  repository: &str,
+  now: i64,
 ) -> Result<String, String> {
-  unimplemented!()
+  // A missing or unreadable cache is just empty.
+  let mut cache: TokenCache = std::fs::read_to_string(cache_path)
+    .ok()
+    .and_then(|text| serde_json::from_str(&text).ok())
+    .unwrap_or_default();
+  if let Some(token) = cache.fresh(repository, now) {
+    return Ok(token.to_string());
+  }
+  let config = read_config(config_path)?;
+  let now_secs = u64::try_from(now).map_err(|_| "clock is before 1970".to_string())?;
+  let tokens = fetch_tokens(client, &config, &[repository.to_string()], now_secs).await?;
+  cache.insert(&tokens);
+  let token = cache
+    .fresh(repository, now)
+    .map(String::from)
+    .ok_or_else(|| format!("integration-proxy returned no token for {repository}"))?;
+  // The cache holds live tokens: only this user may read it.
+  if let Some(dir) = cache_path.parent() {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+  }
+  let text = serde_json::to_string(&cache).map_err(|e| e.to_string())?;
+  write_private(cache_path, &text)?;
+  Ok(token)
+}
+
+fn write_private(path: &Path, text: &str) -> Result<(), String> {
+  use std::io::Write as _;
+  let mut options = std::fs::OpenOptions::new();
+  options.write(true).create(true).truncate(true);
+  #[cfg(unix)]
+  {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    options.mode(0o600);
+  }
+  let mut file = options
+    .open(path)
+    .map_err(|e| format!("{}: {e}", path.display()))?;
+  file.write_all(text.as_bytes()).map_err(|e| e.to_string())
 }
 
 /// The `owner/name` a git credential request (`protocol=…`, `host=…`,

@@ -889,6 +889,12 @@ pub fn handle_cli_command(subcommand: &SubcommandMatches) -> Option<i32> {
       return Some(agent_msg_handlers::handle(&msg.matches));
     }
   }
+  if subcommand.name == "github" {
+    return Some(run_github(&subcommand.matches).unwrap_or_else(|error| {
+      eprintln!("treq github: {error}");
+      1
+    }));
+  }
   let success = match subcommand.name.as_str() {
     "add" => workspace_handlers::handle_workspace_add(&subcommand.matches),
     "set" => workspace_handlers::handle_workspace_set(&subcommand.matches),
@@ -937,8 +943,108 @@ pub(super) enum GithubCommand {
   Gh { args: Vec<String> },
 }
 
-pub(super) fn parse_github_command(_matches: &Matches) -> Result<GithubCommand, String> {
-  unimplemented!()
+pub(super) fn parse_github_command(matches: &Matches) -> Result<GithubCommand, String> {
+  let sub = matches
+    .subcommand
+    .as_deref()
+    .ok_or_else(|| "invalid_arguments: treq github needs token, credential or gh".to_string())?;
+  let value = |name: &str| get_arg_value(&sub.matches, name);
+  match sub.name.as_str() {
+    "token" => Ok(GithubCommand::Token {
+      repository: value("repository")
+        .ok_or_else(|| "invalid_arguments: a repository is required".to_string())?,
+    }),
+    "credential" => Ok(GithubCommand::Credential {
+      operation: value("operation")
+        .ok_or_else(|| "invalid_arguments: an operation is required".to_string())?,
+    }),
+    "gh" => Ok(GithubCommand::Gh {
+      args: sub
+        .matches
+        .args
+        .get("args")
+        .and_then(|arg| arg.value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect(),
+    }),
+    other => Err(format!(
+      "invalid_arguments: unknown treq github command {other}"
+    )),
+  }
+}
+
+fn github_cache_path() -> std::path::PathBuf {
+  std::env::var_os("XDG_CACHE_HOME")
+    .map(std::path::PathBuf::from)
+    .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".cache")))
+    .unwrap_or_else(std::env::temp_dir)
+    .join("treq")
+    .join("github-tokens.json")
+}
+
+fn github_token(repository: &str) -> Result<String, String> {
+  let config = std::env::var_os("TREQ_INTEGRATION_CONFIG_FILE")
+    .map(std::path::PathBuf::from)
+    .unwrap_or_else(|| crate::integration::CONFIG_FILE.into());
+  let runtime = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()
+    .map_err(|e| e.to_string())?;
+  runtime.block_on(crate::integration::token_for(
+    &reqwest::Client::new(),
+    &config,
+    &github_cache_path(),
+    repository,
+    chrono::Utc::now().timestamp(),
+  ))
+}
+
+/// `treq github …`; its exit code (gh's own, for `treq github gh`).
+fn run_github(matches: &Matches) -> Result<i32, String> {
+  use std::io::Read as _;
+  match parse_github_command(matches)? {
+    GithubCommand::Token { repository } => {
+      println!("{}", github_token(&repository)?);
+      Ok(0)
+    }
+    // git also calls helpers with store and erase; there is nothing to keep.
+    GithubCommand::Credential { operation } if operation != "get" => Ok(0),
+    GithubCommand::Credential { .. } => {
+      let mut request = String::new();
+      std::io::stdin()
+        .read_to_string(&mut request)
+        .map_err(|e| e.to_string())?;
+      // Not a github.com repository: say nothing, so git asks elsewhere.
+      if let Some(repository) = crate::integration::credential_repository(&request) {
+        print!(
+          "{}",
+          crate::integration::credential_answer(&github_token(&repository)?)
+        );
+      }
+      Ok(0)
+    }
+    GithubCommand::Gh { args } => {
+      let repository = crate::integration::gh_repo_flag(&args).or_else(|| {
+        let cwd = std::env::current_dir().ok()?;
+        crate::github::get_git_remote_url_impl(&cwd.to_string_lossy())
+          .ok()
+          .flatten()
+          .map(|remote| remote.full_name)
+      });
+      let gh = std::env::var("TREQ_REAL_GH").unwrap_or_else(|_| "/usr/bin/gh".to_string());
+      let mut command = std::process::Command::new(gh);
+      command.args(&args);
+      if let Some(repository) = repository {
+        command.env("GH_TOKEN", github_token(&repository)?);
+      }
+      let status = command
+        .status()
+        .map_err(|e| format!("cannot run gh: {e}"))?;
+      Ok(status.code().unwrap_or(1))
+    }
+  }
 }
 
 /// `treq gateway` flags.
@@ -1060,6 +1166,7 @@ pub(super) fn is_supported_cli_command(name: &str) -> bool {
     name,
     "add"
       | "gateway"
+      | "github"
       | "set"
       | "st"
       | "diff"
