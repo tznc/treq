@@ -1,4 +1,4 @@
-// Request logic for the linear-proxy Edge Function, kept free of Deno and
+// Linear request logic for integration-proxy (/linear/graphql), kept free of Deno and
 // Supabase imports so it runs under the repo's unit tests. The caller
 // supplies the user's token store, `fetch`, the Linear OAuth client, and the
 // user's Pro check.
@@ -103,7 +103,7 @@ async function refreshToken(
   });
 
   if (!res.ok) {
-    console.error("[linear-proxy] token refresh failed:", res.status);
+    console.error("[integration-proxy] linear: token refresh failed:", res.status);
     // A concurrent request may have refreshed first, which spends the
     // refresh token this request used. Use its result if there is one.
     const latest = await deps.store.load();
@@ -128,7 +128,7 @@ async function refreshToken(
     });
   } catch (err) {
     console.error(
-      "[linear-proxy] storing refreshed token failed:",
+      "[integration-proxy] linear: storing refreshed token failed:",
       errorMessage(err),
     );
   }
@@ -149,7 +149,7 @@ export async function proxyLinearRequest(
       return json(refused.body, refused.status);
     }
   } catch (err) {
-    console.error("[linear-proxy] entitlement check failed:", errorMessage(err));
+    console.error("[integration-proxy] linear: entitlement check failed:", errorMessage(err));
     return json({ error: "Failed to check your plan" }, 500);
   }
 
@@ -157,7 +157,7 @@ export async function proxyLinearRequest(
   try {
     token = await deps.store.load();
   } catch (err) {
-    console.error("[linear-proxy] token lookup failed:", errorMessage(err));
+    console.error("[integration-proxy] linear: token lookup failed:", errorMessage(err));
     return json({ error: "Failed to retrieve Linear token" }, 500);
   }
   if (!token) return json({ error: "Linear account not linked" }, 403);
@@ -188,13 +188,13 @@ export async function proxyLinearRequest(
       return json({ error: RECONNECT_MESSAGE }, 401);
     }
     if (!response.ok) {
-      console.error("[linear-proxy] Linear API error:", response.status);
+      console.error("[integration-proxy] linear: Linear API error:", response.status);
     }
     // Pass Linear's body through, including GraphQL `errors` on a 4xx, so
     // the desktop app can show Linear's own message.
     return { status: response.status, body: await response.text() };
   } catch (err) {
-    console.error("[linear-proxy] request failed:", errorMessage(err));
+    console.error("[integration-proxy] linear: request failed:", errorMessage(err));
     return json({ error: "Failed to proxy Linear request" }, 502);
   }
 }
