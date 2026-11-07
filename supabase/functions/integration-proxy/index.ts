@@ -10,7 +10,6 @@
 // token signed with the placement's integration secret>` (see lib.ts).
 // verify_jwt is off in config.toml because sandbox tokens are not Supabase
 // JWTs; lib.ts checks both.
-// linear-proxy stays until desktop builds that call it are retired.
 
 import express from "npm:express@^4.21.2";
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
@@ -20,7 +19,7 @@ import { appJWT } from "../_shared/github/app.ts";
 import { appOnly, type Caller, exactIlike, resolveCaller } from "./lib.ts";
 import { githubUserToken, type StoredGrant, type UserTokenDeps } from "./github-user-token.ts";
 import { sandboxGithubTokens } from "./github-token.ts";
-import { linearTokenStore, proxyLinearRequest } from "../linear-proxy/lib.ts";
+import { linearTokenStore, proxyLinearRequest } from "./linear.ts";
 
 const service = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
