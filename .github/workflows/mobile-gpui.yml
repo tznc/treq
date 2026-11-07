@@ -110,6 +110,7 @@ jobs:
           npm ci --no-audit --no-fund
           npm run tauri -- android init --ci
           scripts/mobile/apply-icons.sh
+          scripts/mobile/android-compile-sdk.sh
           # `android init` regenerates gen/android without the plugin entries;
           # only this app's build script adds them back (tauri-plugin-gpui's
           # GpuiView), and a warm Rust cache skips it. Force it to rerun.
