@@ -31,9 +31,7 @@ describe("buildCheckoutSessionParams", () => {
   };
 
   it("builds an embedded subscription session with no trial", () => {
-    expect(
-      buildCheckoutSessionParams(base),
-    ).toEqual({
+    expect(buildCheckoutSessionParams(base)).toEqual({
       ui_mode: "embedded",
       mode: "subscription",
       customer: "cus_123",
@@ -59,7 +57,6 @@ describe("buildCheckoutSessionParams", () => {
     expect(params).not.toHaveProperty("line_items[1][quantity]");
   });
 
-
   it("builds a Team session owned by the organization, returning to the Team tab", () => {
     expect(
       buildCheckoutSessionParams({
@@ -83,7 +80,6 @@ describe("buildCheckoutSessionParams", () => {
         "https://treq.dev/dashboard?tab=team&session_id={CHECKOUT_SESSION_ID}",
     });
   });
-
 
   it("drops a trailing slash from the web URL", () => {
     expect(
@@ -500,8 +496,6 @@ describe("createCheckout", () => {
     );
     expect(store.attachCustomer).not.toHaveBeenCalled();
   });
-
-
 
   it("resolves the price by lookup key", async () => {
     const { stripe, calls } = fakeStripe(STRIPE_OK);
