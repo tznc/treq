@@ -2,7 +2,7 @@
 -- who may call, sandbox JWTs, and the checks that run before any outbound
 -- call. Outbound calls themselves are not exercised here.
 begin;
-select plan(25);
+select plan(29);
 
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000000e1', 'integrations@example.com'),
@@ -35,6 +35,15 @@ select function_privs_are('public', 'integration_sandbox_token', array['uuid'], 
   array['EXECUTE'], 'authenticated can call integration_sandbox_token');
 select function_privs_are('public', 'linear_graphql', array['text', 'jsonb'], 'anon',
   array[]::text[], 'anon cannot call linear_graphql');
+select function_privs_are('public', 'linear_graphql', array['text', 'jsonb'], 'treq_proxy',
+  array['EXECUTE'], 'treq_proxy can call linear_graphql');
+select function_privs_are('public', 'github_repo_token', array['text'], 'treq_proxy',
+  array['EXECUTE'], 'treq_proxy can call github_repo_token');
+select function_privs_are('public', 'integration_sandbox_token', array['uuid'], 'treq_proxy',
+  array[]::text[], 'treq_proxy cannot mint sandbox JWTs');
+select is(
+  (select count(*)::int from information_schema.role_table_grants where grantee = 'treq_proxy'),
+  0, 'treq_proxy has no table privileges');
 select function_privs_are('public', 'integration_vault', array['text'], 'authenticated',
   array[]::text[], 'authenticated cannot read Vault through the helper');
 select function_privs_are('public', 'integration_linear_token', array['uuid'], 'authenticated',
@@ -50,29 +59,27 @@ select pg_temp.as_claims('{"sub":"00000000-0000-0000-0000-0000000000e1","role":"
 select is(public.integration_caller(), '00000000-0000-0000-0000-0000000000e1'::uuid,
   'a user JWT is its user');
 
-select pg_temp.as_claims(jsonb_build_object(
-  'sub', '00000000-0000-0000-0000-0000000000e1', 'role', 'authenticated',
-  'iat', 1000, 'exp', 4600, 'treq_placement_id', '00000000-0000-0000-0000-00000000e0b1'));
-select is(public.integration_caller(), '00000000-0000-0000-0000-0000000000e1'::uuid,
-  'a sandbox JWT for a live placement is its owner');
+create function pg_temp.sandbox(p_placement text, p_exp int default 4600, p_aud text default 'treq_proxy')
+returns void language sql as $$
+  select set_config('request.jwt.claims', jsonb_build_object(
+    'sub', p_placement, 'role', 'treq_proxy', 'aud', p_aud, 'iat', 1000, 'exp', p_exp)::text, true);
+$$;
 
-select pg_temp.as_claims(jsonb_build_object(
-  'sub', '00000000-0000-0000-0000-0000000000e1', 'role', 'authenticated',
-  'iat', 1000, 'exp', 4601, 'treq_placement_id', '00000000-0000-0000-0000-00000000e0b1'));
+select pg_temp.sandbox('00000000-0000-0000-0000-00000000e0b1');
+select is(public.integration_caller(), '00000000-0000-0000-0000-0000000000e1'::uuid,
+  'a sandbox JWT for a live placement acts for its owner');
+
+select pg_temp.sandbox('00000000-0000-0000-0000-00000000e0b1', 4601);
 select throws_ok($$ select public.integration_caller() $$, 'PGRST', null,
   'a sandbox JWT issued for over an hour is refused');
 
-select pg_temp.as_claims(jsonb_build_object(
-  'sub', '00000000-0000-0000-0000-0000000000e2', 'role', 'authenticated',
-  'iat', 1000, 'exp', 4600, 'treq_placement_id', '00000000-0000-0000-0000-00000000e0b1'));
+select pg_temp.sandbox('00000000-0000-0000-0000-00000000ffff');
 select throws_ok($$ select public.integration_caller() $$, 'PGRST', null,
-  'a sandbox JWT for someone else''s placement is refused');
+  'a sandbox JWT for an unknown placement is refused');
 
 update public.remote_instance_placements set role = 'dead'
 where id = '00000000-0000-0000-0000-00000000e0b1';
-select pg_temp.as_claims(jsonb_build_object(
-  'sub', '00000000-0000-0000-0000-0000000000e1', 'role', 'authenticated',
-  'iat', 1000, 'exp', 4600, 'treq_placement_id', '00000000-0000-0000-0000-00000000e0b1'));
+select pg_temp.sandbox('00000000-0000-0000-0000-00000000e0b1');
 select throws_ok($$ select public.integration_caller() $$, 'PGRST', null,
   'a sandbox JWT dies with its placement');
 update public.remote_instance_placements set role = 'active'
@@ -100,19 +107,16 @@ select is(
   convert_from(decode(rpad(translate(split_part(token, '.', 2), '-_', '+/'),
     (length(split_part(token, '.', 2)) + 3) / 4 * 4, '='), 'base64'), 'utf8')::jsonb
     - 'iat' - 'exp',
-  jsonb_build_object('sub', '00000000-0000-0000-0000-0000000000e1', 'role', 'authenticated',
-    'aud', 'authenticated', 'is_anonymous', false,
-    'treq_placement_id', '00000000-0000-0000-0000-00000000e0b1'),
-  'the sandbox JWT carries the owner and placement')
+  jsonb_build_object('sub', '00000000-0000-0000-0000-00000000e0b1',
+    'role', 'treq_proxy', 'aud', 'treq_proxy'),
+  'the sandbox JWT names the placement, not the user, under treq_proxy')
 from minted;
 
 select throws_ok(
   $$ select public.integration_sandbox_token('00000000-0000-0000-0000-00000000ffff') $$,
   'PGRST', null, 'only the owner''s placements get a sandbox JWT');
 
-select pg_temp.as_claims(jsonb_build_object(
-  'sub', '00000000-0000-0000-0000-0000000000e1', 'role', 'authenticated',
-  'iat', 1000, 'exp', 4600, 'treq_placement_id', '00000000-0000-0000-0000-00000000e0b1'));
+select pg_temp.sandbox('00000000-0000-0000-0000-00000000e0b1');
 select throws_ok(
   $$ select public.integration_sandbox_token('00000000-0000-0000-0000-00000000e0b1') $$,
   'PGRST', null, 'a sandbox JWT cannot mint another');

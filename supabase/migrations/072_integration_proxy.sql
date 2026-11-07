@@ -50,9 +50,18 @@ as $$
   select decrypted_secret from vault.decrypted_secrets where name = p_name;
 $$;
 
--- The calling user. A sandbox JWT (treq_placement_id claim) is accepted
--- only while its placement is live, still owned by `sub`, and the token was
--- issued for at most an hour.
+-- Sandbox JWTs use their own role, so they reach nothing but the two
+-- integration RPCs: `role: treq_proxy` gets no table privileges and is
+-- granted execute only on linear_graphql and github_repo_token, and
+-- `sub` is the placement id, not a user, so Auth (and every Edge Function
+-- that checks a token with auth.getUser) refuses it.
+create role treq_proxy nologin noinherit;
+grant treq_proxy to authenticator;
+grant usage on schema public to treq_proxy;
+
+-- The user a call acts for: a signed-in user, or the owner of the placement
+-- a sandbox JWT names. A sandbox JWT is accepted only while its placement is
+-- live and if it was issued for at most an hour.
 create function public.integration_caller()
 returns uuid
 language plpgsql
@@ -61,23 +70,26 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_uid uuid := (select auth.uid());
-  v_claims jsonb := (select auth.jwt());
-  v_placement text := v_claims ->> 'treq_placement_id';
+  v_claims jsonb := coalesce((select auth.jwt()), '{}'::jsonb);
+  v_owner uuid;
 begin
-  if v_uid is null then
-    perform public.integration_raise(401, 'unauthorized', 'Sign in to use integrations');
+  if v_claims ->> 'role' = 'treq_proxy' then
+    select p.owner_user_id into v_owner
+    from public.remote_instance_placements p
+    where p.id::text = v_claims ->> 'sub' and p.role <> 'dead';
+    if v_owner is null
+      or v_claims ->> 'aud' is distinct from 'treq_proxy'
+      or not ((v_claims ->> 'exp')::bigint - (v_claims ->> 'iat')::bigint <= 3600) then
+      perform public.integration_raise(401, 'unauthorized', 'Sandbox token is no longer valid');
+    end if;
+    return v_owner;
   end if;
-  if v_placement is not null and not (
-    (v_claims ->> 'exp')::bigint - (v_claims ->> 'iat')::bigint <= 3600
-    and exists (
-      select 1 from public.remote_instance_placements p
-      where p.id::text = v_placement and p.owner_user_id = v_uid and p.role <> 'dead'
-    )
-  ) then
-    perform public.integration_raise(401, 'unauthorized', 'Sandbox token is no longer valid');
+
+  if v_claims ->> 'role' = 'authenticated' and (select auth.uid()) is not null then
+    return (select auth.uid());
   end if;
-  return v_uid;
+  perform public.integration_raise(401, 'unauthorized', 'Sign in to use integrations');
+  return null;
 end;
 $$;
 
@@ -120,9 +132,10 @@ $$;
 
 -- ── Sandbox JWT ─────────────────────────────────────────────────────────
 
--- A Supabase JWT for an agent in the caller's placement: HS256 with the
--- project's JWT secret, `sub` = owner, at most an hour. A sandbox JWT cannot
--- mint another.
+-- A sandbox JWT for an agent in one of the caller's placements: HS256 with
+-- the project's JWT secret, `role` and `aud` treq_proxy, `sub` the
+-- placement id, at most an hour. Only a signed-in user can mint one:
+-- treq_proxy has no execute on this function.
 create function public.integration_sandbox_token(p_placement_id uuid)
 returns jsonb
 language plpgsql
@@ -136,8 +149,8 @@ declare
   v_now bigint := extract(epoch from now())::bigint;
   v_input text;
 begin
-  if (select auth.jwt()) ? 'treq_placement_id' then
-    perform public.integration_raise(403, 'forbidden', 'Sandbox tokens cannot mint tokens');
+  if (select auth.jwt()) ->> 'role' is distinct from 'authenticated' then
+    perform public.integration_raise(403, 'forbidden', 'Only a signed-in user can mint sandbox tokens');
   end if;
   if not exists (
     select 1 from public.remote_instance_placements
@@ -151,9 +164,8 @@ begin
 
   v_input := public.integration_b64url(convert_to('{"alg":"HS256","typ":"JWT"}', 'utf8'))
     || '.' || public.integration_b64url(convert_to(jsonb_build_object(
-      'sub', v_uid, 'role', 'authenticated', 'aud', 'authenticated',
-      'iat', v_now, 'exp', v_now + 3600, 'is_anonymous', false,
-      'treq_placement_id', p_placement_id)::text, 'utf8'));
+      'sub', p_placement_id, 'role', 'treq_proxy', 'aud', 'treq_proxy',
+      'iat', v_now, 'exp', v_now + 3600)::text, 'utf8'));
   return jsonb_build_object(
     'token', v_input || '.' || public.integration_b64url(
       extensions.hmac(convert_to(v_input, 'utf8'), convert_to(v_secret, 'utf8'), 'sha256')),
@@ -299,7 +311,8 @@ declare
   v_token record;
   v_res extensions.http_response;
 begin
-  if not public.has_pro(v_uid) then
+  -- has_pro compares with auth.uid(), which is the placement for a sandbox.
+  if not treq_internal.user_has_pro(v_uid) then
     perform public.integration_raise(402, 'pro_required',
       'Linear OAuth needs Pro. Add a personal Linear API key in Settings instead.');
   end if;
@@ -487,8 +500,8 @@ revoke all on function public.integration_sandbox_token(uuid) from public, anon;
 revoke all on function public.linear_graphql(text, jsonb) from public, anon;
 revoke all on function public.github_repo_token(text) from public, anon;
 grant execute on function public.integration_sandbox_token(uuid) to authenticated;
-grant execute on function public.linear_graphql(text, jsonb) to authenticated;
-grant execute on function public.github_repo_token(text) to authenticated;
+grant execute on function public.linear_graphql(text, jsonb) to authenticated, treq_proxy;
+grant execute on function public.github_repo_token(text) to authenticated, treq_proxy;
 
 -- ── Schedules ───────────────────────────────────────────────────────────
 
