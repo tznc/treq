@@ -16,6 +16,12 @@ const INSTALLATION_ID = 4242;
 const STATE = "f".repeat(64);
 const CODE = "0123456789abcdef0123";
 const USER_TOKEN = "ghu_user_token";
+const GRANT = {
+  accessToken: USER_TOKEN,
+  refreshToken: "ghr_refresh",
+  expiresAt: "2026-11-08T08:00:00.000Z",
+  refreshExpiresAt: "2027-05-08T00:00:00.000Z",
+};
 
 const installation: GitHubInstallation = {
   id: INSTALLATION_ID,
@@ -29,6 +35,7 @@ function fakeDeps(
   store: InstallationLinkStore & {
     consumeIntent: ReturnType<typeof vi.fn>;
     linkInstallation: ReturnType<typeof vi.fn>;
+    saveUserToken: ReturnType<typeof vi.fn>;
   };
   github: { [K in keyof GitHubInstallationAccess]: ReturnType<typeof vi.fn> };
 } {
@@ -41,9 +48,10 @@ function fakeDeps(
         result: "linked" as const,
         organization_id: null,
       })),
+      saveUserToken: vi.fn(async () => {}),
     },
     github: {
-      exchangeCode: vi.fn(github.exchangeCode ?? (async () => USER_TOKEN)),
+      exchangeCode: vi.fn(github.exchangeCode ?? (async () => GRANT)),
       userCanAccessInstallation: vi.fn(
         github.userCanAccessInstallation ?? (async () => true),
       ),
@@ -79,6 +87,20 @@ describe("completeInstallation verifies the installer on GitHub", () => {
       installation,
       USER_ID,
     );
+    expect(deps.store.saveUserToken).toHaveBeenCalledWith(USER_ID, GRANT);
+  });
+
+  it("still links when the user token cannot be saved", async () => {
+    const deps = fakeDeps();
+    deps.store.saveUserToken.mockRejectedValueOnce(new Error("vault down"));
+    const result = await completeInstallation(body, deps);
+    expect(result.status).toBe(200);
+  });
+
+  it("keeps no user token for a refused installation", async () => {
+    const deps = fakeDeps({ userCanAccessInstallation: async () => false });
+    await completeInstallation(body, deps);
+    expect(deps.store.saveUserToken).not.toHaveBeenCalled();
   });
 
   it("refuses an installation the GitHub user cannot access", async () => {
@@ -199,11 +221,18 @@ function installationsPage(ids: number[], totalCount: number) {
 describe("githubInstallationAccess", () => {
   it("exchanges the code with the App's client credentials", async () => {
     const { calls, impl } = fakeFetch([
-      jsonResponse({ access_token: USER_TOKEN, token_type: "bearer" }),
+      jsonResponse({
+        access_token: USER_TOKEN,
+        token_type: "bearer",
+        expires_in: 28800,
+        refresh_token: "ghr_refresh",
+        refresh_token_expires_in: 15724800,
+      }),
     ]);
-    const access = githubInstallationAccess(credentials, impl);
+    const now = () => Date.parse("2026-11-08T00:00:00.000Z");
+    const access = githubInstallationAccess(credentials, impl, now);
 
-    await expect(access.exchangeCode(CODE)).resolves.toBe(USER_TOKEN);
+    await expect(access.exchangeCode(CODE)).resolves.toEqual(GRANT);
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("https://github.com/login/oauth/access_token");
     expect(calls[0].init.method).toBe("POST");
@@ -216,6 +245,18 @@ describe("githubInstallationAccess", () => {
       client_id: "Iv1.client",
       client_secret: "secret-value",
       code: CODE,
+    });
+  });
+
+  it("reads a grant without expiry as a token that does not expire", async () => {
+    const { impl } = fakeFetch([jsonResponse({ access_token: USER_TOKEN })]);
+    await expect(
+      githubInstallationAccess(credentials, impl).exchangeCode(CODE),
+    ).resolves.toEqual({
+      accessToken: USER_TOKEN,
+      refreshToken: null,
+      expiresAt: null,
+      refreshExpiresAt: null,
     });
   });
 
