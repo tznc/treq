@@ -135,8 +135,11 @@ export interface GitHubDeps {
 export const TOKEN_PERMISSIONS = {
   contents: "write",
   pull_requests: "write",
+  issues: "write",
   metadata: "read",
   actions: "read",
+  checks: "read",
+  statuses: "read",
 } as const;
 
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;

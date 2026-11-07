@@ -98,7 +98,15 @@ describe("githubRepoToken", () => {
     expect(url).toBe("https://api.github.com/app/installations/42/access_tokens");
     expect(JSON.parse(init.body)).toEqual({
       repositories: ["treq"],
-      permissions: { contents: "write", pull_requests: "write", metadata: "read", actions: "read" },
+      permissions: {
+        contents: "write",
+        pull_requests: "write",
+        issues: "write",
+        metadata: "read",
+        actions: "read",
+        checks: "read",
+        statuses: "read",
+      },
     });
   });
 
