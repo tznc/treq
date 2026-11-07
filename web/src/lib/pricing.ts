@@ -47,7 +47,7 @@ export const FAQ_ITEMS = [
   {
     question: 'What is free, and what do I pay for?',
     answer:
-      "The desktop app is free and open source, and runs everything on your machine. GitHub works through your local gh CLI and Linear through a personal API key, for any repository. You pay for the features that run on Treq's servers: the Treq GitHub App and Linear OAuth on Pro. Cloud workspaces are pay-as-you-go on top of Pro, at provider cost plus 20%, billed by the second. If you bring your own Boat, Daytona, or E2B account, the provider bills you for the machine and Treq charges 5% of the provider's list price.",
+      "The desktop app is free and open source, and runs everything on your machine. GitHub works through your local gh CLI and Linear through a personal API key, for any repository. You pay for the features that run on Treq's servers: the Treq GitHub App and Linear OAuth on Pro. Cloud workspaces are pay-as-you-go on top of Pro, at provider cost plus 20%, billed by the second. If you bring your own Boat, Daytona, or E2B account, the provider bills you for the machine and Treq charges 5% of the provider's list price. Both rates fall with volume in each billing period: after 730 hours of a Medium sandbox (2,920 vCPU-hours), the markup drops to 15% and the BYOS fee to 4%; after twice that, to 10% and 3%. The lower rate applies only to usage past each threshold.",
   },
   {
     question: 'How does the Pro trial work?',
