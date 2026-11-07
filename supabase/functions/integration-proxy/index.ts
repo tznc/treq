@@ -15,7 +15,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
 import { userHasPro } from "../_shared/billing/entitlement.ts";
 import { appJWT } from "../_shared/github/app.ts";
-import { linearTokenStore, proxyLinearRequest } from "../linear-proxy/lib.ts";
+import { linearTokenStore, proxyLinearRequest } from "./linear.ts";
 import {
   type Caller,
   exactIlike,
