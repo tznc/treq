@@ -1,8 +1,8 @@
 /**
- * E2B-pegged pricing (072): running time bills at E2B's rate for the size,
- * whichever provider runs it. Managed pays it plus 20%, BYOS pays 5% of it.
- * Stopped disk bills at Daytona's storage rate, with the same markup and fee.
- * usage_reports keeps the real provider cost.
+ * Fixed list prices (072): one price per size on every provider. Medium bills
+ * US$0.40/h managed and US$0.017/h on a BYOS key; stopped disk bills
+ * US$0.10/GB-month managed and US$0.004 BYOS. usage_reports keeps the real
+ * provider cost.
  */
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -13,7 +13,8 @@ import { createTestUser, deleteTestUser } from "../seed";
 
 const admin = getServiceClient();
 const HOUR = 3_600_000;
-const E2B_MEDIUM = 92_000; // nano-USD per second
+const MANAGED_MEDIUM = 0.4e9 / 3600; // nano-USD per second
+const BYOS_MEDIUM = 0.017e9 / 3600;
 const BOAT_MEDIUM = 10_000;
 const users: string[] = [];
 
@@ -110,7 +111,7 @@ async function reports(owner: string): Promise<Report[]> {
   return (data ?? []) as Report[];
 }
 
-it("bills Boat usage at E2B's price for the size", async () => {
+it("bills Boat usage at the list price for the size", async () => {
   const managed = await createTestUser();
   const byos = await createTestUser();
   users.push(managed.user.id, byos.user.id);
@@ -130,20 +131,20 @@ it("bills Boat usage at E2B's price for the size", async () => {
       Math.abs(r.provider_cost_nanousd - r.seconds * BOAT_MEDIUM),
     ).toBeLessThanOrEqual(BOAT_MEDIUM);
     expect(
-      Math.abs(r.billed_nanousd - r.seconds * E2B_MEDIUM * 1.2),
-    ).toBeLessThanOrEqual(E2B_MEDIUM * 1.2);
+      Math.abs(r.billed_nanousd - r.seconds * MANAGED_MEDIUM),
+    ).toBeLessThanOrEqual(MANAGED_MEDIUM);
   }
   for (const r of b) {
     expect(
-      Math.abs(r.byos_billed_nanousd - r.seconds * E2B_MEDIUM * 0.05),
-    ).toBeLessThanOrEqual(E2B_MEDIUM * 0.05);
+      Math.abs(r.byos_billed_nanousd - r.seconds * BYOS_MEDIUM),
+    ).toBeLessThanOrEqual(BYOS_MEDIUM);
     expect(r.billed_nanousd).toBe(r.byos_billed_nanousd);
   }
 
-  await recordOutcome("e2b-pegged-pricing-01-usage", {
+  await recordOutcome("list-prices-01-usage", {
     expectations: [
-      "Managed Boat Medium bills E2B Medium + 20% per second (US$0.39744/h), not Boat's cost + 20%.",
-      "BYOS on a Boat key bills 5% of E2B Medium (US$0.01656/h).",
+      "Managed Boat Medium bills the Medium list price, US$0.40/h, not Boat's cost + 20%.",
+      "BYOS on a Boat key bills the BYOS Medium list price, US$0.017/h.",
       "provider_cost_nanousd keeps Boat's real cost (US$0.036/h).",
     ],
     details: { managed: m, byos: b },
@@ -176,7 +177,7 @@ it("shows one price per size in the catalogs", async () => {
       [...new Set(t.regions.map((r) => Number(r.hourly_usd)))],
     ]),
   );
-  expect(prices.m).toEqual([0.39744]);
+  expect(prices.m).toEqual([0.4]);
 
   const { data: byosCatalog, error: byosError } =
     await anon.rpc("get_byos_catalog");
@@ -188,20 +189,21 @@ it("shows one price per size in the catalogs", async () => {
       provider_hourly_usd: number;
     }[]
   ).find((e) => e.tier_id === "m");
-  expect(Number(boatM?.hourly_usd)).toBe(0.01656);
+  expect(Number(boatM?.hourly_usd)).toBe(0.017);
   expect(Number(boatM?.provider_hourly_usd)).toBe(0.036);
 
-  await recordOutcome("e2b-pegged-pricing-02-catalog", {
+  await recordOutcome("list-prices-02-catalog", {
     expectations: [
-      "A signed-in user sees one Medium price (US$0.39744/h) in every region of get_machine_catalog.",
-      "get_byos_catalog shows a Boat Medium fee of 5% of E2B Medium (US$0.01656/h) next to Boat's own US$0.036/h.",
+      "A signed-in user sees one Medium price (US$0.40/h) in every region of get_machine_catalog.",
+      "get_byos_catalog shows a Boat Medium fee of US$0.017/h next to Boat's own US$0.036/h.",
     ],
     details: { prices, boatM },
   });
 }, 120_000);
 
-it("bills stopped Boat disk at Daytona's storage rate", async () => {
-  const DAYTONA_DISK = 30; // nano-USD per GB-second
+it("bills stopped Boat disk at the list price per GB", async () => {
+  const DISK_MANAGED = 0.1e9 / (730 * 3600); // nano-USD per GB-second
+  const DISK_BYOS = 0.004e9 / (730 * 3600);
   const managed = await createTestUser();
   const byos = await createTestUser();
   users.push(managed.user.id, byos.user.id);
@@ -216,23 +218,23 @@ it("bills stopped Boat disk at Daytona's storage rate", async () => {
   const b = await reports(byos.user.id);
   expect(m.length).toBeGreaterThanOrEqual(2);
   expect(b.length).toBeGreaterThanOrEqual(2);
-  const rate = DAYTONA_DISK * 10;
+
   for (const r of m) {
     expect(r.provider_cost_nanousd).toBe(0);
     expect(
-      Math.abs(r.billed_nanousd - r.seconds * rate * 1.2),
-    ).toBeLessThanOrEqual(rate * 1.2);
+      Math.abs(r.billed_nanousd - r.seconds * DISK_MANAGED * 10),
+    ).toBeLessThanOrEqual(DISK_MANAGED * 10);
   }
   for (const r of b) {
     expect(
-      Math.abs(r.byos_billed_nanousd - r.seconds * rate * 0.05),
-    ).toBeLessThanOrEqual(rate * 0.05);
+      Math.abs(r.byos_billed_nanousd - r.seconds * DISK_BYOS * 10),
+    ).toBeLessThanOrEqual(DISK_BYOS * 10 + 1);
   }
 
-  await recordOutcome("e2b-pegged-pricing-03-stopped-disk", {
+  await recordOutcome("list-prices-03-stopped-disk", {
     expectations: [
-      "A suspended managed Boat workspace with 10 GB bills Daytona's storage rate + 20% (US$0.0013/h), though Boat charges Treq nothing.",
-      "A suspended BYOS Boat workspace with 10 GB bills 5% of Daytona's storage rate.",
+      "A suspended managed Boat workspace with 10 GB bills US$0.10/GB-month, though Boat charges Treq nothing.",
+      "A suspended BYOS Boat workspace with 10 GB bills US$0.004/GB-month.",
     ],
     details: { managed: m, byos: b },
   });

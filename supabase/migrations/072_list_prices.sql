@@ -1,58 +1,90 @@
--- E2B-pegged pricing. Running time bills at E2B's rate for the size tier,
--- whichever provider runs it: managed pays that rate plus the markup (20%),
--- BYOS pays the BYOS fee (5%) of it. Stopped disk bills at Daytona's storage
--- rate on every provider that keeps the disk, with the same markup and fee. usage_reports.provider_cost_nanousd stays the real provider
--- cost, so margin per provider stays visible.
+-- Fixed list prices: one price per size on every provider, whichever provider
+-- runs the workspace. Managed and BYOS each have an hourly rate per size, and
+-- stopped disk bills per GB-month wherever the provider keeps the disk
+-- (stopKeepsDisk). The rates started from E2B (running) and Daytona (disk),
+-- with the 20% markup and 5% BYOS fee, rounded:
 --
--- The functions below are 068's (and 044/045's catalogs) with the running
--- rate read through list_running_nanousd_per_sec.
+--   size   managed   BYOS      stopped disk (all sizes)
+--   s      $0.20/h   $0.0085/h  managed $0.10/GB-month
+--   m      $0.40/h   $0.017/h   BYOS    $0.004/GB-month
+--   l      $0.80/h   $0.034/h
+--   xl     $1.60/h   $0.068/h
+--
+-- They no longer follow provider prices or the markup settings: changing a
+-- price is an update to list_prices. usage_reports.provider_cost_nanousd
+-- stays the real provider cost, so margin per provider stays visible. A size
+-- with no list price falls back to provider cost with the markup or fee.
+--
+-- The functions below are 068's (and 044/045/046's) with the billed rate read
+-- through billed_running_nanousd_per_sec / billed_stopped_nanousd_per_gb_sec.
 
--- E2B's running rate for the machine type's size tier at p_at; the machine
--- type's own rate (p_fallback) when E2B has no price for that tier then.
-create function treq_internal.list_running_nanousd_per_sec(
-  p_machine_type_id text, p_at timestamptz, p_fallback bigint)
-returns bigint
+create table public.list_prices (
+  tier_id text primary key references public.size_tiers (id),
+  managed_usd_per_hour numeric not null check (managed_usd_per_hour >= 0),
+  byos_usd_per_hour numeric not null check (byos_usd_per_hour >= 0),
+  stopped_managed_usd_per_gb_month numeric not null check (stopped_managed_usd_per_gb_month >= 0),
+  stopped_byos_usd_per_gb_month numeric not null check (stopped_byos_usd_per_gb_month >= 0),
+  updated_at timestamptz not null default now()
+);
+alter table public.list_prices enable row level security;
+revoke all on public.list_prices from anon, authenticated;
+
+insert into public.list_prices
+  (tier_id, managed_usd_per_hour, byos_usd_per_hour, stopped_managed_usd_per_gb_month, stopped_byos_usd_per_gb_month)
+values
+  ('s', 0.20, 0.0085, 0.10, 0.004),
+  ('m', 0.40, 0.017, 0.10, 0.004),
+  ('l', 0.80, 0.034, 0.10, 0.004),
+  ('xl', 1.60, 0.068, 0.10, 0.004);
+
+-- Billed nano-USD per running second for a machine type: its size's list
+-- price for the billing mode, else p_fallback.
+create function treq_internal.billed_running_nanousd_per_sec(
+  p_machine_type_id text, p_billing_mode text, p_fallback numeric)
+returns numeric
 language sql
 stable
 security definer
 set search_path = ''
 as $$
   select coalesce(
-    (select e.running_nanousd_per_sec
+    (select case when p_billing_mode = 'byos' then l.byos_usd_per_hour else l.managed_usd_per_hour end
+            * 1e9 / 3600
        from public.provider_machine_types m
-       join public.machine_type_prices e
-         on e.id = treq_internal.current_price_id('e2b:' || m.tier_id, p_at)
+       join public.list_prices l on l.tier_id = m.tier_id
       where m.id = p_machine_type_id),
     p_fallback);
 $$;
 
-revoke all on function treq_internal.list_running_nanousd_per_sec(text, timestamptz, bigint) from public, anon, authenticated;
-
--- Daytona's stopped-disk rate per GB for any provider that keeps a stopped
--- disk; 0 where the disk is lost (stopKeepsDisk false, e.g. Cloudflare). The
--- machine type's own rate (p_fallback) when Daytona has no price then.
-create function treq_internal.list_stopped_nanousd_per_gb_sec(
-  p_machine_type_id text, p_at timestamptz, p_fallback bigint)
-returns bigint
+-- Billed nano-USD per GB-second of stopped disk (a month is 730 hours): 0
+-- where the provider loses the disk when stopped (Cloudflare), else the list
+-- price for the billing mode, else p_fallback.
+create function treq_internal.billed_stopped_nanousd_per_gb_sec(
+  p_machine_type_id text, p_billing_mode text, p_fallback numeric)
+returns numeric
 language sql
 stable
 security definer
 set search_path = ''
 as $$
   select case
-    when coalesce((sp.capabilities->>'stopKeepsDisk')::boolean, true) is false then 0
+    when (select (sp.capabilities->>'stopKeepsDisk')::boolean
+            from public.provider_machine_types m
+            join public.sandbox_providers sp on sp.kind = m.provider_kind
+           where m.id = p_machine_type_id) is false then 0::numeric
     else coalesce(
-      (select d.stopped_nanousd_per_gb_sec
-         from public.machine_type_prices d
-        where d.id = treq_internal.current_price_id('daytona:' || m.tier_id, p_at)),
+      (select case when p_billing_mode = 'byos' then l.stopped_byos_usd_per_gb_month
+                   else l.stopped_managed_usd_per_gb_month end
+              * 1e9 / (730 * 3600)
+         from public.provider_machine_types m
+         join public.list_prices l on l.tier_id = m.tier_id
+        where m.id = p_machine_type_id),
       p_fallback)
-  end
-    from public.provider_machine_types m
-    join public.sandbox_providers sp on sp.kind = m.provider_kind
-   where m.id = p_machine_type_id;
+  end;
 $$;
 
-revoke all on function treq_internal.list_stopped_nanousd_per_gb_sec(text, timestamptz, bigint) from public, anon, authenticated;
+revoke all on function treq_internal.billed_running_nanousd_per_sec(text, text, numeric) from public, anon, authenticated;
+revoke all on function treq_internal.billed_stopped_nanousd_per_gb_sec(text, text, numeric) from public, anon, authenticated;
 
 CREATE OR REPLACE FUNCTION treq_internal.month_spend_nanousd(p_user_id uuid, p_now timestamp with time zone)
  RETURNS bigint
@@ -72,15 +104,14 @@ AS $function$
        and r.hour >= b.month_start and r.hour < p_now
   ),
   open as (
-    select coalesce(sum(treq_internal.billed_nanousd(
+    select coalesce(sum(
              extract(epoch from
                least(coalesce(u.ended_at, p_now), p_now)
                - greatest(u.started_at, greatest(b.month_start, coalesce(rp.reported_until, b.month_start))))
              * case u.kind
-                 when 'running' then treq_internal.list_running_nanousd_per_sec(p.machine_type_id, u.started_at, p.running_nanousd_per_sec)
-                 else treq_internal.list_stopped_nanousd_per_gb_sec(p.machine_type_id, u.started_at, p.stopped_nanousd_per_gb_sec) * coalesce(u.disk_gb, 0)
-               end,
-             p.markup_bps, u.billing_mode)), 0) as billed
+                 when 'running' then treq_internal.billed_running_nanousd_per_sec(p.machine_type_id, u.billing_mode, treq_internal.billed_nanousd(p.running_nanousd_per_sec, p.markup_bps, u.billing_mode))
+                 else treq_internal.billed_stopped_nanousd_per_gb_sec(p.machine_type_id, u.billing_mode, treq_internal.billed_nanousd(p.stopped_nanousd_per_gb_sec, p.markup_bps, u.billing_mode)) * coalesce(u.disk_gb, 0)
+               end), 0) as billed
       from bounds b
      cross join reported rp
       join public.usage_intervals u
@@ -100,13 +131,12 @@ CREATE OR REPLACE FUNCTION treq_internal.org_spend_nanousd(p_org_id uuid, p_user
  SET search_path TO ''
 AS $function$
   with w as (select treq_internal.org_spend_window_start(p_org_id, p_now) as start)
-  select coalesce(round(sum(treq_internal.billed_nanousd(
+  select coalesce(round(sum(
            extract(epoch from least(coalesce(u.ended_at, p_now), p_now) - greatest(u.started_at, w.start))
            * case u.kind
-               when 'running' then treq_internal.list_running_nanousd_per_sec(p.machine_type_id, u.started_at, p.running_nanousd_per_sec)
-               else treq_internal.list_stopped_nanousd_per_gb_sec(p.machine_type_id, u.started_at, p.stopped_nanousd_per_gb_sec) * coalesce(u.disk_gb, 0)
-             end,
-           p.markup_bps, u.billing_mode))), 0)::bigint
+               when 'running' then treq_internal.billed_running_nanousd_per_sec(p.machine_type_id, u.billing_mode, treq_internal.billed_nanousd(p.running_nanousd_per_sec, p.markup_bps, u.billing_mode))
+               else treq_internal.billed_stopped_nanousd_per_gb_sec(p.machine_type_id, u.billing_mode, treq_internal.billed_nanousd(p.stopped_nanousd_per_gb_sec, p.markup_bps, u.billing_mode)) * coalesce(u.disk_gb, 0)
+             end)), 0)::bigint
     from w
     join public.usage_intervals u
       on u.billing_org_id = p_org_id
@@ -134,9 +164,9 @@ begin
          b.owner_user_id, b.billing_org_id, b.hour,
          round(sum(b.seconds))::int,
          round(sum(b.cost))::bigint,
-         round(sum(treq_internal.billed_nanousd(b.list_cost, b.markup_bps, b.billing_mode)))::bigint,
+         round(sum(b.billed))::bigint,
          round(sum(case when b.billing_mode = 'byos'
-                        then treq_internal.billed_nanousd(b.list_cost, b.markup_bps, b.billing_mode)
+                        then b.billed
                         else 0 end))::bigint
     from (
       select u.owner_user_id, u.billing_org_id, h.hour, p.markup_bps, u.billing_mode,
@@ -154,9 +184,9 @@ begin
                least(coalesce(u.ended_at, v_cutoff), h.hour + interval '1 hour', v_cutoff)
                - greatest(u.started_at, h.hour))
              * case u.kind
-                 when 'running' then treq_internal.list_running_nanousd_per_sec(p.machine_type_id, h.hour, p.running_nanousd_per_sec)
-                 else treq_internal.list_stopped_nanousd_per_gb_sec(p.machine_type_id, h.hour, p.stopped_nanousd_per_gb_sec) * coalesce(u.disk_gb, 0)
-               end as list_cost
+                 when 'running' then treq_internal.billed_running_nanousd_per_sec(p.machine_type_id, u.billing_mode, treq_internal.billed_nanousd(p.running_nanousd_per_sec, p.markup_bps, u.billing_mode))
+                 else treq_internal.billed_stopped_nanousd_per_gb_sec(p.machine_type_id, u.billing_mode, treq_internal.billed_nanousd(p.stopped_nanousd_per_gb_sec, p.markup_bps, u.billing_mode)) * coalesce(u.disk_gb, 0)
+               end as billed
         from public.usage_intervals u
         join public.machine_type_prices p on p.id = u.price_id
         cross join lateral generate_series(
@@ -193,9 +223,9 @@ begin
          b.owner_user_id, b.billing_org_id, b.hour,
          round(sum(b.seconds))::int,
          round(sum(b.cost))::bigint,
-         round(sum(treq_internal.billed_nanousd(b.list_cost, b.markup_bps, b.billing_mode)))::bigint,
+         round(sum(b.billed))::bigint,
          round(sum(case when b.billing_mode = 'byos'
-                        then treq_internal.billed_nanousd(b.list_cost, b.markup_bps, b.billing_mode)
+                        then b.billed
                         else 0 end))::bigint
     from (
       select u.owner_user_id, u.billing_org_id, h.hour, p.markup_bps, u.billing_mode,
@@ -213,9 +243,9 @@ begin
                least(coalesce(u.ended_at, v_cutoff), h.hour + interval '1 hour', v_cutoff)
                - greatest(u.started_at, h.hour))
              * case u.kind
-                 when 'running' then treq_internal.list_running_nanousd_per_sec(p.machine_type_id, h.hour, p.running_nanousd_per_sec)
-                 else treq_internal.list_stopped_nanousd_per_gb_sec(p.machine_type_id, h.hour, p.stopped_nanousd_per_gb_sec) * coalesce(u.disk_gb, 0)
-               end as list_cost
+                 when 'running' then treq_internal.billed_running_nanousd_per_sec(p.machine_type_id, u.billing_mode, treq_internal.billed_nanousd(p.running_nanousd_per_sec, p.markup_bps, u.billing_mode))
+                 else treq_internal.billed_stopped_nanousd_per_gb_sec(p.machine_type_id, u.billing_mode, treq_internal.billed_nanousd(p.stopped_nanousd_per_gb_sec, p.markup_bps, u.billing_mode)) * coalesce(u.disk_gb, 0)
+               end as billed
         from public.usage_intervals u
         join public.machine_type_prices p on p.id = u.price_id
         cross join lateral generate_series(
@@ -252,7 +282,7 @@ AS $function$
                    'region', d.region,
                    'machine_type_id', d.machine_type_id,
                    'hourly_usd', round(
-                     treq_internal.list_running_nanousd_per_sec(d.machine_type_id, now(), p.running_nanousd_per_sec) * 3600 * (10000 + p.markup_bps) / 10000.0 / 1e9, 6)
+                     treq_internal.billed_running_nanousd_per_sec(d.machine_type_id, 'managed', p.running_nanousd_per_sec * (10000 + p.markup_bps) / 10000.0) * 3600 / 1e9, 6)
                  ) order by d.region)
             from public.pro_provider_defaults d
             join public.machine_type_prices p
@@ -278,8 +308,7 @@ AS $function$
            'machine_type_id', t.id,
            'regions', to_jsonb(t.regions),
            'provider_hourly_usd', round(p.running_nanousd_per_sec * 3600 / 1e9, 6),
-           'hourly_usd', round(treq_internal.billed_nanousd(
-              treq_internal.list_running_nanousd_per_sec(t.id, now(), p.running_nanousd_per_sec) * 3600, p.markup_bps, 'byos') / 1e9, 6)
+           'hourly_usd', round(treq_internal.billed_running_nanousd_per_sec(t.id, 'byos', treq_internal.billed_nanousd(p.running_nanousd_per_sec, p.markup_bps, 'byos')) * 3600 / 1e9, 6)
          ) order by c.provider_kind, st.sort), '[]'::jsonb)
     from public.remote_provider_credentials c
     join public.sandbox_providers sp on sp.kind = c.provider_kind
@@ -295,8 +324,6 @@ AS $function$
      and c.owner_org_id is null;
 $function$;
 
--- A suspended workspace opens a stopped-disk interval when its list storage
--- rate (Daytona's) bills, not only when its own provider charges for disk.
 CREATE OR REPLACE FUNCTION public.set_placement_state(p_placement_id uuid, p_state text, p_disk_gb integer DEFAULT NULL::integer, p_at timestamp with time zone DEFAULT NULL::timestamp with time zone)
  RETURNS void
  LANGUAGE plpgsql
@@ -340,7 +367,7 @@ begin
        order by u.started_at desc limit 1)
     when p_state in ('ready', 'waking', 'degraded', 'bootstrapping', 'installing_access', 'verifying')
       then 'running'
-    when p_state = 'suspended' and treq_internal.list_stopped_nanousd_per_gb_sec(v_price.machine_type_id, v_at, v_price.stopped_nanousd_per_gb_sec) > 0
+    when p_state = 'suspended' and treq_internal.billed_stopped_nanousd_per_gb_sec(v_price.machine_type_id, 'managed', v_price.stopped_nanousd_per_gb_sec) > 0
       then 'stopped_storage'
     else null
   end;

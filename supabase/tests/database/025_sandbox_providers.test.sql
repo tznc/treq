@@ -50,8 +50,8 @@ select is(
   (select (r->>'hourly_usd')::numeric
      from jsonb_array_elements(public.get_machine_catalog()) t, jsonb_array_elements(t->'regions') r
     where t->>'id' = 's' and r->>'region' = 'eu_west'),
-  0.19872,
-  'the catalog price is E2B Small x 1.2 ($0.1656/h -> $0.19872/h), whichever provider runs it');
+  0.20,
+  'the catalog price is the Small list price (US$0.20/h), whichever provider runs it');
 select ok(
   not exists (
     select 1 from jsonb_array_elements(public.get_machine_catalog()) t
@@ -133,7 +133,7 @@ select is(
   (select count(*)::int from public.usage_intervals
     where placement_id = '00000000-0000-0000-0000-00000000b001' and ended_at is null and kind = 'stopped_storage'),
   1,
-  'and opens a stopped-disk interval: local keeps its disk, which bills at Daytona''s rate');
+  'and opens a stopped-disk interval: local keeps its disk, which bills');
 set local role service_role;
 select public.set_placement_state('00000000-0000-0000-0000-00000000b001', 'ready');
 reset role;
@@ -195,8 +195,8 @@ select results_eq(
        from public.usage_reports
       where owner_user_id = '00000000-0000-0000-0000-0000000000d1'
         and hour = date_trunc('hour', now()) - interval '3 hours' $$,
-  $$ values (3600, 18000000::bigint, 21600000::bigint) $$,
-  'one hour on boat:small costs $0.018 and bills $0.0216');
+  $$ values (3600, 18000000::bigint, 200000000::bigint) $$,
+  'one hour on boat:small costs $0.018 and bills the Small list price, $0.20');
 select ok(
   not exists (select 1 from public.usage_reports where hour >= date_trunc('hour', now())),
   'the current, unfinished hour is not reported');
@@ -210,7 +210,7 @@ select is(
 select set_config('request.jwt.claims',
   '{"sub":"00000000-0000-0000-0000-0000000000d1","role":"authenticated"}', true);
 select ok(
-  (select sum(billed_usd) from public.get_usage_summary(now() - interval '1 day', now())) >= 0.0216,
+  (select sum(billed_usd) from public.get_usage_summary(now() - interval '1 day', now())) >= 0.20,
   'the owner sees their billed usage');
 reset role;
 
