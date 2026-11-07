@@ -9,6 +9,9 @@ use reqwest::Method;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
+mod write;
+pub use write::github_write;
+
 const API_BASE: &str = "https://api.github.com";
 const JSON_MEDIA_TYPE: &str = "application/vnd.github+json";
 const DIFF_MEDIA_TYPE: &str = "application/vnd.github.diff";
