@@ -280,7 +280,7 @@ it("takes a price edit from treq_admin.admin_config without a migration", async 
       p_value: { tiers: {} },
     });
     expect(badError?.message).toContain(
-      "list_prices: tiers.s.managed_usd_per_hour must be a number >= 0",
+      "admin_config: list_prices does not match its schema",
     );
 
     const { error: anonError } = await anon.rpc("admin_config_get", {
@@ -296,7 +296,7 @@ it("takes a price edit from treq_admin.admin_config without a migration", async 
     await recordOutcome("list-prices-04-admin-config-edit", {
       expectations: [
         "Setting the list_prices key through admin_config_set (service role) changes the Medium catalog price to US$0.36/h at once.",
-        "A value that drops the tier prices is rejected with a message naming the missing field.",
+        "A value that drops the tier prices is rejected by its JSON Schema, naming the key.",
         "A signed-in user can neither call admin_config_get nor query the treq_admin schema.",
       ],
       details: {

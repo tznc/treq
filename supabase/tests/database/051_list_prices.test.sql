@@ -7,7 +7,7 @@
 -- Medium: managed US$0.40/h = 111,111.1 nano-USD/s; BYOS US$0.017/h = 4,722.2.
 -- Disk: managed US$0.10/GB-month = 38.05 nano-USD/GB-s; BYOS US$0.004 = 1.52.
 begin;
-select plan(26);
+select plan(27);
 
 update public.machine_type_prices set effective_from = now() - interval '30 days' where effective_to is null;
 
@@ -21,12 +21,16 @@ select is((select value from treq_admin.admin_config where key = 'list_prices'),
   'one rounded price per size, in admin_config');
 select throws_ok(
   $$ update treq_admin.admin_config set value = value #- '{tiers,xl}' where key = 'list_prices' $$,
-  'P0001', 'list_prices: tiers.xl.managed_usd_per_hour must be a number >= 0',
+  'P0001', 'admin_config: list_prices does not match its schema',
   'an edit that drops a size is rejected');
 select throws_ok(
   $$ update treq_admin.admin_config set value = jsonb_set(value, '{stopped_disk,byos_usd_per_gb_month}', '"cheap"') where key = 'list_prices' $$,
-  'P0001', 'list_prices: stopped_disk.byos_usd_per_gb_month must be a number >= 0',
+  'P0001', 'admin_config: list_prices does not match its schema',
   'an edit with a non-number price is rejected');
+select throws_ok(
+  $$ update treq_admin.admin_config set value = jsonb_set(value, '{tiers,s,managed_usd_per_hour}', '-1') where key = 'list_prices' $$,
+  'P0001', 'admin_config: list_prices does not match its schema',
+  'a negative price is rejected');
 select ok(not has_schema_privilege('authenticated', 'treq_admin', 'usage')
           and not has_schema_privilege('anon', 'treq_admin', 'usage'),
   'clients cannot reach the treq_admin schema');

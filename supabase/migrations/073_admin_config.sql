@@ -26,9 +26,8 @@
 -- the Supabase dashboard (Table Editor, schema treq_admin). The schema is not
 -- exposed through the API and clients have no access to it; service code
 -- reads and writes through admin_config_get / admin_config_set, which only
--- the service role can call. A key with a known shape is checked on write by
--- admin_config_validate, so a bad edit is refused instead of breaking
--- billing.
+-- the service role can call. A key with a JSON Schema in admin_config_schemas
+-- is checked on write, so a bad edit is refused instead of breaking billing.
 create schema treq_admin;
 revoke all on schema treq_admin from public, anon, authenticated;
 
@@ -41,39 +40,52 @@ create table treq_admin.admin_config (
 alter table treq_admin.admin_config enable row level security;
 revoke all on treq_admin.admin_config from public, anon, authenticated;
 
+-- JSON Schema per key (pg_jsonschema). A key with a schema must match it on
+-- every write; a key without one is free-form. Edit a schema here to change
+-- what a key accepts.
+create extension if not exists pg_jsonschema with schema extensions;
+
+create table treq_admin.admin_config_schemas (
+  key text primary key,
+  schema json not null check (extensions.json_matches_schema('{"type":"object"}', schema))
+);
+alter table treq_admin.admin_config_schemas enable row level security;
+revoke all on treq_admin.admin_config_schemas from public, anon, authenticated;
+
+insert into treq_admin.admin_config_schemas (key, schema) values
+  ('byos_markup_bps', '{"type":"integer","minimum":0,"maximum":10000}'),
+  ('spend_cap_max_usd', '{"type":"number","minimum":5}'),
+  ('list_prices', '{
+    "type": "object",
+    "required": ["tiers", "stopped_disk"],
+    "properties": {
+      "tiers": {
+        "type": "object",
+        "required": ["s", "m", "l", "xl"],
+        "additionalProperties": {"type":"object","required":["managed_usd_per_hour","byos_usd_per_hour"],"properties":{"managed_usd_per_hour":{"type":"number","minimum":0},"byos_usd_per_hour":{"type":"number","minimum":0}}}
+      },
+      "stopped_disk": {
+        "type": "object",
+        "required": ["managed_usd_per_gb_month", "byos_usd_per_gb_month"],
+        "properties": {
+          "managed_usd_per_gb_month": {"type": "number", "minimum": 0},
+          "byos_usd_per_gb_month": {"type": "number", "minimum": 0}
+        }
+      }
+    }
+  }');
+
 create function treq_internal.admin_config_validate()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
 declare
-  v_path text[];
-  v_paths text[][] := array[
-    array['tiers', 's', 'managed_usd_per_hour'], array['tiers', 's', 'byos_usd_per_hour'],
-    array['tiers', 'm', 'managed_usd_per_hour'], array['tiers', 'm', 'byos_usd_per_hour'],
-    array['tiers', 'l', 'managed_usd_per_hour'], array['tiers', 'l', 'byos_usd_per_hour'],
-    array['tiers', 'xl', 'managed_usd_per_hour'], array['tiers', 'xl', 'byos_usd_per_hour'],
-    array['stopped_disk', 'managed_usd_per_gb_month', ''], array['stopped_disk', 'byos_usd_per_gb_month', '']];
+  v_schema json := (select s.schema from treq_admin.admin_config_schemas s where s.key = new.key);
 begin
   new.updated_at := now();
-  if new.key = 'byos_markup_bps'
-     and (jsonb_typeof(new.value) is distinct from 'number'
-          or (new.value #>> '{}')::numeric not between 0 and 10000
-          or (new.value #>> '{}')::numeric <> trunc((new.value #>> '{}')::numeric)) then
-    raise exception 'byos_markup_bps must be a number between 0 and 10000';
-  end if;
-  if new.key = 'spend_cap_max_usd'
-     and (jsonb_typeof(new.value) is distinct from 'number' or (new.value #>> '{}')::numeric < 5) then
-    raise exception 'spend_cap_max_usd must be a number >= 5';
-  end if;
-  if new.key = 'list_prices' then
-    foreach v_path slice 1 in array v_paths loop
-      v_path := array_remove(v_path, '');
-      if jsonb_typeof(new.value #> v_path) is distinct from 'number'
-         or (new.value #>> v_path)::numeric < 0 then
-        raise exception 'list_prices: % must be a number >= 0', array_to_string(v_path, '.');
-      end if;
-    end loop;
+  if v_schema is not null and not extensions.jsonb_matches_schema(v_schema, new.value) then
+    raise exception 'admin_config: % does not match its schema', new.key;
   end if;
   return new;
 end;
