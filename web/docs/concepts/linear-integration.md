@@ -20,13 +20,13 @@ If the issue has sub-issues, you can optionally include them as separate nested 
 
 ## Authentication
 
-The Linear integration is a Pro feature. On the Free plan, Settings shows an upgrade prompt in place of the Linear controls, and the app refuses Linear requests. A repository that already has an API key or OAuth connection stops working on Free and resumes once Pro is back; nothing is deleted.
+The Linear integration is a Pro feature.
 
 Pro supports two authentication methods:
 
-**Personal API key:** Paste your Linear API key into Settings, stored locally per repository. The key stays on your machine and is never sent to Treq's servers.
+**Personal API key:** Paste your Linear API key into Settings, stored locally per repository. The key stays on your machine and is never sent to Treq's servers. It is device-local, so agents on remote machines cannot use it.
 
-**OAuth:** Connect your Linear account. Requests go through Treq's servers, so the raw token never reaches your machine. The server refuses OAuth requests from accounts without Pro. If both an API key and OAuth are set, the API key takes priority.
+**OAuth:** Connect your Linear account. Requests go through Treq's servers, which lets mobile and remote sandboxes use your Linear account without direct access to any API key. If both an API key and OAuth are set, the API key takes priority.
 
 ## Repository Settings
 
