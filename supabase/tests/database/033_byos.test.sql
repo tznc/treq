@@ -135,8 +135,8 @@ select throws_ok(
 select is(treq_internal.month_spend_nanousd('00000000-0000-0000-0000-0000000000b1',
             date_trunc('hour', now()) - interval '1 hour'),
   case when date_trunc('hour', now()) - interval '2 hours' >= date_trunc('month', now(), 'UTC')
-       then (21600000 + 900000)::bigint else null end,
-  'the spend cap counts managed at cost x 1.2 plus BYOS at cost x 0.05 (unreported)');
+       then (200000000 + 8500000)::bigint else null end,
+  'the spend cap counts managed and BYOS at the Small list prices (unreported)');
 
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
@@ -146,8 +146,8 @@ select results_eq(
   $$ select provider_cost_nanousd, billed_nanousd, byos_billed_nanousd from public.usage_reports
       where owner_user_id = '00000000-0000-0000-0000-0000000000b1'
         and hour = date_trunc('hour', now()) - interval '2 hours' $$,
-  $$ values (36000000::bigint, 22500000::bigint, 900000::bigint) $$,
-  'one report per owner-hour: managed at 20% markup plus BYOS at 5% of cost');
+  $$ values (36000000::bigint, 208500000::bigint, 8500000::bigint) $$,
+  'one report per owner-hour: managed $0.20/h plus BYOS $0.0085/h on Small');
 select is(treq_internal.byos_markup_bps(), 500, 'the BYOS rate is 500 bps by default');
 
 set local role authenticated;
@@ -156,7 +156,7 @@ select set_config('request.jwt.claims',
 select results_eq(
   $$ select billed_usd, byos_billed_usd from public.get_usage_summary(now() - interval '3 hours', now())
       where hour = date_trunc('hour', now()) - interval '2 hours' $$,
-  $$ values (0.0225::numeric, 0.0009::numeric) $$,
+  $$ values (0.2085::numeric, 0.0085::numeric) $$,
   'the usage summary shows the total and the BYOS part');
 select throws_ok($$ select public.delete_provider_credential('boat') $$, 'P0001', 'credential_in_use',
   'a credential a live workspace uses cannot be removed');
