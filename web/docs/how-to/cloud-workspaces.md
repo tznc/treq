@@ -65,8 +65,8 @@ Both rates fall with volume. Usage is counted in vCPU-hours per billing period, 
 | vCPU-hours this period | Treq-managed | Your own account |
 |---|---|---|
 | First 2,920 (730 hours of a Medium sandbox) | provider cost + 20% | 5% of list price |
-| Next 2,920 | provider cost + 15% | 4% of list price |
-| Beyond 5,840 | provider cost + 10% | 3% of list price |
+| Next 2,920 | provider cost + 18% | 4% of list price |
+| Beyond 5,840 | provider cost + 16% | 3% of list price |
 
 Each rate applies only to the usage inside its band.
 

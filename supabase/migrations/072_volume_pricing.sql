@@ -3,8 +3,8 @@
 --
 --   sandbox-months this period   managed markup   BYOS fee
 --   0 - 1                         20%              5%
---   1 - 2                         15%              4%
---   2 +                           10%              3%
+--   1 - 2                         18%              4%
+--   2 +                           16%              3%
 --
 -- A sandbox-month is 730 hours of a Medium (4 vCPU) sandbox, counted in
 -- vCPU-seconds (10,512,000), so a larger machine moves through the tiers
@@ -33,7 +33,7 @@ as $$
 declare
   v_tier constant numeric := 10512000;
   v_mult numeric[] := case when p_billing_mode = 'byos'
-                           then array[1, 0.8, 0.6] else array[1, 0.75, 0.5] end;
+                           then array[1, 0.8, 0.6] else array[1, 0.9, 0.8] end;
   v_lo numeric[] := array[0, v_tier, 2 * v_tier];
   v_hi numeric[] := array[v_tier, 2 * v_tier, 'Infinity'::numeric];
   v_prior numeric := greatest(coalesce(p_prior, 0), 0);

@@ -1,6 +1,6 @@
 -- Volume pricing (072): the markup falls with usage in the billing period.
 -- One tier is 730 hours of a Medium (4 vCPU) sandbox = 10,512,000 vCPU-seconds.
--- Managed markup 20% / 15% / 10%, BYOS fee 5% / 4% / 3%, graduated.
+-- Managed markup 20% / 18% / 16%, BYOS fee 5% / 4% / 3%, graduated.
 begin;
 select plan(14);
 
@@ -9,11 +9,11 @@ select is(treq_internal.volume_rate_bps('managed', 2000, 0, 0), 2000::numeric,
   'no usage yet: full managed markup');
 select is(treq_internal.volume_rate_bps('managed', 2000, 0, 10512000), 2000::numeric,
   'first sandbox-month: 20%');
-select is(treq_internal.volume_rate_bps('managed', 2000, 10512000, 10512000), 1500::numeric,
-  'second sandbox-month: 15%');
-select is(treq_internal.volume_rate_bps('managed', 2000, 21024000, 105120000), 1000::numeric,
-  'past two sandbox-months: 10%');
-select is(treq_internal.volume_rate_bps('managed', 2000, 5256000, 10512000), 1750::numeric,
+select is(treq_internal.volume_rate_bps('managed', 2000, 10512000, 10512000), 1800::numeric,
+  'second sandbox-month: 18%');
+select is(treq_internal.volume_rate_bps('managed', 2000, 21024000, 105120000), 1600::numeric,
+  'past two sandbox-months: 16%');
+select is(treq_internal.volume_rate_bps('managed', 2000, 5256000, 10512000), 1900::numeric,
   'a slice across a boundary blends the two tiers');
 select is(treq_internal.volume_rate_bps('byos', 500, 0, 3600), 500::numeric,
   'BYOS first sandbox-month: 5%');
@@ -65,11 +65,11 @@ select ok((select bool_and(abs(billed_nanousd - round(provider_cost_nanousd * 1.
             where owner_user_id = '00000000-0000-0000-0000-0000000051a2'
               and identifier <> 'volume-light-old'),
   'light user, old usage outside the period: 20% markup');
-select ok((select bool_and(abs(billed_nanousd - round(provider_cost_nanousd * 1.10)) <= 1)
+select ok((select bool_and(abs(billed_nanousd - round(provider_cost_nanousd * 1.16)) <= 1)
              from public.usage_reports
             where owner_user_id = '00000000-0000-0000-0000-0000000051a1'
               and identifier <> 'volume-heavy-prior'),
-  'heavy user past two sandbox-months this period: 10% markup');
+  'heavy user past two sandbox-months this period: 16% markup');
 select is(public.build_usage_reports(now()), 0, 'a second build writes nothing');
 select ok(not has_function_privilege('authenticated', 'treq_internal.volume_rate_bps(text, integer, numeric, numeric)', 'execute'),
   'clients cannot call the tier function');

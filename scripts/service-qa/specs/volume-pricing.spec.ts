@@ -1,7 +1,7 @@
 /**
  * Volume pricing (072): build_usage_reports bills each hour at the tier the
  * invoice owner's usage this period has reached. Tiers are 730 h of a Medium
- * (4 vCPU) sandbox = 10,512,000 vCPU-seconds; managed markup 20/15/10%, BYOS
+ * (4 vCPU) sandbox = 10,512,000 vCPU-seconds; managed markup 20/18/16%, BYOS
  * fee 5/4/3%.
  */
 import { randomUUID } from "node:crypto";
@@ -161,7 +161,7 @@ it("bills each hour at the owner's volume tier", async () => {
     ).toBe(true);
   for (const r of h)
     expect(
-      near(r.billed_nanousd, Math.round(r.provider_cost_nanousd * 1.1)),
+      near(r.billed_nanousd, Math.round(r.provider_cost_nanousd * 1.16)),
     ).toBe(true);
   for (const r of b) {
     expect(
@@ -176,7 +176,7 @@ it("bills each hour at the owner's volume tier", async () => {
   await recordOutcome("volume-pricing-01-tiers", {
     expectations: [
       "A Pro user with no usage this period pays provider cost plus 20%.",
-      "A Pro user past two sandbox-months of managed usage this period pays cost plus 10%.",
+      "A Pro user past two sandbox-months of managed usage this period pays cost plus 16%.",
       "A BYOS user in the second sandbox-month pays a 4% fee, counted apart from managed usage.",
     ],
     details: { light: l, heavy: h, byos: b },
