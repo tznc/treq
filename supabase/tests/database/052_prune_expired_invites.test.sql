@@ -1,8 +1,8 @@
--- prune_expired_organization_invites from 074_prune_expired_invites.sql: the
--- daily remote-maintenance run deletes invites that expired without being
--- accepted. Live invites and accepted ones stay.
+-- prune_expired_organization_invites from 074_prune_expired_invites.sql: a
+-- daily pg_cron job deletes invites that expired without being accepted.
+-- Live invites and accepted ones stay.
 begin;
-select plan(4);
+select plan(6);
 
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000000d1', 'prune-invites-owner@example.com');
@@ -35,6 +35,13 @@ select function_privs_are('public', 'prune_expired_organization_invites', array[
   array[]::text[], 'authenticated cannot prune invites');
 select function_privs_are('public', 'prune_expired_organization_invites', array[]::text[], 'anon',
   array[]::text[], 'anon cannot prune invites');
+
+select is(
+  (select schedule from cron.job where jobname = 'prune-expired-organization-invites'),
+  '23 3 * * *', 'pg_cron runs the prune daily at 03:23 UTC');
+select is(
+  (select command from cron.job where jobname = 'prune-expired-organization-invites'),
+  'select public.prune_expired_organization_invites()', 'the job calls the prune function');
 
 select * from finish();
 rollback;
