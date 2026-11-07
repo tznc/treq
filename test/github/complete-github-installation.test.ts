@@ -226,7 +226,7 @@ describe("githubInstallationAccess", () => {
         token_type: "bearer",
         expires_in: 28800,
         refresh_token: "ghr_refresh",
-        refresh_token_expires_in: 15724800,
+        refresh_token_expires_in: 15638400,
       }),
     ]);
     const now = () => Date.parse("2026-11-08T00:00:00.000Z");

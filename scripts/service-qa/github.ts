@@ -25,7 +25,12 @@ export function stubGitHubInstallationAccess(
       if (!(code in users)) {
         throw new Error("GitHub token exchange refused: bad_verification_code");
       }
-      return `${tokenPrefix}${code}`;
+      return {
+        accessToken: `${tokenPrefix}${code}`,
+        refreshToken: null,
+        expiresAt: null,
+        refreshExpiresAt: null,
+      };
     },
     async userCanAccessInstallation(userToken, installationId) {
       const code = userToken.slice(tokenPrefix.length);
