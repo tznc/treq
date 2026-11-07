@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const SCRIPT = join(import.meta.dirname, "../../scripts/check-migration-order.sh");
+const SCRIPT = join(
+  import.meta.dirname,
+  "../../scripts/check-migration-order.sh",
+);
 
 function repoWith(base: string[], added: string[]) {
   const dir = mkdtempSync(join(tmpdir(), "mig-order-"));
