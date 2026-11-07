@@ -38,7 +38,9 @@ impl ScreenTracker {
     if tracked.contains_key(pty_id) {
       return;
     }
-    let parser = Arc::new(Mutex::new(crate::core::pty_daemon::new_screen(cols, rows)));
+    let parser = Arc::new(Mutex::new(crate::core::terminal_screen::new_screen(
+      cols, rows,
+    )));
     let sink = parser.clone();
     let output = crate::pty_stream::subscribe(
       pty_id,

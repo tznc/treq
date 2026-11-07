@@ -222,7 +222,7 @@ mod tests {
   const RESET: &str = "\x1b[0m";
 
   fn screen(text: &str) -> vt100::Parser {
-    let mut parser = crate::core::pty_daemon::new_screen(100, 24);
+    let mut parser = crate::core::terminal_screen::new_screen(100, 24);
     parser.process(text.replace('\n', "\r\n").as_bytes());
     parser
   }
