@@ -1112,6 +1112,88 @@ function OrganizationCard({
   );
 }
 
+// Free and Pro users see this in place of the create form. Get Team creates
+// the organization, then opens Team checkout for it, so nobody is left with
+// an organization that has no Team.
+function GetTeamCard({
+  checkoutAvailable,
+  onCreated,
+}: {
+  checkoutAvailable: boolean;
+  onCreated: () => Promise<unknown>;
+}) {
+  const [name, setName] = useState("");
+  const [orgId, setOrgId] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onCheckoutError = useCallback((message: string) => {
+    setError(message);
+  }, []);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!checkoutAvailable) return;
+    setPending(true);
+    setError(null);
+    try {
+      const created = await organizationsRequest<{ organization: { id: string } }>({
+        action: "create",
+        name,
+      });
+      setOrgId(created.organization.id);
+      await onCreated();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <section aria-label="Get Team" style={styles.orgCard}>
+      <div style={styles.orgName}>Get Team</div>
+      <p style={styles.billingNote}>
+        Every member gets Pro, with shared billing and a shared GitHub App
+        installation. US$199 per month for {TEAM_INCLUDED_SEATS} members, then
+        US${TEAM_EXTRA_SEAT_USD} per extra member.
+      </p>
+      {orgId ? (
+        <EmbeddedCheckoutPanel organizationId={orgId} onError={onCheckoutError} />
+      ) : (
+        <form className="dashboard-form" style={styles.teamForm} onSubmit={submit}>
+          <input
+            required
+            maxLength={100}
+            aria-label="Organization name"
+            placeholder="Acme"
+            value={name}
+            disabled={!checkoutAvailable}
+            onChange={(e) => setName(e.target.value)}
+            style={styles.input}
+          />
+          <button
+            type="submit"
+            disabled={!checkoutAvailable || pending}
+            style={{
+              ...styles.saveButton,
+              ...(!checkoutAvailable ? styles.primaryButtonDisabled : {}),
+            }}
+          >
+            Get Team
+          </button>
+        </form>
+      )}
+      {!checkoutAvailable && <div style={styles.comingSoonSubtext}>Coming Soon</div>}
+      {error && (
+        <div role="alert" style={styles.errorText}>
+          {error}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function clearSearchParams(...names: string[]) {
   const url = new URL(window.location.href);
   for (const name of names) url.searchParams.delete(name);
@@ -1217,6 +1299,13 @@ function TeamTab({
         : `You joined ${joined.organization.name}. Every member of a team with Team has Pro.`;
     });
 
+  // Free and Pro users get Team by creating an organization and paying in
+  // one step. Members of a team that already has Team create more directly.
+  const hasTeam = (data?.memberships ?? []).some(
+    (m) =>
+      m.user_id === userId &&
+      (data?.subscriptions ?? []).some((s) => s.owner_id === m.org_id),
+  );
   const orgs = new Map<string, { id: string; name: string }>();
   for (const m of data?.memberships ?? []) {
     if (m.user_id === userId && m.organizations) orgs.set(m.org_id, m.organizations);
@@ -1294,41 +1383,51 @@ function TeamTab({
         ))
       )}
 
-      <div style={styles.orgCard}>
-        <div style={styles.orgName}>Create an organization</div>
-        <p style={styles.billingNote}>
-          An organization holds a Team subscription: US$199 per month for{" "}
-          {TEAM_INCLUDED_SEATS} members, then US${TEAM_EXTRA_SEAT_USD} per extra
-          member, each with everything in Pro. It can also own
-          a shared GitHub App installation.
-        </p>
-        <form
-          className="dashboard-form" style={styles.teamForm}
-          onSubmit={(e) => {
-            e.preventDefault();
-            void run(async () => {
-              const created = await organizationsRequest<{
-                organization: { name: string };
-              }>({ action: "create", name: orgName });
-              setOrgName("");
-              return `Created ${created.organization.name}.`;
-            });
-          }}
-        >
-          <input
-            required
-            maxLength={100}
-            aria-label="Organization name"
-            placeholder="Acme"
-            value={orgName}
-            onChange={(e) => setOrgName(e.target.value)}
-            style={styles.input}
+      {data !== null &&
+        (hasTeam ? (
+          <div style={styles.orgCard}>
+            <div style={styles.orgName}>Create an organization</div>
+            <p style={styles.billingNote}>
+              An organization holds a Team subscription: US$199 per month for{" "}
+              {TEAM_INCLUDED_SEATS} members, then US${TEAM_EXTRA_SEAT_USD} per extra
+              member, each with everything in Pro. It can also own
+              a shared GitHub App installation.
+            </p>
+            <form
+              className="dashboard-form" style={styles.teamForm}
+              onSubmit={(e) => {
+                e.preventDefault();
+                void run(async () => {
+                  const created = await organizationsRequest<{
+                    organization: { name: string };
+                  }>({ action: "create", name: orgName });
+                  setOrgName("");
+                  return `Created ${created.organization.name}.`;
+                });
+              }}
+            >
+              <input
+                required
+                maxLength={100}
+                aria-label="Organization name"
+                placeholder="Acme"
+                value={orgName}
+                onChange={(e) => setOrgName(e.target.value)}
+                style={styles.input}
+              />
+              <button type="submit" disabled={pending} style={styles.saveButton}>
+                Create organization
+              </button>
+            </form>
+          </div>
+        ) : (
+          <GetTeamCard
+            checkoutAvailable={checkoutAvailable}
+            onCreated={async () => {
+              await reload();
+            }}
           />
-          <button type="submit" disabled={pending} style={styles.saveButton}>
-            Create organization
-          </button>
-        </form>
-      </div>
+        ))}
     </section>
   );
 }

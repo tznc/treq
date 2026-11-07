@@ -521,7 +521,7 @@ test.describe('Dashboard team tab', () => {
       role: 'admin',
     });
     await acme.getByRole('button', { name: 'Remove admin from Mia Member' }).click();
-    expect(calls.organizations).toContainEqual({
+    await expect.poll(() => calls.organizations).toContainEqual({
       action: 'set_role',
       organization_id: ORG,
       user_id: MIA,
@@ -546,12 +546,46 @@ test.describe('Dashboard team tab', () => {
     await close();
   });
 
-  test('a new user creates an organization', async ({ browser }) => {
+  test('a user without Team sees a Team upsell instead of the create form', async ({ browser }) => {
+    const { page, close } = await openTeamTab(browser, emptyTeam());
+    const upsell = teamSection(page).getByRole('region', { name: 'Get Team' });
+    await expect(upsell).toContainText('Every member gets Pro');
+    await expect(teamSection(page).getByRole('button', { name: 'Create organization' })).toHaveCount(0);
+    await close();
+  });
+
+  test('Get Team stays closed while payments are off', async ({ browser }) => {
+    test.skip(checkoutLive, 'stripePayments is on and the live key is set');
     const { page, calls, close } = await openTeamTab(browser, emptyTeam());
-    await teamSection(page).getByRole('textbox', { name: 'Organization name' }).fill('Acme');
-    await teamSection(page).getByRole('button', { name: 'Create organization' }).click();
-    await expect(orgCard(page, 'Acme').getByRole('group', { name: 'Your role' })).toContainText('Owner');
+    const upsell = teamSection(page).getByRole('region', { name: 'Get Team' });
+    await expect(upsell.getByRole('button', { name: 'Get Team' })).toBeDisabled();
+    await expect(upsell).toContainText('Coming Soon');
+    expect(calls.organizations).toEqual([]);
+    await close();
+  });
+
+  test('Get Team creates the organization and opens its checkout', async ({ browser }) => {
+    test.skip(!checkoutLive, 'stripePayments is off or the live publishable key is not set');
+    const { page, calls, close } = await openTeamTab(browser, emptyTeam());
+    const upsell = teamSection(page).getByRole('region', { name: 'Get Team' });
+    await upsell.getByRole('textbox', { name: 'Organization name' }).fill('Acme');
+    await upsell.getByRole('button', { name: 'Get Team' }).click();
+    await expect(upsell.getByTestId('stripe-embedded-checkout')).toContainText('cs_test_team_secret');
     expect(calls.organizations).toContainEqual({ action: 'create', name: 'Acme' });
+    expect(calls.checkout).toEqual([{ plan: 'team', organization_id: ORG }]);
+    await close();
+  });
+
+  test('a member of a team with Team still creates an organization directly', async ({ browser }) => {
+    const team = acmeTeam('member');
+    team.subscriptions = [
+      { owner_id: ORG, status: 'active', current_period_end: '2026-11-05T00:00:00', cancel_at_period_end: false },
+    ];
+    const { page, calls, close } = await openTeamTab(browser, team);
+    await expect(teamSection(page).getByRole('region', { name: 'Get Team' })).toHaveCount(0);
+    await teamSection(page).getByRole('textbox', { name: 'Organization name' }).fill('Beta');
+    await teamSection(page).getByRole('button', { name: 'Create organization' }).click();
+    await expect.poll(() => calls.organizations).toContainEqual({ action: 'create', name: 'Beta' });
     await close();
   });
 
