@@ -299,9 +299,9 @@ verify_jwt = false
 # gateway can verify it; the function verifies it again and checks ownership.
 verify_jwt = true
 
-[functions.integration-proxy]
-# Agents in cloud sandboxes call this with a sandbox JWT that has no Auth
-# session; the function verifies it and users' JWTs itself.
+[functions.github-app-jwt]
+# Called only by Postgres (072_integration_proxy.sql) with the
+# x-github-app-jwt-key header, checked against GITHUB_APP_JWT_KEY.
 verify_jwt = false
 
 [functions.gtm-metrics]
