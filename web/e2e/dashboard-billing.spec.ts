@@ -219,18 +219,18 @@ test.describe('Dashboard subscription tab', () => {
   test('a free user with no billing account has no Manage billing button', async ({ browser }) => {
     const { page, close } = await openDashboard(browser, { subscriptions: [FREE], billingCustomer: null });
     await expect(field(page, 'Current Plan')).toContainText('Free');
-    await expect(card(page).getByRole('button', { name: 'Start 14-day free trial' })).toBeVisible();
+    await expect(card(page).getByRole('button', { name: 'Upgrade to Pro' })).toBeVisible();
+    await expect(card(page)).not.toContainText(/free trial/i);
     await expect(card(page).getByRole('button', { name: 'Manage billing' })).toHaveCount(0);
     await close();
   });
 
-  test('a free user who used the trial is offered Pro without one', async ({ browser }) => {
+  test('a free user with a billing account is offered Pro and Manage billing', async ({ browser }) => {
     const { page, close } = await openDashboard(browser, {
       subscriptions: [FREE],
       billingCustomer: { trial_used_at: '2026-09-01T00:00:00Z' },
     });
     await expect(card(page).getByRole('button', { name: 'Upgrade to Pro' })).toBeVisible();
-    await expect(card(page).getByRole('button', { name: 'Start 14-day free trial' })).toHaveCount(0);
     await expect(card(page).getByRole('button', { name: 'Manage billing' })).toBeVisible();
     await close();
   });
@@ -259,7 +259,7 @@ test.describe('Dashboard subscription tab', () => {
   test('checkout stays closed while payments are off', async ({ browser }) => {
     test.skip(checkoutLive, 'stripePayments is on and the live key is set');
     const { page, calls, close } = await openDashboard(browser, { subscriptions: [FREE], billingCustomer: null });
-    const button = card(page).getByRole('button', { name: 'Start 14-day free trial' });
+    const button = card(page).getByRole('button', { name: 'Upgrade to Pro' });
     await expect(button).toBeDisabled();
     await expect(card(page)).toContainText('Coming Soon');
     expect(calls.checkout).toEqual([]);
@@ -269,7 +269,7 @@ test.describe('Dashboard subscription tab', () => {
   test('checkout opens embedded with a client secret from billing-checkout', async ({ browser }) => {
     test.skip(!checkoutLive, 'stripePayments is off or the live publishable key is not set');
     const { page, calls, close } = await openDashboard(browser, { subscriptions: [FREE], billingCustomer: null });
-    await card(page).getByRole('button', { name: 'Start 14-day free trial' }).click();
+    await card(page).getByRole('button', { name: 'Upgrade to Pro' }).click();
     await expect(page.getByTestId('stripe-embedded-checkout')).toContainText(
       `Embedded Checkout ${STRIPE_PUBLISHABLE_KEY_PROD} cs_test_e2e_secret`,
     );

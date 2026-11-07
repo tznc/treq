@@ -1,11 +1,9 @@
 // Checkout Session parameters for Pro and Team (prds/billing-and-teams.md,
-// "Edge functions"). Kept pure so the trial and ownership rules are unit
+// "Edge functions"). Kept pure so the ownership rules are unit
 // tested without Stripe.
 
 import type { BillingPlan } from "./plans.ts";
 import type { StripeParams } from "./stripe-api.ts";
-
-export const PRO_TRIAL_DAYS = 14;
 
 /** Pro belongs to a user. Team belongs to an organization. */
 export type BillingOwnerType = "user" | "organization";
@@ -71,15 +69,13 @@ export function checkoutReturnUrl(
 /**
  * The owner travels in metadata and client_reference_id. The webhook trusts
  * metadata because only this server, holding the secret key, can set it.
- * The card is always collected, so a trial converts without a second step.
- * Only a user's Pro has a trial. Team never does (open decision B01).
+ * The card is always collected. There is no trial.
  */
 export function buildCheckoutSessionParams(input: {
   customerId: string;
   priceId: string;
   ownerId: string;
   ownerType?: BillingOwnerType;
-  trialEligible: boolean;
   webUrl: string;
   /** Team's member count. Pro is always 1. */
   quantity?: number;
@@ -110,8 +106,5 @@ export function buildCheckoutSessionParams(input: {
     return_url: checkoutReturnUrl(input.webUrl, ownerType),
   };
   if (input.couponId) params["discounts[0][coupon]"] = input.couponId;
-  if (input.trialEligible && ownerType === "user") {
-    params["subscription_data[trial_period_days]"] = PRO_TRIAL_DAYS;
-  }
   return params;
 }

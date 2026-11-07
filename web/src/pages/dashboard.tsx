@@ -394,7 +394,6 @@ function SubscriptionTab({
     }
   };
 
-  const trialEligible = !billingCustomer?.trial_used_at;
   const status = subscription?.status;
   const periodEnd = subscription?.current_period_end;
 
@@ -480,7 +479,7 @@ function SubscriptionTab({
                     ...(!checkoutAvailable ? styles.primaryButtonDisabled : {}),
                   }}
                 >
-                  {trialEligible ? "Start 14-day free trial" : "Upgrade to Pro"}
+                  Upgrade to Pro
                 </button>
               </span>
               {!checkoutAvailable && (

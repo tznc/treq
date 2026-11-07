@@ -3506,7 +3506,7 @@ impl SettingsView {
         .on_click(self.press("cloud.upgrade"));
       return setting_row(
         "Linear needs Pro",
-        "Start a trial or upgrade to use Linear",
+        "Upgrade to use Linear",
         button,
         p,
       )
