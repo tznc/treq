@@ -82,6 +82,11 @@ it("runs an organization: invites by token, no member cap and Team for every mem
     );
     expect(invited.body).not.toHaveProperty("token");
     const token = tokenOf(invited.body.accept_url);
+    // An invite link works for 24 hours.
+    const lifetimeMs =
+      new Date(invited.body.invite.expires_at).getTime() - Date.now();
+    expect(lifetimeMs).toBeGreaterThan(23 * 60 * 60 * 1000);
+    expect(lifetimeMs).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
 
     const { client: ownerClient } = await signInWithEmailPassword(
       owner.email,

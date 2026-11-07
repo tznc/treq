@@ -609,3 +609,30 @@ a:hover {
     height: 44px !important;
   }
 }
+
+/* Dashboard tooltip: shown on hover and keyboard focus of its button. */
+.dashboard-tooltip-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.dashboard-tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  background: var(--ifm-color-emphasis-900);
+  color: var(--ifm-color-emphasis-0);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.1s;
+  z-index: 10;
+}
+.dashboard-tooltip-anchor:hover .dashboard-tooltip,
+.dashboard-tooltip-anchor:focus-within .dashboard-tooltip {
+  visibility: visible;
+  opacity: 1;
+}

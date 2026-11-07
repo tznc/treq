@@ -2,7 +2,7 @@ import { expect, test, type Browser, type Page, type Route } from '@playwright/t
 import pkg from '../../package.json';
 import { STRIPE_PUBLISHABLE_KEY_PROD } from '../src/lib/constants';
 
-// The Team section of /dashboard's Account page against the production build, reached from the
+// The Teams section of /dashboard's Account page against the production build, reached from the
 // home page through the navbar. Supabase (PostgREST and the organizations,
 // billing-checkout and billing-portal functions) and Stripe.js are stubbed
 // at the network layer. The stub keeps a small in-memory organization so
@@ -294,7 +294,7 @@ async function openTeamTab(
   return { page, calls, close: () => context.close() };
 }
 
-const teamSection = (page: Page) => page.getByRole('region', { name: 'Team' });
+const teamSection = (page: Page) => page.getByRole('region', { name: 'Teams' });
 const orgCard = (page: Page, name: string) => teamSection(page).getByRole('region', { name });
 
 test.describe('Dashboard team tab', () => {
@@ -311,7 +311,7 @@ test.describe('Dashboard team tab', () => {
     await expect(acme.getByRole('list', { name: 'Pending invites' })).toContainText('sam@example.com');
 
     await acme.getByRole('textbox', { name: 'Email to invite' }).fill('lee@example.com');
-    await acme.getByRole('button', { name: 'Invite', exact: true }).click();
+    await acme.getByRole('button', { name: 'Generate invite link' }).click();
     await expect(acme.getByRole('textbox', { name: 'Invite link for lee@example.com' })).toHaveValue(
       ACCEPT_URL,
     );
@@ -330,6 +330,28 @@ test.describe('Dashboard team tab', () => {
     await close();
   });
 
+  test('a pending invite shows its short expiry date on a second line, and a revoke icon with a tooltip', async ({
+    browser,
+  }) => {
+    const { page, close } = await openTeamTab(browser, acmeTeam('owner'));
+    const sam = orgCard(page, 'Acme')
+      .getByRole('list', { name: 'Pending invites' })
+      .getByRole('listitem')
+      .filter({ hasText: 'sam@example.com' });
+    await expect(sam.getByText('Expires Oct 12, 2026', { exact: true })).toBeVisible();
+    const revoke = sam.getByRole('button', { name: 'Revoke invite for sam@example.com' });
+    await expect(revoke).toHaveText('');
+    await revoke.hover();
+    await expect(sam.getByRole('tooltip')).toHaveText('Revoke invite');
+    await close();
+  });
+
+  test('invite links are said to work for 24 hours', async ({ browser }) => {
+    const { page, close } = await openTeamTab(browser, acmeTeam('owner'));
+    await expect(orgCard(page, 'Acme')).toContainText('expires after 24 hours');
+    await close();
+  });
+
   test('a refused invite shows the message the server names', async ({ browser }) => {
     const team = acmeTeam('owner');
     team.refuse = {
@@ -342,7 +364,7 @@ test.describe('Dashboard team tab', () => {
     const { page, close } = await openTeamTab(browser, team);
     const acme = orgCard(page, 'Acme');
     await acme.getByRole('textbox', { name: 'Email to invite' }).fill('mia@example.com');
-    await acme.getByRole('button', { name: 'Invite', exact: true }).click();
+    await acme.getByRole('button', { name: 'Generate invite link' }).click();
     await expect(acme.getByRole('alert')).toContainText('That address already belongs to a member.');
     await close();
   });
@@ -622,7 +644,7 @@ test.describe('Dashboard account tab', () => {
     test(`?tab=${tab} opens Account with subscription, team and account deletion`, async ({ browser }) => {
       const { page, close } = await openTeamTab(browser, acmeTeam('owner'), `/dashboard?tab=${tab}`);
       await expect(page.getByRole('heading', { level: 1, name: 'Account' })).toBeVisible();
-      await expect(page.getByRole('region', { name: 'Subscription' })).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Personal' })).toBeVisible();
       await expect(orgCard(page, 'Acme')).toBeVisible();
       await expect(page.getByRole('region', { name: 'Delete account' })).toBeVisible();
       await close();
