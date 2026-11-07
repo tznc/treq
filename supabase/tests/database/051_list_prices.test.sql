@@ -1,5 +1,5 @@
 -- Fixed list prices (073): one price per size on every provider, stored in
--- treq_admin.admin_config under 'list_prices' so they are edited without a
+-- treq_internal.admin_config under 'list_prices' so they are edited without a
 -- migration. Managed and BYOS each have their own hourly rate;
 -- stopped disk bills per GB-month wherever the provider keeps the disk.
 -- provider_cost_nanousd stays the real provider cost.
@@ -12,7 +12,7 @@ select plan(27);
 update public.machine_type_prices set effective_from = now() - interval '30 days' where effective_to is null;
 
 -- ── List prices ────────────────────────────────────────────────────────────
-select is((select value from treq_admin.admin_config where key = 'list_prices'),
+select is((select value from treq_internal.admin_config where key = 'list_prices'),
   '{"tiers": {"s":  {"managed_usd_per_hour": 0.20, "byos_usd_per_hour": 0.0085},
               "m":  {"managed_usd_per_hour": 0.40, "byos_usd_per_hour": 0.017},
               "l":  {"managed_usd_per_hour": 0.80, "byos_usd_per_hour": 0.034},
@@ -20,20 +20,20 @@ select is((select value from treq_admin.admin_config where key = 'list_prices'),
     "stopped_disk": {"managed_usd_per_gb_month": 0.10, "byos_usd_per_gb_month": 0.004}}'::jsonb,
   'one rounded price per size, in admin_config');
 select throws_ok(
-  $$ update treq_admin.admin_config set value = value #- '{tiers,xl}' where key = 'list_prices' $$,
+  $$ update treq_internal.admin_config set value = value #- '{tiers,xl}' where key = 'list_prices' $$,
   'P0001', 'admin_config: list_prices does not match its schema',
   'an edit that drops a size is rejected');
 select throws_ok(
-  $$ update treq_admin.admin_config set value = jsonb_set(value, '{stopped_disk,byos_usd_per_gb_month}', '"cheap"') where key = 'list_prices' $$,
+  $$ update treq_internal.admin_config set value = jsonb_set(value, '{stopped_disk,byos_usd_per_gb_month}', '"cheap"') where key = 'list_prices' $$,
   'P0001', 'admin_config: list_prices does not match its schema',
   'an edit with a non-number price is rejected');
 select throws_ok(
-  $$ update treq_admin.admin_config set value = jsonb_set(value, '{tiers,s,managed_usd_per_hour}', '-1') where key = 'list_prices' $$,
+  $$ update treq_internal.admin_config set value = jsonb_set(value, '{tiers,s,managed_usd_per_hour}', '-1') where key = 'list_prices' $$,
   'P0001', 'admin_config: list_prices does not match its schema',
   'a negative price is rejected');
-select ok(not has_schema_privilege('authenticated', 'treq_admin', 'usage')
-          and not has_schema_privilege('anon', 'treq_admin', 'usage'),
-  'clients cannot reach the treq_admin schema');
+select ok(not has_schema_privilege('authenticated', 'treq_internal', 'usage')
+          and not has_schema_privilege('anon', 'treq_internal', 'usage'),
+  'clients cannot reach the treq_internal schema');
 select is(public.admin_config_get('list_prices') #>> '{tiers,m,byos_usd_per_hour}', '0.017',
   'service code reads a key through admin_config_get');
 select ok(not has_function_privilege('authenticated', 'public.admin_config_get(text)', 'execute')
@@ -52,7 +52,7 @@ select is(round(treq_internal.billed_running_nanousd_per_sec('e2b:m', 'byos', 0)
 select is(round(treq_internal.billed_running_nanousd_per_sec('fly_machines:xl', 'managed', 0), 3), 444444.444,
   'Fly XL bills the managed XL price');
 savepoint price_edit;
-update treq_admin.admin_config set value = jsonb_set(value, '{tiers,m,managed_usd_per_hour}', '0.36') where key = 'list_prices';
+update treq_internal.admin_config set value = jsonb_set(value, '{tiers,m,managed_usd_per_hour}', '0.36') where key = 'list_prices';
 select is(round(treq_internal.billed_running_nanousd_per_sec('boat:default', 'managed', 0), 3), 100000.000,
   'editing the config row changes the price, no migration needed');
 rollback to savepoint price_edit;

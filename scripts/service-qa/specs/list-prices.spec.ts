@@ -240,7 +240,7 @@ it("bills stopped Boat disk at the list price per GB", async () => {
   });
 }, 120_000);
 
-it("takes a price edit from treq_admin.admin_config without a migration", async () => {
+it("takes a price edit from treq_internal.admin_config without a migration", async () => {
   const u = await createTestUser();
   users.push(u.user.id);
   await grantPro(admin, u.user.id);
@@ -288,7 +288,7 @@ it("takes a price edit from treq_admin.admin_config without a migration", async 
     });
     expect(anonError).not.toBeNull();
     const { error: tableError } = await anon
-      .schema("treq_admin")
+      .schema("treq_internal")
       .from("admin_config")
       .select("key");
     expect(tableError).not.toBeNull();
@@ -297,7 +297,7 @@ it("takes a price edit from treq_admin.admin_config without a migration", async 
       expectations: [
         "Setting the list_prices key through admin_config_set (service role) changes the Medium catalog price to US$0.36/h at once.",
         "A value that drops the tier prices is rejected by its JSON Schema, naming the key.",
-        "A signed-in user can neither call admin_config_get nor query the treq_admin schema.",
+        "A signed-in user can neither call admin_config_get nor query the treq_internal schema.",
       ],
       details: {
         medium,

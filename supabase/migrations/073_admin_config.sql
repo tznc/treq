@@ -13,7 +13,7 @@
 -- This replaces 072's rates, which followed E2B's running rate and Daytona's
 -- storage rate times the markup. Prices no longer follow provider prices or
 -- the markup settings: changing a price is an edit to the 'list_prices' row
--- of treq_admin.admin_config, in the dashboard, with no migration.
+-- of treq_internal.admin_config, in the dashboard, with no migration.
 -- usage_reports.provider_cost_nanousd stays the real provider cost, so margin
 -- per provider stays visible. If the 'list_prices' row is deleted, billing
 -- falls back to provider cost with the markup or fee.
@@ -21,38 +21,36 @@
 -- The functions below replace 072's, with the billed rate read through
 -- billed_running_nanousd_per_sec / billed_stopped_nanousd_per_gb_sec.
 
--- App-wide settings live in treq_admin.admin_config, one row per key, and are
--- the reference value for every setting moved here. Operators edit them in
--- the Supabase dashboard (Table Editor, schema treq_admin). The schema is not
--- exposed through the API and clients have no access to it; service code
--- reads and writes through admin_config_get / admin_config_set, which only
--- the service role can call. A key with a JSON Schema in admin_config_schemas
--- is checked on write, so a bad edit is refused instead of breaking billing.
-create schema treq_admin;
-revoke all on schema treq_admin from public, anon, authenticated;
-
-create table treq_admin.admin_config (
+-- App-wide settings live in treq_internal.admin_config, one row per key, and
+-- are the reference value for every setting moved here. Operators edit them
+-- in the Supabase dashboard (Table Editor, schema treq_internal). Clients have
+-- no access to treq_internal (002) and it is not exposed through the API;
+-- service code reads and writes through admin_config_get / admin_config_set,
+-- which only the service role can call. A key with a JSON Schema in
+-- admin_config_schemas is checked on write, so a bad edit is refused instead
+-- of breaking billing.
+create table treq_internal.admin_config (
   key text primary key,
   value jsonb not null,
   description text,
   updated_at timestamptz not null default now()
 );
-alter table treq_admin.admin_config enable row level security;
-revoke all on treq_admin.admin_config from public, anon, authenticated;
+alter table treq_internal.admin_config enable row level security;
+revoke all on treq_internal.admin_config from public, anon, authenticated;
 
 -- JSON Schema per key (pg_jsonschema). A key with a schema must match it on
 -- every write; a key without one is free-form. Edit a schema here to change
 -- what a key accepts.
 create extension if not exists pg_jsonschema with schema extensions;
 
-create table treq_admin.admin_config_schemas (
+create table treq_internal.admin_config_schemas (
   key text primary key,
   schema json not null check (extensions.json_matches_schema('{"type":"object"}', schema))
 );
-alter table treq_admin.admin_config_schemas enable row level security;
-revoke all on treq_admin.admin_config_schemas from public, anon, authenticated;
+alter table treq_internal.admin_config_schemas enable row level security;
+revoke all on treq_internal.admin_config_schemas from public, anon, authenticated;
 
-insert into treq_admin.admin_config_schemas (key, schema) values
+insert into treq_internal.admin_config_schemas (key, schema) values
   ('byos_markup_bps', '{"type":"integer","minimum":0,"maximum":10000}'),
   ('spend_cap_max_usd', '{"type":"number","minimum":5}'),
   ('list_prices', '{
@@ -81,7 +79,7 @@ language plpgsql
 set search_path = ''
 as $$
 declare
-  v_schema json := (select s.schema from treq_admin.admin_config_schemas s where s.key = new.key);
+  v_schema json := (select s.schema from treq_internal.admin_config_schemas s where s.key = new.key);
 begin
   new.updated_at := now();
   if v_schema is not null and not extensions.jsonb_matches_schema(v_schema, new.value) then
@@ -92,10 +90,10 @@ end;
 $$;
 
 create trigger admin_config_validate
-  before insert or update on treq_admin.admin_config
+  before insert or update on treq_internal.admin_config
   for each row execute function treq_internal.admin_config_validate();
 
-insert into treq_admin.admin_config (key, value, description) values ('list_prices', '{
+insert into treq_internal.admin_config (key, value, description) values ('list_prices', '{
   "tiers": {
     "s":  {"managed_usd_per_hour": 0.20, "byos_usd_per_hour": 0.0085},
     "m":  {"managed_usd_per_hour": 0.40, "byos_usd_per_hour": 0.017},
@@ -119,7 +117,7 @@ as $$
     (select (c.value #>> array['tiers', m.tier_id,
                case when p_billing_mode = 'byos' then 'byos_usd_per_hour' else 'managed_usd_per_hour' end])::numeric
             * 1e9 / 3600
-       from public.provider_machine_types m, treq_admin.admin_config c
+       from public.provider_machine_types m, treq_internal.admin_config c
       where m.id = p_machine_type_id and c.key = 'list_prices'),
     p_fallback);
 $$;
@@ -144,7 +142,7 @@ as $$
       (select (c.value #>> array['stopped_disk',
                  case when p_billing_mode = 'byos' then 'byos_usd_per_gb_month' else 'managed_usd_per_gb_month' end])::numeric
               * 1e9 / (730 * 3600)
-         from treq_admin.admin_config c
+         from treq_internal.admin_config c
         where c.key = 'list_prices'),
       p_fallback)
   end;
@@ -154,7 +152,7 @@ revoke all on function treq_internal.admin_config_validate() from public, anon, 
 
 -- 062's single-row billing_settings moves into admin_config, keeping its
 -- current values.
-insert into treq_admin.admin_config (key, value, description)
+insert into treq_internal.admin_config (key, value, description)
 select 'byos_markup_bps', to_jsonb(b.byos_markup_bps),
        'BYOS fee in basis points of provider cost, used where a size has no list price (500 = 5%).'
   from treq_internal.billing_settings b
@@ -170,7 +168,7 @@ stable
 security definer
 set search_path = ''
 as $$
-  select coalesce((select (c.value #>> '{}')::int from treq_admin.admin_config c where c.key = 'byos_markup_bps'), 500);
+  select coalesce((select (c.value #>> '{}')::int from treq_internal.admin_config c where c.key = 'byos_markup_bps'), 500);
 $$;
 
 create or replace function treq_internal.spend_cap_max_usd()
@@ -180,7 +178,7 @@ stable
 security definer
 set search_path = ''
 as $$
-  select coalesce((select (c.value #>> '{}')::numeric from treq_admin.admin_config c where c.key = 'spend_cap_max_usd'), 1000);
+  select coalesce((select (c.value #>> '{}')::numeric from treq_internal.admin_config c where c.key = 'spend_cap_max_usd'), 1000);
 $$;
 
 drop table treq_internal.billing_settings;
@@ -196,7 +194,7 @@ set search_path = ''
 as $$
 begin
   perform treq_internal.require_service_role();
-  return (select c.value from treq_admin.admin_config c where c.key = p_key);
+  return (select c.value from treq_internal.admin_config c where c.key = p_key);
 end;
 $$;
 
@@ -208,7 +206,7 @@ set search_path = ''
 as $$
 begin
   perform treq_internal.require_service_role();
-  insert into treq_admin.admin_config (key, value) values (p_key, p_value)
+  insert into treq_internal.admin_config (key, value) values (p_key, p_value)
   on conflict (key) do update set value = excluded.value;
 end;
 $$;
