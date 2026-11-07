@@ -49,42 +49,146 @@ pub struct CachedToken {
   pub expires_at: i64,
 }
 
-pub fn read_config(_path: &Path) -> Result<IntegrationConfig, String> {
-  unimplemented!()
+pub fn read_config(path: &Path) -> Result<IntegrationConfig, String> {
+  let text = std::fs::read_to_string(path).map_err(|e| {
+    format!(
+      "{} is unreadable ({e}): this is not a treq cloud sandbox, or its setup has not finished",
+      path.display()
+    )
+  })?;
+  serde_json::from_str(&text).map_err(|e| format!("{} is malformed: {e}", path.display()))
 }
 
 /// `it1.<placement_id>.<expiry>.<mac>`, `mac` lowercase hex HMAC-SHA256 over
 /// `it1.<placement_id>.<expiry>` keyed with the integration secret.
-pub fn request_token(_secret: &str, _placement_id: &str, _expiry: u64) -> String {
-  unimplemented!()
+pub fn request_token(secret: &str, placement_id: &str, expiry: u64) -> String {
+  use hmac::{Hmac, KeyInit, Mac};
+  let payload = format!("it1.{placement_id}.{expiry}");
+  #[expect(clippy::expect_used, reason = "HMAC accepts keys of any length")]
+  let mut mac = Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes()).expect("hmac key");
+  mac.update(payload.as_bytes());
+  let digest: String = mac
+    .finalize()
+    .into_bytes()
+    .iter()
+    .map(|b| format!("{b:02x}"))
+    .collect();
+  format!("{payload}.{digest}")
 }
 
 impl TokenCache {
   /// A cached token for `repository` with enough time left at `now`.
-  pub fn fresh(&self, _repository: &str, _now: i64) -> Option<&str> {
-    unimplemented!()
+  pub fn fresh(&self, repository: &str, now: i64) -> Option<&str> {
+    self
+      .tokens
+      .get(&repository.to_ascii_lowercase())
+      .filter(|cached| cached.expires_at - now > REUSE_MARGIN_SECS)
+      .map(|cached| cached.token.as_str())
   }
 
   /// Records every repository each token covers.
-  pub fn insert(&mut self, _tokens: &[RepoToken]) {
-    unimplemented!()
+  pub fn insert(&mut self, tokens: &[RepoToken]) {
+    for token in tokens {
+      let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(&token.expires_at) else {
+        continue;
+      };
+      for repository in &token.repositories {
+        self.tokens.insert(
+          repository.to_ascii_lowercase(),
+          CachedToken {
+            token: token.token.clone(),
+            expires_at: expires_at.timestamp(),
+          },
+        );
+      }
+    }
   }
 }
 
 /// Asks the proxy for tokens for `repositories`, signing with `config`.
 pub async fn fetch_tokens(
-  _client: &reqwest::Client,
-  _config: &IntegrationConfig,
-  _repositories: &[String],
-  _now: u64,
+  client: &reqwest::Client,
+  config: &IntegrationConfig,
+  repositories: &[String],
+  now: u64,
 ) -> Result<Vec<RepoToken>, String> {
+  #[derive(Deserialize)]
+  struct Refused {
+    repository: String,
+    error: String,
+  }
+  #[derive(Deserialize)]
+  struct Answer {
+    #[serde(default)]
+    tokens: Vec<RepoToken>,
+    #[serde(default)]
+    errors: Vec<Refused>,
+    #[serde(default)]
+    error: Option<String>,
+  }
+  let auth = request_token(
+    &config.secret,
+    &config.placement_id,
+    now + REQUEST_TOKEN_TTL_SECS,
+  );
+  let response = client
+    .post(format!(
+      "{}/github/token",
+      config.proxy_url.trim_end_matches('/')
+    ))
+    .bearer_auth(auth)
+    .json(&serde_json::json!({ "repositories": repositories }))
+    .send()
+    .await
+    .map_err(|e| format!("integration-proxy unreachable: {e}"))?;
+  let status = response.status();
+  let answer: Answer = response
+    .json()
+    .await
+    .map_err(|e| format!("integration-proxy answered {status} without JSON: {e}"))?;
+  if answer.tokens.is_empty() {
+    let reasons: Vec<String> = answer
+      .errors
+      .iter()
+      .map(|r| format!("{}: {}", r.repository, r.error))
+      .chain(answer.error)
+      .collect();
+    return Err(if reasons.is_empty() {
+      format!("integration-proxy answered {status}")
+    } else {
+      reasons.join("; ")
+    });
+  }
+  Ok(answer.tokens)
+}
+
+/// A token for `repository`: from the cache at `cache_path` when it has
+/// time left, otherwise fetched with the config at `config_path` and cached.
+pub async fn token_for(
+  _client: &reqwest::Client,
+  _config_path: &Path,
+  _cache_path: &Path,
+  _repository: &str,
+  _now: i64,
+) -> Result<String, String> {
   unimplemented!()
 }
 
 /// The `owner/name` a git credential request (`protocol=…`, `host=…`,
 /// `path=…` lines) asks about, when it is for github.com over https.
-pub fn credential_repository(_request: &str) -> Option<String> {
-  unimplemented!()
+pub fn credential_repository(request: &str) -> Option<String> {
+  let field = |name: &str| {
+    request
+      .lines()
+      .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
+  };
+  if field("protocol")? != "https" || field("host")? != "github.com" {
+    return None;
+  }
+  let path = field("path")?;
+  let path = path.strip_suffix(".git").unwrap_or(path);
+  let (owner, name) = path.split_once('/')?;
+  (!owner.is_empty() && !name.is_empty() && !name.contains('/')).then(|| path.to_string())
 }
 
 /// The git credential helper's answer for `token`.
@@ -93,8 +197,17 @@ pub fn credential_answer(token: &str) -> String {
 }
 
 /// The repository a `gh` invocation names with `-R`/`--repo`, if any.
-pub fn gh_repo_flag(_args: &[String]) -> Option<String> {
-  unimplemented!()
+pub fn gh_repo_flag(args: &[String]) -> Option<String> {
+  let mut iter = args.iter();
+  while let Some(arg) = iter.next() {
+    if arg == "-R" || arg == "--repo" {
+      return iter.next().cloned();
+    }
+    if let Some(value) = arg.strip_prefix("--repo=") {
+      return Some(value.to_string());
+    }
+  }
+  None
 }
 
 #[cfg(test)]
@@ -208,6 +321,38 @@ mod tests {
     .await
     .unwrap_err();
     assert!(err.contains("cannot push to this repository"), "{err}");
+  }
+
+  #[tokio::test]
+  async fn token_for_fetches_once_and_then_serves_from_the_cache_file() {
+    use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+        "tokens": [{ "repositories": ["tznc/treq"], "token": "ghs_1", "expires_at": "2027-01-01T01:00:00Z" }],
+        "errors": [],
+      })))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("integration.json");
+    std::fs::write(
+      &config_path,
+      serde_json::json!({ "placement_id": PLACEMENT, "proxy_url": server.uri(), "secret": SECRET })
+        .to_string(),
+    )
+    .unwrap();
+    let cache_path = dir.path().join("cache").join("github-tokens.json");
+    let client = reqwest::Client::new();
+    let now = 1_798_765_200 - 3_000;
+    for _ in 0..2 {
+      let token = token_for(&client, &config_path, &cache_path, "tznc/treq", now)
+        .await
+        .unwrap();
+      assert_eq!(token, "ghs_1");
+    }
+    assert!(cache_path.exists());
   }
 
   #[test]

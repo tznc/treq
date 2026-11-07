@@ -929,6 +929,18 @@ pub fn handle_cli_command(subcommand: &SubcommandMatches) -> Option<i32> {
   Some(if success { 0 } else { 1 })
 }
 
+/// `treq github …`: GitHub tokens for agents in a cloud sandbox.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum GithubCommand {
+  Token { repository: String },
+  Credential { operation: String },
+  Gh { args: Vec<String> },
+}
+
+pub(super) fn parse_github_command(_matches: &Matches) -> Result<GithubCommand, String> {
+  unimplemented!()
+}
+
 /// `treq gateway` flags.
 #[derive(Debug)]
 pub(super) struct GatewayArgs {
