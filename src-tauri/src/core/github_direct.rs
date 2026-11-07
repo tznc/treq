@@ -33,22 +33,55 @@ pub trait DirectDeps: Send + Sync {
 
 pub const NO_GITHUB_REMOTE: &str = "invalid_arguments: this repository has no GitHub remote";
 
+enum Call {
+  Read(GithubQuery),
+  Write(GithubAction),
+}
+
+impl Call {
+  async fn run(&self, gh: &GithubHttp, full_name: &str) -> Result<Value, String> {
+    match self {
+      Self::Read(query) => github_http::github_read(gh, full_name, query.clone()).await,
+      Self::Write(action) => github_http::github_write(gh, full_name, action.clone()).await,
+    }
+  }
+}
+
+async fn direct(deps: &dyn DirectDeps, repo: &str, call: Call) -> Option<Result<Value, String>> {
+  let token = deps.token().await.ok()?;
+  let full_name = match deps.full_name(repo).await {
+    Ok(Some(full_name)) => full_name,
+    Ok(None) => return Some(Err(NO_GITHUB_REMOTE.to_string())),
+    Err(_) => return None,
+  };
+  let result = call.run(&deps.client(token), &full_name).await;
+  match result {
+    // The cached token was revoked or rotated: drop it and try once more.
+    Err(error) if error.starts_with(github_http::UNAUTHORIZED) => {
+      deps.forget_token().await;
+      let token = deps.token().await.ok()?;
+      Some(call.run(&deps.client(token), &full_name).await)
+    }
+    result => Some(result),
+  }
+}
+
 /// A read answered here, or `None` to ask the host.
 pub async fn read(
-  _deps: &dyn DirectDeps,
-  _repo: &str,
-  _query: GithubQuery,
+  deps: &dyn DirectDeps,
+  repo: &str,
+  query: GithubQuery,
 ) -> Option<Result<Value, String>> {
-  unimplemented!()
+  direct(deps, repo, Call::Read(query)).await
 }
 
 /// A change made here, or `None` to ask the host.
 pub async fn write(
-  _deps: &dyn DirectDeps,
-  _repo: &str,
-  _action: GithubAction,
+  deps: &dyn DirectDeps,
+  repo: &str,
+  action: GithubAction,
 ) -> Option<Result<Value, String>> {
-  unimplemented!()
+  direct(deps, repo, Call::Write(action)).await
 }
 
 #[cfg(test)]
