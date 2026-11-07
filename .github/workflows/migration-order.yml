@@ -1,0 +1,24 @@
+name: Migration order
+
+# A migration numbered at or below main's newest one blocks `supabase db push`
+# after merge, so fail the PR instead.
+on:
+  pull_request:
+    paths:
+      - "supabase/migrations/**"
+      - "scripts/check-migration-order.sh"
+      - ".github/workflows/migration-order.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: new migrations sort last
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: scripts/check-migration-order.sh "origin/$GITHUB_BASE_REF"
