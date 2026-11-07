@@ -37,12 +37,16 @@ const PARAMS: CreateInstanceParams = {
   machineType: "large",
 };
 
-Deno.test("boatConfigFromEnv needs both secrets", () => {
+Deno.test("boatConfigFromEnv needs the token and defaults the URL to Boat's API", () => {
   const err = assertThrows(() => boatConfigFromEnv(() => undefined), ProviderError);
   assertEquals(err.kind, "invalid_request");
   assertEquals(
     boatConfigFromEnv((k) => ({ TREQ_BOAT_API_URL: "https://u", TREQ_BOAT_API_TOKEN: "t" })[k]),
     { baseUrl: "https://u", apiToken: "t", autoStopMinutes: 60 },
+  );
+  assertEquals(
+    boatConfigFromEnv((k) => ({ TREQ_BOAT_API_TOKEN: "t" })[k as "TREQ_BOAT_API_TOKEN"]).baseUrl,
+    "https://boat.dev/api/v1",
   );
 });
 
