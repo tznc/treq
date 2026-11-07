@@ -21,7 +21,7 @@ test('lists Free, Pro and Team with their prices', async ({ page }) => {
   await expect(pro).toContainText('$15');
   await expect(pro).toContainText('/user/month');
   await expect(pro).toContainText('14-day free trial');
-  await expect(pro).toContainText("Cloud workspaces, pay-as-you-go at one price per size: E2B's rate plus 20%");
+  await expect(pro).toContainText('Cloud workspaces, pay-as-you-go from US$0.20 per hour');
   await expect(pro).toContainText('Linear integration');
   await expect(pro).not.toContainText(/mobile/i);
 

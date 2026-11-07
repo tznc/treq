@@ -66,14 +66,14 @@ select is(
   treq_internal.month_spend_nanousd('00000000-0000-0000-0000-0000000000e1', now()),
   -- If the month began less than 600 s ago, the part before it is last month's.
   60000000000::bigint + round(extract(epoch from
-    now() - greatest(now() - interval '600 seconds', date_trunc('month', now(), 'UTC'))) * 6000)::bigint,
-  'spend is this month''s reports plus the unreported open interval at cost x 1.2');
+    now() - greatest(now() - interval '600 seconds', date_trunc('month', now(), 'UTC'))) * 0.20e9 / 3600)::bigint,
+  'spend is this month''s reports plus the unreported open interval at the Small list price ($0.20/h)');
 
 set local role authenticated;
 select set_config('request.jwt.claims',
   '{"sub":"00000000-0000-0000-0000-0000000000e1","role":"authenticated"}', true);
 select results_eq(
-  $$ select s->>'state', (s->>'spent_usd')::numeric between 60 and 60.01
+  $$ select s->>'state', (s->>'spent_usd')::numeric between 60 and 60.05
        from public.get_spend_status() s $$,
   $$ values ('warning', true) $$,
   'US$60 of a US$75 cap is a warning (80% or more)');

@@ -82,7 +82,36 @@ type Price = {
   running_nanousd_per_sec: number;
   stopped_nanousd_per_gb_sec: number;
   markup_bps: number;
+  machine_type_id: string;
 };
+type ListPrice = {
+  tier_id: string;
+  managed_usd_per_hour: number;
+  byos_usd_per_hour: number;
+  stopped_managed_usd_per_gb_month: number;
+  stopped_byos_usd_per_gb_month: number;
+};
+
+/** Billed nano-USD for `sec` seconds of an interval at its size's list price (072). */
+function billedFor(
+  i: { kind: string; billing_mode: string; disk_gb: number | null },
+  l: ListPrice,
+  sec: number,
+): number {
+  const byos = i.billing_mode === "byos";
+  if (i.kind === "running") {
+    return (
+      (sec *
+        Number(byos ? l.byos_usd_per_hour : l.managed_usd_per_hour) *
+        1e9) /
+      3600
+    );
+  }
+  const perGbMonth = Number(
+    byos ? l.stopped_byos_usd_per_gb_month : l.stopped_managed_usd_per_gb_month,
+  );
+  return (sec * perGbMonth * 1e9 * (i.disk_gb ?? 0)) / (730 * 3600);
+}
 
 const ms = (s: string) => new Date(s).getTime();
 const HOUR = 3_600_000;
@@ -230,12 +259,31 @@ it(`keeps the usage ledger and reports consistent over ${SEEDS} random timelines
             admin
               .from("machine_type_prices")
               .select(
-                "id, running_nanousd_per_sec, stopped_nanousd_per_gb_sec, markup_bps",
+                "id, running_nanousd_per_sec, stopped_nanousd_per_gb_sec, markup_bps, machine_type_id",
               )
               .in("id", [...new Set(intervals.map((i) => i.price_id))]),
           )
         ).map((p) => [p.id, p]),
       );
+      const listPrices = new Map(
+        (await rows<ListPrice>(admin.from("list_prices").select("*"))).map(
+          (l) => [l.tier_id, l],
+        ),
+      );
+      const tiers = new Map(
+        (
+          await rows<{ id: string; tier_id: string }>(
+            admin.from("provider_machine_types").select("id, tier_id"),
+          )
+        ).map((m) => [m.id, m.tier_id]),
+      );
+      const listFor = (priceId: string): ListPrice => {
+        const mt = prices.get(priceId)?.machine_type_id;
+        const list =
+          mt === undefined ? undefined : listPrices.get(tiers.get(mt) ?? "");
+        if (!list) throw new Error(`no list price for price ${priceId}`);
+        return list;
+      };
       const fail = (msg: string) => failures.push(`seed ${seed}: ${msg}`);
 
       // I1: one machine is billed at a time for a workspace.
@@ -305,10 +353,7 @@ it(`keeps the usage ledger and reports consistent over ${SEEDS} random timelines
             (i.kind === "running"
               ? p.running_nanousd_per_sec
               : p.stopped_nanousd_per_gb_sec * (i.disk_gb ?? 0));
-          const b =
-            i.billing_mode === "byos"
-              ? c * 0.05
-              : (c * (10000 + p.markup_bps)) / 10000;
+          const b = billedFor(i, listFor(i.price_id), sec);
           secs += sec;
           cost += c;
           billed += b;
@@ -348,16 +393,7 @@ it(`keeps the usage ledger and reports consistent over ${SEEDS} random timelines
         const s = Math.max(i.s, w0),
           e = Math.min(i.e, tNow);
         if (e <= s) continue;
-        const p = prices.get(i.price_id)!;
-        const c =
-          ((e - s) / 1000) *
-          (i.kind === "running"
-            ? p.running_nanousd_per_sec
-            : p.stopped_nanousd_per_gb_sec * (i.disk_gb ?? 0));
-        ledger +=
-          i.billing_mode === "byos"
-            ? c * 0.05
-            : (c * (10000 + p.markup_bps)) / 10000;
+        ledger += billedFor(i, listFor(i.price_id), (e - s) / 1000);
       }
       // The open part is priced at the moment of the call, a few ms after ours.
       if (Math.abs(spend.spent_usd - ledger / 1e9) > 1e-4) {
