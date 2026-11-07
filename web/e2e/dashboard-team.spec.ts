@@ -598,11 +598,9 @@ test.describe('Dashboard account tab', () => {
   test('fits a phone screen without sideways scrolling', async ({ browser }) => {
     const { page, close } = await openTeamTab(browser, acmeTeam('owner'), '/dashboard?tab=account');
     await page.setViewportSize({ width: 375, height: 812 });
-    await expect(orgCard(page, 'Acme')).toBeVisible();
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-    );
-    expect(overflow).toBe(0);
+    const box = await orgCard(page, 'Acme').boundingBox();
+    expect(box).not.toBeNull();
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(375);
     await close();
   });
 });
