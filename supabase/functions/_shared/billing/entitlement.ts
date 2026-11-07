@@ -39,7 +39,7 @@ export const PRO_REQUIRED_MESSAGES = {
   githubApp:
     "The Treq GitHub App needs Pro. Start a trial or upgrade on your treq.dev dashboard.",
   linearOAuth:
-    "Linear OAuth needs Pro. Add a personal Linear API key in the repository's Linear settings to keep using Linear on the Free plan.",
+    "Linear needs Pro. Start a trial or upgrade on your treq.dev dashboard.",
   cloudWorkspace:
     "Cloud workspaces need Pro. You can still check the status of your cloud workspace or delete it.",
 } as const;

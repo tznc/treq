@@ -24,7 +24,6 @@ const FREE_FEATURES: PlanFeature[] = [
       </>
     ),
   },
-  {key: 'linear', text: 'Linear through your personal API key'},
 ];
 
 const PRO_FEATURES: PlanFeature[] = [
@@ -32,7 +31,7 @@ const PRO_FEATURES: PlanFeature[] = [
   {key: 'github-app', text: 'Treq GitHub App'},
   {key: 'cloud', text: 'Cloud workspaces, pay-as-you-go at provider cost plus 20%'},
   {key: 'byos', text: "Your own provider account: 5% of the provider's list price"},
-  {key: 'linear-oauth', text: 'Linear OAuth'},
+  {key: 'linear', text: 'Linear integration'},
 ];
 
 const TEAM_FEATURES: PlanFeature[] = [
@@ -74,7 +73,7 @@ const COMPARISON_ROWS: ComparisonRow[] = [
   },
   {
     feature: 'Linear',
-    free: {included: true, detail: 'Personal API key'},
+    free: {included: false},
     pro: {included: true, detail: 'API key or OAuth'},
     team: {included: true, detail: 'API key or OAuth'},
   },

@@ -91,6 +91,7 @@ struct AppEffects {
 #[async_trait]
 impl CloudEffects for AppEffects {
   fn changed(&self, snapshot: &AccountSnapshot) {
+    crate::linear::set_pro(snapshot.is_pro());
     #[cfg(feature = "gpui-shell")]
     #[cfg(desktop)]
     crate::gpui_shell::account_changed(&self.app, snapshot.clone());

@@ -170,5 +170,7 @@ startApp({ ...fixture, ...(dbus ? { dbus } : {}) }, {
   SHELL: shell,
   GDK_SCALE: process.env.GDK_SCALE ?? "2",
   TREQ_E2E_LINEAR_URL: `http://127.0.0.1:${linearPort}/graphql`,
+  // Linear is Pro-only; the QA app has no Supabase session.
+  TREQ_E2E_PRO: "1",
   TREQ_FAKE_GH_LOG: join(fixture.root, "gh-calls.log"),
 });

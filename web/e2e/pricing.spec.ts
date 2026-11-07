@@ -15,14 +15,14 @@ test('lists Free, Pro and Team with their prices', async ({ page }) => {
   const free = plans.getByRole('article', { name: 'Free' });
   await expect(free).toContainText('$0');
   await expect(free).toContainText('gh');
-  await expect(free).toContainText('personal API key');
+  await expect(free).not.toContainText('Linear');
 
   const pro = plans.getByRole('article', { name: 'Pro' });
   await expect(pro).toContainText('$15');
   await expect(pro).toContainText('/user/month');
   await expect(pro).toContainText('14-day free trial');
   await expect(pro).toContainText('Cloud workspaces, pay-as-you-go at provider cost plus 20%');
-  await expect(pro).toContainText('Linear OAuth');
+  await expect(pro).toContainText('Linear integration');
   await expect(pro).not.toContainText(/mobile/i);
 
   const team = plans.getByRole('article', { name: 'Team' });

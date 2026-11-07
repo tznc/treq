@@ -525,6 +525,8 @@ pub struct LinearSection {
   pub edit_label: String,
   /// The OAuth row shows (Pro).
   pub oauth: bool,
+  /// Free plan: Linear needs Pro, so an upgrade prompt replaces the key.
+  pub upgrade: bool,
   pub oauth_description: String,
   pub oauth_loading: bool,
   pub key_priority_note: bool,
@@ -1247,6 +1249,7 @@ impl SettingsView {
           saving: linear.is_some_and(|l| l.saving),
           edit_label: format!("{} API key", if key.is_some() { "Update" } else { "Add" }),
           oauth: pro && native::feature_flag("pro"),
+          upgrade: !pro && !crate::linear::e2e_pro(),
           oauth_description: if key.is_some() {
             "API key takes priority, but you can also connect via OAuth"
           } else {
@@ -3495,6 +3498,19 @@ impl SettingsView {
         .text_color(p.muted_foreground)
         .child("Select a repository to configure Linear integration")
         .into_any_element();
+    }
+    if linear.upgrade {
+      let button = Button::new("linear-upgrade", p)
+        .size(Size::Sm)
+        .label("Upgrade to Pro")
+        .on_click(self.press("cloud.upgrade"));
+      return setting_row(
+        "Linear needs Pro",
+        "Start a trial or upgrade to use Linear",
+        button,
+        p,
+      )
+      .into_any_element();
     }
     let key_control: AnyElement = if linear.editing {
       let input = self
