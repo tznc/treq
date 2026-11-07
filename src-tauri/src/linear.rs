@@ -1769,14 +1769,14 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn oauth_session_reaches_linear_through_the_proxy() {
+  async fn oauth_session_reaches_linear_through_the_integration_proxy() {
     use wiremock::{
       matchers::{header, method, path},
       Mock, MockServer, ResponseTemplate,
     };
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-      .and(path("/functions/v1/linear-proxy"))
+      .and(path("/functions/v1/integration-proxy/linear/graphql"))
       .and(header("authorization", "Bearer supabase-jwt"))
       .respond_with(
         ResponseTemplate::new(200)
