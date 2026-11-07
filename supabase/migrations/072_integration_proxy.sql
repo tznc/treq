@@ -9,7 +9,10 @@
 -- INTEGRATION_SLOTS advisory locks first and fails fast with 429 when all
 -- are taken, and curl is capped at 5s, so a burst of slow upstream calls
 -- cannot take over the pool. pg_cron refreshes Linear tokens and the
--- GitHub App JWT ahead of expiry, so requests rarely make a second call.
+-- GitHub App JWT ahead of expiry, so requests rarely make a second call,
+-- but only while they are in use: a Linear token unused for a day or an
+-- App JWT unused for 15 minutes is left to expire and refreshed inline on
+-- the next call. `last_used_at` is written at most once a minute.
 --
 -- Vault secrets the operator creates (names below):
 --   project_jwt_secret    the project's JWT secret, to sign sandbox JWTs
@@ -159,6 +162,8 @@ $$;
 
 -- ── Linear ──────────────────────────────────────────────────────────────
 
+alter table public.linear_oauth_tokens add column last_used_at timestamptz;
+
 -- Refreshes a user's Linear token and saves it; the new access token, or
 -- null when Linear refuses (the user must reconnect).
 create function public.integration_linear_refresh(p_user_id uuid, p_refresh_token text)
@@ -212,6 +217,9 @@ begin
   if not found then
     perform public.integration_raise(403, 'not_linked', 'Linear account not linked');
   end if;
+  update public.linear_oauth_tokens set last_used_at = now()
+  where user_id = p_user_id
+    and (last_used_at is null or last_used_at < now() - interval '1 minute');
   if v_token.expires_at is null or v_token.expires_at > now() + interval '1 minute' then
     return v_token.access_token;
   end if;
@@ -225,8 +233,9 @@ begin
 end;
 $$;
 
--- pg_cron, every 5 minutes: refreshes up to 20 Linear tokens expiring in
--- the next 15 minutes, one at a time, each committed on its own.
+-- pg_cron, every 5 minutes: refreshes up to 20 Linear tokens used in the
+-- last day and expiring in the next 15 minutes, one at a time, each
+-- committed on its own.
 create function public.integration_refresh_linear_tokens()
 returns void
 language plpgsql
@@ -242,6 +251,7 @@ begin
     select user_id from public.linear_oauth_tokens
     where refresh_token_secret_id is not null
       and expires_at < now() + interval '15 minutes'
+      and last_used_at > now() - interval '1 day'
     order by expires_at
     limit 20
   loop
@@ -301,7 +311,8 @@ $$;
 create table public.github_app_jwt_cache (
   id boolean primary key default true check (id),
   secret_id uuid not null,
-  expires_at timestamptz not null
+  expires_at timestamptz not null,
+  last_used_at timestamptz not null default now()
 );
 alter table public.github_app_jwt_cache enable row level security;
 revoke all on table public.github_app_jwt_cache from public, anon, authenticated;
@@ -346,8 +357,8 @@ begin
 end;
 $$;
 
--- The cached App JWT. pg_cron refreshes it every 4 minutes; this refreshes
--- inline only if that missed.
+-- The cached App JWT. pg_cron refreshes it every 4 minutes while it was
+-- used in the last 15; this refreshes inline otherwise.
 create function public.integration_github_app_jwt()
 returns text
 language plpgsql
@@ -359,6 +370,8 @@ declare
   v_cache public.github_app_jwt_cache;
   v_jwt text;
 begin
+  update public.github_app_jwt_cache set last_used_at = now()
+  where last_used_at < now() - interval '1 minute';
   select * into v_cache from public.github_app_jwt_cache;
   if found and v_cache.expires_at > now() + interval '1 minute' then
     return (select decrypted_secret from vault.decrypted_secrets where id = v_cache.secret_id);
@@ -448,4 +461,6 @@ grant execute on function public.github_repo_token(text) to authenticated;
 select cron.schedule('integration-refresh-linear-tokens', '*/5 * * * *',
   'select public.integration_refresh_linear_tokens()');
 select cron.schedule('integration-refresh-github-app-jwt', '*/4 * * * *',
-  'select public.integration_curl_limits(); select public.integration_github_app_jwt_refresh()');
+  $cmd$select public.integration_curl_limits(), public.integration_github_app_jwt_refresh()
+    where exists (select 1 from public.github_app_jwt_cache
+                  where last_used_at > now() - interval '15 minutes')$cmd$);

@@ -2,7 +2,7 @@
 -- who may call, sandbox JWTs, and the checks that run before any outbound
 -- call. Outbound calls themselves are not exercised here.
 begin;
-select plan(21);
+select plan(23);
 
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000000e1', 'integrations@example.com'),
@@ -139,6 +139,20 @@ select lives_ok($$ select public.integration_refresh_linear_tokens() $$,
   'the Linear refresh job runs with nothing to refresh');
 select function_privs_are('public', 'integration_refresh_linear_tokens', array[]::text[],
   'authenticated', array[]::text[], 'authenticated cannot run the refresh job');
+
+-- Use is recorded, so pg_cron only refreshes what is in use.
+select public.linear_tokens_save('00000000-0000-0000-0000-0000000000e1', 'a1', 'r1',
+  now() + interval '1 hour', 'ws', 'Workspace');
+select public.integration_linear_token('00000000-0000-0000-0000-0000000000e1');
+select isnt(
+  (select last_used_at from public.linear_oauth_tokens
+   where user_id = '00000000-0000-0000-0000-0000000000e1'),
+  null, 'using a Linear token records last_used_at');
+
+select matches(
+  (select command from cron.job where jobname = 'integration-refresh-github-app-jwt'),
+  'last_used_at > now\(\) - interval',
+  'the App JWT refresh only runs while the JWT is in use');
 
 select * from finish();
 rollback;
