@@ -106,6 +106,18 @@ describe("githubUserToken", () => {
     });
   });
 
+  it("still returns the refreshed token when saving it fails", async () => {
+    const { deps } = setup({
+      grants: [stored({ expiresAt: iso(60_000) })],
+      refresh: refreshed,
+    });
+    deps.store.save.mockRejectedValueOnce(new Error("vault down"));
+    expect(await githubUserToken(deps)).toEqual({
+      status: 200,
+      body: { token: "ghu_new", expires_at: iso(8 * HOUR) },
+    });
+  });
+
   it("uses a concurrent request's refresh when GitHub refuses the spent refresh token", async () => {
     const { deps } = setup({
       grants: [
