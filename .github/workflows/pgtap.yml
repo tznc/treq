@@ -27,7 +27,7 @@ jobs:
 
       - uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
         with:
-          version: latest
+          version: 3.0.0
 
       - name: Start local database (skip API/edge/studio -- pgTAP only needs postgres)
         run: |
