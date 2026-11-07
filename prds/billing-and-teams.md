@@ -8,7 +8,7 @@ This document defines how Treq sells Pro and Team, how the service decides who i
 
 ## Goals
 
-- A signed-in user can start a Pro trial or buy Team from the web dashboard, and manage or cancel it without contacting anyone.
+- A signed-in user can buy Pro or Team from the web dashboard, and manage or cancel it without contacting anyone.
 - The service decides entitlement from records keyed by user or organization ID. An email address never decides it.
 - Every cloud feature checks entitlement on the server. A modified build of the open-source app cannot turn a cloud feature on.
 - An organization owns its GitHub App installation and its Team subscription.
@@ -25,10 +25,10 @@ This document defines how Treq sells Pro and Team, how the service decides who i
 | Plan | Price | Entitlement |
 | --- | --- | --- |
 | Free | US$0 | No cloud features. |
-| Pro | US$15 per user per month, 14-day trial with a card | `pro` for the subscribing user. |
+| Pro | US$15 per user per month | `pro` for the subscribing user. |
 | Team | US$199 per month for 5 members, plus US$8 per month for each member beyond 5 | `pro` for every member of the organization. |
 
-The trial applies to Pro only. A user gets one Pro trial per Stripe customer, recorded when the first trial starts.
+Neither plan has a trial. The `trialing` status is still honoured for subscriptions that started a trial before it was removed.
 
 The cloud features are the GitHub App, managed cloud workspaces, mobile access, and Linear OAuth. GitHub through the local `gh` CLI and Linear through a personal API key stay free.
 
@@ -64,7 +64,7 @@ Stripe stays the source of truth for payment state. The webhook copies the field
 
 | Function | Auth | Behavior |
 | --- | --- | --- |
-| `billing-checkout` | User JWT | Creates or reuses the owner's Stripe customer, then creates an embedded Checkout session in subscription mode. Prices come from the lookup keys `treq_pro_monthly` and `treq_team_monthly`. Team buys one unit per member. Pro sets `trial_period_days: 14` unless `trial_used_at` is set, and always collects a card. Team requires the caller to own the organization. Returns the session's client secret. |
+| `billing-checkout` | User JWT | Creates or reuses the owner's Stripe customer, then creates an embedded Checkout session in subscription mode. Prices come from the lookup keys `treq_pro_monthly` and `treq_team_monthly`. Team buys one unit per member. Neither plan sets a trial. Checkout always collects a card. Team requires the caller to own the organization. Returns the session's client secret. |
 | `billing-portal` | User JWT | Returns a Stripe customer portal URL for the caller's customer, or for an organization they own. |
 | `stripe-webhook` | Stripe signature | Verifies `Stripe-Signature` with `STRIPE_WEBHOOK_SECRET`, skips events already in `billing_events`, and upserts `billing_subscriptions` on `customer.subscription.created`, `updated`, and `deleted`. `checkout.session.completed` confirms the customer mapping and sets `trial_used_at`. |
 | `organizations` | User JWT | Creates an organization, invites by email, accepts an invite by token, promotes and demotes owners, removes a member, deletes the organization, and attaches a GitHub App installation the caller linked. After a join, leave or removal it sets the Team subscription's quantity to the member count. |
@@ -106,7 +106,7 @@ When an account is deleted and it was the last owner, the longest-standing membe
 
 Web dashboard:
 
-- The Subscription tab opens embedded Checkout for Pro, shows trial and renewal dates, and links to the customer portal.
+- The Subscription tab opens embedded Checkout for Pro, shows renewal dates, and links to the customer portal.
 - A Team tab creates an organization, buys Team, lists members and pending invites, and shows members against the 5 included seats and any extra seats billed.
 - The pricing page links its Pro and Team buttons to the matching Checkout.
 
@@ -124,7 +124,7 @@ Each step ships on its own and leaves the product working.
 2. `billing-checkout`, `billing-portal`, and the dashboard. The owner turns on `stripePayments` once the Stripe products, portal, webhook and secrets exist.
 3. Server-side enforcement. This step waits for step 2, so no user loses a feature they cannot buy.
 4. Organizations, Team checkout, and installation ownership.
-5. Pricing page copy for Pro as the cloud bundle, the trial, and Team.
+5. Pricing page copy for Pro as the cloud bundle, and Team.
 
 Stripe currently has no paying subscribers, because checkout never shipped. No backfill is needed.
 
@@ -132,7 +132,7 @@ Stripe currently has no paying subscribers, because checkout never shipped. No b
 
 - pgTAP covers `has_pro` for every status, row-level security on the new tables, and organization access to installations.
 - Webhook tests post signed fixture events and check idempotency and status transitions.
-- `service-qa` runs Checkout in Stripe test mode against the local Supabase stack, from trial start through cancellation.
+- `service-qa` runs Checkout in Stripe test mode against the local Supabase stack, from purchase through cancellation.
 - A takeover spec checks that a forged installation ID is refused and the real owner keeps the installation.
 - pgTAP covers owner promotion and demotion, last-owner protection, refused deletion while Team is active, and account deletion.
 
@@ -140,7 +140,7 @@ Stripe currently has no paying subscribers, because checkout never shipped. No b
 
 | ID | Decision | Default in this document |
 | --- | --- | --- |
-| B01 | Does Team get a trial? | No. Only Pro has a trial. |
+| B01 | Does Team get a trial? | No. No plan has a trial. |
 | B02 | How long is a lapsed cloud workspace kept? | 30 days, stopped, then deleted (decided 2026-10-14 as 7 days, extended to 30 on 2026-10-31). Remote audit events are kept 7 days for Team members and 1 day for everyone else. |
 | B03 | Should a member who leaves a Team keep `pro` until the period ends? | No. Entitlement ends at once. |
 | B04 | Should deleting an account or organization cancel its Stripe subscription? | No. The subscription keeps billing until canceled in the portal. |

@@ -83,12 +83,6 @@ const COMPARISON_ROWS: ComparisonRow[] = [
     pro: {included: true, detail: 'US$15 per user per month'},
     team: {included: true, detail: 'US$199 per month for 5 members, US$8 per extra member'},
   },
-  {
-    feature: 'Free trial',
-    free: {included: false},
-    pro: {included: true, detail: '14 days, card required'},
-    team: {included: false},
-  },
 ];
 
 function FeatureList({features}: {features: PlanFeature[]}): ReactNode {
@@ -138,7 +132,7 @@ function PlansSection(): ReactNode {
         <Heading as="h2" id="plan-pro" className={styles.planName}>
           Pro
         </Heading>
-        <p className={styles.planSeats}>14-day free trial, card required</p>
+        <p className={styles.planSeats}>Billed monthly</p>
         <p className={styles.planPrice}>
           <span className={styles.priceAmount}>$15</span>
           <span className={styles.priceUnit}>/user/month</span>
@@ -148,7 +142,7 @@ function PlansSection(): ReactNode {
           className={clsx('button', styles.planButton, styles.planButtonPrimary)}
           to="/dashboard?tab=account"
         >
-          Start 14-day free trial
+          Get Pro
         </Link>
       </article>
 
@@ -292,7 +286,7 @@ export default function PricingPage(): ReactNode {
   return (
     <Layout
       title="Pricing"
-      description="Treq pricing. The desktop app is free. Pro is $15 per user per month with a 14-day trial. Team is $199 per month for 5 members, then $8 per extra member."
+      description="Treq pricing. The desktop app is free. Pro is $15 per user per month. Team is $199 per month for 5 members, then $8 per extra member."
     >
       <Head>
         <script type="application/ld+json">
