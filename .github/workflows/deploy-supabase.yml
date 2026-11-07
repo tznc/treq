@@ -58,13 +58,11 @@ jobs:
             | jq -er 'map(select(.database_type == "PRIMARY"))[0].connection_string' \
             > supabase/.temp/pooler-url
 
-      # --include-all: a migration merged after a higher-numbered one (e.g. 039
-      # after 042) is still applied, in version order, instead of failing.
       - name: Show pending migrations
-        run: supabase db push --remote --include-all --dry-run
+        run: supabase db push --remote --dry-run
 
       - name: Apply migrations
-        run: supabase db push --remote --include-all --yes
+        run: supabase db push --remote --yes
 
       # With no names, deploys every supabase/functions/*/index.ts (skipping
       # _shared and tests) and applies the verify_jwt settings in config.toml.
