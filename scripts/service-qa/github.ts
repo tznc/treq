@@ -31,6 +31,10 @@ export function stubGitHubInstallationAccess(
       const code = userToken.slice(tokenPrefix.length);
       return (users[code] ?? []).includes(installationId);
     },
+    async getUser(userToken) {
+      const code = userToken.slice(tokenPrefix.length);
+      return { id: 1000 + code.length, login: `stub-${code}` };
+    },
     async getInstallation(id) {
       return { id, account: account(id), app_id: 1 };
     },

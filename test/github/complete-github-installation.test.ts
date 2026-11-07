@@ -29,6 +29,7 @@ function fakeDeps(
   store: InstallationLinkStore & {
     consumeIntent: ReturnType<typeof vi.fn>;
     linkInstallation: ReturnType<typeof vi.fn>;
+    saveIdentity: ReturnType<typeof vi.fn>;
   };
   github: { [K in keyof GitHubInstallationAccess]: ReturnType<typeof vi.fn> };
 } {
@@ -41,11 +42,15 @@ function fakeDeps(
         result: "linked" as const,
         organization_id: null,
       })),
+      saveIdentity: vi.fn(async () => {}),
     },
     github: {
       exchangeCode: vi.fn(github.exchangeCode ?? (async () => USER_TOKEN)),
       userCanAccessInstallation: vi.fn(
         github.userCanAccessInstallation ?? (async () => true),
+      ),
+      getUser: vi.fn(
+        github.getUser ?? (async () => ({ id: 42, login: "octo" })),
       ),
       getInstallation: vi.fn(
         github.getInstallation ?? (async () => installation),
@@ -79,6 +84,17 @@ describe("completeInstallation verifies the installer on GitHub", () => {
       installation,
       USER_ID,
     );
+    expect(deps.store.saveIdentity).toHaveBeenCalledWith(USER_ID, {
+      id: 42,
+      login: "octo",
+    });
+  });
+
+  it("still links when the GitHub identity cannot be saved", async () => {
+    const deps = fakeDeps();
+    deps.store.saveIdentity.mockRejectedValueOnce(new Error("db down"));
+    const result = await completeInstallation(body, deps);
+    expect(result.status).toBe(200);
   });
 
   it("refuses an installation the GitHub user cannot access", async () => {

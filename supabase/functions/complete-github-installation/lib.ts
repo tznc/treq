@@ -7,7 +7,9 @@
 // adds a `code` to the redirect. The handler exchanges it for a user access
 // token and links the installation only when it is in that GitHub user's
 // GET /user/installations. Without a code it refuses, so an App configured
-// without that setting fails closed. The user token is never stored.
+// without that setting fails closed. The user token is never stored; the
+// GitHub account it belongs to is (github_user_identities), so
+// integration-proxy can check that account's repository permissions.
 //
 // Linking requires Pro (prds/billing-and-teams.md, "Enforcement"). The check
 // runs before the intent is consumed, so a user who upgrades can retry with
@@ -55,7 +57,11 @@ export interface InstallationLinkStore {
     installation: GitHubInstallation,
     userId: string,
   ): Promise<LinkResult>;
+  /** Records the GitHub account behind the treq user. */
+  saveIdentity(userId: string, identity: GitHubUser): Promise<void>;
 }
+
+export type GitHubUser = { id: number; login: string };
 
 /** Every GitHub call the handler makes. service-qa stubs this. */
 export interface GitHubInstallationAccess {
@@ -72,6 +78,8 @@ export interface GitHubInstallationAccess {
     userToken: string,
     installationId: number,
   ): Promise<boolean>;
+  /** The GitHub account the user token belongs to (GET /user). */
+  getUser(userToken: string): Promise<GitHubUser>;
   /** App-authenticated lookup on GitHub; null when it does not exist. */
   getInstallation(installationId: number): Promise<GitHubInstallation | null>;
 }
@@ -154,12 +162,14 @@ export async function completeInstallation(
   // Prove the signed-in user's GitHub account can access the installation.
   // The token lives only in this block.
   let accessible: boolean;
+  let githubUser: GitHubUser;
   try {
     const userToken = await deps.github.exchangeCode(code);
     accessible = await deps.github.userCanAccessInstallation(
       userToken,
       installationId,
     );
+    githubUser = await deps.github.getUser(userToken);
   } catch (err) {
     console.error(
       "[complete-github-installation] GitHub user verification failed:",
@@ -236,6 +246,17 @@ export async function completeInstallation(
     };
   }
 
+  // Without it integration-proxy refuses to mint tokens and asks the user to
+  // reconnect, so a failure here does not undo the link.
+  try {
+    await deps.store.saveIdentity(deps.userId, githubUser);
+  } catch (err) {
+    console.error(
+      "[complete-github-installation] saving GitHub identity failed:",
+      errorMessage(err),
+    );
+  }
+
   console.log(
     JSON.stringify({
       operation: "installation_linked",
@@ -285,6 +306,15 @@ export function installationLinkStore(
       });
       if (error) throw new Error(error.message);
       return data as LinkResult;
+    },
+    async saveIdentity(userId, identity) {
+      const { error } = await client.from("github_user_identities").upsert({
+        user_id: userId,
+        github_user_id: identity.id,
+        github_login: identity.login,
+        updated_at: new Date().toISOString(),
+      });
+      if (error) throw new Error(error.message);
     },
   };
 }

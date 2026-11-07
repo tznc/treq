@@ -122,9 +122,13 @@ export async function resolveCaller(
 
 // ── GitHub ──────────────────────────────────────────────────────────────
 
+export type GitHubIdentity = { githubUserId: number; login: string };
+
 export interface GitHubDeps {
   /** The installation linked to `userId` that can see `owner/name`, if any. */
   installationFor(userId: string, fullName: string): Promise<number | null>;
+  /** The GitHub account recorded when `userId` linked an installation. */
+  identityFor(userId: string): Promise<GitHubIdentity | null>;
   appJwt(): Promise<string>;
   fetch: typeof fetch;
 }
@@ -144,9 +148,51 @@ export const TOKEN_PERMISSIONS = {
 
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
+// Repository roles that may push; a token for a user below these is refused.
+const PUSH_ROLES = new Set(["admin", "maintain", "write"]);
+
+const GITHUB_HEADERS = {
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+  "User-Agent": "treq-github-app/1.0",
+};
+
+export const RECONNECT_GITHUB =
+  "Reconnect the treq GitHub App from the dashboard so treq can check your GitHub access.";
+
+async function mintInstallationToken(
+  installationId: number,
+  repoName: string,
+  permissions: Record<string, string>,
+  deps: GitHubDeps,
+): Promise<{ token: string; expires_at: string } | null> {
+  const res = await deps.fetch(
+    `https://api.github.com/app/installations/${installationId}/access_tokens`,
+    {
+      method: "POST",
+      headers: {
+        ...GITHUB_HEADERS,
+        Authorization: `Bearer ${await deps.appJwt()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ repositories: [repoName], permissions }),
+    },
+  );
+  if (!res.ok) {
+    console.error("[integration-proxy] GitHub token mint failed:", res.status);
+    await res.body?.cancel();
+    return null;
+  }
+  const grant = await res.json();
+  return { token: grant.token, expires_at: grant.expires_at };
+}
+
 /**
  * Mints a GitHub App installation token limited to one repository the
- * caller's linked installation can see. GitHub expires it after an hour.
+ * caller's linked installation can see, and only when the caller's own
+ * GitHub account can push to it: an installation token acts as the App, so
+ * without this check anyone who linked an org's installation could write to
+ * every repository in it. GitHub expires the token after an hour.
  */
 export async function githubRepoToken(
   userId: string,
@@ -163,31 +209,44 @@ export async function githubRepoToken(
       body: { error: "The treq GitHub App is not installed for this repository" },
     };
   }
-
-  const res = await deps.fetch(
-    `https://api.github.com/app/installations/${installationId}/access_tokens`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${await deps.appJwt()}`,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "treq-github-app/1.0",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        repositories: [repository.split("/")[1]],
-        permissions: TOKEN_PERMISSIONS,
-      }),
-    },
-  );
-  if (!res.ok) {
-    console.error("[integration-proxy] GitHub token mint failed:", res.status);
-    return { status: 502, body: { error: "Failed to mint GitHub token" } };
+  const identity = await deps.identityFor(userId);
+  if (!identity) {
+    return { status: 403, body: { error: RECONNECT_GITHUB, code: "github_identity_required" } };
   }
-  const grant = await res.json();
-  return {
-    status: 200,
-    body: { token: grant.token, expires_at: grant.expires_at },
-  };
+
+  // A metadata-only token, never returned, to read the user's permission.
+  const [owner, name] = repository.split("/");
+  const check = await mintInstallationToken(installationId, name, { metadata: "read" }, deps);
+  if (!check) return { status: 502, body: { error: "Failed to check GitHub access" } };
+  const res = await deps.fetch(
+    `https://api.github.com/repos/${owner}/${name}/collaborators/${encodeURIComponent(identity.login)}/permission`,
+    { headers: { ...GITHUB_HEADERS, Authorization: `Bearer ${check.token}` } },
+  );
+  if (res.status === 404) {
+    await res.body?.cancel();
+    return { status: 403, body: { error: RECONNECT_GITHUB, code: "github_identity_required" } };
+  }
+  if (!res.ok) {
+    console.error("[integration-proxy] GitHub permission check failed:", res.status);
+    await res.body?.cancel();
+    return { status: 502, body: { error: "Failed to check GitHub access" } };
+  }
+  const access = (await res.json()) as { permission?: string; user?: { id?: number } };
+  // A renamed account's old login may now belong to someone else.
+  if (access.user?.id !== identity.githubUserId) {
+    return { status: 403, body: { error: RECONNECT_GITHUB, code: "github_identity_required" } };
+  }
+  if (!PUSH_ROLES.has(access.permission ?? "")) {
+    return {
+      status: 403,
+      body: {
+        error: "Your GitHub account cannot push to this repository",
+        code: "github_permission_denied",
+      },
+    };
+  }
+
+  const grant = await mintInstallationToken(installationId, name, TOKEN_PERMISSIONS, deps);
+  if (!grant) return { status: 502, body: { error: "Failed to mint GitHub token" } };
+  return { status: 200, body: grant };
 }

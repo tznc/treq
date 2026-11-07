@@ -80,23 +80,49 @@ describe("resolveCaller", () => {
 });
 
 describe("githubRepoToken", () => {
-  const ghDeps = (installation: number | null, ok = true) => ({
-    installationFor: vi.fn(async () => installation),
-    appJwt: async () => "app-jwt",
-    fetch: vi.fn(async () =>
-      new Response(JSON.stringify({ token: "ghs_x", expires_at: "2027-01-01T00:00:00Z" }), {
-        status: ok ? 201 : 500,
-      })
-    ) as unknown as typeof fetch,
-  });
+  type Opts = {
+    installation?: number | null;
+    identity?: { githubUserId: number; login: string } | null;
+    permission?: { status: number; body?: unknown };
+    mintStatus?: number;
+  };
+  const ghDeps = (o: Opts = {}) => {
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/collaborators/")) {
+        const p = o.permission ?? { status: 200, body: { permission: "write", user: { id: 7 } } };
+        return new Response(JSON.stringify(p.body ?? {}), { status: p.status });
+      }
+      const perms = JSON.parse(String(init?.body)).permissions;
+      const token = perms.contents ? "ghs_agent" : "ghs_check";
+      return new Response(JSON.stringify({ token, expires_at: "2027-01-01T00:00:00Z" }), {
+        status: o.mintStatus ?? 201,
+      });
+    });
+    return {
+      installationFor: vi.fn(async () => (o.installation === undefined ? 42 : o.installation)),
+      identityFor: vi.fn(async () =>
+        o.identity === undefined ? { githubUserId: 7, login: "octo" } : o.identity
+      ),
+      appJwt: async () => "app-jwt",
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      calls: fetch.mock.calls as unknown as [string, RequestInit][],
+    };
+  };
 
-  it("mints a token limited to the repository", async () => {
-    const d = ghDeps(42);
+  it("checks the user's permission, then mints a token limited to the repository", async () => {
+    const d = ghDeps();
     const result = await githubRepoToken("owner-1", "tznc/treq", d);
-    expect(result).toEqual({ status: 200, body: { token: "ghs_x", expires_at: "2027-01-01T00:00:00Z" } });
-    const [url, init] = (d.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(url).toBe("https://api.github.com/app/installations/42/access_tokens");
-    expect(JSON.parse(init.body)).toEqual({
+    expect(result).toEqual({ status: 200, body: { token: "ghs_agent", expires_at: "2027-01-01T00:00:00Z" } });
+
+    const [check, permission, mint] = d.calls;
+    expect(JSON.parse(String(check[1].body))).toEqual({
+      repositories: ["treq"],
+      permissions: { metadata: "read" },
+    });
+    expect(permission[0]).toBe("https://api.github.com/repos/tznc/treq/collaborators/octo/permission");
+    expect((permission[1].headers as Record<string, string>).Authorization).toBe("Bearer ghs_check");
+    expect(mint[0]).toBe("https://api.github.com/app/installations/42/access_tokens");
+    expect(JSON.parse(String(mint[1].body))).toEqual({
       repositories: ["treq"],
       permissions: {
         contents: "write",
@@ -110,9 +136,32 @@ describe("githubRepoToken", () => {
     });
   });
 
+  it("refuses a user who cannot push, without minting an agent token", async () => {
+    for (const permission of ["read", "triage", "none"]) {
+      const d = ghDeps({ permission: { status: 200, body: { permission, user: { id: 7 } } } });
+      const result = await githubRepoToken("owner-1", "tznc/treq", d);
+      expect(result).toMatchObject({ status: 403, body: { code: "github_permission_denied" } });
+      expect(d.calls).toHaveLength(2);
+    }
+  });
+
+  it("asks the user to reconnect when the GitHub account is unknown or changed", async () => {
+    const cases: Opts[] = [
+      { identity: null },
+      { permission: { status: 404 } },
+      // The stored login now belongs to another account.
+      { permission: { status: 200, body: { permission: "admin", user: { id: 8 } } } },
+    ];
+    for (const o of cases) {
+      const result = await githubRepoToken("owner-1", "tznc/treq", ghDeps(o));
+      expect(result).toMatchObject({ status: 403, body: { code: "github_identity_required" } });
+    }
+  });
+
   it("refuses bad input, unlinked repos and GitHub errors", async () => {
-    expect((await githubRepoToken("u", "not-a-repo", ghDeps(42))).status).toBe(400);
-    expect((await githubRepoToken("u", "a/b", ghDeps(null))).status).toBe(403);
-    expect((await githubRepoToken("u", "a/b", ghDeps(42, false))).status).toBe(502);
+    expect((await githubRepoToken("u", "not-a-repo", ghDeps())).status).toBe(400);
+    expect((await githubRepoToken("u", "a/b", ghDeps({ installation: null }))).status).toBe(403);
+    expect((await githubRepoToken("u", "a/b", ghDeps({ mintStatus: 500 }))).status).toBe(502);
+    expect((await githubRepoToken("u", "a/b", ghDeps({ permission: { status: 500 } }))).status).toBe(502);
   });
 });

@@ -118,6 +118,16 @@ router.post("/github/token", async (req, res) => {
         .maybeSingle();
       return (data?.installation_id as number | undefined) ?? null;
     },
+    identityFor: async (userId) => {
+      const { data } = await service
+        .from("github_user_identities")
+        .select("github_user_id, github_login")
+        .eq("user_id", userId)
+        .maybeSingle();
+      return data
+        ? { githubUserId: Number(data.github_user_id), login: data.github_login as string }
+        : null;
+    },
   });
   res.status(result.status).json(result.body);
 });
