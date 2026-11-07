@@ -18,6 +18,7 @@ import { appJWT } from "../_shared/github/app.ts";
 import { linearTokenStore, proxyLinearRequest } from "../linear-proxy/lib.ts";
 import {
   type Caller,
+  exactIlike,
   githubRepoToken,
   mintSandboxJwt,
   resolveCaller,
@@ -111,7 +112,7 @@ router.post("/github/token", async (req, res) => {
       const { data } = await service
         .from("github_repositories")
         .select("installation_id, github_app_installations!inner(linked_user_id, suspended_at)")
-        .ilike("full_name", fullName)
+        .ilike("full_name", exactIlike(fullName))
         .eq("github_app_installations.linked_user_id", userId)
         .is("github_app_installations.suspended_at", null)
         .limit(1)

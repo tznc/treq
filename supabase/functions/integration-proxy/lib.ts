@@ -146,6 +146,14 @@ export const TOKEN_PERMISSIONS = {
   statuses: "read",
 } as const;
 
+/**
+ * `owner/name` as an exact, case-insensitive ILIKE pattern: `_` (allowed
+ * in repository names) is otherwise a single-character wildcard.
+ */
+export function exactIlike(value: string): string {
+  return value.replace(/[\\%_*]/g, "\\$&");
+}
+
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 // Repository roles that may push; a token for a user below these is refused.

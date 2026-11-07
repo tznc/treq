@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
+  exactIlike,
   githubRepoToken,
   mintSandboxJwt,
   resolveCaller,
@@ -76,6 +77,14 @@ describe("resolveCaller", () => {
     deps.userFromJwt.mockClear();
     await resolveCaller(`Bearer ${forge(claims, "wrong-secret-wrong-secret-wrong-secret")}`, deps);
     expect(deps.userFromJwt).not.toHaveBeenCalled();
+  });
+});
+
+describe("exactIlike", () => {
+  it("escapes ILIKE wildcards so owner/tre_ cannot match owner/treq", () => {
+    expect(exactIlike("tznc/tre_")).toBe("tznc/tre\\_");
+    expect(exactIlike("a%b*c\\d")).toBe("a\\%b\\*c\\\\d");
+    expect(exactIlike("tznc/treq")).toBe("tznc/treq");
   });
 });
 
