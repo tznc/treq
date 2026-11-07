@@ -96,7 +96,10 @@ describe("githubRepoToken", () => {
     expect(result).toEqual({ status: 200, body: { token: "ghs_x", expires_at: "2027-01-01T00:00:00Z" } });
     const [url, init] = (d.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toBe("https://api.github.com/app/installations/42/access_tokens");
-    expect(JSON.parse(init.body)).toEqual({ repositories: ["treq"] });
+    expect(JSON.parse(init.body)).toEqual({
+      repositories: ["treq"],
+      permissions: { contents: "write", pull_requests: "write", metadata: "read", actions: "read" },
+    });
   });
 
   it("refuses bad input, unlinked repos and GitHub errors", async () => {

@@ -129,6 +129,16 @@ export interface GitHubDeps {
   fetch: typeof fetch;
 }
 
+// What an agent may do with a minted token, narrower than the App's own
+// permissions. Workflow files are read through `contents`; GitHub's
+// `workflows` permission only grants write, so it is left out.
+export const TOKEN_PERMISSIONS = {
+  contents: "write",
+  pull_requests: "write",
+  metadata: "read",
+  actions: "read",
+} as const;
+
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /**
@@ -162,7 +172,10 @@ export async function githubRepoToken(
         "User-Agent": "treq-github-app/1.0",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ repositories: [repository.split("/")[1]] }),
+      body: JSON.stringify({
+        repositories: [repository.split("/")[1]],
+        permissions: TOKEN_PERMISSIONS,
+      }),
     },
   );
   if (!res.ok) {
