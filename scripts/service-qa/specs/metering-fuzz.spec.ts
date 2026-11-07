@@ -274,11 +274,9 @@ it(`keeps the usage ledger and reports consistent over ${SEEDS} random timelines
           )
         ).map((p) => [p.id, p]),
       );
-      const config = (
-        await rows<{ value: ListPricesConfig }>(
-          admin.from("admin_config").select("value").eq("key", "list_prices"),
-        )
-      )[0].value;
+      const config = await rpc<ListPricesConfig>("admin_config_get", {
+        p_key: "list_prices",
+      });
       const listPrices = new Map<string, ListPrice>(
         Object.entries(config.tiers).map(([tier, t]) => [
           tier,

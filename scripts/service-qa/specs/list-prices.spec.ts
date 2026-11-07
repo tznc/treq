@@ -240,7 +240,7 @@ it("bills stopped Boat disk at the list price per GB", async () => {
   });
 }, 120_000);
 
-it("takes a price edit from admin_config without a migration", async () => {
+it("takes a price edit from treq_admin.admin_config without a migration", async () => {
   const u = await createTestUser();
   users.push(u.user.id);
   await grantPro(admin, u.user.id);
@@ -251,23 +251,21 @@ it("takes a price edit from admin_config without a migration", async () => {
   });
   expect(signInError).toBeNull();
 
-  const { data: row, error: readError } = await admin
-    .from("admin_config")
-    .select("value")
-    .eq("key", "list_prices")
-    .single();
+  const { data: row, error: readError } = await admin.rpc("admin_config_get", {
+    p_key: "list_prices",
+  });
   expect(readError).toBeNull();
-  const original = (row as { value: Record<string, unknown> }).value;
+  const original = row as Record<string, unknown>;
   const edited = structuredClone(original) as {
     tiers: Record<string, { managed_usd_per_hour: number }>;
   };
   edited.tiers.m.managed_usd_per_hour = 0.36;
 
   try {
-    const { error: editError } = await admin
-      .from("admin_config")
-      .update({ value: edited })
-      .eq("key", "list_prices");
+    const { error: editError } = await admin.rpc("admin_config_set", {
+      p_key: "list_prices",
+      p_value: edited,
+    });
     expect(editError).toBeNull();
     const { data: catalog } = await anon.rpc("get_machine_catalog");
     const medium = (
@@ -277,35 +275,41 @@ it("takes a price edit from admin_config without a migration", async () => {
       ...new Set(medium?.regions.map((r) => Number(r.hourly_usd))),
     ]).toEqual([0.36]);
 
-    const { error: badError } = await admin
-      .from("admin_config")
-      .update({ value: { tiers: {} } })
-      .eq("key", "list_prices");
+    const { error: badError } = await admin.rpc("admin_config_set", {
+      p_key: "list_prices",
+      p_value: { tiers: {} },
+    });
     expect(badError?.message).toContain(
       "list_prices: tiers.s.managed_usd_per_hour must be a number >= 0",
     );
 
-    const { error: anonError, data: anonRows } = await anon
+    const { error: anonError } = await anon.rpc("admin_config_get", {
+      p_key: "list_prices",
+    });
+    expect(anonError).not.toBeNull();
+    const { error: tableError } = await anon
+      .schema("treq_admin")
       .from("admin_config")
       .select("key");
-    expect(anonError !== null || (anonRows ?? []).length === 0).toBe(true);
+    expect(tableError).not.toBeNull();
 
     await recordOutcome("list-prices-04-admin-config-edit", {
       expectations: [
-        "Updating the list_prices row of admin_config through the API changes the Medium catalog price to US$0.36/h at once.",
-        "An update that drops the tier prices is rejected with a message naming the missing field.",
-        "A signed-in user cannot read admin_config.",
+        "Setting the list_prices key through admin_config_set (service role) changes the Medium catalog price to US$0.36/h at once.",
+        "A value that drops the tier prices is rejected with a message naming the missing field.",
+        "A signed-in user can neither call admin_config_get nor query the treq_admin schema.",
       ],
       details: {
         medium,
         badError: badError?.message,
         anonError: anonError?.message ?? null,
+        tableError: tableError?.message ?? null,
       },
     });
   } finally {
-    await admin
-      .from("admin_config")
-      .update({ value: original })
-      .eq("key", "list_prices");
+    await admin.rpc("admin_config_set", {
+      p_key: "list_prices",
+      p_value: original,
+    });
   }
 }, 120_000);

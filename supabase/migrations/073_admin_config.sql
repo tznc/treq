@@ -13,7 +13,7 @@
 -- This replaces 072's rates, which followed E2B's running rate and Daytona's
 -- storage rate times the markup. Prices no longer follow provider prices or
 -- the markup settings: changing a price is an edit to the 'list_prices' row
--- of admin_config, in the dashboard, with no migration.
+-- of treq_admin.admin_config, in the dashboard, with no migration.
 -- usage_reports.provider_cost_nanousd stays the real provider cost, so margin
 -- per provider stays visible. If the 'list_prices' row is deleted, billing
 -- falls back to provider cost with the markup or fee.
@@ -21,18 +21,25 @@
 -- The functions below replace 072's, with the billed rate read through
 -- billed_running_nanousd_per_sec / billed_stopped_nanousd_per_gb_sec.
 
--- Operator settings, one row per key, edited in the Supabase dashboard
--- (Table Editor -> admin_config). A key with a known shape is checked on write
--- by admin_config_validate, so a bad edit is refused instead of breaking
--- billing. Only the service role and the dashboard can read or write it.
-create table public.admin_config (
+-- App-wide settings live in treq_admin.admin_config, one row per key, and are
+-- the reference value for every setting moved here. Operators edit them in
+-- the Supabase dashboard (Table Editor, schema treq_admin). The schema is not
+-- exposed through the API and clients have no access to it; service code
+-- reads and writes through admin_config_get / admin_config_set, which only
+-- the service role can call. A key with a known shape is checked on write by
+-- admin_config_validate, so a bad edit is refused instead of breaking
+-- billing.
+create schema treq_admin;
+revoke all on schema treq_admin from public, anon, authenticated;
+
+create table treq_admin.admin_config (
   key text primary key,
   value jsonb not null,
   description text,
   updated_at timestamptz not null default now()
 );
-alter table public.admin_config enable row level security;
-revoke all on public.admin_config from anon, authenticated;
+alter table treq_admin.admin_config enable row level security;
+revoke all on treq_admin.admin_config from public, anon, authenticated;
 
 create function treq_internal.admin_config_validate()
 returns trigger
@@ -49,6 +56,16 @@ declare
     array['stopped_disk', 'managed_usd_per_gb_month', ''], array['stopped_disk', 'byos_usd_per_gb_month', '']];
 begin
   new.updated_at := now();
+  if new.key = 'byos_markup_bps'
+     and (jsonb_typeof(new.value) is distinct from 'number'
+          or (new.value #>> '{}')::numeric not between 0 and 10000
+          or (new.value #>> '{}')::numeric <> trunc((new.value #>> '{}')::numeric)) then
+    raise exception 'byos_markup_bps must be a number between 0 and 10000';
+  end if;
+  if new.key = 'spend_cap_max_usd'
+     and (jsonb_typeof(new.value) is distinct from 'number' or (new.value #>> '{}')::numeric < 5) then
+    raise exception 'spend_cap_max_usd must be a number >= 5';
+  end if;
   if new.key = 'list_prices' then
     foreach v_path slice 1 in array v_paths loop
       v_path := array_remove(v_path, '');
@@ -63,10 +80,10 @@ end;
 $$;
 
 create trigger admin_config_validate
-  before insert or update on public.admin_config
+  before insert or update on treq_admin.admin_config
   for each row execute function treq_internal.admin_config_validate();
 
-insert into public.admin_config (key, value, description) values ('list_prices', '{
+insert into treq_admin.admin_config (key, value, description) values ('list_prices', '{
   "tiers": {
     "s":  {"managed_usd_per_hour": 0.20, "byos_usd_per_hour": 0.0085},
     "m":  {"managed_usd_per_hour": 0.40, "byos_usd_per_hour": 0.017},
@@ -90,7 +107,7 @@ as $$
     (select (c.value #>> array['tiers', m.tier_id,
                case when p_billing_mode = 'byos' then 'byos_usd_per_hour' else 'managed_usd_per_hour' end])::numeric
             * 1e9 / 3600
-       from public.provider_machine_types m, public.admin_config c
+       from public.provider_machine_types m, treq_admin.admin_config c
       where m.id = p_machine_type_id and c.key = 'list_prices'),
     p_fallback);
 $$;
@@ -115,13 +132,79 @@ as $$
       (select (c.value #>> array['stopped_disk',
                  case when p_billing_mode = 'byos' then 'byos_usd_per_gb_month' else 'managed_usd_per_gb_month' end])::numeric
               * 1e9 / (730 * 3600)
-         from public.admin_config c
+         from treq_admin.admin_config c
         where c.key = 'list_prices'),
       p_fallback)
   end;
 $$;
 
 revoke all on function treq_internal.admin_config_validate() from public, anon, authenticated;
+
+-- 062's single-row billing_settings moves into admin_config, keeping its
+-- current values.
+insert into treq_admin.admin_config (key, value, description)
+select 'byos_markup_bps', to_jsonb(b.byos_markup_bps),
+       'BYOS fee in basis points of provider cost, used where a size has no list price (500 = 5%).'
+  from treq_internal.billing_settings b
+union all
+select 'spend_cap_max_usd', to_jsonb(b.spend_cap_max_usd),
+       'Highest monthly spend cap (US$) a user can set.'
+  from treq_internal.billing_settings b;
+
+create or replace function treq_internal.byos_markup_bps()
+returns int
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce((select (c.value #>> '{}')::int from treq_admin.admin_config c where c.key = 'byos_markup_bps'), 500);
+$$;
+
+create or replace function treq_internal.spend_cap_max_usd()
+returns numeric
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce((select (c.value #>> '{}')::numeric from treq_admin.admin_config c where c.key = 'spend_cap_max_usd'), 1000);
+$$;
+
+drop table treq_internal.billing_settings;
+
+-- Service code (Edge Functions, service-qa) reads and writes settings here;
+-- clients cannot call either.
+create function public.admin_config_get(p_key text)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  perform treq_internal.require_service_role();
+  return (select c.value from treq_admin.admin_config c where c.key = p_key);
+end;
+$$;
+
+create function public.admin_config_set(p_key text, p_value jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform treq_internal.require_service_role();
+  insert into treq_admin.admin_config (key, value) values (p_key, p_value)
+  on conflict (key) do update set value = excluded.value;
+end;
+$$;
+
+revoke all on function public.admin_config_get(text) from public, anon, authenticated;
+revoke all on function public.admin_config_set(text, jsonb) from public, anon, authenticated;
+grant execute on function public.admin_config_get(text) to service_role;
+grant execute on function public.admin_config_set(text, jsonb) to service_role;
 revoke all on function treq_internal.billed_running_nanousd_per_sec(text, text, numeric) from public, anon, authenticated;
 revoke all on function treq_internal.billed_stopped_nanousd_per_gb_sec(text, text, numeric) from public, anon, authenticated;
 

@@ -1,5 +1,5 @@
 -- Fixed list prices (073): one price per size on every provider, stored in
--- public.admin_config under 'list_prices' so they are edited without a
+-- treq_admin.admin_config under 'list_prices' so they are edited without a
 -- migration. Managed and BYOS each have their own hourly rate;
 -- stopped disk bills per GB-month wherever the provider keeps the disk.
 -- provider_cost_nanousd stays the real provider cost.
@@ -7,12 +7,12 @@
 -- Medium: managed US$0.40/h = 111,111.1 nano-USD/s; BYOS US$0.017/h = 4,722.2.
 -- Disk: managed US$0.10/GB-month = 38.05 nano-USD/GB-s; BYOS US$0.004 = 1.52.
 begin;
-select plan(23);
+select plan(26);
 
 update public.machine_type_prices set effective_from = now() - interval '30 days' where effective_to is null;
 
 -- ── List prices ────────────────────────────────────────────────────────────
-select is((select value from public.admin_config where key = 'list_prices'),
+select is((select value from treq_admin.admin_config where key = 'list_prices'),
   '{"tiers": {"s":  {"managed_usd_per_hour": 0.20, "byos_usd_per_hour": 0.0085},
               "m":  {"managed_usd_per_hour": 0.40, "byos_usd_per_hour": 0.017},
               "l":  {"managed_usd_per_hour": 0.80, "byos_usd_per_hour": 0.034},
@@ -20,15 +20,27 @@ select is((select value from public.admin_config where key = 'list_prices'),
     "stopped_disk": {"managed_usd_per_gb_month": 0.10, "byos_usd_per_gb_month": 0.004}}'::jsonb,
   'one rounded price per size, in admin_config');
 select throws_ok(
-  $$ update public.admin_config set value = value #- '{tiers,xl}' where key = 'list_prices' $$,
+  $$ update treq_admin.admin_config set value = value #- '{tiers,xl}' where key = 'list_prices' $$,
   'P0001', 'list_prices: tiers.xl.managed_usd_per_hour must be a number >= 0',
   'an edit that drops a size is rejected');
 select throws_ok(
-  $$ update public.admin_config set value = jsonb_set(value, '{stopped_disk,byos_usd_per_gb_month}', '"cheap"') where key = 'list_prices' $$,
+  $$ update treq_admin.admin_config set value = jsonb_set(value, '{stopped_disk,byos_usd_per_gb_month}', '"cheap"') where key = 'list_prices' $$,
   'P0001', 'list_prices: stopped_disk.byos_usd_per_gb_month must be a number >= 0',
   'an edit with a non-number price is rejected');
-select ok(not has_table_privilege('authenticated', 'public.admin_config', 'select'),
-  'signed-in users cannot read admin_config');
+select ok(not has_schema_privilege('authenticated', 'treq_admin', 'usage')
+          and not has_schema_privilege('anon', 'treq_admin', 'usage'),
+  'clients cannot reach the treq_admin schema');
+select is(public.admin_config_get('list_prices') #>> '{tiers,m,byos_usd_per_hour}', '0.017',
+  'service code reads a key through admin_config_get');
+select ok(not has_function_privilege('authenticated', 'public.admin_config_get(text)', 'execute')
+          and not has_function_privilege('authenticated', 'public.admin_config_set(text, jsonb)', 'execute'),
+  'signed-in users cannot call the admin_config RPCs');
+savepoint rpc_set;
+select public.admin_config_set('list_prices',
+  jsonb_set(public.admin_config_get('list_prices'), '{tiers,s,managed_usd_per_hour}', '0.25'));
+select is(public.admin_config_get('list_prices') #>> '{tiers,s,managed_usd_per_hour}', '0.25',
+  'service code writes a key through admin_config_set');
+rollback to savepoint rpc_set;
 select is(round(treq_internal.billed_running_nanousd_per_sec('boat:default', 'managed', 0), 3), 111111.111,
   'Boat Medium bills the managed Medium price');
 select is(round(treq_internal.billed_running_nanousd_per_sec('e2b:m', 'byos', 0), 3), 4722.222,
@@ -36,7 +48,7 @@ select is(round(treq_internal.billed_running_nanousd_per_sec('e2b:m', 'byos', 0)
 select is(round(treq_internal.billed_running_nanousd_per_sec('fly_machines:xl', 'managed', 0), 3), 444444.444,
   'Fly XL bills the managed XL price');
 savepoint price_edit;
-update public.admin_config set value = jsonb_set(value, '{tiers,m,managed_usd_per_hour}', '0.36') where key = 'list_prices';
+update treq_admin.admin_config set value = jsonb_set(value, '{tiers,m,managed_usd_per_hour}', '0.36') where key = 'list_prices';
 select is(round(treq_internal.billed_running_nanousd_per_sec('boat:default', 'managed', 0), 3), 100000.000,
   'editing the config row changes the price, no migration needed');
 rollback to savepoint price_edit;

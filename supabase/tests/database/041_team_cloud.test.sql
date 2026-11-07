@@ -134,7 +134,7 @@ select throws_ok($$
 update public.remote_instances set active_placement_id = '00000000-0000-0000-0000-0000000041c2'
  where id = '00000000-0000-0000-0000-0000000041b2';
 -- At a BYOS list price of $1.80/h for Small, 3 hours bill about $5.40, over the $5 member cap.
-update public.admin_config set value = jsonb_set(value, '{tiers,s,byos_usd_per_hour}', '1.80') where key = 'list_prices';
+update treq_admin.admin_config set value = jsonb_set(value, '{tiers,s,byos_usd_per_hour}', '1.80') where key = 'list_prices';
 select public.set_placement_state('00000000-0000-0000-0000-0000000041c2', 'ready', null, now() - interval '3 hours');
 select is((select billing_org_id from public.usage_intervals where placement_id = '00000000-0000-0000-0000-0000000041c2' limit 1),
   '00000000-0000-0000-0000-0000000041f1'::uuid, 'usage records the organization it bills to');
