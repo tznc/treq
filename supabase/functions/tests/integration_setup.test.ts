@@ -83,3 +83,24 @@ Deno.test("the config is readable by the sandbox's treq user, not by everyone", 
   assert(script.includes("chgrp treq"));
   assert(!/[0-9a-f]{64}/.test(script));
 });
+
+Deno.test("provisionPlacementServices starts the gateway, then installs the integration credential", async () => {
+  const { provisionPlacementServices } = await import("../_shared/remote/machine-setup.ts");
+  const { provider, execs } = recorder();
+  (provider as { ensureService: unknown }).ensureService = () => Promise.resolve();
+  const gateway = memoryStore();
+  const integration = memoryStore();
+  await provisionPlacementServices(
+    { gateway: { ...gateway, load: () => Promise.resolve(null) }, integration },
+    provider,
+    "m1",
+    "pl-1",
+    PROXY,
+  );
+  assertEquals(execs.length, 2);
+  assert(execs[0].includes("/etc/treq/gateway.secret"));
+  assert(execs[1].includes(INTEGRATION_CONFIG_FILE));
+  assertMatch(gateway.saved["pl-1"], /^[0-9a-f]{64}$/);
+  assertMatch(integration.saved["pl-1"], /^[0-9a-f]{64}$/);
+  assert(gateway.saved["pl-1"] !== integration.saved["pl-1"], "two different secrets");
+});
