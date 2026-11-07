@@ -3,8 +3,22 @@
 //! [`crate::core::remote::github_read`], which goes through `gh`, so a
 //! screen cannot tell which one answered.
 
-use crate::core::remote::GithubQuery;
-use serde_json::Value;
+use crate::core::remote::{GithubContext, GithubQuery};
+use crate::github::{self, GhIssue, GhListPage, GhPullRequest, GhReviewThread, GH_LIST_PAGE_SIZE};
+use reqwest::Method;
+use serde::de::DeserializeOwned;
+use serde_json::{json, Value};
+
+const API_BASE: &str = "https://api.github.com";
+const JSON_MEDIA_TYPE: &str = "application/vnd.github+json";
+const DIFF_MEDIA_TYPE: &str = "application/vnd.github.diff";
+
+/// How an error from a rejected token starts, so the caller can drop the
+/// token it cached and try once more with a fresh one.
+pub const UNAUTHORIZED: &str = "github_unauthorized";
+
+/// Pages of comments read for one issue or pull request, 100 each.
+const MAX_COMMENT_PAGES: usize = 10;
 
 /// A GitHub API client authenticated as one user.
 pub struct GithubHttp {
@@ -16,13 +30,107 @@ pub struct GithubHttp {
 impl GithubHttp {
   /// A client for `api.github.com`.
   pub fn new(token: String) -> Self {
-    unimplemented!("{token}")
+    Self::with_base(token, API_BASE.to_string())
   }
 
   /// A client for the API at `api_base`, such as a test server.
   pub fn with_base(token: String, api_base: String) -> Self {
-    unimplemented!("{token}{api_base}")
+    Self {
+      client: reqwest::Client::new(),
+      token,
+      api_base: api_base.trim_end_matches('/').to_string(),
+    }
   }
+
+  fn request(&self, method: Method, path: &str, accept: &str) -> reqwest::RequestBuilder {
+    self
+      .client
+      .request(method, format!("{}{path}", self.api_base))
+      .bearer_auth(&self.token)
+      .header(reqwest::header::ACCEPT, accept)
+      .header("X-GitHub-Api-Version", "2022-11-28")
+      .header(reqwest::header::USER_AGENT, "treq")
+  }
+
+  /// The response's body, or GitHub's message when it refused; a 401 reads
+  /// as [`UNAUTHORIZED`].
+  async fn send(&self, request: reqwest::RequestBuilder) -> Result<String, String> {
+    let response = request
+      .send()
+      .await
+      .map_err(|error| format!("GitHub request failed: {error}"))?;
+    let status = response.status();
+    let text = response
+      .text()
+      .await
+      .map_err(|error| format!("GitHub response failed: {error}"))?;
+    if status.is_success() {
+      return Ok(text);
+    }
+    let message = serde_json::from_str::<Value>(&text)
+      .ok()
+      .and_then(|body| body.get("message")?.as_str().map(str::to_string))
+      .unwrap_or(text);
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+      return Err(format!("{UNAUTHORIZED}: {message}"));
+    }
+    Err(format!("GitHub returned {status}: {message}"))
+  }
+
+  /// A REST call with an optional JSON body; an empty response is `null`.
+  pub async fn rest(
+    &self,
+    method: Method,
+    path: &str,
+    body: Option<&Value>,
+  ) -> Result<Value, String> {
+    let mut request = self.request(method, path, JSON_MEDIA_TYPE);
+    if let Some(body) = body {
+      request = request.json(body);
+    }
+    let text = self.send(request).await?;
+    if text.trim().is_empty() {
+      return Ok(Value::Null);
+    }
+    serde_json::from_str(&text).map_err(|error| format!("Failed to parse GitHub response: {error}"))
+  }
+
+  /// A REST `GET` read as text in the media type `accept`.
+  pub async fn rest_text(&self, path: &str, accept: &str) -> Result<String, String> {
+    self.send(self.request(Method::GET, path, accept)).await
+  }
+
+  /// A GraphQL call's whole response; its `errors`, if any, as the error.
+  pub async fn graphql(&self, query: &str, variables: Value) -> Result<Value, String> {
+    let body = json!({ "query": query, "variables": variables });
+    let response = self.rest(Method::POST, "/graphql", Some(&body)).await?;
+    match response.get("errors").and_then(Value::as_array) {
+      Some(errors) if !errors.is_empty() => Err(
+        errors
+          .iter()
+          .filter_map(|error| error.get("message").and_then(Value::as_str))
+          .collect::<Vec<_>>()
+          .join("; "),
+      ),
+      _ => Ok(response),
+    }
+  }
+}
+
+fn parse<T: DeserializeOwned>(value: Value) -> Result<T, String> {
+  serde_json::from_value(value).map_err(|error| format!("Failed to parse GitHub response: {error}"))
+}
+
+fn to_json<T: serde::Serialize>(value: T) -> Result<Value, String> {
+  serde_json::to_value(value).map_err(|error| error.to_string())
+}
+
+/// `full_name`'s owner and name.
+fn owner_and_name(full_name: &str) -> Result<(&str, &str), String> {
+  full_name
+    .split_once('/')
+    .filter(|(owner, name)| !owner.is_empty() && !name.is_empty() && !name.contains('/'))
+    .ok_or_else(|| format!("Expected an OWNER/REPO name, got: {full_name}"))
 }
 
 /// [`GithubQuery`] answered over HTTPS for the repository `full_name`
@@ -32,8 +140,330 @@ pub async fn github_read(
   full_name: &str,
   query: GithubQuery,
 ) -> Result<Value, String> {
-  let _ = (&gh.client, &gh.token, &gh.api_base, full_name, query);
-  unimplemented!()
+  match query {
+    GithubQuery::Context => {
+      let user = gh.rest(Method::GET, "/user", None).await?;
+      let login = user["login"]
+        .as_str()
+        .ok_or("GitHub sent no login for the signed-in user")?;
+      to_json(GithubContext {
+        full_name: full_name.to_string(),
+        login: login.to_string(),
+      })
+    }
+    GithubQuery::ListIssues { state, after } => {
+      to_json(list_issues(gh, full_name, &state, after.as_deref()).await?)
+    }
+    GithubQuery::ListPrs { state, page } => to_json(list_prs(gh, full_name, &state, page).await?),
+    GithubQuery::SearchOpenPrs { mine, query, limit } => {
+      to_json(search_open_prs(gh, full_name, mine, &query, limit).await?)
+    }
+    GithubQuery::Issue { number } => to_json(issue(gh, full_name, number).await?),
+    GithubQuery::Pr { number } => to_json(pr(gh, full_name, number).await?),
+    GithubQuery::PrDiff { number } => {
+      let path = format!("/repos/{full_name}/pulls/{number}");
+      to_json(gh.rest_text(&path, DIFF_MEDIA_TYPE).await?)
+    }
+    GithubQuery::PrChecks { number } => to_json(pr_checks(gh, full_name, number).await?),
+    GithubQuery::PrReviewThreads { number } => {
+      to_json(pr_review_threads(gh, full_name, number).await?)
+    }
+  }
+}
+
+/// `gh_list_issues_impl`: one page of [`github::issues_page_query`].
+async fn list_issues(
+  gh: &GithubHttp,
+  full_name: &str,
+  state: &str,
+  after: Option<&str>,
+) -> Result<GhListPage<GhIssue>, String> {
+  let (owner, name) = owner_and_name(full_name)?;
+  let query = github::issues_page_query(state)?;
+  let variables = json!({
+    "owner": owner,
+    "name": name,
+    "first": GH_LIST_PAGE_SIZE.clamp(1, 100),
+    "after": after,
+  });
+  let response = gh.graphql(&query, variables).await?;
+  Ok(parse::<github::IssuesPageResponse>(response)?.into_page())
+}
+
+/// The fields `gh pr list --json ...` reads, as GraphQL.
+const LISTED_PR_FIELDS: &str = "number title state url author { login } \
+  labels(first: 100) { nodes { name color } } headRefName baseRefName \
+  mergeStateStatus createdAt updatedAt isDraft";
+
+/// Search terms in one string, with single spaces.
+fn search_terms(terms: &[&str]) -> String {
+  terms
+    .iter()
+    .flat_map(|term| term.split_whitespace())
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
+/// Pull requests matching the search `q`, in its order, up to `want`.
+async fn search_prs(gh: &GithubHttp, q: &str, want: u32) -> Result<Vec<GhPullRequest>, String> {
+  let query = format!(
+    "query($q: String!, $first: Int!, $after: String) {{ \
+       search(query: $q, type: ISSUE, first: $first, after: $after) {{ \
+         nodes {{ ... on PullRequest {{ {LISTED_PR_FIELDS} }} }} \
+         pageInfo {{ hasNextPage endCursor }} }} }}"
+  );
+  let want = want as usize;
+  let mut prs = Vec::new();
+  let mut after: Option<String> = None;
+  while prs.len() < want {
+    let first = (want - prs.len()).min(100);
+    let response = gh
+      .graphql(&query, json!({ "q": q, "first": first, "after": after }))
+      .await?;
+    let search = &response["data"]["search"];
+    for node in search["nodes"].as_array().into_iter().flatten() {
+      // An issue among the results comes back as an empty node.
+      if node.get("number").is_some() {
+        prs.push(parse(gh_shape(node.clone()))?);
+      }
+    }
+    let page = &search["pageInfo"];
+    match page["endCursor"].as_str() {
+      Some(cursor) if page["hasNextPage"].as_bool() == Some(true) => {
+        after = Some(cursor.to_string());
+      }
+      _ => break,
+    }
+  }
+  prs.truncate(want);
+  Ok(prs)
+}
+
+/// `gh_list_prs_impl`: `gh pr list --state` searches GitHub the same way.
+async fn list_prs(
+  gh: &GithubHttp,
+  full_name: &str,
+  state: &str,
+  page: u32,
+) -> Result<GhListPage<GhPullRequest>, String> {
+  let filter = match state {
+    // `--state open` includes drafts, which have their own filter.
+    "open" => "is:open draft:false",
+    "draft" => "is:open draft:true",
+    "closed" => "is:closed",
+    "merged" => "is:merged",
+    "all" => "",
+    other => return Err(format!("Unknown pull request state: {other}")),
+  };
+  let repo = format!("repo:{full_name}");
+  let q = search_terms(&[&repo, "is:pr", filter, "sort:created-desc"]);
+  let limit = GH_LIST_PAGE_SIZE.max(1);
+  let page = page.max(1);
+  let fetched = search_prs(gh, &q, limit * page).await?;
+  Ok(github::take_list_page(fetched, limit, page))
+}
+
+/// `gh_search_open_prs_impl`.
+async fn search_open_prs(
+  gh: &GithubHttp,
+  full_name: &str,
+  mine: bool,
+  query: &str,
+  limit: u32,
+) -> Result<Vec<GhPullRequest>, String> {
+  let repo = format!("repo:{full_name}");
+  let author = if mine { "author:@me" } else { "" };
+  let q = search_terms(&[
+    &repo,
+    "is:pr",
+    "is:open",
+    query,
+    "sort:created-desc",
+    author,
+  ]);
+  search_prs(gh, &q, limit.max(1)).await
+}
+
+/// A GraphQL node in the shape `gh ... --json` prints it: connections as
+/// plain lists, a deleted account as an empty login, and a missing review
+/// decision or submission time as an empty string.
+fn gh_shape(mut node: Value) -> Value {
+  fn fix_author(node: &mut Value) {
+    if let Some(author) = node.get_mut("author").filter(|author| author.is_null()) {
+      *author = json!({ "login": "" });
+    }
+  }
+  let Some(object) = node.as_object_mut() else {
+    return node;
+  };
+  for key in ["labels", "comments", "latestReviews", "reviews"] {
+    if let Some(field) = object.get_mut(key) {
+      if let Some(nodes) = field.get_mut("nodes").map(Value::take) {
+        *field = nodes;
+      }
+      for item in field.as_array_mut().into_iter().flatten() {
+        fix_author(item);
+        if let Some(at) = item.get_mut("submittedAt").filter(|at| at.is_null()) {
+          *at = json!("");
+        }
+      }
+    }
+  }
+  if let Some(decision) = object.get_mut("reviewDecision").filter(|d| d.is_null()) {
+    *decision = json!("");
+  }
+  fix_author(&mut node);
+  node
+}
+
+/// The fields of a comment `gh ... view --json comments` reads, with the
+/// reactions `fill_comment_reactions` adds.
+const COMMENT_FIELDS: &str = "id body createdAt author { login } \
+  reactionGroups { content viewerHasReacted reactors { totalCount } }";
+
+/// The issue or pull request (`kind`) `number` with all its comments, read
+/// with `fields`.
+async fn view(
+  gh: &GithubHttp,
+  full_name: &str,
+  kind: &str,
+  number: u64,
+  fields: &str,
+) -> Result<Value, String> {
+  let (owner, name) = owner_and_name(full_name)?;
+  let query = format!(
+    "query($owner: String!, $name: String!, $number: Int!, $after: String) {{ \
+       repository(owner: $owner, name: $name) {{ {kind}(number: $number) {{ {fields} \
+         comments(first: 100, after: $after) {{ nodes {{ {COMMENT_FIELDS} }} \
+           pageInfo {{ hasNextPage endCursor }} }} }} }} }}"
+  );
+  let mut item: Option<Value> = None;
+  let mut comments = Vec::new();
+  let mut after: Option<String> = None;
+  for _ in 0..MAX_COMMENT_PAGES {
+    let variables = json!({ "owner": owner, "name": name, "number": number, "after": after });
+    let mut response = gh.graphql(&query, variables).await?;
+    let mut node = response
+      .pointer_mut(&format!("/data/repository/{kind}"))
+      .map(Value::take)
+      .unwrap_or_default();
+    if node.is_null() {
+      return Err(format!("GitHub has no {kind} #{number} in {full_name}"));
+    }
+    let page = node
+      .get_mut("comments")
+      .map(Value::take)
+      .unwrap_or_default();
+    comments.extend(page["nodes"].as_array().cloned().unwrap_or_default());
+    item.get_or_insert(node);
+    match page["pageInfo"]["endCursor"].as_str() {
+      Some(cursor) if page["pageInfo"]["hasNextPage"].as_bool() == Some(true) => {
+        after = Some(cursor.to_string());
+      }
+      _ => break,
+    }
+  }
+  let mut item = item.ok_or_else(|| format!("GitHub has no {kind} #{number} in {full_name}"))?;
+  if let Some(object) = item.as_object_mut() {
+    object.insert("comments".into(), Value::Array(comments));
+  }
+  Ok(gh_shape(item))
+}
+
+/// Keeps the reactions someone is on, as `fill_comment_reactions` does.
+fn shown_comment_reactions(comments: Option<&mut Vec<github::GhIssueComment>>) {
+  for comment in comments.into_iter().flatten() {
+    comment.reactions = github::shown_reactions(std::mem::take(&mut comment.reactions));
+  }
+}
+
+/// `github_cli::issue`: `gh issue view --json ...` with reactions filled in.
+async fn issue(gh: &GithubHttp, full_name: &str, number: u64) -> Result<GhIssue, String> {
+  let fields = "number title state url body createdAt updatedAt author { login } \
+    labels(first: 100) { nodes { name color } }";
+  let mut issue: GhIssue = parse(view(gh, full_name, "issue", number, fields).await?)?;
+  shown_comment_reactions(issue.comments.as_mut());
+  Ok(issue)
+}
+
+/// `github_cli::pr`: `gh pr view --json ...` with reactions filled in.
+async fn pr(gh: &GithubHttp, full_name: &str, number: u64) -> Result<GhPullRequest, String> {
+  let fields = format!(
+    "{LISTED_PR_FIELDS} body reviewDecision \
+     latestReviews(first: 100) {{ nodes {{ author {{ login }} state }} }} \
+     reviews(first: 100) {{ nodes {{ author {{ login }} state submittedAt }} }}"
+  );
+  let mut pr: GhPullRequest = parse(view(gh, full_name, "pullRequest", number, &fields).await?)?;
+  shown_comment_reactions(pr.comments.as_mut());
+  Ok(pr)
+}
+
+const PR_CHECKS_QUERY: &str =
+  "query($owner: String!, $name: String!, $number: Int!, $after: String) { \
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
+    commits(last: 1) { nodes { commit { statusCheckRollup { \
+      contexts(first: 100, after: $after) { \
+        nodes { __typename \
+          ... on CheckRun { name status conclusion detailsUrl startedAt completedAt } \
+          ... on StatusContext { context state targetUrl } } \
+        pageInfo { hasNextPage endCursor } } } } } } } } }";
+
+/// Pages of checks read for one pull request, 100 each.
+const MAX_CHECK_PAGES: usize = 10;
+
+/// `get_pr_checks_for_pr_impl`: the head commit's checks rolled up as
+/// `gh pr checks` reports them; `None` when none are reported.
+async fn pr_checks(
+  gh: &GithubHttp,
+  full_name: &str,
+  number: u64,
+) -> Result<Option<github::PrCiStatus>, String> {
+  let (owner, name) = owner_and_name(full_name)?;
+  let mut entries = Vec::new();
+  let mut after: Option<String> = None;
+  for _ in 0..MAX_CHECK_PAGES {
+    let variables = json!({ "owner": owner, "name": name, "number": number, "after": after });
+    let mut response = gh.graphql(PR_CHECKS_QUERY, variables).await?;
+    let contexts = response
+      .pointer_mut("/data/repository/pullRequest/commits/nodes/0/commit/statusCheckRollup/contexts")
+      .map(Value::take)
+      .unwrap_or_default();
+    let nodes = contexts["nodes"].as_array().cloned().unwrap_or_default();
+    entries.extend(parse::<Vec<github::GhRollupEntry>>(Value::Array(nodes))?);
+    match contexts["pageInfo"]["endCursor"].as_str() {
+      Some(cursor) if contexts["pageInfo"]["hasNextPage"].as_bool() == Some(true) => {
+        after = Some(cursor.to_string());
+      }
+      _ => break,
+    }
+  }
+  Ok(github::rollup_check_entries(entries))
+}
+
+/// `gh_list_pr_review_threads_impl`; none when the name is not `owner/name`.
+async fn pr_review_threads(
+  gh: &GithubHttp,
+  full_name: &str,
+  number: u64,
+) -> Result<Vec<GhReviewThread>, String> {
+  let Some((owner, repo)) = full_name.split_once('/') else {
+    return Ok(Vec::new());
+  };
+  let mut threads = Vec::new();
+  let mut after: Option<String> = None;
+  for _ in 0..github::MAX_REVIEW_THREAD_PAGES {
+    let variables = json!({ "owner": owner, "repo": repo, "number": number, "after": after });
+    let response = gh.graphql(github::REVIEW_THREADS_QUERY, variables).await?;
+    let Some((page, next)) = parse::<github::GqlResponse>(response)?.into_threads_page() else {
+      break;
+    };
+    threads.extend(page);
+    let Some(next) = next else {
+      break;
+    };
+    after = Some(next);
+  }
+  Ok(threads)
 }
 
 #[cfg(test)]
