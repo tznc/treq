@@ -63,13 +63,60 @@ impl GithubUserTokens {
   }
 
   /// A token for the signed-in user at `now` (Unix seconds).
-  pub async fn token(&self, _now: i64) -> Result<String, GithubTokenError> {
-    unimplemented!()
+  pub async fn token(&self, now: i64) -> Result<String, GithubTokenError> {
+    let user_id = self
+      .supabase
+      .auth
+      .session()
+      .map(|session| session.user.id)
+      .ok_or(GithubTokenError::SignedOut)?;
+    let mut cached = self.cached.lock().await;
+    if let Some(hit) = cached.as_ref().filter(|c| {
+      c.user_id == user_id && c.expires_at.is_none_or(|at| at - now > REUSE_MARGIN_SECS)
+    }) {
+      return Ok(hit.token.clone());
+    }
+    let (status, body) = self
+      .supabase
+      .invoke_raw(
+        "integration-proxy/github/user-token",
+        &serde_json::json!({}),
+      )
+      .await
+      .map_err(|e| GithubTokenError::Unavailable(e.friendly()))?;
+    let message = || {
+      body.get("error").and_then(|e| e.as_str()).map_or_else(
+        || format!("integration-proxy answered {status}"),
+        String::from,
+      )
+    };
+    if status == 401 && body.get("code").and_then(|c| c.as_str()) == Some("github_reconnect") {
+      return Err(GithubTokenError::Reconnect(message()));
+    }
+    if status != 200 {
+      return Err(GithubTokenError::Unavailable(message()));
+    }
+    let issued: Issued = serde_json::from_value(body)
+      .map_err(|e| GithubTokenError::Unavailable(format!("integration-proxy answer: {e}")))?;
+    let expires_at = match issued.expires_at.as_deref() {
+      None => None,
+      Some(at) => Some(
+        chrono::DateTime::parse_from_rfc3339(at)
+          .map_err(|e| GithubTokenError::Unavailable(format!("bad expires_at {at}: {e}")))?
+          .timestamp(),
+      ),
+    };
+    *cached = Some(Cached {
+      user_id,
+      token: issued.token.clone(),
+      expires_at,
+    });
+    Ok(issued.token)
   }
 
   /// Forgets the cached token, after GitHub refused it.
   pub async fn forget(&self) {
-    unimplemented!()
+    *self.cached.lock().await = None;
   }
 }
 
