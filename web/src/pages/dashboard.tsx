@@ -924,8 +924,8 @@ function OrganizationCard({
             <ul aria-label="Pending invites" style={styles.teamList}>
               {invites.map((i) => (
                 <li key={i.id} style={styles.teamInvite}>
-                  <div className="dashboard-row" style={styles.teamRow}>
-                    <span>
+                  <div style={styles.teamRow}>
+                    <span style={styles.inviteEmail}>
                       {i.email}
                       <span style={styles.teamMuted}>
                         {" "}
@@ -947,8 +947,9 @@ function OrganizationCard({
                       <button
                         type="button"
                         aria-label={`Revoke invite for ${i.email}`}
+                        title="Revoke invite"
                         disabled={pending}
-                        className="dashboard-link-button" style={styles.linkButton}
+                        style={styles.iconButton}
                         onClick={() =>
                           void run(() =>
                             organizationsRequest({
@@ -958,7 +959,9 @@ function OrganizationCard({
                           )
                         }
                       >
-                        Revoke
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.75 6.5v4.5M9.25 6.5v4.5" />
+                        </svg>
                       </button>
                     </span>
                   </div>
@@ -2016,6 +2019,21 @@ const styles: Record<string, React.CSSProperties> = {
   teamLinkRow: { display: "flex", gap: "0.5rem", paddingBottom: "0.6rem" },
   teamMuted: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-500)" },
   teamForm: { display: "flex", gap: "0.5rem", marginTop: "0.75rem" },
+  inviteEmail: { flex: 1, minWidth: 0 },
+  iconButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    width: "32px",
+    height: "32px",
+    padding: 0,
+    borderRadius: "6px",
+    border: "none",
+    backgroundColor: "transparent",
+    color: "#ef4444",
+    cursor: "pointer",
+  },
   linkButton: {
     border: "none",
     background: "none",
