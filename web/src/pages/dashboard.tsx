@@ -401,7 +401,7 @@ function SubscriptionTab({
   return (
     <section aria-labelledby="subscription-heading">
       <h2 id="subscription-heading" style={styles.sectionTitle}>
-        Subscription
+        Personal
       </h2>
       <div style={styles.card}>
         {checkoutReturn === "waiting" && (
@@ -452,7 +452,7 @@ function SubscriptionTab({
         )}
         {isPro && billingCustomer === null && (
           <p style={styles.billingNote}>
-            Your Pro comes from a team. Its owners manage billing in the Team
+            Your Pro comes from a team. Its owners manage billing in the Teams
             section below.
           </p>
         )}
@@ -493,7 +493,7 @@ function SubscriptionTab({
               type="button"
               onClick={openPortal}
               disabled={portalPending}
-              style={styles.secondaryButton}
+              style={{ ...styles.secondaryButton, marginLeft: "auto" }}
             >
               Manage billing
             </button>
@@ -779,7 +779,7 @@ function OrganizationCard({
               type="button"
               onClick={openPortal}
               disabled={pending}
-              style={styles.secondaryButton}
+              style={{ ...styles.secondaryButton, marginLeft: "auto" }}
             >
               Manage billing
             </button>
@@ -926,10 +926,9 @@ function OrganizationCard({
                 <li key={i.id} style={styles.teamInvite}>
                   <div style={styles.teamRow}>
                     <span style={styles.inviteEmail}>
-                      {i.email}
-                      <span style={styles.teamMuted}>
-                        {" "}
-                        expires {formatPeriodEnd(i.expires_at)}
+                      <span>{i.email}</span>
+                      <span style={styles.inviteExpiry}>
+                        Expires {shortDate(i.expires_at)}
                       </span>
                     </span>
                     <span className="dashboard-row-actions" style={styles.teamRowActions}>
@@ -944,10 +943,11 @@ function OrganizationCard({
                           New link
                         </button>
                       )}
+                      <span className="dashboard-tooltip-anchor">
                       <button
                         type="button"
                         aria-label={`Revoke invite for ${i.email}`}
-                        title="Revoke invite"
+                        aria-describedby={`revoke-tip-${i.id}`}
                         disabled={pending}
                         style={styles.iconButton}
                         onClick={() =>
@@ -963,6 +963,14 @@ function OrganizationCard({
                           <path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.75 6.5v4.5M9.25 6.5v4.5" />
                         </svg>
                       </button>
+                      <span
+                        role="tooltip"
+                        id={`revoke-tip-${i.id}`}
+                        className="dashboard-tooltip"
+                      >
+                        Revoke invite
+                      </span>
+                      </span>
                     </span>
                   </div>
                   {links[i.id] && (
@@ -1004,13 +1012,13 @@ function OrganizationCard({
               style={styles.input}
             />
             <button type="submit" disabled={pending} style={styles.saveButton}>
-              Invite
+              Generate invite link
             </button>
           </form>
           <p style={styles.inputHint}>
-            Treq does not send invite emails yet. Copy the link and send it to
-            your teammate. A link works once, for any Treq account, and expires
-            after 7 days. New link replaces the old one. Team includes{" "}
+            Enter your teammate's email, generate a link, then copy it and
+            send it to them. A link works once, for any Treq account, and
+            expires after 24 hours. New link replaces the old one. Team includes{" "}
             {TEAM_INCLUDED_SEATS} members. Each member who joins beyond that
             adds US${TEAM_EXTRA_SEAT_USD} per month, prorated.
           </p>
@@ -1194,6 +1202,16 @@ function GetTeamCard({
   );
 }
 
+// "Nov 14, 2026": pending invites show a short expiry date.
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 function clearSearchParams(...names: string[]) {
   const url = new URL(window.location.href);
   for (const name of names) url.searchParams.delete(name);
@@ -1314,7 +1332,7 @@ function TeamTab({
   return (
     <section aria-labelledby="team-heading">
       <h2 id="team-heading" style={styles.sectionTitle}>
-        Team
+        Teams
       </h2>
 
       {checkoutReturn === "waiting" && (
@@ -2118,7 +2136,8 @@ const styles: Record<string, React.CSSProperties> = {
   teamLinkRow: { display: "flex", gap: "0.5rem", paddingBottom: "0.6rem" },
   teamMuted: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-500)" },
   teamForm: { display: "flex", gap: "0.5rem", marginTop: "0.75rem" },
-  inviteEmail: { flex: 1, minWidth: 0 },
+  inviteEmail: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column" },
+  inviteExpiry: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-600)" },
   iconButton: {
     display: "inline-flex",
     alignItems: "center",

@@ -158,7 +158,7 @@ async function openDashboard(
   return { page, calls, close: () => context.close() };
 }
 
-const card = (page: Page) => page.getByRole('region', { name: 'Subscription' });
+const card = (page: Page) => page.getByRole('region', { name: 'Personal' });
 
 function field(page: Page, label: string) {
   return card(page).getByRole('group', { name: label });
