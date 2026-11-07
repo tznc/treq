@@ -1,31 +1,75 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   githubRepoToken,
-  mintSandboxToken,
+  mintSandboxJwt,
   resolveCaller,
-  SANDBOX_TOKEN_MAX_TTL_SEC,
 } from "../../supabase/functions/integration-proxy/lib.ts";
 
 const NOW = 1_800_000_000;
 const PLACEMENT = "11111111-1111-1111-1111-111111111111";
-const SECRET = "a".repeat(64);
+const SECRET = "super-secret-jwt-token-with-at-least-32-characters-long";
 
 const deps = {
-  userFromJwt: async (jwt: string) => (jwt === "good-jwt" ? "user-1" : null),
-  placement: async (id: string) =>
-    id === PLACEMENT ? { secret: SECRET, ownerUserId: "owner-1" } : null,
+  jwtSecret: SECRET,
+  userFromJwt: async (jwt: string) => (jwt === "a.good.jwt" ? "user-1" : null),
+  placementOwner: async (id: string) => (id === PLACEMENT ? "owner-1" : null),
   nowSec: () => NOW,
 };
 
+function decode(segment: string) {
+  return JSON.parse(Buffer.from(segment, "base64url").toString());
+}
+
+// Re-signs a payload with the same secret, to test claim checks.
+function forge(payload: Record<string, unknown>, secret = SECRET): string {
+  const enc = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url");
+  const input = `${enc({ alg: "HS256", typ: "JWT" })}.${enc(payload)}`;
+  return `${input}.${createHmac("sha256", secret).update(input).digest("base64url")}`;
+}
+
+describe("mintSandboxJwt", () => {
+  it("mints a standard HS256 Supabase JWT for the owner", async () => {
+    const { token, expiresAt } = await mintSandboxJwt(SECRET, "owner-1", PLACEMENT, 600, NOW);
+    const [h, p, sig] = token.split(".");
+    expect(decode(h)).toEqual({ alg: "HS256", typ: "JWT" });
+    expect(decode(p)).toEqual({
+      sub: "owner-1",
+      role: "authenticated",
+      aud: "authenticated",
+      iat: NOW,
+      exp: NOW + 600,
+      is_anonymous: false,
+      treq_placement_id: PLACEMENT,
+    });
+    expect(sig).toBe(createHmac("sha256", SECRET).update(`${h}.${p}`).digest("base64url"));
+    expect(expiresAt).toBe(NOW + 600);
+  });
+
+  it("caps the lifetime at an hour", async () => {
+    const { expiresAt } = await mintSandboxJwt(SECRET, "owner-1", PLACEMENT, 99_999, NOW);
+    expect(expiresAt).toBe(NOW + 3600);
+  });
+});
+
 describe("resolveCaller", () => {
-  it("accepts a Supabase JWT", async () => {
-    expect(await resolveCaller("Bearer good-jwt", deps)).toEqual({ kind: "user", userId: "user-1" });
-    expect(await resolveCaller("Bearer bad-jwt", deps)).toBeNull();
+  const claims = {
+    sub: "owner-1",
+    role: "authenticated",
+    aud: "authenticated",
+    iat: NOW,
+    exp: NOW + 600,
+    treq_placement_id: PLACEMENT,
+  };
+
+  it("passes a user's JWT to Auth", async () => {
+    expect(await resolveCaller("Bearer a.good.jwt", deps)).toEqual({ kind: "user", userId: "user-1" });
+    expect(await resolveCaller("Bearer a.bad.jwt", deps)).toBeNull();
     expect(await resolveCaller(undefined, deps)).toBeNull();
   });
 
-  it("accepts a sandbox token as the placement owner", async () => {
-    const { token } = await mintSandboxToken(SECRET, PLACEMENT, 600, NOW);
+  it("accepts a sandbox JWT as the placement owner", async () => {
+    const { token } = await mintSandboxJwt(SECRET, "owner-1", PLACEMENT, 600, NOW);
     expect(await resolveCaller(`Bearer ${token}`, deps)).toEqual({
       kind: "sandbox",
       userId: "owner-1",
@@ -33,15 +77,25 @@ describe("resolveCaller", () => {
     });
   });
 
-  it("rejects expired, tampered, foreign and too-long-lived tokens", async () => {
-    const expired = await mintSandboxToken(SECRET, PLACEMENT, 60, NOW - 120);
-    const wrongKey = await mintSandboxToken("b".repeat(64), PLACEMENT, 600, NOW);
-    const unknown = await mintSandboxToken(SECRET, "22222222-2222-2222-2222-222222222222", 600, NOW);
-    const { token } = await mintSandboxToken(SECRET, PLACEMENT, 600, NOW);
-    const tooLong = token.replace(`.${NOW + 600}.`, `.${NOW + SANDBOX_TOKEN_MAX_TTL_SEC + 1}.`);
-    for (const t of [expired.token, wrongKey.token, unknown.token, tooLong, "it1.x.y"]) {
-      expect(await resolveCaller(`Bearer ${t}`, deps)).toBeNull();
-    }
+  it("rejects bad signatures, expired, too-long-lived and orphaned sandbox JWTs", async () => {
+    const tokens = [
+      forge(claims, "another-secret-another-secret-another-secret"),
+      forge({ ...claims, iat: NOW - 700, exp: NOW - 100 }),
+      forge({ ...claims, exp: NOW + 3601 }),
+      forge({ ...claims, sub: "someone-else" }),
+      forge({ ...claims, treq_placement_id: "22222222-2222-2222-2222-222222222222" }),
+      forge({ ...claims, role: "service_role" }),
+    ];
+    for (const t of tokens) expect(await resolveCaller(`Bearer ${t}`, deps)).toBeNull();
+  });
+
+  it("never sends a sandbox JWT to Auth", async () => {
+    const userFromJwt = vi.fn(async () => "user-1");
+    await resolveCaller(`Bearer ${forge(claims, "wrong-secret-wrong-secret-wrong-secret")}`, {
+      ...deps,
+      userFromJwt,
+    });
+    expect(userFromJwt).not.toHaveBeenCalled();
   });
 });
 

@@ -1,15 +1,15 @@
 // Request logic for the integration-proxy Edge Function, kept free of Deno
 // and Supabase imports so it runs under the repo's unit tests.
 //
-// Callers are either a signed-in user (Supabase JWT) or an agent inside a
-// cloud sandbox holding a sandbox token. A sandbox token is
-// `it1.<placement_id>.<expiry>.<mac>`: `mac` is lowercase hex HMAC-SHA256
-// over `it1.<placement_id>.<expiry>`, keyed with the placement's gateway
-// secret (051_gateway_secrets.sql). The `it1` prefix keeps it from being
-// accepted as a gateway token and the other way round. It acts as the
-// placement's owner and cannot mint further tokens.
+// Callers are either a signed-in user or an agent inside a cloud sandbox.
+// Both send a Supabase JWT. A sandbox JWT is minted here, HS256 with the
+// project's JWT secret, so the Data API and RLS accept it as the sandbox's
+// owner (`role: authenticated`, `sub` = owner). Its `treq_placement_id`
+// claim marks it as a sandbox token, for RLS and for refusing it on
+// /sandbox-token. It lives at most an hour and is not tied to an Auth
+// session, so it is checked locally here rather than through Auth.
 
-export const SANDBOX_TOKEN_PREFIX = "it1";
+export const SANDBOX_CLAIM = "treq_placement_id";
 export const SANDBOX_TOKEN_MAX_TTL_SEC = 3600;
 
 export type Caller =
@@ -19,24 +19,34 @@ export type Caller =
 export type Result = { status: number; body: unknown };
 
 export interface AuthDeps {
-  /** The user id for a Supabase JWT, or null when it is not valid. */
+  /** The project's JWT secret, used for sandbox JWTs. */
+  jwtSecret: string;
+  /** The user id for a user's Supabase JWT, or null when it is not valid. */
   userFromJwt(jwt: string): Promise<string | null>;
-  /** The placement's gateway secret and owner, or null when there is none. */
-  placement(
-    placementId: string,
-  ): Promise<{ secret: string; ownerUserId: string } | null>;
+  /** The live placement's owner, or null when there is none. */
+  placementOwner(placementId: string): Promise<string | null>;
   nowSec?: () => number;
 }
 
-function hex(bytes: Uint8Array): string {
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+function base64url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function macHex(
-  secret: string,
-  placementId: string,
-  expiry: number,
-): Promise<string> {
+function decodeSegment(segment: string): Record<string, unknown> | null {
+  try {
+    const b64 = segment.replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    const value = JSON.parse(new TextDecoder().decode(bytes));
+    return value && typeof value === "object" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function hs256(secret: string, input: string): Promise<string> {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
@@ -45,12 +55,7 @@ async function macHex(
     false,
     ["sign"],
   );
-  const sig = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    enc.encode(`${SANDBOX_TOKEN_PREFIX}.${placementId}.${expiry}`),
-  );
-  return hex(new Uint8Array(sig));
+  return base64url(new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(input))));
 }
 
 function constantTimeEqual(a: string, b: string): boolean {
@@ -60,18 +65,51 @@ function constantTimeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-export async function mintSandboxToken(
+export async function mintSandboxJwt(
   secret: string,
+  ownerUserId: string,
   placementId: string,
   ttlSec = SANDBOX_TOKEN_MAX_TTL_SEC,
   nowSec = Math.floor(Date.now() / 1000),
 ): Promise<{ token: string; expiresAt: number }> {
-  const expiry = nowSec + Math.min(ttlSec, SANDBOX_TOKEN_MAX_TTL_SEC);
-  const mac = await macHex(secret, placementId, expiry);
-  return {
-    token: `${SANDBOX_TOKEN_PREFIX}.${placementId}.${expiry}.${mac}`,
-    expiresAt: expiry,
-  };
+  const exp = nowSec + Math.min(ttlSec, SANDBOX_TOKEN_MAX_TTL_SEC);
+  const enc = new TextEncoder();
+  const header = base64url(enc.encode(JSON.stringify({ alg: "HS256", typ: "JWT" })));
+  const payload = base64url(enc.encode(JSON.stringify({
+    sub: ownerUserId,
+    role: "authenticated",
+    aud: "authenticated",
+    iat: nowSec,
+    exp,
+    is_anonymous: false,
+    [SANDBOX_CLAIM]: placementId,
+  })));
+  const input = `${header}.${payload}`;
+  return { token: `${input}.${await hs256(secret, input)}`, expiresAt: exp };
+}
+
+async function verifySandboxJwt(
+  jwt: string,
+  deps: AuthDeps,
+): Promise<Caller | null> {
+  const [header, payload, sig] = jwt.split(".");
+  const h = decodeSegment(header);
+  const p = decodeSegment(payload);
+  if (!deps.jwtSecret || h?.alg !== "HS256" || !p || !sig) return null;
+  if (!constantTimeEqual(await hs256(deps.jwtSecret, `${header}.${payload}`), sig)) return null;
+
+  const now = (deps.nowSec ?? (() => Math.floor(Date.now() / 1000)))();
+  const { sub, exp, iat, role } = p;
+  const placementId = p[SANDBOX_CLAIM];
+  if (
+    typeof sub !== "string" || typeof placementId !== "string" ||
+    typeof exp !== "number" || typeof iat !== "number" || role !== "authenticated" ||
+    exp < now || exp - iat > SANDBOX_TOKEN_MAX_TTL_SEC
+  ) return null;
+
+  // A sandbox token dies with its placement, or if the placement changes hands.
+  if ((await deps.placementOwner(placementId)) !== sub) return null;
+  return { kind: "sandbox", userId: sub, placementId };
 }
 
 /** Resolves the Authorization header to a caller, or null when it is not valid. */
@@ -79,27 +117,13 @@ export async function resolveCaller(
   authorization: string | undefined,
   deps: AuthDeps,
 ): Promise<Caller | null> {
-  const bearer = (authorization ?? "").replace(/^Bearer\s+/i, "");
-  if (!bearer) return null;
-
-  if (!bearer.startsWith(`${SANDBOX_TOKEN_PREFIX}.`)) {
-    const userId = await deps.userFromJwt(bearer);
-    return userId ? { kind: "user", userId } : null;
+  const jwt = (authorization ?? "").replace(/^Bearer\s+/i, "");
+  if (jwt.split(".").length !== 3) return null;
+  if (decodeSegment(jwt.split(".")[1])?.[SANDBOX_CLAIM] !== undefined) {
+    return verifySandboxJwt(jwt, deps);
   }
-
-  const parts = bearer.split(".");
-  if (parts.length !== 4) return null;
-  const [, placementId, expiryText, mac] = parts;
-  if (mac.length !== 64 || !/^\d+$/.test(expiryText)) return null;
-  const expiry = Number(expiryText);
-  const now = (deps.nowSec ?? (() => Math.floor(Date.now() / 1000)))();
-  if (expiry < now || expiry > now + SANDBOX_TOKEN_MAX_TTL_SEC) return null;
-
-  const placement = await deps.placement(placementId);
-  if (!placement) return null;
-  const expected = await macHex(placement.secret, placementId, expiry);
-  if (!constantTimeEqual(expected, mac)) return null;
-  return { kind: "sandbox", userId: placement.ownerUserId, placementId };
+  const userId = await deps.userFromJwt(jwt);
+  return userId ? { kind: "user", userId } : null;
 }
 
 // ── GitHub ──────────────────────────────────────────────────────────────

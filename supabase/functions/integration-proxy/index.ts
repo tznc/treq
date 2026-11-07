@@ -5,9 +5,10 @@
 //   POST /linear/graphql  { query, variables } -> Linear's response
 //   POST /github/token    { repository: "owner/name" } -> { token, expires_at }
 //
-// Every route takes `Authorization: Bearer <Supabase JWT | sandbox token>`;
-// see lib.ts for the sandbox token. verify_jwt is off in config.toml because
-// sandbox tokens are not Supabase JWTs.
+// Every route takes `Authorization: Bearer <Supabase JWT>`: the user's, or a
+// sandbox JWT from /sandbox-token (see lib.ts). verify_jwt is off in
+// config.toml because sandbox JWTs have no Auth session; lib.ts checks both.
+// Env: SUPABASE_JWT_SECRET (hosted) or JWT_SECRET (self-hosted docker).
 
 import express from "npm:express@^4.21.2";
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
@@ -18,7 +19,7 @@ import { linearTokenStore, proxyLinearRequest } from "../linear-proxy/lib.ts";
 import {
   type Caller,
   githubRepoToken,
-  mintSandboxToken,
+  mintSandboxJwt,
   resolveCaller,
 } from "./lib.ts";
 
@@ -28,19 +29,17 @@ const service = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
 );
 
-async function loadPlacement(placementId: string) {
-  const { data: placement } = await service
+const jwtSecret = Deno.env.get("SUPABASE_JWT_SECRET") ?? Deno.env.get("JWT_SECRET") ?? "";
+
+/** The owner of a placement that is not dead, or null. */
+async function placementOwner(placementId: string): Promise<string | null> {
+  const { data } = await service
     .from("remote_instance_placements")
     .select("owner_user_id")
     .eq("id", placementId)
     .neq("role", "dead")
     .maybeSingle();
-  if (!placement) return null;
-  const { data: secret } = await service.rpc("gateway_secret_load", {
-    p_placement_id: placementId,
-  });
-  if (typeof secret !== "string" || !secret) return null;
-  return { secret, ownerUserId: placement.owner_user_id as string };
+  return (data?.owner_user_id as string | undefined) ?? null;
 }
 
 const app = express();
@@ -50,11 +49,12 @@ app.use(express.json({ limit: "1mb" }));
 app.use(async (req, res, next) => {
   try {
     const caller = await resolveCaller(req.headers.authorization, {
+      jwtSecret,
       userFromJwt: async (jwt) => {
         const { data, error } = await service.auth.getUser(jwt);
         return error ? null : data.user?.id ?? null;
       },
-      placement: loadPlacement,
+      placementOwner,
     });
     if (!caller) return res.status(401).json({ error: "Unauthorized" });
     res.locals.caller = caller;
@@ -75,11 +75,11 @@ router.post("/sandbox-token", async (req, res) => {
   if (typeof placementId !== "string") {
     return res.status(400).json({ error: "Missing placement_id" });
   }
-  const placement = await loadPlacement(placementId);
-  if (!placement || placement.ownerUserId !== caller.userId) {
+  if ((await placementOwner(placementId)) !== caller.userId) {
     return res.status(404).json({ error: "Placement not found" });
   }
-  const { token, expiresAt } = await mintSandboxToken(placement.secret, placementId);
+  if (!jwtSecret) return res.status(500).json({ error: "JWT secret not configured" });
+  const { token, expiresAt } = await mintSandboxJwt(jwtSecret, caller.userId, placementId);
   res.json({ token, expires_at: new Date(expiresAt * 1000).toISOString() });
 });
 

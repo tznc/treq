@@ -300,8 +300,8 @@ verify_jwt = false
 verify_jwt = true
 
 [functions.integration-proxy]
-# Agents in cloud sandboxes call this with a sandbox token, which is not a
-# Supabase JWT; the function verifies both kinds of bearer itself.
+# Agents in cloud sandboxes call this with a sandbox JWT that has no Auth
+# session; the function verifies it and users' JWTs itself.
 verify_jwt = false
 
 [functions.gtm-metrics]
