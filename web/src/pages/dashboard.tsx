@@ -29,7 +29,6 @@ import {
   extraSeats,
   forgetPendingInvite,
   invitePage,
-  inviteTokenFromInput,
   pendingInviteToken,
   stashInviteForSignIn,
   TEAM_EXTRA_SEAT_USD,
@@ -48,7 +47,15 @@ interface GithubRepo {
   installation_id: number;
 }
 
-type Tab = "subscription" | "integrations" | "team";
+type Tab = "account" | "integrations";
+
+// Older links (pricing, invite emails, GitHub callback) still say
+// ?tab=subscription or ?tab=team. Both now live on Account.
+function tabFromSearch(search: string): Tab {
+  return new URLSearchParams(search).get("tab") === "integrations"
+    ? "integrations"
+    : "account";
+}
 
 // ── Repo row ─────────────────────────────────────────────────────────────────
 
@@ -124,7 +131,7 @@ function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
 
       {/* GitHub App */}
       <div style={styles.card}>
-        <div style={styles.integrationHeader}>
+        <div className="dashboard-integration-header" style={styles.integrationHeader}>
           <div style={styles.integrationInfo}>
             <div style={styles.integrationIcon}>
               <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
@@ -209,14 +216,14 @@ function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
 
         {isConnected && (
           <div style={styles.repoSection}>
-            <div style={styles.repoSectionHeader}>
+            <div className="dashboard-row" style={styles.repoSectionHeader}>
               <span style={styles.repoSectionTitle}>
                 {repos.length} {repos.length === 1 ? "repository" : "repositories"}
               </span>
               {githubAppEnabled && (
                 <a
                   href={GITHUB_APP_INSTALL_URL}
-                  style={styles.manageLink}
+                  className="dashboard-link-button" style={styles.manageLink}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -245,7 +252,7 @@ const CHECKOUT_RETURN_MAX_POLLS = 15;
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div role="group" aria-label={label} style={styles.field}>
+    <div role="group" aria-label={label} className="dashboard-field" style={styles.field}>
       <span style={styles.fieldLabel}>{label}</span>
       <div style={styles.fieldValue}>{children}</div>
     </div>
@@ -445,8 +452,8 @@ function SubscriptionTab({
         )}
         {isPro && billingCustomer === null && (
           <p style={styles.billingNote}>
-            Your Pro comes from a team. Its owners manage billing on the Team
-            tab.
+            Your Pro comes from a team. Its owners manage billing in the Team
+            section below.
           </p>
         )}
 
@@ -794,7 +801,7 @@ function OrganizationCard({
         {members.map((m) => {
           const name = memberName(data.profiles.get(m.user_id));
           return (
-            <li key={m.user_id} style={styles.teamRow}>
+            <li key={m.user_id} className="dashboard-row" style={styles.teamRow}>
               <span>
                 {name}
                 {m.user_id === userId ? " (you)" : ""}
@@ -803,7 +810,7 @@ function OrganizationCard({
                   {data.profiles.get(m.user_id)?.email ?? ""}
                 </span>
               </span>
-              <span style={styles.teamRowActions}>
+              <span className="dashboard-row-actions" style={styles.teamRowActions}>
                 <span style={styles.teamMuted}>
                   {roleLabel(m.role)}
                 </span>
@@ -816,7 +823,7 @@ function OrganizationCard({
                         : `Make ${name} an admin`
                     }
                     disabled={pending}
-                    style={styles.linkButton}
+                    className="dashboard-link-button" style={styles.linkButton}
                     onClick={() =>
                       void run(() =>
                         organizationsRequest({
@@ -836,7 +843,7 @@ function OrganizationCard({
                     type="button"
                     aria-label={`Make ${name} an owner`}
                     disabled={pending}
-                    style={styles.linkButton}
+                    className="dashboard-link-button" style={styles.linkButton}
                     onClick={() => {
                       if (
                         window.confirm(
@@ -861,7 +868,7 @@ function OrganizationCard({
                     type="button"
                     aria-label={`Make ${name} a member`}
                     disabled={pending}
-                    style={styles.linkButton}
+                    className="dashboard-link-button" style={styles.linkButton}
                     onClick={() => {
                       if (window.confirm(`Make ${name} a member of ${org.name} instead of an owner?`)) {
                         void run(() =>
@@ -882,7 +889,7 @@ function OrganizationCard({
                     type="button"
                     aria-label={`Remove ${name}`}
                     disabled={pending}
-                    style={styles.linkButton}
+                    className="dashboard-link-button" style={styles.linkButton}
                     onClick={() => {
                       if (
                         window.confirm(
@@ -917,7 +924,7 @@ function OrganizationCard({
             <ul aria-label="Pending invites" style={styles.teamList}>
               {invites.map((i) => (
                 <li key={i.id} style={styles.teamInvite}>
-                  <div style={styles.teamRow}>
+                  <div className="dashboard-row" style={styles.teamRow}>
                     <span>
                       {i.email}
                       <span style={styles.teamMuted}>
@@ -925,13 +932,13 @@ function OrganizationCard({
                         expires {formatPeriodEnd(i.expires_at)}
                       </span>
                     </span>
-                    <span style={styles.teamRowActions}>
+                    <span className="dashboard-row-actions" style={styles.teamRowActions}>
                       {!links[i.id] && (
                         <button
                           type="button"
                           aria-label={`New link for ${i.email}`}
                           disabled={pending}
-                          style={styles.linkButton}
+                          className="dashboard-link-button" style={styles.linkButton}
                           onClick={() => void invite(i.email)}
                         >
                           New link
@@ -941,7 +948,7 @@ function OrganizationCard({
                         type="button"
                         aria-label={`Revoke invite for ${i.email}`}
                         disabled={pending}
-                        style={styles.linkButton}
+                        className="dashboard-link-button" style={styles.linkButton}
                         onClick={() =>
                           void run(() =>
                             organizationsRequest({
@@ -956,7 +963,7 @@ function OrganizationCard({
                     </span>
                   </div>
                   {links[i.id] && (
-                    <div style={styles.teamLinkRow}>
+                    <div className="dashboard-form" style={styles.teamLinkRow}>
                       <input
                         readOnly
                         aria-label={`Invite link for ${i.email}`}
@@ -978,7 +985,7 @@ function OrganizationCard({
             </ul>
           )}
           <form
-            style={styles.teamForm}
+            className="dashboard-form" style={styles.teamForm}
             onSubmit={(e) => {
               e.preventDefault();
               void invite(inviteEmail);
@@ -1013,7 +1020,7 @@ function OrganizationCard({
       ) : (
         <ul aria-label="GitHub App installations" style={styles.teamList}>
           {attached.map((i) => (
-            <li key={i.id} style={styles.teamRow}>
+            <li key={i.id} className="dashboard-row" style={styles.teamRow}>
               <span style={styles.repoName}>{i.account_login}</span>
               <span style={styles.teamMuted}>{i.account_type}</span>
             </li>
@@ -1123,7 +1130,6 @@ function TeamTab({
   const [inviteToken, setInviteToken] = useState<string | null>(() =>
     pendingInviteToken(invitePage()),
   );
-  const [inviteLink, setInviteLink] = useState("");
   const [orgName, setOrgName] = useState("");
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -1203,7 +1209,6 @@ function TeamTab({
         result: string;
       }>({ action: "accept", token });
       setInviteToken(null);
-      setInviteLink("");
       return joined.result === "already_member"
         ? `You are already a member of ${joined.organization.name}.`
         : `You joined ${joined.organization.name}. Every member of a team with Team has Pro.`;
@@ -1287,34 +1292,6 @@ function TeamTab({
       )}
 
       <div style={styles.orgCard}>
-        <div style={styles.orgName}>Join a team</div>
-        <form
-          style={styles.teamForm}
-          onSubmit={(e) => {
-            e.preventDefault();
-            const token = inviteTokenFromInput(inviteLink);
-            if (!token) {
-              setNotice(null);
-              setError("That is not an invite link. Paste the whole link you were sent.");
-              return;
-            }
-            void accept(token);
-          }}
-        >
-          <input
-            aria-label="Invite link"
-            placeholder="https://treq.dev/dashboard?tab=team#invite=…"
-            value={inviteLink}
-            onChange={(e) => setInviteLink(e.target.value)}
-            style={styles.input}
-          />
-          <button type="submit" disabled={pending} style={styles.saveButton}>
-            Join
-          </button>
-        </form>
-      </div>
-
-      <div style={styles.orgCard}>
         <div style={styles.orgName}>Create an organization</div>
         <p style={styles.billingNote}>
           An organization holds a Team subscription: US$199 per month for{" "}
@@ -1323,7 +1300,7 @@ function TeamTab({
           a shared GitHub App installation.
         </p>
         <form
-          style={styles.teamForm}
+          className="dashboard-form" style={styles.teamForm}
           onSubmit={(e) => {
             e.preventDefault();
             void run(async () => {
@@ -1476,13 +1453,9 @@ function DashboardContent() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      return (params.get("tab") as Tab) ?? "subscription";
-    }
-    return "subscription";
-  });
+  const [activeTab, setActiveTab] = useState<Tab>(() =>
+    typeof window !== "undefined" ? tabFromSearch(window.location.search) : "account",
+  );
 
   useEffect(() => {
     // Sign-in brings the user back here, so an invite link opened while
@@ -1547,8 +1520,8 @@ function DashboardContent() {
     user.user_metadata?.full_name || user.user_metadata?.name || "User";
   return (
     <div className="dashboard-page" style={styles.container}>
-      <div style={styles.sidebar}>
-        <div style={styles.sidebarHeader}>
+      <div className="dashboard-sidebar" style={styles.sidebar}>
+        <div className="dashboard-sidebar-header" style={styles.sidebarHeader}>
           {avatarUrl ? (
             <img src={avatarUrl} alt={fullName} style={styles.avatar} />
           ) : (
@@ -1560,63 +1533,56 @@ function DashboardContent() {
           </div>
         </div>
 
-        <nav style={styles.nav}>
-          <button
-            onClick={() => setActiveTab("subscription")}
-            style={{
-              ...styles.navItem,
-              ...(activeTab === "subscription" ? styles.navItemActive : {}),
-            }}
-          >
-            Subscription
-          </button>
-          <button
-            onClick={() => setActiveTab("integrations")}
-            style={{
-              ...styles.navItem,
-              ...(activeTab === "integrations" ? styles.navItemActive : {}),
-            }}
-          >
-            Integrations
-          </button>
-          <button
-            onClick={() => setActiveTab("team")}
-            style={{
-              ...styles.navItem,
-              ...(activeTab === "team" ? styles.navItemActive : {}),
-            }}
-          >
-            Team
-          </button>
+        <nav aria-label="Dashboard" className="dashboard-nav" style={styles.nav}>
+          {(
+            [
+              ["account", "Account"],
+              ["integrations", "Integrations"],
+            ] as const
+          ).map(([tab, label]) => (
+            <button
+              key={tab}
+              type="button"
+              aria-current={activeTab === tab ? "page" : undefined}
+              onClick={() => setActiveTab(tab)}
+              className="dashboard-nav-item"
+              style={{
+                ...styles.navItem,
+                ...(activeTab === tab ? styles.navItemActive : {}),
+              }}
+            >
+              {label}
+            </button>
+          ))}
         </nav>
 
-        <button onClick={handleSignOut} style={styles.signOutButton}>
+        <button type="button" onClick={handleSignOut} className="dashboard-signout" style={styles.signOutButton}>
           Sign Out
         </button>
       </div>
 
-      <div style={styles.content}>
-        {activeTab === "subscription" && (
+      <div className="dashboard-content" style={styles.content}>
+        {activeTab === "account" && (
           <>
+            <h1 style={styles.pageTitle}>Account</h1>
             <SubscriptionTab
               subscription={subscription}
               reloadSubscription={loadSubscription}
               stripePaymentsEnabled={stripePaymentsEnabled}
             />
+            <div style={styles.accountSection}>
+              <TeamTab
+                userId={user.id}
+                reloadSubscription={loadSubscription}
+                stripePaymentsEnabled={stripePaymentsEnabled}
+              />
+            </div>
             <DeleteAccountSection email={user.email ?? ""} />
           </>
         )}
 
         {activeTab === "integrations" && (
-          <IntegrationsTab onUpgrade={() => setActiveTab("subscription")} />
-        )}
-
-        {activeTab === "team" && (
-          <TeamTab
-            userId={user.id}
-            reloadSubscription={loadSubscription}
-            stripePaymentsEnabled={stripePaymentsEnabled}
-          />
+          <IntegrationsTab onUpgrade={() => setActiveTab("account")} />
         )}
       </div>
     </div>
@@ -1642,7 +1608,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   container: {
     display: "flex",
-    width: "960px",
+    width: "100%",
+    maxWidth: "960px",
     margin: "0 auto",
     padding: "2rem 1rem",
     gap: "2rem",
@@ -1709,7 +1676,9 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     marginTop: "auto",
   },
-  content: { flex: 1, minWidth: 0 },
+  content: { flex: 1, minWidth: 0, overflowWrap: "anywhere" },
+  pageTitle: { fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.25rem" },
+  accountSection: { marginTop: "2.5rem" },
   sectionTitle: { fontSize: "1.25rem", fontWeight: 700, marginBottom: "1rem" },
   card: {
     padding: "1.5rem",
@@ -1846,7 +1815,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "4px",
     backgroundColor: "rgba(16,185,129,0.12)",
     color: "#10b981",
-    fontSize: "0.65rem",
+    fontSize: "0.7rem",
     fontWeight: 700,
     letterSpacing: "0.04em",
     verticalAlign: "middle",
@@ -1895,7 +1864,7 @@ const styles: Record<string, React.CSSProperties> = {
   repoMeta: { display: "flex", alignItems: "center", gap: "0.5rem" },
   repoName: { fontSize: "0.875rem", fontWeight: 600, fontFamily: "monospace" },
   privateBadge: {
-    fontSize: "0.7rem",
+    fontSize: "0.75rem",
     padding: "0.1rem 0.4rem",
     borderRadius: "4px",
     backgroundColor: "var(--ifm-color-emphasis-100)",
@@ -1912,8 +1881,8 @@ const styles: Record<string, React.CSSProperties> = {
     outline: "none",
   },
   inputHint: {
-    fontSize: "0.73rem",
-    color: "var(--ifm-color-emphasis-400)",
+    fontSize: "0.8rem",
+    color: "var(--ifm-color-emphasis-600)",
     marginTop: "0.2rem",
   },
   // Team tab
@@ -1943,7 +1912,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.4rem 0",
     fontSize: "0.85rem",
   },
-  teamRowActions: { display: "flex", alignItems: "center", gap: "0.75rem" },
+  teamRowActions: { display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" },
   teamInvite: { borderBottom: "1px solid var(--ifm-color-emphasis-100)" },
   teamLinkRow: { display: "flex", gap: "0.5rem", paddingBottom: "0.6rem" },
   teamMuted: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-500)" },

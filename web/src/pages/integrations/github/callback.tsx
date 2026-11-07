@@ -85,7 +85,7 @@ function CallbackContent() {
       }
 
       // A GitHub organization's installation that no Treq organization owns
-      // yet: an owner chooses one on the Team tab.
+      // yet: an owner chooses one on the Account page.
       const chooseOrganization =
         data?.account_type === "Organization" && !data?.organization_id;
       setState(chooseOrganization ? "choose_organization" : "success");
@@ -94,7 +94,7 @@ function CallbackContent() {
       setTimeout(
         () => {
           window.location.href = chooseOrganization
-            ? "/dashboard?tab=team"
+            ? "/dashboard?tab=account"
             : "/dashboard?tab=integrations";
         },
         chooseOrganization ? 4000 : 2000
@@ -127,11 +127,11 @@ function CallbackContent() {
           <div style={styles.icon}>✓</div>
           <p style={styles.text}>
             GitHub App connected. It belongs to a GitHub organization, so choose
-            which Treq organization owns it by attaching it on the Team tab.
+            which Treq organization owns it by attaching it on the Account page.
             Until then it stays linked to your account.
           </p>
-          <a href="/dashboard?tab=team" style={styles.link}>
-            Go to the Team tab
+          <a href="/dashboard?tab=account" style={styles.link}>
+            Go to Account
           </a>
         </>
       )}
@@ -151,7 +151,7 @@ function CallbackContent() {
       {state === "needs_pro" && (
         <>
           <p style={styles.text}>{message}</p>
-          <a href="/dashboard?tab=subscription" style={styles.link}>
+          <a href="/dashboard?tab=account" style={styles.link}>
             Upgrade to Pro
           </a>
         </>

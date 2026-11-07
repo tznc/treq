@@ -2,7 +2,7 @@ import { expect, test, type Browser, type Page, type Route } from '@playwright/t
 import pkg from '../../package.json';
 import { STRIPE_PUBLISHABLE_KEY_PROD } from '../src/lib/constants';
 
-// The Team tab of /dashboard against the production build, reached from the
+// The Team section of /dashboard's Account page against the production build, reached from the
 // home page through the navbar. Supabase (PostgREST and the organizations,
 // billing-checkout and billing-portal functions) and Stripe.js are stubbed
 // at the network layer. The stub keeps a small in-memory organization so
@@ -216,6 +216,7 @@ function handleOrganizations(team: Team, body: Record<string, unknown>) {
 async function openTeamTab(
   browser: Browser,
   team: Team,
+  path?: string,
 ): Promise<{ page: Page; calls: Calls; close: () => Promise<void> }> {
   const session = fakeSession();
   const ref = new URL(pkg.env.prod.supabase.url).hostname.split('.')[0];
@@ -283,9 +284,13 @@ async function openTeamTab(
     route.fulfill({ status: 200, contentType: 'application/javascript', body: FAKE_STRIPE_JS }),
   );
 
-  await page.goto('/');
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Dashboard' }).click();
-  await page.getByRole('button', { name: 'Team', exact: true }).click();
+  if (path) {
+    await page.goto(path);
+  } else {
+    await page.goto('/');
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Dashboard' }).click();
+    await page.getByRole('button', { name: 'Account', exact: true }).click();
+  }
   return { page, calls, close: () => context.close() };
 }
 
@@ -550,18 +555,54 @@ test.describe('Dashboard team tab', () => {
     await close();
   });
 
-  for (const [form, link] of [
-    ['fragment', ACCEPT_URL],
-    ['older query', OLD_ACCEPT_URL],
-  ]) {
-    test(`an invited user joins with the link they were sent (${form} form)`, async ({ browser }) => {
-      const { page, calls, close } = await openTeamTab(browser, emptyTeam());
-      await teamSection(page).getByRole('textbox', { name: 'Invite link', exact: true }).fill(link);
-      await teamSection(page).getByRole('button', { name: 'Join' }).click();
-      await expect(teamSection(page).getByRole('status')).toContainText('You joined Acme');
-      await expect(orgCard(page, 'Acme').getByRole('group', { name: 'Your role' })).toContainText('Member');
-      expect(calls.organizations).toContainEqual({ action: 'accept', token: TOKEN });
+  test('an invited user joins by opening the link they were sent', async ({ browser }) => {
+    const { page, calls, close } = await openTeamTab(
+      browser,
+      emptyTeam(),
+      `/dashboard?tab=team#invite=${TOKEN}`,
+    );
+    await teamSection(page).getByRole('button', { name: 'Accept invite' }).click();
+    await expect(teamSection(page).getByRole('status')).toContainText('You joined Acme');
+    await expect(orgCard(page, 'Acme').getByRole('group', { name: 'Your role' })).toContainText('Member');
+    expect(calls.organizations).toContainEqual({ action: 'accept', token: TOKEN });
+    await close();
+  });
+
+  test('there is no field to paste an invite link', async ({ browser }) => {
+    const { page, close } = await openTeamTab(browser, emptyTeam());
+    await expect(teamSection(page).getByRole('textbox', { name: 'Invite link', exact: true })).toHaveCount(0);
+    await expect(teamSection(page).getByRole('button', { name: 'Join' })).toHaveCount(0);
+    await close();
+  });
+});
+
+test.describe('Dashboard account tab', () => {
+  test('the sidebar offers Account and Integrations only', async ({ browser }) => {
+    const { page, close } = await openTeamTab(browser, emptyTeam());
+    const nav = page.getByRole('navigation', { name: 'Dashboard' });
+    await expect(nav.getByRole('button')).toHaveText(['Account', 'Integrations']);
+    await close();
+  });
+
+  for (const tab of ['account', 'subscription', 'team']) {
+    test(`?tab=${tab} opens Account with subscription, team and account deletion`, async ({ browser }) => {
+      const { page, close } = await openTeamTab(browser, acmeTeam('owner'), `/dashboard?tab=${tab}`);
+      await expect(page.getByRole('heading', { level: 1, name: 'Account' })).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Subscription' })).toBeVisible();
+      await expect(orgCard(page, 'Acme')).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Delete account' })).toBeVisible();
       await close();
     });
   }
+
+  test('fits a phone screen without sideways scrolling', async ({ browser }) => {
+    const { page, close } = await openTeamTab(browser, acmeTeam('owner'), '/dashboard?tab=account');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect(orgCard(page, 'Acme')).toBeVisible();
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBe(0);
+    await close();
+  });
 });

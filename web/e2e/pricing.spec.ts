@@ -40,14 +40,14 @@ test('points each plan at the right next step', async ({ page }) => {
   );
   await expect(plans.getByRole('link', { name: 'Start 14-day free trial' })).toHaveAttribute(
     'href',
-    '/dashboard?tab=subscription',
+    '/dashboard?tab=account',
   );
   await expect(plans.getByRole('link', { name: 'Set up Team' })).toHaveAttribute(
     'href',
-    '/dashboard?tab=team',
+    '/dashboard?tab=account',
   );
 
-  // Signed out, the Team tab asks you to sign in first.
+  // Signed out, the Account page asks you to sign in first.
   await plans.getByRole('link', { name: 'Set up Team' }).click();
   await expect(page.getByRole('heading', { name: 'Sign in to Treq' })).toBeVisible();
 });

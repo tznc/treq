@@ -147,7 +147,7 @@ function PlansSection(): ReactNode {
         <FeatureList features={PRO_FEATURES} />
         <Link
           className={clsx('button', styles.planButton, styles.planButtonPrimary)}
-          to="/dashboard?tab=subscription"
+          to="/dashboard?tab=account"
         >
           Start 14-day free trial
         </Link>
@@ -165,7 +165,7 @@ function PlansSection(): ReactNode {
         <FeatureList features={TEAM_FEATURES} />
         <Link
           className={clsx('button', styles.planButton, styles.planButtonSecondary)}
-          to="/dashboard?tab=team"
+          to="/dashboard?tab=account"
         >
           Set up Team
         </Link>

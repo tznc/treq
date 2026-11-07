@@ -528,3 +528,72 @@ a:hover {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* Dashboard: sidebar becomes a top bar on tablets and phones. */
+@media (max-width: 768px) {
+  .dashboard-page {
+    flex-direction: column;
+    gap: 1.25rem !important;
+    padding: 1.25rem 1rem !important;
+  }
+  .dashboard-sidebar {
+    width: 100% !important;
+    flex-direction: row !important;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .dashboard-sidebar-header {
+    flex: 1 1 100%;
+    min-width: 0;
+    margin-bottom: 0.25rem !important;
+    padding-bottom: 0.75rem !important;
+  }
+  .dashboard-sidebar-header > div:last-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .dashboard-nav {
+    flex-direction: row !important;
+    flex: 1;
+    gap: 0.25rem !important;
+  }
+  .dashboard-nav-item {
+    width: auto !important;
+    min-height: 44px;
+    padding: 0.5rem 1rem !important;
+  }
+  .dashboard-signout {
+    width: auto !important;
+    min-height: 44px;
+    margin-top: 0 !important;
+  }
+  .dashboard-content .dashboard-row,
+  .dashboard-content .dashboard-field,
+  .dashboard-content .dashboard-integration-header {
+    flex-wrap: wrap;
+  }
+  .dashboard-content .dashboard-row-actions {
+    gap: 0 0.75rem !important;
+  }
+  .dashboard-content .dashboard-link-button {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 0.25rem !important;
+  }
+  .dashboard-content .dashboard-form {
+    flex-wrap: wrap;
+  }
+  .dashboard-content .dashboard-form input {
+    flex: 1 1 12rem;
+    min-height: 44px;
+  }
+  .dashboard-content button {
+    min-height: 44px;
+  }
+  /* 16px stops iOS Safari zooming in on focus. */
+  .dashboard-content input {
+    font-size: 16px !important;
+  }
+}
