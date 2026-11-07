@@ -120,6 +120,21 @@ export async function resolveCaller(
   return userId ? { kind: "user", userId } : null;
 }
 
+// ── Linear ──────────────────────────────────────────────────────────────
+
+/**
+ * Linear goes through the desktop and mobile apps only: a sandbox would hold
+ * the user's whole Linear grant, mutations included, so sandbox tokens are
+ * refused. Null when the caller may proceed.
+ */
+export function linearRefusal(caller: Caller): Result | null {
+  if (caller.kind === "user") return null;
+  return {
+    status: 403,
+    body: { error: "Linear is not available from sandboxes", code: "sandbox_not_allowed" },
+  };
+}
+
 // ── GitHub ──────────────────────────────────────────────────────────────
 
 export type GitHubIdentity = { githubUserId: number; login: string };

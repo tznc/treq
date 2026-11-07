@@ -2,7 +2,7 @@
 // cloud sandboxes. Routes (under /integration-proxy):
 //
 //   POST /sandbox-token   user only: { placement_id } -> { token, expires_at }
-//   POST /linear/graphql  { query, variables } -> Linear's response
+//   POST /linear/graphql  user only: { query, variables } -> Linear's response
 //   POST /github/token    { repository: "owner/name" } -> { token, expires_at }
 //
 // Every route takes `Authorization: Bearer <user's Supabase JWT | sandbox
@@ -20,6 +20,7 @@ import {
   type Caller,
   exactIlike,
   githubRepoToken,
+  linearRefusal,
   mintSandboxJwt,
   resolveCaller,
 } from "./lib.ts";
@@ -86,6 +87,8 @@ router.post("/sandbox-token", async (req, res) => {
 
 router.post("/linear/graphql", async (req, res) => {
   const caller = res.locals.caller as Caller;
+  const refused = linearRefusal(caller);
+  if (refused) return res.status(refused.status).json(refused.body);
   if (!req.body?.query) return res.status(400).json({ error: "Missing query" });
   const clientId = Deno.env.get("LINEAR_CLIENT_ID");
   const clientSecret = Deno.env.get("LINEAR_CLIENT_SECRET");

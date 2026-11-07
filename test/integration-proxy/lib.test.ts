@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   exactIlike,
   githubRepoToken,
+  linearRefusal,
   mintSandboxJwt,
   resolveCaller,
 } from "../../supabase/functions/integration-proxy/lib.ts";
@@ -77,6 +78,16 @@ describe("resolveCaller", () => {
     deps.userFromJwt.mockClear();
     await resolveCaller(`Bearer ${forge(claims, "wrong-secret-wrong-secret-wrong-secret")}`, deps);
     expect(deps.userFromJwt).not.toHaveBeenCalled();
+  });
+});
+
+describe("linearRefusal", () => {
+  it("lets signed-in users through and refuses sandboxes", () => {
+    expect(linearRefusal({ kind: "user", userId: "u" })).toBeNull();
+    expect(linearRefusal({ kind: "sandbox", userId: "u", placementId: "p" })).toEqual({
+      status: 403,
+      body: { error: "Linear is not available from sandboxes", code: "sandbox_not_allowed" },
+    });
   });
 });
 
