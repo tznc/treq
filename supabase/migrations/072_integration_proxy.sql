@@ -12,7 +12,8 @@
 -- GitHub App JWT ahead of expiry, so requests rarely make a second call,
 -- but only while they are in use: a Linear token unused for a day or an
 -- App JWT unused for 15 minutes is left to expire and refreshed inline on
--- the next call. `last_used_at` is written at most once a minute.
+-- the next call. `last_used_at` is debounced, so a call writes nothing
+-- unless it is the first in 10 minutes (Linear, per user) or 5 (App JWT).
 --
 -- Vault secrets the operator creates (names below):
 --   project_jwt_secret    the project's JWT secret, to sign sandbox JWTs
@@ -199,11 +200,13 @@ begin
 end;
 $$;
 
--- A usable Linear access token. pg_cron refreshes tokens 15 minutes ahead
--- (integration_refresh_linear_tokens); this refreshes inline only if that
--- missed.
-create function public.integration_linear_token(p_user_id uuid)
-returns text
+-- A usable Linear access token, and whether this call refreshed it.
+-- pg_cron refreshes tokens in use an hour ahead
+-- (integration_refresh_linear_tokens); this refreshes inline only for a
+-- token pg_cron skipped (unused for a day) or has not reached yet.
+-- last_used_at is debounced: written only when over 10 minutes old.
+create function public.integration_linear_token(
+  p_user_id uuid, out access_token text, out refreshed boolean)
 language plpgsql
 volatile
 security definer
@@ -211,57 +214,73 @@ set search_path = ''
 as $$
 declare
   v_token record;
-  v_access text;
+  v_last_used timestamptz;
 begin
+  refreshed := false;
   select * into v_token from public.linear_tokens_load(p_user_id) limit 1;
   if not found then
     perform public.integration_raise(403, 'not_linked', 'Linear account not linked');
   end if;
-  update public.linear_oauth_tokens set last_used_at = now()
-  where user_id = p_user_id
-    and (last_used_at is null or last_used_at < now() - interval '1 minute');
+  select t.last_used_at into v_last_used
+  from public.linear_oauth_tokens t where t.user_id = p_user_id;
+  if v_last_used is null or v_last_used < now() - interval '10 minutes' then
+    update public.linear_oauth_tokens set last_used_at = now() where user_id = p_user_id;
+  end if;
+
   if v_token.expires_at is null or v_token.expires_at > now() + interval '1 minute' then
-    return v_token.access_token;
+    access_token := v_token.access_token;
+    return;
   end if;
   if v_token.refresh_token is not null then
-    v_access := public.integration_linear_refresh(p_user_id, v_token.refresh_token);
-    if v_access is not null then return v_access; end if;
+    access_token := public.integration_linear_refresh(p_user_id, v_token.refresh_token);
+    if access_token is not null then
+      refreshed := true;
+      return;
+    end if;
   end if;
   perform public.integration_raise(401, 'reconnect',
     'Linear authorization expired. Reconnect Linear in treq settings.');
-  return null;
 end;
 $$;
 
--- pg_cron, every 5 minutes: refreshes up to 20 Linear tokens used in the
--- last day and expiring in the next 15 minutes, one at a time, each
--- committed on its own.
+-- pg_cron, every minute: refreshes Linear tokens used in the last day that
+-- expire within the hour, soonest first, for up to 20 seconds per run
+-- (about 40-100 refreshes, or 2,400-6,000 an hour). Each refresh commits on
+-- its own. The hour of lead time absorbs bursts: a token is only refreshed
+-- inline if the backlog is over an hour deep. pg_cron never overlaps runs
+-- of one job, so this holds at most one backend.
 create function public.integration_refresh_linear_tokens()
-returns void
+returns int
 language plpgsql
 security definer
 set search_path = ''
 as $$
 declare
+  v_deadline timestamptz := clock_timestamp() + interval '20 seconds';
   v_user uuid;
   v_token record;
+  v_done int := 0;
 begin
   perform public.integration_curl_limits();
   for v_user in
     select user_id from public.linear_oauth_tokens
     where refresh_token_secret_id is not null
-      and expires_at < now() + interval '15 minutes'
+      and expires_at < now() + interval '1 hour'
       and last_used_at > now() - interval '1 day'
     order by expires_at
-    limit 20
+    limit 200
   loop
+    exit when clock_timestamp() > v_deadline;
     begin
       select * into v_token from public.linear_tokens_load(v_user) limit 1;
-      perform public.integration_linear_refresh(v_user, v_token.refresh_token);
+      if public.integration_linear_refresh(v_user, v_token.refresh_token) is not null then
+        v_done := v_done + 1;
+      end if;
     exception when others then
       raise warning 'Linear token refresh for % failed: %', v_user, sqlerrm;
     end;
   end loop;
+  return v_done;
 end;
 $$;
 
@@ -277,6 +296,7 @@ set statement_timeout = '7s'
 as $$
 declare
   v_uid uuid := public.integration_caller();
+  v_token record;
   v_res extensions.http_response;
 begin
   if not public.has_pro(v_uid) then
@@ -284,23 +304,36 @@ begin
       'Linear OAuth needs Pro. Add a personal Linear API key in Settings instead.');
   end if;
   perform public.integration_take_slot();
-  v_res := extensions.http((
-    'POST', 'https://api.linear.app/graphql',
-    array[extensions.http_header('Authorization', 'Bearer ' || public.integration_linear_token(v_uid))],
-    'application/json',
-    jsonb_build_object('query', p_query, 'variables', p_variables)::text
-  )::extensions.http_request);
+  v_token := public.integration_linear_token(v_uid);
 
-  if v_res.status = 401 then
+  -- Raising rolls back the transaction. After an inline refresh that would
+  -- lose the new token once its refresh token is spent, so failures are
+  -- then returned as GraphQL `errors` (HTTP 200) instead of raised. The
+  -- block's own rollback keeps the saved token.
+  begin
+    v_res := extensions.http((
+      'POST', 'https://api.linear.app/graphql',
+      array[extensions.http_header('Authorization', 'Bearer ' || v_token.access_token)],
+      'application/json',
+      jsonb_build_object('query', p_query, 'variables', p_variables)::text
+    )::extensions.http_request);
+  exception when others then
+    raise warning 'Linear request failed: %', sqlerrm;
+    v_res := null;
+  end;
+
+  if v_res is null or v_res.status >= 500 then
+    if v_token.refreshed then
+      return jsonb_build_object('errors', jsonb_build_array(jsonb_build_object(
+        'message', 'Linear is unavailable, retry shortly',
+        'extensions', jsonb_build_object('code', 'linear_error'))));
+    end if;
+    perform public.integration_raise(502, 'linear_error', 'Linear is unavailable, retry shortly');
+  elsif v_res.status = 401 and not v_token.refreshed then
     perform public.integration_raise(401, 'reconnect',
       'Linear authorization expired. Reconnect Linear in treq settings.');
-  elsif v_res.status >= 500 then
-    raise warning 'Linear answered %', v_res.status;
-    perform public.integration_raise(502, 'linear_error', 'Linear is unavailable, retry shortly');
   end if;
-  -- A 4xx is returned as Linear's body (GraphQL `errors`), not raised: a
-  -- raise rolls back the transaction, which would lose a refreshed token
-  -- after its refresh token was spent.
+  -- A 4xx is Linear's body (GraphQL `errors`).
   return v_res.content::jsonb;
 end;
 $$;
@@ -370,9 +403,10 @@ declare
   v_cache public.github_app_jwt_cache;
   v_jwt text;
 begin
-  update public.github_app_jwt_cache set last_used_at = now()
-  where last_used_at < now() - interval '1 minute';
   select * into v_cache from public.github_app_jwt_cache;
+  if found and v_cache.last_used_at < now() - interval '5 minutes' then
+    update public.github_app_jwt_cache set last_used_at = now();
+  end if;
   if found and v_cache.expires_at > now() + interval '1 minute' then
     return (select decrypted_secret from vault.decrypted_secrets where id = v_cache.secret_id);
   end if;
@@ -446,7 +480,7 @@ revoke all on function public.integration_linear_refresh(uuid, text) from public
 revoke all on function public.integration_refresh_linear_tokens() from public, anon, authenticated;
 revoke all on function public.integration_github_app_jwt_refresh() from public, anon, authenticated;
 revoke all on function public.integration_b64url(bytea) from public, anon, authenticated;
-revoke all on function public.integration_linear_token(uuid) from public, anon, authenticated;
+revoke all on function public.integration_linear_token(uuid, out text, out boolean) from public, anon, authenticated;
 revoke all on function public.integration_github_app_jwt() from public, anon, authenticated;
 
 revoke all on function public.integration_sandbox_token(uuid) from public, anon;
@@ -458,7 +492,7 @@ grant execute on function public.github_repo_token(text) to authenticated;
 
 -- ── Schedules ───────────────────────────────────────────────────────────
 
-select cron.schedule('integration-refresh-linear-tokens', '*/5 * * * *',
+select cron.schedule('integration-refresh-linear-tokens', '* * * * *',
   'select public.integration_refresh_linear_tokens()');
 select cron.schedule('integration-refresh-github-app-jwt', '*/4 * * * *',
   $cmd$select public.integration_curl_limits(), public.integration_github_app_jwt_refresh()

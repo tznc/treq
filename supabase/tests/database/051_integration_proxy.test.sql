@@ -2,7 +2,7 @@
 -- who may call, sandbox JWTs, and the checks that run before any outbound
 -- call. Outbound calls themselves are not exercised here.
 begin;
-select plan(23);
+select plan(25);
 
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000000e1', 'integrations@example.com'),
@@ -131,7 +131,7 @@ select results_eq(
   $$ select jobname::text, schedule::text from cron.job
      where jobname like 'integration-%' order by jobname $$,
   $$ values ('integration-refresh-github-app-jwt', '*/4 * * * *'),
-            ('integration-refresh-linear-tokens', '*/5 * * * *') $$,
+            ('integration-refresh-linear-tokens', '* * * * *') $$,
   'pg_cron refreshes the GitHub App JWT and Linear tokens');
 
 reset role;
@@ -148,6 +148,22 @@ select isnt(
   (select last_used_at from public.linear_oauth_tokens
    where user_id = '00000000-0000-0000-0000-0000000000e1'),
   null, 'using a Linear token records last_used_at');
+
+update public.linear_oauth_tokens set last_used_at = now() - interval '9 minutes'
+where user_id = '00000000-0000-0000-0000-0000000000e1';
+select public.integration_linear_token('00000000-0000-0000-0000-0000000000e1');
+select is(
+  (select last_used_at from public.linear_oauth_tokens
+   where user_id = '00000000-0000-0000-0000-0000000000e1'),
+  now() - interval '9 minutes', 'a use within 10 minutes of the last writes nothing');
+
+update public.linear_oauth_tokens set last_used_at = now() - interval '11 minutes'
+where user_id = '00000000-0000-0000-0000-0000000000e1';
+select public.integration_linear_token('00000000-0000-0000-0000-0000000000e1');
+select is(
+  (select last_used_at from public.linear_oauth_tokens
+   where user_id = '00000000-0000-0000-0000-0000000000e1'),
+  now(), 'a use over 10 minutes after the last records it');
 
 select matches(
   (select command from cron.job where jobname = 'integration-refresh-github-app-jwt'),
