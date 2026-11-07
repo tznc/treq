@@ -3504,13 +3504,8 @@ impl SettingsView {
         .size(Size::Sm)
         .label("Upgrade to Pro")
         .on_click(self.press("cloud.upgrade"));
-      return setting_row(
-        "Linear needs Pro",
-        "Upgrade to use Linear",
-        button,
-        p,
-      )
-      .into_any_element();
+      return setting_row("Linear needs Pro", "Upgrade to use Linear", button, p)
+        .into_any_element();
     }
     let key_control: AnyElement = if linear.editing {
       let input = self
