@@ -18,10 +18,16 @@ on:
       - "supabase/functions/**"
       - "supabase/config.toml"
       - ".github/workflows/deploy-supabase.yml"
+  # PRs run only the dry run, so deploy changes are exercised before merge.
+  pull_request:
+    paths:
+      - "supabase/migrations/**"
+      - "supabase/config.toml"
+      - ".github/workflows/deploy-supabase.yml"
   workflow_dispatch:
 
 concurrency:
-  group: deploy-supabase
+  group: deploy-supabase-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
   cancel-in-progress: false
 
 permissions:
@@ -58,13 +64,17 @@ jobs:
             | jq -er 'map(select(.database_type == "PRIMARY"))[0].connection_string' \
             > supabase/.temp/pooler-url
 
+      # --include-all: a migration merged after a higher-numbered one (e.g. 039
+      # after 042) is still applied, in version order, instead of failing.
       - name: Show pending migrations
-        run: supabase db push --remote --dry-run
+        run: supabase db push --remote --include-all --dry-run
 
       - name: Apply migrations
-        run: supabase db push --remote --yes
+        if: github.event_name != 'pull_request'
+        run: supabase db push --remote --include-all --yes
 
       # With no names, deploys every supabase/functions/*/index.ts (skipping
       # _shared and tests) and applies the verify_jwt settings in config.toml.
       - name: Deploy edge functions
+        if: github.event_name != 'pull_request'
         run: supabase functions deploy --use-api --yes
