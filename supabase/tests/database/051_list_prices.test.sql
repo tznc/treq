@@ -1,30 +1,45 @@
--- Fixed list prices (072): one price per size on every provider, stored in
--- public.list_prices. Managed and BYOS each have their own hourly rate;
+-- Fixed list prices (073): one price per size on every provider, stored in
+-- public.admin_config under 'list_prices' so they are edited without a
+-- migration. Managed and BYOS each have their own hourly rate;
 -- stopped disk bills per GB-month wherever the provider keeps the disk.
 -- provider_cost_nanousd stays the real provider cost.
 --
 -- Medium: managed US$0.40/h = 111,111.1 nano-USD/s; BYOS US$0.017/h = 4,722.2.
 -- Disk: managed US$0.10/GB-month = 38.05 nano-USD/GB-s; BYOS US$0.004 = 1.52.
 begin;
-select plan(19);
+select plan(23);
 
 update public.machine_type_prices set effective_from = now() - interval '30 days' where effective_to is null;
 
 -- ── List prices ────────────────────────────────────────────────────────────
-select results_eq(
-  $$ select tier_id, managed_usd_per_hour, byos_usd_per_hour, stopped_managed_usd_per_gb_month, stopped_byos_usd_per_gb_month
-       from public.list_prices order by managed_usd_per_hour $$,
-  $$ values ('s'::text, 0.20::numeric, 0.0085::numeric, 0.10::numeric, 0.004::numeric),
-            ('m', 0.40, 0.017, 0.10, 0.004),
-            ('l', 0.80, 0.034, 0.10, 0.004),
-            ('xl', 1.60, 0.068, 0.10, 0.004) $$,
-  'one rounded price per size');
+select is((select value from public.admin_config where key = 'list_prices'),
+  '{"tiers": {"s":  {"managed_usd_per_hour": 0.20, "byos_usd_per_hour": 0.0085},
+              "m":  {"managed_usd_per_hour": 0.40, "byos_usd_per_hour": 0.017},
+              "l":  {"managed_usd_per_hour": 0.80, "byos_usd_per_hour": 0.034},
+              "xl": {"managed_usd_per_hour": 1.60, "byos_usd_per_hour": 0.068}},
+    "stopped_disk": {"managed_usd_per_gb_month": 0.10, "byos_usd_per_gb_month": 0.004}}'::jsonb,
+  'one rounded price per size, in admin_config');
+select throws_ok(
+  $$ update public.admin_config set value = value #- '{tiers,xl}' where key = 'list_prices' $$,
+  'P0001', 'list_prices: tiers.xl.managed_usd_per_hour must be a number >= 0',
+  'an edit that drops a size is rejected');
+select throws_ok(
+  $$ update public.admin_config set value = jsonb_set(value, '{stopped_disk,byos_usd_per_gb_month}', '"cheap"') where key = 'list_prices' $$,
+  'P0001', 'list_prices: stopped_disk.byos_usd_per_gb_month must be a number >= 0',
+  'an edit with a non-number price is rejected');
+select ok(not has_table_privilege('authenticated', 'public.admin_config', 'select'),
+  'signed-in users cannot read admin_config');
 select is(round(treq_internal.billed_running_nanousd_per_sec('boat:default', 'managed', 0), 3), 111111.111,
   'Boat Medium bills the managed Medium price');
 select is(round(treq_internal.billed_running_nanousd_per_sec('e2b:m', 'byos', 0), 3), 4722.222,
   'E2B Medium on a BYOS key bills the BYOS Medium price');
 select is(round(treq_internal.billed_running_nanousd_per_sec('fly_machines:xl', 'managed', 0), 3), 444444.444,
   'Fly XL bills the managed XL price');
+savepoint price_edit;
+update public.admin_config set value = jsonb_set(value, '{tiers,m,managed_usd_per_hour}', '0.36') where key = 'list_prices';
+select is(round(treq_internal.billed_running_nanousd_per_sec('boat:default', 'managed', 0), 3), 100000.000,
+  'editing the config row changes the price, no migration needed');
+rollback to savepoint price_edit;
 
 -- ── Usage reports ────────────────────────────────────────────────────────
 insert into auth.users (id, email) values

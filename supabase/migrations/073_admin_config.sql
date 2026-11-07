@@ -1,5 +1,5 @@
--- Fixed list prices: one price per size on every provider, whichever provider
--- runs the workspace. Managed and BYOS each have an hourly rate per size, and
+-- Fixed list prices, kept in admin_config: one price per size on every
+-- provider, whichever provider runs the workspace. Managed and BYOS each have an hourly rate per size, and
 -- stopped disk bills per GB-month wherever the provider keeps the disk
 -- (stopKeepsDisk). The rates started from E2B (running) and Daytona (disk),
 -- with the 20% markup and 5% BYOS fee, rounded:
@@ -12,32 +12,69 @@
 --
 -- This replaces 072's rates, which followed E2B's running rate and Daytona's
 -- storage rate times the markup. Prices no longer follow provider prices or
--- the markup settings: changing a price is an update to list_prices.
+-- the markup settings: changing a price is an edit to the 'list_prices' row
+-- of admin_config, in the dashboard, with no migration.
 -- usage_reports.provider_cost_nanousd stays the real provider cost, so margin
--- per provider stays visible. A size with no list price falls back to
--- provider cost with the markup or fee.
+-- per provider stays visible. If the 'list_prices' row is deleted, billing
+-- falls back to provider cost with the markup or fee.
 --
 -- The functions below replace 072's, with the billed rate read through
 -- billed_running_nanousd_per_sec / billed_stopped_nanousd_per_gb_sec.
 
-create table public.list_prices (
-  tier_id text primary key references public.size_tiers (id),
-  managed_usd_per_hour numeric not null check (managed_usd_per_hour >= 0),
-  byos_usd_per_hour numeric not null check (byos_usd_per_hour >= 0),
-  stopped_managed_usd_per_gb_month numeric not null check (stopped_managed_usd_per_gb_month >= 0),
-  stopped_byos_usd_per_gb_month numeric not null check (stopped_byos_usd_per_gb_month >= 0),
+-- Operator settings, one row per key, edited in the Supabase dashboard
+-- (Table Editor -> admin_config). A key with a known shape is checked on write
+-- by admin_config_validate, so a bad edit is refused instead of breaking
+-- billing. Only the service role and the dashboard can read or write it.
+create table public.admin_config (
+  key text primary key,
+  value jsonb not null,
+  description text,
   updated_at timestamptz not null default now()
 );
-alter table public.list_prices enable row level security;
-revoke all on public.list_prices from anon, authenticated;
+alter table public.admin_config enable row level security;
+revoke all on public.admin_config from anon, authenticated;
 
-insert into public.list_prices
-  (tier_id, managed_usd_per_hour, byos_usd_per_hour, stopped_managed_usd_per_gb_month, stopped_byos_usd_per_gb_month)
-values
-  ('s', 0.20, 0.0085, 0.10, 0.004),
-  ('m', 0.40, 0.017, 0.10, 0.004),
-  ('l', 0.80, 0.034, 0.10, 0.004),
-  ('xl', 1.60, 0.068, 0.10, 0.004);
+create function treq_internal.admin_config_validate()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_path text[];
+  v_paths text[][] := array[
+    array['tiers', 's', 'managed_usd_per_hour'], array['tiers', 's', 'byos_usd_per_hour'],
+    array['tiers', 'm', 'managed_usd_per_hour'], array['tiers', 'm', 'byos_usd_per_hour'],
+    array['tiers', 'l', 'managed_usd_per_hour'], array['tiers', 'l', 'byos_usd_per_hour'],
+    array['tiers', 'xl', 'managed_usd_per_hour'], array['tiers', 'xl', 'byos_usd_per_hour'],
+    array['stopped_disk', 'managed_usd_per_gb_month', ''], array['stopped_disk', 'byos_usd_per_gb_month', '']];
+begin
+  new.updated_at := now();
+  if new.key = 'list_prices' then
+    foreach v_path slice 1 in array v_paths loop
+      v_path := array_remove(v_path, '');
+      if jsonb_typeof(new.value #> v_path) is distinct from 'number'
+         or (new.value #>> v_path)::numeric < 0 then
+        raise exception 'list_prices: % must be a number >= 0', array_to_string(v_path, '.');
+      end if;
+    end loop;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger admin_config_validate
+  before insert or update on public.admin_config
+  for each row execute function treq_internal.admin_config_validate();
+
+insert into public.admin_config (key, value, description) values ('list_prices', '{
+  "tiers": {
+    "s":  {"managed_usd_per_hour": 0.20, "byos_usd_per_hour": 0.0085},
+    "m":  {"managed_usd_per_hour": 0.40, "byos_usd_per_hour": 0.017},
+    "l":  {"managed_usd_per_hour": 0.80, "byos_usd_per_hour": 0.034},
+    "xl": {"managed_usd_per_hour": 1.60, "byos_usd_per_hour": 0.068}
+  },
+  "stopped_disk": {"managed_usd_per_gb_month": 0.10, "byos_usd_per_gb_month": 0.004}
+}', 'Cloud workspace prices per size tier (US$/hour) and for stopped disk (US$/GB-month), managed and BYOS. Takes effect on the next hourly usage report.');
 
 -- Billed nano-USD per running second for a machine type: its size's list
 -- price for the billing mode, else p_fallback.
@@ -50,11 +87,11 @@ security definer
 set search_path = ''
 as $$
   select coalesce(
-    (select case when p_billing_mode = 'byos' then l.byos_usd_per_hour else l.managed_usd_per_hour end
+    (select (c.value #>> array['tiers', m.tier_id,
+               case when p_billing_mode = 'byos' then 'byos_usd_per_hour' else 'managed_usd_per_hour' end])::numeric
             * 1e9 / 3600
-       from public.provider_machine_types m
-       join public.list_prices l on l.tier_id = m.tier_id
-      where m.id = p_machine_type_id),
+       from public.provider_machine_types m, public.admin_config c
+      where m.id = p_machine_type_id and c.key = 'list_prices'),
     p_fallback);
 $$;
 
@@ -75,16 +112,16 @@ as $$
             join public.sandbox_providers sp on sp.kind = m.provider_kind
            where m.id = p_machine_type_id) is false then 0::numeric
     else coalesce(
-      (select case when p_billing_mode = 'byos' then l.stopped_byos_usd_per_gb_month
-                   else l.stopped_managed_usd_per_gb_month end
+      (select (c.value #>> array['stopped_disk',
+                 case when p_billing_mode = 'byos' then 'byos_usd_per_gb_month' else 'managed_usd_per_gb_month' end])::numeric
               * 1e9 / (730 * 3600)
-         from public.provider_machine_types m
-         join public.list_prices l on l.tier_id = m.tier_id
-        where m.id = p_machine_type_id),
+         from public.admin_config c
+        where c.key = 'list_prices'),
       p_fallback)
   end;
 $$;
 
+revoke all on function treq_internal.admin_config_validate() from public, anon, authenticated;
 revoke all on function treq_internal.billed_running_nanousd_per_sec(text, text, numeric) from public, anon, authenticated;
 revoke all on function treq_internal.billed_stopped_nanousd_per_gb_sec(text, text, numeric) from public, anon, authenticated;
 

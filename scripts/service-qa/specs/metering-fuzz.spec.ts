@@ -85,11 +85,20 @@ type Price = {
   machine_type_id: string;
 };
 type ListPrice = {
-  tier_id: string;
   managed_usd_per_hour: number;
   byos_usd_per_hour: number;
   stopped_managed_usd_per_gb_month: number;
   stopped_byos_usd_per_gb_month: number;
+};
+type ListPricesConfig = {
+  tiers: Record<
+    string,
+    { managed_usd_per_hour: number; byos_usd_per_hour: number }
+  >;
+  stopped_disk: {
+    managed_usd_per_gb_month: number;
+    byos_usd_per_gb_month: number;
+  };
 };
 
 /** Billed nano-USD for `sec` seconds of an interval at its size's list price (072). */
@@ -265,10 +274,22 @@ it(`keeps the usage ledger and reports consistent over ${SEEDS} random timelines
           )
         ).map((p) => [p.id, p]),
       );
-      const listPrices = new Map(
-        (await rows<ListPrice>(admin.from("list_prices").select("*"))).map(
-          (l) => [l.tier_id, l],
-        ),
+      const config = (
+        await rows<{ value: ListPricesConfig }>(
+          admin.from("admin_config").select("value").eq("key", "list_prices"),
+        )
+      )[0].value;
+      const listPrices = new Map<string, ListPrice>(
+        Object.entries(config.tiers).map(([tier, t]) => [
+          tier,
+          {
+            ...t,
+            stopped_managed_usd_per_gb_month:
+              config.stopped_disk.managed_usd_per_gb_month,
+            stopped_byos_usd_per_gb_month:
+              config.stopped_disk.byos_usd_per_gb_month,
+          },
+        ]),
       );
       const tiers = new Map(
         (
