@@ -1,7 +1,7 @@
 -- E2B-pegged pricing. Running time bills at E2B's rate for the size tier,
 -- whichever provider runs it: managed pays that rate plus the markup (20%),
--- BYOS pays the BYOS fee (5%) of it. Stopped disk keeps the provider's own
--- storage rate. usage_reports.provider_cost_nanousd stays the real provider
+-- BYOS pays the BYOS fee (5%) of it. Stopped disk bills at Daytona's storage
+-- rate on every provider that keeps the disk, with the same markup and fee. usage_reports.provider_cost_nanousd stays the real provider
 -- cost, so margin per provider stays visible.
 --
 -- The functions below are 068's (and 044/045's catalogs) with the running
@@ -28,6 +28,32 @@ $$;
 
 revoke all on function treq_internal.list_running_nanousd_per_sec(text, timestamptz, bigint) from public, anon, authenticated;
 
+-- Daytona's stopped-disk rate per GB for any provider that keeps a stopped
+-- disk; 0 where the disk is lost (stopKeepsDisk false, e.g. Cloudflare). The
+-- machine type's own rate (p_fallback) when Daytona has no price then.
+create function treq_internal.list_stopped_nanousd_per_gb_sec(
+  p_machine_type_id text, p_at timestamptz, p_fallback bigint)
+returns bigint
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case
+    when coalesce((sp.capabilities->>'stopKeepsDisk')::boolean, true) is false then 0
+    else coalesce(
+      (select d.stopped_nanousd_per_gb_sec
+         from public.machine_type_prices d
+        where d.id = treq_internal.current_price_id('daytona:' || m.tier_id, p_at)),
+      p_fallback)
+  end
+    from public.provider_machine_types m
+    join public.sandbox_providers sp on sp.kind = m.provider_kind
+   where m.id = p_machine_type_id;
+$$;
+
+revoke all on function treq_internal.list_stopped_nanousd_per_gb_sec(text, timestamptz, bigint) from public, anon, authenticated;
+
 CREATE OR REPLACE FUNCTION treq_internal.month_spend_nanousd(p_user_id uuid, p_now timestamp with time zone)
  RETURNS bigint
  LANGUAGE sql
@@ -52,7 +78,7 @@ AS $function$
                - greatest(u.started_at, greatest(b.month_start, coalesce(rp.reported_until, b.month_start))))
              * case u.kind
                  when 'running' then treq_internal.list_running_nanousd_per_sec(p.machine_type_id, u.started_at, p.running_nanousd_per_sec)
-                 else p.stopped_nanousd_per_gb_sec * coalesce(u.disk_gb, 0)
+                 else treq_internal.list_stopped_nanousd_per_gb_sec(p.machine_type_id, u.started_at, p.stopped_nanousd_per_gb_sec) * coalesce(u.disk_gb, 0)
                end,
              p.markup_bps, u.billing_mode)), 0) as billed
       from bounds b
@@ -78,7 +104,7 @@ AS $function$
            extract(epoch from least(coalesce(u.ended_at, p_now), p_now) - greatest(u.started_at, w.start))
            * case u.kind
                when 'running' then treq_internal.list_running_nanousd_per_sec(p.machine_type_id, u.started_at, p.running_nanousd_per_sec)
-               else p.stopped_nanousd_per_gb_sec * coalesce(u.disk_gb, 0)
+               else treq_internal.list_stopped_nanousd_per_gb_sec(p.machine_type_id, u.started_at, p.stopped_nanousd_per_gb_sec) * coalesce(u.disk_gb, 0)
              end,
            p.markup_bps, u.billing_mode))), 0)::bigint
     from w
@@ -129,7 +155,7 @@ begin
                - greatest(u.started_at, h.hour))
              * case u.kind
                  when 'running' then treq_internal.list_running_nanousd_per_sec(p.machine_type_id, h.hour, p.running_nanousd_per_sec)
-                 else p.stopped_nanousd_per_gb_sec * coalesce(u.disk_gb, 0)
+                 else treq_internal.list_stopped_nanousd_per_gb_sec(p.machine_type_id, h.hour, p.stopped_nanousd_per_gb_sec) * coalesce(u.disk_gb, 0)
                end as list_cost
         from public.usage_intervals u
         join public.machine_type_prices p on p.id = u.price_id
@@ -188,7 +214,7 @@ begin
                - greatest(u.started_at, h.hour))
              * case u.kind
                  when 'running' then treq_internal.list_running_nanousd_per_sec(p.machine_type_id, h.hour, p.running_nanousd_per_sec)
-                 else p.stopped_nanousd_per_gb_sec * coalesce(u.disk_gb, 0)
+                 else treq_internal.list_stopped_nanousd_per_gb_sec(p.machine_type_id, h.hour, p.stopped_nanousd_per_gb_sec) * coalesce(u.disk_gb, 0)
                end as list_cost
         from public.usage_intervals u
         join public.machine_type_prices p on p.id = u.price_id
@@ -267,4 +293,100 @@ AS $function$
     join public.machine_type_prices p on p.id = treq_internal.current_price_id(t.id, now())
    where c.owner_user_id = (select auth.uid())
      and c.owner_org_id is null;
+$function$;
+
+-- A suspended workspace opens a stopped-disk interval when its list storage
+-- rate (Daytona's) bills, not only when its own provider charges for disk.
+CREATE OR REPLACE FUNCTION public.set_placement_state(p_placement_id uuid, p_state text, p_disk_gb integer DEFAULT NULL::integer, p_at timestamp with time zone DEFAULT NULL::timestamp with time zone)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+declare
+  v_placement public.remote_instance_placements;
+  v_price public.machine_type_prices;
+  v_want text;
+  v_now timestamptz := now();
+  v_at timestamptz := least(coalesce(p_at, now()), now());
+  v_start timestamptz;
+begin
+  perform treq_internal.require_service_role();
+  -- Split first, so an interval closed below is priced correctly.
+  perform treq_internal.split_repriced_intervals(v_now);
+
+  update public.remote_instance_placements
+     set state = p_state
+   where id = p_placement_id
+  returning * into v_placement;
+  if not found then
+    raise exception 'placement_not_found';
+  end if;
+
+  select greatest(v_at, coalesce(max(coalesce(u.ended_at, u.started_at)), v_at)) into v_at
+    from public.usage_intervals u
+   where u.placement_id = p_placement_id;
+
+  select * into v_price
+    from public.machine_type_prices
+   where id = treq_internal.current_price_id(v_placement.machine_type_id, v_at);
+
+  v_want := case
+    when v_placement.role <> 'active' then null
+    -- The machine bills until the provider confirms the delete.
+    when p_state = 'deleting' then (
+      select u.kind from public.usage_intervals u
+       where u.placement_id = p_placement_id and u.ended_at is null
+       order by u.started_at desc limit 1)
+    when p_state in ('ready', 'waking', 'degraded', 'bootstrapping', 'installing_access', 'verifying')
+      then 'running'
+    when p_state = 'suspended' and treq_internal.list_stopped_nanousd_per_gb_sec(v_price.machine_type_id, v_at, v_price.stopped_nanousd_per_gb_sec) > 0
+      then 'stopped_storage'
+    else null
+  end;
+
+  update public.usage_intervals
+     set ended_at = greatest(started_at, v_at)
+   where placement_id = p_placement_id
+     and ended_at is null
+     and kind is distinct from v_want;
+
+  if v_want is not null and not exists (
+    select 1 from public.usage_intervals
+     where placement_id = p_placement_id and ended_at is null and kind = v_want
+  ) then
+    select greatest(v_at, coalesce(max(u.ended_at), v_at)) into v_start
+      from public.usage_intervals u
+     where u.placement_id = p_placement_id;
+    select * into v_price
+      from public.machine_type_prices
+     where id = treq_internal.current_price_id(v_placement.machine_type_id, v_start);
+    if v_price.id is not null then
+      insert into public.usage_intervals
+        (placement_id, owner_user_id, kind, price_id, disk_gb, started_at, billing_mode)
+      values
+        (p_placement_id, v_placement.owner_user_id, v_want, v_price.id,
+         case when v_want = 'stopped_storage' then coalesce(
+           p_disk_gb,
+           (select m.disk_gb from public.provider_machine_types m where m.id = v_placement.machine_type_id),
+           0) end,
+         v_start, v_placement.credential_source);
+    end if;
+  end if;
+
+  -- A backdated start may span a price change.
+  perform treq_internal.split_repriced_intervals(v_now);
+
+  if v_placement.role = 'active' then
+    update public.remote_instances
+       set status = p_state,
+           credential_source = v_placement.credential_source,
+           credential_id = v_placement.credential_id,
+           updated_at = v_now
+     where id = v_placement.instance_id
+       and (status is distinct from p_state
+            or credential_source is distinct from v_placement.credential_source
+            or credential_id is distinct from v_placement.credential_id);
+  end if;
+end;
 $function$;

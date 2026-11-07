@@ -1,6 +1,7 @@
 /**
  * E2B-pegged pricing (072): running time bills at E2B's rate for the size,
  * whichever provider runs it. Managed pays it plus 20%, BYOS pays 5% of it.
+ * Stopped disk bills at Daytona's storage rate, with the same markup and fee.
  * usage_reports keeps the real provider cost.
  */
 import { randomUUID } from "node:crypto";
@@ -39,7 +40,12 @@ async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
 }
 
 /** A Boat Medium workspace running for the last 3 hours. */
-async function boatMedium(owner: string, byos: boolean) {
+async function boatMedium(
+  owner: string,
+  byos: boolean,
+  state = "ready",
+  diskGb: number | null = null,
+) {
   const instanceId = randomUUID();
   const placementId = randomUUID();
   const credentialId = byos
@@ -80,7 +86,8 @@ async function boatMedium(owner: string, byos: boolean) {
   if (pe) throw new Error(pe.message);
   await rpc("set_placement_state", {
     p_placement_id: placementId,
-    p_state: "ready",
+    p_state: state,
+    p_disk_gb: diskGb,
     p_at: new Date(Date.now() - 3 * HOUR).toISOString(),
   });
 }
@@ -190,5 +197,43 @@ it("shows one price per size in the catalogs", async () => {
       "get_byos_catalog shows a Boat Medium fee of 5% of E2B Medium (US$0.01656/h) next to Boat's own US$0.036/h.",
     ],
     details: { prices, boatM },
+  });
+}, 120_000);
+
+it("bills stopped Boat disk at Daytona's storage rate", async () => {
+  const DAYTONA_DISK = 30; // nano-USD per GB-second
+  const managed = await createTestUser();
+  const byos = await createTestUser();
+  users.push(managed.user.id, byos.user.id);
+  await grantPro(admin, managed.user.id);
+  await grantPro(admin, byos.user.id);
+  await boatMedium(managed.user.id, false, "suspended", 10);
+  await boatMedium(byos.user.id, true, "suspended", 10);
+
+  await rpc("build_usage_reports", { p_until: new Date().toISOString() });
+
+  const m = await reports(managed.user.id);
+  const b = await reports(byos.user.id);
+  expect(m.length).toBeGreaterThanOrEqual(2);
+  expect(b.length).toBeGreaterThanOrEqual(2);
+  const rate = DAYTONA_DISK * 10;
+  for (const r of m) {
+    expect(r.provider_cost_nanousd).toBe(0);
+    expect(
+      Math.abs(r.billed_nanousd - r.seconds * rate * 1.2),
+    ).toBeLessThanOrEqual(rate * 1.2);
+  }
+  for (const r of b) {
+    expect(
+      Math.abs(r.byos_billed_nanousd - r.seconds * rate * 0.05),
+    ).toBeLessThanOrEqual(rate * 0.05);
+  }
+
+  await recordOutcome("e2b-pegged-pricing-03-stopped-disk", {
+    expectations: [
+      "A suspended managed Boat workspace with 10 GB bills Daytona's storage rate + 20% (US$0.0013/h), though Boat charges Treq nothing.",
+      "A suspended BYOS Boat workspace with 10 GB bills 5% of Daytona's storage rate.",
+    ],
+    details: { managed: m, byos: b },
   });
 }, 120_000);

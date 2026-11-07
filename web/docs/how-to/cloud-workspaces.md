@@ -60,7 +60,7 @@ The trash icon (**Delete cloud workspace**) removes the machine. The confirmatio
 
 With Pro, you can run the cloud workspace on your own Boat, Daytona, E2B, or Cloudflare account instead of Treq's. The provider bills you for the machine. Treq charges 5% of E2B's rate for the same size, whatever provider you bring and whatever rate your account pays.
 
-Cloud workspaces cost the same per size on every provider. Treq prices running time at E2B's rate for the size; a workspace Treq runs pays that rate plus 20%, and one on your own account pays 5% of it. A stopped workspace's disk still bills at its provider's storage rate (plus 20% when Treq runs it).
+Cloud workspaces cost the same per size on every provider. Treq prices running time at E2B's rate for the size; a workspace Treq runs pays that rate plus 20%, and one on your own account pays 5% of it. A stopped workspace's disk bills at Daytona's storage rate on every provider, US$0.079 per GB per month: plus 20% (US$0.095) when Treq runs it, or 5% of it (US$0.004) on your own account. A provider that discards the disk when the workspace stops (Cloudflare) bills nothing while stopped.
 
 | Size | vCPU / RAM | Treq-managed | Your own account |
 |---|---|---|---|

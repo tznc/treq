@@ -1,9 +1,9 @@
 -- E2B-pegged pricing (072): running time bills at E2B's rate for the size,
 -- whichever provider runs it. Managed adds the markup (20%); BYOS charges the
--- BYOS fee (5%) of that rate. Stopped disk still bills at the provider's
--- rate. provider_cost_nanousd stays the real provider cost.
+-- BYOS fee (5%) of that rate. Stopped disk bills at Daytona's storage rate
+-- on every provider that keeps a stopped disk, with the same markup and fee. provider_cost_nanousd stays the real provider cost.
 begin;
-select plan(13);
+select plan(19);
 
 update public.machine_type_prices set effective_from = now() - interval '30 days' where effective_to is null;
 
@@ -59,7 +59,7 @@ select ok((select bool_and(abs(byos_billed_nanousd - round(seconds * 92000 * 0.0
              from public.usage_reports where owner_user_id = '00000000-0000-0000-0000-0000000051a2'),
   'BYOS on Boat pays 5% of E2B Medium');
 
--- Stopped disk keeps the provider's storage rate (Daytona 30 nano-USD/GB-s).
+-- Stopped disk on Daytona itself (30 nano-USD/GB-s).
 insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000051a3', 'pegged-disk@example.com');
 insert into public.remote_instances (id, owner_user_id, provider_kind, region, size_preset, status, tier_id, machine_type_id)
 values ('00000000-0000-0000-0000-0000000051b3', '00000000-0000-0000-0000-0000000051a3', 'daytona', 'us_east', 'small', 'provisioning', 's', 'daytona:s');
@@ -71,6 +71,37 @@ select public.build_usage_reports(now());
 select ok((select bool_and(abs(billed_nanousd - round(seconds * 30 * 10 * 1.2)) <= 30 * 10 * 1.2)
              from public.usage_reports where owner_user_id = '00000000-0000-0000-0000-0000000051a3'),
   'stopped disk bills at the provider''s storage rate + 20%');
+
+-- ── Stopped disk pegged to Daytona ─────────────────────────────────────────
+select is(treq_internal.list_stopped_nanousd_per_gb_sec('boat:default', now(), 0), 30::bigint,
+  'Boat stopped disk lists at Daytona''s storage rate');
+select is(treq_internal.list_stopped_nanousd_per_gb_sec('e2b:xl', now(), 0), 30::bigint,
+  'E2B stopped disk lists at Daytona''s storage rate');
+select is(treq_internal.list_stopped_nanousd_per_gb_sec('cloudflare:s', now(), 0), 0::bigint,
+  'Cloudflare loses its disk when stopped, so nothing bills');
+
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000051a4', 'pegged-boat-disk@example.com');
+insert into public.remote_instances (id, owner_user_id, provider_kind, region, size_preset, status, tier_id, machine_type_id)
+values ('00000000-0000-0000-0000-0000000051b4', '00000000-0000-0000-0000-0000000051a4', 'boat', 'eu_west', 'medium', 'provisioning', 'm', 'boat:default');
+insert into public.remote_instance_placements (id, instance_id, owner_user_id, provider_kind, machine_type_id, region, state, role)
+values ('00000000-0000-0000-0000-0000000051c4', '00000000-0000-0000-0000-0000000051b4', '00000000-0000-0000-0000-0000000051a4',
+        'boat', 'boat:default', 'eu_west', 'provisioning', 'active');
+select public.set_placement_state('00000000-0000-0000-0000-0000000051c4', 'suspended', 10, now() - interval '3 hours');
+select is((select count(*)::int from public.usage_intervals
+            where placement_id = '00000000-0000-0000-0000-0000000051c4' and kind = 'stopped_storage'), 1,
+  'a suspended Boat workspace opens a stopped-disk interval');
+select public.build_usage_reports(now());
+select ok((select bool_and(abs(billed_nanousd - round(seconds * 30 * 10 * 1.2)) <= 30 * 10 * 1.2
+                           and provider_cost_nanousd = 0)
+             from public.usage_reports where owner_user_id = '00000000-0000-0000-0000-0000000051a4'),
+  'managed Boat stopped disk bills Daytona''s rate + 20%; Boat charges us nothing');
+
+-- BYOS on Boat: suspend the running workspace from above.
+select public.set_placement_state('00000000-0000-0000-0000-0000000051c2', 'suspended', 10, null);
+select ok(abs(treq_internal.month_spend_nanousd('00000000-0000-0000-0000-0000000051a2', now() + interval '1 hour')
+              - treq_internal.month_spend_nanousd('00000000-0000-0000-0000-0000000051a2', now())
+              - 3600 * 30 * 10 * 0.05) < 1000,
+  'BYOS stopped disk on Boat bills 5% of Daytona''s storage rate');
 
 -- ── Catalogs ─────────────────────────────────────────────────────────────
 select is((select count(distinct (r->>'hourly_usd')::numeric)::int
