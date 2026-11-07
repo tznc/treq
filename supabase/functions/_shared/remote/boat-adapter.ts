@@ -123,6 +123,7 @@ function boatError(response: Response): Promise<ProviderError> {
   });
 }
 
+// Per docs.boat.dev/api/v1. TREQ_BOAT_API_URL overrides it (tests, staging).
 const BOAT_DEFAULT_API_URL = "https://boat.dev/api/v1";
 
 export interface BoatConfig {
@@ -139,10 +140,10 @@ export function boatConfigFromEnv(
   env: (key: string) => string | undefined = (key) => Deno.env.get(key),
   credential?: ProviderCredential,
 ): BoatConfig {
-  const baseUrl = env("TREQ_BOAT_API_URL") || (credential ? BOAT_DEFAULT_API_URL : undefined);
+  const baseUrl = env("TREQ_BOAT_API_URL") || BOAT_DEFAULT_API_URL;
   const apiToken = credential?.apiKey ?? env("TREQ_BOAT_API_TOKEN");
-  if (!baseUrl || !apiToken) {
-    throw new ProviderError("invalid_request", "TREQ_BOAT_API_URL and TREQ_BOAT_API_TOKEN must be set");
+  if (!apiToken) {
+    throw new ProviderError("invalid_request", "TREQ_BOAT_API_TOKEN must be set");
   }
   return { baseUrl, apiToken, autoStopMinutes: providerAutoStopMinutes(env) };
 }
