@@ -1,7 +1,7 @@
 -- Catalog, placements, the usage ledger and config sync
 -- (036, 038, 042).
 begin;
-select plan(30);
+select plan(31);
 
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000000d1', 'sandbox-pro@example.com'),
@@ -50,8 +50,8 @@ select is(
   (select (r->>'hourly_usd')::numeric
      from jsonb_array_elements(public.get_machine_catalog()) t, jsonb_array_elements(t->'regions') r
     where t->>'id' = 's' and r->>'region' = 'eu_west'),
-  0.0216,
-  'the catalog price is provider cost x 1.2 ($0.018/h -> $0.0216/h)');
+  0.19872,
+  'the catalog price is E2B Small x 1.2 ($0.1656/h -> $0.19872/h), whichever provider runs it');
 select ok(
   not exists (
     select 1 from jsonb_array_elements(public.get_machine_catalog()) t
@@ -126,9 +126,14 @@ select public.set_placement_state('00000000-0000-0000-0000-00000000b001', 'suspe
 reset role;
 select is(
   (select count(*)::int from public.usage_intervals
-    where placement_id = '00000000-0000-0000-0000-00000000b001' and ended_at is null),
+    where placement_id = '00000000-0000-0000-0000-00000000b001' and ended_at is null and kind = 'running'),
   0,
-  'suspending closes the running interval (local bills no stopped storage)');
+  'suspending closes the running interval');
+select is(
+  (select count(*)::int from public.usage_intervals
+    where placement_id = '00000000-0000-0000-0000-00000000b001' and ended_at is null and kind = 'stopped_storage'),
+  1,
+  'and opens a stopped-disk interval: local keeps its disk, which bills at Daytona''s rate');
 set local role service_role;
 select public.set_placement_state('00000000-0000-0000-0000-00000000b001', 'ready');
 reset role;
