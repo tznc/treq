@@ -58,7 +58,16 @@ The trash icon (**Delete cloud workspace**) removes the machine. The confirmatio
 
 ## Bring your own sandbox
 
-With Pro, you can run the cloud workspace on your own Boat, Daytona, E2B, or Cloudflare account instead of Treq's. The provider bills you for the machine. Treq charges 5% of the provider's list price for the same usage, whatever rate your provider account pays.
+With Pro, you can run the cloud workspace on your own Boat, Daytona, E2B, or Cloudflare account instead of Treq's. The provider bills you for the machine. Treq charges 5% of E2B's rate for the same size, whatever provider you bring and whatever rate your account pays.
+
+Cloud workspaces cost the same per size on every provider. Treq prices running time at E2B's rate for the size; a workspace Treq runs pays that rate plus 20%, and one on your own account pays 5% of it. A stopped workspace's disk still bills at its provider's storage rate (plus 20% when Treq runs it).
+
+| Size | vCPU / RAM | Treq-managed | Your own account |
+|---|---|---|---|
+| Small | 2 / 4 GiB | US$0.199/h | US$0.0083/h |
+| Medium | 4 / 8 GiB | US$0.397/h | US$0.0166/h |
+| Large | 8 / 16 GiB | US$0.795/h | US$0.0331/h |
+| Extra large | 16 / 32 GiB | US$1.590/h | US$0.0662/h |
 
 1. Open Settings and choose **Account**.
 2. Under **Provider keys**, select **Add Boat key**, **Add Daytona key**, **Add E2B key**, or **Add Cloudflare key**.

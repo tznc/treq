@@ -50,8 +50,8 @@ select is(
   (select (r->>'hourly_usd')::numeric
      from jsonb_array_elements(public.get_machine_catalog()) t, jsonb_array_elements(t->'regions') r
     where t->>'id' = 's' and r->>'region' = 'eu_west'),
-  0.0216,
-  'the catalog price is provider cost x 1.2 ($0.018/h -> $0.0216/h)');
+  0.19872,
+  'the catalog price is E2B Small x 1.2 ($0.1656/h -> $0.19872/h), whichever provider runs it');
 select ok(
   not exists (
     select 1 from jsonb_array_elements(public.get_machine_catalog()) t

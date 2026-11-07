@@ -133,8 +133,8 @@ select throws_ok($$
 
 update public.remote_instances set active_placement_id = '00000000-0000-0000-0000-0000000041c2'
  where id = '00000000-0000-0000-0000-0000000041b2';
--- $36/h of provider cost: 3 hours on BYOS bill 5%, about $5.40, over the $5 member cap.
-update public.machine_type_prices set running_nanousd_per_sec = 10000000 where machine_type_id = 'boat:small' and effective_to is null;
+-- BYOS bills 5% of E2B's rate for the size: at $36/h, 3 hours bill about $5.40, over the $5 member cap.
+update public.machine_type_prices set running_nanousd_per_sec = 10000000 where machine_type_id = 'e2b:s' and effective_to is null;
 select public.set_placement_state('00000000-0000-0000-0000-0000000041c2', 'ready', null, now() - interval '3 hours');
 select is((select billing_org_id from public.usage_intervals where placement_id = '00000000-0000-0000-0000-0000000041c2' limit 1),
   '00000000-0000-0000-0000-0000000041f1'::uuid, 'usage records the organization it bills to');
