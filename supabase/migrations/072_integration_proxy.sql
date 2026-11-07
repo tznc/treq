@@ -8,7 +8,8 @@
 -- for its whole round trip. Every call here takes one of
 -- INTEGRATION_SLOTS advisory locks first and fails fast with 429 when all
 -- are taken, and curl is capped at 5s, so a burst of slow upstream calls
--- cannot take over the pool.
+-- cannot take over the pool. pg_cron refreshes Linear tokens and the
+-- GitHub App JWT ahead of expiry, so requests rarely make a second call.
 --
 -- Vault secrets the operator creates (names below):
 --   project_jwt_secret    the project's JWT secret, to sign sandbox JWTs
@@ -18,6 +19,7 @@
 --   github_app_jwt_key    shared with the function's GITHUB_APP_JWT_KEY
 
 create extension if not exists http with schema extensions;
+create extension if not exists pg_cron;
 
 -- ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -75,6 +77,17 @@ begin
 end;
 $$;
 
+create function public.integration_curl_limits()
+returns void
+language plpgsql
+set search_path = ''
+as $$
+begin
+  perform extensions.http_set_curlopt('CURLOPT_TIMEOUT_MS', '5000');
+  perform extensions.http_set_curlopt('CURLOPT_CONNECTTIMEOUT_MS', '2000');
+end;
+$$;
+
 -- Takes one of 4 outbound slots for the rest of the transaction, or 429.
 create function public.integration_take_slot()
 returns void
@@ -84,8 +97,7 @@ as $$
 begin
   for slot in 0..3 loop
     if pg_try_advisory_xact_lock(hashtext('treq.integration_slot'), slot) then
-      perform extensions.http_set_curlopt('CURLOPT_TIMEOUT_MS', '5000');
-      perform extensions.http_set_curlopt('CURLOPT_CONNECTTIMEOUT_MS', '2000');
+      perform public.integration_curl_limits();
       return;
     end if;
   end loop;
@@ -147,7 +159,44 @@ $$;
 
 -- ── Linear ──────────────────────────────────────────────────────────────
 
--- A usable Linear access token, refreshing it within a minute of expiry.
+-- Refreshes a user's Linear token and saves it; the new access token, or
+-- null when Linear refuses (the user must reconnect).
+create function public.integration_linear_refresh(p_user_id uuid, p_refresh_token text)
+returns text
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_res extensions.http_response;
+  v_grant jsonb;
+begin
+  v_res := extensions.http((
+    'POST', 'https://api.linear.app/oauth/token', null,
+    'application/x-www-form-urlencoded',
+    'grant_type=refresh_token'
+      || '&client_id=' || extensions.urlencode(coalesce(public.integration_vault('linear_client_id'), ''))
+      || '&client_secret=' || extensions.urlencode(coalesce(public.integration_vault('linear_client_secret'), ''))
+      || '&refresh_token=' || extensions.urlencode(p_refresh_token)
+  )::extensions.http_request);
+  if v_res.status <> 200 then
+    raise warning 'Linear token refresh for % answered %', p_user_id, v_res.status;
+    return null;
+  end if;
+  v_grant := v_res.content::jsonb;
+  perform public.linear_tokens_save(
+    p_user_id, v_grant ->> 'access_token',
+    coalesce(v_grant ->> 'refresh_token', p_refresh_token),
+    case when v_grant ? 'expires_in'
+      then now() + make_interval(secs => (v_grant ->> 'expires_in')::int) end);
+  return v_grant ->> 'access_token';
+end;
+$$;
+
+-- A usable Linear access token. pg_cron refreshes tokens 15 minutes ahead
+-- (integration_refresh_linear_tokens); this refreshes inline only if that
+-- missed.
 create function public.integration_linear_token(p_user_id uuid)
 returns text
 language plpgsql
@@ -157,8 +206,7 @@ set search_path = ''
 as $$
 declare
   v_token record;
-  v_res extensions.http_response;
-  v_grant jsonb;
+  v_access text;
 begin
   select * into v_token from public.linear_tokens_load(p_user_id) limit 1;
   if not found then
@@ -167,29 +215,43 @@ begin
   if v_token.expires_at is null or v_token.expires_at > now() + interval '1 minute' then
     return v_token.access_token;
   end if;
-
   if v_token.refresh_token is not null then
-    v_res := extensions.http((
-      'POST', 'https://api.linear.app/oauth/token', null,
-      'application/x-www-form-urlencoded',
-      'grant_type=refresh_token'
-        || '&client_id=' || extensions.urlencode(coalesce(public.integration_vault('linear_client_id'), ''))
-        || '&client_secret=' || extensions.urlencode(coalesce(public.integration_vault('linear_client_secret'), ''))
-        || '&refresh_token=' || extensions.urlencode(v_token.refresh_token)
-    )::extensions.http_request);
-    if v_res.status = 200 then
-      v_grant := v_res.content::jsonb;
-      perform public.linear_tokens_save(
-        p_user_id, v_grant ->> 'access_token',
-        coalesce(v_grant ->> 'refresh_token', v_token.refresh_token),
-        case when v_grant ? 'expires_in'
-          then now() + make_interval(secs => (v_grant ->> 'expires_in')::int) end);
-      return v_grant ->> 'access_token';
-    end if;
+    v_access := public.integration_linear_refresh(p_user_id, v_token.refresh_token);
+    if v_access is not null then return v_access; end if;
   end if;
   perform public.integration_raise(401, 'reconnect',
     'Linear authorization expired. Reconnect Linear in treq settings.');
   return null;
+end;
+$$;
+
+-- pg_cron, every 5 minutes: refreshes up to 20 Linear tokens expiring in
+-- the next 15 minutes, one at a time, each committed on its own.
+create function public.integration_refresh_linear_tokens()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user uuid;
+  v_token record;
+begin
+  perform public.integration_curl_limits();
+  for v_user in
+    select user_id from public.linear_oauth_tokens
+    where refresh_token_secret_id is not null
+      and expires_at < now() + interval '15 minutes'
+    order by expires_at
+    limit 20
+  loop
+    begin
+      select * into v_token from public.linear_tokens_load(v_user) limit 1;
+      perform public.integration_linear_refresh(v_user, v_token.refresh_token);
+    exception when others then
+      raise warning 'Linear token refresh for % failed: %', v_user, sqlerrm;
+    end;
+  end loop;
 end;
 $$;
 
@@ -244,6 +306,48 @@ create table public.github_app_jwt_cache (
 alter table public.github_app_jwt_cache enable row level security;
 revoke all on table public.github_app_jwt_cache from public, anon, authenticated;
 
+-- Fetches a fresh App JWT from github-app-jwt into the cache.
+create function public.integration_github_app_jwt_refresh()
+returns text
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_secret_id uuid;
+  v_res extensions.http_response;
+  v_body jsonb;
+  v_url text := public.integration_vault('github_app_jwt_url');
+begin
+  if v_url is null then return null; end if;
+  v_res := extensions.http((
+    'POST', v_url,
+    array[extensions.http_header('x-github-app-jwt-key', coalesce(public.integration_vault('github_app_jwt_key'), ''))],
+    'application/json', '{}'
+  )::extensions.http_request);
+  if v_res.status <> 200 then
+    raise warning 'github-app-jwt answered %', v_res.status;
+    return null;
+  end if;
+  v_body := v_res.content::jsonb;
+
+  select secret_id into v_secret_id from public.github_app_jwt_cache for update;
+  if found then
+    perform vault.update_secret(v_secret_id, v_body ->> 'jwt');
+    update public.github_app_jwt_cache set expires_at = (v_body ->> 'expires_at')::timestamptz;
+  else
+    insert into public.github_app_jwt_cache (secret_id, expires_at) values (
+      vault.create_secret(v_body ->> 'jwt', 'github_app_jwt', 'Cached GitHub App JWT'),
+      (v_body ->> 'expires_at')::timestamptz)
+    on conflict (id) do nothing;
+  end if;
+  return v_body ->> 'jwt';
+end;
+$$;
+
+-- The cached App JWT. pg_cron refreshes it every 4 minutes; this refreshes
+-- inline only if that missed.
 create function public.integration_github_app_jwt()
 returns text
 language plpgsql
@@ -253,35 +357,17 @@ set search_path = ''
 as $$
 declare
   v_cache public.github_app_jwt_cache;
-  v_res extensions.http_response;
-  v_body jsonb;
+  v_jwt text;
 begin
   select * into v_cache from public.github_app_jwt_cache;
   if found and v_cache.expires_at > now() + interval '1 minute' then
     return (select decrypted_secret from vault.decrypted_secrets where id = v_cache.secret_id);
   end if;
-
-  v_res := extensions.http((
-    'POST', public.integration_vault('github_app_jwt_url'),
-    array[extensions.http_header('x-github-app-jwt-key', coalesce(public.integration_vault('github_app_jwt_key'), ''))],
-    'application/json', '{}'
-  )::extensions.http_request);
-  if v_res.status <> 200 then
-    raise warning 'github-app-jwt answered %', v_res.status;
+  v_jwt := public.integration_github_app_jwt_refresh();
+  if v_jwt is null then
     perform public.integration_raise(503, 'github_unavailable', 'GitHub App is not configured');
   end if;
-  v_body := v_res.content::jsonb;
-
-  if found then
-    perform vault.update_secret(v_cache.secret_id, v_body ->> 'jwt');
-    update public.github_app_jwt_cache set expires_at = (v_body ->> 'expires_at')::timestamptz;
-  else
-    insert into public.github_app_jwt_cache (secret_id, expires_at) values (
-      vault.create_secret(v_body ->> 'jwt', 'github_app_jwt', 'Cached GitHub App JWT'),
-      (v_body ->> 'expires_at')::timestamptz)
-    on conflict (id) do nothing;
-  end if;
-  return v_body ->> 'jwt';
+  return v_jwt;
 end;
 $$;
 
@@ -342,6 +428,10 @@ revoke all on function public.integration_raise(int, text, text) from public, an
 revoke all on function public.integration_vault(text) from public, anon, authenticated;
 revoke all on function public.integration_caller() from public, anon, authenticated;
 revoke all on function public.integration_take_slot() from public, anon, authenticated;
+revoke all on function public.integration_curl_limits() from public, anon, authenticated;
+revoke all on function public.integration_linear_refresh(uuid, text) from public, anon, authenticated;
+revoke all on function public.integration_refresh_linear_tokens() from public, anon, authenticated;
+revoke all on function public.integration_github_app_jwt_refresh() from public, anon, authenticated;
 revoke all on function public.integration_b64url(bytea) from public, anon, authenticated;
 revoke all on function public.integration_linear_token(uuid) from public, anon, authenticated;
 revoke all on function public.integration_github_app_jwt() from public, anon, authenticated;
@@ -352,3 +442,10 @@ revoke all on function public.github_repo_token(text) from public, anon;
 grant execute on function public.integration_sandbox_token(uuid) to authenticated;
 grant execute on function public.linear_graphql(text, jsonb) to authenticated;
 grant execute on function public.github_repo_token(text) to authenticated;
+
+-- ── Schedules ───────────────────────────────────────────────────────────
+
+select cron.schedule('integration-refresh-linear-tokens', '*/5 * * * *',
+  'select public.integration_refresh_linear_tokens()');
+select cron.schedule('integration-refresh-github-app-jwt', '*/4 * * * *',
+  'select public.integration_curl_limits(); select public.integration_github_app_jwt_refresh()');

@@ -2,7 +2,7 @@
 -- who may call, sandbox JWTs, and the checks that run before any outbound
 -- call. Outbound calls themselves are not exercised here.
 begin;
-select plan(18);
+select plan(21);
 
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000000e1', 'integrations@example.com'),
@@ -124,6 +124,21 @@ select throws_ok($$ select public.github_repo_token('not a repo') $$, 'PGRST', n
   'github_repo_token refuses a malformed repository');
 select throws_like($$ select public.github_repo_token('tznc/treq') $$, '%not_installed%',
   'github_repo_token refuses a repository without a linked installation');
+
+-- ── Schedules ───────────────────────────────────────────────────────────
+
+select results_eq(
+  $$ select jobname::text, schedule::text from cron.job
+     where jobname like 'integration-%' order by jobname $$,
+  $$ values ('integration-refresh-github-app-jwt', '*/4 * * * *'),
+            ('integration-refresh-linear-tokens', '*/5 * * * *') $$,
+  'pg_cron refreshes the GitHub App JWT and Linear tokens');
+
+reset role;
+select lives_ok($$ select public.integration_refresh_linear_tokens() $$,
+  'the Linear refresh job runs with nothing to refresh');
+select function_privs_are('public', 'integration_refresh_linear_tokens', array[]::text[],
+  'authenticated', array[]::text[], 'authenticated cannot run the refresh job');
 
 select * from finish();
 rollback;
