@@ -22,7 +22,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::num::NonZeroU16;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -35,7 +34,7 @@ use std::time::{Duration, Instant};
 pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Lines of history a reattach replays above the current screen.
-pub const HISTORY_LINES: usize = 250;
+pub use crate::core::terminal_screen::HISTORY_LINES;
 
 /// How long the daemon stays up with no sessions before it exits.
 pub const IDLE_EXIT: Duration = Duration::from_secs(60);
@@ -233,14 +232,8 @@ impl Frame {
   }
 }
 
-/// A terminal model sized `cols` x `rows` that keeps [`HISTORY_LINES`].
-pub fn new_screen(cols: u16, rows: u16) -> vt100::Parser {
-  vt100::Parser::new(nonzero(rows), nonzero(cols), HISTORY_LINES)
-}
-
-fn nonzero(value: u16) -> NonZeroU16 {
-  NonZeroU16::new(value).unwrap_or(NonZeroU16::MIN)
-}
+pub use crate::core::terminal_screen::new_screen;
+use crate::core::terminal_screen::nonzero;
 
 /// The bytes that bring a freshly attached terminal to the session's state:
 /// its history lines (scrolled up into the client's own scrollback), then
