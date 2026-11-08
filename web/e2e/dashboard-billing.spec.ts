@@ -46,26 +46,6 @@ function fakeSession() {
   };
 }
 
-// Stands in for Stripe.js: initEmbeddedCheckout fetches the client secret
-// through our billing-checkout function and "mounts" by writing it out.
-const FAKE_STRIPE_JS = `
-window.Stripe = function (key) {
-  return {
-    initEmbeddedCheckout: async function (options) {
-      const secret = await options.fetchClientSecret();
-      return {
-        mount: function (target) {
-          const node = typeof target === 'string' ? document.querySelector(target) : target;
-          node.textContent = 'Embedded Checkout ' + key + ' ' + secret;
-        },
-        unmount: function () {},
-        destroy: function () {},
-      };
-    },
-  };
-};
-`;
-
 type Stubs = {
   subscriptions: SubscriptionRow[];
   billingCustomer?: { trial_used_at: string | null } | null;
@@ -130,7 +110,7 @@ async function openDashboard(
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ client_secret: 'cs_test_e2e_secret' }),
+      body: JSON.stringify({ url: 'https://checkout.stripe.com/c/pay/cs_test_e2e' }),
     });
   });
   await page.route(/\/functions\/v1\/billing-portal/, async (route) => {
@@ -150,8 +130,12 @@ async function openDashboard(
   await page.route('https://billing.stripe.com/**', (route) =>
     route.fulfill({ status: 200, contentType: 'text/html', body: '<h1>Stripe customer portal</h1>' }),
   );
-  await page.route('https://js.stripe.com/**', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/javascript', body: FAKE_STRIPE_JS }),
+  await page.route('https://checkout.stripe.com/**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: `<h1>Stripe Checkout ${new URL(route.request().url()).pathname.split('/').pop()}</h1>`,
+    }),
   );
 
   await page.goto(path);
@@ -266,13 +250,11 @@ test.describe('Dashboard subscription tab', () => {
     await close();
   });
 
-  test('checkout opens embedded with a client secret from billing-checkout', async ({ browser }) => {
+  test('Upgrade to Pro goes to Stripe Checkout', async ({ browser }) => {
     test.skip(!checkoutLive, 'stripePayments is off or the live publishable key is not set');
     const { page, calls, close } = await openDashboard(browser, { subscriptions: [FREE], billingCustomer: null });
     await card(page).getByRole('button', { name: 'Upgrade to Pro' }).click();
-    await expect(page.getByTestId('stripe-embedded-checkout')).toContainText(
-      `Embedded Checkout ${STRIPE_PUBLISHABLE_KEY_PROD} cs_test_e2e_secret`,
-    );
+    await expect(page.getByRole('heading', { name: 'Stripe Checkout cs_test_e2e' })).toBeVisible();
     expect(calls.checkout).toEqual([{ plan: 'pro' }]);
     await close();
   });

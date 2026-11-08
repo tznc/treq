@@ -1,5 +1,5 @@
-// Opens an embedded Stripe Checkout session for Pro, or for Team on behalf of
-// an organization the caller owns, and returns its client secret
+// Opens a Stripe-hosted Checkout session for Pro, or for Team on behalf of
+// an organization the caller owns, and returns its URL
 // (prds/billing-and-teams.md, "Edge functions"). Called by the web dashboard
 // with the user's Supabase JWT. The logic lives in lib.ts.
 // Env: STRIPE_SECRET_KEY, and WEB_URL for the return URL (default

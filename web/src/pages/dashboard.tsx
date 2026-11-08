@@ -4,8 +4,6 @@ import Layout from "@theme/Layout";
 import Head from "@docusaurus/Head";
 import BrowserOnly from "@docusaurus/BrowserOnly";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
-import type { StripeEmbeddedCheckout } from "@stripe/stripe-js";
-import { loadStripe } from "@stripe/stripe-js/pure";
 import { supabase } from "../lib/supabase";
 import { proRequiredMessage } from "../lib/pro-required";
 import { confirmsAccountDeletion, deleteAccount } from "../lib/account";
@@ -15,7 +13,7 @@ import {
 } from "../lib/constants";
 import {
   fetchBillingPortalUrl,
-  fetchCheckoutClientSecret,
+  fetchCheckoutUrl,
   functionErrorMessage,
 } from "../lib/billing";
 import {
@@ -259,40 +257,25 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-// Mounts Stripe's embedded Checkout. Stripe.js loads only here, and asks
-// billing-checkout for the session's client secret itself: Pro for the
-// user, or Team when an organization id is given.
-function EmbeddedCheckoutPanel({
+// Sends the browser to Stripe-hosted Checkout. billing-checkout opens the
+// session: Pro for the user, or Team when an organization id is given.
+// Stripe returns to the dashboard with ?session_id when payment completes.
+function CheckoutRedirect({
   onError,
   organizationId,
 }: {
   onError: (message: string) => void;
   organizationId?: string;
 }) {
-  const container = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     let cancelled = false;
-    let checkout: StripeEmbeddedCheckout | null = null;
-    loadStripe(STRIPE_PUBLISHABLE_KEY)
-      .then((stripe) => {
-        if (!stripe) throw new Error("Stripe failed to load");
-        return stripe.initEmbeddedCheckout({
-          fetchClientSecret: () =>
-            fetchCheckoutClientSecret(
-              organizationId
-                ? { plan: "team", organization_id: organizationId }
-                : { plan: "pro" },
-            ),
-        });
-      })
-      .then((instance) => {
-        if (cancelled) {
-          instance.destroy();
-          return;
-        }
-        checkout = instance;
-        if (container.current) instance.mount(container.current);
+    fetchCheckoutUrl(
+      organizationId
+        ? { plan: "team", organization_id: organizationId }
+        : { plan: "pro" },
+    )
+      .then((url) => {
+        if (!cancelled) window.location.assign(url);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -301,16 +284,13 @@ function EmbeddedCheckoutPanel({
       });
     return () => {
       cancelled = true;
-      checkout?.destroy();
     };
   }, [onError, organizationId]);
 
   return (
-    <div
-      ref={container}
-      data-testid="stripe-embedded-checkout"
-      style={{ marginTop: "1.5rem" }}
-    />
+    <div role="status" style={{ marginTop: "1rem" }}>
+      Opening Stripe Checkout…
+    </div>
   );
 }
 
@@ -505,7 +485,7 @@ function SubscriptionTab({
           </div>
         )}
 
-        {checkoutOpen && <EmbeddedCheckoutPanel onError={onCheckoutError} />}
+        {checkoutOpen && <CheckoutRedirect onError={onCheckoutError} />}
       </div>
     </section>
   );
@@ -786,7 +766,7 @@ function OrganizationCard({
         </div>
       )}
       {checkoutOpen && (
-        <EmbeddedCheckoutPanel organizationId={org.id} onError={onCheckoutError} />
+        <CheckoutRedirect organizationId={org.id} onError={onCheckoutError} />
       )}
 
       {error && (
@@ -1166,7 +1146,7 @@ function GetTeamCard({
         US${TEAM_EXTRA_SEAT_USD} per extra member.
       </p>
       {orgId ? (
-        <EmbeddedCheckoutPanel organizationId={orgId} onError={onCheckoutError} />
+        <CheckoutRedirect organizationId={orgId} onError={onCheckoutError} />
       ) : (
         <form className="dashboard-form" style={styles.teamForm} onSubmit={submit}>
           <input

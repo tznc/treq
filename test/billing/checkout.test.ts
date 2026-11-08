@@ -30,9 +30,9 @@ describe("buildCheckoutSessionParams", () => {
     webUrl: WEB_URL,
   };
 
-  it("builds an embedded subscription session with no trial", () => {
+  it("builds a hosted subscription session with no trial", () => {
     expect(buildCheckoutSessionParams(base)).toEqual({
-      ui_mode: "embedded",
+      ui_mode: "hosted",
       mode: "subscription",
       customer: "cus_123",
       "line_items[0][price]": "price_pro",
@@ -43,8 +43,9 @@ describe("buildCheckoutSessionParams", () => {
       "metadata[owner_id]": USER_ID,
       "subscription_data[metadata][owner_type]": "user",
       "subscription_data[metadata][owner_id]": USER_ID,
-      return_url:
+      success_url:
         "https://treq.dev/dashboard?tab=subscription&session_id={CHECKOUT_SESSION_ID}",
+      cancel_url: "https://treq.dev/dashboard?tab=subscription",
     });
   });
 
@@ -65,7 +66,7 @@ describe("buildCheckoutSessionParams", () => {
         ownerType: "organization",
       }),
     ).toEqual({
-      ui_mode: "embedded",
+      ui_mode: "hosted",
       mode: "subscription",
       customer: "cus_123",
       "line_items[0][price]": "price_pro",
@@ -76,8 +77,9 @@ describe("buildCheckoutSessionParams", () => {
       "metadata[owner_id]": ORG_ID,
       "subscription_data[metadata][owner_type]": "organization",
       "subscription_data[metadata][owner_id]": ORG_ID,
-      return_url:
+      success_url:
         "https://treq.dev/dashboard?tab=team&session_id={CHECKOUT_SESSION_ID}",
+      cancel_url: "https://treq.dev/dashboard?tab=team",
     });
   });
 
@@ -86,7 +88,7 @@ describe("buildCheckoutSessionParams", () => {
       buildCheckoutSessionParams({
         ...base,
         webUrl: "http://localhost:3001/",
-      }).return_url,
+      }).success_url,
     ).toBe(
       "http://localhost:3001/dashboard?tab=subscription&session_id={CHECKOUT_SESSION_ID}",
     );
@@ -142,9 +144,7 @@ describe("parseCheckoutBody", () => {
 });
 
 describe("createStripeClient", () => {
-  it("pins the API version that still accepts ui_mode=embedded", () => {
-    // @stripe/stripe-js 8 (release train "clover") provides
-    // initEmbeddedCheckout. Later trains rename embedded Checkout.
+  it("pins the clover API version", () => {
     expect(STRIPE_API_VERSION).toMatch(/\.clover$/);
   });
 
@@ -275,7 +275,7 @@ const STRIPE_OK = {
   },
   "POST /v1/checkout/sessions": {
     id: "cs_1",
-    client_secret: "cs_1_secret_abc",
+    url: "https://checkout.stripe.com/c/pay/cs_1",
   },
   "GET /v1/subscriptions": { data: [] },
   "GET /v1/checkout/sessions": { data: [] },
@@ -433,7 +433,7 @@ describe("createCheckout", () => {
 
     expect(result).toEqual({
       status: 200,
-      body: { client_secret: "cs_1_secret_abc" },
+      body: { url: "https://checkout.stripe.com/c/pay/cs_1" },
     });
     expect(calls[0]).toEqual({
       method: "POST",
@@ -691,7 +691,7 @@ describe("createCheckout for Team", () => {
 
     expect(result).toEqual({
       status: 200,
-      body: { client_secret: "cs_1_secret_abc" },
+      body: { url: "https://checkout.stripe.com/c/pay/cs_1" },
     });
     expect(calls[0]).toEqual({
       method: "POST",
