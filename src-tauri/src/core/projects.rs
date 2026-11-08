@@ -1277,6 +1277,7 @@ mod tests {
       prompt: String::new(),
       context_paths: Vec::new(),
       draft: false,
+      org_id: None,
     };
     let repo = &overview(&project)[0];
     assert_eq!(repo.path, "/srv/app");
@@ -1311,6 +1312,7 @@ mod tests {
       prompt: String::new(),
       context_paths: Vec::new(),
       draft: false,
+      org_id: None,
     };
     let overview = overview(&project);
     assert_eq!(overview.len(), 1);
