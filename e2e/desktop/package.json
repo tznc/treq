@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
-    "landing": "playwright test -c landing/landing.config.ts",
+    "landing": "node landing/capture.ts",
     "typecheck": "tsc -p .",
     "qa": "node qa/run-each.ts"
   },
