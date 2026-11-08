@@ -168,8 +168,7 @@ jobs:
   test-desktop-e2e:
     needs: detect-changes
     if: ${{ !github.event.pull_request.draft && (needs.detect-changes.outputs.rust_changed == 'true' || needs.detect-changes.outputs.e2e_changed == 'true') }}
-    # The e2e suite takes up to 20 minutes, and the landing capture up to 10.
-    timeout-minutes: 35
+    timeout-minutes: 20
     name: test-desktop-e2e / playwright / ubuntu-22.04
     runs-on: ubuntu-22.04
     steps:
@@ -227,11 +226,67 @@ jobs:
           TREQ_E2E_BIN: ${{ github.workspace }}/target/debug/treq
         run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm test
 
-      # The same capture Deploy Web runs, so a UI change that breaks a landing
-      # screenshot fails here instead of on main. The window renders at
-      # GDK_SCALE=2, so the screen is larger than the suite's.
+      - name: Upload the report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-e2e-report
+          path: |
+            e2e/desktop/playwright-report
+            e2e/desktop/test-results
+          retention-days: 7
+
+  # The capture Deploy Web runs, on every PR (drafts and docs-only included),
+  # so a change that breaks a landing screenshot fails here instead of on main.
+  landing-capture:
+    # A cold e2e build takes up to 15 minutes, and the capture up to 10.
+    timeout-minutes: 35
+    name: landing-capture / playwright / ubuntu-22.04
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+
+      - name: Use mold linker
+        uses: rui314/setup-mold@da13e0b42e392e3a45d1215033a2270b849d7d36 # v1
+
+      # The same packages and cache entry as test-desktop-e2e.
+      - name: install dependencies (ubuntu only)
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
+        with:
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers xdotool
+          version: webkit-4.1-gpui-e2e-2
+          execute_install_scripts: true
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: test
+          save-if: false
+          workspaces: |
+            . -> target
+
+      - name: Build the app with the e2e feature
+        working-directory: src-tauri
+        run: cargo build --locked --features e2e --bin treq
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: e2e/desktop/package-lock.json
+
+      - name: Install the capture suite
+        working-directory: e2e/desktop
+        run: npm ci
+
+      # The window renders at GDK_SCALE=2, so the screen is larger than the
+      # e2e suite's.
       - name: Capture landing screenshots under Xvfb
-        if: ${{ !cancelled() }}
         working-directory: e2e/desktop
         env:
           TREQ_E2E_BIN: ${{ github.workspace }}/target/debug/treq
@@ -242,10 +297,8 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@v7
         with:
-          name: desktop-e2e-report
-          path: |
-            e2e/desktop/playwright-report
-            e2e/desktop/test-results
+          name: landing-capture-report
+          path: e2e/desktop/test-results
           retention-days: 7
 
   # clippy and the Rust tests share one job: each takes 1-2 min on a warm
