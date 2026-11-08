@@ -139,10 +139,6 @@ test.beforeAll(() => {
 });
 
 test("captures the landing screenshots", async ({ page }) => {
-  // One serial capture of every screenshot. The debug build renders on the
-  // CPU (llvmpipe) at 2x scale: a CI run takes over 4 minutes where a fast
-  // machine takes under 2.
-  test.setTimeout(600_000);
   await page.setViewportSize({ width: 1400, height: 900 });
   await expect(
     page.getByRole("button", { name: "Command palette" }),
