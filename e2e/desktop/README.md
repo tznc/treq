@@ -46,7 +46,9 @@ the app at `GDK_SCALE=2` in the dark theme. `landing/capture.ts` starts it,
 drives it and takes each shot.
 
 ```sh
-xvfb-run --auto-servernum --server-args="-screen 0 3840x2400x24" npm run landing
+# From the repository root: builds the e2e app, then captures. On Linux
+# without a display it runs under Xvfb; on macOS or a desktop it opens a window.
+mise run landing
 ```
 
 The Deploy Web workflow runs this for production builds and passes the PNGs

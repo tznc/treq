@@ -1,0 +1,20 @@
+# Tasks for local development. Tool versions come from .tool-versions.
+
+[tasks."landing:build"]
+description = "Build the desktop app with the e2e feature (Playwright server)"
+run = "cargo build --manifest-path src-tauri/Cargo.toml --features e2e --bin treq"
+
+[tasks.landing]
+description = "Capture the landing page screenshots into web/static/img/landing/"
+depends = ["landing:build"]
+dir = "{{config_root}}/e2e/desktop"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+[ -d node_modules ] || npm ci
+# The window renders at GDK_SCALE=2, so a headless Linux screen must be large.
+if [ "$(uname)" = Linux ] && [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+  exec xvfb-run --auto-servernum --server-args="-screen 0 3840x2400x24" npm run landing
+fi
+exec npm run landing
+"""
