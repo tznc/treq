@@ -5,7 +5,7 @@
 // Env: STRIPE_SECRET_KEY, and WEB_URL for the return URL (default
 // https://treq.dev), and TREQ_STRIPE_USAGE_PRICE_LOOKUP_KEY for Pro's
 // metered usage price (default treq_sandbox_usage). The
-// admin_config key test_coupon ({email, coupon_id}) gives that one account a
+// admin_config key test_coupon ({emails, coupon_id}) gives those accounts a
 // coupon at checkout.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
       usagePriceLookupKey:
         Deno.env.get("TREQ_STRIPE_USAGE_PRICE_LOOKUP_KEY") || undefined,
       testCoupon: {
-        email: testCoupon?.email ?? "",
+        emails: testCoupon?.emails ?? [],
         couponId: testCoupon?.coupon_id ?? "",
       },
     });

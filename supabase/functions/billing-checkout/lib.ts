@@ -38,17 +38,17 @@ export type CheckoutDeps = {
   /** Lookup key of the metered usage price Pro carries. */
   usagePriceLookupKey?: string;
   /**
-   * Internal test account: when the signed-in user's email equals `email`
-   * exactly, checkout applies `couponId` (a 100%-off coupon) so plans can be
+   * Internal test accounts: when the signed-in user's email equals one of
+   * `emails` exactly, checkout applies `couponId` (a 100%-off coupon) so plans can be
    * tested in production without charges.
    */
-  testCoupon?: { email: string; couponId: string };
+  testCoupon?: { emails: string[]; couponId: string };
 };
 
 function testCouponFor(deps: CheckoutDeps): string | undefined {
   const t = deps.testCoupon;
-  if (!t?.email || !t.couponId || !deps.user.email) return undefined;
-  return deps.user.email === t.email ? t.couponId : undefined;
+  if (!t?.couponId || !deps.user.email) return undefined;
+  return t.emails.includes(deps.user.email) ? t.couponId : undefined;
 }
 
 export type CheckoutResult = { status: number; body: Record<string, unknown> };

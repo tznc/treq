@@ -303,10 +303,11 @@ describe("createCheckout", () => {
   const user = { id: USER_ID, email: "dev@example.com" };
   const existing = { stripe_customer_id: "cus_old", trial_used_at: null };
 
-  it("applies the test coupon only when the email matches the test account exactly", async () => {
-    const testCoupon = { email: "dev@example.com", couponId: "coupon_free" };
+  it("applies the test coupon only when the email matches a test account exactly", async () => {
+    const testCoupon = { emails: ["dev@example.com", "qa@example.com"], couponId: "coupon_free" };
     const cases: [string, string | undefined][] = [
       ["dev@example.com", "coupon_free"],
+      ["qa@example.com", "coupon_free"],
       ["Dev@example.com", undefined],
       ["dev@example.com.evil", undefined],
     ];
@@ -336,7 +337,7 @@ describe("createCheckout", () => {
         store: fakeStore({ getCustomer: vi.fn(async () => existing) }),
         stripe,
         webUrl: WEB_URL,
-        testCoupon: { email: "", couponId: "" },
+        testCoupon: { emails: [], couponId: "" },
       },
     );
     expect(sessionParams(calls)?.["discounts[0][coupon]"]).toBeUndefined();
