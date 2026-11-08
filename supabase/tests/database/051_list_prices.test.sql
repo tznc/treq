@@ -1,4 +1,4 @@
--- Fixed list prices (073): one price per size on every provider, stored in
+-- Fixed list prices (075): one price per size on every provider, stored in
 -- treq_internal.admin_config under 'list_prices' so they are edited without a
 -- migration. Managed and BYOS each have their own hourly rate;
 -- stopped disk bills per GB-month wherever the provider keeps the disk.

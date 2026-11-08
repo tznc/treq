@@ -1,4 +1,4 @@
--- Billing rates come from treq_internal.admin_config (073; before it,
+-- Billing rates come from treq_internal.admin_config (075; before it,
 -- treq_internal.billing_settings, 062), not from custom GUCs, which any
 -- database session can SET for itself.
 begin;
