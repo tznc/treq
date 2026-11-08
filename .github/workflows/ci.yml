@@ -236,9 +236,12 @@ jobs:
             e2e/desktop/test-results
           retention-days: 7
 
-  # The capture Deploy Web runs, on every PR (drafts and docs-only included),
-  # so a change that breaks a landing screenshot fails here instead of on main.
+  # The capture Deploy Web runs, on every PR that changes the app or the
+  # capture (drafts included), so a change that breaks a landing screenshot
+  # fails here instead of on main.
   landing-capture:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.rust_changed == 'true' || needs.detect-changes.outputs.e2e_changed == 'true' }}
     # A cold e2e build takes up to 15 minutes, and the capture up to 10.
     timeout-minutes: 35
     name: landing-capture / playwright / ubuntu-22.04
