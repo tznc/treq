@@ -29,8 +29,8 @@ const FREE_FEATURES: PlanFeature[] = [
 const PRO_FEATURES: PlanFeature[] = [
   {key: 'free', text: 'Everything in Free'},
   {key: 'github-app', text: 'Treq GitHub App'},
-  {key: 'cloud', text: 'Cloud workspaces, pay-as-you-go at one price per size: E2B\'s rate plus 20%'},
-  {key: 'byos', text: "Your own provider account: 5% of E2B's rate for the size"},
+  {key: 'cloud', text: 'Cloud workspaces, pay-as-you-go from US$0.20 per hour'},
+  {key: 'byos', text: 'Your own provider account, from US$0.0085 per hour'},
   {key: 'linear', text: 'Linear integration'},
 ];
 

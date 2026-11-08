@@ -56,18 +56,22 @@ When the card shows **Degraded** or **Failed**, a **Repair** button appears. It 
 
 The trash icon (**Delete cloud workspace**) removes the machine. The confirmation dialog warns that cloned repositories, uncommitted changes, and agent sessions are lost, and that you cannot undo it. Deleting your Treq account deletes the cloud workspace and its disk too.
 
-## Bring your own sandbox
+## Pricing
 
-With Pro, you can run the cloud workspace on your own Boat, Daytona, E2B, or Cloudflare account instead of Treq's. The provider bills you for the machine. Treq charges 5% of E2B's rate for the same size, whatever provider you bring and whatever rate your account pays.
-
-Cloud workspaces cost the same per size on every provider. Treq prices running time at E2B's rate for the size; a workspace Treq runs pays that rate plus 20%, and one on your own account pays 5% of it. A stopped workspace's disk bills at Daytona's storage rate on every provider, US$0.079 per GB per month: plus 20% (US$0.095) when Treq runs it, or 5% of it (US$0.004) on your own account. A provider that discards the disk when the workspace stops (Cloudflare) bills nothing while stopped.
+Cloud workspaces cost the same per size on every provider:
 
 | Size | vCPU / RAM | Treq-managed | Your own account |
 |---|---|---|---|
-| Small | 2 / 4 GiB | US$0.199/h | US$0.0083/h |
-| Medium | 4 / 8 GiB | US$0.397/h | US$0.0166/h |
-| Large | 8 / 16 GiB | US$0.795/h | US$0.0331/h |
-| Extra large | 16 / 32 GiB | US$1.590/h | US$0.0662/h |
+| Small | 2 / 4 GiB | US$0.20/h | US$0.0085/h |
+| Medium | 4 / 8 GiB | US$0.40/h | US$0.017/h |
+| Large | 8 / 16 GiB | US$0.80/h | US$0.034/h |
+| Extra large | 16 / 32 GiB | US$1.60/h | US$0.068/h |
+
+A stopped workspace's disk bills US$0.10 per GB per month when Treq runs it, or US$0.004 on your own account. A provider that discards the disk when the workspace stops (Cloudflare) bills nothing while stopped.
+
+## Bring your own sandbox
+
+With Pro, you can run the cloud workspace on your own Boat, Daytona, E2B, or Cloudflare account instead of Treq's. The provider bills you for the machine. Treq charges a fixed fee per size (see [Pricing](#pricing)), whatever provider you bring and whatever rate your account pays.
 
 1. Open Settings and choose **Account**.
 2. Under **Provider keys**, select **Add Boat key**, **Add Daytona key**, **Add E2B key**, or **Add Cloudflare key**.
