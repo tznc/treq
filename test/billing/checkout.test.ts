@@ -304,7 +304,10 @@ describe("createCheckout", () => {
   const existing = { stripe_customer_id: "cus_old", trial_used_at: null };
 
   it("applies the test coupon only when the email matches a test account exactly", async () => {
-    const testCoupon = { emails: ["dev@example.com", "qa@example.com"], couponId: "coupon_free" };
+    const testCoupon = {
+      emails: ["dev@example.com", "qa@example.com"],
+      couponId: "coupon_free",
+    };
     const cases: [string, string | undefined][] = [
       ["dev@example.com", "coupon_free"],
       ["qa@example.com", "coupon_free"],
