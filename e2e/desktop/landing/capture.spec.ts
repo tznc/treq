@@ -61,22 +61,9 @@ async function shot(page: Page, name: string, clip?: Clip): Promise<void> {
   written.add(name);
 }
 
-/** The prompt card around the "Describe a task…" box. */
-async function promptCard(page: Page): Promise<Clip> {
-  const box = await page
-    .getByRole("textbox", { name: "Describe a task…" })
-    .boundingBox();
-  const edit = await page
-    .getByRole("button", { name: "Edit", exact: true })
-    .boundingBox();
-  if (!box || !edit) throw new Error("prompt card not on screen");
-  const top = box.y - 15;
-  return {
-    x: box.x - 15,
-    y: top,
-    width: box.width + 30,
-    height: edit.y + edit.height + 11 - top,
-  };
+/** The Code tab's agent prompt dialog. */
+function promptDialog(page: Page) {
+  return page.getByRole("dialog", { name: "Start a new agent session" });
 }
 
 function row(page: Page, branch: string) {
@@ -123,15 +110,23 @@ async function commentOnLine(
   await expect(input).toHaveCount(0);
 }
 
+/** Types a task into the Agent dialog, captures it, then closes it. */
 async function typePrompt(
   page: Page,
   name: string,
   text: string,
 ): Promise<void> {
-  const box = page.getByRole("textbox", { name: "Describe a task…" });
+  await page.getByRole("button", { name: "Agent", exact: true }).click();
+  const dialog = promptDialog(page);
+  await expect(dialog).toBeVisible();
+  const box = dialog.getByRole("textbox", { name: "Describe a task…" });
   await box.fill(text);
   await expect(box).toHaveValue(text);
-  await shot(page, name, await promptCard(page));
+  const clip = await dialog.boundingBox();
+  if (!clip) throw new Error("agent prompt dialog not on screen");
+  await shot(page, name, clip);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
 }
 
 test.beforeAll(() => {
@@ -163,7 +158,7 @@ test("captures the landing screenshots", async ({ page }) => {
   await page.waitForTimeout(2000);
   await shot(page, "github.png", MAIN);
 
-  // Prompts typed into a workspace's task box.
+  // Prompts typed into a workspace's Agent dialog.
   await openWorkspace(page, MARKETING);
   await openTab(page, "Code");
   await typePrompt(page, "prompt.png", "create a workspace for this fix");
@@ -177,7 +172,6 @@ test("captures the landing screenshots", async ({ page }) => {
     "break-workspace.png",
     "Break up this workspace into smaller stacked or separate workspaces",
   );
-  await page.getByRole("textbox", { name: "Describe a task…" }).fill("");
   await openWorkspace(page, CACHE);
   await openTab(page, "Code");
   await typePrompt(
@@ -185,7 +179,6 @@ test("captures the landing screenshots", async ({ page }) => {
     "spawn-before.png",
     "Split the work across 3 agents in 3 different workspaces",
   );
-  await page.getByRole("textbox", { name: "Describe a task…" }).fill("");
 
   // The conflicted Home.tsx, handed to an agent for a new commit.
   await openWorkspace(page, MARKETING);
