@@ -1,7 +1,9 @@
 // Captures the landing page screenshots from the running app on the demo
 // repository (`seed.ts`) and writes each PNG named in
 // web/src/data/landing-screenshots.json into web/static/img/landing/ (or
-// `LANDING_OUT`). The steps share one app and run in order.
+// `LANDING_OUT`). A plain script, not a test (`npm run landing`): it starts
+// the app with `launch.ts`, runs the steps in order on one window, and exits
+// non-zero on the first failed step, after saving a screenshot of it.
 //
 // A few targets (a diff line's comment button, a thread's toggle, the
 // GitHub tabs) are not observable elements,
@@ -9,10 +11,12 @@
 // seed is deterministic, so the points hold; each step then waits on an
 // observable result, so a moved target fails the run instead of capturing
 // the wrong state.
+import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, type Page, test } from "@playwright/test";
+import { chromium, expect as baseExpect, type Page } from "@playwright/test";
+import { port } from "../env.ts";
 import { fixture } from "../fixture.ts";
 import {
   CACHE,
@@ -31,6 +35,7 @@ const expected: string[] = JSON.parse(
   readFileSync(join(repoRoot, "web/src/data/landing-screenshots.json"), "utf8"),
 );
 const written = new Set<string>();
+const expect = baseExpect.configure({ timeout: 15_000 });
 
 type Clip = { x: number; y: number; width: number; height: number };
 
@@ -39,8 +44,6 @@ const SIDEBAR: Clip = { x: 0, y: 0, width: 280, height: 900 };
 const MAIN: Clip = { x: 280, y: 0, width: 1120, height: 900 };
 /** The Changes tab: its file list and the diff, below the tab bar. */
 const CHANGES: Clip = { x: 280, y: 102, width: 1120, height: 759 };
-
-test.describe.configure({ mode: "serial" });
 
 /**
  * Moves the pointer to the empty foot of the sidebar, off every control and
@@ -134,11 +137,7 @@ async function typePrompt(
   await expect(dialog).toHaveCount(0);
 }
 
-test.beforeAll(() => {
-  mkdirSync(outDir, { recursive: true });
-});
-
-test("captures the landing screenshots", async ({ page }) => {
+async function capture(page: Page): Promise<void> {
   await page.setViewportSize({ width: 1400, height: 900 });
   await expect(
     page.getByRole("button", { name: "Command palette" }),
@@ -300,4 +299,47 @@ test("captures the landing screenshots", async ({ page }) => {
 
   // Every PNG the site lists came from this run.
   expect([...written].sort()).toEqual([...expected].sort());
+}
+
+/** Resolves once gpui-playwright accepts connections on `port`. */
+async function waitForApp(app: ReturnType<typeof spawn>): Promise<void> {
+  const deadline = Date.now() + 180_000;
+  for (;;) {
+    if (app.exitCode !== null) throw new Error(`launch.ts exited (${app.exitCode})`);
+    try {
+      await fetch(`http://127.0.0.1:${port}/`);
+      return;
+    } catch {
+      if (Date.now() > deadline) throw new Error("the app did not start in 3 minutes");
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+}
+
+mkdirSync(outDir, { recursive: true });
+const app = spawn(process.execPath, [join(here, "launch.ts")], {
+  cwd: resolve(here, ".."),
+  stdio: "inherit",
+  detached: true,
 });
+let page: Page | undefined;
+let failed = false;
+try {
+  await waitForApp(app);
+  const browser = await chromium.connect(`ws://127.0.0.1:${port}/`);
+  page = await (await browser.newContext()).newPage();
+  await capture(page);
+  console.log(`wrote ${written.size} screenshots to ${outDir}`);
+} catch (error) {
+  failed = true;
+  console.error(error);
+  const failure = resolve(here, "../test-results/landing/failure.png");
+  mkdirSync(dirname(failure), { recursive: true });
+  await page?.screenshot({ path: failure }).catch(() => {});
+} finally {
+  // launch.ts and the app share the detached process group.
+  try {
+    process.kill(-app.pid!, "SIGTERM");
+  } catch {}
+}
+process.exit(failed ? 1 : 0);
