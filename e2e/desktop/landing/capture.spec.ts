@@ -3,8 +3,8 @@
 // web/src/data/landing-screenshots.json into web/static/img/landing/ (or
 // `LANDING_OUT`). The steps share one app and run in order.
 //
-// A few targets (file rows in the Changes list, a diff line's comment
-// button, a thread's toggle, the GitHub tabs) are not observable elements,
+// A few targets (a diff line's comment button, a thread's toggle, the
+// GitHub tabs) are not observable elements,
 // so those steps click a fixed point. The window is a fixed 1400x900 and the
 // seed is deterministic, so the points hold; each step then waits on an
 // observable result, so a moved target fails the run instead of capturing
@@ -64,6 +64,11 @@ async function shot(page: Page, name: string, clip?: Clip): Promise<void> {
 /** The Code tab's agent prompt dialog. */
 function promptDialog(page: Page) {
   return page.getByRole("dialog", { name: "Start a new agent session" });
+}
+
+/** A file's row in the Changes list. */
+function file(page: Page, path: string) {
+  return page.getByRole("button", { name: path, exact: true });
 }
 
 function row(page: Page, branch: string) {
@@ -185,7 +190,8 @@ test("captures the landing screenshots", async ({ page }) => {
   await openTab(page, "Changes");
   const resolve = page.getByRole("button", { name: "Resolve conflicts…" });
   await expect(resolve).toBeVisible();
-  await page.mouse.click(330, 283); // Home.tsx under Conflicts
+  // Home.tsx under Conflicts (it is listed again under Committed).
+  await file(page, "packages/web/src/pages/Home.tsx").first().click();
   await page.waitForTimeout(1000);
   await resolve.click();
   await expect(page.getByRole("button", { name: "Plan" })).toBeVisible();
@@ -194,7 +200,7 @@ test("captures the landing screenshots", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Plan" })).toHaveCount(0);
 
   // A resolved GitHub thread and a local comment on client.ts.
-  await page.mouse.click(326, 383); // client.ts under Committed
+  await file(page, "packages/web/src/lib/client.ts").click();
   await page.waitForTimeout(1500);
   await commentOnLine(page, "packages/web/src/lib/client.ts", 6, "remove this");
   await page.mouse.click(571, 474); // unfold the resolved thread
