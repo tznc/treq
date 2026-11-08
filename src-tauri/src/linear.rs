@@ -157,8 +157,7 @@ pub fn resolve_linear_client(
 }
 
 /// Why a read fails without Pro.
-pub const PRO_REQUIRED: &str =
-  "Linear needs Pro. Start a trial or upgrade on your treq.dev dashboard.";
+pub const PRO_REQUIRED: &str = "Linear needs Pro. Upgrade on your treq.dev dashboard.";
 
 /// Why a read fails when the repo has no API key and treq has no OAuth
 /// session: the Linear view shows it as the connect hint.

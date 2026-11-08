@@ -37,9 +37,9 @@ export async function refuseGatedAction(
 /** What each gated feature says when it refuses a Free user. */
 export const PRO_REQUIRED_MESSAGES = {
   githubApp:
-    "The Treq GitHub App needs Pro. Start a trial or upgrade on your treq.dev dashboard.",
+    "The Treq GitHub App needs Pro. Upgrade on your treq.dev dashboard.",
   linearOAuth:
-    "Linear needs Pro. Start a trial or upgrade on your treq.dev dashboard.",
+    "Linear needs Pro. Upgrade on your treq.dev dashboard.",
   cloudWorkspace:
     "Cloud workspaces need Pro. You can still check the status of your cloud workspace or delete it.",
 } as const;

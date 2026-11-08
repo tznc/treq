@@ -30,10 +30,8 @@ describe("buildCheckoutSessionParams", () => {
     webUrl: WEB_URL,
   };
 
-  it("builds an embedded subscription session with a 14-day trial", () => {
-    expect(
-      buildCheckoutSessionParams({ ...base, trialEligible: true }),
-    ).toEqual({
+  it("builds an embedded subscription session with no trial", () => {
+    expect(buildCheckoutSessionParams(base)).toEqual({
       ui_mode: "embedded",
       mode: "subscription",
       customer: "cus_123",
@@ -47,27 +45,16 @@ describe("buildCheckoutSessionParams", () => {
       "subscription_data[metadata][owner_id]": USER_ID,
       return_url:
         "https://treq.dev/dashboard?tab=subscription&session_id={CHECKOUT_SESSION_ID}",
-      "subscription_data[trial_period_days]": 14,
     });
   });
 
   it("adds the metered usage price as a second line item without a quantity", () => {
     const params = buildCheckoutSessionParams({
       ...base,
-      trialEligible: false,
       usagePriceId: "price_usage",
     });
     expect(params["line_items[1][price]"]).toBe("price_usage");
     expect(params).not.toHaveProperty("line_items[1][quantity]");
-  });
-
-  it("leaves the trial out once the owner has used it", () => {
-    const params = buildCheckoutSessionParams({
-      ...base,
-      trialEligible: false,
-    });
-    expect(params).not.toHaveProperty("subscription_data[trial_period_days]");
-    expect(params.payment_method_collection).toBe("always");
   });
 
   it("builds a Team session owned by the organization, returning to the Team tab", () => {
@@ -76,7 +63,6 @@ describe("buildCheckoutSessionParams", () => {
         ...base,
         ownerId: ORG_ID,
         ownerType: "organization",
-        trialEligible: false,
       }),
     ).toEqual({
       ui_mode: "embedded",
@@ -95,23 +81,11 @@ describe("buildCheckoutSessionParams", () => {
     });
   });
 
-  it("never gives an organization a trial (B01)", () => {
-    expect(
-      buildCheckoutSessionParams({
-        ...base,
-        ownerId: ORG_ID,
-        ownerType: "organization",
-        trialEligible: true,
-      }),
-    ).not.toHaveProperty("subscription_data[trial_period_days]");
-  });
-
   it("drops a trailing slash from the web URL", () => {
     expect(
       buildCheckoutSessionParams({
         ...base,
         webUrl: "http://localhost:3001/",
-        trialEligible: true,
       }).return_url,
     ).toBe(
       "http://localhost:3001/dashboard?tab=subscription&session_id={CHECKOUT_SESSION_ID}",
@@ -279,7 +253,6 @@ function fakeStore(overrides: Partial<BillingStore> = {}): BillingStore {
     hasPro: vi.fn(async () => false),
     getCustomer: vi.fn(async () => null),
     attachCustomer: vi.fn(async (id: string) => id),
-    trialClaimed: vi.fn(async () => false),
     ...overrides,
   };
 }
@@ -445,7 +418,7 @@ describe("createCheckout", () => {
     expect(open?.params).toMatchObject({ customer: "cus_old", status: "open" });
   });
 
-  it("creates and records a customer, then offers the trial", async () => {
+  it("creates and records a customer, then opens checkout with no trial", async () => {
     const { stripe, calls } = fakeStripe(STRIPE_OK);
     const store = fakeStore({
       getCustomer: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({
@@ -475,8 +448,10 @@ describe("createCheckout", () => {
     expect(store.attachCustomer).toHaveBeenCalledWith("cus_new");
     expect(sessionParams(calls)).toMatchObject({
       customer: "cus_new",
-      "subscription_data[trial_period_days]": 14,
     });
+    expect(sessionParams(calls)).not.toHaveProperty(
+      "subscription_data[trial_period_days]",
+    );
   });
 
   it("uses the customer another checkout recorded first", async () => {
@@ -515,48 +490,11 @@ describe("createCheckout", () => {
     ]);
     expect(sessionParams(calls)).toMatchObject({
       customer: "cus_old",
-      "subscription_data[trial_period_days]": 14,
     });
+    expect(sessionParams(calls)).not.toHaveProperty(
+      "subscription_data[trial_period_days]",
+    );
     expect(store.attachCustomer).not.toHaveBeenCalled();
-  });
-
-  it("offers no trial once trial_used_at is set", async () => {
-    const { stripe, calls } = fakeStripe(STRIPE_OK);
-    const store = fakeStore({
-      getCustomer: vi.fn(async () => ({
-        stripe_customer_id: "cus_old",
-        trial_used_at: "2026-09-01T00:00:00Z",
-      })),
-    });
-    const result = await createCheckout(
-      { plan: "pro" },
-      { user, store, stripe, webUrl: WEB_URL },
-    );
-    expect(result.status).toBe(200);
-    expect(sessionParams(calls)).not.toHaveProperty(
-      "subscription_data[trial_period_days]",
-    );
-  });
-
-  // A deleted account's trial is remembered by email, so deleting and
-  // signing up again (new user, new Stripe customer) gets no second trial.
-  it("offers no trial when the email already had one", async () => {
-    const { stripe, calls } = fakeStripe(STRIPE_OK);
-    const store = fakeStore({
-      getCustomer: vi.fn(async () => ({
-        stripe_customer_id: "cus_new_account",
-        trial_used_at: null,
-      })),
-      trialClaimed: vi.fn(async () => true),
-    });
-    const result = await createCheckout(
-      { plan: "pro" },
-      { user, store, stripe, webUrl: WEB_URL },
-    );
-    expect(result.status).toBe(200);
-    expect(sessionParams(calls)).not.toHaveProperty(
-      "subscription_data[trial_period_days]",
-    );
   });
 
   it("resolves the price by lookup key", async () => {

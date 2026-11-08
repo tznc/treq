@@ -29,7 +29,7 @@ export const PRICING_SCHEMA = {
       priceCurrency: 'USD',
       unitText: 'user/month',
       description:
-        'The Treq GitHub App and the Linear integration (OAuth or personal API key). Billed per user per month after a 14-day trial that needs a card. Cloud workspaces are pay-as-you-go at one price per size on every provider, from US$0.20 per hour, billed by the second.',
+        'The Treq GitHub App and the Linear integration (OAuth or personal API key). Billed per user per month. Cloud workspaces are pay-as-you-go at one price per size on every provider, billed by the second.',
     },
     {
       '@type': 'Offer',
@@ -50,9 +50,9 @@ export const FAQ_ITEMS = [
       "The desktop app is free and open source, and runs everything on your machine. GitHub works through your local gh CLI, for any repository. You pay for Pro features, some of which run on Treq's servers: the Treq GitHub App and the Linear integration. Cloud workspaces are pay-as-you-go on top of Pro, at one price per size on every provider, from US$0.20 per hour, billed by the second. If you bring your own Boat, Daytona, or E2B account, the provider bills you for the machine and Treq charges a fixed fee per size, from US$0.0085 per hour.",
   },
   {
-    question: 'How does the Pro trial work?',
+    question: 'How is Pro billed?',
     answer:
-      'Pro starts with a 14-day free trial. Checkout asks for a card, and Stripe charges it when the trial ends unless you cancel first. Each account gets one trial. If you cancel, Pro stays on until the end of the period you already have. Team has no trial.',
+      'Checkout asks for a card, and Stripe charges it at the start of each monthly period. If you cancel, Pro stays on until the end of the period you already paid for.',
   },
   {
     question: 'How do Team seats count?',

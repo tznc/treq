@@ -208,7 +208,6 @@ async function openSession(
         priceId,
         ownerId: owner.id,
         ownerType: owner.type,
-        trialEligible: plan === "pro" && customer.trial_used_at === null && !(await owner.store.trialClaimed()),
         webUrl: deps.webUrl,
         quantity: owner.quantity,
         usagePriceId,
@@ -268,8 +267,7 @@ export async function createCheckout(
     );
   }
 
-  // One Pro subscription per user. A second one would bill twice, and a
-  // second trial would stack on the first.
+  // One Pro subscription per user. A second one would bill twice.
   if (await deps.store.hasPro()) {
     return {
       status: 409,
