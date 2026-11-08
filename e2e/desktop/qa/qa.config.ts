@@ -15,7 +15,7 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  timeout: 300_000,
+  timeout: 30_000,
   reporter: "list",
   expect: { timeout: 15_000 },
   outputDir: "../test-results/qa",

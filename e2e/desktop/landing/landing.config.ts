@@ -11,9 +11,7 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  // The debug build renders on the CPU (llvmpipe) at 2x scale: a CI run takes
-  // over 4 minutes where a fast machine takes under 2.
-  timeout: 600_000,
+  timeout: 30_000,
   reporter: "list",
   expect: { timeout: 15_000 },
   outputDir: "../test-results/landing",
