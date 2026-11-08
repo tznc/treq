@@ -24,6 +24,8 @@ pub struct Project {
   pub context_paths: Vec<String>,
   /// An unsaved window's project: kept, but not listed until promoted.
   pub draft: bool,
+  /// The Team organization that owns the project; `None` for personal.
+  pub org_id: Option<String>,
 }
 
 /// What closing a window should do.
@@ -64,6 +66,7 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
       "draft",
       "ALTER TABLE projects ADD COLUMN draft INTEGER NOT NULL DEFAULT 0",
     ),
+    ("org_id", "ALTER TABLE projects ADD COLUMN org_id TEXT"),
   ] {
     let has: i64 = conn.query_row(
       "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name = ?1",
@@ -197,7 +200,7 @@ fn insert(conn: &Connection, name: &str, repos: &[String], draft: bool) -> Resul
 pub fn get(conn: &Connection, id: &str) -> Result<Option<Project>, String> {
   let row = conn
     .query_row(
-      "SELECT name, created_at, last_opened_at, prompt, context_paths, draft FROM projects WHERE id = ?1",
+      "SELECT name, created_at, last_opened_at, prompt, context_paths, draft, org_id FROM projects WHERE id = ?1",
       [id],
       |r| {
         Ok((
@@ -207,12 +210,13 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<Project>, String> {
           r.get::<_, String>(3)?,
           r.get::<_, String>(4)?,
           r.get::<_, bool>(5)?,
+          r.get::<_, Option<String>>(6)?,
         ))
       },
     )
     .optional()
     .map_err(err)?;
-  let Some((name, created_at, last_opened_at, prompt, context, draft)) = row else {
+  let Some((name, created_at, last_opened_at, prompt, context, draft, org_id)) = row else {
     return Ok(None);
   };
   Ok(Some(Project {
@@ -224,6 +228,7 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<Project>, String> {
     prompt,
     context_paths: serde_json::from_str(&context).unwrap_or_default(),
     draft,
+    org_id,
   }))
 }
 
@@ -263,6 +268,29 @@ pub fn set_context(
     .execute(
       "UPDATE projects SET prompt = ?2, context_paths = ?3 WHERE id = ?1",
       params![id, prompt.trim(), json],
+    )
+    .map_err(err)
+    .map(drop)
+}
+
+/// Saved projects owned by `org_id` (`None`: personal), most recently
+/// opened first.
+pub fn list_for_owner(conn: &Connection, org_id: Option<&str>) -> Result<Vec<Project>, String> {
+  Ok(
+    list(conn)?
+      .into_iter()
+      .filter(|p| p.org_id.as_deref() == org_id)
+      .collect(),
+  )
+}
+
+/// Moves the project to a Team organization, or back to personal with `None`.
+pub fn set_owner(conn: &Connection, id: &str, org_id: Option<&str>) -> Result<(), String> {
+  exists(conn, id)?;
+  conn
+    .execute(
+      "UPDATE projects SET org_id = ?2 WHERE id = ?1",
+      params![id, org_id],
     )
     .map_err(err)
     .map(drop)
@@ -680,6 +708,41 @@ mod tests {
 
   fn repos(paths: &[&str]) -> Vec<String> {
     paths.iter().map(|p| p.to_string()).collect()
+  }
+
+  #[test]
+  fn new_project_is_personal() {
+    let conn = conn();
+    let saved = save(&conn, "Solo", &repos(&["/r/a"])).expect("save");
+    assert_eq!(saved.org_id, None);
+  }
+
+  #[test]
+  fn set_owner_moves_project_to_team_and_back() {
+    let conn = conn();
+    let saved = save(&conn, "Shared", &repos(&["/r/a"])).expect("save");
+    set_owner(&conn, &saved.id, Some("org-1")).expect("to team");
+    assert_eq!(get(&conn, &saved.id).unwrap().unwrap().org_id.as_deref(), Some("org-1"));
+    set_owner(&conn, &saved.id, None).expect("to personal");
+    assert_eq!(get(&conn, &saved.id).unwrap().unwrap().org_id, None);
+  }
+
+  #[test]
+  fn list_for_owner_filters_by_personal_or_org() {
+    let conn = conn();
+    let mine = save(&conn, "Mine", &repos(&["/r/a"])).expect("save");
+    let team = save(&conn, "Team", &repos(&["/r/b"])).expect("save");
+    let other = save(&conn, "Other", &repos(&["/r/c"])).expect("save");
+    set_owner(&conn, &team.id, Some("org-1")).unwrap();
+    set_owner(&conn, &other.id, Some("org-2")).unwrap();
+    let ids = |o| list_for_owner(&conn, o).unwrap().into_iter().map(|p| p.id).collect::<Vec<_>>();
+    assert_eq!(ids(None), vec![mine.id]);
+    assert_eq!(ids(Some("org-1")), vec![team.id]);
+  }
+
+  #[test]
+  fn set_owner_rejects_unknown_project() {
+    assert!(set_owner(&conn(), "missing", None).is_err());
   }
 
   #[test]
@@ -1119,6 +1182,7 @@ mod tests {
       prompt: String::new(),
       context_paths: Vec::new(),
       draft: false,
+      org_id: None,
     };
     let overview = overview(&project);
     crate::local_db::release_connections_under(dir.path());
