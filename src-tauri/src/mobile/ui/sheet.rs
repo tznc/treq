@@ -9,10 +9,10 @@ use gpui_kit::{
   div, AnyView, App, AppContext, Context, Entity, Global, InteractiveElement, IntoElement,
   ParentElement, Pixels, Render, SharedString, Styled, WeakEntity, Window,
 };
-use treq_ui::{ConfirmDialog, Dialog, Row, RowDensity};
+use treq_ui::{ConfirmDialog, Dialog};
 
 /// What a sheet action does when tapped. The sheet closes first.
-pub type Action = Rc<dyn Fn(&mut Window, &mut App)>;
+pub type Action = treq_ui::touch::Action;
 
 /// The open sheet, owned by the root view.
 pub struct Sheet {
@@ -147,33 +147,7 @@ fn render_with(
 }
 
 /// One row of a [`Menu`].
-#[derive(Clone)]
-pub struct MenuEntry {
-  pub id: SharedString,
-  pub label: SharedString,
-  pub danger: bool,
-  pub action: Action,
-}
-
-impl MenuEntry {
-  pub fn new(
-    id: impl Into<SharedString>,
-    label: impl Into<SharedString>,
-    action: impl Fn(&mut Window, &mut App) + 'static,
-  ) -> Self {
-    Self {
-      id: id.into(),
-      label: label.into(),
-      danger: false,
-      action: Rc::new(action),
-    }
-  }
-
-  pub fn danger(mut self) -> Self {
-    self.danger = true;
-    self
-  }
-}
+pub type MenuEntry = treq_ui::touch::SheetAction;
 
 /// A list of actions, as a sheet: the phone's context menu.
 pub struct Menu {
@@ -190,21 +164,7 @@ pub fn menu(title: impl Into<SharedString>, entries: Vec<MenuEntry>, cx: &mut Ap
 impl Render for Menu {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = treq_ui::theme::current(cx);
-    gpui_kit::component::v_flex().children(self.entries.iter().map(|entry| {
-      let action = entry.action.clone();
-      Row::new(entry.id.clone(), &palette)
-        .density(RowDensity::Touch)
-        .role(gpui_kit::Role::MenuItem)
-        .label(entry.label.clone())
-        // A menu is shorter than a list: its rows are actions, not records.
-        .min_h(gpui_kit::px(48.))
-        .when(entry.danger, |row| row.text_color(palette.destructive))
-        .child(entry.label.clone())
-        .on_click(move |_, window, cx| {
-          close(cx);
-          action(window, cx);
-        })
-    }))
+    treq_ui::touch::ActionSheet::new(self.entries.clone(), &palette).on_dismiss(|_, cx| close(cx))
   }
 }
 
