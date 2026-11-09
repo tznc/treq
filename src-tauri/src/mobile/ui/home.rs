@@ -318,7 +318,6 @@ impl HomeScreen {
     let model = model(cx).read(cx);
     let email = model.user.clone()?;
     let busy = model.auth_busy;
-    let delete_email = email.clone();
     Some(
       widgets::section("Account", cx)
         .child(
@@ -337,16 +336,6 @@ impl HomeScreen {
               ),
           ),
         )
-        .child(
-          Button::new("delete-account")
-            .ghost()
-            .w_full()
-            .text_color(cx.theme().danger)
-            .label("Delete account")
-            .disabled(busy)
-            .on_click(move |_, _, cx| super::delete_account::open(delete_email.clone(), cx))
-            .touch(),
-        ),
     )
   }
 
