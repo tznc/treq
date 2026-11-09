@@ -1,5 +1,5 @@
 /**
- * Team projects (076_organization_projects.sql) through PostgREST as signed-in
+ * Team projects (077_organization_projects.sql) through PostgREST as signed-in
  * users: what the desktop project sync (core/project_sync.rs) calls. Members
  * put and list their organization's projects; outsiders see and write none;
  * repos must be remote references.
