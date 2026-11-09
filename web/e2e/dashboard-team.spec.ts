@@ -557,7 +557,14 @@ test.describe('Dashboard team tab', () => {
   test('a user without Team sees a Team upsell instead of the create form', async ({ browser }) => {
     const { page, close } = await openTeamTab(browser, emptyTeam());
     const upsell = teamSection(page).getByRole('region', { name: 'Get Team' });
-    await expect(upsell).toContainText('Every member gets Pro');
+    await expect(upsell).toContainText('US$199');
+    await expect(upsell).toContainText('5 members included, US$8 per extra member');
+    const perks = teamSection(page).getByRole('list', { name: 'Team plan' });
+    await expect(perks.getByRole('listitem')).toHaveText([
+      'Everything in Pro for every member',
+      'Shared GitHub App installation',
+      'One bill for the whole team',
+    ]);
     await expect(teamSection(page).getByRole('button', { name: 'Create organization' })).toHaveCount(0);
     await close();
   });

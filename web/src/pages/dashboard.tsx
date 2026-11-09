@@ -513,6 +513,13 @@ function SubscriptionTab({
   );
 }
 
+// The Team plan's features, as the pricing page lists them.
+const TEAM_PERKS = [
+  "Everything in Pro for every member",
+  "Shared GitHub App installation",
+  "One bill for the whole team",
+];
+
 // ── Team tab ─────────────────────────────────────────────────────────────────
 //
 // Organizations and Team (prds/billing-and-teams.md, "Organizations and
@@ -1162,10 +1169,12 @@ function GetTeamCard({
   return (
     <section aria-label="Get Team" style={styles.orgCard}>
       <div style={styles.orgName}>Get Team</div>
+      <p style={styles.teamPrice}>
+        <span style={styles.teamPriceAmount}>US$199</span> per month
+      </p>
       <p style={styles.billingNote}>
-        Every member gets Pro, with shared billing and a shared GitHub App
-        installation. US$199 per month for {TEAM_INCLUDED_SEATS} members, then
-        US${TEAM_EXTRA_SEAT_USD} per extra member.
+        {TEAM_INCLUDED_SEATS} members included, US${TEAM_EXTRA_SEAT_USD} per extra
+        member
       </p>
       {orgId ? (
         <CheckoutRedirect organizationId={orgId} onError={onCheckoutError} />
@@ -1343,6 +1352,27 @@ function TeamTab({
       <h2 id="team-heading" style={styles.sectionTitle}>
         Teams
       </h2>
+      <ul aria-label="Team plan" style={styles.teamPerks}>
+        {TEAM_PERKS.map((perk) => (
+          <li key={perk} style={styles.teamPerk}>
+            <svg
+              aria-hidden="true"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#10b981"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ flexShrink: 0 }}
+            >
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+            {perk}
+          </li>
+        ))}
+      </ul>
 
       {checkoutReturn === "waiting" && (
         <div role="status" style={styles.notice}>
@@ -2145,6 +2175,18 @@ const styles: Record<string, React.CSSProperties> = {
   teamLinkRow: { display: "flex", gap: "0.5rem", paddingBottom: "0.6rem" },
   teamMuted: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-500)" },
   teamForm: { display: "flex", gap: "0.5rem", marginTop: "0.75rem" },
+  teamPerks: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "0.5rem 1.5rem",
+    listStyle: "none",
+    padding: 0,
+    margin: "0 0 1rem",
+    fontSize: "0.9rem",
+  },
+  teamPerk: { display: "flex", alignItems: "center", gap: "0.4rem" },
+  teamPrice: { margin: "0.5rem 0 0", fontSize: "0.9rem" },
+  teamPriceAmount: { fontSize: "1.75rem", fontWeight: 700 },
   teamCreateForm: {
     display: "flex",
     flexDirection: "column",
