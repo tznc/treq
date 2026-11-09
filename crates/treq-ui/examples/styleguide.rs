@@ -1,8 +1,8 @@
 //! Treq's design system, built with gpui-styleguidist.
 //!
 //! - `cargo run -p treq-ui --example styleguide` opens it.
-//! - `-- render` re-renders the snapshots under `styleguide/`; `-- check`
-//!   compares against them.
+//! - `-- render` writes snapshots under `styleguide/` (git-ignored; not
+//!   checked in); `-- check` compares against a local render.
 
 use gpui::{div, prelude::*, px, App, Entity, Window};
 use gpui_kit::component::input::InputState;
