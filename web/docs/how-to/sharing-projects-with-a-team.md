@@ -24,7 +24,7 @@ Select **Move to** → **Personal** to take a project back. It stays on your com
 
 ## Switch between personal and team projects
 
-The **Projects** section on the welcome page has a switcher above the list. In the sidebar project menu, each organization's projects are in a submenu named after it. Select **Personal** or an organization's name to show that owner's projects.
+The **Projects** section on the welcome page has a switcher above the list. Select **Personal** or an organization's name to show that owner's projects. In the sidebar project menu, each organization's projects are in a submenu named after it.
 
 ## What syncs
 
