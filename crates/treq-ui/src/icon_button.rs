@@ -20,6 +20,15 @@ impl IconButtonSize {
       IconButtonSize::Medium => (28., 16.),
     }
   }
+
+  /// [`IconButtonSize::metrics`] at `density`: on a phone every icon button
+  /// is a 44 target with a 20 icon.
+  pub fn metrics_at(self, density: crate::theme::Density) -> (f32, f32) {
+    match density {
+      crate::theme::Density::Touch => (crate::theme::TOUCH_TARGET, 20.),
+      crate::theme::Density::Desktop => self.metrics(),
+    }
+  }
 }
 
 /// An icon-only [`Button`]: ghost in toolbars, outline beside fields. The
@@ -121,8 +130,8 @@ impl IconButton {
 }
 
 impl RenderOnce for IconButton {
-  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-    let (side, icon) = self.size.metrics();
+  fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    let (side, icon) = self.size.metrics_at(crate::theme::Density::current(cx));
     let p = self.palette;
     self
       .button
@@ -141,6 +150,20 @@ impl RenderOnce for IconButton {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::theme::Density;
+
+  #[test]
+  fn a_touch_icon_button_is_a_44_target() {
+    assert_eq!(
+      IconButtonSize::Medium.metrics_at(Density::Touch),
+      (44., 20.)
+    );
+    assert_eq!(IconButtonSize::Small.metrics_at(Density::Touch), (44., 20.));
+    assert_eq!(
+      IconButtonSize::Small.metrics_at(Density::Desktop),
+      (24., 14.)
+    );
+  }
   use crate::theme;
 
   #[test]

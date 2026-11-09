@@ -327,7 +327,9 @@ jobs:
   test-rust:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.rust_changed == 'true' }}
-    timeout-minutes: 20
+    # Clippy then the tests: a cold build (a Cargo.lock change misses the
+    # cache) takes about 20 minutes on its own.
+    timeout-minutes: 30
     # macOS runs after merge in warm-caches.yml: macOS runners are the
     # scarcest and slowest, and the tests rarely differ by platform.
     name: test-rust / clippy + test / ubuntu-22.04

@@ -1,18 +1,20 @@
 //! Treq's design system, built with gpui-styleguidist.
 //!
 //! - `cargo run -p treq-ui --example styleguide` opens it.
-//! - `-- render` re-renders the snapshots under `styleguide/`; `-- check`
-//!   compares against them.
+//! - `-- render` writes snapshots under `styleguide/` (git-ignored; not
+//!   checked in); `-- check` compares against a local render.
 
-use gpui::{div, prelude::*, px, App};
+use gpui::{div, prelude::*, px, App, Entity, Window};
+use gpui_kit::component::input::InputState;
 use gpui_styleguidist::{example, Example, Styleguide};
 use treq_ui::{
   floating,
   theme::{self, Palette},
-  Alert, Badge, Button, CheckState, Checkbox, ConfirmDialog, Count, Dialog, Dot, EmptyState,
-  IconButton, IconButtonSize, Kbd, Loading, MenuItem, MenuLabel, MenuSeparator, Picker,
-  PickerPlacement, Row, RowDensity, Severity, Skeleton, SplitButton, Tab, Tabs, TabsStyle, Tone,
-  Variant,
+  touch, Alert, Badge, Button, Card, CardFooter, CardHeader, CardVariant, CheckState, Checkbox,
+  ConfirmDialog, Count, Dialog, Dot, EmptyState, Field, FieldLayout, Form, FormActions, FormLayout,
+  FormRow, FormSection, IconButton, IconButtonSize, Kbd, Loading, MenuItem, MenuLabel,
+  MenuSeparator, PathField, Picker, PickerPlacement, Row, RowDensity, Severity, Skeleton,
+  SplitButton, Tab, Tabs, TabsStyle, Tone, Variant,
 };
 
 fn main() {
@@ -28,8 +30,19 @@ fn styleguide() -> Styleguide {
     .assets(theme::Assets)
     .setup(theme::init)
     .open_window(|options, frame, cx| Ok(gpui_kit::open_window(options, cx, frame)?.0))
-    .themes(["light", "dark"], |name, cx| {
-      theme::set_dark(name == "dark", cx)
+    // Every example also renders at touch density, so each desktop
+    // component has its phone translation in the snapshots.
+    .themes(["light", "dark", "touch-light", "touch-dark"], |name, cx| {
+      let touch = name.starts_with("touch");
+      theme::set_density(
+        if touch {
+          theme::Density::Touch
+        } else {
+          theme::Density::Desktop
+        },
+        cx,
+      );
+      theme::set_dark(name.ends_with("dark"), cx)
     })
     .background(|cx| p(cx).background)
     // Past this, snapshots cover the default plus each single-knob change.
@@ -118,7 +131,322 @@ fn styleguide() -> Styleguide {
     .examples(buttons())
     .examples(indicators())
     .examples(navigation())
+    .describe(
+      "Card",
+      "One object per card. Outlined by default; elevated for a card that floats over the \
+       page, never nested; ghost for an empty slot. A footer only when there are actions, \
+       the primary last. Flush for a list edge to edge.",
+    )
+    .describe(
+      "Form",
+      "Vertical in dialogs and narrow panes; horizontal (a 140 label column) in settings \
+       pages, stacking below 480; inline for filter bars. Rows split a line by span; \
+       sections group fields under a title. Actions end-align, or line up with the \
+       controls in a horizontal form.",
+    )
+    .describe(
+      "Field",
+      "A label, its control and one line under it: the hint, or the error that replaces \
+       it. All body text, so they line up with the text in the control. A red * for \
+       required; \"(optional)\" when most fields are required. Trailing puts the control \
+       at the end of the row, for a setting.",
+    )
+    .describe(
+      "PathField",
+      "Paths are picked, not typed: the value in mono and Browse…, which opens the \
+       system's picker. Dropping a folder on it picks that.",
+    )
     .examples(surfaces())
+    .describe(
+      "InputGroup",
+      "A field with icon buttons joined to its end in one border, for a value that comes \
+       from an action (a picker, a lookup). Preferred on a phone over a text button \
+       beside the field. Each icon button's label names the action.",
+    )
+    .describe(
+      "Mobile",
+      "Phone-only patterns. Every other page also renders at touch density (the touch \
+       themes): 44 targets, forms vertical, actions full width, no shortcuts.",
+    )
+    .examples(cards())
+    .examples(forms())
+    .examples(mobile())
+}
+
+fn cards() -> Vec<Example> {
+  vec![
+    example!("card/variants", |knobs, _, cx| {
+      let p = p(cx);
+      div().w(px(360.)).child(
+        Card::new("card", &p)
+          .variant(knobs.pick(
+            "variant",
+            &[
+              ("outlined", CardVariant::Outlined),
+              ("elevated", CardVariant::Elevated),
+              ("ghost", CardVariant::Ghost),
+            ],
+            "outlined",
+          ))
+          .selected(knobs.bool("selected", false))
+          .header(
+            CardHeader::new("treq")
+              .description("~/code/treq")
+              .action(IconButton::new("card-more", theme::ICON_MORE, "More", &p)),
+          )
+          .child("3 workspaces, 1 with uncommitted changes.")
+          .footer(
+            CardFooter::new()
+              .end(
+                Button::new("card-cancel", &p)
+                  .variant(Variant::Ghost)
+                  .label("Cancel"),
+              )
+              .end(Button::new("card-open", &p).label("Open")),
+          ),
+      )
+    })
+    .component("Card")
+    .title("Variants")
+    .size(440., 220.),
+    example!("card/flush", |_, _, cx| {
+      let p = p(cx);
+      div().w(px(360.)).child(
+        Card::new("branches", &p)
+          .header(CardHeader::new("Branches").action(Count::new(3, &p)))
+          .flush(true)
+          .children(["main", "feat/cards", "fix/forms"].map(|b| Row::new(b, &p).title(b)))
+          .footer(
+            CardFooter::new()
+              .start(
+                Button::new("b-delete", &p)
+                  .variant(Variant::DestructiveOutline)
+                  .label("Delete"),
+              )
+              .end(
+                Button::new("b-open", &p)
+                  .variant(Variant::Outline)
+                  .label("Open"),
+              ),
+          ),
+      )
+    })
+    .component("Card")
+    .title("Flush list, split footer")
+    .size(440., 260.),
+  ]
+}
+
+/// Inputs need state, so form examples are views.
+struct FormDemo {
+  layout: FormLayout,
+  error: bool,
+  name: Entity<InputState>,
+  email: Entity<InputState>,
+  owner: Entity<InputState>,
+  repo: Entity<InputState>,
+  depth: Entity<InputState>,
+}
+
+impl FormDemo {
+  fn new(
+    layout: FormLayout,
+    error: bool,
+    window: &mut Window,
+    cx: &mut gpui::Context<Self>,
+  ) -> Self {
+    let mut input = |v: &str| {
+      let v = v.to_string();
+      cx.new(|cx| InputState::new(window, cx).default_value(v))
+    };
+    Self {
+      layout,
+      error,
+      name: input("feat/card-system"),
+      email: input("ty@example"),
+      owner: input("tznc"),
+      repo: input("treq"),
+      depth: input("50"),
+    }
+  }
+}
+
+impl Render for FormDemo {
+  fn render(&mut self, _: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    let p = p(cx);
+    let form = Form::new("demo", &p).layout(self.layout);
+    let form = if self.layout == FormLayout::Inline {
+      form
+        .field(
+          Field::new("owner", &p)
+            .label("Owner")
+            .child(treq_ui::input(&self.owner)),
+        )
+        .field(
+          Field::new("repo", &p)
+            .label("Name")
+            .child(treq_ui::input(&self.repo)),
+        )
+        .child(
+          Button::new("reset", &p)
+            .variant(Variant::Outline)
+            .label("Reset"),
+        )
+    } else {
+      form
+        .section(
+          FormSection::new("Workspace")
+            .field(
+              Field::new("name", &p)
+                .label("Name")
+                .required()
+                .hint("Becomes the branch name.")
+                .child(treq_ui::input(&self.name)),
+            )
+            .field(
+              Field::new("email", &p)
+                .label("Email")
+                .hint("Used for commit attribution.")
+                .error(
+                  self
+                    .error
+                    .then_some("Use a full address, such as ty@example.com."),
+                )
+                .child(treq_ui::input(&self.email)),
+            )
+            .field(
+              Field::new("path", &p).label("Clone path").child(
+                PathField::new("path-picker", &p)
+                  .value(Some("~/code/treq"))
+                  .on_pick(|_, _, _| {}),
+              ),
+            ),
+        )
+        .section(
+          FormSection::new("Repository").row(
+            FormRow::new()
+              .span(
+                2,
+                Field::new("owner", &p)
+                  .label("Owner")
+                  .child(treq_ui::input(&self.owner)),
+              )
+              .col(
+                Field::new("depth", &p)
+                  .label("Depth")
+                  .child(treq_ui::input(&self.depth)),
+              ),
+          ),
+        )
+        .field(
+          Field::new("open", &p).child(
+            Checkbox::new("open-after", &p)
+              .checked(true)
+              .label("Open after creating"),
+          ),
+        )
+        .actions(
+          FormActions::new()
+            .end(
+              Button::new("f-cancel", &p)
+                .variant(Variant::Ghost)
+                .label("Cancel"),
+            )
+            .end(Button::new("f-create", &p).label("Create workspace")),
+        )
+    };
+    div().w(px(560.)).child(form)
+  }
+}
+
+fn forms() -> Vec<Example> {
+  vec![
+    example!(view "form/layouts", |knobs, window, cx| {
+      let layout = knobs.pick(
+        "layout",
+        &[
+          ("vertical", FormLayout::Vertical),
+          ("horizontal", FormLayout::horizontal()),
+          ("inline", FormLayout::Inline),
+        ],
+        "vertical",
+      );
+      let error = knobs.bool("error", false);
+      cx.new(|cx| FormDemo::new(layout, error, window, cx))
+    })
+    .component("Form")
+    .title("Vertical, horizontal, inline")
+    .description("Sections, a 2:1 row, a path picker and a checkbox in one form.")
+    .size(640., 520.),
+    example!("field/settings", |_, _, cx| {
+      let p = p(cx);
+      div().w(px(420.)).child(
+        Card::new("settings", &p).flush(true).child(
+          div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .p_4()
+            .child(
+              Field::new("compact", &p)
+                .layout(FieldLayout::Trailing)
+                .label("Compact rows")
+                .hint("28px rows in the sidebar.")
+                .child(Checkbox::new("compact-switch", &p).switch().checked(true)),
+            )
+            .child(
+              Field::new("signout", &p)
+                .layout(FieldLayout::Trailing)
+                .label("Sign out everywhere")
+                .child(
+                  Button::new("signout-btn", &p)
+                    .variant(Variant::DestructiveOutline)
+                    .label("Sign out…"),
+                ),
+            ),
+        ),
+      )
+    })
+    .component("Field")
+    .title("Settings (trailing)")
+    .size(500., 200.),
+    example!("checkbox/radio-switch", |_, _, cx| {
+      let p = p(cx);
+      div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(
+          Checkbox::new("r1", &p)
+            .radio()
+            .checked(true)
+            .label("Merge commit"),
+        )
+        .child(Checkbox::new("r2", &p).radio().label("Squash and merge"))
+        .child(
+          Checkbox::new("s1", &p)
+            .switch()
+            .checked(true)
+            .label("Delete branch after merge"),
+        )
+        .child(Checkbox::new("s2", &p).switch().label("Auto-merge"))
+    })
+    .component("Checkbox")
+    .title("Radio and switch")
+    .size(360., 160.),
+    example!("path-field", |knobs, _, cx| {
+      let p = p(cx);
+      div().w(px(360.)).child(
+        PathField::new("clone", &p)
+          .value(knobs.bool("chosen", true).then_some("~/code/treq"))
+          .disabled(knobs.bool("disabled", false))
+          .on_pick(|_, _, _| {}),
+      )
+    })
+    .component("PathField")
+    .title("Folder")
+    .size(440., 80.),
+  ]
 }
 
 fn variant_knob(knobs: &gpui_styleguidist::Knobs) -> Variant {
@@ -772,4 +1100,157 @@ fn surfaces() -> Vec<Example> {
     .title("Floating surface")
     .size(480., 160.),
   ]
+}
+
+fn mobile() -> Vec<Example> {
+  vec![
+    example!("touch/grouped-list", |_, _, cx| {
+      let p = p(cx);
+      div().w(px(390.)).p_4().child(
+        touch::grouped(&p)
+          .child(touch::nav_row("ws-1", "feat/card-system", &p).meta("2 files changed"))
+          .child(touch::nav_row("ws-2", "fix/forms", &p).meta("Agent idle"))
+          .child(touch::nav_row("ws-3", "main", &p).meta("Clean")),
+      )
+    })
+    .component("Mobile")
+    .title("Grouped list")
+    .size(420., 260.),
+    example!("touch/choice", |knobs, _, cx| {
+      let p = p(cx);
+      let picked = knobs.select("picked", &["merge", "squash", "rebase"], "merge");
+      div().w(px(390.)).p_4().child(
+        touch::grouped(&p)
+          .child(touch::choice(
+            "merge",
+            "Merge commit",
+            picked == "merge",
+            &p,
+          ))
+          .child(touch::choice(
+            "squash",
+            "Squash and merge",
+            picked == "squash",
+            &p,
+          ))
+          .child(touch::choice(
+            "rebase",
+            "Rebase and merge",
+            picked == "rebase",
+            &p,
+          )),
+      )
+    })
+    .component("Mobile")
+    .title("Choice list (radio)")
+    .size(420., 240.),
+    example!("touch/bottom-bar", |_, _, cx| {
+      let p = p(cx);
+      div().w(px(390.)).child(
+        touch::bottom_bar(&p)
+          .child(
+            Button::new("test", &p)
+              .variant(Variant::Outline)
+              .label("Test"),
+          )
+          .child(
+            div()
+              .flex_1()
+              .child(Button::new("add", &p).label("Add host").w_full()),
+          ),
+      )
+    })
+    .component("Mobile")
+    .title("Bottom bar")
+    .size(420., 100.),
+    example!("touch/action-sheet", |_, _, cx| {
+      let p = p(cx);
+      div().w(px(390.)).child(touch::ActionSheet::new(
+        vec![
+          touch::SheetAction::new("terminal", "Open terminal", |_, _| {}),
+          touch::SheetAction::new("rename", "Rename…", |_, _| {}),
+          touch::SheetAction::new("copy", "Copy branch name", |_, _| {}),
+          touch::SheetAction::new("delete", "Delete workspace…", |_, _| {}).danger(),
+        ],
+        &p,
+      ))
+    })
+    .component("Mobile")
+    .title("Action sheet (menu)")
+    .size(420., 240.),
+    example!("touch/tab-bar", |knobs, _, cx| {
+      let p = p(cx);
+      div().w(px(390.)).child(
+        Tabs::new("ws-tabs", &p)
+          .style(TabsStyle::Bar)
+          .tab(
+            Tab::new("t-term", "Terminals")
+              .icon(theme::ICON_TERMINAL)
+              .count(2),
+          )
+          .tab(
+            Tab::new("t-changes", "Changes")
+              .icon(theme::ICON_FILE_DIFF)
+              .count(4),
+          )
+          .tab(Tab::new("t-commits", "Commits").icon(theme::ICON_COMMIT))
+          .tab(Tab::new("t-code", "Code").icon(theme::ICON_CODE))
+          .selected(knobs.number("selected", 1., 0.0..=3.0, 1.) as usize)
+          .on_select(|_, _, _| {}),
+      )
+    })
+    .component("Mobile")
+    .title("Tab bar")
+    .size(420., 100.),
+    example!(view "input-group", |_, window, cx| {
+      cx.new(|cx| InputGroupDemo {
+        path: cx.new(|cx| InputState::new(window, cx).default_value("~/code/treq")),
+      })
+    })
+    .component("InputGroup")
+    .title("Path with browse and copy")
+    .size(420., 100.),
+    example!("touch/path-field", |_, _, cx| {
+      let p = p(cx);
+      div().w(px(390.)).p_4().child(
+        Field::new("root", &p)
+          .label("Workspace root")
+          .hint("A folder on the host.")
+          .child(
+            PathField::new("root-path", &p)
+              .value(Some("~/code"))
+              .on_browse("Browse host…", |_, _| {}),
+          ),
+      )
+    })
+    .component("Mobile")
+    .title("Path on a remote host")
+    .size(420., 140.),
+  ]
+}
+
+struct InputGroupDemo {
+  path: Entity<InputState>,
+}
+
+impl Render for InputGroupDemo {
+  fn render(&mut self, _: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    let p = p(cx);
+    div().w(px(360.)).p_4().child(
+      treq_ui::InputGroup::new("demo-path", &p)
+        .control(treq_ui::input(&self.path).appearance(false))
+        .append(IconButton::new(
+          "demo-browse",
+          theme::ICON_FOLDER_SEARCH,
+          "Browse host folders",
+          &p,
+        ))
+        .append(IconButton::new(
+          "demo-copy",
+          theme::ICON_COPY,
+          "Copy path",
+          &p,
+        )),
+    )
+  }
 }

@@ -13,6 +13,12 @@ pub struct Kbd {
 }
 
 impl Kbd {
+  /// Whether shortcuts show: not on a phone, which has no keyboard to
+  /// press them on. Every action needs a visible control there.
+  pub fn shown(density: crate::theme::Density) -> bool {
+    density == crate::theme::Density::Desktop
+  }
+
   /// `keystroke` as GPUI binds it, such as `secondary-k` or `cmd-shift-p`.
   /// One that doesn't parse shows as written.
   pub fn new(keystroke: &str, palette: &Palette) -> Self {
@@ -88,9 +94,11 @@ impl Kbd {
 }
 
 impl RenderOnce for Kbd {
-  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+  fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = &self.palette;
+    let shown = Kbd::shown(crate::theme::Density::current(cx));
     text(div(), TextSize::Xs)
+      .when(!shown, |el| el.hidden())
       .flex()
       .flex_none()
       .items_center()
@@ -110,6 +118,13 @@ impl RenderOnce for Kbd {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::theme::Density;
+
+  #[test]
+  fn shortcuts_are_hidden_on_touch() {
+    assert!(Kbd::shown(Density::Desktop));
+    assert!(!Kbd::shown(Density::Touch));
+  }
 
   fn format(keystroke: &str, mac: bool) -> String {
     Kbd::format(&Keystroke::parse(keystroke).unwrap(), mac)

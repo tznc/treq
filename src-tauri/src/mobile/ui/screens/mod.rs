@@ -6,6 +6,7 @@ pub mod commits;
 pub mod conflicts;
 pub mod diff;
 pub mod file;
+pub mod folder_picker;
 pub mod github;
 pub mod issue;
 pub mod issues;
