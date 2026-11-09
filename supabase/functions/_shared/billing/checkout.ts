@@ -89,7 +89,7 @@ export function buildCheckoutSessionParams(input: {
 }): StripeParams {
   const ownerType = input.ownerType ?? "user";
   const params: StripeParams = {
-    ui_mode: "embedded",
+    ui_mode: "hosted",
     mode: "subscription",
     customer: input.customerId,
     "line_items[0][price]": input.priceId,
@@ -103,7 +103,8 @@ export function buildCheckoutSessionParams(input: {
     "metadata[owner_id]": input.ownerId,
     "subscription_data[metadata][owner_type]": ownerType,
     "subscription_data[metadata][owner_id]": input.ownerId,
-    return_url: checkoutReturnUrl(input.webUrl, ownerType),
+    success_url: checkoutReturnUrl(input.webUrl, ownerType),
+    cancel_url: dashboardBillingUrl(input.webUrl, ownerType),
   };
   if (input.couponId) params["discounts[0][coupon]"] = input.couponId;
   return params;

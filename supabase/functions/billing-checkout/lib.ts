@@ -200,7 +200,7 @@ async function openSession(
       };
     }
 
-    const session = await deps.stripe.request<{ client_secret: string }>(
+    const session = await deps.stripe.request<{ url: string }>(
       "POST",
       "/v1/checkout/sessions",
       buildCheckoutSessionParams({
@@ -214,7 +214,7 @@ async function openSession(
         couponId: testCouponFor(deps),
       }),
     );
-    return { status: 200, body: { client_secret: session.client_secret } };
+    return { status: 200, body: { url: session.url } };
   } catch (err) {
     if (err instanceof StripeApiError) {
       console.error(`[billing-checkout] Stripe ${err.status}: ${err.message}`);

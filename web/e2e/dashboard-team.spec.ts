@@ -47,24 +47,6 @@ function fakeSession() {
   };
 }
 
-const FAKE_STRIPE_JS = `
-window.Stripe = function (key) {
-  return {
-    initEmbeddedCheckout: async function (options) {
-      const secret = await options.fetchClientSecret();
-      return {
-        mount: function (target) {
-          const node = typeof target === 'string' ? document.querySelector(target) : target;
-          node.textContent = 'Embedded Checkout ' + key + ' ' + secret;
-        },
-        unmount: function () {},
-        destroy: function () {},
-      };
-    },
-  };
-};
-`;
-
 type Membership = {
   org_id: string;
   user_id: string;
@@ -270,7 +252,7 @@ async function openTeamTab(
   await page.route(/\/functions\/v1\/billing-checkout/, async (route) => {
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204 });
     calls.checkout.push(route.request().postDataJSON());
-    return fulfillJson(route, { client_secret: 'cs_test_team_secret' });
+    return fulfillJson(route, { url: 'https://checkout.stripe.com/c/pay/cs_test_team' });
   });
   await page.route(/\/functions\/v1\/billing-portal/, async (route) => {
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204 });
@@ -280,8 +262,12 @@ async function openTeamTab(
   await page.route('https://billing.stripe.com/**', (route) =>
     route.fulfill({ status: 200, contentType: 'text/html', body: '<h1>Stripe customer portal</h1>' }),
   );
-  await page.route('https://js.stripe.com/**', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/javascript', body: FAKE_STRIPE_JS }),
+  await page.route('https://checkout.stripe.com/**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: `<h1>Stripe Checkout ${new URL(route.request().url()).pathname.split('/').pop()}</h1>`,
+    }),
   );
 
   if (path) {
@@ -469,12 +455,12 @@ test.describe('Dashboard team tab', () => {
     await close();
   });
 
-  test('buying Team opens embedded checkout for the organization', async ({ browser }) => {
+  test('buying Team goes to Stripe Checkout for the organization', async ({ browser }) => {
     test.skip(!checkoutLive, 'stripePayments is off or the live publishable key is not set');
     const { page, calls, close } = await openTeamTab(browser, acmeTeam('owner'));
     const acme = orgCard(page, 'Acme');
     await acme.getByRole('button', { name: 'Buy Team' }).click();
-    await expect(acme.getByTestId('stripe-embedded-checkout')).toContainText('cs_test_team_secret');
+    await expect(page.getByRole('heading', { name: 'Stripe Checkout cs_test_team' })).toBeVisible();
     expect(calls.checkout).toEqual([{ plan: 'team', organization_id: ORG }]);
     await close();
   });
@@ -571,7 +557,15 @@ test.describe('Dashboard team tab', () => {
   test('a user without Team sees a Team upsell instead of the create form', async ({ browser }) => {
     const { page, close } = await openTeamTab(browser, emptyTeam());
     const upsell = teamSection(page).getByRole('region', { name: 'Get Team' });
-    await expect(upsell).toContainText('Every member gets Pro');
+    await expect(upsell).toContainText('US$199');
+    await expect(upsell).toContainText('5 members included, US$8 per extra member');
+    const perks = teamSection(page).getByRole('list', { name: 'Team plan' });
+    await expect(perks.getByRole('listitem')).toHaveText([
+      'Everything in Pro for every member',
+      'Manage team-wide integrations',
+      'Sandbox usage management',
+      'One bill for the whole team',
+    ]);
     await expect(teamSection(page).getByRole('button', { name: 'Create organization' })).toHaveCount(0);
     await close();
   });
@@ -580,7 +574,7 @@ test.describe('Dashboard team tab', () => {
     test.skip(checkoutLive, 'stripePayments is on and the live key is set');
     const { page, calls, close } = await openTeamTab(browser, emptyTeam());
     const upsell = teamSection(page).getByRole('region', { name: 'Get Team' });
-    await expect(upsell.getByRole('button', { name: 'Get Team' })).toBeDisabled();
+    await expect(upsell.getByRole('button', { name: 'Start a team' })).toBeDisabled();
     await expect(upsell).toContainText('Coming Soon');
     expect(calls.organizations).toEqual([]);
     await close();
@@ -590,9 +584,9 @@ test.describe('Dashboard team tab', () => {
     test.skip(!checkoutLive, 'stripePayments is off or the live publishable key is not set');
     const { page, calls, close } = await openTeamTab(browser, emptyTeam());
     const upsell = teamSection(page).getByRole('region', { name: 'Get Team' });
-    await upsell.getByRole('textbox', { name: 'Organization name' }).fill('Acme');
-    await upsell.getByRole('button', { name: 'Get Team' }).click();
-    await expect(upsell.getByTestId('stripe-embedded-checkout')).toContainText('cs_test_team_secret');
+    await upsell.getByRole('textbox', { name: 'Team name' }).fill('Acme');
+    await upsell.getByRole('button', { name: 'Start a team' }).click();
+    await expect(page.getByRole('heading', { name: 'Stripe Checkout cs_test_team' })).toBeVisible();
     expect(calls.organizations).toContainEqual({ action: 'create', name: 'Acme' });
     expect(calls.checkout).toEqual([{ plan: 'team', organization_id: ORG }]);
     await close();

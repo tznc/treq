@@ -4,8 +4,6 @@ import Layout from "@theme/Layout";
 import Head from "@docusaurus/Head";
 import BrowserOnly from "@docusaurus/BrowserOnly";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
-import type { StripeEmbeddedCheckout } from "@stripe/stripe-js";
-import { loadStripe } from "@stripe/stripe-js/pure";
 import { supabase } from "../lib/supabase";
 import { proRequiredMessage } from "../lib/pro-required";
 import { confirmsAccountDeletion, deleteAccount } from "../lib/account";
@@ -15,7 +13,7 @@ import {
 } from "../lib/constants";
 import {
   fetchBillingPortalUrl,
-  fetchCheckoutClientSecret,
+  fetchCheckoutUrl,
   functionErrorMessage,
 } from "../lib/billing";
 import {
@@ -243,6 +241,27 @@ function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
   );
 }
 
+// Lucide "credit-card", sized to sit before a button label.
+function CreditCardIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ verticalAlign: "-3px", marginRight: "0.4rem" }}
+    >
+      <rect width="20" height="14" x="2" y="5" rx="2" />
+      <line x1="2" x2="22" y1="10" y2="10" />
+    </svg>
+  );
+}
+
 // ── Subscription tab ─────────────────────────────────────────────────────────
 
 // After embedded Checkout returns, Pro appears once the stripe-webhook
@@ -259,40 +278,25 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-// Mounts Stripe's embedded Checkout. Stripe.js loads only here, and asks
-// billing-checkout for the session's client secret itself: Pro for the
-// user, or Team when an organization id is given.
-function EmbeddedCheckoutPanel({
+// Sends the browser to Stripe-hosted Checkout. billing-checkout opens the
+// session: Pro for the user, or Team when an organization id is given.
+// Stripe returns to the dashboard with ?session_id when payment completes.
+function CheckoutRedirect({
   onError,
   organizationId,
 }: {
   onError: (message: string) => void;
   organizationId?: string;
 }) {
-  const container = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     let cancelled = false;
-    let checkout: StripeEmbeddedCheckout | null = null;
-    loadStripe(STRIPE_PUBLISHABLE_KEY)
-      .then((stripe) => {
-        if (!stripe) throw new Error("Stripe failed to load");
-        return stripe.initEmbeddedCheckout({
-          fetchClientSecret: () =>
-            fetchCheckoutClientSecret(
-              organizationId
-                ? { plan: "team", organization_id: organizationId }
-                : { plan: "pro" },
-            ),
-        });
-      })
-      .then((instance) => {
-        if (cancelled) {
-          instance.destroy();
-          return;
-        }
-        checkout = instance;
-        if (container.current) instance.mount(container.current);
+    fetchCheckoutUrl(
+      organizationId
+        ? { plan: "team", organization_id: organizationId }
+        : { plan: "pro" },
+    )
+      .then((url) => {
+        if (!cancelled) window.location.assign(url);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -301,16 +305,13 @@ function EmbeddedCheckoutPanel({
       });
     return () => {
       cancelled = true;
-      checkout?.destroy();
     };
   }, [onError, organizationId]);
 
   return (
-    <div
-      ref={container}
-      data-testid="stripe-embedded-checkout"
-      style={{ marginTop: "1.5rem" }}
-    />
+    <div role="status" style={{ marginTop: "1rem" }}>
+      Opening Stripe Checkout…
+    </div>
   );
 }
 
@@ -456,9 +457,9 @@ function SubscriptionTab({
           </p>
         )}
 
-        <div style={styles.billingActions}>
+        <div style={{ ...styles.billingActions, justifyContent: "flex-end" }}>
           {!isPro && !checkoutOpen && (
-            <div>
+            <div style={{ textAlign: "right" }}>
               <span
                 title={!checkoutAvailable ? "Coming Soon" : undefined}
                 style={
@@ -479,6 +480,7 @@ function SubscriptionTab({
                     ...(!checkoutAvailable ? styles.primaryButtonDisabled : {}),
                   }}
                 >
+                  <CreditCardIcon />
                   Upgrade to Pro
                 </button>
               </span>
@@ -492,7 +494,7 @@ function SubscriptionTab({
               type="button"
               onClick={openPortal}
               disabled={portalPending}
-              style={{ ...styles.secondaryButton, marginLeft: "auto" }}
+              style={styles.secondaryButton}
             >
               Manage billing
             </button>
@@ -505,11 +507,19 @@ function SubscriptionTab({
           </div>
         )}
 
-        {checkoutOpen && <EmbeddedCheckoutPanel onError={onCheckoutError} />}
+        {checkoutOpen && <CheckoutRedirect onError={onCheckoutError} />}
       </div>
     </section>
   );
 }
+
+// The Team plan's features, as the pricing page lists them.
+const TEAM_PERKS = [
+  "Everything in Pro for every member",
+  "Manage team-wide integrations",
+  "Sandbox usage management",
+  "One bill for the whole team",
+];
 
 // ── Team tab ─────────────────────────────────────────────────────────────────
 //
@@ -778,7 +788,7 @@ function OrganizationCard({
               type="button"
               onClick={openPortal}
               disabled={pending}
-              style={{ ...styles.secondaryButton, marginLeft: "auto" }}
+              style={styles.secondaryButton}
             >
               Manage billing
             </button>
@@ -786,7 +796,7 @@ function OrganizationCard({
         </div>
       )}
       {checkoutOpen && (
-        <EmbeddedCheckoutPanel organizationId={org.id} onError={onCheckoutError} />
+        <CheckoutRedirect organizationId={org.id} onError={onCheckoutError} />
       )}
 
       {error && (
@@ -1160,19 +1170,24 @@ function GetTeamCard({
   return (
     <section aria-label="Get Team" style={styles.orgCard}>
       <div style={styles.orgName}>Get Team</div>
+      <p style={styles.teamPrice}>
+        <span style={styles.teamPriceAmount}>US$199</span> per month
+      </p>
       <p style={styles.billingNote}>
-        Every member gets Pro, with shared billing and a shared GitHub App
-        installation. US$199 per month for {TEAM_INCLUDED_SEATS} members, then
-        US${TEAM_EXTRA_SEAT_USD} per extra member.
+        {TEAM_INCLUDED_SEATS} members included, US${TEAM_EXTRA_SEAT_USD} per extra
+        member
       </p>
       {orgId ? (
-        <EmbeddedCheckoutPanel organizationId={orgId} onError={onCheckoutError} />
+        <CheckoutRedirect organizationId={orgId} onError={onCheckoutError} />
       ) : (
-        <form className="dashboard-form" style={styles.teamForm} onSubmit={submit}>
+        <form style={styles.teamCreateForm} onSubmit={submit}>
+          <label htmlFor="team-name" style={styles.fieldLabel}>
+            Team name
+          </label>
           <input
+            id="team-name"
             required
             maxLength={100}
-            aria-label="Organization name"
             placeholder="Acme"
             value={name}
             disabled={!checkoutAvailable}
@@ -1183,15 +1198,20 @@ function GetTeamCard({
             type="submit"
             disabled={!checkoutAvailable || pending}
             style={{
-              ...styles.saveButton,
+              ...styles.primaryButton,
+              alignSelf: "flex-end",
+              marginTop: "0.5rem",
               ...(!checkoutAvailable ? styles.primaryButtonDisabled : {}),
             }}
           >
-            Get Team
+            <CreditCardIcon />
+            Start a team
           </button>
         </form>
       )}
-      {!checkoutAvailable && <div style={styles.comingSoonSubtext}>Coming Soon</div>}
+      {!checkoutAvailable && (
+        <div style={{ ...styles.comingSoonSubtext, textAlign: "right" }}>Coming Soon</div>
+      )}
       {error && (
         <div role="alert" style={styles.errorText}>
           {error}
@@ -1333,6 +1353,27 @@ function TeamTab({
       <h2 id="team-heading" style={styles.sectionTitle}>
         Teams
       </h2>
+      <ul aria-label="Team plan" style={styles.teamPerks}>
+        {TEAM_PERKS.map((perk) => (
+          <li key={perk} style={styles.teamPerk}>
+            <svg
+              aria-hidden="true"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#10b981"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ flexShrink: 0 }}
+            >
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+            {perk}
+          </li>
+        ))}
+      </ul>
 
       {checkoutReturn === "waiting" && (
         <div role="status" style={styles.notice}>
@@ -2135,6 +2176,24 @@ const styles: Record<string, React.CSSProperties> = {
   teamLinkRow: { display: "flex", gap: "0.5rem", paddingBottom: "0.6rem" },
   teamMuted: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-500)" },
   teamForm: { display: "flex", gap: "0.5rem", marginTop: "0.75rem" },
+  teamPerks: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "0.5rem 1.5rem",
+    listStyle: "none",
+    padding: 0,
+    margin: "0 0 1rem",
+    fontSize: "0.9rem",
+  },
+  teamPerk: { display: "flex", alignItems: "center", gap: "0.4rem" },
+  teamPrice: { margin: "0.5rem 0 0", fontSize: "0.9rem" },
+  teamPriceAmount: { fontSize: "1.75rem", fontWeight: 700 },
+  teamCreateForm: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.4rem",
+    marginTop: "1rem",
+  },
   inviteEmail: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column" },
   inviteExpiry: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-600)" },
   iconButton: {
