@@ -318,15 +318,13 @@ function CheckoutRedirect({
 function SubscriptionTab({
   subscription,
   reloadSubscription,
-  stripePaymentsEnabled,
 }: {
   subscription: Subscription | null;
   reloadSubscription: () => Promise<Subscription | null>;
-  stripePaymentsEnabled: boolean;
 }) {
   const isPro = isProSubscription(subscription);
   // Production builds open Checkout only once the live key is filled in.
-  const checkoutAvailable = stripePaymentsEnabled && STRIPE_PUBLISHABLE_KEY !== "";
+  const checkoutAvailable = STRIPE_PUBLISHABLE_KEY !== "";
 
   const [billingCustomer, setBillingCustomer] = useState<
     { trial_used_at: string | null } | null | undefined
@@ -1240,13 +1238,11 @@ function clearSearchParams(...names: string[]) {
 function TeamTab({
   userId,
   reloadSubscription,
-  stripePaymentsEnabled,
 }: {
   userId: string;
   reloadSubscription: () => Promise<Subscription | null>;
-  stripePaymentsEnabled: boolean;
 }) {
-  const checkoutAvailable = stripePaymentsEnabled && STRIPE_PUBLISHABLE_KEY !== "";
+  const checkoutAvailable = STRIPE_PUBLISHABLE_KEY !== "";
   const [data, setData] = useState<TeamData | null>(null);
   // From the invite link's #invite= fragment, or stashed before sign-in.
   const [inviteToken, setInviteToken] = useState<string | null>(() =>
@@ -1665,9 +1661,8 @@ function MoreMenu({ onSignOut }: { onSignOut: () => void }) {
 function DashboardContent() {
   const { siteConfig } = useDocusaurusContext();
   const flags = siteConfig.customFields?.featureFlags as
-    | { pro?: boolean; stripePayments?: boolean }
+    | { pro?: boolean }
     | undefined;
-  const stripePaymentsEnabled = Boolean(flags?.stripePayments);
 
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -1790,13 +1785,11 @@ function DashboardContent() {
             <SubscriptionTab
               subscription={subscription}
               reloadSubscription={loadSubscription}
-              stripePaymentsEnabled={stripePaymentsEnabled}
             />
             <div style={styles.accountSection}>
               <TeamTab
                 userId={user.id}
                 reloadSubscription={loadSubscription}
-                stripePaymentsEnabled={stripePaymentsEnabled}
               />
             </div>
             <DeleteAccountSection email={user.email ?? ""} />
@@ -2245,7 +2238,7 @@ const styles: Record<string, React.CSSProperties> = {
 export default function DashboardPage(): React.ReactNode {
   const { siteConfig } = useDocusaurusContext();
   const flags = siteConfig.customFields?.featureFlags as
-    | { pro?: boolean; stripePayments?: boolean }
+    | { pro?: boolean }
     | undefined;
 
   if (!flags?.pro) {

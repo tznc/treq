@@ -7,8 +7,7 @@ import { STRIPE_PUBLISHABLE_KEY_PROD } from '../src/lib/constants';
 // billing-checkout and billing-portal functions) and Stripe.js are stubbed
 // at the network layer. The stub keeps a small in-memory organization so
 // each action shows up on the next read, the way the real tables would.
-const checkoutLive =
-  Boolean(pkg.featureFlags.stripePayments) && STRIPE_PUBLISHABLE_KEY_PROD !== '';
+const checkoutLive = STRIPE_PUBLISHABLE_KEY_PROD !== '';
 
 const ME = '6f1c1f4e-6a8f-4a39-9d55-2b1f0b3f9a10';
 const MIA = '7a2d2e5f-7b9a-4b4a-8e66-3c2a1c4f0b21';
@@ -446,7 +445,7 @@ test.describe('Dashboard team tab', () => {
   });
 
   test('buying Team stays closed while payments are off', async ({ browser }) => {
-    test.skip(checkoutLive, 'stripePayments is on and the live key is set');
+    test.skip(checkoutLive, 'the live publishable key is set');
     const { page, calls, close } = await openTeamTab(browser, acmeTeam('owner'));
     const acme = orgCard(page, 'Acme');
     await expect(acme.getByRole('button', { name: 'Buy Team' })).toBeDisabled();
@@ -456,7 +455,7 @@ test.describe('Dashboard team tab', () => {
   });
 
   test('buying Team goes to Stripe Checkout for the organization', async ({ browser }) => {
-    test.skip(!checkoutLive, 'stripePayments is off or the live publishable key is not set');
+    test.skip(!checkoutLive, 'the live publishable key is not set');
     const { page, calls, close } = await openTeamTab(browser, acmeTeam('owner'));
     const acme = orgCard(page, 'Acme');
     await acme.getByRole('button', { name: 'Buy Team' }).click();
@@ -571,7 +570,7 @@ test.describe('Dashboard team tab', () => {
   });
 
   test('Get Team stays closed while payments are off', async ({ browser }) => {
-    test.skip(checkoutLive, 'stripePayments is on and the live key is set');
+    test.skip(checkoutLive, 'the live publishable key is set');
     const { page, calls, close } = await openTeamTab(browser, emptyTeam());
     const upsell = teamSection(page).getByRole('region', { name: 'Get Team' });
     await expect(upsell.getByRole('button', { name: 'Start a team' })).toBeDisabled();
@@ -581,7 +580,7 @@ test.describe('Dashboard team tab', () => {
   });
 
   test('Get Team creates the organization and opens its checkout', async ({ browser }) => {
-    test.skip(!checkoutLive, 'stripePayments is off or the live publishable key is not set');
+    test.skip(!checkoutLive, 'the live publishable key is not set');
     const { page, calls, close } = await openTeamTab(browser, emptyTeam());
     const upsell = teamSection(page).getByRole('region', { name: 'Get Team' });
     await upsell.getByRole('textbox', { name: 'Team name' }).fill('Acme');

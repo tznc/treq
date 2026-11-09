@@ -5,7 +5,6 @@
   "type": "module",
   "featureFlags": {
     "pro": true,
-    "stripePayments": true,
     "emailSignup": false,
     "githubApp": true,
     "skillsInstallation": false,

@@ -121,7 +121,7 @@ Desktop app:
 Each step ships on its own and leaves the product working.
 
 1. Migration, `has_pro`, the rewritten `subscriptions` view, and `stripe-webhook`. Nobody can buy yet, so nothing changes for users.
-2. `billing-checkout`, `billing-portal`, and the dashboard. The owner turns on `stripePayments` once the Stripe products, portal, webhook and secrets exist.
+2. `billing-checkout`, `billing-portal`, and the dashboard.
 3. Server-side enforcement. This step waits for step 2, so no user loses a feature they cannot buy.
 4. Organizations, Team checkout, and installation ownership.
 5. Pricing page copy for Pro as the cloud bundle, and Team.

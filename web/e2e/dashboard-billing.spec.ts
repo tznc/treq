@@ -4,11 +4,9 @@ import { STRIPE_PUBLISHABLE_KEY_PROD } from '../src/lib/constants';
 
 // The Subscription tab of /dashboard against the production build, with
 // Supabase and Stripe stubbed at the network layer. Checkout opens only when
-// the stripePayments flag is on and the live publishable key is set, so the
-// checkout test runs once both ship and the disabled-button test runs until
-// then.
-const checkoutLive =
-  Boolean(pkg.featureFlags.stripePayments) && STRIPE_PUBLISHABLE_KEY_PROD !== '';
+// the live publishable key is set, so the checkout test runs when it is and
+// the disabled-button test runs when it is not.
+const checkoutLive = STRIPE_PUBLISHABLE_KEY_PROD !== '';
 
 type SubscriptionRow = {
   plan: string;
@@ -241,7 +239,7 @@ test.describe('Dashboard subscription tab', () => {
   });
 
   test('checkout stays closed while payments are off', async ({ browser }) => {
-    test.skip(checkoutLive, 'stripePayments is on and the live key is set');
+    test.skip(checkoutLive, 'the live publishable key is set');
     const { page, calls, close } = await openDashboard(browser, { subscriptions: [FREE], billingCustomer: null });
     const button = card(page).getByRole('button', { name: 'Upgrade to Pro' });
     await expect(button).toBeDisabled();
@@ -251,7 +249,7 @@ test.describe('Dashboard subscription tab', () => {
   });
 
   test('Upgrade to Pro goes to Stripe Checkout', async ({ browser }) => {
-    test.skip(!checkoutLive, 'stripePayments is off or the live publishable key is not set');
+    test.skip(!checkoutLive, 'the live publishable key is not set');
     const { page, calls, close } = await openDashboard(browser, { subscriptions: [FREE], billingCustomer: null });
     await card(page).getByRole('button', { name: 'Upgrade to Pro' }).click();
     await expect(page.getByRole('heading', { name: 'Stripe Checkout cs_test_e2e' })).toBeVisible();
