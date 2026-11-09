@@ -1,7 +1,7 @@
 -- Team projects from 076_organization_projects.sql: members of an
 -- organization read and write its projects; outsiders see nothing.
 begin;
-select plan(7);
+select plan(10);
 
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000053a1', 'proj-owner@example.com'),
@@ -22,10 +22,23 @@ select lives_ok(
   $$ insert into public.organization_projects (id, org_id, name, repos)
      values ('00000000-0000-0000-0000-0000000053c1', '00000000-0000-0000-0000-0000000053b1', 'Web', '["acme/web"]') $$,
   'a member creates a team project');
-select is((select count(*)::int from public.organization_projects), 1, 'a member lists team projects');
+select is((select count(*)::int from public.organization_projects where name = 'Web'), 1, 'a member lists team projects');
 select lives_ok(
   $$ update public.organization_projects set name = 'Web app' where id = '00000000-0000-0000-0000-0000000053c1' $$,
   'a member renames a team project');
+
+select lives_ok(
+  $$ insert into public.organization_projects (org_id, name, repos)
+     values ('00000000-0000-0000-0000-0000000053b1', 'Urls', '["https://github.com/acme/api.git", "git@github.com:acme/cli.git"]') $$,
+  'repos accept clone URLs');
+select throws_ok(
+  $$ insert into public.organization_projects (org_id, name, repos)
+     values ('00000000-0000-0000-0000-0000000053b1', 'Local', '["/Users/me/code/web"]') $$,
+  '23514', null, 'repos reject local paths');
+select throws_ok(
+  $$ insert into public.organization_projects (org_id, name, repos)
+     values ('00000000-0000-0000-0000-0000000053b1', 'Bad', '[1]') $$,
+  '23514', null, 'repos reject non-strings');
 
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000053a3","role":"authenticated"}', true);
 select is((select count(*)::int from public.organization_projects), 0, 'an outsider sees no team projects');
