@@ -10,7 +10,7 @@ A saved project is personal until you move it to a Team organization. Personal p
 
 ## Save a new project to a team
 
-When you save a project, the **Save project** dialog has an **Owner** dropdown under the name. Select the organization's name from it, then select **Save project**. Owner shows only when you belong to a Team organization.
+When you save a project, the **Save project** dialog has an **Owner** dropdown above the name. Select the organization's name from it, then select **Save project**. Owner shows only when you belong to a Team organization.
 
 ## Move a project to a team
 
