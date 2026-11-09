@@ -24,7 +24,7 @@ Select **Move to** → **Personal** to take a project back. It stays on your com
 
 ## Switch between personal and team projects
 
-The **Projects** section on the welcome page has a switcher above the list. Select **Personal** or an organization's name to show that owner's projects.
+The **Projects** section on the welcome page has a switcher above the list. In the sidebar project menu, each organization's projects are in a submenu named after it. Select **Personal** or an organization's name to show that owner's projects.
 
 ## What syncs
 
@@ -37,7 +37,7 @@ The **Projects** section on the welcome page has a switcher above the list. Sele
 
 Each member's computer maps a repository to a clone it already has. If it has none, Treq uses its managed clone folder. Repositories with no GitHub `origin` do not sync.
 
-Treq syncs after you sign in, then every hour. If you leave an organization, Treq removes that organization's projects from your computer at the next sync.
+Treq syncs after you sign in, right after you save or move a project to a team, and every hour. If you leave an organization, Treq removes that organization's projects from your computer at the next sync.
 
 ## Next Steps
 
