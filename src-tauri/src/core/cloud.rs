@@ -2403,7 +2403,10 @@ mod tests {
     rpc(&server, "list_my_cloud_organizations", acme(true, true)).await;
     let (cloud, _) = signed_in(&server).await;
     let orgs = cloud.snapshot().cloud.organizations;
-    assert_eq!(orgs.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(), ["Acme"]);
+    assert_eq!(
+      orgs.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(),
+      ["Acme"]
+    );
   }
 
   #[tokio::test]

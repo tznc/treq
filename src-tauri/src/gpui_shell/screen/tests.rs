@@ -315,7 +315,9 @@ impl FakeHost {
 
 impl machines::MachinesHost for FakeHost {
   fn listing(&self) -> machines::Listing {
-    self.listings.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    self
+      .listings
+      .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     self.listing.clone()
   }
 

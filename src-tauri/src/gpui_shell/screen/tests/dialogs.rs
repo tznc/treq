@@ -1171,7 +1171,14 @@ fn save_project_assigns_the_team_picked(cx: &mut TestAppContext) {
   });
   let mut h = Harness::with_host(cx, save_project_screen(false), host.clone());
   assert!(h.drawn("save-project-owner"));
+  assert!(!h.drawn("save-project-owner-menu"), "closed until clicked");
+  h.click("save-project-owner");
+  assert!(h.drawn("save-project-owner-menu"));
   h.click("save-project-owner-o1");
+  assert!(
+    !h.drawn("save-project-owner-menu"),
+    "picking closes the menu"
+  );
   h.click("save-project-submit");
   h.cx.run_until_parked();
   assert_eq!(project_calls(&host), ["save project \"web + api\" to o1"]);

@@ -149,11 +149,19 @@ test("team projects: save to a team, then Move to", async () => {
       title: "Save project: Owner picker",
       expectations: [
         "Dialog 'Save project' with the name field and the repositories line",
-        "An Owner row with a segmented Personal / Acme switcher, Personal selected",
+        "An Owner dropdown under the name reading 'Personal'",
       ],
     });
-    await expect(page.getByRole("tab", { name: "Acme" })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole("tab", { name: "Acme" }).click();
+    const owner = page.getByRole("combobox", { name: "Owner" });
+    await expect(owner).toBeVisible({ timeout: 15_000 });
+    await owner.click();
+    await settle(page, 500);
+    await capture(page, {
+      name: "23-team-projects-01b-owner-open",
+      title: "Save project: Owner dropdown open",
+      expectations: ["The Owner menu lists Personal (checked) and Acme"],
+    });
+    await page.getByRole("menuitem", { name: "Acme" }).click();
     await page.keyboard.press("End");
     for (let i = 0; i < 40; i++) await page.keyboard.press("Backspace");
     await page.keyboard.type("Web app");
@@ -161,7 +169,7 @@ test("team projects: save to a team, then Move to", async () => {
     await capture(page, {
       name: "23-team-projects-02-save-owner-acme",
       title: "Save project: Acme picked",
-      expectations: ["Name 'Web app', Owner switcher with Acme selected"],
+      expectations: ["Name 'Web app', the Owner dropdown reads 'Acme'"],
     });
     await page.keyboard.press("Enter");
     await settle(page, 6000);

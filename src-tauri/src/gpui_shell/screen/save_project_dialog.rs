@@ -6,10 +6,12 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::sync::Arc;
 
+use gpui_kit::base::TestSupportExt as _;
+
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  div, prelude::*, Context, Entity, FocusHandle, FontWeight, Subscription, Window,
+  deferred, div, prelude::*, Context, Entity, FocusHandle, FontWeight, Subscription, Window,
 };
 
 use super::{
@@ -49,6 +51,8 @@ pub struct SaveProjectDialog {
   teams: Vec<(String, String)>,
   /// The owner picked: `None` personal.
   owner: Option<String>,
+  /// The Owner select's menu is open.
+  owner_open: bool,
   pub(super) pending: bool,
   pub(super) error: String,
   pub(super) dismissed: bool,
@@ -71,6 +75,7 @@ impl SaveProjectDialog {
         host.project_teams()
       },
       owner: None,
+      owner_open: false,
       route,
       host,
       sink,
@@ -271,36 +276,80 @@ impl Render for SaveProjectDialog {
               .child(format!("Repositories: {repos}")),
           )
           .when(!self.teams.is_empty(), |this| {
-            let mut tabs = ui::Tabs::segmented("save-project-owner", &p)
-              .tab(ui::Tab::new("save-project-owner-personal", "Personal"));
-            for (id, name) in &self.teams {
-              tabs = tabs.tab(ui::Tab::new(
+            let name = |owner: &Option<String>| -> String {
+              owner
+                .as_ref()
+                .and_then(|o| self.teams.iter().find(|(id, _)| id == o))
+                .map_or("Personal".to_string(), |(_, n)| n.clone())
+            };
+            let current = name(&self.owner);
+            let mut options: Vec<(Option<String>, String, String)> = vec![(
+              None,
+              "save-project-owner-personal".into(),
+              "Personal".into(),
+            )];
+            options.extend(self.teams.iter().map(|(id, n)| {
+              (
+                Some(id.clone()),
                 format!("save-project-owner-{id}"),
-                name.clone(),
-              ));
-            }
-            let selected = self
-              .owner
-              .as_ref()
-              .and_then(|o| self.teams.iter().position(|(id, _)| id == o))
-              .map_or(0, |i| i + 1);
-            let teams: Vec<String> = self.teams.iter().map(|(id, _)| id.clone()).collect();
-            let view = cx.weak_entity();
+                n.clone(),
+              )
+            }));
+            let menu = self.owner_open.then(|| {
+              let panel = super::code::menu_panel("save-project-owner-menu", &p)
+                .top(zpx(36.))
+                .left_0()
+                .min_w(zpx(200.))
+                .children(options.into_iter().map(|(owner, id, label)| {
+                  let checked = owner == self.owner;
+                  ui::MenuItem::new(id, label, &p)
+                    .checked(checked)
+                    .aria_selected(checked)
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                      view.owner = owner.clone();
+                      view.owner_open = false;
+                      cx.notify();
+                    }))
+                }))
+                .on_mouse_down_out(cx.listener(|view, _, _, cx| {
+                  if view.owner_open {
+                    view.owner_open = false;
+                    cx.notify();
+                  }
+                }));
+              deferred(panel).with_priority(3)
+            });
             this
               .child(
                 ui::text(div(), TextSize::Sm)
                   .font_weight(FontWeight::MEDIUM)
                   .child("Owner"),
               )
-              .child(tabs.selected(selected).on_select(move |ix, _, cx| {
-                let owner = ix.checked_sub(1).and_then(|i| teams.get(i).cloned());
-                view
-                  .update(cx, |view, cx| {
-                    view.owner = owner;
-                    cx.notify();
-                  })
-                  .ok();
-              }))
+              .child(
+                div()
+                  .relative()
+                  .child(
+                    div()
+                      .id("save-project-owner")
+                      .debug_selector(|| "save-project-owner".into())
+                      .role(tauri_plugin_gpui::gpui::Role::ComboBox)
+                      .aria_label("Owner")
+                      .aria_value(current.clone())
+                      .aria_expanded(self.owner_open)
+                      .test_support()
+                      .cursor_pointer()
+                      .child(
+                        ui::Picker::new("save-project-owner-picker", &p)
+                          .value(current)
+                          .open(self.owner_open),
+                      )
+                      .on_click(cx.listener(|view, _, _, cx| {
+                        view.owner_open = !view.owner_open;
+                        cx.notify();
+                      })),
+                  )
+                  .children(menu),
+              )
           })
           .when(!self.error.is_empty(), |this| {
             this.child(

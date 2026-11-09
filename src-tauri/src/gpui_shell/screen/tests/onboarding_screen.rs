@@ -1012,7 +1012,10 @@ fn onboarding_rereads_projects_when_switching_owner(cx: &mut TestAppContext) {
   let mut l = listing();
   l.projects = vec![owned("mine", None)];
   l.teams = vec![("o1".into(), "Acme".into())];
-  let host = Arc::new(FakeHost { listing: l, ..FakeHost::default() });
+  let host = Arc::new(FakeHost {
+    listing: l,
+    ..FakeHost::default()
+  });
   let mut h = Harness::with_host(cx, onboarding(), host.clone());
   h.cx.run_until_parked();
   let before = host.listings.load(std::sync::atomic::Ordering::SeqCst);
