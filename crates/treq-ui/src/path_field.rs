@@ -104,39 +104,87 @@ impl RenderOnce for PathField {
     let on_pick = self.on_pick.filter(|_| !self.disabled);
     let shown = self.value.is_some();
     let selector = format!("{}-value", self.id);
-    let browse = Button::new(format!("{}-browse", self.id), &p)
-      .variant(Variant::Outline)
-      .size(match density {
-        theme::Density::Touch => Size::Lg,
-        theme::Density::Desktop => Size::Md,
-      })
-      .label(self.browse_label.clone())
-      .disabled(self.disabled || (on_pick.is_none() && self.on_browse.is_none()))
-      .when_some(self.on_browse.clone().filter(|_| !self.disabled), |b, f| {
-        b.on_click(move |_, window, cx| f(window, cx))
-      })
-      .when_some(
-        on_pick.clone().filter(|_| self.on_browse.is_none()),
-        |b, f| {
-          b.on_click(move |_, window, cx| {
-            let rx = cx.prompt_for_paths(options.clone());
-            let f = f.clone();
-            window
-              .spawn(cx, async move |cx| {
-                if let Ok(Ok(Some(paths))) = rx.await {
-                  if let Some(path) = paths.into_iter().next() {
-                    cx.update(|window, cx| f(path, window, cx)).ok();
-                  }
+    let enabled = !self.disabled && (on_pick.is_some() || self.on_browse.is_some());
+    // A custom browse (a remote host's folders) or the system picker.
+    let click: Option<crate::touch::Action> = if !enabled {
+      None
+    } else if let Some(f) = self.on_browse.clone() {
+      Some(f)
+    } else {
+      on_pick.clone().map(|f| -> crate::touch::Action {
+        std::rc::Rc::new(move |window: &mut Window, cx: &mut App| {
+          let rx = cx.prompt_for_paths(options.clone());
+          let f = f.clone();
+          window
+            .spawn(cx, async move |cx| {
+              if let Ok(Ok(Some(paths))) = rx.await {
+                if let Some(path) = paths.into_iter().next() {
+                  cx.update(|window, cx| f(path, window, cx)).ok();
                 }
-              })
-              .detach();
-          })
-        },
-      );
-    div()
-      .id(self.id.clone())
+              }
+            })
+            .detach();
+        })
+      })
+    };
+    let value = div()
+      .debug_selector(move || selector)
+      .flex_1()
+      .min_w_0()
+      .h_full()
+      .px_2()
       .flex()
-      .gap(zpx(theme::space::SM))
+      .items_center()
+      .bg(p.muted.opacity(0.5))
+      .font_family(theme::MONO_FONT)
+      .map(|el| text(el, TextSize::Code))
+      .text_color(if shown {
+        p.foreground
+      } else {
+        p.muted_foreground
+      })
+      .overflow_hidden()
+      .whitespace_nowrap()
+      .text_ellipsis()
+      .child(self.value.unwrap_or(self.placeholder));
+    let browse_id = format!("{}-browse", self.id);
+    let body = match density {
+      // On a phone the action is an icon joined to the field.
+      theme::Density::Touch => crate::InputGroup::new(self.id.clone(), &p)
+        .control(value)
+        .append(
+          crate::IconButton::new(
+            browse_id,
+            theme::ICON_FOLDER_OPEN,
+            self.browse_label.clone(),
+            &p,
+          )
+          .disabled(!enabled)
+          .when_some(click, |b, f| b.on_click(move |_, window, cx| f(window, cx))),
+        )
+        .into_any_element(),
+      theme::Density::Desktop => div()
+        .flex()
+        .gap(zpx(theme::space::SM))
+        .child(
+          value
+            .h(zpx(density.control_height()))
+            .rounded(zpx(theme::RADIUS_MD))
+            .border_1()
+            .border_color(p.input),
+        )
+        .child(
+          Button::new(browse_id, &p)
+            .variant(Variant::Outline)
+            .size(Size::Md)
+            .label(self.browse_label.clone())
+            .disabled(!enabled)
+            .when_some(click, |b, f| b.on_click(move |_, window, cx| f(window, cx))),
+        )
+        .into_any_element(),
+    };
+    div()
+      .id(SharedString::from(format!("{}-drop", self.id)))
       .min_w_0()
       .when_some(on_pick, |el, f| {
         el.on_drop(move |paths: &ExternalPaths, window, cx| {
@@ -145,38 +193,47 @@ impl RenderOnce for PathField {
           }
         })
       })
-      .child(
-        div()
-          .debug_selector(move || selector)
-          .flex_1()
-          .min_w_0()
-          .h(zpx(density.control_height()))
-          .px_2()
-          .flex()
-          .items_center()
-          .rounded(zpx(theme::RADIUS_MD))
-          .border_1()
-          .border_color(p.input)
-          .bg(p.muted.opacity(0.5))
-          .font_family(theme::MONO_FONT)
-          .map(|el| text(el, TextSize::Code))
-          .text_color(if shown {
-            p.foreground
-          } else {
-            p.muted_foreground
-          })
-          .overflow_hidden()
-          .whitespace_nowrap()
-          .text_ellipsis()
-          .child(self.value.unwrap_or(self.placeholder)),
-      )
-      .child(browse)
+      .child(body)
   }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  struct Host;
+
+  impl Render for Host {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+      let p = theme::palette(false);
+      div().w(gpui::px(300.)).child(
+        PathField::new("clone", &p)
+          .value(Some("~/code"))
+          .on_pick(|_, _, _| {}),
+      )
+    }
+  }
+
+  fn addon(cx: &mut gpui::TestAppContext, density: theme::Density) -> bool {
+    cx.update(|cx| {
+      theme::init(cx);
+      theme::set_density(density, cx);
+    });
+    let window = cx.add_window(|_, _| Host);
+    let mut cx = gpui::VisualTestContext::from_window(*window, cx);
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    cx.debug_bounds("clone-addon-0").is_some()
+  }
+
+  #[gpui::test]
+  fn on_touch_browse_is_an_icon_button_joined_to_the_field(cx: &mut gpui::TestAppContext) {
+    assert!(addon(cx, theme::Density::Touch));
+  }
+
+  #[gpui::test]
+  fn on_desktop_browse_is_a_labelled_button_beside_it(cx: &mut gpui::TestAppContext) {
+    assert!(!addon(cx, theme::Density::Desktop));
+  }
 
   #[test]
   fn a_custom_browse_replaces_the_system_picker() {

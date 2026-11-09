@@ -158,6 +158,12 @@ fn styleguide() -> Styleguide {
     )
     .examples(surfaces())
     .describe(
+      "InputGroup",
+      "A field with icon buttons joined to its end in one border, for a value that comes \
+       from an action (a picker, a lookup). Preferred on a phone over a text button \
+       beside the field. Each icon button's label names the action.",
+    )
+    .describe(
       "Mobile",
       "Phone-only patterns. Every other page also renders at touch density (the touch \
        themes): 44 targets, forms vertical, actions full width, no shortcuts.",
@@ -1196,6 +1202,14 @@ fn mobile() -> Vec<Example> {
     .component("Mobile")
     .title("Tab bar")
     .size(420., 100.),
+    example!(view "input-group", |_, window, cx| {
+      cx.new(|cx| InputGroupDemo {
+        path: cx.new(|cx| InputState::new(window, cx).default_value("~/code/treq")),
+      })
+    })
+    .component("InputGroup")
+    .title("Path with browse and copy")
+    .size(420., 100.),
     example!("touch/path-field", |_, _, cx| {
       let p = p(cx);
       div().w(px(390.)).p_4().child(
@@ -1213,4 +1227,30 @@ fn mobile() -> Vec<Example> {
     .title("Path on a remote host")
     .size(420., 140.),
   ]
+}
+
+struct InputGroupDemo {
+  path: Entity<InputState>,
+}
+
+impl Render for InputGroupDemo {
+  fn render(&mut self, _: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    let p = p(cx);
+    div().w(px(360.)).p_4().child(
+      treq_ui::InputGroup::new("demo-path", &p)
+        .control(treq_ui::input(&self.path).appearance(false))
+        .append(IconButton::new(
+          "demo-browse",
+          theme::ICON_FOLDER_SEARCH,
+          "Browse host folders",
+          &p,
+        ))
+        .append(IconButton::new(
+          "demo-copy",
+          theme::ICON_COPY,
+          "Copy path",
+          &p,
+        )),
+    )
+  }
 }

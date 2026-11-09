@@ -14,6 +14,7 @@ pub mod empty_state;
 pub mod form;
 pub mod icon_button;
 pub mod image;
+pub mod input_group;
 pub mod kbd;
 #[cfg(test)]
 mod keyboard_tests;
@@ -38,6 +39,7 @@ pub use dialog::{handler, tab_key, trap_tab, ConfirmDialog, Dialog};
 pub use empty_state::{error_actions, EmptyState, Loading, Skeleton};
 pub use form::{Field, FieldLayout, Form, FormActions, FormLayout, FormRow, FormSection};
 pub use icon_button::{IconButton, IconButtonSize};
+pub use input_group::InputGroup;
 pub use kbd::Kbd;
 pub use list_nav::{ListKey, ListNav};
 pub use menu::{MenuItem, MenuLabel, MenuSeparator};

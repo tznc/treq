@@ -171,31 +171,34 @@ impl Render for ReposScreen {
               widgets::card(cx)
                 .p_4()
                 .gap_3()
-                .child(Input::new(&self.path).large())
-                .child(
-                  h_flex()
-                    .gap_2()
-                    .child(
-                      Button::new("inspect")
-                        .primary()
-                        .large()
-                        .label(if self.probing {
-                          "Inspecting…"
-                        } else {
-                          "Inspect repository"
-                        })
-                        .loading(self.probing)
-                        .on_click(cx.listener(|this, _, _, cx| this.inspect(cx)))
-                        .touch(),
+                .child({
+                  let palette = treq_ui::theme::current(cx);
+                  treq_ui::InputGroup::new("repo-path", &palette)
+                    .control(Input::new(&self.path).large().appearance(false))
+                    .append(
+                      treq_ui::IconButton::new(
+                        "browse-host",
+                        treq_ui::theme::ICON_FOLDER_SEARCH,
+                        "Browse host folders",
+                        &palette,
+                      )
+                      .on_click(cx.listener(|this, _, _, cx| this.browse(cx))),
                     )
-                    .child(
-                      Button::new("browse-host")
-                        .outline()
-                        .large()
-                        .label("Browse host…")
-                        .on_click(cx.listener(|this, _, _, cx| this.browse(cx)))
-                        .touch(),
-                    ),
+                })
+                .child(
+                  h_flex().child(
+                    Button::new("inspect")
+                      .primary()
+                      .large()
+                      .label(if self.probing {
+                        "Inspecting…"
+                      } else {
+                        "Inspect repository"
+                      })
+                      .loading(self.probing)
+                      .on_click(cx.listener(|this, _, _, cx| this.inspect(cx)))
+                      .touch(),
+                  ),
                 )
                 .children(self.error.clone().map(|e| widgets::error_text(e, cx))),
             ),

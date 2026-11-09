@@ -2435,7 +2435,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "c8601208c7837968"
+          "hash": "d0ac537aced1620d"
         },
         {
           "theme": "dark",
@@ -2445,7 +2445,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "ccdc0270008a9648"
+          "hash": "fe4d8eacca11a4cf"
         },
         {
           "theme": "touch-light",
@@ -2455,7 +2455,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "8f909724d17cf37c"
+          "hash": "3b4bbf6fb2fbb6a5"
         },
         {
           "theme": "touch-dark",
@@ -2465,7 +2465,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "2b2c2464a932fec8"
+          "hash": "fde3f9be9d006dfd"
         }
       ]
     },
@@ -2898,7 +2898,7 @@
           "width": 392,
           "height": 123,
           "scale": 2.0,
-          "hash": "4ddc9637546c8014"
+          "hash": "1fb39a2049eeb023"
         },
         {
           "theme": "dark",
@@ -2908,7 +2908,7 @@
           "width": 392,
           "height": 123,
           "scale": 2.0,
-          "hash": "b7b96413fc2b7ffd"
+          "hash": "d5906a434d0b38ab"
         },
         {
           "theme": "touch-light",
@@ -2918,7 +2918,7 @@
           "width": 392,
           "height": 137,
           "scale": 2.0,
-          "hash": "16cfbb4e08471b78"
+          "hash": "1f293e9176ff6c1e"
         },
         {
           "theme": "touch-dark",
@@ -2928,7 +2928,7 @@
           "width": 392,
           "height": 137,
           "scale": 2.0,
-          "hash": "0ae55a156579dded"
+          "hash": "5238dedcada79c80"
         }
       ]
     },
@@ -4021,7 +4021,7 @@
           "width": 672,
           "height": 552,
           "scale": 2.0,
-          "hash": "83819174dd137933"
+          "hash": "75d07b6a3a22f440"
         },
         {
           "theme": "touch-light",
@@ -4034,7 +4034,7 @@
           "width": 672,
           "height": 552,
           "scale": 2.0,
-          "hash": "78a8cf4d0e73eb7e"
+          "hash": "78e9e39917960af9"
         },
         {
           "theme": "touch-light",
@@ -4047,7 +4047,7 @@
           "width": 672,
           "height": 552,
           "scale": 2.0,
-          "hash": "83819174dd137933"
+          "hash": "75d07b6a3a22f440"
         },
         {
           "theme": "touch-light",
@@ -4060,7 +4060,7 @@
           "width": 672,
           "height": 552,
           "scale": 2.0,
-          "hash": "78a8cf4d0e73eb7e"
+          "hash": "78e9e39917960af9"
         },
         {
           "theme": "touch-light",
@@ -4100,7 +4100,7 @@
           "width": 672,
           "height": 552,
           "scale": 2.0,
-          "hash": "a1b9630fd054557b"
+          "hash": "cb1a403db69d2c2a"
         },
         {
           "theme": "touch-dark",
@@ -4113,7 +4113,7 @@
           "width": 672,
           "height": 552,
           "scale": 2.0,
-          "hash": "a0c8a94c8b8dc29f"
+          "hash": "e31d062b03c895d6"
         },
         {
           "theme": "touch-dark",
@@ -4126,7 +4126,7 @@
           "width": 672,
           "height": 552,
           "scale": 2.0,
-          "hash": "a1b9630fd054557b"
+          "hash": "cb1a403db69d2c2a"
         },
         {
           "theme": "touch-dark",
@@ -4139,7 +4139,7 @@
           "width": 672,
           "height": 552,
           "scale": 2.0,
-          "hash": "a0c8a94c8b8dc29f"
+          "hash": "e31d062b03c895d6"
         },
         {
           "theme": "touch-dark",
@@ -4443,7 +4443,7 @@
           "width": 472,
           "height": 112,
           "scale": 2.0,
-          "hash": "30d350a692ee45c5"
+          "hash": "f4769596281ddbca"
         },
         {
           "theme": "touch-light",
@@ -4456,7 +4456,7 @@
           "width": 472,
           "height": 112,
           "scale": 2.0,
-          "hash": "ef36f04e2d062f54"
+          "hash": "c67c5f9a4c358cf8"
         },
         {
           "theme": "touch-light",
@@ -4469,7 +4469,7 @@
           "width": 472,
           "height": 112,
           "scale": 2.0,
-          "hash": "0953283a66409e4e"
+          "hash": "de871fd2296b8881"
         },
         {
           "theme": "touch-light",
@@ -4482,7 +4482,7 @@
           "width": 472,
           "height": 112,
           "scale": 2.0,
-          "hash": "c24dd85b70ab3517"
+          "hash": "f0f4bc77606b5bbb"
         },
         {
           "theme": "touch-dark",
@@ -4496,7 +4496,7 @@
           "width": 472,
           "height": 112,
           "scale": 2.0,
-          "hash": "5616f53fab78555a"
+          "hash": "e1abd18ccbb29d27"
         },
         {
           "theme": "touch-dark",
@@ -4509,7 +4509,7 @@
           "width": 472,
           "height": 112,
           "scale": 2.0,
-          "hash": "13367a90ae3a18ae"
+          "hash": "9360db7c169f022e"
         },
         {
           "theme": "touch-dark",
@@ -4522,7 +4522,7 @@
           "width": 472,
           "height": 112,
           "scale": 2.0,
-          "hash": "2c187cc1738504db"
+          "hash": "59fc83a1bc4b13b6"
         },
         {
           "theme": "touch-dark",
@@ -4535,7 +4535,7 @@
           "width": 472,
           "height": 112,
           "scale": 2.0,
-          "hash": "cf1c15ca7907f837"
+          "hash": "9785f6eba487725f"
         }
       ]
     },
@@ -4984,6 +4984,64 @@
       ]
     },
     {
+      "id": "input-group",
+      "title": "Path with browse and copy",
+      "component": "InputGroup",
+      "code": [
+        {
+          "text": "cx.new(|cx| InputGroupDemo {\n  path: cx.new(|cx| InputState::new(window, cx).default_value(\"~/code/treq\")),\n})"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark",
+        "touch-light",
+        "touch-dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/input-group/light/default.png",
+          "width": 452,
+          "height": 132,
+          "scale": 2.0,
+          "hash": "38ce25d339f5d71e"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/input-group/dark/default.png",
+          "width": 452,
+          "height": 132,
+          "scale": 2.0,
+          "hash": "7c7383a65fbd4b81"
+        },
+        {
+          "theme": "touch-light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/input-group/touch-light/default.png",
+          "width": 452,
+          "height": 132,
+          "scale": 2.0,
+          "hash": "5a40ed81744c112c"
+        },
+        {
+          "theme": "touch-dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/input-group/touch-dark/default.png",
+          "width": 452,
+          "height": 132,
+          "scale": 2.0,
+          "hash": "3f9a162a13f5d4b6"
+        }
+      ]
+    },
+    {
       "id": "touch/path-field",
       "title": "Path on a remote host",
       "component": "Mobile",
@@ -5027,7 +5085,7 @@
           "width": 452,
           "height": 172,
           "scale": 2.0,
-          "hash": "ab85ab82a8b19313"
+          "hash": "5ecd2d756f513848"
         },
         {
           "theme": "touch-dark",
@@ -5037,7 +5095,7 @@
           "width": 452,
           "height": 172,
           "scale": 2.0,
-          "hash": "95244e58cc4033b1"
+          "hash": "c1b2274a54690d1d"
         }
       ]
     }
