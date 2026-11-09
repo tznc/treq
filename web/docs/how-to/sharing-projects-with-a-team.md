@@ -8,6 +8,10 @@ _Move a saved project to a Team organization so every member sees it._
 
 A saved project is personal until you move it to a Team organization. Personal projects stay on your computer. A team project syncs to every member of that organization.
 
+## Save a new project to a team
+
+When you save a project, the **Save project** dialog has an **Owner** switcher under the name. Select the organization's name, then select **Save project**. Owner shows only when you belong to a Team organization.
+
 ## Move a project to a team
 
 1. Open the project's window.
