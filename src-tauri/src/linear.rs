@@ -89,7 +89,8 @@ pub enum LinearClientSource {
   /// Linear.
   ApiKey(String),
   /// The signed-in treq user's Linear OAuth grant, used through the
-  /// `linear-proxy` Edge Function, which holds the Linear token.
+  /// `integration-proxy` Edge Function (`/linear/graphql`), which holds the
+  /// Linear token.
   Proxy(LinearProxySession),
 }
 
@@ -266,7 +267,7 @@ async fn linear_graphql<T: DeserializeOwned>(
       .header("Authorization", api_key),
     LinearClientSource::Proxy(session) => linear_http_client()
       .post(format!(
-        "{}/functions/v1/linear-proxy",
+        "{}/functions/v1/integration-proxy/linear/graphql",
         session.supabase_url
       ))
       .bearer_auth(&session.access_token),
@@ -1769,14 +1770,14 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn oauth_session_reaches_linear_through_the_proxy() {
+  async fn oauth_session_reaches_linear_through_the_integration_proxy() {
     use wiremock::{
       matchers::{header, method, path},
       Mock, MockServer, ResponseTemplate,
     };
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-      .and(path("/functions/v1/linear-proxy"))
+      .and(path("/functions/v1/integration-proxy/linear/graphql"))
       .and(header("authorization", "Bearer supabase-jwt"))
       .respond_with(
         ResponseTemplate::new(200)
