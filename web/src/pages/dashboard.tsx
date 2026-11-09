@@ -517,6 +517,7 @@ const TEAM_PERKS = [
   "Everything in Pro for every member",
   "Manage team-wide integrations",
   "Sandbox usage management",
+  "Projects shared with every member",
   "One bill for the whole team",
 ];
 
@@ -747,11 +748,6 @@ function OrganizationCard({
       ) : (
         <Field label="Members">{members.length}</Field>
       )}
-      <ul aria-label="Team includes" style={styles.integrationFeatureList}>
-        <li>Pro for every member</li>
-        <li>Shared GitHub App installation</li>
-        <li>Projects shared with every member</li>
-      </ul>
 
       {isManager && (
         <div style={styles.billingActions}>
