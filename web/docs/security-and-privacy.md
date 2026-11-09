@@ -24,6 +24,8 @@ When Treq connects to a remote Git host, the connection goes directly to that ho
 
 Optional [GitHub Integration](/docs/concepts/github-integration) uses two extra paths. Pull request, issue, CI, and review-thread actions run through the local `gh` CLI with your GitHub credentials on the machine. Repository linking uses the Treq GitHub App and Treq's backend after you sign in and install the App. Local review comments, application logs, and telemetry all stay locally on disk unless you copy or send them to the Treq developers explicitly.
 
+A project you move to a Team organization is stored on Treq's backend so members can see it: its name, repository names or clone URLs, and agent instructions. Personal projects stay on your computer. See [Sharing Projects with a Team](/docs/how-to/sharing-projects-with-a-team).
+
 ## CLI Safety
 
 The `treq` CLI is non-destructive. It can create and inspect workspaces, move changes, and start agent sessions. It does not delete workspaces. It does not force-push to remotes.
