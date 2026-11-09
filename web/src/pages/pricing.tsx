@@ -38,6 +38,7 @@ const TEAM_FEATURES: PlanFeature[] = [
   {key: 'pro', text: 'Everything in Pro for every member'},
   {key: 'installation', text: 'Manage team-wide integrations'},
   {key: 'sandbox-usage', text: 'Sandbox usage management'},
+  {key: 'shared-projects', text: 'Projects shared with every member'},
   {key: 'one-bill', text: 'One bill for the whole team'},
 ];
 
@@ -77,6 +78,12 @@ const COMPARISON_ROWS: ComparisonRow[] = [
     free: {included: false},
     pro: {included: true, detail: 'API key or OAuth'},
     team: {included: true, detail: 'API key or OAuth'},
+  },
+  {
+    feature: 'Projects',
+    free: {included: true, detail: 'Personal'},
+    pro: {included: true, detail: 'Personal'},
+    team: {included: true, detail: 'Shared with every member'},
   },
   {
     feature: 'Price',

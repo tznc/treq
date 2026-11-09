@@ -1,0 +1,41 @@
+---
+sidebar_position: 10
+---
+
+# Sharing Projects with a Team
+
+_Move a saved project to a Team organization so every member sees it._
+
+A saved project is personal until you move it to a Team organization. Personal projects stay on your computer. A team project syncs to every member of that organization.
+
+## Move a project to a team
+
+1. Open the project's window.
+2. Open the project menu at the top of the sidebar.
+3. Select **Move to**, then the organization's name.
+
+Select **Move to** → **Personal** to take a project back. It stays on your computer, and Treq stops syncing it. The copy that members already have stays in the team.
+
+**Move to** shows only after you join a Team organization. See [Cloud Workspaces](/docs/how-to/cloud-workspaces) for how Team billing works.
+
+## Switch between personal and team projects
+
+The **Projects** section on the welcome page has a switcher above the list. Select **Personal** or an organization's name to show that owner's projects.
+
+## What syncs
+
+| Field                                | Syncs                               |
+| ------------------------------------ | ----------------------------------- |
+| Name                                 | Yes                                 |
+| Repositories                         | Yes, as `owner/name` or a clone URL |
+| Agent instructions and context paths | Yes                                 |
+| Local clone folders                  | No                                  |
+
+Each member's computer maps a repository to a clone it already has. If it has none, Treq uses its managed clone folder. Repositories with no GitHub `origin` do not sync.
+
+Treq syncs after you sign in, then every hour. If you leave an organization, Treq removes that organization's projects from your computer at the next sync.
+
+## Next Steps
+
+- [Connecting GitHub](/docs/how-to/connecting-github)
+- [Security and Privacy](/docs/security-and-privacy)
