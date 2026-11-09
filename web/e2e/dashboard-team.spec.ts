@@ -563,6 +563,7 @@ test.describe('Dashboard team tab', () => {
     await expect(perks.getByRole('listitem')).toHaveText([
       'Everything in Pro for every member',
       'Manage team-wide integrations',
+      'Sandbox usage management',
       'One bill for the whole team',
     ]);
     await expect(teamSection(page).getByRole('button', { name: 'Create organization' })).toHaveCount(0);

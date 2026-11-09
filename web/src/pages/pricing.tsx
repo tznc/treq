@@ -37,6 +37,7 @@ const PRO_FEATURES: PlanFeature[] = [
 const TEAM_FEATURES: PlanFeature[] = [
   {key: 'pro', text: 'Everything in Pro for every member'},
   {key: 'installation', text: 'Manage team-wide integrations'},
+  {key: 'sandbox-usage', text: 'Sandbox usage management'},
   {key: 'one-bill', text: 'One bill for the whole team'},
 ];
 

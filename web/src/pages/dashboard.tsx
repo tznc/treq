@@ -517,6 +517,7 @@ function SubscriptionTab({
 const TEAM_PERKS = [
   "Everything in Pro for every member",
   "Manage team-wide integrations",
+  "Sandbox usage management",
   "One bill for the whole team",
 ];
 
