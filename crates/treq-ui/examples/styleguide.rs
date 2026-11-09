@@ -10,7 +10,7 @@ use gpui_styleguidist::{example, Example, Styleguide};
 use treq_ui::{
   floating,
   theme::{self, Palette},
-  Alert, Badge, Button, Card, CardFooter, CardHeader, CardVariant, CheckState, Checkbox,
+  touch, Alert, Badge, Button, Card, CardFooter, CardHeader, CardVariant, CheckState, Checkbox,
   ConfirmDialog, Count, Dialog, Dot, EmptyState, Field, FieldLayout, Form, FormActions, FormLayout,
   FormRow, FormSection, IconButton, IconButtonSize, Kbd, Loading, MenuItem, MenuLabel,
   MenuSeparator, PathField, Picker, PickerPlacement, Row, RowDensity, Severity, Skeleton,
@@ -30,8 +30,19 @@ fn styleguide() -> Styleguide {
     .assets(theme::Assets)
     .setup(theme::init)
     .open_window(|options, frame, cx| Ok(gpui_kit::open_window(options, cx, frame)?.0))
-    .themes(["light", "dark"], |name, cx| {
-      theme::set_dark(name == "dark", cx)
+    // Every example also renders at touch density, so each desktop
+    // component has its phone translation in the snapshots.
+    .themes(["light", "dark", "touch-light", "touch-dark"], |name, cx| {
+      let touch = name.starts_with("touch");
+      theme::set_density(
+        if touch {
+          theme::Density::Touch
+        } else {
+          theme::Density::Desktop
+        },
+        cx,
+      );
+      theme::set_dark(name.ends_with("dark"), cx)
     })
     .background(|cx| p(cx).background)
     // Past this, snapshots cover the default plus each single-knob change.
@@ -146,8 +157,14 @@ fn styleguide() -> Styleguide {
        system's picker. Dropping a folder on it picks that.",
     )
     .examples(surfaces())
+    .describe(
+      "Mobile",
+      "Phone-only patterns. Every other page also renders at touch density (the touch \
+       themes): 44 targets, forms vertical, actions full width, no shortcuts.",
+    )
     .examples(cards())
     .examples(forms())
+    .examples(mobile())
 }
 
 fn cards() -> Vec<Example> {
@@ -1076,5 +1093,124 @@ fn surfaces() -> Vec<Example> {
     .component("Floating")
     .title("Floating surface")
     .size(480., 160.),
+  ]
+}
+
+fn mobile() -> Vec<Example> {
+  vec![
+    example!("touch/grouped-list", |_, _, cx| {
+      let p = p(cx);
+      div().w(px(390.)).p_4().child(
+        touch::grouped(&p)
+          .child(touch::nav_row("ws-1", "feat/card-system", &p).meta("2 files changed"))
+          .child(touch::nav_row("ws-2", "fix/forms", &p).meta("Agent idle"))
+          .child(touch::nav_row("ws-3", "main", &p).meta("Clean")),
+      )
+    })
+    .component("Mobile")
+    .title("Grouped list")
+    .size(420., 260.),
+    example!("touch/choice", |knobs, _, cx| {
+      let p = p(cx);
+      let picked = knobs.select("picked", &["merge", "squash", "rebase"], "merge");
+      div().w(px(390.)).p_4().child(
+        touch::grouped(&p)
+          .child(touch::choice(
+            "merge",
+            "Merge commit",
+            picked == "merge",
+            &p,
+          ))
+          .child(touch::choice(
+            "squash",
+            "Squash and merge",
+            picked == "squash",
+            &p,
+          ))
+          .child(touch::choice(
+            "rebase",
+            "Rebase and merge",
+            picked == "rebase",
+            &p,
+          )),
+      )
+    })
+    .component("Mobile")
+    .title("Choice list (radio)")
+    .size(420., 240.),
+    example!("touch/bottom-bar", |_, _, cx| {
+      let p = p(cx);
+      div().w(px(390.)).child(
+        touch::bottom_bar(&p)
+          .child(
+            Button::new("test", &p)
+              .variant(Variant::Outline)
+              .label("Test"),
+          )
+          .child(
+            div()
+              .flex_1()
+              .child(Button::new("add", &p).label("Add host").w_full()),
+          ),
+      )
+    })
+    .component("Mobile")
+    .title("Bottom bar")
+    .size(420., 100.),
+    example!("touch/action-sheet", |_, _, cx| {
+      let p = p(cx);
+      div().w(px(390.)).child(touch::ActionSheet::new(
+        vec![
+          touch::SheetAction::new("terminal", "Open terminal", |_, _| {}),
+          touch::SheetAction::new("rename", "Rename…", |_, _| {}),
+          touch::SheetAction::new("copy", "Copy branch name", |_, _| {}),
+          touch::SheetAction::new("delete", "Delete workspace…", |_, _| {}).danger(),
+        ],
+        &p,
+      ))
+    })
+    .component("Mobile")
+    .title("Action sheet (menu)")
+    .size(420., 240.),
+    example!("touch/tab-bar", |knobs, _, cx| {
+      let p = p(cx);
+      div().w(px(390.)).child(
+        Tabs::new("ws-tabs", &p)
+          .style(TabsStyle::Bar)
+          .tab(
+            Tab::new("t-term", "Terminals")
+              .icon(theme::ICON_TERMINAL)
+              .count(2),
+          )
+          .tab(
+            Tab::new("t-changes", "Changes")
+              .icon(theme::ICON_FILE_DIFF)
+              .count(4),
+          )
+          .tab(Tab::new("t-commits", "Commits").icon(theme::ICON_COMMIT))
+          .tab(Tab::new("t-code", "Code").icon(theme::ICON_CODE))
+          .selected(knobs.number("selected", 1., 0.0..=3.0, 1.) as usize)
+          .on_select(|_, _, _| {}),
+      )
+    })
+    .component("Mobile")
+    .title("Tab bar")
+    .size(420., 100.),
+    example!("touch/path-field", |_, _, cx| {
+      let p = p(cx);
+      div().w(px(390.)).p_4().child(
+        Field::new("root", &p)
+          .label("Workspace root")
+          .hint("A folder on the host.")
+          .child(
+            PathField::new("root-path", &p)
+              .value(Some("~/code"))
+              .on_browse("Browse host…", |_, _| {}),
+          ),
+      )
+    })
+    .component("Mobile")
+    .title("Path on a remote host")
+    .size(420., 140.),
   ]
 }

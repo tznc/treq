@@ -6,7 +6,7 @@ use gpui::{div, prelude::*, AnyElement, App, Div, FontWeight, SharedString, Wind
 
 use crate::{
   text,
-  theme::{self, space, Palette},
+  theme::{self, space, Density, Palette},
   zoomed, zpx, TextSize,
 };
 
@@ -29,6 +29,15 @@ impl FieldLayout {
   pub fn horizontal() -> Self {
     FieldLayout::Horizontal {
       label_width: theme::LABEL_WIDTH,
+    }
+  }
+
+  /// What it draws as at `density`: a phone's screen is always narrow, so
+  /// labels go above; settings rows keep their trailing control.
+  pub fn at_density(self, density: Density) -> Self {
+    match (self, density) {
+      (FieldLayout::Horizontal { .. }, Density::Touch) => FieldLayout::Vertical,
+      (other, _) => other,
     }
   }
 
@@ -134,11 +143,15 @@ fn part(id: &SharedString, name: &str) -> Div {
 }
 
 impl RenderOnce for Field {
-  fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+  fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = self.palette;
     let width = f32::from(window.viewport_size().width);
     let breakpoint = f32::from(zoomed(theme::STACK_BREAKPOINT, window));
-    let layout = self.layout.unwrap_or_default().at_width(width, breakpoint);
+    let layout = self
+      .layout
+      .unwrap_or_default()
+      .at_width(width, breakpoint)
+      .at_density(Density::current(cx));
     let message = self.message().map(|(m, error)| {
       part(&self.id, "message")
         .id(SharedString::from(format!("{}-message", self.id)))
@@ -334,6 +347,15 @@ impl FormLayout {
     }
   }
 
+  /// What it draws as at `density`: vertical on a phone, where an inline
+  /// filter bar becomes a column too.
+  pub fn at_density(self, density: Density) -> Self {
+    match density {
+      Density::Touch => FormLayout::Vertical,
+      Density::Desktop => self,
+    }
+  }
+
   fn field_layout(self) -> FieldLayout {
     match self {
       FormLayout::Horizontal { label_width } => FieldLayout::Horizontal { label_width },
@@ -454,11 +476,13 @@ fn render_items(items: Vec<Item>, layout: FieldLayout, p: &Palette) -> Vec<AnyEl
 }
 
 impl RenderOnce for Form {
-  fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+  fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = self.palette;
-    let field_layout = self.layout.field_layout();
+    let touch = Density::current(cx) == Density::Touch;
+    let layout = self.layout.at_density(Density::current(cx));
+    let field_layout = layout.field_layout();
     let selector = self.id.to_string();
-    let inline = self.layout == FormLayout::Inline;
+    let inline = layout == FormLayout::Inline;
     // Actions line up with the controls, past the label column, unless the
     // labels have stacked.
     let indent = match field_layout.at_width(
@@ -469,6 +493,15 @@ impl RenderOnce for Form {
       _ => None,
     };
     let actions = self.actions.map(|a| {
+      // On a phone the actions stack full width, the primary on top.
+      if touch {
+        return part(&self.id, "actions")
+          .flex()
+          .flex_col()
+          .w_full()
+          .gap(zpx(space::SM))
+          .children(a.end.into_iter().rev().chain(a.start));
+      }
       let split = !a.start.is_empty();
       part(&self.id, "actions")
         .flex()
@@ -502,6 +535,41 @@ mod tests {
   use gpui::{px, size, TestAppContext, VisualTestContext};
 
   use super::*;
+
+  #[test]
+  fn touch_forms_are_vertical_except_settings() {
+    use theme::Density::*;
+    assert_eq!(
+      FieldLayout::horizontal().at_density(Touch),
+      FieldLayout::Vertical
+    );
+    assert_eq!(
+      FieldLayout::horizontal().at_density(Desktop),
+      FieldLayout::horizontal()
+    );
+    assert_eq!(
+      FieldLayout::Trailing.at_density(Touch),
+      FieldLayout::Trailing
+    );
+    assert_eq!(FormLayout::Inline.at_density(Touch), FormLayout::Vertical);
+    assert_eq!(
+      FormLayout::horizontal().at_density(Touch),
+      FormLayout::Vertical
+    );
+    assert_eq!(FormLayout::Inline.at_density(Desktop), FormLayout::Inline);
+  }
+
+  #[gpui::test]
+  fn touch_form_actions_fill_the_width(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_global(theme::Density::Touch));
+    let mut cx = mount(cx, FormLayout::horizontal(), 800.);
+    let form = cx.debug_bounds("form").unwrap();
+    let submit = cx.debug_bounds("submit").unwrap();
+    let label = cx.debug_bounds("name-label").unwrap();
+    let input = cx.debug_bounds("name-input").unwrap();
+    assert_eq!(label.origin.x, input.origin.x);
+    assert_eq!(submit.size.width, form.size.width);
+  }
 
   #[test]
   fn horizontal_stacks_below_the_breakpoint() {
@@ -575,7 +643,7 @@ mod tests {
           .actions(
             FormActions::new().end(
               div()
-                .w(px(60.))
+                .min_w(px(60.))
                 .h(px(28.))
                 .debug_selector(|| "submit".into()),
             ),

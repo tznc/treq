@@ -155,6 +155,15 @@ impl Card {
     self
   }
 
+  /// The variant it draws as: a phone has no hover layer for a raised
+  /// card to rise above, so elevated draws outlined there.
+  fn variant_at(&self, density: Density) -> CardVariant {
+    match (self.variant, density) {
+      (CardVariant::Elevated, Density::Touch) => CardVariant::Outlined,
+      (variant, _) => variant,
+    }
+  }
+
   /// Its fill, border and shadows, from the variant and selection.
   fn surface(&self) -> (Option<gpui::Hsla>, Option<gpui::Hsla>, Vec<gpui::BoxShadow>) {
     let p = &self.palette;
@@ -178,14 +187,11 @@ impl ParentElement for Card {
 }
 
 impl RenderOnce for Card {
-  fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+  fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = self.palette;
-    let pad = zpx(
-      cx.try_global::<Density>()
-        .copied()
-        .unwrap_or_default()
-        .card_padding(),
-    );
+    let density = Density::current(cx);
+    let pad = zpx(density.card_padding());
+    self.variant = self.variant_at(density);
     let (fill, border, shadows) = self.surface();
     let id = self.id.clone();
     let part = |name: &str| {
@@ -307,6 +313,14 @@ mod tests {
   use gpui::{px, TestAppContext, VisualTestContext};
 
   use super::*;
+
+  #[test]
+  fn an_elevated_card_is_outlined_on_touch() {
+    let p = theme::palette(false);
+    let card = Card::new("c", &p).variant(CardVariant::Elevated);
+    assert_eq!(card.variant_at(Density::Desktop), CardVariant::Elevated);
+    assert_eq!(card.variant_at(Density::Touch), CardVariant::Outlined);
+  }
 
   #[test]
   fn variants_set_fill_border_and_shadow() {

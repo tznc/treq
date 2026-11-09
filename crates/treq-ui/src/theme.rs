@@ -363,8 +363,25 @@ pub const LABEL_GAP: f32 = 6.;
 pub const LABEL_WIDTH: f32 = 140.;
 /// Below this window width, a horizontal form stacks its labels on top.
 pub const STACK_BREAKPOINT: f32 = 480.;
+/// The smallest box a finger can hit reliably (Apple's 44pt).
+pub const TOUCH_TARGET: f32 = 44.;
+/// A full-width call to action in a phone's bottom bar.
+pub const CTA_HEIGHT: f32 = 52.;
 
 impl Density {
+  /// The installed density, Desktop when none is set.
+  pub fn current(cx: &App) -> Self {
+    cx.try_global::<Density>().copied().unwrap_or_default()
+  }
+
+  /// How tall a field's control is: a toolbar control, or a finger's target.
+  pub fn control_height(self) -> f32 {
+    match self {
+      Density::Desktop => CONTROL_MD,
+      Density::Touch => TOUCH_TARGET,
+    }
+  }
+
   /// The padding of a card's header, body and footer.
   pub fn card_padding(self) -> f32 {
     match self {
@@ -912,4 +929,17 @@ pub mod tw {
   pub const YELLOW_400: u32 = 0xfacc15;
   pub const YELLOW_700: u32 = 0xa16207;
   pub const YELLOW_600: u32 = 0xca8a04;
+}
+
+#[cfg(test)]
+mod touch_tests {
+  use super::*;
+
+  #[test]
+  fn touch_controls_meet_the_44_target() {
+    assert_eq!(Density::Desktop.control_height(), CONTROL_MD);
+    assert_eq!(Density::Touch.control_height(), TOUCH_TARGET);
+    assert_eq!(TOUCH_TARGET, 44.);
+    assert_eq!(CTA_HEIGHT, 52.);
+  }
 }

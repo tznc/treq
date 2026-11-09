@@ -19,6 +19,8 @@ pub struct PathField {
   directories: bool,
   disabled: bool,
   on_pick: Option<OnPick>,
+  browse_label: SharedString,
+  on_browse: Option<crate::touch::Action>,
 }
 
 impl PathField {
@@ -31,6 +33,8 @@ impl PathField {
       directories: true,
       disabled: false,
       on_pick: None,
+      browse_label: "Browse…".into(),
+      on_browse: None,
     }
   }
 
@@ -63,6 +67,19 @@ impl PathField {
     self
   }
 
+  /// Browses somewhere the system picker can't see, such as a remote
+  /// host's disk on a phone: the button runs `f`, which calls back with
+  /// the path, instead of opening the picker.
+  pub fn on_browse(
+    mut self,
+    label: impl Into<SharedString>,
+    f: impl Fn(&mut Window, &mut App) + 'static,
+  ) -> Self {
+    self.browse_label = label.into();
+    self.on_browse = Some(Rc::new(f));
+    self
+  }
+
   fn options(&self) -> PathPromptOptions {
     PathPromptOptions {
       files: !self.directories,
@@ -79,8 +96,9 @@ fn dropped(paths: &[PathBuf], directories: bool) -> Option<PathBuf> {
 }
 
 impl RenderOnce for PathField {
-  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+  fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = self.palette;
+    let density = theme::Density::current(cx);
     let options = self.options();
     let directories = self.directories;
     let on_pick = self.on_pick.filter(|_| !self.disabled);
@@ -88,24 +106,33 @@ impl RenderOnce for PathField {
     let selector = format!("{}-value", self.id);
     let browse = Button::new(format!("{}-browse", self.id), &p)
       .variant(Variant::Outline)
-      .size(Size::Md)
-      .label("Browse…")
-      .disabled(self.disabled || on_pick.is_none())
-      .when_some(on_pick.clone(), |b, f| {
-        b.on_click(move |_, window, cx| {
-          let rx = cx.prompt_for_paths(options.clone());
-          let f = f.clone();
-          window
-            .spawn(cx, async move |cx| {
-              if let Ok(Ok(Some(paths))) = rx.await {
-                if let Some(path) = paths.into_iter().next() {
-                  cx.update(|window, cx| f(path, window, cx)).ok();
+      .size(match density {
+        theme::Density::Touch => Size::Lg,
+        theme::Density::Desktop => Size::Md,
+      })
+      .label(self.browse_label.clone())
+      .disabled(self.disabled || (on_pick.is_none() && self.on_browse.is_none()))
+      .when_some(self.on_browse.clone().filter(|_| !self.disabled), |b, f| {
+        b.on_click(move |_, window, cx| f(window, cx))
+      })
+      .when_some(
+        on_pick.clone().filter(|_| self.on_browse.is_none()),
+        |b, f| {
+          b.on_click(move |_, window, cx| {
+            let rx = cx.prompt_for_paths(options.clone());
+            let f = f.clone();
+            window
+              .spawn(cx, async move |cx| {
+                if let Ok(Ok(Some(paths))) = rx.await {
+                  if let Some(path) = paths.into_iter().next() {
+                    cx.update(|window, cx| f(path, window, cx)).ok();
+                  }
                 }
-              }
-            })
-            .detach();
-        })
-      });
+              })
+              .detach();
+          })
+        },
+      );
     div()
       .id(self.id.clone())
       .flex()
@@ -123,7 +150,7 @@ impl RenderOnce for PathField {
           .debug_selector(move || selector)
           .flex_1()
           .min_w_0()
-          .h(zpx(theme::CONTROL_MD))
+          .h(zpx(density.control_height()))
           .px_2()
           .flex()
           .items_center()
@@ -150,6 +177,17 @@ impl RenderOnce for PathField {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn a_custom_browse_replaces_the_system_picker() {
+    let p = theme::palette(false);
+    let f = PathField::new("f", &p);
+    assert!(f.on_browse.is_none());
+    assert_eq!(f.browse_label.as_ref(), "Browse…");
+    let f = f.on_browse("Browse host…", |_, _| {});
+    assert!(f.on_browse.is_some());
+    assert_eq!(f.browse_label.as_ref(), "Browse host…");
+  }
 
   #[test]
   fn it_picks_a_folder_unless_told_files() {

@@ -28,6 +28,7 @@ pub mod section_header;
 pub mod split_button;
 pub mod tabs;
 pub mod theme;
+pub mod touch;
 
 pub use alert::{Alert, Severity};
 pub use badge::{Badge, Count, Dot, Tone};

@@ -13,7 +13,7 @@ use gpui_kit::{
   ScrollHandle, StatefulInteractiveElement, Styled, Window,
 };
 
-use super::workspaces;
+use super::{folder_picker, workspaces};
 use crate::mobile::{
   backend, remote, store,
   ui::{load, nav, widgets, Location},
@@ -48,6 +48,26 @@ impl ReposScreen {
       error: None,
       scroll: ScrollHandle::new(),
     }
+  }
+
+  /// Picks the path from the host's folders instead of typing it.
+  fn browse(&mut self, cx: &mut Context<Self>) {
+    let start = self.path.read(cx).value().trim().to_string();
+    let screen = cx.weak_entity();
+    folder_picker::open(
+      start,
+      move |path, window, cx| {
+        screen
+          .update(cx, |this, cx| {
+            this
+              .path
+              .update(cx, |input, cx| input.set_value(path.clone(), window, cx));
+            this.inspect(cx);
+          })
+          .ok();
+      },
+      cx,
+    );
   }
 
   fn inspect(&mut self, cx: &mut Context<Self>) {
@@ -153,19 +173,29 @@ impl Render for ReposScreen {
                 .gap_3()
                 .child(Input::new(&self.path).large())
                 .child(
-                  h_flex().child(
-                    Button::new("inspect")
-                      .primary()
-                      .large()
-                      .label(if self.probing {
-                        "Inspecting…"
-                      } else {
-                        "Inspect repository"
-                      })
-                      .loading(self.probing)
-                      .on_click(cx.listener(|this, _, _, cx| this.inspect(cx)))
-                      .touch(),
-                  ),
+                  h_flex()
+                    .gap_2()
+                    .child(
+                      Button::new("inspect")
+                        .primary()
+                        .large()
+                        .label(if self.probing {
+                          "Inspecting…"
+                        } else {
+                          "Inspect repository"
+                        })
+                        .loading(self.probing)
+                        .on_click(cx.listener(|this, _, _, cx| this.inspect(cx)))
+                        .touch(),
+                    )
+                    .child(
+                      Button::new("browse-host")
+                        .outline()
+                        .large()
+                        .label("Browse host…")
+                        .on_click(cx.listener(|this, _, _, cx| this.browse(cx)))
+                        .touch(),
+                    ),
                 )
                 .children(self.error.clone().map(|e| widgets::error_text(e, cx))),
             ),
