@@ -516,7 +516,7 @@ function SubscriptionTab({
 // The Team plan's features, as the pricing page lists them.
 const TEAM_PERKS = [
   "Everything in Pro for every member",
-  "Shared GitHub App installation",
+  "Manage team-wide integrations",
   "One bill for the whole team",
 ];
 

@@ -29,7 +29,7 @@ test('lists Free, Pro and Team with their prices', async ({ page }) => {
   await expect(team).toContainText('$199');
   await expect(team).toContainText('5 members included, US$8 per extra');
   await expect(team).toContainText('Everything in Pro for every member');
-  await expect(team).toContainText('Shared GitHub App installation');
+  await expect(team).toContainText('Manage team-wide integrations');
 });
 
 test('points each plan at the right next step', async ({ page }) => {
