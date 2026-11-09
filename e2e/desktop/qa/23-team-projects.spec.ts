@@ -132,13 +132,18 @@ test("team projects: save to a team, then Move to", async () => {
     await expect(button).toBeVisible({ timeout: 60_000 });
     // The account (and its organizations) loads after the window.
     await settle(page, 6000);
-    await button.click();
-    await settle(page, 1000);
-    const menu = popupBox();
-    if (!menu) throw new Error("no project menu");
-    await xPointer(page, menu.x + 60, menu.y + 18, 1); // Save Project…
-    await settle(page, 1000);
-    await expect(page.getByRole("tab", { name: "Acme" })).toBeVisible({ timeout: 15_000 });
+    // The menu is a popup window. Retry: a
+    // click can land before the popup maps under Xvfb.
+    const dialog = page.getByRole("button", { name: "Save project" });
+    for (let i = 0; i < 4 && (await dialog.count()) === 0; i++) {
+      await button.click();
+      await settle(page, 1500);
+      const menu = popupBox();
+      // Rows: synced projects, a separator, Save Project…, New Window….
+      if (menu) await xPointer(page, menu.x + 60, menu.y + menu.h - 41, 1);
+      await settle(page, 1500);
+    }
+    await expect(dialog).toBeVisible();
     await capture(page, {
       name: "23-team-projects-01-save-owner",
       title: "Save project: Owner picker",
@@ -147,6 +152,7 @@ test("team projects: save to a team, then Move to", async () => {
         "An Owner row with a segmented Personal / Acme switcher, Personal selected",
       ],
     });
+    await expect(page.getByRole("tab", { name: "Acme" })).toBeVisible({ timeout: 15_000 });
     await page.getByRole("tab", { name: "Acme" }).click();
     await page.keyboard.press("End");
     for (let i = 0; i < 40; i++) await page.keyboard.press("Backspace");
