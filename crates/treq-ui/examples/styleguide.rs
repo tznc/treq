@@ -4,15 +4,17 @@
 //! - `-- render` re-renders the snapshots under `styleguide/`; `-- check`
 //!   compares against them.
 
-use gpui::{div, prelude::*, px, App};
+use gpui::{div, prelude::*, px, App, Entity, Window};
+use gpui_kit::component::input::InputState;
 use gpui_styleguidist::{example, Example, Styleguide};
 use treq_ui::{
   floating,
   theme::{self, Palette},
-  Alert, Badge, Button, CheckState, Checkbox, ConfirmDialog, Count, Dialog, Dot, EmptyState,
-  IconButton, IconButtonSize, Kbd, Loading, MenuItem, MenuLabel, MenuSeparator, Picker,
-  PickerPlacement, Row, RowDensity, Severity, Skeleton, SplitButton, Tab, Tabs, TabsStyle, Tone,
-  Variant,
+  Alert, Badge, Button, Card, CardFooter, CardHeader, CardVariant, CheckState, Checkbox,
+  ConfirmDialog, Count, Dialog, Dot, EmptyState, Field, FieldLayout, Form, FormActions, FormLayout,
+  FormRow, FormSection, IconButton, IconButtonSize, Kbd, Loading, MenuItem, MenuLabel,
+  MenuSeparator, PathField, Picker, PickerPlacement, Row, RowDensity, Severity, Skeleton,
+  SplitButton, Tab, Tabs, TabsStyle, Tone, Variant,
 };
 
 fn main() {
@@ -118,7 +120,310 @@ fn styleguide() -> Styleguide {
     .examples(buttons())
     .examples(indicators())
     .examples(navigation())
+    .describe(
+      "Card",
+      "One object per card. Outlined by default; elevated for a card that floats over the \
+       page, never nested; ghost for an empty slot. A footer only when there are actions, \
+       the primary last. Flush for a list edge to edge.",
+    )
+    .describe(
+      "Form",
+      "Vertical in dialogs and narrow panes; horizontal (a 140 label column) in settings \
+       pages, stacking below 480; inline for filter bars. Rows split a line by span; \
+       sections group fields under a title. Actions end-align, or line up with the \
+       controls in a horizontal form.",
+    )
+    .describe(
+      "Field",
+      "A label, its control and one line under it: the hint, or the error that replaces \
+       it. All body text, so they line up with the text in the control. A red * for \
+       required; \"(optional)\" when most fields are required. Trailing puts the control \
+       at the end of the row, for a setting.",
+    )
+    .describe(
+      "PathField",
+      "Paths are picked, not typed: the value in mono and Browse…, which opens the \
+       system's picker. Dropping a folder on it picks that.",
+    )
     .examples(surfaces())
+    .examples(cards())
+    .examples(forms())
+}
+
+fn cards() -> Vec<Example> {
+  vec![
+    example!("card/variants", |knobs, _, cx| {
+      let p = p(cx);
+      div().w(px(360.)).child(
+        Card::new("card", &p)
+          .variant(knobs.pick(
+            "variant",
+            &[
+              ("outlined", CardVariant::Outlined),
+              ("elevated", CardVariant::Elevated),
+              ("ghost", CardVariant::Ghost),
+            ],
+            "outlined",
+          ))
+          .selected(knobs.bool("selected", false))
+          .header(
+            CardHeader::new("treq")
+              .description("~/code/treq")
+              .action(IconButton::new("card-more", theme::ICON_MORE, "More", &p)),
+          )
+          .child("3 workspaces, 1 with uncommitted changes.")
+          .footer(
+            CardFooter::new()
+              .end(
+                Button::new("card-cancel", &p)
+                  .variant(Variant::Ghost)
+                  .label("Cancel"),
+              )
+              .end(Button::new("card-open", &p).label("Open")),
+          ),
+      )
+    })
+    .component("Card")
+    .title("Variants")
+    .size(440., 220.),
+    example!("card/flush", |_, _, cx| {
+      let p = p(cx);
+      div().w(px(360.)).child(
+        Card::new("branches", &p)
+          .header(CardHeader::new("Branches").action(Count::new(3, &p)))
+          .flush(true)
+          .children(["main", "feat/cards", "fix/forms"].map(|b| Row::new(b, &p).title(b)))
+          .footer(
+            CardFooter::new()
+              .start(
+                Button::new("b-delete", &p)
+                  .variant(Variant::DestructiveOutline)
+                  .label("Delete"),
+              )
+              .end(
+                Button::new("b-open", &p)
+                  .variant(Variant::Outline)
+                  .label("Open"),
+              ),
+          ),
+      )
+    })
+    .component("Card")
+    .title("Flush list, split footer")
+    .size(440., 260.),
+  ]
+}
+
+/// Inputs need state, so form examples are views.
+struct FormDemo {
+  layout: FormLayout,
+  error: bool,
+  name: Entity<InputState>,
+  email: Entity<InputState>,
+  owner: Entity<InputState>,
+  repo: Entity<InputState>,
+  depth: Entity<InputState>,
+}
+
+impl FormDemo {
+  fn new(
+    layout: FormLayout,
+    error: bool,
+    window: &mut Window,
+    cx: &mut gpui::Context<Self>,
+  ) -> Self {
+    let mut input = |v: &str| {
+      let v = v.to_string();
+      cx.new(|cx| InputState::new(window, cx).default_value(v))
+    };
+    Self {
+      layout,
+      error,
+      name: input("feat/card-system"),
+      email: input("ty@example"),
+      owner: input("tznc"),
+      repo: input("treq"),
+      depth: input("50"),
+    }
+  }
+}
+
+impl Render for FormDemo {
+  fn render(&mut self, _: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    let p = p(cx);
+    let form = Form::new("demo", &p).layout(self.layout);
+    let form = if self.layout == FormLayout::Inline {
+      form
+        .field(
+          Field::new("owner", &p)
+            .label("Owner")
+            .child(treq_ui::input(&self.owner)),
+        )
+        .field(
+          Field::new("repo", &p)
+            .label("Name")
+            .child(treq_ui::input(&self.repo)),
+        )
+        .child(
+          Button::new("reset", &p)
+            .variant(Variant::Outline)
+            .label("Reset"),
+        )
+    } else {
+      form
+        .section(
+          FormSection::new("Workspace")
+            .field(
+              Field::new("name", &p)
+                .label("Name")
+                .required()
+                .hint("Becomes the branch name.")
+                .child(treq_ui::input(&self.name)),
+            )
+            .field(
+              Field::new("email", &p)
+                .label("Email")
+                .hint("Used for commit attribution.")
+                .error(
+                  self
+                    .error
+                    .then_some("Use a full address, such as ty@example.com."),
+                )
+                .child(treq_ui::input(&self.email)),
+            )
+            .field(
+              Field::new("path", &p).label("Clone path").child(
+                PathField::new("path-picker", &p)
+                  .value(Some("~/code/treq"))
+                  .on_pick(|_, _, _| {}),
+              ),
+            ),
+        )
+        .section(
+          FormSection::new("Repository").row(
+            FormRow::new()
+              .span(
+                2,
+                Field::new("owner", &p)
+                  .label("Owner")
+                  .child(treq_ui::input(&self.owner)),
+              )
+              .col(
+                Field::new("depth", &p)
+                  .label("Depth")
+                  .child(treq_ui::input(&self.depth)),
+              ),
+          ),
+        )
+        .field(
+          Field::new("open", &p).child(
+            Checkbox::new("open-after", &p)
+              .checked(true)
+              .label("Open after creating"),
+          ),
+        )
+        .actions(
+          FormActions::new()
+            .end(
+              Button::new("f-cancel", &p)
+                .variant(Variant::Ghost)
+                .label("Cancel"),
+            )
+            .end(Button::new("f-create", &p).label("Create workspace")),
+        )
+    };
+    div().w(px(560.)).child(form)
+  }
+}
+
+fn forms() -> Vec<Example> {
+  vec![
+    example!(view "form/layouts", |knobs, window, cx| {
+      let layout = knobs.pick(
+        "layout",
+        &[
+          ("vertical", FormLayout::Vertical),
+          ("horizontal", FormLayout::horizontal()),
+          ("inline", FormLayout::Inline),
+        ],
+        "vertical",
+      );
+      let error = knobs.bool("error", false);
+      cx.new(|cx| FormDemo::new(layout, error, window, cx))
+    })
+    .component("Form")
+    .title("Vertical, horizontal, inline")
+    .description("Sections, a 2:1 row, a path picker and a checkbox in one form.")
+    .size(640., 520.),
+    example!("field/settings", |_, _, cx| {
+      let p = p(cx);
+      div().w(px(420.)).child(
+        Card::new("settings", &p).flush(true).child(
+          div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .p_4()
+            .child(
+              Field::new("compact", &p)
+                .layout(FieldLayout::Trailing)
+                .label("Compact rows")
+                .hint("28px rows in the sidebar.")
+                .child(Checkbox::new("compact-switch", &p).switch().checked(true)),
+            )
+            .child(
+              Field::new("signout", &p)
+                .layout(FieldLayout::Trailing)
+                .label("Sign out everywhere")
+                .child(
+                  Button::new("signout-btn", &p)
+                    .variant(Variant::DestructiveOutline)
+                    .label("Sign out…"),
+                ),
+            ),
+        ),
+      )
+    })
+    .component("Field")
+    .title("Settings (trailing)")
+    .size(500., 200.),
+    example!("checkbox/radio-switch", |_, _, cx| {
+      let p = p(cx);
+      div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(
+          Checkbox::new("r1", &p)
+            .radio()
+            .checked(true)
+            .label("Merge commit"),
+        )
+        .child(Checkbox::new("r2", &p).radio().label("Squash and merge"))
+        .child(
+          Checkbox::new("s1", &p)
+            .switch()
+            .checked(true)
+            .label("Delete branch after merge"),
+        )
+        .child(Checkbox::new("s2", &p).switch().label("Auto-merge"))
+    })
+    .component("Checkbox")
+    .title("Radio and switch")
+    .size(360., 160.),
+    example!("path-field", |knobs, _, cx| {
+      let p = p(cx);
+      div().w(px(360.)).child(
+        PathField::new("clone", &p)
+          .value(knobs.bool("chosen", true).then_some("~/code/treq"))
+          .disabled(knobs.bool("disabled", false))
+          .on_pick(|_, _, _| {}),
+      )
+    })
+    .component("PathField")
+    .title("Folder")
+    .size(440., 80.),
+  ]
 }
 
 fn variant_knob(knobs: &gpui_styleguidist::Knobs) -> Variant {

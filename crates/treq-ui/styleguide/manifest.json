@@ -436,7 +436,7 @@
           }
         },
         {
-          "text": ";\ndiv()\n  .flex()\n  .items_center()\n  .gap_2()\n  .child(IconButton::new(\"ghost\", theme::ICON_X, \"Close\", &p).size(size))\n  .child(\n    IconButton::new(\"outline\", theme::ICON_CHEVRON_DOWN, \"More\", &p)\n      .outline()\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"selected\", theme::ICON_INFO, \"Details\", &p)\n      .selected(true)\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"danger\", theme::ICON_X, \"Remove\", &p)\n      .tone(Tone::Danger)\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"disabled\", theme::ICON_X, \"Close\", &p)\n      .disabled(true)\n      .size(size),\n  )"
+          "text": ";\ndiv()\n  .flex()\n  .items_center()\n  .gap_2()\n  .child(IconButton::new(\"ghost\", theme::ICON_X, \"Close\", &p).size(size))\n  .child(\n    IconButton::new(\"outline\", theme::ICON_CHEVRON_DOWN, \"More\", &p)\n      .outline()\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"selected\", theme::ICON_INFO, \"Details\", &p)\n      .selected(true)\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"danger\", theme::ICON_X, \"Remove\", &p)\n      .tone(Tone::Danger)\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"disabled\", theme::ICON_X, \"Close\", &p)\n      .disabled(true)\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"primary\", theme::ICON_SEND, \"Send\", &p)\n      .primary()\n      .size(size),\n  )"
         }
       ],
       "knobs": [
@@ -463,10 +463,10 @@
           },
           "is_default": true,
           "file": "snapshots/icon-button/states/light/default.png",
-          "width": 264,
+          "width": 300,
           "height": 88,
           "scale": 2.0,
-          "hash": "c01cecbe2d6b1d98"
+          "hash": "b15bbb86c5dc95f6"
         },
         {
           "theme": "light",
@@ -475,10 +475,10 @@
             "size": "small"
           },
           "file": "snapshots/icon-button/states/light/size=small.png",
-          "width": 264,
+          "width": 300,
           "height": 88,
           "scale": 2.0,
-          "hash": "4d4852d13d612951"
+          "hash": "ed65b952e1f543d1"
         },
         {
           "theme": "dark",
@@ -488,10 +488,10 @@
           },
           "is_default": true,
           "file": "snapshots/icon-button/states/dark/default.png",
-          "width": 264,
+          "width": 300,
           "height": 88,
           "scale": 2.0,
-          "hash": "6946fe572ea6b105"
+          "hash": "622d17e58ae2c216"
         },
         {
           "theme": "dark",
@@ -500,10 +500,10 @@
             "size": "small"
           },
           "file": "snapshots/icon-button/states/dark/size=small.png",
-          "width": 264,
+          "width": 300,
           "height": 88,
           "scale": 2.0,
-          "hash": "41070760b15aaf70"
+          "hash": "38d0cc14ff458643"
         }
       ]
     },
@@ -975,7 +975,7 @@
       "component": "Badge",
       "code": [
         {
-          "text": "let p = p(cx);\ndiv().flex().flex_col().gap_3().children([\n  div().flex().items_center().gap_2().children(\n    [\n      (\"PRO\", Tone::Neutral),\n      (\"Open\", Tone::GitOpen),\n      (\"Merged\", Tone::GitMerged),\n      (\"Closed\", Tone::GitClosed),\n      (\"Draft\", Tone::Neutral),\n      (\"Failing\", Tone::Danger),\n    ]\n    .map(|(label, tone)| Badge::new(label, &p).tone(tone).into_any_element()),\n  ),\n  div()\n    .flex()\n    .items_center()\n    .gap_2()\n    .children([0, 3, 42, 1500].map(|n| Count::new(n, &p).into_any_element())),\n  div().flex().items_center().gap_2().children(\n    [\n      Tone::Neutral,\n      Tone::Primary,\n      Tone::Success,\n      Tone::Warning,\n      Tone::Danger,\n    ]\n    .map(|tone| Dot::new(tone, &p).into_any_element()),\n  ),\n])"
+          "text": "let p = p(cx);\ndiv().flex().flex_col().gap_3().children([\n  div().flex().items_center().gap_2().children(\n    [\n      (\"PRO\", Tone::Neutral),\n      (\"Open\", Tone::GitOpen),\n      (\"Merged\", Tone::GitMerged),\n      (\"Closed\", Tone::GitClosed),\n      (\"Draft\", Tone::Neutral),\n      (\"Failing\", Tone::Danger),\n    ]\n    .map(|(label, tone)| Badge::new(label, &p).tone(tone).into_any_element()),\n  ),\n  div()\n    .flex()\n    .items_center()\n    .gap_2()\n    .children([0, 3, 42, 1500].map(|n| Count::new(n, &p).into_any_element())),\n  div().flex().items_center().gap_2().children(\n    // Every dot names its state; hover one for its tooltip.\n    [\n      (Tone::Neutral, \"Agent running\"),\n      (Tone::Primary, \"Renamed\"),\n      (Tone::Success, \"Checks passing\"),\n      (Tone::Warning, \"Uncommitted changes\"),\n      (Tone::Danger, \"Conflict\"),\n    ]\n    .map(|(tone, label)| Dot::new(tone, label, &p).into_any_element()),\n  ),\n])"
         }
       ],
       "themes": [
@@ -1378,7 +1378,7 @@
           "width": 452,
           "height": 252,
           "scale": 2.0,
-          "hash": "afbd7855728f2e7b"
+          "hash": "d35f74c534f64e6e"
         },
         {
           "theme": "light",
@@ -1390,7 +1390,7 @@
           "width": 452,
           "height": 252,
           "scale": 2.0,
-          "hash": "ea3cb054d2c5c23b"
+          "hash": "4c5c5b44ba8b66b2"
         },
         {
           "theme": "dark",
@@ -1403,7 +1403,7 @@
           "width": 452,
           "height": 252,
           "scale": 2.0,
-          "hash": "de5472ae913271fc"
+          "hash": "fcdd2e65cf9a38e9"
         },
         {
           "theme": "dark",
@@ -1415,7 +1415,7 @@
           "width": 452,
           "height": 252,
           "scale": 2.0,
-          "hash": "721dcd7da875f7df"
+          "hash": "9782884c19c0409d"
         }
       ]
     },
@@ -1441,7 +1441,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "a79572fb0e37505c"
+          "hash": "239ed8c7485315bc"
         },
         {
           "theme": "dark",
@@ -1451,7 +1451,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "d4a92c4b44427ca7"
+          "hash": "32cfa21d11921e90"
         }
       ]
     },
@@ -1477,7 +1477,7 @@
           "knob": "conflict"
         },
         {
-          "text": " {\n        changes.dot(Tone::Danger)\n      } else {\n        changes\n      }\n    },\n    {\n      let logs = Tab::new(\"logs\", \"Logs\");\n      if "
+          "text": " {\n        changes.dot(Tone::Danger, \"Conflict\")\n      } else {\n        changes\n      }\n    },\n    {\n      let logs = Tab::new(\"logs\", \"Logs\");\n      if "
         },
         {
           "knob": "badge"
@@ -1523,9 +1523,9 @@
           "is_default": true,
           "file": "snapshots/tabs/playground/light/default.png",
           "width": 276,
-          "height": 58,
+          "height": 55,
           "scale": 2.0,
-          "hash": "39ad5256b49a5e1e"
+          "hash": "f74b5cfc78a16e0a"
         },
         {
           "theme": "light",
@@ -1551,9 +1551,9 @@
           },
           "file": "snapshots/tabs/playground/light/conflict=true.png",
           "width": 286,
-          "height": 58,
+          "height": 55,
           "scale": 2.0,
-          "hash": "422eaead5c367a76"
+          "hash": "39b71bd12d9d9b52"
         },
         {
           "theme": "light",
@@ -1565,9 +1565,9 @@
           },
           "file": "snapshots/tabs/playground/light/badge=true.png",
           "width": 310,
-          "height": 58,
+          "height": 55,
           "scale": 2.0,
-          "hash": "3bb232b17f215a1d"
+          "hash": "002f601a3a1cb489"
         },
         {
           "theme": "dark",
@@ -1582,7 +1582,7 @@
           "width": 276,
           "height": 55,
           "scale": 2.0,
-          "hash": "835941254f55fbaf"
+          "hash": "b2bac8ce42f79f41"
         },
         {
           "theme": "dark",
@@ -1610,7 +1610,7 @@
           "width": 286,
           "height": 55,
           "scale": 2.0,
-          "hash": "c1061020c3abc287"
+          "hash": "b501a27e361c5f71"
         },
         {
           "theme": "dark",
@@ -1624,7 +1624,43 @@
           "width": 310,
           "height": 55,
           "scale": 2.0,
-          "hash": "12ed505c34f35022"
+          "hash": "af037f8fbbbc9964"
+        }
+      ]
+    },
+    {
+      "id": "tabs/segmented",
+      "title": "Segmented with icons",
+      "component": "Tabs",
+      "code": [
+        {
+          "text": "let p = p(cx);\nTabs::segmented(\"views\", &p)\n  .tab(Tab::new(\"code\", \"Code\").icon(theme::ICON_CODE))\n  .tab(\n    Tab::new(\"commits\", \"Commits\")\n      .icon(theme::ICON_COMMIT)\n      .count(2),\n  )\n  .tab(\n    Tab::new(\"changes\", \"Changes\")\n      .icon(theme::ICON_FILE_DIFF)\n      .count(3),\n  )\n  .tab(Tab::new(\"logs\", \"Logs\").icon(theme::ICON_DATABASE))\n  .selected(1)"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/tabs/segmented/light/default.png",
+          "width": 348,
+          "height": 55,
+          "scale": 2.0,
+          "hash": "b8eb075247ced3f2"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/tabs/segmented/dark/default.png",
+          "width": 348,
+          "height": 55,
+          "scale": 2.0,
+          "hash": "dcd1a5e3dda5aa2f"
         }
       ]
     },
@@ -1634,7 +1670,7 @@
       "component": "Row",
       "code": [
         {
-          "text": "let p = p(cx);\ndiv()\n  .w(px(360.))\n  .flex()\n  .flex_col()\n  .child(\n    Row::new(\"ws-1\", &p)\n      .icon(theme::ICON_CIRCLE_DOT)\n      .title(\"feat/event-ingest\")\n      .trailing(Dot::new(Tone::GitOpen, &p)),\n  )\n  .child(\n    Row::new(\"ws-2\", &p)\n      .icon(theme::ICON_CIRCLE_DOT)\n      .title(\"feat/keyvalues-cache\")\n      .selected(true)\n      .trailing(Count::new(3, &p)),\n  )\n  .child(\n    Row::new(\"ws-3\", &p)\n      .density(RowDensity::Comfortable)\n      .title(\"main\")\n      .meta(\"default branch\"),\n  )\n  .child(\n    Row::new(\"commit\", &p)\n      .density(RowDensity::TwoLine)\n      .title(\"feat: keyvalues cache\")\n      .meta(\"just now · +9 −0\")\n      .actions(\n        IconButton::new(\"commit-more\", theme::ICON_CHEVRON_DOWN, \"More\", &p)\n          .size(IconButtonSize::Small),\n        32.,\n      ),\n  )"
+          "text": "let p = p(cx);\ndiv()\n  .w(px(360.))\n  .flex()\n  .flex_col()\n  .child(\n    Row::new(\"ws-1\", &p)\n      .icon(theme::ICON_CIRCLE_DOT)\n      .title(\"feat/event-ingest\")\n      .trailing(Dot::new(Tone::GitOpen, \"Pull request open\", &p)),\n  )\n  .child(\n    Row::new(\"ws-2\", &p)\n      .icon(theme::ICON_CIRCLE_DOT)\n      .title(\"feat/keyvalues-cache\")\n      .selected(true)\n      .trailing(Count::new(3, &p)),\n  )\n  .child(\n    Row::new(\"ws-3\", &p)\n      .density(RowDensity::Default)\n      .title(\"main\")\n      .meta(\"default branch\"),\n  )\n  .child(\n    Row::new(\"commit\", &p)\n      .density(RowDensity::TwoLine)\n      .title(\"feat: keyvalues cache\")\n      .meta(\"just now · +9 −0\")\n      .actions(\n        IconButton::new(\"commit-more\", theme::ICON_CHEVRON_DOWN, \"More\", &p)\n          .size(IconButtonSize::Small),\n        32.,\n      ),\n  )"
         }
       ],
       "themes": [
@@ -1661,6 +1697,42 @@
           "height": 131,
           "scale": 2.0,
           "hash": "8ee89de92f6f8337"
+        }
+      ]
+    },
+    {
+      "id": "row/slots",
+      "title": "Slots and load more",
+      "component": "Row",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv()\n  .w(px(360.))\n  .flex()\n  .flex_col()\n  .child(\n    Row::new(\"file-1\", &p)\n      .density(RowDensity::Default)\n      .leading(Checkbox::new(\"file-1-check\", &p).checked(CheckState::On))\n      .title(\"src/main.rs\")\n      .meta(\"src\")\n      .trailing(Badge::new(\"M\", &p).tone(Tone::Warning)),\n  )\n  .child(\n    Row::new(\"file-2\", &p)\n      .density(RowDensity::Default)\n      .leading(Checkbox::new(\"file-2-check\", &p))\n      .title(\"src/lib.rs\")\n      .meta(\"src\")\n      .selected(true)\n      .trailing(Badge::new(\"A\", &p).tone(Tone::GitOpen)),\n  )\n  .child(Row::load_more(\"files-more\", false, &p))\n  .child(Row::load_more(\"files-loading\", true, &p))"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/row/slots/light/default.png",
+          "width": 392,
+          "height": 123,
+          "scale": 2.0,
+          "hash": "60ebb8b6cfd0b7af"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/row/slots/dark/default.png",
+          "width": 392,
+          "height": 123,
+          "scale": 2.0,
+          "hash": "1a93712405dbb530"
         }
       ]
     },
@@ -1818,6 +1890,792 @@
           "height": 292,
           "scale": 2.0,
           "hash": "ec8c55975685409d"
+        }
+      ]
+    },
+    {
+      "id": "dialog/busy",
+      "title": "Custom header, busy verb",
+      "component": "Dialog",
+      "code": [
+        {
+          "text": "let p = p(cx);\nlet busy = "
+        },
+        {
+          "knob": "busy"
+        },
+        {
+          "text": ";\nDialog::new(\"rename\", &p)\n  .width(520.)\n  .title(\"Rename workspace\")\n  .header(\n    div()\n      .flex()\n      .items_center()\n      .gap_2()\n      .text_lg()\n      .child(\"Rename workspace\")\n      .child(Badge::new(\"treq/login\", &p)),\n  )\n  .primary_disabled(busy)\n  .on_close(|_, _| {})\n  .child(\"A custom header, and a verb that is busy: Enter waits for it.\")\n  .footer([\n    Button::new(\"rename-cancel\", &p)\n      .variant(Variant::Outline)\n      .label(\"Cancel\")\n      .into_any_element(),\n    Button::new(\"rename-confirm\", &p)\n      .disabled(busy)\n      .label(if busy { \"Renaming…\" } else { \"Rename\" })\n      .into_any_element(),\n  ])"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "busy",
+          "type": "bool",
+          "default": true
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "busy=true",
+          "values": {
+            "busy": true
+          },
+          "is_default": true,
+          "file": "snapshots/dialog/busy/light/default.png",
+          "width": 632,
+          "height": 292,
+          "scale": 2.0,
+          "hash": "da00a724da15bde3"
+        },
+        {
+          "theme": "light",
+          "key": "busy=false",
+          "values": {
+            "busy": false
+          },
+          "file": "snapshots/dialog/busy/light/busy=false.png",
+          "width": 632,
+          "height": 292,
+          "scale": 2.0,
+          "hash": "4a927e5fcd2b2ef6"
+        },
+        {
+          "theme": "dark",
+          "key": "busy=true",
+          "values": {
+            "busy": true
+          },
+          "is_default": true,
+          "file": "snapshots/dialog/busy/dark/default.png",
+          "width": 632,
+          "height": 292,
+          "scale": 2.0,
+          "hash": "14f69e5892313cf1"
+        },
+        {
+          "theme": "dark",
+          "key": "busy=false",
+          "values": {
+            "busy": false
+          },
+          "file": "snapshots/dialog/busy/dark/busy=false.png",
+          "width": 632,
+          "height": 292,
+          "scale": 2.0,
+          "hash": "b9d871b523155ef4"
+        }
+      ]
+    },
+    {
+      "id": "floating",
+      "title": "Floating surface",
+      "component": "Floating",
+      "code": [
+        {
+          "text": "let p = p(cx);\nfloating(div(), &p)\n  .w(px(360.))\n  .bg(p.background)\n  .p_3()\n  .child(\"A surface that floats without being a dialog: the palette, a file finder.\")"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/floating/light/default.png",
+          "width": 512,
+          "height": 192,
+          "scale": 2.0,
+          "hash": "1c2dd8149f90f654"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/floating/dark/default.png",
+          "width": 512,
+          "height": 192,
+          "scale": 2.0,
+          "hash": "edd230fefa1691c3"
+        }
+      ]
+    },
+    {
+      "id": "card/variants",
+      "title": "Variants",
+      "component": "Card",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv().w(px(360.)).child(\n  Card::new(\"card\", &p)\n    .variant("
+        },
+        {
+          "knob": "variant",
+          "code": {
+            "elevated": "CardVariant::Elevated",
+            "ghost": "CardVariant::Ghost",
+            "outlined": "CardVariant::Outlined"
+          }
+        },
+        {
+          "text": ")\n    .selected("
+        },
+        {
+          "knob": "selected"
+        },
+        {
+          "text": ")\n    .header(\n      CardHeader::new(\"treq\")\n        .description(\"~/code/treq\")\n        .action(IconButton::new(\"card-more\", theme::ICON_MORE, \"More\", &p)),\n    )\n    .child(\"3 workspaces, 1 with uncommitted changes.\")\n    .footer(\n      CardFooter::new()\n        .end(\n          Button::new(\"card-cancel\", &p)\n            .variant(Variant::Ghost)\n            .label(\"Cancel\"),\n        )\n        .end(Button::new(\"card-open\", &p).label(\"Open\")),\n    ),\n)"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "variant",
+          "type": "select",
+          "options": [
+            "outlined",
+            "elevated",
+            "ghost"
+          ],
+          "default": "outlined"
+        },
+        {
+          "name": "selected",
+          "type": "bool",
+          "default": false
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "variant=outlined,selected=false",
+          "values": {
+            "selected": false,
+            "variant": "outlined"
+          },
+          "is_default": true,
+          "file": "snapshots/card/variants/light/default.png",
+          "width": 472,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "da63c861784d5994"
+        },
+        {
+          "theme": "light",
+          "key": "variant=outlined,selected=true",
+          "values": {
+            "selected": true,
+            "variant": "outlined"
+          },
+          "file": "snapshots/card/variants/light/selected=true.png",
+          "width": 472,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "6735672489af1e04"
+        },
+        {
+          "theme": "light",
+          "key": "variant=elevated,selected=false",
+          "values": {
+            "selected": false,
+            "variant": "elevated"
+          },
+          "file": "snapshots/card/variants/light/variant=elevated.png",
+          "width": 472,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "a98b18d80468fd18"
+        },
+        {
+          "theme": "light",
+          "key": "variant=elevated,selected=true",
+          "values": {
+            "selected": true,
+            "variant": "elevated"
+          },
+          "file": "snapshots/card/variants/light/variant=elevated,selected=true.png",
+          "width": 472,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "6735672489af1e04"
+        },
+        {
+          "theme": "light",
+          "key": "variant=ghost,selected=false",
+          "values": {
+            "selected": false,
+            "variant": "ghost"
+          },
+          "file": "snapshots/card/variants/light/variant=ghost.png",
+          "width": 472,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "b662a7e36a27ea7a"
+        },
+        {
+          "theme": "light",
+          "key": "variant=ghost,selected=true",
+          "values": {
+            "selected": true,
+            "variant": "ghost"
+          },
+          "file": "snapshots/card/variants/light/variant=ghost,selected=true.png",
+          "width": 472,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "0e12ea206ac72643"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=outlined,selected=false",
+          "values": {
+            "selected": false,
+            "variant": "outlined"
+          },
+          "is_default": true,
+          "file": "snapshots/card/variants/dark/default.png",
+          "width": 472,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "18f5b86d0cab6ef8"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=outlined,selected=true",
+          "values": {
+            "selected": true,
+            "variant": "outlined"
+          },
+          "file": "snapshots/card/variants/dark/selected=true.png",
+          "width": 472,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "2e50f8c992925a10"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=elevated,selected=false",
+          "values": {
+            "selected": false,
+            "variant": "elevated"
+          },
+          "file": "snapshots/card/variants/dark/variant=elevated.png",
+          "width": 472,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "b64ee603eafd5483"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=elevated,selected=true",
+          "values": {
+            "selected": true,
+            "variant": "elevated"
+          },
+          "file": "snapshots/card/variants/dark/variant=elevated,selected=true.png",
+          "width": 472,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "781df6ccc05f8f03"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=ghost,selected=false",
+          "values": {
+            "selected": false,
+            "variant": "ghost"
+          },
+          "file": "snapshots/card/variants/dark/variant=ghost.png",
+          "width": 472,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "e1b22b17ccd4ddd4"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=ghost,selected=true",
+          "values": {
+            "selected": true,
+            "variant": "ghost"
+          },
+          "file": "snapshots/card/variants/dark/variant=ghost,selected=true.png",
+          "width": 472,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "58c4c0eca2489c63"
+        }
+      ]
+    },
+    {
+      "id": "card/flush",
+      "title": "Flush list, split footer",
+      "component": "Card",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv().w(px(360.)).child(\n  Card::new(\"branches\", &p)\n    .header(CardHeader::new(\"Branches\").action(Count::new(3, &p)))\n    .flush(true)\n    .children([\"main\", \"feat/cards\", \"fix/forms\"].map(|b| Row::new(b, &p).title(b)))\n    .footer(\n      CardFooter::new()\n        .start(\n          Button::new(\"b-delete\", &p)\n            .variant(Variant::DestructiveOutline)\n            .label(\"Delete\"),\n        )\n        .end(\n          Button::new(\"b-open\", &p)\n            .variant(Variant::Outline)\n            .label(\"Open\"),\n        ),\n    ),\n)"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/card/flush/light/default.png",
+          "width": 472,
+          "height": 292,
+          "scale": 2.0,
+          "hash": "c8517707f0956709"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/card/flush/dark/default.png",
+          "width": 472,
+          "height": 292,
+          "scale": 2.0,
+          "hash": "1fcb7d18b463312d"
+        }
+      ]
+    },
+    {
+      "id": "form/layouts",
+      "title": "Vertical, horizontal, inline",
+      "component": "Form",
+      "description": "Sections, a 2:1 row, a path picker and a checkbox in one form.",
+      "code": [
+        {
+          "text": "let layout = "
+        },
+        {
+          "knob": "layout",
+          "code": {
+            "horizontal": "FormLayout::horizontal()",
+            "inline": "FormLayout::Inline",
+            "vertical": "FormLayout::Vertical"
+          }
+        },
+        {
+          "text": ";\nlet error = "
+        },
+        {
+          "knob": "error"
+        },
+        {
+          "text": ";\ncx.new(|cx| FormDemo::new(layout, error, window, cx))"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "layout",
+          "type": "select",
+          "options": [
+            "vertical",
+            "horizontal",
+            "inline"
+          ],
+          "default": "vertical"
+        },
+        {
+          "name": "error",
+          "type": "bool",
+          "default": false
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "layout=vertical,error=false",
+          "values": {
+            "error": false,
+            "layout": "vertical"
+          },
+          "is_default": true,
+          "file": "snapshots/form/layouts/light/default.png",
+          "width": 672,
+          "height": 552,
+          "scale": 2.0,
+          "hash": "7046959ad5701b62"
+        },
+        {
+          "theme": "light",
+          "key": "layout=vertical,error=true",
+          "values": {
+            "error": true,
+            "layout": "vertical"
+          },
+          "file": "snapshots/form/layouts/light/error=true.png",
+          "width": 672,
+          "height": 552,
+          "scale": 2.0,
+          "hash": "09b3d1f1f8941f1e"
+        },
+        {
+          "theme": "light",
+          "key": "layout=horizontal,error=false",
+          "values": {
+            "error": false,
+            "layout": "horizontal"
+          },
+          "file": "snapshots/form/layouts/light/layout=horizontal.png",
+          "width": 672,
+          "height": 552,
+          "scale": 2.0,
+          "hash": "80ce9a9edc2a96f7"
+        },
+        {
+          "theme": "light",
+          "key": "layout=horizontal,error=true",
+          "values": {
+            "error": true,
+            "layout": "horizontal"
+          },
+          "file": "snapshots/form/layouts/light/layout=horizontal,error=true.png",
+          "width": 672,
+          "height": 552,
+          "scale": 2.0,
+          "hash": "2cfd2989dfa013b7"
+        },
+        {
+          "theme": "light",
+          "key": "layout=inline,error=false",
+          "values": {
+            "error": false,
+            "layout": "inline"
+          },
+          "file": "snapshots/form/layouts/light/layout=inline.png",
+          "width": 672,
+          "height": 552,
+          "scale": 2.0,
+          "hash": "b36b7f1b509dda10"
+        },
+        {
+          "theme": "light",
+          "key": "layout=inline,error=true",
+          "values": {
+            "error": true,
+            "layout": "inline"
+          },
+          "file": "snapshots/form/layouts/light/layout=inline,error=true.png",
+          "width": 672,
+          "height": 552,
+          "scale": 2.0,
+          "hash": "b36b7f1b509dda10"
+        },
+        {
+          "theme": "dark",
+          "key": "layout=vertical,error=false",
+          "values": {
+            "error": false,
+            "layout": "vertical"
+          },
+          "is_default": true,
+          "file": "snapshots/form/layouts/dark/default.png",
+          "width": 672,
+          "height": 552,
+          "scale": 2.0,
+          "hash": "71ed6f51d731e60b"
+        },
+        {
+          "theme": "dark",
+          "key": "layout=vertical,error=true",
+          "values": {
+            "error": true,
+            "layout": "vertical"
+          },
+          "file": "snapshots/form/layouts/dark/error=true.png",
+          "width": 672,
+          "height": 552,
+          "scale": 2.0,
+          "hash": "9ab8e879c84e40f4"
+        },
+        {
+          "theme": "dark",
+          "key": "layout=horizontal,error=false",
+          "values": {
+            "error": false,
+            "layout": "horizontal"
+          },
+          "file": "snapshots/form/layouts/dark/layout=horizontal.png",
+          "width": 672,
+          "height": 552,
+          "scale": 2.0,
+          "hash": "deb453c743702d81"
+        },
+        {
+          "theme": "dark",
+          "key": "layout=horizontal,error=true",
+          "values": {
+            "error": true,
+            "layout": "horizontal"
+          },
+          "file": "snapshots/form/layouts/dark/layout=horizontal,error=true.png",
+          "width": 672,
+          "height": 552,
+          "scale": 2.0,
+          "hash": "dd714fa30ac1703a"
+        },
+        {
+          "theme": "dark",
+          "key": "layout=inline,error=false",
+          "values": {
+            "error": false,
+            "layout": "inline"
+          },
+          "file": "snapshots/form/layouts/dark/layout=inline.png",
+          "width": 672,
+          "height": 552,
+          "scale": 2.0,
+          "hash": "6858446b4641e6b6"
+        },
+        {
+          "theme": "dark",
+          "key": "layout=inline,error=true",
+          "values": {
+            "error": true,
+            "layout": "inline"
+          },
+          "file": "snapshots/form/layouts/dark/layout=inline,error=true.png",
+          "width": 672,
+          "height": 552,
+          "scale": 2.0,
+          "hash": "6858446b4641e6b6"
+        }
+      ]
+    },
+    {
+      "id": "field/settings",
+      "title": "Settings (trailing)",
+      "component": "Field",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv().w(px(420.)).child(\n  Card::new(\"settings\", &p).flush(true).child(\n    div()\n      .flex()\n      .flex_col()\n      .gap_3()\n      .p_4()\n      .child(\n        Field::new(\"compact\", &p)\n          .layout(FieldLayout::Trailing)\n          .label(\"Compact rows\")\n          .hint(\"28px rows in the sidebar.\")\n          .child(Checkbox::new(\"compact-switch\", &p).switch().checked(true)),\n      )\n      .child(\n        Field::new(\"signout\", &p)\n          .layout(FieldLayout::Trailing)\n          .label(\"Sign out everywhere\")\n          .child(\n            Button::new(\"signout-btn\", &p)\n              .variant(Variant::DestructiveOutline)\n              .label(\"Sign out…\"),\n          ),\n      ),\n  ),\n)"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/field/settings/light/default.png",
+          "width": 532,
+          "height": 232,
+          "scale": 2.0,
+          "hash": "2a65ac7dc1d09ef1"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/field/settings/dark/default.png",
+          "width": 532,
+          "height": 232,
+          "scale": 2.0,
+          "hash": "ee98819b208e16a5"
+        }
+      ]
+    },
+    {
+      "id": "checkbox/radio-switch",
+      "title": "Radio and switch",
+      "component": "Checkbox",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv()\n  .flex()\n  .flex_col()\n  .gap_2()\n  .child(\n    Checkbox::new(\"r1\", &p)\n      .radio()\n      .checked(true)\n      .label(\"Merge commit\"),\n  )\n  .child(Checkbox::new(\"r2\", &p).radio().label(\"Squash and merge\"))\n  .child(\n    Checkbox::new(\"s1\", &p)\n      .switch()\n      .checked(true)\n      .label(\"Delete branch after merge\"),\n  )\n  .child(Checkbox::new(\"s2\", &p).switch().label(\"Auto-merge\"))"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/checkbox/radio-switch/light/default.png",
+          "width": 392,
+          "height": 192,
+          "scale": 2.0,
+          "hash": "7446865e8ca1bb5f"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/checkbox/radio-switch/dark/default.png",
+          "width": 392,
+          "height": 192,
+          "scale": 2.0,
+          "hash": "289561431c788da5"
+        }
+      ]
+    },
+    {
+      "id": "path-field",
+      "title": "Folder",
+      "component": "PathField",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv().w(px(360.)).child(\n  PathField::new(\"clone\", &p)\n    .value("
+        },
+        {
+          "knob": "chosen"
+        },
+        {
+          "text": ".then_some(\"~/code/treq\"))\n    .disabled("
+        },
+        {
+          "knob": "disabled"
+        },
+        {
+          "text": ")\n    .on_pick(|_, _, _| {}),\n)"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "chosen",
+          "type": "bool",
+          "default": true
+        },
+        {
+          "name": "disabled",
+          "type": "bool",
+          "default": false
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "chosen=true,disabled=false",
+          "values": {
+            "chosen": true,
+            "disabled": false
+          },
+          "is_default": true,
+          "file": "snapshots/path-field/light/default.png",
+          "width": 472,
+          "height": 112,
+          "scale": 2.0,
+          "hash": "54b18c5fd0c1576e"
+        },
+        {
+          "theme": "light",
+          "key": "chosen=true,disabled=true",
+          "values": {
+            "chosen": true,
+            "disabled": true
+          },
+          "file": "snapshots/path-field/light/disabled=true.png",
+          "width": 472,
+          "height": 112,
+          "scale": 2.0,
+          "hash": "bb2a86ba6681ace9"
+        },
+        {
+          "theme": "light",
+          "key": "chosen=false,disabled=false",
+          "values": {
+            "chosen": false,
+            "disabled": false
+          },
+          "file": "snapshots/path-field/light/chosen=false.png",
+          "width": 472,
+          "height": 112,
+          "scale": 2.0,
+          "hash": "2c9e6e62240211c8"
+        },
+        {
+          "theme": "light",
+          "key": "chosen=false,disabled=true",
+          "values": {
+            "chosen": false,
+            "disabled": true
+          },
+          "file": "snapshots/path-field/light/chosen=false,disabled=true.png",
+          "width": 472,
+          "height": 112,
+          "scale": 2.0,
+          "hash": "0183f3c4d8b9aaef"
+        },
+        {
+          "theme": "dark",
+          "key": "chosen=true,disabled=false",
+          "values": {
+            "chosen": true,
+            "disabled": false
+          },
+          "is_default": true,
+          "file": "snapshots/path-field/dark/default.png",
+          "width": 472,
+          "height": 112,
+          "scale": 2.0,
+          "hash": "c9a8f12a981b9745"
+        },
+        {
+          "theme": "dark",
+          "key": "chosen=true,disabled=true",
+          "values": {
+            "chosen": true,
+            "disabled": true
+          },
+          "file": "snapshots/path-field/dark/disabled=true.png",
+          "width": 472,
+          "height": 112,
+          "scale": 2.0,
+          "hash": "c5e93b1112566f58"
+        },
+        {
+          "theme": "dark",
+          "key": "chosen=false,disabled=false",
+          "values": {
+            "chosen": false,
+            "disabled": false
+          },
+          "file": "snapshots/path-field/dark/chosen=false.png",
+          "width": 472,
+          "height": 112,
+          "scale": 2.0,
+          "hash": "81400aebf95b57ad"
+        },
+        {
+          "theme": "dark",
+          "key": "chosen=false,disabled=true",
+          "values": {
+            "chosen": false,
+            "disabled": true
+          },
+          "file": "snapshots/path-field/dark/chosen=false,disabled=true.png",
+          "width": 472,
+          "height": 112,
+          "scale": 2.0,
+          "hash": "bca7549448e0f0d0"
         }
       ]
     }
