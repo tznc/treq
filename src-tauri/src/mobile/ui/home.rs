@@ -319,23 +319,22 @@ impl HomeScreen {
     let email = model.user.clone()?;
     let busy = model.auth_busy;
     Some(
-      widgets::section("Account", cx)
-        .child(
-          widgets::card(cx).p_4().child(
-            h_flex()
-              .gap_3()
-              .items_center()
-              .child(div().flex_1().min_w_0().truncate().child(email))
-              .child(
-                Button::new("sign-out")
-                  .outline()
-                  .label("Sign out")
-                  .loading(busy)
-                  .on_click(|_, _, cx| super::sign_out(cx))
-                  .touch(),
-              ),
-          ),
-        )
+      widgets::section("Account", cx).child(
+        widgets::card(cx).p_4().child(
+          h_flex()
+            .gap_3()
+            .items_center()
+            .child(div().flex_1().min_w_0().truncate().child(email))
+            .child(
+              Button::new("sign-out")
+                .outline()
+                .label("Sign out")
+                .loading(busy)
+                .on_click(|_, _, cx| super::sign_out(cx))
+                .touch(),
+            ),
+        ),
+      ),
     )
   }
 
