@@ -40,3 +40,22 @@ create policy organization_projects_member_all on public.organization_projects
   for all to authenticated
   using (public.is_organization_member(org_id))
   with check (public.is_organization_member(org_id));
+
+-- Upsert by id, as the caller: RLS decides which organizations it may write.
+create function public.put_organization_project(
+  p_id uuid, p_org_id uuid, p_name text, p_repos jsonb, p_prompt text, p_context_paths jsonb
+)
+returns void
+language sql
+security invoker
+set search_path = ''
+as $$
+  insert into public.organization_projects (id, org_id, name, repos, prompt, context_paths)
+  values (p_id, p_org_id, p_name, p_repos, p_prompt, p_context_paths)
+  on conflict (id) do update
+    set org_id = excluded.org_id, name = excluded.name, repos = excluded.repos,
+        prompt = excluded.prompt, context_paths = excluded.context_paths, updated_at = now();
+$$;
+
+revoke all on function public.put_organization_project(uuid, uuid, text, jsonb, text, jsonb) from public, anon;
+grant execute on function public.put_organization_project(uuid, uuid, text, jsonb, text, jsonb) to authenticated;

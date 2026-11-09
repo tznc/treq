@@ -179,7 +179,50 @@ pub fn start(app: &AppHandle) {
     cloud.start().await;
     cloud.keep_fresh().await;
   });
+  tauri::async_runtime::spawn(sync_projects(sync_cloud.clone()));
   tauri::async_runtime::spawn(sync_config(sync_cloud));
+}
+
+/// Team project sync, once signed in, then hourly (`core::project_sync`).
+async fn sync_projects(cloud: Arc<Cloud>) {
+  use crate::core::{cloud_catalog, project_sync, projects};
+  loop {
+    if cloud.supabase.auth.session().is_none() {
+      tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+      continue;
+    }
+    {
+      if let Ok(orgs) = cloud_catalog::fetch_cloud_organizations(&cloud.supabase).await {
+        let org_ids: Vec<String> = orgs.into_iter().map(|o| o.org_id).collect();
+        let supabase = cloud.supabase.clone();
+        // rusqlite's Connection is not Sync, so the pass runs on its own thread.
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+          let app_dir = crate::core::app_data_dir()?;
+          let db = crate::db::Database::new(app_dir.join("treq.db")).ok()?;
+          let known = projects::list(db.conn())
+            .ok()?
+            .into_iter()
+            .flat_map(|p| p.repos)
+            .collect();
+          let mapper = project_sync::GitMapper {
+            known,
+            clones_root: projects::clones_root(),
+          };
+          let transport = project_sync::SupabaseTransport(supabase);
+          tauri::async_runtime::block_on(project_sync::sync(
+            db.conn(),
+            &transport,
+            &mapper,
+            &org_ids,
+          ))
+          .map_err(|e| log::warn!("project sync: {e}"))
+          .ok()
+        })
+        .await;
+      }
+    }
+    tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+  }
 }
 
 /// Config sync, once signed in: pulls a missing local copy, then pushes

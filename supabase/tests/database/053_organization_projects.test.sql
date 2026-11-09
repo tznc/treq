@@ -1,7 +1,7 @@
 -- Team projects from 076_organization_projects.sql: members of an
 -- organization read and write its projects; outsiders see nothing.
 begin;
-select plan(10);
+select plan(13);
 
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000053a1', 'proj-owner@example.com'),
@@ -40,12 +40,25 @@ select throws_ok(
      values ('00000000-0000-0000-0000-0000000053b1', 'Bad', '[1]') $$,
   '23514', null, 'repos reject non-strings');
 
+select lives_ok(
+  $$ select public.put_organization_project('00000000-0000-0000-0000-0000000053c2',
+       '00000000-0000-0000-0000-0000000053b1', 'Synced', '["acme/api"]', 'Use pnpm', '[]') $$,
+  'put_organization_project inserts');
+select lives_ok(
+  $$ select public.put_organization_project('00000000-0000-0000-0000-0000000053c2',
+       '00000000-0000-0000-0000-0000000053b1', 'Synced 2', '["acme/api"]', '', '[]') $$,
+  'put_organization_project updates by id');
+
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000053a3","role":"authenticated"}', true);
 select is((select count(*)::int from public.organization_projects), 0, 'an outsider sees no team projects');
 select throws_ok(
   $$ insert into public.organization_projects (org_id, name, repos)
      values ('00000000-0000-0000-0000-0000000053b1', 'Evil', '[]') $$,
   '42501', null, 'an outsider cannot create a team project');
+select throws_ok(
+  $$ select public.put_organization_project(gen_random_uuid(),
+       '00000000-0000-0000-0000-0000000053b1', 'Evil', '[]', '', '[]') $$,
+  '42501', null, 'an outsider cannot put a team project');
 reset role;
 
 select is((select name from public.organization_projects where id = '00000000-0000-0000-0000-0000000053c1'),
