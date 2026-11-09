@@ -241,6 +241,27 @@ function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
   );
 }
 
+// Lucide "credit-card", sized to sit before a button label.
+function CreditCardIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ verticalAlign: "-3px", marginRight: "0.4rem" }}
+    >
+      <rect width="20" height="14" x="2" y="5" rx="2" />
+      <line x1="2" x2="22" y1="10" y2="10" />
+    </svg>
+  );
+}
+
 // ── Subscription tab ─────────────────────────────────────────────────────────
 
 // After embedded Checkout returns, Pro appears once the stripe-webhook
@@ -459,6 +480,7 @@ function SubscriptionTab({
                     ...(!checkoutAvailable ? styles.primaryButtonDisabled : {}),
                   }}
                 >
+                  <CreditCardIcon />
                   Upgrade to Pro
                 </button>
               </span>
@@ -1167,7 +1189,8 @@ function GetTeamCard({
               ...(!checkoutAvailable ? styles.primaryButtonDisabled : {}),
             }}
           >
-            Get Team
+            <CreditCardIcon />
+            Start a team
           </button>
         </form>
       )}

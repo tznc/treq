@@ -566,7 +566,7 @@ test.describe('Dashboard team tab', () => {
     test.skip(checkoutLive, 'stripePayments is on and the live key is set');
     const { page, calls, close } = await openTeamTab(browser, emptyTeam());
     const upsell = teamSection(page).getByRole('region', { name: 'Get Team' });
-    await expect(upsell.getByRole('button', { name: 'Get Team' })).toBeDisabled();
+    await expect(upsell.getByRole('button', { name: 'Start a team' })).toBeDisabled();
     await expect(upsell).toContainText('Coming Soon');
     expect(calls.organizations).toEqual([]);
     await close();
@@ -577,7 +577,7 @@ test.describe('Dashboard team tab', () => {
     const { page, calls, close } = await openTeamTab(browser, emptyTeam());
     const upsell = teamSection(page).getByRole('region', { name: 'Get Team' });
     await upsell.getByRole('textbox', { name: 'Organization name' }).fill('Acme');
-    await upsell.getByRole('button', { name: 'Get Team' }).click();
+    await upsell.getByRole('button', { name: 'Start a team' }).click();
     await expect(page.getByRole('heading', { name: 'Stripe Checkout cs_test_team' })).toBeVisible();
     expect(calls.organizations).toContainEqual({ action: 'create', name: 'Acme' });
     expect(calls.checkout).toEqual([{ plan: 'team', organization_id: ORG }]);
