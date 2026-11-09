@@ -345,6 +345,83 @@ pub const CONTROL_SM: f32 = 24.;
 pub const CONTROL_MD: f32 = 28.;
 pub const CONTROL_LG: f32 = 32.;
 
+/// The 4px spacing scale for gaps and padding (Bootstrap's spacers, MUI's
+/// 4px grid). Lay out with these rather than raw pixel values.
+pub mod space {
+  pub const XS: f32 = 4.;
+  pub const SM: f32 = 8.;
+  pub const MD: f32 = 12.;
+  pub const LG: f32 = 16.;
+  pub const XL: f32 = 24.;
+  pub const XXL: f32 = 32.;
+}
+
+/// Between the fields of a form.
+pub const FIELD_GAP: f32 = space::LG;
+/// Between a field's label, its control and its hint.
+pub const LABEL_GAP: f32 = 6.;
+/// The label column of a horizontal form.
+pub const LABEL_WIDTH: f32 = 140.;
+/// Below this window width, a horizontal form stacks its labels on top.
+pub const STACK_BREAKPOINT: f32 = 480.;
+/// The smallest box a finger can hit reliably (Apple's 44pt).
+pub const TOUCH_TARGET: f32 = 44.;
+/// A full-width call to action in a phone's bottom bar.
+pub const CTA_HEIGHT: f32 = 52.;
+
+impl Density {
+  /// The installed density, Desktop when none is set.
+  pub fn current(cx: &App) -> Self {
+    cx.try_global::<Density>().copied().unwrap_or_default()
+  }
+
+  /// How tall a field's control is: a toolbar control, or a finger's target.
+  pub fn control_height(self) -> f32 {
+    match self {
+      Density::Desktop => CONTROL_MD,
+      Density::Touch => TOUCH_TARGET,
+    }
+  }
+
+  /// The padding of a card's header, body and footer.
+  pub fn card_padding(self) -> f32 {
+    match self {
+      Density::Desktop => space::LG,
+      Density::Touch => 20.,
+    }
+  }
+}
+
+/// How far a surface sits above the page: a card, a popover, the palette,
+/// a dialog (MUI's `elevation`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Elevation {
+  #[default]
+  Flat,
+  Raised,
+  Overlay,
+  Modal,
+}
+
+impl Elevation {
+  /// The surface's shadows; none when flat.
+  pub fn shadows(self) -> Vec<gpui::BoxShadow> {
+    let shadow = |y: f32, blur: f32, alpha: f32| gpui::BoxShadow {
+      color: hsla(0., 0., 0., alpha),
+      offset: gpui::point(gpui::px(0.), gpui::px(y)),
+      blur_radius: gpui::px(blur),
+      spread_radius: gpui::px(0.),
+      inset: false,
+    };
+    match self {
+      Elevation::Flat => Vec::new(),
+      Elevation::Raised => vec![shadow(1., 2., 0.06), shadow(4., 12., 0.06)],
+      Elevation::Overlay => vec![shadow(4., 8., 0.08), shadow(12., 24., 0.10)],
+      Elevation::Modal => vec![shadow(8., 16., 0.12), shadow(24., 48., 0.18)],
+    }
+  }
+}
+
 /// List row heights ([`crate::RowDensity`]): compact for the sidebar, file
 /// trees and menus; the default for lists in screens, dialogs and settings.
 pub const ROW_HEIGHT_COMPACT: f32 = 28.;
@@ -491,6 +568,16 @@ pub struct Palette {
 
 /// A CSS `hsl(h s% l%)` token.
 impl Palette {
+  /// A raised surface's fill: the card, a shade lighter in the dark theme,
+  /// where a shadow barely shows (MUI's dark overlay).
+  pub fn raised(&self) -> Hsla {
+    if self.dark {
+      hsla(0., 0., 0.23, 1.)
+    } else {
+      self.card
+    }
+  }
+
   /// The one hover fill: rows, ghost buttons and menu items.
   pub fn hover(&self) -> Hsla {
     self.accent
@@ -843,4 +930,17 @@ pub mod tw {
   pub const YELLOW_400: u32 = 0xfacc15;
   pub const YELLOW_700: u32 = 0xa16207;
   pub const YELLOW_600: u32 = 0xca8a04;
+}
+
+#[cfg(test)]
+mod touch_tests {
+  use super::*;
+
+  #[test]
+  fn touch_controls_meet_the_44_target() {
+    assert_eq!(Density::Desktop.control_height(), CONTROL_MD);
+    assert_eq!(Density::Touch.control_height(), TOUCH_TARGET);
+    assert_eq!(TOUCH_TARGET, 44.);
+    assert_eq!(CTA_HEIGHT, 52.);
+  }
 }

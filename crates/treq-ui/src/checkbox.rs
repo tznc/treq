@@ -27,6 +27,35 @@ impl From<bool> for CheckState {
   }
 }
 
+/// The control's shape: a box, a radio circle or a switch track.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum CheckKind {
+  #[default]
+  Box,
+  /// One of a set; the caller unchecks the others.
+  Radio,
+  /// A setting that takes effect at once, with no Save.
+  Switch,
+}
+
+impl CheckKind {
+  pub fn role(self) -> Role {
+    match self {
+      CheckKind::Box => Role::CheckBox,
+      CheckKind::Radio => Role::RadioButton,
+      CheckKind::Switch => Role::Switch,
+    }
+  }
+
+  /// Width and height.
+  pub fn size(self) -> (f32, f32) {
+    match self {
+      CheckKind::Switch => (28., 16.),
+      _ => (13., 13.),
+    }
+  }
+}
+
 /// The box, with its [`Checkbox::label`] beside it. Given
 /// [`Checkbox::on_click`], the box and label are one control: a tab stop
 /// named by the label that Space toggles. Without it the box is drawn for a
@@ -37,6 +66,7 @@ pub struct Checkbox {
   base: Stateful<Div>,
   palette: Palette,
   state: CheckState,
+  kind: CheckKind,
   disabled: bool,
   label: Option<SharedString>,
   on_click: Option<OnClick>,
@@ -51,6 +81,7 @@ impl Checkbox {
       base: div().id(id).debug_selector(move || selector),
       palette: *palette,
       state: CheckState::Off,
+      kind: CheckKind::Box,
       disabled: false,
       label: None,
       on_click: None,
@@ -59,6 +90,18 @@ impl Checkbox {
 
   pub fn checked(mut self, state: impl Into<CheckState>) -> Self {
     self.state = state.into();
+    self
+  }
+
+  /// Draws it as a radio button: a circle with a dot when on.
+  pub fn radio(mut self) -> Self {
+    self.kind = CheckKind::Radio;
+    self
+  }
+
+  /// Draws it as a switch: a track whose knob slides right when on.
+  pub fn switch(mut self) -> Self {
+    self.kind = CheckKind::Switch;
     self
   }
 
@@ -109,8 +152,11 @@ impl RenderOnce for Checkbox {
       crate::tab_stop(key, window, cx)
     });
     let focused = focus.as_ref().is_some_and(|f| f.is_focused(window));
+    let on = self.state != CheckState::Off;
+    let (w, h) = self.kind.size();
     let square = div()
-      .size(zpx(13.))
+      .w(zpx(w))
+      .h(zpx(h))
       .flex_none()
       .flex()
       .items_center()
@@ -119,11 +165,35 @@ impl RenderOnce for Checkbox {
       .when(focused, |this| {
         this.shadow(vec![crate::focus_ring(&p, false)])
       })
-      .map(|this| match mark {
-        Some(mark) => this
+      .map(|this| match (self.kind, mark) {
+        (CheckKind::Switch, _) => this
+          .rounded_full()
+          .p(zpx(2.))
+          .bg(if on { p.primary } else { p.input })
+          .when(on, |t| t.justify_end())
+          .when(!on, |t| t.justify_start())
+          .child(
+            div()
+              .size(zpx(12.))
+              .rounded_full()
+              .bg(p.primary_foreground)
+              .shadow_sm(),
+          ),
+        (CheckKind::Radio, Some(_)) => this
+          .rounded_full()
           .bg(p.primary)
-          .child(icon(mark, 11., p.primary_foreground)),
-        None => this
+          .child(div().size(zpx(5.)).rounded_full().bg(p.primary_foreground)),
+        (CheckKind::Radio, None) => this
+          .rounded_full()
+          .border_1()
+          .border_color(p.muted_foreground)
+          .bg(p.background),
+        (CheckKind::Box, Some(mark)) => {
+          this
+            .bg(p.primary)
+            .child(icon(mark, 11., p.primary_foreground))
+        }
+        (CheckKind::Box, None) => this
           .border_1()
           .border_color(p.muted_foreground)
           .bg(p.background),
@@ -142,7 +212,7 @@ impl RenderOnce for Checkbox {
       .when(self.disabled, |this| this.opacity(0.5))
       .when(control, |this| {
         this
-          .role(Role::CheckBox)
+          .role(self.kind.role())
           .aria_toggled(toggled)
           .when_some(self.label.clone(), |this, label| this.aria_label(label))
       })
@@ -167,6 +237,20 @@ impl RenderOnce for Checkbox {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn radio_and_switch_are_checkbox_shapes_with_their_own_roles() {
+    let p = theme::palette(false);
+    assert_eq!(Checkbox::new("c", &p).kind.role(), Role::CheckBox);
+    let radio = Checkbox::new("r", &p).radio();
+    assert_eq!(radio.kind, CheckKind::Radio);
+    assert_eq!(radio.kind.role(), Role::RadioButton);
+    let switch = Checkbox::new("s", &p).switch();
+    assert_eq!(switch.kind, CheckKind::Switch);
+    assert_eq!(switch.kind.role(), Role::Switch);
+    assert_eq!(CheckKind::Switch.size(), (28., 16.));
+    assert_eq!(CheckKind::Radio.size(), (13., 13.));
+  }
 
   #[test]
   fn test_checkbox_builder() {

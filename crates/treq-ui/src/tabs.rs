@@ -17,6 +17,9 @@ pub enum TabsStyle {
   /// Labels with a line under the selected one: switches panels, such as
   /// GitHub / Linear.
   Underline,
+  /// A phone's bottom tab bar: equal tabs with the icon over the label,
+  /// for the top-level areas of a screen. Five tabs at most.
+  Bar,
 }
 
 /// One tab: a label, then an optional badge, count and status dot.
@@ -184,6 +187,7 @@ impl RenderOnce for Tabs {
     // A phone is tapped, so every tab is at least the 44pt touch minimum.
     let touch = cx.try_global::<theme::Density>().copied() == Some(theme::Density::Touch);
     let segmented = self.style == TabsStyle::Segmented;
+    let bar = self.style == TabsStyle::Bar;
     let selected = self.selected;
     let disabled: Vec<bool> = self.tabs.iter().map(|tab| tab.disabled).collect();
     let on_key = self.on_select.clone();
@@ -216,7 +220,12 @@ impl RenderOnce for Tabs {
           })
       })
       .map(|el| {
-        if segmented {
+        if bar {
+          el.w_full()
+            .border_t_1()
+            .border_color(p.border)
+            .bg(p.background)
+        } else if segmented {
           el.gap(zpx(2.))
             .p(zpx(2.))
             .rounded(zpx(theme::RADIUS_MD))
@@ -237,7 +246,12 @@ impl RenderOnce for Tabs {
         } else {
           p.muted_foreground
         };
-        text(div(), TextSize::Sm)
+        let fg = if bar && active && !tab.disabled {
+          p.primary
+        } else {
+          fg
+        };
+        text(div(), if bar { TextSize::Xs } else { TextSize::Sm })
           .id(tab.id)
           .debug_selector(move || selector)
           .role(gpui::Role::Tab)
@@ -250,7 +264,14 @@ impl RenderOnce for Tabs {
           .font_weight(gpui::FontWeight::MEDIUM)
           .text_color(fg)
           .map(|el| {
-            if segmented {
+            if bar {
+              el.flex_1()
+                .flex_col()
+                .justify_center()
+                .gap(zpx(2.))
+                .h(zpx(56.))
+                .relative()
+            } else if segmented {
               el.h(zpx(if touch { 44. } else { 24. }))
                 .when(touch, |el| el.flex_1().justify_center())
                 .px_2()
@@ -281,7 +302,9 @@ impl RenderOnce for Tabs {
               }
             })
           })
-          .when_some(tab.icon, |el, path| el.child(crate::icon(path, 16., fg)))
+          .when_some(tab.icon, |el, path| {
+            el.child(crate::icon(path, if bar { 22. } else { 16. }, fg))
+          })
           .child(tab.label)
           .when_some(tab.badge, |el, (label, tone)| {
             el.child(Badge::new(label, &p).tone(tone))
@@ -291,6 +314,9 @@ impl RenderOnce for Tabs {
             el.child(
               div()
                 .debug_selector(move || id)
+                .when(bar, |el| {
+                  el.absolute().top(zpx(4.)).left(gpui::relative(0.55))
+                })
                 .child(Count::new(count, &p)),
             )
           })
@@ -299,6 +325,9 @@ impl RenderOnce for Tabs {
             el.child(
               div()
                 .debug_selector(move || id)
+                .when(bar, |el| {
+                  el.absolute().top(zpx(6.)).left(gpui::relative(0.6))
+                })
                 .child(Dot::new(tone, label, &p)),
             )
           })
@@ -409,6 +438,34 @@ mod tests {
         .size
         .height;
       (f32::from(seg), f32::from(line))
+    }
+
+    struct Bar;
+
+    impl Render for Bar {
+      fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let p = theme::palette(false);
+        gpui::Styled::w(div(), gpui::px(400.)).child(
+          Tabs::new("bar", &p)
+            .style(TabsStyle::Bar)
+            .tab(Tab::new("bar-a", "Terminals").icon(theme::ICON_TERMINAL))
+            .tab(Tab::new("bar-b", "Changes").icon(theme::ICON_FILE_DIFF))
+            .tab(Tab::new("bar-c", "Commits").icon(theme::ICON_COMMIT))
+            .tab(Tab::new("bar-d", "Code").icon(theme::ICON_CODE)),
+        )
+      }
+    }
+
+    #[gpui::test]
+    fn a_tab_bar_splits_the_width_in_56_tall_tabs(cx: &mut TestAppContext) {
+      let window = cx.add_window(|_, _| Bar);
+      let mut cx = VisualTestContext::from_window(*window, cx);
+      cx.update(|window, cx| window.draw(cx).clear(cx));
+      let a = cx.debug_bounds("bar-a").unwrap();
+      let d = cx.debug_bounds("bar-d").unwrap();
+      assert_eq!(a.size.width, d.size.width);
+      assert_eq!(a.size.width, gpui::px(100.));
+      assert_eq!(a.size.height, gpui::px(56.));
     }
 
     struct Column;

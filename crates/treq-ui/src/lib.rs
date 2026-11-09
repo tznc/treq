@@ -6,17 +6,21 @@
 
 pub mod alert;
 pub mod badge;
+pub mod card;
 pub mod checkbox;
 pub mod copy_feedback;
 pub mod dialog;
 pub mod empty_state;
+pub mod form;
 pub mod icon_button;
 pub mod image;
+pub mod input_group;
 pub mod kbd;
 #[cfg(test)]
 mod keyboard_tests;
 pub mod list_nav;
 pub mod menu;
+pub mod path_field;
 pub mod picker;
 pub mod popover;
 pub mod press;
@@ -25,16 +29,21 @@ pub mod section_header;
 pub mod split_button;
 pub mod tabs;
 pub mod theme;
+pub mod touch;
 
 pub use alert::{Alert, Severity};
 pub use badge::{Badge, Count, Dot, Tone};
-pub use checkbox::{CheckState, Checkbox};
+pub use card::{Card, CardFooter, CardHeader, CardVariant};
+pub use checkbox::{CheckKind, CheckState, Checkbox};
 pub use dialog::{handler, tab_key, trap_tab, ConfirmDialog, Dialog};
 pub use empty_state::{error_actions, EmptyState, Loading, Skeleton};
+pub use form::{Field, FieldLayout, Form, FormActions, FormLayout, FormRow, FormSection};
 pub use icon_button::{IconButton, IconButtonSize};
+pub use input_group::InputGroup;
 pub use kbd::Kbd;
 pub use list_nav::{ListKey, ListNav};
 pub use menu::{MenuItem, MenuLabel, MenuSeparator};
+pub use path_field::PathField;
 pub use picker::{Picker, PickerPlacement};
 pub use popover::{floating, Popover};
 pub use row::{Row, RowDensity, TOUCH_ROW_HEIGHT};
@@ -836,7 +845,8 @@ impl<E: ParentElement> ParentElement for A11yDisabled<E> {
   }
 }
 
-/// `ui/card.tsx`'s `Card`: a bordered, rounded surface.
+/// `ui/card.tsx`'s `Card`: a bordered, rounded surface. Prefer [`Card`],
+/// which adds the header, padding and footer.
 pub fn card(p: &Palette) -> Div {
   div()
     .rounded(zpx(12.))

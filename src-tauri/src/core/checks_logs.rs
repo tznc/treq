@@ -884,7 +884,7 @@ pub fn run_logs_sql(repo_path: &str, sql: &str, max_rows: i64) -> Result<SqlResu
   let mut stmt = conn
     .prepare(&capped)
     .map_err(|e| format!("Query error: {}", e))?;
-  let columns: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
+  let columns: Vec<String> = stmt.column_names().map(String::from).collect();
 
   let mut rows = stmt.query([]).map_err(|e| format!("Query error: {}", e))?;
   let mut out_rows: Vec<Vec<Option<String>>> = Vec::new();
