@@ -7,9 +7,11 @@
 // redirects to the App's callback URL with a `code`. POST
 // /login/oauth/access_token turns it into a user access token, and
 // GET /user/installations lists the installations of this App that the user
-// can access. The token is only passed to that call; nothing keeps it.
+// can access. The grant (access and refresh token) is then kept in Vault
+// (github_user_tokens) so treq can call GitHub as the user later.
 
 import { getInstallation } from "../_shared/github/app.ts";
+import { parseUserGrant } from "../_shared/github/user-token.ts";
 import type { GitHubInstallationAccess } from "./lib.ts";
 
 export type GitHubAppOAuthCredentials = {
@@ -28,6 +30,7 @@ const USER_AGENT = "treq-github-app/1.0";
 export function githubInstallationAccess(
   credentials: GitHubAppOAuthCredentials,
   fetchImpl: typeof fetch = fetch,
+  now: () => number = Date.now,
 ): GitHubInstallationAccess {
   return {
     async exchangeCode(code) {
@@ -56,17 +59,7 @@ export function githubInstallationAccess(
         await res.body?.cancel();
         throw new Error(`GitHub token exchange → ${res.status}`);
       }
-      // GitHub reports a bad or expired code with 200 and an `error` field.
-      const answer = (await res.json()) as {
-        access_token?: unknown;
-        error?: unknown;
-      };
-      if (typeof answer.access_token !== "string" || !answer.access_token) {
-        const reason =
-          typeof answer.error === "string" ? answer.error : "no access_token";
-        throw new Error(`GitHub token exchange refused: ${reason}`);
-      }
-      return answer.access_token;
+      return parseUserGrant(await res.json(), now());
     },
 
     async userCanAccessInstallation(userToken, installationId) {
