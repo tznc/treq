@@ -881,6 +881,7 @@ fn onboarding_lists_projects_and_opens_one(cx: &mut TestAppContext) {
     id: "p1".into(),
     name: "Checkout revamp".into(),
     repos: vec!["/home/me/web".into(), "/home/me/api".into()],
+    org_id: None,
   }];
   let host = Arc::new(FakeHost {
     listing: with_projects,
@@ -911,6 +912,7 @@ fn onboarding_opens_the_project_of_the_row_clicked(cx: &mut TestAppContext) {
       id: id.into(),
       name: format!("Project {id}"),
       repos: vec![format!("/home/me/{id}")],
+      org_id: None,
     })
     .collect();
   let host = Arc::new(FakeHost {
@@ -937,6 +939,7 @@ fn onboarding_lists_projects_above_recent_repositories(cx: &mut TestAppContext) 
     id: "p1".into(),
     name: "Checkout".into(),
     repos: vec!["/home/me/web".into()],
+    org_id: None,
   }];
   let host = Arc::new(FakeHost {
     listing: with_projects,
@@ -961,4 +964,45 @@ fn onboarding_with_nothing_shows_the_empty_state_and_no_projects(cx: &mut TestAp
   let mut h = Harness::with_host(cx, onboarding(), host);
   assert!(!h.drawn("onboarding-projects"));
   assert!(h.drawn("onboarding-no-recents"));
+}
+
+fn owned(id: &str, org: Option<&str>) -> machines::ProjectSummary {
+  machines::ProjectSummary {
+    id: id.into(),
+    name: format!("Project {id}"),
+    repos: vec![format!("/home/me/{id}")],
+    org_id: org.map(Into::into),
+  }
+}
+
+#[gpui::test]
+fn onboarding_hides_the_owner_switcher_without_teams(cx: &mut TestAppContext) {
+  let mut l = listing();
+  l.projects = vec![owned("p1", None)];
+  let host = Arc::new(FakeHost {
+    listing: l,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(h.drawn("project-p1"));
+  assert!(!h.drawn("projects-owner"));
+}
+
+#[gpui::test]
+fn onboarding_switches_projects_between_personal_and_a_team(cx: &mut TestAppContext) {
+  let mut l = listing();
+  l.projects = vec![owned("mine", None), owned("team", Some("o1"))];
+  l.teams = vec![("o1".into(), "Acme".into())];
+  let host = Arc::new(FakeHost {
+    listing: l,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(h.drawn("projects-owner"));
+  assert!(
+    h.drawn("project-mine") && !h.drawn("project-team"),
+    "personal first"
+  );
+  h.click("projects-owner-o1");
+  assert!(h.drawn("project-team") && !h.drawn("project-mine"));
 }

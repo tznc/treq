@@ -106,6 +106,8 @@ pub struct OnboardingView {
   live: HashMap<String, Option<Result<TerminalStatus, String>>>,
   /// Other machines' + is open, offering an SSH host or a dev container.
   other_open: bool,
+  /// Whose projects show: `None` personal, else a Team organization.
+  project_owner: Option<String>,
 }
 
 /// The one group SSH hosts and dev containers share until there is one.
@@ -158,6 +160,7 @@ impl OnboardingView {
       terminals: HashMap::new(),
       live: HashMap::new(),
       other_open: false,
+      project_owner: None,
     };
     // Signing in, or the cloud workspace changing state, changes its row.
     cx.observe_global::<super::account_data::Account>(|view, cx| {
@@ -1168,7 +1171,47 @@ impl OnboardingView {
         )
       })
       .collect();
-    let projects = (!self.listing.projects.is_empty()).then(|| {
+    let owner = self
+      .project_owner
+      .clone()
+      .filter(|o| self.listing.teams.iter().any(|(id, _)| id == o));
+    let switcher = (!self.listing.teams.is_empty()).then(|| {
+      let mut tabs = ui::Tabs::segmented("projects-owner", &p)
+        .tab(ui::Tab::new("projects-owner-personal", "Personal"));
+      for (id, name) in &self.listing.teams {
+        tabs = tabs.tab(ui::Tab::new(format!("projects-owner-{id}"), name.clone()));
+      }
+      let selected = owner
+        .as_ref()
+        .and_then(|o| self.listing.teams.iter().position(|(id, _)| id == o))
+        .map_or(0, |i| i + 1);
+      let teams: Vec<String> = self
+        .listing
+        .teams
+        .iter()
+        .map(|(id, _)| id.clone())
+        .collect();
+      let view = cx.weak_entity();
+      div()
+        .px_2()
+        .pb_3()
+        .child(tabs.selected(selected).on_select(move |ix, _, cx| {
+          let owner = ix.checked_sub(1).and_then(|i| teams.get(i).cloned());
+          view
+            .update(cx, |view, cx| {
+              view.project_owner = owner;
+              cx.notify();
+            })
+            .ok();
+        }))
+    });
+    let shown: Vec<&super::machines::ProjectSummary> = self
+      .listing
+      .projects
+      .iter()
+      .filter(|p| p.org_id == owner)
+      .collect();
+    let projects = (!shown.is_empty() || switcher.is_some()).then(|| {
       div()
         .debug_selector(|| "onboarding-projects".into())
         .pb_5()
@@ -1179,7 +1222,8 @@ impl OnboardingView {
             .font_weight(FontWeight::SEMIBOLD)
             .child("Projects"),
         )
-        .children(self.listing.projects.iter().map(|project| {
+        .children(switcher)
+        .children(shown.into_iter().map(|project| {
           let repos = project
             .repos
             .iter()

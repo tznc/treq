@@ -69,6 +69,9 @@ pub enum MenuAction {
   SaveProject,
   /// Edits the saved project's agent instructions and context.
   ProjectContext,
+  /// Moves this window's saved project to a Team organization, or back to
+  /// personal with `None`.
+  SetProjectOwner(Option<String>),
   /// A new window on the welcome page, to open another project or repository.
   NewWindow,
 }
@@ -457,9 +460,53 @@ pub fn project_items(projects: &[ProjectEntry], current: Option<&str>) -> Vec<Me
   items
 }
 
+/// "Move to" for this window's saved project: Personal, then each Team
+/// organization as (id, name), the current owner marked. `None` without teams.
+pub fn project_owner_item(teams: &[(String, String)], owner: Option<&str>) -> Option<MenuItem> {
+  if teams.is_empty() {
+    return None;
+  }
+  let mark = |on: bool, name: &str| {
+    if on {
+      format!("✓ {name}")
+    } else {
+      name.to_string()
+    }
+  };
+  let mut items = vec![MenuItem::item(
+    &mark(owner.is_none(), "Personal"),
+    MenuAction::SetProjectOwner(None),
+  )];
+  items.extend(teams.iter().map(|(id, name)| {
+    MenuItem::item(
+      &mark(owner == Some(id.as_str()), name),
+      MenuAction::SetProjectOwner(Some(id.clone())),
+    )
+  }));
+  Some(MenuItem::Submenu {
+    text: "Move to".into(),
+    icon: Some(MenuIcon::FolderOpen),
+    items,
+  })
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn project_owner_menu_marks_the_owner_and_lists_teams() {
+    let teams = vec![("o1".to_string(), "Acme".to_string())];
+    assert_eq!(project_owner_item(&[], None), None);
+    let item = project_owner_item(&teams, Some("o1")).unwrap();
+    assert_eq!(labels(&[item.clone()]), ["Move to: [Personal, ✓ Acme]"]);
+    let MenuItem::Submenu { items, .. } = item else {
+      panic!()
+    };
+    assert!(
+      matches!(&items[1], MenuItem::Item { action: MenuAction::SetProjectOwner(Some(id)), .. } if id == "o1")
+    );
+  }
 
   fn entry(id: &str, name: &str) -> ProjectEntry {
     ProjectEntry {

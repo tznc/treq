@@ -102,6 +102,15 @@ pub fn supporting_repos(project: &Project, main: &str) -> Vec<String> {
     .collect()
 }
 
+/// Moves window `label`'s saved project to a Team organization, or back
+/// to personal with `None`.
+pub fn set_window_owner(app: &AppHandle, label: &str, org_id: Option<&str>) -> Result<(), String> {
+  let project = window_project(app, label).ok_or("This window has no saved project")?;
+  let state = app.state::<AppState>();
+  let db = state.db.lock_or_recover();
+  projects::set_owner(db.conn(), &project.id, org_id)
+}
+
 /// Every saved project, most recently opened first.
 pub fn list(app: &AppHandle) -> Vec<Project> {
   let state = app.state::<AppState>();

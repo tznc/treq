@@ -1956,6 +1956,7 @@ fn onboarding() -> ScreenSnapshot {
 fn listing() -> machines::Listing {
   use machines::{Machine, Place, Recent};
   machines::Listing {
+    teams: Vec::new(),
     machines: vec![
       Machine {
         id: "local".into(),

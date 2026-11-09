@@ -64,7 +64,23 @@ pub fn handle(
           name: p.name,
         })
         .collect();
-      let items = context_menu::project_items(&entries, current.as_deref());
+      let mut items = context_menu::project_items(&entries, current.as_deref());
+      if let Some(project) = super::projects::window_project(app, label) {
+        let teams: Vec<(String, String)> = crate::commands::cloud::owned_cloud(app)
+          .map(|c| {
+            c.snapshot()
+              .cloud
+              .organizations
+              .iter()
+              .map(|o| (o.org_id.clone(), o.name.clone()))
+              .collect()
+          })
+          .unwrap_or_default();
+        if let Some(owner) = context_menu::project_owner_item(&teams, project.org_id.as_deref()) {
+          // Before "New Window…", the last item.
+          items.insert(items.len() - 1, owner);
+        }
+      }
       show(app, label, backend, items);
       true
     }
@@ -312,6 +328,11 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
     MenuAction::OpenBranchSwitcher => open(OpenRequest::BranchSwitcher),
     MenuAction::SaveProject => open(OpenRequest::SaveProject { closing: false }),
     MenuAction::ProjectContext => open(OpenRequest::ProjectContext),
+    MenuAction::SetProjectOwner(org_id) => {
+      if let Err(e) = super::projects::set_window_owner(app, backend.label(), org_id.as_deref()) {
+        log::warn!("moving project: {e}");
+      }
+    }
     MenuAction::SwitchProject(id) => {
       let main = app.clone();
       main

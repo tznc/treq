@@ -91,12 +91,17 @@ pub struct ProjectSummary {
   pub name: String,
   /// Its repository paths, in sidebar order.
   pub repos: Vec<String>,
+  /// The Team organization that owns it; `None` for personal.
+  pub org_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Listing {
   /// Saved projects, most recently opened first.
   pub projects: Vec<ProjectSummary>,
+  /// The user's Team organizations as (id, name): the project owner
+  /// switcher shows when there is at least one.
+  pub teams: Vec<(String, String)>,
   pub machines: Vec<Machine>,
   pub recents: Vec<Recent>,
   /// Not signed in to Treq: no cloud row, a sign-in button instead.
@@ -273,8 +278,20 @@ impl MachinesHost for Backend {
         id: p.id,
         name: p.name,
         repos: p.repos,
+        org_id: p.org_id,
       })
       .collect();
+    listing.teams = crate::commands::cloud::owned_cloud(self.app())
+      .map(|cloud| {
+        cloud
+          .snapshot()
+          .cloud
+          .organizations
+          .iter()
+          .map(|o| (o.org_id.clone(), o.name.clone()))
+          .collect()
+      })
+      .unwrap_or_default();
     listing.ssh = remote_ssh;
     listing.containers = containers;
     // Most recently opened first, then the rest in saved order.
