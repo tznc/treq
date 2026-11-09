@@ -576,7 +576,7 @@ test.describe('Dashboard team tab', () => {
     test.skip(!checkoutLive, 'stripePayments is off or the live publishable key is not set');
     const { page, calls, close } = await openTeamTab(browser, emptyTeam());
     const upsell = teamSection(page).getByRole('region', { name: 'Get Team' });
-    await upsell.getByRole('textbox', { name: 'Organization name' }).fill('Acme');
+    await upsell.getByRole('textbox', { name: 'Team name' }).fill('Acme');
     await upsell.getByRole('button', { name: 'Start a team' }).click();
     await expect(page.getByRole('heading', { name: 'Stripe Checkout cs_test_team' })).toBeVisible();
     expect(calls.organizations).toContainEqual({ action: 'create', name: 'Acme' });

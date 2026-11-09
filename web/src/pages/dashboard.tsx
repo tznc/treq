@@ -457,9 +457,9 @@ function SubscriptionTab({
           </p>
         )}
 
-        <div style={styles.billingActions}>
+        <div style={{ ...styles.billingActions, justifyContent: "flex-end" }}>
           {!isPro && !checkoutOpen && (
-            <div>
+            <div style={{ textAlign: "right" }}>
               <span
                 title={!checkoutAvailable ? "Coming Soon" : undefined}
                 style={
@@ -494,7 +494,7 @@ function SubscriptionTab({
               type="button"
               onClick={openPortal}
               disabled={portalPending}
-              style={{ ...styles.secondaryButton, marginLeft: "auto" }}
+              style={styles.secondaryButton}
             >
               Manage billing
             </button>
@@ -780,7 +780,7 @@ function OrganizationCard({
               type="button"
               onClick={openPortal}
               disabled={pending}
-              style={{ ...styles.secondaryButton, marginLeft: "auto" }}
+              style={styles.secondaryButton}
             >
               Manage billing
             </button>
@@ -1170,11 +1170,14 @@ function GetTeamCard({
       {orgId ? (
         <CheckoutRedirect organizationId={orgId} onError={onCheckoutError} />
       ) : (
-        <form className="dashboard-form" style={styles.teamForm} onSubmit={submit}>
+        <form style={styles.teamCreateForm} onSubmit={submit}>
+          <label htmlFor="team-name" style={styles.fieldLabel}>
+            Team name
+          </label>
           <input
+            id="team-name"
             required
             maxLength={100}
-            aria-label="Organization name"
             placeholder="Acme"
             value={name}
             disabled={!checkoutAvailable}
@@ -1185,7 +1188,9 @@ function GetTeamCard({
             type="submit"
             disabled={!checkoutAvailable || pending}
             style={{
-              ...styles.saveButton,
+              ...styles.primaryButton,
+              alignSelf: "flex-end",
+              marginTop: "0.5rem",
               ...(!checkoutAvailable ? styles.primaryButtonDisabled : {}),
             }}
           >
@@ -1194,7 +1199,9 @@ function GetTeamCard({
           </button>
         </form>
       )}
-      {!checkoutAvailable && <div style={styles.comingSoonSubtext}>Coming Soon</div>}
+      {!checkoutAvailable && (
+        <div style={{ ...styles.comingSoonSubtext, textAlign: "right" }}>Coming Soon</div>
+      )}
       {error && (
         <div role="alert" style={styles.errorText}>
           {error}
@@ -2138,6 +2145,12 @@ const styles: Record<string, React.CSSProperties> = {
   teamLinkRow: { display: "flex", gap: "0.5rem", paddingBottom: "0.6rem" },
   teamMuted: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-500)" },
   teamForm: { display: "flex", gap: "0.5rem", marginTop: "0.75rem" },
+  teamCreateForm: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.4rem",
+    marginTop: "1rem",
+  },
   inviteEmail: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column" },
   inviteExpiry: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-600)" },
   iconButton: {
