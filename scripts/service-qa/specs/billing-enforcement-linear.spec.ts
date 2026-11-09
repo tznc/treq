@@ -1,6 +1,6 @@
 /**
  * Pro enforcement on Linear OAuth (`create-linear-oauth-intent`,
- * `linear-proxy`) against the local database.
+ * `integration-proxy` /linear/graphql) against the local database.
  *
  * Runs the handlers (lib.ts) in this process with their real service-role
  * stores, so has_pro, linear_oauth_intents and linear_oauth_tokens are the
@@ -20,7 +20,7 @@ import {
 import {
   linearTokenStore,
   proxyLinearRequest,
-} from "../../../supabase/functions/linear-proxy/lib";
+} from "../../../supabase/functions/integration-proxy/linear";
 import { clearBilling, endPro, grantPro } from "../billing";
 import { getServiceClient } from "../clients";
 import { recordOutcome } from "../record";
@@ -83,7 +83,7 @@ it("requires Pro for Linear OAuth and the Linear proxy", async () => {
       details: { freeIntent, proStatus: proIntent.status },
     });
 
-    // ── linear-proxy ──────────────────────────────────────────────────────
+    // ── integration-proxy /linear/graphql ──────────────────────────────────────────────────────
     // Both users hold an OAuth token, as if they connected while Pro.
     // Tokens live in Vault (032_linear_tokens_vault.sql), so they are
     // written through linear_tokens_save.
@@ -138,7 +138,7 @@ it("requires Pro for Linear OAuth and the Linear proxy", async () => {
 
     await recordOutcome("billing-enforcement-linear-02-proxy", {
       expectations: [
-        "linear-proxy answers a Free user 402 pro_required, with a message pointing at the personal API key, and never calls Linear.",
+        "integration-proxy /linear/graphql answers a Free user 402 pro_required, with a message pointing at the personal API key, and never calls Linear.",
         "For the Pro user it forwards the query with their stored OAuth token and passes Linear's 200 through.",
         "Once the subscription is deleted the same user gets 402 and Linear is not called.",
       ],

@@ -80,7 +80,7 @@ Each check calls `has_pro` on the server. The desktop and web gates stay for dis
 | Feature | Where it is checked | When entitlement ends |
 | --- | --- | --- |
 | GitHub App install | `create-github-install-intent` and `complete-github-installation`. The App requests user authorization during installation, and the function confirms the installation appears in GitHub's `/user/installations` for that user before linking. | Existing installations stay linked. |
-| Linear OAuth | `create-linear-oauth-intent` and `linear-proxy` | The proxy returns 402 and the app falls back to the personal API key. |
+| Linear OAuth | `create-linear-oauth-intent` and `integration-proxy` (`/linear/graphql`) | The proxy returns 402 and the app falls back to the personal API key. |
 | Managed cloud workspace | `remote-instance` actions `ensure`, `wake`, and `reprovision`, plus the SSH relay and key install that would wake it | The instance stops. Its disk is kept for 30 days, then deleted. `status` and `delete` always work. |
 | Mobile access | The same checks as cloud workspaces, since mobile reaches them through Remote Development | As above. |
 
