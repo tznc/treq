@@ -107,7 +107,7 @@ impl Render for FolderPicker {
     let on_pick = self.on_pick.clone();
     let chosen = listing.path.clone();
     v_flex()
-      .child(widgets::mono(listing.path.clone(), cx).px_4().pb_2())
+      .child(widgets::mono(listing.path, cx).px_4().pb_2())
       .children(up)
       .children(rows)
       .child(
