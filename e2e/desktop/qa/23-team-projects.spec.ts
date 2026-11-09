@@ -174,6 +174,10 @@ test("team projects: save to a team, then Move to", async () => {
     await page.keyboard.press("Enter");
     await settle(page, 6000);
     await expect(page.getByRole("button", { name: "Project: Web app" })).toBeVisible();
+    // Saving to a team pushes right away, not at the next hourly sync.
+    await expect
+      .poll(() => psql(`select repos::text from public.organization_projects where org_id = '${org}' and name = 'Web app'`), { timeout: 15_000 })
+      .toBe('["acme/web"]');
 
     await page.getByRole("button", { name: "Project: Web app" }).click();
     await settle(page, 1000);
@@ -182,7 +186,7 @@ test("team projects: save to a team, then Move to", async () => {
       title: "Project menu with Move to",
       screen: true,
       rest: false,
-      expectations: ["The project menu lists '✓ Web app', Rename Project…, Project Instructions…, a Move to submenu, New Window…"],
+      expectations: ["The project menu shows an Acme submenu (team projects), then Rename Project…, Project Instructions…, Move to, New Window…"],
     });
     const menu2 = popupBox();
     if (menu2) {

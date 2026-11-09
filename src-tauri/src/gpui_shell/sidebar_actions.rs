@@ -57,25 +57,22 @@ pub fn handle(
   match action {
     SidebarAction::ProjectMenu => {
       let current = super::projects::window_project(app, label).map(|p| p.id);
+      let teams = super::projects::teams(app);
       let entries: Vec<context_menu::ProjectEntry> = super::projects::list(app)
         .into_iter()
         .map(|p| context_menu::ProjectEntry {
+          team: p.org_id.as_ref().map(|o| {
+            teams
+              .iter()
+              .find(|(id, _)| id == o)
+              .map_or_else(|| "Team".to_string(), |(_, n)| n.clone())
+          }),
           id: p.id,
           name: p.name,
         })
         .collect();
       let mut items = context_menu::project_items(&entries, current.as_deref());
       if let Some(project) = super::projects::window_project(app, label) {
-        let teams: Vec<(String, String)> = crate::commands::cloud::owned_cloud(app)
-          .map(|c| {
-            c.snapshot()
-              .cloud
-              .organizations
-              .iter()
-              .map(|o| (o.org_id.clone(), o.name.clone()))
-              .collect()
-          })
-          .unwrap_or_default();
         if let Some(owner) = context_menu::project_owner_item(&teams, project.org_id.as_deref()) {
           // Before "New Window…", the last item.
           items.insert(items.len() - 1, owner);

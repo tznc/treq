@@ -426,22 +426,44 @@ pub fn create_pr_items() -> Vec<MenuItem> {
 pub struct ProjectEntry {
   pub id: String,
   pub name: String,
+  /// The owning Team organization's name; `None` for personal.
+  pub team: Option<String>,
 }
 
 /// The sidebar's project menu: every saved project (this window's one
 /// marked), then Save or Rename, then a new window.
 pub fn project_items(projects: &[ProjectEntry], current: Option<&str>) -> Vec<MenuItem> {
+  let row = |p: &ProjectEntry| {
+    let text = if current == Some(p.id.as_str()) {
+      format!("✓ {}", p.name)
+    } else {
+      p.name.clone()
+    };
+    MenuItem::item(&text, MenuAction::SwitchProject(p.id.clone())).icon(MenuIcon::FolderOpen)
+  };
+  // Personal projects inline, then one submenu per team, in first-seen order.
   let mut items: Vec<MenuItem> = projects
     .iter()
-    .map(|p| {
-      let text = if current == Some(p.id.as_str()) {
-        format!("✓ {}", p.name)
-      } else {
-        p.name.clone()
-      };
-      MenuItem::item(&text, MenuAction::SwitchProject(p.id.clone())).icon(MenuIcon::FolderOpen)
-    })
+    .filter(|p| p.team.is_none())
+    .map(row)
     .collect();
+  let mut teams: Vec<&str> = Vec::new();
+  for team in projects.iter().filter_map(|p| p.team.as_deref()) {
+    if !teams.contains(&team) {
+      teams.push(team);
+    }
+  }
+  for team in teams {
+    items.push(MenuItem::Submenu {
+      text: team.to_string(),
+      icon: Some(MenuIcon::FolderOpen),
+      items: projects
+        .iter()
+        .filter(|p| p.team.as_deref() == Some(team))
+        .map(row)
+        .collect(),
+    });
+  }
   if !items.is_empty() {
     items.push(MenuItem::Separator);
   }
@@ -512,7 +534,19 @@ mod tests {
     ProjectEntry {
       id: id.into(),
       name: name.into(),
+      team: None,
     }
+  }
+
+  #[test]
+  fn project_menu_puts_each_teams_projects_in_a_submenu() {
+    let mut team = entry("t", "Billing");
+    team.team = Some("Acme".into());
+    let items = project_items(&[entry("a", "Checkout"), team], Some("t"));
+    assert_eq!(
+      labels(&items)[..3],
+      ["Checkout", "Acme: [✓ Billing]", "---"]
+    );
   }
 
   #[test]
@@ -582,7 +616,7 @@ mod tests {
         let projects: Vec<ProjectEntry> = names
           .iter()
           .enumerate()
-          .map(|(i, n)| ProjectEntry { id: format!("p{i}"), name: n.clone() })
+          .map(|(i, n)| ProjectEntry { id: format!("p{i}"), name: n.clone(), team: None })
           .collect();
         let current = current.map(|i| format!("p{i}"));
         let items = project_items(&projects, current.as_deref());
