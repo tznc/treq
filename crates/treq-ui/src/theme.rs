@@ -68,6 +68,7 @@ icons! {
   ICON_FOLDER_PLUS => "folder-plus",
   ICON_FOLDER_SEARCH => "folder-search",
   ICON_GITHUB => "github",
+  ICON_GOOGLE => "google",
   ICON_HISTORY => "history",
   ICON_HOUSE => "house",
   ICON_INFO => "info",
