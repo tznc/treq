@@ -2,11 +2,9 @@
 
 use std::sync::{Arc, LazyLock};
 
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
     button::Button,
-    h_flex,
     text::SelectionFormat,
     text::{TextView, TextViewStyle},
     v_flex, ActiveTheme, IconName,
@@ -47,7 +45,7 @@ pub fn wordmark(size: f32, cx: &App) -> Div {
 pub const ROW_H: f32 = treq_ui::TOUCH_ROW_HEIGHT;
 
 /// Height of a full-width call-to-action button (gpui-kit's large is 32px).
-pub const CTA_H: f32 = 52.;
+pub const CTA_H: f32 = treq_ui::theme::CTA_HEIGHT;
 
 /// `el` at caption size, the smallest text on a phone (13px).
 pub fn caption<E: Styled>(el: E) -> E {
@@ -65,14 +63,7 @@ impl<E: Styled> Caption for E {}
 
 /// The bar pinned under a page that holds its main action.
 pub fn bottom_bar(cx: &App) -> Div {
-  let theme = cx.theme();
-  h_flex()
-    .flex_none()
-    .p_3()
-    .gap_2()
-    .border_t_1()
-    .border_color(theme.border)
-    .bg(theme.background)
+  treq_ui::touch::bottom_bar(&treq_ui::theme::current(cx))
 }
 
 /// A titled group of content, under a [`treq_ui::SectionHeader`].
@@ -107,14 +98,7 @@ fn slug(title: &str) -> String {
 
 /// A bordered surface.
 pub fn card(cx: &App) -> Div {
-  v_flex()
-    .rounded(cx.theme().radius_lg)
-    .border_1()
-    .border_color(cx.theme().border)
-    .bg(cx.theme().background)
-    .overflow_hidden()
-    // A card with overflow_hidden may otherwise shrink below its rows.
-    .flex_shrink_0()
+  treq_ui::touch::grouped(&treq_ui::theme::current(cx))
 }
 
 /// A tappable list row with a title, optional detail line and a chevron:
@@ -163,12 +147,11 @@ pub fn choice(
   selected: bool,
   cx: &App,
 ) -> Row {
-  let check = div()
-    .w(px(16.))
-    .when(selected, |c| c.child(IconName::Check));
-  touch_row(id, None, title, detail, None, cx)
-    .trailing(check)
-    .selected(selected)
+  let row = treq_ui::touch::choice(id, title, selected, &treq_ui::theme::current(cx));
+  match detail {
+    Some(detail) => row.meta(detail),
+    None => row,
+  }
 }
 
 fn touch_row(
@@ -216,26 +199,7 @@ pub fn resize(state: &ListState, count: usize) {
 /// borders of every item, the top of the `first` and the bottom of the `last`
 /// with its rounded corners.
 pub fn card_item(child: impl IntoElement, first: bool, last: bool, cx: &App) -> Div {
-  let theme = cx.theme();
-  div().px_4().child(
-    v_flex()
-      .border_l_1()
-      .border_r_1()
-      .border_color(theme.border)
-      .bg(theme.background)
-      .overflow_hidden()
-      .when(first, |c| {
-        c.border_t_1()
-          .rounded_tl(theme.radius_lg)
-          .rounded_tr(theme.radius_lg)
-      })
-      .when(last, |c| {
-        c.border_b_1()
-          .rounded_bl(theme.radius_lg)
-          .rounded_br(theme.radius_lg)
-      })
-      .child(child),
-  )
+  treq_ui::touch::grouped_item(child, first, last, &treq_ui::theme::current(cx))
 }
 
 pub fn muted(text: impl Into<SharedString>, cx: &App) -> Div {

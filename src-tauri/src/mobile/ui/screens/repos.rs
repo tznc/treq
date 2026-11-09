@@ -13,7 +13,7 @@ use gpui_kit::{
   ScrollHandle, StatefulInteractiveElement, Styled, Window,
 };
 
-use super::workspaces;
+use super::{folder_picker, workspaces};
 use crate::mobile::{
   backend, remote, store,
   ui::{load, nav, widgets, Location},
@@ -48,6 +48,26 @@ impl ReposScreen {
       error: None,
       scroll: ScrollHandle::new(),
     }
+  }
+
+  /// Picks the path from the host's folders instead of typing it.
+  fn browse(&mut self, cx: &mut Context<Self>) {
+    let start = self.path.read(cx).value().trim().to_string();
+    let screen = cx.weak_entity();
+    folder_picker::open(
+      start,
+      move |path, window, cx| {
+        screen
+          .update(cx, |this, cx| {
+            this
+              .path
+              .update(cx, |input, cx| input.set_value(path.clone(), window, cx));
+            this.inspect(cx);
+          })
+          .ok();
+      },
+      cx,
+    );
   }
 
   fn inspect(&mut self, cx: &mut Context<Self>) {
@@ -151,7 +171,20 @@ impl Render for ReposScreen {
               widgets::card(cx)
                 .p_4()
                 .gap_3()
-                .child(Input::new(&self.path).large())
+                .child({
+                  let palette = treq_ui::theme::current(cx);
+                  treq_ui::InputGroup::new("repo-path", &palette)
+                    .control(Input::new(&self.path).large().appearance(false))
+                    .append(
+                      treq_ui::IconButton::new(
+                        "browse-host",
+                        treq_ui::theme::ICON_FOLDER_SEARCH,
+                        "Browse host folders",
+                        &palette,
+                      )
+                      .on_click(cx.listener(|this, _, _, cx| this.browse(cx))),
+                    )
+                })
                 .child(
                   h_flex().child(
                     Button::new("inspect")

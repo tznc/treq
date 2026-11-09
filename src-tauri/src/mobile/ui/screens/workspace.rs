@@ -23,8 +23,8 @@ use gpui_kit::{
 };
 use serde::Deserialize;
 use treq_ui::{
-  tabs::{Tab, Tabs},
-  Badge, Tone,
+  tabs::{Tab, Tabs, TabsStyle},
+  theme, Badge, Tone,
 };
 
 use super::{
@@ -1014,19 +1014,30 @@ impl WorkspaceScreen {
     let ahead = self.status.ready().map_or(0, |s| s.partial.commits_ahead);
     let view = self.view;
     let this = cx.weak_entity();
-    div().px_4().pb_2().child(
+    // The workspace's areas, at the bottom in reach of the thumb.
+    div().flex_none().child(
       Tabs::new("workspace-tabs", &palette)
-        .tab(counted(Tab::new("tab-terminals", "Terminals"), running))
+        .style(TabsStyle::Bar)
+        .tab(counted(
+          Tab::new("tab-terminals", "Terminals").icon(theme::ICON_TERMINAL),
+          running,
+        ))
         .tab({
-          let tab = counted(Tab::new("tab-changes", "Changes"), files);
+          let tab = counted(
+            Tab::new("tab-changes", "Changes").icon(theme::ICON_FILE_DIFF),
+            files,
+          );
           if conflicts {
             tab.dot(Tone::Danger, "Conflict")
           } else {
             tab
           }
         })
-        .tab(counted(Tab::new("tab-commits", "Commits"), ahead))
-        .tab(Tab::new("tab-code", "Code"))
+        .tab(counted(
+          Tab::new("tab-commits", "Commits").icon(theme::ICON_COMMIT),
+          ahead,
+        ))
+        .tab(Tab::new("tab-code", "Code").icon(theme::ICON_CODE))
         .selected(VIEWS.iter().position(|v| *v == view).unwrap_or(0))
         .on_select(move |ix, window, cx| {
           this
@@ -1221,7 +1232,6 @@ impl Render for WorkspaceScreen {
     v_flex()
       .size_full()
       .child(self.header(cx))
-      .child(tabs)
       .children(self.message.clone().map(|(ok, text)| {
         let line = if ok {
           widgets::muted(text, cx)
@@ -1268,6 +1278,7 @@ impl Render for WorkspaceScreen {
           .border_color(border)
           .child(body),
       )
+      .child(tabs)
   }
 }
 
