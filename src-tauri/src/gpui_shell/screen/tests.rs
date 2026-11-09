@@ -24,6 +24,8 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
+  /// How many times a screen listed machines and projects.
+  listings: std::sync::atomic::AtomicUsize,
   /// Team organizations the save-project dialog offers, as (id, name).
   project_teams: Vec<(String, String)>,
   /// Repositories whose folder is gone from disk (Home shows them missing).
@@ -313,6 +315,7 @@ impl FakeHost {
 
 impl machines::MachinesHost for FakeHost {
   fn listing(&self) -> machines::Listing {
+    self.listings.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     self.listing.clone()
   }
 

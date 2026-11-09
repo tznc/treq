@@ -1200,6 +1200,8 @@ impl OnboardingView {
           view
             .update(cx, |view, cx| {
               view.project_owner = owner;
+              // Team projects arrive by sync: read them again.
+              view.load(cx);
               cx.notify();
             })
             .ok();

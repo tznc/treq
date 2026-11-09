@@ -1006,3 +1006,17 @@ fn onboarding_switches_projects_between_personal_and_a_team(cx: &mut TestAppCont
   h.click("projects-owner-o1");
   assert!(h.drawn("project-team") && !h.drawn("project-mine"));
 }
+
+#[gpui::test]
+fn onboarding_rereads_projects_when_switching_owner(cx: &mut TestAppContext) {
+  let mut l = listing();
+  l.projects = vec![owned("mine", None)];
+  l.teams = vec![("o1".into(), "Acme".into())];
+  let host = Arc::new(FakeHost { listing: l, ..FakeHost::default() });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  h.cx.run_until_parked();
+  let before = host.listings.load(std::sync::atomic::Ordering::SeqCst);
+  h.click("projects-owner-o1");
+  h.cx.run_until_parked();
+  assert!(host.listings.load(std::sync::atomic::Ordering::SeqCst) > before);
+}
