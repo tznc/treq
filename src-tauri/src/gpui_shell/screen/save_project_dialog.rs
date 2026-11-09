@@ -45,6 +45,10 @@ pub struct SaveProjectDialog {
   focus: FocusHandle,
   input: Option<Entity<InputState>>,
   pub(super) name: String,
+  /// Team organizations offered as owners of a new project, as (id, name).
+  teams: Vec<(String, String)>,
+  /// The owner picked: `None` personal.
+  owner: Option<String>,
   pub(super) pending: bool,
   pub(super) error: String,
   pub(super) dismissed: bool,
@@ -61,6 +65,12 @@ impl SaveProjectDialog {
   ) -> Self {
     Self {
       name: route.name.clone(),
+      teams: if route.saved {
+        Vec::new()
+      } else {
+        host.project_teams()
+      },
+      owner: None,
       route,
       host,
       sink,
@@ -106,11 +116,12 @@ impl SaveProjectDialog {
     cx.notify();
     let host = self.host.clone();
     let closing = self.route.closing;
+    let owner = self.owner.clone();
     cx.spawn(async move |this, cx| {
       let result = cx
         .background_spawn({
-          let (host, name) = (host.clone(), name.clone());
-          async move { host.save_project(&name) }
+          let (host, name, owner) = (host.clone(), name.clone(), owner.clone());
+          async move { host.save_project(&name, owner.as_deref()) }
         })
         .await;
       this
@@ -259,6 +270,38 @@ impl Render for SaveProjectDialog {
               .text_color(p.muted_foreground)
               .child(format!("Repositories: {repos}")),
           )
+          .when(!self.teams.is_empty(), |this| {
+            let mut tabs = ui::Tabs::segmented("save-project-owner", &p)
+              .tab(ui::Tab::new("save-project-owner-personal", "Personal"));
+            for (id, name) in &self.teams {
+              tabs = tabs.tab(ui::Tab::new(
+                format!("save-project-owner-{id}"),
+                name.clone(),
+              ));
+            }
+            let selected = self
+              .owner
+              .as_ref()
+              .and_then(|o| self.teams.iter().position(|(id, _)| id == o))
+              .map_or(0, |i| i + 1);
+            let teams: Vec<String> = self.teams.iter().map(|(id, _)| id.clone()).collect();
+            let view = cx.weak_entity();
+            this
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .font_weight(FontWeight::MEDIUM)
+                  .child("Owner"),
+              )
+              .child(tabs.selected(selected).on_select(move |ix, _, cx| {
+                let owner = ix.checked_sub(1).and_then(|i| teams.get(i).cloned());
+                view
+                  .update(cx, |view, cx| {
+                    view.owner = owner;
+                    cx.notify();
+                  })
+                  .ok();
+              }))
+          })
           .when(!self.error.is_empty(), |this| {
             this.child(
               ui::text(div(), TextSize::Sm)

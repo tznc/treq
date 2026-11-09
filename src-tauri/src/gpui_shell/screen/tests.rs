@@ -24,6 +24,8 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
+  /// Team organizations the save-project dialog offers, as (id, name).
+  project_teams: Vec<(String, String)>,
   /// Repositories whose folder is gone from disk (Home shows them missing).
   gone: Vec<&'static str>,
   /// Saving repository settings fails, as a full disk would.
@@ -2816,8 +2818,15 @@ impl Harness {
 }
 
 impl workspace_dialog_data::WorkspaceDialogHost for FakeHost {
-  fn save_project(&self, name: &str) -> Result<(), String> {
-    self.record(format!("save project {name:?}"));
+  fn project_teams(&self) -> Vec<(String, String)> {
+    self.project_teams.clone()
+  }
+
+  fn save_project(&self, name: &str, org_id: Option<&str>) -> Result<(), String> {
+    match org_id {
+      Some(org) => self.record(format!("save project {name:?} to {org}")),
+      None => self.record(format!("save project {name:?}")),
+    }
     if self.failing.contains(&"save_project") {
       return Err("save failed".into());
     }
