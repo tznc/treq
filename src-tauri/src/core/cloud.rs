@@ -352,6 +352,8 @@ impl Cloud {
     if user.is_some() && first {
       *self.subscribed_user.lock_or_recover() = user;
       self.refresh_subscription().await;
+      // Teams own projects, so their names are needed before any cloud screen opens.
+      self.load_team().await;
     }
   }
 
@@ -2393,6 +2395,15 @@ mod tests {
     json!([{"org_id": "o1", "name": "Acme", "role": "owner", "has_team": true,
       "allow_managed": allow_managed, "allow_byos": allow_byos,
       "org_cap_usd": 500, "member_cap_usd": 50}])
+  }
+
+  #[tokio::test]
+  async fn signing_in_reads_the_users_teams() {
+    let server = MockServer::start().await;
+    rpc(&server, "list_my_cloud_organizations", acme(true, true)).await;
+    let (cloud, _) = signed_in(&server).await;
+    let orgs = cloud.snapshot().cloud.organizations;
+    assert_eq!(orgs.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(), ["Acme"]);
   }
 
   #[tokio::test]
