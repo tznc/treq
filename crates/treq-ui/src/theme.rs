@@ -25,6 +25,7 @@ icons! {
   ICON_AGENT_CODEX => "agent-codex",
   ICON_AGENT_COPILOT => "agent-copilot",
   ICON_AGENT_CURSOR => "agent-cursor",
+  ICON_AGENT_DEVIN => "agent-devin",
   ICON_ARCHIVE => "archive",
   ICON_ARROW_DOWN => "arrow-down",
   ICON_ARROW_LEFT => "arrow-left",

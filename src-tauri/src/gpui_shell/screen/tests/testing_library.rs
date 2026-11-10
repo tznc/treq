@@ -124,7 +124,7 @@ fn the_agent_picker_lists_every_agent(cx: &mut TestAppContext) {
     .iter()
     .filter_map(|n| n.name())
     .collect();
-  assert_eq!(agents, ["Claude", "Codex", "Cursor", "Copilot"]);
+  assert_eq!(agents, ["Claude", "Codex", "Cursor", "Copilot", "Devin"]);
 }
 
 #[gpui::test]
@@ -154,6 +154,7 @@ fn the_agent_picker_hides_agents_that_are_not_installed(cx: &mut TestAppContext)
       ("codex", false),
       ("cursor-agent", true),
       ("copilot", false),
+      ("devin", false),
     ],
     ..FakeHost::default()
   };
