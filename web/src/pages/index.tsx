@@ -2,7 +2,6 @@ import {useState, type ReactNode} from 'react';
 import clsx from 'clsx';
 import Link from '@docusaurus/Link';
 import Head from '@docusaurus/Head';
-import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
 import {DownloadButton, OtherDownloads} from '@site/src/components/DownloadLinks';
@@ -676,10 +675,9 @@ const SOFTWARE_APP_SCHEMA = {
 };
 
 export default function Home(): ReactNode {
-  const {siteConfig} = useDocusaurusContext();
   return (
     <Layout
-      title={siteConfig.title}
+      title="Isolated workspaces and stacked PRs for coding agents"
       description="Stacking Agent Development Environment that isolates each agent and rebases stacked PRs when the base moves.">
       <Head>
         <script type="application/ld+json">{JSON.stringify(SOFTWARE_APP_SCHEMA)}</script>
