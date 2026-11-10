@@ -12,6 +12,8 @@ For guides on the Treq app itself, such as pushing, discarding changes, and sett
 
 <DocCardList items={[
   {type: 'link', href: '/learn/how-to/how-to-run-multiple-claude-code-sessions', label: 'Run Multiple Claude Code Sessions'},
+  {type: 'link', href: '/learn/how-to/how-to-run-multiple-codex-agents', label: 'Run Multiple Codex Agents'},
+  {type: 'link', href: '/learn/how-to/how-to-run-multiple-cursor-agents', label: 'Run Multiple Cursor Agents'},
   {type: 'link', href: '/learn/how-to/auto-rebase-ai-branches', label: 'Auto-Rebasing AI Workspaces'},
   {type: 'link', href: '/learn/how-to/review-ai-generated-prs', label: 'Review AI-Generated PRs'},
   {type: 'link', href: '/learn/how-to/merge-conflicts-with-coding-agents', label: 'Fix Merge Conflicts from Coding Agents'},

@@ -102,6 +102,8 @@ const sidebars: SidebarsConfig = {
       link: {type: 'doc', id: 'how-to/index'},
       items: [
         'how-to/how-to-run-multiple-claude-code-sessions',
+        'how-to/how-to-run-multiple-codex-agents',
+        'how-to/how-to-run-multiple-cursor-agents',
         'how-to/auto-rebase-ai-branches',
         'how-to/review-ai-generated-prs',
         'how-to/merge-conflicts-with-coding-agents',

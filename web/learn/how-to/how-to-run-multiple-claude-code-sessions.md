@@ -100,6 +100,8 @@ git branch -d agent/payments-retry agent/search-filters
 
 ## Related
 
+- [How to Run Multiple Codex Agents in Parallel](/learn/how-to/how-to-run-multiple-codex-agents)
+- [How to Run Multiple Cursor Agents in Parallel](/learn/how-to/how-to-run-multiple-cursor-agents)
 - [Git Worktrees for AI Coding Agents](/learn/git-worktrees-for-ai)
 - [Parallel Coding Agents Without Branch Chaos](/learn/parallel-coding-agents)
 - [Git Worktrees vs Clones for Agents](/learn/how-to/git-worktrees-vs-clones-for-agents)
