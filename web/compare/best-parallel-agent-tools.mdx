@@ -1,0 +1,76 @@
+---
+sidebar_position: 20
+title: Best Tools for Running AI Coding Agents in Parallel (2026)
+description: Treq, Claude Code worktrees, Conductor, Claude Squad, Orca, emdash, Superset and Nimbalyst compared for running several coding agents on one repository.
+---
+
+# Best Tools for Running AI Coding Agents in Parallel
+
+_Every tool on this list isolates agents. They differ in what happens after the agent finishes: review, stacking, and rebasing._
+
+Running [parallel coding agents](/learn/parallel-coding-agents) in one checkout breaks fast. Both edit the same files, and one agent's half-finished change shows up in the other's test run. Every tool below fixes that with isolation, usually one [git worktree](/learn/concepts/git/git-worktrees) per agent. Facts were checked against each project's own site or repository in November 2026.
+
+## How to Choose
+
+Pick by the problem after isolation:
+
+- **You review every change before it merges.** Choose a tool with a diff view and a way to send comments back to the agent.
+- **Tasks depend on each other.** Choose a tool that stacks workspaces and rebases dependents when a lower layer changes.
+- **You live in the terminal.** Choose a terminal multiplexer over a desktop app.
+- **You only run one agent vendor.** That vendor's built-in worktree support might be enough.
+
+## The Tools
+
+| Tool | Form | License | Stacks and auto-rebase | Best for |
+| --- | --- | --- | --- | --- |
+| Treq | Desktop app | Apache 2.0 | Yes | Dependent agent tasks with local review |
+| Claude Code worktrees | Built into Claude Code | Proprietary | No | Claude-only users who want no extra tool |
+| Conductor | Mac desktop app | Proprietary | No | A polished Mac workflow |
+| Claude Squad | Terminal app | AGPL-3.0 | No | Terminal-first users |
+| Orca | Desktop app | MIT | Not emphasized | One environment for editing, browsing and agents |
+| emdash | Desktop app | Apache 2.0 | No | An open source desktop ADE |
+| Superset | Desktop editor | ELv2 | No | Broad agent control in an editor |
+| Nimbalyst | Desktop app | See project | No | Former Crystal users |
+
+## 1. Treq
+
+[Treq](/) gives each agent its own workspace and connects dependent workspaces into a stack. When a lower workspace changes, Treq rebases the ones above it and sends any conflict back to the agent. You review each layer as a PR-style diff and send line comments to the agent. Claude Code, Codex and Cursor agents run in its workspaces. The desktop app is free. [Pro](/pricing) adds the GitHub App, Linear and cloud workspaces.
+
+## 2. Claude Code Worktrees
+
+Claude Code can start a session in its own worktree with the `--worktree` flag, and its desktop app has a worktree mode. It needs no extra install. It covers isolation only, with no stacking or cross-agent review, and runs Claude only.
+
+## 3. Conductor
+
+Conductor is a Mac app for running agents in parallel workspaces with a polished interface. See [Treq vs Conductor](./treq-vs-conductor).
+
+## 4. Claude Squad
+
+Claude Squad manages several terminal agents in tmux sessions, each in its own worktree. It suits people who never leave the terminal. See [Treq vs Claude Squad](./treq-vs-claude-squad).
+
+## 5. Orca
+
+Orca is an MIT-licensed environment with worktrees, terminals, a file editor, browser tabs and SSH worktrees. See [Treq vs Orca](./treq-vs-orca).
+
+## 6. emdash
+
+emdash is an Apache 2.0 desktop environment for running several agents side by side. See [Treq vs emdash](./treq-vs-emdash).
+
+## 7. Superset
+
+Superset is a source-available code editor built around agents, with free, Pro and Enterprise tiers. See [Treq vs Superset](./treq-vs-superset).
+
+## 8. Nimbalyst
+
+Nimbalyst replaced Crystal, which its maintainers deprecated in February 2026 and pointed users to Nimbalyst. It runs parallel agent sessions and adds visual editing for markdown and diagrams.
+
+## Doing It Yourself
+
+You can run agents in plain worktrees with `git worktree add` and one terminal per agent. That works for two or three independent tasks. It stops working when tasks depend on each other, because nothing rebases the dependent worktrees for you. [Git Worktrees for AI](/learn/git-worktrees-for-ai) covers the manual setup.
+
+## Next Steps
+
+- [Best Graphite Alternatives](./best-graphite-alternatives): tools for stacked pull requests
+- [Best Git Worktree Managers](./best-git-worktree-managers): CLIs and apps that manage worktrees
+- [Sandbox Providers for Coding Agents](./sandbox-providers-for-coding-agents): run agents on cloud machines
+- [What are Stacked PRs?](/learn/concepts/git/stacked-prs): why dependent tasks need stacks
