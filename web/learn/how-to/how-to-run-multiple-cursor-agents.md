@@ -64,7 +64,7 @@ When the agent finishes, review the workspace diff, leave line comments, and sen
 
 ## Mix agents in one project
 
-Treq is not tied to one agent. Claude Code, Codex and Cursor Agent all run in the same kind of workspace, so you can pick the agent per task instead of per project. The repository setting only sets the default.
+Treq is not tied to one agent. Claude Code, Codex, Cursor Agent and GitHub Copilot CLI all run in the same kind of workspace, so you can pick the agent per task instead of per project. The repository setting only sets the default.
 
 Match each task to the model you trust most for that kind of work. For example, give exploratory or unclear tasks to an agent with a plan mode, such as Claude Code or Cursor Agent, and give well-scoped edits to whichever agent is fastest for you. Your own results are the best guide, since model strengths shift with every release.
 
@@ -100,4 +100,5 @@ git branch -d agent/payments-retry agent/search-filters
 - [How to Run Multiple Claude Code Sessions](/learn/how-to/how-to-run-multiple-claude-code-sessions)
 - [How to Run Multiple Codex Agents in Parallel](/learn/how-to/how-to-run-multiple-codex-agents)
 - [Git Worktrees for AI Coding Agents](/learn/git-worktrees-for-ai)
+- [How to Run Multiple GitHub Copilot CLI Agents in Parallel](/learn/how-to/how-to-run-multiple-copilot-agents)
 - [Parallel Coding Agents Without Branch Chaos](/learn/parallel-coding-agents)
