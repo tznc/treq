@@ -6,10 +6,11 @@ use crate::{
   core::remote::{GithubQuery, TreqCommandRequest},
   github::{GhListPage, GhPullRequest},
 };
+use gpui_kit::component::Selectable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
-    button::{Button, ButtonVariants},
+    button::Button,
     h_flex,
     input::{Input, InputEvent, InputState},
     IconName, Sizable,
@@ -340,7 +341,8 @@ impl Render for PullRequestsScreen {
       Button::new(id)
         .h(px(44.))
         .label(label)
-        .map(|b| if on { b.primary() } else { b.outline() })
+        .outline()
+        .selected(on)
     };
     let chips = h_flex()
       .gap_2()
