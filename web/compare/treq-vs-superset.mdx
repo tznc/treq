@@ -7,7 +7,7 @@ description: Compare Treq and Superset for parallel coding agents, review workfl
 
 _Two local-first ADEs for different workflows: stacked changes or broad agent control._
 
-Treq and Superset both run coding agents in isolated workspaces and give you a place to review the result. They sit in the same product category. The workflow changes after the agents start writing code.
+Superset is now called Paradev. Its CLI is still `superset`. Treq and Superset both run coding agents in isolated workspaces and give you a place to review the result. They sit in the same product category. The workflow changes after the agents start writing code.
 
 Treq is built around human review, stacked workspaces, auto-rebase, and sending conflicts back to the agent. Superset is built around running many CLI agents in parallel. It also sells paid plans for teams.
 
@@ -15,7 +15,7 @@ Treq is built around human review, stacked workspaces, auto-rebase, and sending 
 
 | | Treq | Superset |
 | --- | --- | --- |
-| Positioning | Stacking ADE, open-source Graphite alternative | Code editor for AI agents, software-factory platform |
+| Positioning | Stacking ADE, open-source Graphite alternative | Desktop app for running CLI agents in parallel |
 | Isolation model | Jujutsu workspaces over a colocated Git repo | Git worktrees per task |
 | Review surface | PR-style diffs, line comments sent back to the agent | Diff and file review inside the app |
 | Stacked changes | Core workflow | Not emphasized publicly |
@@ -23,8 +23,8 @@ Treq is built around human review, stacked workspaces, auto-rebase, and sending 
 | Conflict handling | Send resolution instructions to the agent | Manual, unless you drive it yourself |
 | Provider model | Claude, Codex, Cursor, and Copilot | Very broad CLI agent support |
 | Remote or cloud workspaces | [Roadmap](/roadmap): SSH remote development | Remote workspaces and enterprise packaging |
-| License | Apache 2.0 | Source-available under ELv2 |
-| Pricing | Free desktop, [Pro](/pricing) at $15 per user per month | Free tier, Pro, and Enterprise |
+| License | Apache 2.0 | MIT |
+| Pricing | Free desktop, [Pro](/pricing) at $15 per user per month | Free, Pro, Team, Ultra and Enterprise |
 
 ## What Each Product Does
 
@@ -48,7 +48,7 @@ Both products solve the same first problem. Several agents should not share one 
 | Agent-driven conflict resolution | Yes | Not emphasized publicly |
 | Automations and scheduling | Not public on the site today | Yes |
 | Remote or cloud workspaces | Planned, not shipped | Yes |
-| Open source | Apache 2.0 | Source-available under ELv2 |
+| Open source | Apache 2.0 | MIT |
 
 ## Where They Differ
 
@@ -64,7 +64,7 @@ Running many agents is becoming a standard feature. Treq's distinction is the st
 
 Treq's desktop app is free and open source under Apache 2.0. [Pricing](/pricing) lists Free for public GitHub repos and Pro at $15 per user per month. Local review stays on your machine either way.
 
-Superset offers a free tier, Pro pricing around $15 per user per month when billed yearly, and custom Enterprise pricing. Its desktop code is source-available under Elastic License 2.0, which is not the same as Apache-style open source.
+Paradev lists Free, Pro at $20, Team at $60, Ultra at $200, and custom Enterprise plans. Its code is open source under the MIT license.
 
 In both cases you still pay the underlying model providers for Claude, Codex, or any other agent usage.
 

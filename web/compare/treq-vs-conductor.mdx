@@ -7,6 +7,10 @@ description: Compare Treq and Conductor for parallel coding agents on the deskto
 
 _Both run agents in isolated workspaces. Treq bets on stacked review. Conductor bets on a polished Mac workflow._
 
+:::note Conductor is joining Meta
+On November 4, 2026, Conductor [announced it is joining Meta](https://conductor.build/changelog/0.93.0-conductor-is-joining-meta). Conductor Cloud goes read-only on November 13 and shuts down on November 20, 2026. The local app keeps getting new models and critical bug fixes until early 2027. Conductor users can export their data from Settings, then Account, then Export data.
+:::
+
 Treq and Conductor solve the same first problem. Each coding agent gets its own workspace, branch, files, terminal, and review path. Their models diverge when tasks depend on one another.
 
 Treq is a Stacking ADE built around dependent workspaces, human review, automatic rebasing, and agent-driven conflict resolution. Conductor focuses on a Mac-native interface for running Claude, Codex, Cursor, and OpenCode agents as a team.
@@ -15,14 +19,14 @@ Treq is a Stacking ADE built around dependent workspaces, human review, automati
 
 | | Treq | Conductor |
 | --- | --- | --- |
-| Positioning | Stacking ADE, open-source Graphite alternative | Human interface to AI organizations on your Mac |
+| Positioning | Stacking ADE, open-source Graphite alternative | Parallel Claude Code, Codex and Cursor agents in isolated workspaces on your Mac |
 | Platform | Desktop app for macOS, Windows, and Linux | Mac-first desktop app |
 | Isolation model | Jujutsu workspaces over a colocated Git repo | Per-task workspace, branch, files, terminal, and diff |
 | Review surface | PR-style diffs with comments sent back to the agent | Diff and review path per task |
 | Stacked changes | Core workflow | Not emphasized publicly |
 | Auto-rebase | Core workflow | Not emphasized publicly |
 | Agent support | Claude, Codex, Cursor, and Copilot | Claude, Codex, Cursor, and OpenCode |
-| Cloud | Not shipped | Cloud early access |
+| Cloud | Not shipped | Conductor Cloud shuts down November 20, 2026 |
 | Open source | Apache 2.0 | No public OSS repo surfaced |
 | Pricing | Free desktop, [Pro](/pricing) at $15 per user per month | Download-first, public self-serve pricing not disclosed |
 
@@ -46,7 +50,7 @@ Both products assume agents need isolation. Both assume developers still need a 
 | Stacked PR or stacked workspace support | Yes | Not emphasized publicly |
 | Auto-rebase and conflict handling | Yes | Not emphasized publicly |
 | Issue tracker integration | Not public on the site today | Linear integration |
-| Cloud workspaces | Not public on the site today | Cloud early access |
+| Cloud workspaces | Not public on the site today | Shutting down November 20, 2026 |
 | Open source | Apache 2.0 | Closed source in public materials |
 
 ## Where They Differ
@@ -79,7 +83,7 @@ Choose **Treq** if you:
 Choose **Conductor** if you:
 
 - Want a polished Mac app centered on Claude, Codex, Cursor, and OpenCode.
-- Prefer a download-first product with Linear integration and cloud early access.
+- Already use it locally and are fine with updates ending in early 2027.
 - Care more about team orchestration narrative and commercial packaging than stacked PR tooling.
 - Are less concerned about open-source licensing for the orchestrator itself.
 
