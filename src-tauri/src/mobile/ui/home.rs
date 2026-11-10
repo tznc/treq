@@ -318,35 +318,23 @@ impl HomeScreen {
     let model = model(cx).read(cx);
     let email = model.user.clone()?;
     let busy = model.auth_busy;
-    let delete_email = email.clone();
     Some(
-      widgets::section("Account", cx)
-        .child(
-          widgets::card(cx).p_4().child(
-            h_flex()
-              .gap_3()
-              .items_center()
-              .child(div().flex_1().min_w_0().truncate().child(email))
-              .child(
-                Button::new("sign-out")
-                  .outline()
-                  .label("Sign out")
-                  .loading(busy)
-                  .on_click(|_, _, cx| super::sign_out(cx))
-                  .touch(),
-              ),
-          ),
-        )
-        .child(
-          Button::new("delete-account")
-            .ghost()
-            .w_full()
-            .text_color(cx.theme().danger)
-            .label("Delete account")
-            .disabled(busy)
-            .on_click(move |_, _, cx| super::delete_account::open(delete_email.clone(), cx))
-            .touch(),
+      widgets::section("Account", cx).child(
+        widgets::card(cx).p_4().child(
+          h_flex()
+            .gap_3()
+            .items_center()
+            .child(div().flex_1().min_w_0().truncate().child(email))
+            .child(
+              Button::new("sign-out")
+                .outline()
+                .label("Sign out")
+                .loading(busy)
+                .on_click(|_, _, cx| super::sign_out(cx))
+                .touch(),
+            ),
         ),
+      ),
     )
   }
 
