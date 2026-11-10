@@ -6,6 +6,7 @@ import BrowserOnly from "@docusaurus/BrowserOnly";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import { supabase } from "../../lib/supabase";
 import { authCallbackDestination } from "../../lib/utils";
+import { isFirstSignIn, trackEvent } from "../../lib/analytics";
 
 function CallbackContent() {
   const [status, setStatus] = useState<"loading" | "desktop" | "error">("loading");
@@ -70,6 +71,10 @@ function CallbackContent() {
 
         if (!session) {
           throw new Error("Failed to establish session");
+        }
+
+        if (isFirstSignIn(session.user)) {
+          trackEvent("sign_up", { method: session.user.app_metadata.provider ?? "email" });
         }
 
         const destination = authCallbackDestination(searchParams);

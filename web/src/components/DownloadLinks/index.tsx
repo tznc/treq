@@ -8,6 +8,7 @@ import {
   type DownloadLink,
   type ReleaseAsset,
 } from '@site/src/lib/downloads';
+import {trackEvent} from '@site/src/lib/analytics';
 import styles from './styles.module.css';
 
 type LatestReleaseData = {release: {assets: ReleaseAsset[]} | null} | undefined;
@@ -23,11 +24,8 @@ function useDownloads() {
   );
 }
 
-// gtag only exists when the site is built with DOCUSAURUS_ENABLE_GTAG=true.
 function trackDownload(location: string, platform: DownloadLink['platform']) {
-  if (typeof window.gtag === 'function') {
-    window.gtag('event', 'download_click', {location, platform});
-  }
+  trackEvent('download_click', {location, platform});
 }
 
 function DownloadAnchor({
