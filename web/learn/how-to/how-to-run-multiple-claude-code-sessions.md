@@ -67,6 +67,21 @@ In Treq, create one workspace per task from the dashboard. Each workspace gets a
 
 See [Agent Sessions](/docs/concepts/agent-sessions) and [Workspaces](/docs/concepts/workspaces).
 
+## Mix agents in one project
+
+Treq is not tied to one agent. Claude Code, Codex and Cursor Agent all run in the same kind of workspace, so you can pick the agent per task instead of per project. The repository setting only sets the default.
+
+Match each task to the model you trust most for that kind of work. For example, give exploratory or unclear tasks to an agent with a plan mode, such as Claude Code or Cursor Agent, and give well-scoped edits to whichever agent is fastest for you. Your own results are the best guide, since model strengths shift with every release.
+
+Agents can share one stack. The database layer can come from one agent and the UI layer from another. Treq still rebases the upper workspace when the lower one changes, and your review comments go back to the agent that owns each workspace.
+
+```bash
+treq add db-schema
+treq add orders-ui --source-branch db-schema
+treq agent start db-schema "Add the orders table and migration" --agent claude
+treq agent start orders-ui "Build the orders page on the new API" --agent codex
+```
+
 ## Common failure cases
 
 **Both sessions share the home checkout.** Symptoms include interleaved edits, unexpected `git status`, and agents fighting over the same file. Fix by moving each session into its own worktree before continuing.
