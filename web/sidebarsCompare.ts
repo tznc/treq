@@ -17,6 +17,7 @@ const sidebars: SidebarsConfig = {
     'treq-vs-vibe-kanban',
     'treq-vs-github-stacked-prs',
     'treq-vs-gitbutler',
+    'treq-vs-herdr',
     {
       type: 'category',
       label: 'Best Tools',
