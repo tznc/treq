@@ -9,6 +9,12 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Guides',
+      link: {type: 'doc', id: 'guides/index'},
+      items: ['guides/parallel-ai-coding-agents'],
+    },
+    {
+      type: 'category',
       label: 'Concepts',
       link: {type: 'doc', id: 'concepts/index'},
       items: [

@@ -1,0 +1,131 @@
+---
+sidebar_position: 2
+slug: /guides/parallel-ai-coding-agents
+title: The Complete Guide to Running AI Coding Agents in Parallel
+description: How to split a feature across several coding agents, isolate them, stack dependent work, review every change, and merge it with Treq. A start-to-finish guide.
+---
+
+import DefinitionCard from "@site/src/components/DefinitionCard";
+
+# The Complete Guide to Running AI Coding Agents in Parallel
+
+_Several agents can finish a feature faster than one. This guide covers the whole loop with Treq: split, isolate, stack, review, merge._
+
+One coding agent waits on you. Several agents waiting on you is where the speed comes from, as long as their work does not collide and you can still review it. This guide walks the full loop in Treq, from splitting a feature into tasks to merging the last pull request. Each step links to the concept page or doc that covers it in depth.
+
+## Why Run Agents in Parallel
+
+A coding agent spends most of a task reading code, running tests and waiting for the model. While one agent works, you have nothing to do. Running three agents on three tasks turns that idle time into progress.
+
+Parallel agents fail in three predictable ways. They overwrite each other's files when they share a checkout. Their branches go stale while you review. Their output piles up faster than you can read it. [Parallel Coding Agents](/learn/parallel-coding-agents) explains each failure. The rest of this guide shows how Treq handles them.
+
+## Step 1: Split the Work
+
+Start with the feature, not the agents. Break it into tasks an agent can finish and you can review in one sitting. Each task becomes one workspace and later one pull request.
+
+Sort the tasks into two kinds:
+
+- **Independent tasks** touch different parts of the code and can merge in any order, such as a docs fix and an unrelated bug fix.
+- **Dependent tasks** build on each other, such as a database change, an API that uses it, and a UI that calls the API.
+
+<DefinitionCard
+  term="Stack"
+  definition="An ordered chain of workspaces where each one targets the workspace below it instead of the default branch."
+/>
+
+Independent tasks run side by side. Dependent tasks form a **stack**. [What are Stacked PRs?](/learn/concepts/git/stacked-prs) covers why small dependent layers review faster than one large change.
+
+## Step 2: Install Treq and Open a Repository
+
+[Install Treq](/docs/getting-started/installation) for macOS, Windows or Linux and open a Git repository. You also need at least one agent CLI: Claude Code, Codex or Cursor Agent. Treq starts the agent you pick inside each workspace, so your existing subscription and login carry over.
+
+## Step 3: Create One Workspace per Task
+
+<DefinitionCard
+  term="Workspace"
+  definition="An isolated working copy with its own branch, files, terminal and review, so one agent's edits and builds never touch another's."
+/>
+
+Click **New** in the sidebar, or press `Cmd+N` on macOS or `Ctrl+N` on Windows and Linux. Type one line per task and click **Create**. A line can be a title for new work, an existing branch name or a GitHub pull request link.
+
+Each **workspace** is a separate directory, so two agents can install packages and run tests at the same time. Treq builds workspaces on [Jujutsu](/docs/concepts/workspaces) beside your Git repository. You keep using Git, and you never have to learn `jj`.
+
+From a terminal, `treq add` does the same job. Use `--symlink node_modules` to share a large dependency folder instead of installing it in every workspace. The [CLI reference](/docs/reference/cli) lists every option.
+
+## Step 4: Stack the Dependent Tasks
+
+Create a dependent workspace on top of the one it builds on. In the CLI, `treq add api-layer --source-branch db-schema` makes `api-layer` target `db-schema` instead of the default branch.
+
+When a lower workspace changes, Treq rebases every workspace above it onto the new commit. You do not run `git rebase` and you do not wait until review to find out the stack has drifted. [Workspaces](/docs/concepts/workspaces) documents the rebase rules, including how Treq follows a pull request that moves to a new base on GitHub.
+
+Plain [git worktrees](/learn/concepts/git/git-worktrees) give you isolation but not this step. A worktree has no idea which branch it depends on, so every rebase is manual. [Auto-rebase AI branches](/learn/how-to/auto-rebase-ai-branches) compares the approaches.
+
+## Step 5: Start the Agents
+
+Open a workspace, describe the task in the **Code** tab and click **Run**. Pick the mode first:
+
+| Mode | What the agent does | Use it when |
+| --- | --- | --- |
+| Plan | Reads the workspace and proposes an approach without editing | Requirements are unclear or the change is broad |
+| Edit | Applies changes in the workspace | The task is well defined |
+
+Write each prompt as if the agent knows nothing about the other tasks. Name the files in scope, the files to leave alone and the command that proves the task works. A precise prompt is the cheapest way to cut review time later. [Agent Sessions](/docs/concepts/agent-sessions) lists what each agent supports in each mode.
+
+Start the next workspace while the first agent runs. Three to five agents is a practical range for one reviewer. Past that, review becomes the bottleneck and agents sit finished and unreviewed.
+
+## Step 6: Review Each Workspace
+
+Open the **Changes** tab when an agent finishes. Treq shows the workspace diff the way a pull request would, with uncommitted and committed views.
+
+Leave comments on changed lines. Say in each comment whether the agent should fix a defect, answer a question or consider a suggestion. Comments save as a pending review on your machine and never go to GitHub. When you finish, send the review back to the agent in plan or edit mode, and the agent picks up every comment with its file and line.
+
+Review stacks from the bottom up. A fix in a lower layer rebases everything above it, so reviewing the top first wastes effort. [Review AI-Generated PRs](/learn/how-to/review-ai-generated-prs) and [Quality Gates for Agent Output](/learn/concepts/ai-engineering/quality-gates-for-agent-output) cover what to look for.
+
+## Step 7: Hand Conflicts to the Agent
+
+A rebase can conflict when two layers touch the same lines. Treq marks the conflicted files and blocks merging until they are resolved.
+
+Do not resolve the conflict by hand. Write instructions instead, such as which side's behavior to keep, and include them in the review. The agent receives them in a separate conflict-resolution section and fixes the files. [Merge Conflicts with Coding Agents](/learn/how-to/merge-conflicts-with-coding-agents) shows how to write instructions an agent can follow.
+
+## Step 8: Commit, Push and Open Pull Requests
+
+Commit from the **Changes** tab. You can select whole files or single hunks. Click **Push** in the workspace header to push the branch.
+
+Treq creates and shows pull requests through your local `gh` CLI. A stack of workspaces becomes a stack of pull requests, each targeting the branch below it. GitHub's [native stacked pull requests](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs) then handle team review and merging on github.com.
+
+## Step 9: Merge the Stack
+
+Merge from the bottom. Click **Merge...** in the workspace header and choose a strategy:
+
+| Strategy | Result |
+| --- | --- |
+| Merge | A merge commit with two parents |
+| Squash and merge | One commit on the target |
+| Rebase and merge | The workspace commits replayed onto the target for a linear history |
+
+When a workspace has an open pull request, choose whether to merge locally or on GitHub. After a lower workspace merges, Treq moves the workspace above it onto the merged target, so the next layer is ready to merge. [Merging Workspaces](/docs/tutorials/merging-workspaces) covers each case.
+
+## Scaling Up
+
+A few habits keep a larger setup manageable:
+
+- **Share heavy folders.** Symlink `node_modules` or build caches into workspaces with `treq add --symlink` so each workspace does not reinstall them.
+- **Check out less.** In a monorepo, `treq add --sparse` materializes only the paths a task needs.
+- **Let agents talk.** `treq agent msg` sends a message to another running agent, so one agent can ask another about an interface instead of guessing.
+- **Move work to the cloud.** With [Pro](/pricing), [cloud workspaces](/docs/how-to/cloud-workspaces) run agents on a remote machine and behave like local ones.
+
+## Checklist
+
+- Each task fits one review sitting.
+- Dependent tasks are stacked, not run side by side.
+- Each prompt names its scope and its proof command.
+- You review bottom-up and send comments back instead of editing by hand.
+- Conflicts go back to the agent with instructions.
+- The stack merges from the bottom.
+
+## Next Steps
+
+- [Parallel Coding Agents](/learn/parallel-coding-agents): the concepts behind this guide
+- [Agent Orchestration](/learn/concepts/ai-engineering/agent-orchestration): coordinate agents across a larger project
+- [Compare](/compare): how Treq compares with other agent tools
+- [Installation and Quickstart](/docs/getting-started/installation): set up Treq in a few minutes
