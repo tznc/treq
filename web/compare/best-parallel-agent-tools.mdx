@@ -1,7 +1,7 @@
 ---
 sidebar_position: 20
 title: Best Tools for Running AI Coding Agents in Parallel (2026)
-description: Treq, Claude Code worktrees, Conductor, Claude Squad, Orca, emdash, Superset and Nimbalyst compared for running several coding agents on one repository.
+description: Treq, Claude Code worktrees, Conductor, Claude Squad, Orca, emdash, Paradev and Nimbalyst compared for running several coding agents on one repository.
 ---
 
 # Best Tools for Running AI Coding Agents in Parallel
@@ -25,11 +25,11 @@ Pick by the problem after isolation:
 | --- | --- | --- | --- | --- |
 | Treq | Desktop app | Apache 2.0 | Yes | Dependent agent tasks with local review |
 | Claude Code worktrees | Built into Claude Code | Proprietary | No | Claude-only users who want no extra tool |
-| Conductor | Mac desktop app | Proprietary | No | A polished Mac workflow |
+| Conductor | Mac desktop app | Proprietary | No | Existing users until early 2027 |
 | Claude Squad | Terminal app | AGPL-3.0 | No | Terminal-first users |
-| Orca | Desktop app | MIT | Not emphasized | One environment for editing, browsing and agents |
+| Orca | Desktop app | MIT | Not emphasized | One environment for agents, browsing and remote hosts |
 | emdash | Desktop app | Apache 2.0 | No | An open source desktop ADE |
-| Superset | Desktop editor | ELv2 | No | Broad agent control in an editor |
+| Paradev, formerly Superset | Desktop app | MIT | No | Running many CLI agents with paid team tiers |
 | Nimbalyst | Desktop app | See project | No | Former Crystal users |
 
 ## 1. Treq
@@ -38,11 +38,11 @@ Pick by the problem after isolation:
 
 ## 2. Claude Code Worktrees
 
-Claude Code can start a session in its own worktree with the `--worktree` flag, and its desktop app has a worktree mode. It needs no extra install. It covers isolation only, with no stacking or cross-agent review, and runs Claude only.
+Claude Code can start a session in its own worktree with the `--worktree` flag, and its desktop app has a Worktree toggle. It needs no extra install. It covers isolation only, with no stacking or cross-agent review, and runs Claude only.
 
 ## 3. Conductor
 
-Conductor is a Mac app for running agents in parallel workspaces with a polished interface. See [Treq vs Conductor](./treq-vs-conductor).
+Conductor runs Claude Code, Codex and Cursor agents in isolated workspaces on your Mac. In November 2026 it announced it is joining Meta. Conductor Cloud shuts down on November 20, 2026, and the local app gets new models and critical fixes only until early 2027. See [Treq vs Conductor](./treq-vs-conductor).
 
 ## 4. Claude Squad
 
@@ -50,15 +50,15 @@ Claude Squad manages several terminal agents in tmux sessions, each in its own w
 
 ## 5. Orca
 
-Orca is an MIT-licensed environment with worktrees, terminals, a file editor, browser tabs and SSH worktrees. See [Treq vs Orca](./treq-vs-orca).
+Orca is an MIT-licensed environment with worktrees, chat and terminals, a built-in browser, and support for SSH hosts and cloud VMs. See [Treq vs Orca](./treq-vs-orca).
 
 ## 6. emdash
 
 emdash is an Apache 2.0 desktop environment for running several agents side by side. See [Treq vs emdash](./treq-vs-emdash).
 
-## 7. Superset
+## 7. Paradev, Formerly Superset
 
-Superset is a source-available code editor built around agents, with free, Pro and Enterprise tiers. See [Treq vs Superset](./treq-vs-superset).
+Paradev, renamed from Superset, is an MIT-licensed desktop app for running CLI agents in parallel. It has free, Pro, Team, Ultra and Enterprise tiers. See [Treq vs Superset](./treq-vs-superset).
 
 ## 8. Nimbalyst
 
