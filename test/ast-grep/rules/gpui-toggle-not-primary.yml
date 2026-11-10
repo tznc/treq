@@ -1,0 +1,26 @@
+id: gpui-toggle-not-primary
+language: rust
+severity: error
+message: >
+  A toggle draws "on" in the one selected style, not as a filled primary
+  button: a row of filter chips or reactions would otherwise show several
+  primaries in one region. Use `.outline().selected(on)`.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+  - "src-tauri/src/mobile/**/*.rs"
+ignores:
+  # Sign-in providers: the first is the primary, the rest outline. Not a toggle.
+  - "src-tauri/src/mobile/ui/home.rs"
+rule:
+  kind: if_expression
+  all:
+    - has:
+        field: consequence
+        has:
+          stopBy: end
+          pattern: $B.primary()
+    - has:
+        field: alternative
+        has:
+          stopBy: end
+          pattern: $B.outline()

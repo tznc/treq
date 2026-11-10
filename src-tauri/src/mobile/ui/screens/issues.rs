@@ -3,6 +3,7 @@
 //! host's `gh`, so the host's sign-in is the one used.
 
 use crate::mobile::ui::widgets::TouchButton as _;
+use gpui_kit::component::Selectable as _;
 use std::rc::Rc;
 
 use crate::{
@@ -448,13 +449,8 @@ impl IssuesScreen {
         .flex_1()
         .h(px(44.))
         .label(label)
-        .map(|b| {
-          if filter == current {
-            b.primary()
-          } else {
-            b.outline()
-          }
-        })
+        .outline()
+        .selected(filter == current)
     };
     h_flex()
       .gap_2()
