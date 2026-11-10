@@ -1,0 +1,49 @@
+.form {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.title {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--ifm-color-emphasis-400);
+  border-radius: var(--ifm-global-radius);
+  background: var(--ifm-background-color);
+  color: var(--ifm-font-color-base);
+  font: inherit;
+}
+
+.note,
+.done {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+.error {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ifm-color-danger-dark);
+}
