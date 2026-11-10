@@ -1,0 +1,41 @@
+.page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+.breadcrumbs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+.sep {
+  color: var(--ifm-color-emphasis-500);
+}
+
+.lead {
+  color: var(--ifm-color-emphasis-800);
+  margin-bottom: 2rem;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.name {
+  font-family: var(--ifm-font-family-monospace);
+  font-weight: 600;
+}
+
+.description {
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ifm-color-emphasis-700);
+}
