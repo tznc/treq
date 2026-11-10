@@ -929,19 +929,14 @@ fn activate(connection: Connection, model: &Entity<AppModel>, cx: &mut App) {
   });
 }
 
-/// The active machine's last repository, or its repository picker.
-/// Every machine a project can open on, the cloud machine first when signed
-/// in, then the SSH hosts.
-fn machines(cx: &App) -> Vec<Machine> {
+/// Every machine on this device, in the order added: the SSH hosts, and the
+/// Treq Cloud machine when signed in. No kind is preferred.
+pub fn machines(cx: &App) -> Vec<Machine> {
   let signed_in = model(cx).read(cx).user.is_some();
-  signed_in
-    .then_some(Machine::Managed)
+  store::user_managed_endpoints()
     .into_iter()
-    .chain(
-      store::user_managed_endpoints()
-        .into_iter()
-        .map(Machine::Host),
-    )
+    .map(Machine::Host)
+    .chain(signed_in.then_some(Machine::Managed))
     .collect()
 }
 
@@ -1076,6 +1071,7 @@ fn open_repo_on_active(remote: String, cx: &mut App) {
   .detach();
 }
 
+/// The active machine's last repository, or its repository picker.
 fn open_location(cx: &mut App) {
   nav::home(cx);
   screens::repos::open(cx);

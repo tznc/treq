@@ -353,98 +353,101 @@ impl HomeScreen {
 
   /// `stacked`: sign-in buttons one above the other, for the narrow
   /// tablet sidebar.
-  fn cloud(&self, stacked: bool, cx: &mut Context<Self>) -> impl IntoElement {
+  /// Every machine in one list, each row alike: Treq Cloud and SSH hosts.
+  /// `stacked` puts the sign-in buttons under one another (the sidebar).
+  fn machines(&self, stacked: bool, cx: &mut Context<Self>) -> impl IntoElement {
+    let machines = super::machines(cx);
     let model = model(cx).read(cx);
-    let busy = model.auth_busy;
-    let error = model.auth_error.clone();
-    let notice = model.auth_notice.clone();
+    let (busy, error, notice) = (
+      model.auth_busy,
+      model.auth_error.clone(),
+      model.auth_notice.clone(),
+    );
     let signed_in = model.user.is_some();
-    let section = widgets::section("Treq Cloud", cx);
-    if !signed_in {
-      return section.child(
-        widgets::card(cx)
-          .p_4()
-          .gap_3()
-          .children(notice.map(|n| div().text_sm().child(n)))
-          .child(widgets::muted(
-            "Sign in to reach your Treq Cloud machine.",
-            cx,
-          ))
-          .map(|card| {
-            if stacked {
-              card.child(v_flex().gap_2().children(provider_buttons(busy, true)))
-            } else {
-              card.child(h_flex().gap_2().children(provider_buttons(busy, false)))
-            }
-          })
-          .children(error.map(|e| widgets::error_text(e, cx).px_4().pb_3())),
-      );
-    }
     let secure_storage = match &model.machine(MANAGED_MACHINE).status {
       MachineStatus::Failed(error) => error
         .strip_prefix(managed::SECURE_STORAGE_PREFIX)
         .map(|detail| detail.trim().to_string()),
       _ => None,
     };
-    let row = self.machine_row(Machine::Managed, "Cloud machine".into(), None, None, cx);
-    section
-      .child(widgets::card(cx).child(row))
-      .when_some(secure_storage, |section, detail| {
-        section.child(
-          Alert::warning("secure-storage", detail)
-            .title("Secure storage isn't set up on this device"),
-        )
-      })
-  }
-
-  fn hosts(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let hosts = store::user_managed_endpoints();
     let palette = treq_ui::theme::current(cx);
-    let count = hosts.len();
-    let title = treq_ui::SectionHeader::new("section-ssh-hosts", "SSH hosts", &palette)
+    let count = machines.len();
+    let title = treq_ui::SectionHeader::new("section-machines", "Machines", &palette)
       .when(count > 0, |header| header.count(count));
-    let list = if hosts.is_empty() {
+    let list = if machines.is_empty() {
       widgets::card(cx).child(widgets::empty(
-        "hosts-empty",
-        "No SSH hosts on this device yet.",
+        "machines-empty",
+        "No machines on this device yet.",
         cx,
       ))
     } else {
-      let rows = hosts
+      let rows = machines
         .into_iter()
-        .map(|host| {
-          let address = format!("{}@{}:{}", host.username, host.hostname, host.port);
-          let edit_record = host.clone();
-          let edit = Button::new(SharedString::from(format!("edit-{}", host.id)))
-            .ghost()
-            .small()
-            .icon(IconName::Ellipsis)
-            .accessibility_label("Edit host")
-            .on_click(move |_, _, cx| {
-              cx.stop_propagation();
-              screens::add_host::edit(edit_record.clone(), cx);
-            })
-            .touch();
-          let name = host.display_name.clone();
-          self.machine_row(
-            Machine::Host(host),
-            name,
-            Some(address),
-            Some(edit.into_any_element()),
-            cx,
-          )
+        .map(|machine| match machine {
+          Machine::Managed => {
+            self.machine_row(Machine::Managed, "Treq Cloud".into(), None, None, cx)
+          }
+          Machine::Host(host) => {
+            let address = format!("{}@{}:{}", host.username, host.hostname, host.port);
+            let edit_record = host.clone();
+            let edit = Button::new(SharedString::from(format!("edit-{}", host.id)))
+              .ghost()
+              .small()
+              .icon(IconName::Ellipsis)
+              .accessibility_label("Edit machine")
+              .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                screens::add_host::edit(edit_record.clone(), cx);
+              })
+              .touch();
+            let name = host.display_name.clone();
+            self.machine_row(
+              Machine::Host(host),
+              name,
+              Some(address),
+              Some(edit.into_any_element()),
+              cx,
+            )
+          }
         })
         .collect::<Vec<_>>();
       widgets::card(cx).children(rows)
     };
-    v_flex().gap_3().child(title).child(list).child(
-      Button::new("add-host")
-        .outline()
-        .icon(IconName::Plus)
-        .label("Add SSH host")
-        .on_click(|_, _, cx| screens::add_host::open(cx))
-        .touch(),
-    )
+    v_flex()
+      .gap_3()
+      .child(title)
+      .child(list)
+      .when_some(secure_storage, |this, detail| {
+        this.child(
+          Alert::warning("secure-storage", detail)
+            .title("Secure storage isn't set up on this device"),
+        )
+      })
+      .child(
+        Button::new("add-host")
+          .outline()
+          .icon(IconName::Plus)
+          .label("Add SSH host")
+          .on_click(|_, _, cx| screens::add_host::open(cx))
+          .touch(),
+      )
+      // Signed out, the cloud machine isn't listed: sign in to add it.
+      .when(!signed_in, |this| {
+        this
+          .children(notice.map(|n| div().text_sm().child(n)))
+          .child(widgets::muted(
+            "Sign in to add your Treq Cloud machine.",
+            cx,
+          ))
+          .map(|this| {
+            if stacked {
+              this.child(v_flex().gap_2().children(provider_buttons(busy, true)))
+            } else {
+              this.child(h_flex().gap_2().children(provider_buttons(busy, false)))
+            }
+          })
+          .children(error.map(|e| widgets::error_text(e, cx)))
+      })
   }
 
   fn account(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
@@ -615,8 +618,7 @@ impl Render for HomeScreen {
         .bg(palette.sidebar)
         .child(
           widgets::page()
-            .child(self.hosts(cx))
-            .child(self.cloud(true, cx))
+            .child(self.machines(true, cx))
             .children(self.account(cx)),
         );
       let recents = div()
@@ -633,12 +635,10 @@ impl Render for HomeScreen {
         .child(recents)
         .into_any_element();
     } else {
-      let cloud = self.cloud(false, cx);
-      let hosts = self.hosts(cx);
+      let machines = self.machines(false, cx);
       let account = self.account(cx);
       widgets::page()
-        .child(hosts)
-        .child(cloud)
+        .child(machines)
         .children(account)
         .into_any_element()
     };

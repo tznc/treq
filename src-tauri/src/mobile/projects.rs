@@ -72,7 +72,8 @@ pub struct Candidate {
 
 /// The machine to open a project on: the active connection if it is ready,
 /// else any ready machine, else the last one used, else the first
-/// candidate (the cloud machine is listed first when signed in).
+/// candidate. Every kind of machine (Treq Cloud or an SSH host) is treated
+/// the same.
 pub fn pick_machine(
   candidates: &[Candidate],
   active: Option<&str>,
