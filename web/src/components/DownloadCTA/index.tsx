@@ -1,6 +1,7 @@
 import type {ReactNode} from 'react';
 import Link from '@docusaurus/Link';
 import {DownloadButton, OtherDownloads} from '@site/src/components/DownloadLinks';
+import EmailCapture from '@site/src/components/EmailCapture';
 import styles from './styles.module.css';
 
 export default function DownloadCTA({
@@ -22,6 +23,7 @@ export default function DownloadCTA({
         </Link>
       </div>
       <OtherDownloads location="cta" className={styles.other} />
+      <EmailCapture />
     </aside>
   );
 }
