@@ -41,6 +41,7 @@ mod gpui_shell;
 #[cfg(desktop)]
 #[doc(hidden)]
 pub use gpui_shell::bench as gpui_bench;
+pub mod integration;
 pub mod jj;
 #[cfg(feature = "gui")]
 pub mod linear;

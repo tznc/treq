@@ -225,6 +225,7 @@ serde_yaml = "0.9"
 rusqlite = { version = "0.41", features = ["bundled"] }
 portable-pty = "0.9"
 chrono = { version = "0.4", features = ["serde"] }
+hmac = "0.13"
 sha2 = "0.11"
 ignore = "0.4"
 jj-lib = "0.40.0"
