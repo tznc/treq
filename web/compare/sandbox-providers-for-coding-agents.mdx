@@ -15,11 +15,11 @@ A sandbox is an isolated machine an agent can run commands on without touching y
 | Provider | Isolation | Price per hour | Free allowance |
 | --- | --- | --- | --- |
 | Northflank | microVM | about $0.07 | Up to $20 per month |
-| Beam | Container, or microVM on request | about $0.14 | $20 credit with the Developer plan |
-| E2B | microVM | about $0.17 | $100 one-time credit |
+| Beam | Container, or microVM on request | about $0.04 shared, $0.14 performance | $20 credit each month with the Developer plan |
+| E2B | VM | about $0.17 | $100 one-time credit |
 | Daytona | Containers and VMs | about $0.17 | $200 credit |
-| Blaxel | microVM | about $0.17, nothing while suspended | Up to $200 credit |
-| Modal | Sandboxes | about $0.24 | $30 per month on Starter |
+| Blaxel | microVM | about $0.17, no compute charge while suspended | Up to $200 credit |
+| Modal | Sandboxes | about $0.24 non-preemptible | $30 per month on Starter |
 | Runloop | microVM | about $0.32 | $50 credit |
 
 Boat, Cloudflare, Vercel and Fly.io price differently, so they are not in the table. Boat bills per second for a persistent VM. Cloudflare needs the $5 per month Workers Paid plan plus Containers usage. Vercel bills active CPU only, so an idle sandbox costs less than a busy one. Fly.io Machines start at about $6.70 per month for 1 shared vCPU and 1 GB.
@@ -27,14 +27,14 @@ Boat, Cloudflare, Vercel and Fly.io price differently, so they are not in the ta
 ## What Matters for Coding Agents
 
 - **Session length.** Agents can run for hours. E2B caps a session at 1 hour on its free Hobby plan and 24 hours on Pro.
-- **Persistence.** A sandbox that keeps its disk lets the agent resume without cloning and installing again. Boat and Vercel Sandbox keep state by default. Most others offer snapshots.
-- **Idle cost.** An agent spends much of its time waiting for the model. Vercel bills only active CPU, and Blaxel bills nothing while a sandbox is suspended.
+- **Persistence.** A sandbox that keeps its disk lets the agent resume without cloning and installing again. Boat and Vercel Sandbox keep their disk by default. Boat does not keep memory or running processes. Most others offer snapshots.
+- **Idle cost.** An agent spends much of its time waiting for the model. Vercel bills only active CPU. Blaxel stops compute billing while a sandbox is suspended and charges only for snapshot storage.
 - **Forking.** Boat can fork a sandbox, which lets several agents start from one prepared environment.
-- **Self-hosting.** Beam publishes its engine as open source. Northflank can run in your own AWS, GCP or Azure account.
+- **Self-hosting.** Beam publishes its engine, beta9, under AGPL-3.0. Northflank can run in your own AWS, GCP or Azure account.
 
 ## The Providers
 
-**E2B** runs each sandbox in a microVM, with SDKs for Python and JavaScript and pause and resume.
+**E2B** runs each sandbox in a Linux VM, with SDKs for Python and JavaScript and pause and resume.
 
 **Daytona** creates sandboxes in under 90 milliseconds by its own measure and bills CPU and memory per hour.
 

@@ -29,11 +29,11 @@ _Graphite made stacked pull requests mainstream. You can now get stacks from Git
 
 ## 2. GitHub Stacked PRs
 
-GitHub added native stacked pull requests, in public preview since July 2026. Each PR targets the branch of the PR below it, and GitHub retargets the stack when a lower PR merges. The `gh stack` extension manages stacks from the terminal. It is the default choice if you want stacks without another tool.
+GitHub's native stacked pull requests have been generally available on all github.com plans since October 2026. Each PR targets the branch of the PR below it. When a lower PR merges, GitHub retargets and rebases the rest. See [Treq vs GitHub Stacked PRs](./treq-vs-github-stacked-prs). The `gh stack` extension manages stacks from the terminal. It is the default choice if you want stacks without another tool.
 
 ## 3. GitButler
 
-GitButler is a Git client with stacked and parallel branches in one working directory. It ships a desktop app, a CLI and a TUI, and opens GitHub's native stacked PRs. Its license is the Functional Source License, which converts to MIT after two years. It is fair source, not an OSI-approved open source license.
+GitButler is a Git client with stacked and parallel branches in one working directory. It ships a desktop app, a CLI and a TUI, and opens GitHub's native stacked PRs. Its license is FSL-1.1-MIT, the Functional Source License, which converts to MIT after two years. See [Treq vs GitButler](./treq-vs-gitbutler). It is fair source, not an OSI-approved open source license.
 
 ## 4. ghstack and spr
 
@@ -41,7 +41,7 @@ ghstack and spr both turn each local commit into its own pull request. You keep 
 
 ## 5. git-town
 
-git-town adds commands for creating, syncing and shipping stacked branches. It works with GitHub, GitLab, Bitbucket and other hosts because it only uses plain Git branches.
+git-town adds commands for creating, syncing and shipping stacked branches. It works with GitHub, GitLab, Bitbucket, Gitea and Forgejo because it only uses plain Git branches.
 
 ## 6. Jujutsu
 
