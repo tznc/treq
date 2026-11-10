@@ -117,8 +117,8 @@ const config: Config = {
   // Set the /<baseUrl>/ pathname under which your site is served
   baseUrl: '/',
 
-  // One canonical form per URL: /page, which Cloudflare Pages serves from page.html and /page/ redirects to.
-  trailingSlash: false,
+  // One canonical form per URL; /page 301s to /page/ instead of both being indexed.
+  trailingSlash: true,
 
   customFields: {
     featureFlags,
