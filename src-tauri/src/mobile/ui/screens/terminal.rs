@@ -268,6 +268,7 @@ pub fn agent_name(agent: RemoteAgentId) -> &'static str {
     RemoteAgentId::CursorAgent => "Cursor Agent",
     RemoteAgentId::Copilot => "Copilot",
     RemoteAgentId::Devin => "Devin",
+    RemoteAgentId::Gemini => "Gemini CLI",
   }
 }
 
@@ -279,6 +280,7 @@ fn label_prefix(agent: RemoteAgentId) -> &'static str {
     RemoteAgentId::CursorAgent => "cursor",
     RemoteAgentId::Copilot => "copilot",
     RemoteAgentId::Devin => "devin",
+    RemoteAgentId::Gemini => "gemini",
   }
 }
 

@@ -1043,6 +1043,7 @@ pub(super) fn agent_icon(agent: Agent) -> &'static str {
     Agent::Cursor => theme::ICON_AGENT_CURSOR,
     Agent::Copilot => theme::ICON_AGENT_COPILOT,
     Agent::Devin => theme::ICON_AGENT_DEVIN,
+    Agent::Gemini => theme::ICON_AGENT_GEMINI,
   }
 }
 

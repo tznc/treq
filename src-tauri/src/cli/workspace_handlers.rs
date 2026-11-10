@@ -518,7 +518,7 @@ pub(super) fn start_agent_kind(matches: &Matches, repo_path: &str) -> Result<Str
     return Ok(resolve_default_agent(repo_path));
   };
   crate::core::agent_launch::agent_kind(Some(agent.trim()))
-    .ok_or_else(|| format!("unknown agent '{agent}'. Use one of: claude, codex, cursor, copilot"))
+    .ok_or_else(|| format!("unknown agent '{agent}'. Use one of: claude, codex, cursor, copilot, devin, gemini"))
 }
 
 fn handle_agent_start(matches: &Matches) -> bool {

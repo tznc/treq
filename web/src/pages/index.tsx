@@ -117,6 +117,9 @@ function AgentBar(): ReactNode {
         <span>Claude Code</span>
         <span>Codex</span>
         <span>Cursor</span>
+        <span>Copilot</span>
+        <span>Devin</span>
+        <span>Gemini</span>
       </div>
     </section>
   );

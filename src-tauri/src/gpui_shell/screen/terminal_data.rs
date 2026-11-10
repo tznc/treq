@@ -372,6 +372,7 @@ impl TerminalHost for Backend {
       RemoteAgentId::CursorAgent => "cursor",
       RemoteAgentId::Copilot => "copilot",
       RemoteAgentId::Devin => "devin",
+      RemoteAgentId::Gemini => "gemini",
     };
     self.connect_agent_msg();
     // The repository is on the host; what its agent sends is recorded on

@@ -37,15 +37,17 @@ pub enum Agent {
   Cursor,
   Copilot,
   Devin,
+  Gemini,
 }
 
 impl Agent {
-  pub const ALL: [Agent; 5] = [
+  pub const ALL: [Agent; 6] = [
     Agent::Claude,
     Agent::Codex,
     Agent::Cursor,
     Agent::Copilot,
     Agent::Devin,
+    Agent::Gemini,
   ];
 
   pub fn id(self) -> &'static str {
@@ -55,6 +57,7 @@ impl Agent {
       Agent::Cursor => "cursor",
       Agent::Copilot => "copilot",
       Agent::Devin => "devin",
+      Agent::Gemini => "gemini",
     }
   }
 
@@ -65,6 +68,7 @@ impl Agent {
       Agent::Cursor => "Cursor",
       Agent::Copilot => "Copilot",
       Agent::Devin => "Devin",
+      Agent::Gemini => "Gemini",
     }
   }
 
@@ -76,6 +80,7 @@ impl Agent {
       Agent::Cursor => "cursor-agent",
       Agent::Copilot => "copilot",
       Agent::Devin => "devin",
+      Agent::Gemini => "gemini",
     }
   }
 

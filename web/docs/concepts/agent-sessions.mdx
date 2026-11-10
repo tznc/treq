@@ -20,6 +20,8 @@ Treq resolves the default agent from the repository settings first, then the app
 | Codex | Not available | Runs the task with edit access |
 | Cursor Agent | Starts with the plan flag | Starts without the plan flag |
 | GitHub Copilot CLI | Not available | Runs the task with all tools allowed |
+| Devin | Uses Devin's plan permission mode | Uses Devin's normal permission mode |
+| Gemini CLI | Uses the plan approval mode | Uses the auto-edit approval mode |
 
 Treq starts GitHub Copilot CLI as `copilot --allow-all-tools`, so Copilot runs commands without asking for approval first. The workspace gives it its own working copy, but its commands run with your user's permissions and can reach files outside the workspace.
 

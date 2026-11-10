@@ -23,7 +23,7 @@ Treq does **not** install software on remote nodes. Before opening a remote work
 - Treq CLI or remote helper available on `PATH`
 - `jj` for workspace and commit operations
 - `git` for cloning repositories and interacting with Git remotes
-- Any coding agents you want to run remotely, such as Claude Code, Codex, Cursor Agent, or GitHub Copilot CLI
+- Any coding agents you want to run remotely, such as Claude Code, Codex, Cursor Agent, GitHub Copilot CLI, Devin, or Gemini CLI
 
 On the client, configure SSH in `~/.ssh/config`. Host aliases, identity files, and `ProxyJump` entries should live there. If `ssh my-host` works in a terminal, Treq can use the same host alias.
 

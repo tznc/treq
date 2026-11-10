@@ -22,6 +22,8 @@ pub const AGENTS: [(&str, &str); 4] = [
   ("codex", "Codex"),
   ("cursor", "Cursor"),
   ("copilot", "Copilot"),
+  ("devin", "Devin"),
+  ("gemini", "Gemini"),
 ];
 
 /// `toAgentKind`: the agent id, when treq knows it.
@@ -1123,6 +1125,14 @@ mod tests {
     assert_eq!(
       resolve_agent(&store, "/r", Some("copilot")).as_deref(),
       Some("copilot")
+    );
+    assert_eq!(
+      resolve_agent(&store, "/r", Some("devin")).as_deref(),
+      Some("devin")
+    );
+    assert_eq!(
+      resolve_agent(&store, "/r", Some("gemini")).as_deref(),
+      Some("gemini")
     );
     assert_eq!(resolve_agent(&store, "/r", Some("bogus")), None);
   }
