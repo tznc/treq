@@ -2,6 +2,7 @@ import type React from 'react';
 import BrowserOnly from '@docusaurus/BrowserOnly';
 import Head from '@docusaurus/Head';
 import { AuthProvider } from '@site/src/components/AuthProvider';
+import ConsentBanner from '@site/src/components/ConsentBanner';
 import { SearchDbProvider } from '@site/src/utils/SearchDbContext';
 import interLatin400 from '@site/static/fonts/inter-400-latin.woff2';
 
@@ -26,6 +27,7 @@ export default function Root({ children }: { children: React.ReactNode }) {
           {() => <SearchDbProvider>{children}</SearchDbProvider>}
         </BrowserOnly>
       </AuthProvider>
+      <BrowserOnly>{() => <ConsentBanner />}</BrowserOnly>
     </>
   );
 }
