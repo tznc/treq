@@ -28,6 +28,11 @@ use crate::mobile::{
 
 const TAGLINE: &str = "Isolates each agent and rebases stacked PRs when the base moves";
 
+/// Whether the landing shows brand and sign-in side by side (tablet width).
+fn landing_split(width: gpui_kit::Pixels) -> bool {
+  width >= super::SPLIT_MIN_WIDTH
+}
+
 pub struct HomeScreen {
   scroll: ScrollHandle,
 }
@@ -351,12 +356,14 @@ impl HomeScreen {
   }
 
   /// The signed-out start screen: brand centered, sign-in within thumb reach.
-  fn landing(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  /// On a tablet: brand on the left, sign-in on the right.
+  fn landing(&self, split: bool, cx: &mut Context<Self>) -> impl IntoElement {
     let model = model(cx).read(cx);
     let busy = model.auth_busy;
     let error = model.auth_error.clone();
     let notice = model.auth_notice.clone();
-    v_flex()
+    let panes = if split { h_flex() } else { v_flex() };
+    panes
       .min_h_full()
       .p_6()
       .gap_6()
@@ -373,6 +380,7 @@ impl HomeScreen {
       .child(
         v_flex()
           .gap_3()
+          .when(split, |col| col.flex_1().justify_center().max_w(px(420.)))
           .children(provider_buttons(busy, true))
           .children(error.map(|e| widgets::error_text(e, cx).text_center()))
           .children(notice.map(|n| widgets::muted(n, cx).text_center()))
@@ -391,11 +399,12 @@ impl HomeScreen {
 }
 
 impl Render for HomeScreen {
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let model = model(cx).read(cx);
     let landing = super::is_landing(model.user.as_deref(), super::has_machines(model));
     let content = if landing {
-      self.landing(cx).into_any_element()
+      let split = landing_split(window.viewport_size().width);
+      self.landing(split, cx).into_any_element()
     } else {
       let cloud = self.cloud(cx);
       let hosts = self.hosts(cx);
@@ -511,6 +520,14 @@ mod tests {
       .contains("agent CLI"));
     // An older treq gives no check, so nothing is claimed missing.
     assert_eq!(missing_tools(&MachineState::default()), None);
+  }
+
+  /// On a tablet the landing puts the brand left and sign-in right.
+  #[core::prelude::v1::test]
+  fn the_landing_splits_on_a_tablet() {
+    assert!(!landing_split(px(390.)));
+    assert!(landing_split(px(768.)));
+    assert!(landing_split(px(1024.)));
   }
 
   #[core::prelude::v1::test]
