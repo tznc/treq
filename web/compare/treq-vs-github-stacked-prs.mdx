@@ -1,0 +1,51 @@
+---
+sidebar_position: 10
+description: GitHub now stacks pull requests natively. Compare GitHub stacked PRs and gh stack with Treq's local stacked agent workspaces.
+---
+
+# Treq vs GitHub Stacked PRs
+
+_GitHub stacks pull requests after you push. Treq stacks the work before a pull request exists, while agents are still writing it._
+
+GitHub made [stacked pull requests](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs) generally available on all github.com plans in October 2026. A stack is an ordered series of small pull requests, each targeting the branch of the one below it. The `gh stack` CLI extension creates, rebases and submits stacks from the terminal. Treq works on the same idea one step earlier, on your machine. Facts were checked on GitHub's documentation and changelog in November 2026.
+
+## At a Glance
+
+| | Treq | GitHub stacked PRs |
+| --- | --- | --- |
+| Where the stack lives | Local agent workspaces, then GitHub PRs | Pull requests on github.com |
+| Who rebases | Treq, continuously, while you work | GitHub after a merge, `gh stack rebase` on demand |
+| Conflicts | Sent to the agent with instructions | Paused for you to resolve |
+| Agent isolation | One workspace per agent | Not in scope |
+| Review | Local PR-style review, then GitHub review | GitHub review, one PR at a time |
+| Merge | Your usual GitHub merge | Bottom-up, whole stack in one click, merge-queue aware |
+| Cost | Free desktop, [Pro](/pricing) at $15 per user per month | Included in every github.com plan |
+
+## What Each Product Does
+
+**GitHub stacked PRs** handle the remote half of stacking. Merging a pull request merges every pull request below it. The ones above retarget to the base branch and GitHub rebases them. Approvals survive a rebase for unchanged code, and a stack enters the merge queue as one group. Limits: every branch must be in the same repository, cross-fork stacks are not supported, and GitHub Enterprise Server support is still to come.
+
+**Treq** handles the local half. Each coding agent writes its layer in its own [workspace](/docs/concepts/workspaces). When a lower layer changes, Treq rebases every workspace above it straight away, before anything is pushed, and sends any conflict back to the agent. You review each layer locally, then push the stack as ordinary GitHub pull requests.
+
+## They Work Together
+
+You do not have to choose. Treq produces branches that target each other, which is exactly what a GitHub stack is. Use Treq while agents are writing and revising the stack, and GitHub stacked PRs for team review and merging.
+
+## Who Should Choose Which
+
+Use **GitHub stacked PRs alone** if you:
+
+- Write most changes yourself and rebase rarely.
+- Want stacks with no new tool.
+
+Add **Treq** if you:
+
+- Have several agents writing the layers of one stack.
+- Want lower-layer changes to reach upper layers while agents are still working.
+- Want agents, not you, to resolve rebase conflicts.
+
+## Next Steps
+
+- [Best Graphite Alternatives](./best-graphite-alternatives): every way to stack pull requests today
+- [Stacked PR Workflow](/learn/workflows/git/stacked-pr): a stack from first branch to merge
+- [Treq vs Graphite](./treq-vs-graphite-for-ai-teams): the hosted stacking platform
