@@ -1,5 +1,7 @@
 //! Home: a landing page when signed out with no machines, otherwise the
-//! machine list (Treq Cloud and SSH hosts), each with its own connection.
+//! user's projects grouped by owner (Personal, then each team). The same
+//! screen in settings mode manages the machines (Treq Cloud and SSH hosts)
+//! and the account.
 
 use crate::mobile::ui::widgets::TouchButton as _;
 use gpui_kit::component::Disableable as _;
@@ -20,6 +22,7 @@ use treq_ui::{Dot, Tone};
 use super::{model, screens, widgets, Machine, MachineState, MachineStatus};
 use crate::core::auth::OAuthProvider;
 use crate::core::pty_remote_supervisor::PtyBackend;
+use crate::mobile::projects::Project;
 use crate::mobile::{
   backend::MANAGED_MACHINE,
   errors::{self, Fix},
@@ -46,6 +49,14 @@ const RECENTS_PER_MACHINE: usize = 5;
 
 pub struct HomeScreen {
   scroll: ScrollHandle,
+  /// Settings: the machines and the account instead of the projects.
+  settings: bool,
+  /// The signed-in user the projects were read for.
+  read_for: Option<String>,
+  /// The projects and the user's teams as (id, name).
+  projects: super::Load<(Vec<Project>, Vec<(String, String)>)>,
+  /// Why the last project tapped did not open.
+  open_error: Option<String>,
 }
 
 /// The status line and dot for a machine row.
@@ -107,10 +118,108 @@ fn missing_tools(state: &MachineState) -> Option<String> {
 
 impl HomeScreen {
   pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
-    cx.observe(&model(cx), |_, _, cx| cx.notify()).detach();
-    Self {
+    Self::with_mode(false, cx)
+  }
+
+  /// The machines and account page, opened from the home page.
+  pub fn settings(_window: &mut Window, cx: &mut Context<Self>) -> Self {
+    Self::with_mode(true, cx)
+  }
+
+  fn with_mode(settings: bool, cx: &mut Context<Self>) -> Self {
+    cx.observe(&model(cx), |this, _, cx| {
+      this.reload_if_user_changed(cx);
+      cx.notify();
+    })
+    .detach();
+    let mut this = Self {
       scroll: ScrollHandle::new(),
+      settings,
+      read_for: None,
+      projects: super::Load::Idle,
+      open_error: None,
+    };
+    this.reload_if_user_changed(cx);
+    this
+  }
+
+  /// Reads the projects again when someone signs in or out.
+  fn reload_if_user_changed(&mut self, cx: &mut Context<Self>) {
+    let user = model(cx).read(cx).user.clone();
+    if self.settings || user == self.read_for {
+      return;
     }
+    self.read_for = user.clone();
+    if user.is_none() {
+      self.projects = super::Load::Idle;
+      return;
+    }
+    self.projects = super::Load::Loading;
+    super::load::run(
+      cx,
+      async {
+        let supabase = &crate::mobile::backend::get().supabase;
+        let projects: Vec<Project> = supabase
+          .select(
+            "organization_projects",
+            "select=id,name,org_id,repos&order=name",
+          )
+          .await
+          .map_err(|e| e.to_string())?;
+        let teams = crate::core::cloud_catalog::fetch_cloud_organizations(supabase)
+          .await
+          .map(|orgs| orgs.into_iter().map(|o| (o.org_id, o.name)).collect())
+          .unwrap_or_default();
+        Ok::<_, String>((projects, teams))
+      },
+      |this, result, _| this.projects = super::Load::from_result(result),
+    );
+  }
+
+  /// The home page: projects by owner, or why there are none.
+  fn projects(&self, cx: &mut Context<Self>) -> AnyElement {
+    let signed_in = model(cx).read(cx).user.is_some();
+    let body: AnyElement = match &self.projects {
+      _ if !signed_in => widgets::muted("Sign in to see your projects.", cx).into_any_element(),
+      super::Load::Ready((projects, teams)) if !projects.is_empty() => {
+        let sections = crate::mobile::projects::group(projects, teams);
+        let view = cx.entity().downgrade();
+        let on_open: super::projects_list::OnOpen = std::rc::Rc::new(move |project, cx| {
+          let error = super::open_project(project, cx).err();
+          view
+            .update(cx, |this, cx| {
+              this.open_error = error;
+              cx.notify();
+            })
+            .ok();
+        });
+        super::projects_list::sections(&sections, on_open, cx).into_any_element()
+      }
+      super::Load::Ready(_) => widgets::muted(
+        "No projects yet. Save one in Treq on your computer to see it here.",
+        cx,
+      )
+      .into_any_element(),
+      super::Load::Failed(error) => widgets::error_text(error.clone(), cx).into_any_element(),
+      _ => Spinner::new().into_any_element(),
+    };
+    v_flex()
+      .gap_4()
+      .child(body)
+      .children(self.open_error.clone().map(|e| widgets::error_text(e, cx)))
+      .child(
+        Button::new("settings")
+          .outline()
+          .icon(IconName::Settings)
+          .label("Settings")
+          .on_click(|_, _, cx| {
+            super::nav::push("Settings", super::Location::default(), cx, |window, cx| {
+              gpui_kit::AppContext::new(cx, |cx| HomeScreen::settings(window, cx))
+            })
+          })
+          .touch(),
+      )
+      .into_any_element()
   }
 
   /// One machine: dot, name, status or last repository, and a problem with
@@ -488,6 +597,8 @@ impl Render for HomeScreen {
     let content = if landing {
       let split = landing_split(window.viewport_size().width);
       self.landing(split, cx).into_any_element()
+    } else if !self.settings {
+      widgets::page().child(self.projects(cx)).into_any_element()
     } else if overview_layout(
       window.viewport_size().width,
       super::nav::beside(cx.entity_id(), cx).is_some(),
