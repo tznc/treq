@@ -534,7 +534,17 @@ mod tests {
       .iter()
       .map(|a| a.binary_name())
       .collect();
-    assert_eq!(bins, ["claude", "codex", "cursor-agent", "copilot"]);
+    assert_eq!(
+      bins,
+      [
+        "claude",
+        "codex",
+        "cursor-agent",
+        "copilot",
+        "devin",
+        "gemini"
+      ]
+    );
   }
 
   use super::*;

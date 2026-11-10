@@ -124,7 +124,10 @@ fn the_agent_picker_lists_every_agent(cx: &mut TestAppContext) {
     .iter()
     .filter_map(|n| n.name())
     .collect();
-  assert_eq!(agents, ["Claude", "Codex", "Cursor", "Copilot", "Devin", "Gemini"]);
+  assert_eq!(
+    agents,
+    ["Claude", "Codex", "Cursor", "Copilot", "Devin", "Gemini"]
+  );
 }
 
 #[gpui::test]
