@@ -68,6 +68,54 @@ Opening paragraph, 2 to 3 sentences. No lists here.
 
 Prose inside every section must follow `explain-to-me`.
 
+## Answers: hub and spoke pages
+
+`web/learn/answers/` holds short pages that each answer one exact search
+query, such as an error message or "how do I X". They use a hub and spoke
+model:
+
+- **Hub:** `web/learn/answers/<topic>.md`. A short intro and `<DocCardList />`,
+  which lists every spoke in the folder automatically. Hubs exist for
+  `worktrees`, `rebasing-and-stacks` and `agents-and-git`. Add a hub only when
+  a new topic has at least three spokes.
+- **Spoke:** `web/learn/answers/<topic>/<query-slug>.md`. The sidebar picks it
+  up automatically. Name the file after the query people type.
+
+Every spoke uses this skeleton, 300 to 600 words:
+
+```markdown
+---
+sidebar_position: N
+description: The answer in one sentence, with the exact error text or query.
+---
+
+# Fix "<error>" | <Task phrased as the query>
+
+_The answer in one or two sentences._
+
+## The Fix
+Commands first, copy-pasteable.
+
+## Why It Happens
+The mechanism, 1 to 2 short paragraphs. Quote the exact error message.
+
+## How Treq Handles It
+One paragraph, shipped behavior only, linked to the doc that covers it.
+
+## Related
+2 to 3 links: sibling spokes first, then the concept article.
+```
+
+Rules for spokes:
+
+- Lead with the fix. A reader who stops after `## The Fix` should be done.
+- Run every command and copy every error message from a real Git run. Name
+  the Git version when output differs between versions.
+- `## How Treq Handles It` states only what the docs under `web/docs/` say
+  ships today. Leave the section out rather than stretch a claim.
+- Link each spoke to at least one sibling spoke, so spokes link across, not
+  only up to the hub.
+
 ## Interlinking across the content site
 
 Treat every article as a node in the site, not a standalone page. Readers
