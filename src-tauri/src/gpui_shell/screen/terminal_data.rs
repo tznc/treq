@@ -590,7 +590,7 @@ impl TerminalHost for Backend {
       .map(agent_command::ProjectContext::from);
     let (app_instructions, repo_instructions) = self
       .with_db(|db| {
-        Ok((
+        Ok::<_, rusqlite::Error>((
           db.get_setting(agent_command::AGENT_INSTRUCTIONS_SETTING)?,
           db.get_repo_setting(&start.repo_path, agent_command::AGENT_INSTRUCTIONS_SETTING)?,
         ))
