@@ -331,6 +331,8 @@ fn agent_options(default: &str) -> Vec<SelectOption> {
     ("codex", "Codex"),
     ("cursor", "Cursor"),
     ("copilot", "Copilot"),
+    ("devin", "Devin"),
+    ("gemini", "Gemini"),
   ])
 }
 
@@ -3248,6 +3250,19 @@ pub(super) fn install_button(row: &SkillRow, p: &Palette) -> Button {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn the_agent_picker_offers_every_launchable_agent() {
+    let offered: Vec<_> = agent_options("Default")[1..]
+      .iter()
+      .map(|o| (o.value.clone(), o.label.clone()))
+      .collect();
+    let launchable: Vec<_> = crate::core::agent_launch::AGENTS
+      .iter()
+      .map(|(id, label)| (id.to_string(), label.to_string()))
+      .collect();
+    assert_eq!(offered, launchable);
+  }
 
   #[test]
   fn previews_the_branch_an_edited_pattern_gives() {
