@@ -6,7 +6,7 @@ defaults:
 
 on:
   schedule:
-    - cron: "0 9 * * *" # 09:00 UTC daily
+    - cron: "17 3 * * *" # 03:17 UTC daily, off the hour to avoid schedule delays
   workflow_dispatch:
 
 jobs:
