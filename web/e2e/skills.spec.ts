@@ -51,7 +51,7 @@ test.describe("Skills Library (/skills)", () => {
 
   test("skill cards navigate to the skill detail page", async ({ page }) => {
     const card = page.getByRole("link", { name: /^pdf/ }).first();
-    await expect(card).toHaveAttribute("href", "/skills/anthropic/pdf");
+    await expect(card).toHaveAttribute("href", "/skills/anthropic/pdf/");
     await expect(card).not.toHaveAttribute("target", "_blank");
   });
 

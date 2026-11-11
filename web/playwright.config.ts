@@ -25,8 +25,8 @@ export default defineConfig({
   ],
   webServer: {
     command: process.env.CI
-      ? 'npm run serve -- --port 3000'
-      : 'npm run build && npm run serve -- --port 3000',
+      ? 'node scripts/serve-e2e.mjs 3000'
+      : 'npm run build && node scripts/serve-e2e.mjs 3000',
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 180 * 1000,
