@@ -15,7 +15,11 @@ import { afterEach, expect, it } from "vitest";
 import { isFirstSignIn } from "../../../web/src/lib/analytics";
 import { getServiceClient } from "../clients";
 import { recordOutcome } from "../record";
-import { createTestUser, deleteTestUser, signInWithEmailPassword } from "../seed";
+import {
+  createTestUser,
+  deleteTestUser,
+  signInWithEmailPassword,
+} from "../seed";
 
 const created: string[] = [];
 afterEach(async () => {
@@ -44,11 +48,12 @@ it("counts a first sign-in once, ignores a later one, and measures from email co
   // Confirm-later account: created unconfirmed now, confirmed after the wait.
   const late = `late-${Date.now()}@service-qa.test`;
   const latePassword = `pw-${Date.now()}-Aa1!`;
-  const { data: lateCreate, error: lateErr } = await admin.auth.admin.createUser({
-    email: late,
-    password: latePassword,
-    email_confirm: false,
-  });
+  const { data: lateCreate, error: lateErr } =
+    await admin.auth.admin.createUser({
+      email: late,
+      password: latePassword,
+      email_confirm: false,
+    });
   expect(lateErr).toBeNull();
   created.push(lateCreate.user!.id);
 
@@ -56,9 +61,12 @@ it("counts a first sign-in once, ignores a later one, and measures from email co
 
   const again = await signInWithEmailPassword(fresh.email, fresh.password);
 
-  const { error: confirmErr } = await admin.auth.admin.updateUserById(lateCreate.user!.id, {
-    email_confirm: true,
-  });
+  const { error: confirmErr } = await admin.auth.admin.updateUserById(
+    lateCreate.user!.id,
+    {
+      email_confirm: true,
+    },
+  );
   expect(confirmErr).toBeNull();
   const lateSignIn = await signInWithEmailPassword(late, latePassword);
 
@@ -66,7 +74,8 @@ it("counts a first sign-in once, ignores a later one, and measures from email co
   expect(isFirstSignIn(first.user)).toBe(true);
   expect(isFirstSignIn(again.user)).toBe(false);
   expect(
-    Date.parse(lateSignIn.user.email_confirmed_at!) - Date.parse(lateSignIn.user.created_at),
+    Date.parse(lateSignIn.user.email_confirmed_at!) -
+      Date.parse(lateSignIn.user.created_at),
   ).toBeGreaterThan(60_000);
   expect(isFirstSignIn(lateSignIn.user)).toBe(true);
 
