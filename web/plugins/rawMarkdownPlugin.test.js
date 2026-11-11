@@ -6,6 +6,7 @@ const {collectMarkdownPages, buildLlmsTxt, buildLlmsFullTxt} = require('./rawMar
 
 function fixtureSite() {
   const siteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'llms-'));
+  /** @param {string} rel @param {string} body */
   const write = (rel, body) => {
     fs.mkdirSync(path.dirname(path.join(siteDir, rel)), {recursive: true});
     fs.writeFileSync(path.join(siteDir, rel), body);
