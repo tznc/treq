@@ -1,0 +1,20 @@
+id: no-node-test-runner-ts
+language: typescript
+severity: error
+message: >
+  Use Jest for unit tests, not node:test or node:assert.
+  Import test, expect and hooks from Jest (globals or @jest/globals) and assert with expect().
+files: ["**/*.ts"]
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: "^['\"](node:)?(assert|test)(/strict)?['\"]$"
+    - all:
+        - pattern: require($MOD)
+        - has:
+            kind: arguments
+            has:
+              kind: string
+              regex: "^['\"](node:)?(assert|test)(/strict)?['\"]$"
