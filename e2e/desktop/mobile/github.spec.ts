@@ -67,10 +67,35 @@ test("issue filters", async () => {
   await pick("Clear filters");
 });
 
-test("issue detail", async () => {
+test("issue detail and composer", async () => {
   await page.getByText("Empty event payloads drop the Discord body").click();
-  await expect(page.getByRole("button", { name: "Comment", exact: true })).toBeVisible();
-  await shot("02-issue", "Issue #77", ["The title, an Open tag, #77 and its author alice"]);
+  const bar = page.getByRole("button", { name: "Add a comment…" });
+  await expect(bar).toBeVisible();
+  // Closing moved to the ⋯ menu: the foot has the bar and nothing else.
+  await expect(page.getByRole("button", { name: "Close…" })).toHaveCount(0);
+  await shot("02-issue", "Issue #77", [
+    "The title, an Open tag, #77 and its author alice",
+    "The foot is one rounded 'Add a comment…' bar; no Close… or Comment buttons",
+  ]);
+  await bar.click();
+  const send = page.getByRole("button", { name: "Comment", exact: true });
+  await expect(send).toBeVisible();
+  await shot("02a-composer", "Composer sheet", [
+    "A sheet titled 'Comment on #77' with Write (selected) and Preview, a text box and one filled Comment button",
+  ]);
+  await page.keyboard.type("Shipped a fix in **#418**: empty bodies now fall back to the JSON payload.");
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByText("empty bodies now fall back")).toBeVisible();
+  await shot("02b-preview", "Composer preview", [
+    "Preview is selected and shows the comment rendered, with #418 in bold",
+  ]);
+  // A tap on the dimmed page above the sheet closes it; the text stays.
+  await page.mouse.click(210, 60);
+  await page.waitForTimeout(800);
+  await expect(page.getByRole("button", { name: /^Continue comment: Shipped a fix/ })).toBeVisible();
+  await shot("02c-unsent", "Unsent comment kept", [
+    "The bar shows the start of the unsent comment in body colour",
+  ]);
   await page.getByRole("button", { name: "Back", exact: true }).click();
 });
 
@@ -94,7 +119,9 @@ test("pull requests list", async () => {
 test("pull request detail and review", async () => {
   await page.getByText("feat: handle empty event messages").click();
   await expect(page.getByRole("button", { name: "Review changes" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add a comment…" })).toBeVisible();
   await shot("04-pr", "Pull request #418", [
+    "The 'Add a comment…' bar sits above Review changes; no comment box in the page",
     "The title, state and review tags, feat/empty-event-message → feat/event-ingest, and the checks summary with one failing",
   ]);
   await page.getByRole("button", { name: "Review changes" }).click();
