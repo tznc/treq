@@ -67,7 +67,13 @@ pub fn workspace_label(entry: &PromptHistoryEntry) -> String {
 /// The prompt's first 200 characters on one line: a uniform list's rows
 /// share one height, so a line break would spill into the next row.
 fn preview(text: &str) -> String {
-  text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect()
+  text
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ")
+    .chars()
+    .take(200)
+    .collect()
 }
 
 /// `formatPromptsForCopy`.
