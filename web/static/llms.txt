@@ -10,7 +10,7 @@
 
 - [Overview](https://treq.dev/docs/intro.md): Treq's four-layer architecture (Interface, Core runtime, Repository-local storage, Global app storage) and how workspaces, reviews, and terminals compose into the Treq model.
 - [Workspaces](https://treq.dev/docs/concepts/workspaces.md): Git worktrees under `.treq/workspaces/` — lifecycle management, stacked workspaces, automatic rebasing, branch naming patterns, and caching behavior.
-- [Agent Sessions](https://treq.dev/docs/concepts/agent-sessions.md): How Treq starts Claude Code, Codex, or Cursor Agent inside a workspace — plan vs edit mode, workspace isolation, session metadata, and model selection.
+- [Agent Sessions](https://treq.dev/docs/concepts/agent-sessions.md): How Treq starts Claude Code, Codex, Cursor Agent, or GitHub Copilot CLI inside a workspace — plan vs edit mode, workspace isolation, session metadata, and model selection.
 - [Changes and Reviews](https://treq.dev/docs/concepts/changes-and-reviews.md): Workspace diff views (uncommitted, committed, per-commit), inline comments, conflict management, and the four ways to finish a review (copy, plan, edit, discard).
 - [Terminal Sessions](https://treq.dev/docs/concepts/terminal-sessions.md): PTY-backed terminal sessions scoped per workspace; sessions run independently and persist in the background when switching workspaces.
 - [Commit Management](https://treq.dev/docs/concepts/commit-management.md): Partial commit selection at file or hunk level, commit history relative to the workspace target, and safe manipulation boundaries.

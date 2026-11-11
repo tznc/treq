@@ -12,7 +12,7 @@ use gpui_kit::{
     spinner::Spinner,
     v_flex, ActiveTheme, IconName, Sizable,
   },
-  div, px, AnyElement, Context, Div, InteractiveElement, IntoElement, ParentElement, Render,
+  div, px, AnyElement, App, Context, Div, InteractiveElement, IntoElement, ParentElement, Render,
   ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window,
 };
 use treq_ui::{Dot, Tone};
@@ -318,35 +318,23 @@ impl HomeScreen {
     let model = model(cx).read(cx);
     let email = model.user.clone()?;
     let busy = model.auth_busy;
-    let delete_email = email.clone();
     Some(
-      widgets::section("Account", cx)
-        .child(
-          widgets::card(cx).p_4().child(
-            h_flex()
-              .gap_3()
-              .items_center()
-              .child(div().flex_1().min_w_0().truncate().child(email))
-              .child(
-                Button::new("sign-out")
-                  .outline()
-                  .label("Sign out")
-                  .loading(busy)
-                  .on_click(|_, _, cx| super::sign_out(cx))
-                  .touch(),
-              ),
-          ),
-        )
-        .child(
-          Button::new("delete-account")
-            .ghost()
-            .w_full()
-            .text_color(cx.theme().danger)
-            .label("Delete account")
-            .disabled(busy)
-            .on_click(move |_, _, cx| super::delete_account::open(delete_email.clone(), cx))
-            .touch(),
+      widgets::section("Account", cx).child(
+        widgets::card(cx).p_4().child(
+          h_flex()
+            .gap_3()
+            .items_center()
+            .child(div().flex_1().min_w_0().truncate().child(email))
+            .child(
+              Button::new("sign-out")
+                .outline()
+                .label("Sign out")
+                .loading(busy)
+                .on_click(|_, _, cx| super::sign_out(cx))
+                .touch(),
+            ),
         ),
+      ),
     )
   }
 
@@ -376,6 +364,7 @@ impl HomeScreen {
           .children(provider_buttons(busy, true))
           .children(error.map(|e| widgets::error_text(e, cx).text_center()))
           .children(notice.map(|n| widgets::muted(n, cx).text_center()))
+          .child(or_divider(cx))
           .child(
             Button::new("add-host")
               .outline()
@@ -417,28 +406,41 @@ impl Render for HomeScreen {
 }
 
 /// One sign-in button per OAuth provider; `cta` makes them full-width.
+/// A rule with "or" in its middle, between sign-in and the SSH host option.
+fn or_divider(cx: &App) -> impl IntoElement {
+  let theme = cx.theme();
+  let rule = || div().flex_1().h(px(1.)).bg(theme.border);
+  h_flex()
+    .gap_3()
+    .items_center()
+    .child(rule())
+    .child(widgets::muted("or", cx))
+    .child(rule())
+}
+
 fn provider_buttons(busy: bool, cta: bool) -> Vec<treq_ui::press::Press> {
   [
     (
       "sign-in-github",
       "Continue with GitHub",
+      treq_ui::theme::ICON_GITHUB,
       OAuthProvider::Github,
     ),
     (
       "sign-in-google",
       "Continue with Google",
+      treq_ui::theme::ICON_GOOGLE,
       OAuthProvider::Google,
     ),
   ]
   .into_iter()
-  .enumerate()
-  .map(|(i, (id, label, provider))| {
-    let button = Button::new(id).label(label).loading(busy).disabled(busy);
-    let button = if i == 0 {
-      button.primary()
-    } else {
-      button.outline()
-    };
+  .map(|(id, label, icon, provider)| {
+    let button = Button::new(id)
+      .outline()
+      .icon(gpui_kit::component::Icon::default().path(icon))
+      .label(label)
+      .loading(busy)
+      .disabled(busy);
     let button = if cta {
       button.large().w_full().h(px(widgets::CTA_H))
     } else {
