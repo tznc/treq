@@ -11,14 +11,14 @@
 
 mod rows;
 
+use crate::core::review::{selected_text, TextPoint};
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
-use crate::core::review::{selected_text, TextPoint};
 use crate::result_ext::ResultExt;
 use std::{
-  collections::{HashMap, HashSet, VecDeque},
   cell::RefCell,
+  collections::{HashMap, HashSet, VecDeque},
   rc::Rc,
   time::Duration,
 };
