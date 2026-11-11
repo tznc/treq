@@ -5,7 +5,24 @@ const path = require('path');
 const CONTENT_SOURCES = [
   {contentPath: 'docs', routeBasePath: 'docs'},
   {contentPath: 'learn', routeBasePath: 'learn'},
+  {contentPath: 'compare', routeBasePath: 'compare'},
 ];
+
+/**
+ * @param {string} raw
+ * @returns {Record<string, string>}
+ */
+function parseFrontMatter(raw) {
+  const match = raw.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return {};
+  return Object.fromEntries(
+    match[1]
+      .split('\n')
+      .map((line) => line.match(/^(\w+):\s*(.*)$/))
+      .filter((m) => m !== null)
+      .map((m) => [m[1], m[2].replace(/^['"]|['"]$/g, '')]),
+  );
+}
 
 /**
  * @param {string} raw
@@ -22,7 +39,7 @@ function normalizeMarkdown(raw) {
 }
 
 /** @typedef {{contentPath: string, routeBasePath: string}} ContentSource */
-/** @typedef {{sourcePath: string, outputPath: string, content: string}} MarkdownPage */
+/** @typedef {{sourcePath: string, outputPath: string, content: string, title: string, description: string, section: string}} MarkdownPage */
 
 /**
  * @param {ContentSource} source
@@ -64,10 +81,16 @@ function collectMarkdownPages(siteDir, sources = CONTENT_SOURCES) {
 
         const relativePath = path.relative(rootDir, fullPath).split(path.sep).join(path.posix.sep);
         const raw = fs.readFileSync(fullPath, 'utf8');
+        const frontMatter = parseFrontMatter(raw);
+        if (frontMatter.draft === 'true') continue;
+        const content = normalizeMarkdown(raw);
         pages.push({
           sourcePath: path.relative(siteDir, fullPath).split(path.sep).join(path.posix.sep),
           outputPath: markdownOutputPath(source, relativePath),
-          content: normalizeMarkdown(raw),
+          content,
+          title: frontMatter.title || content.match(/^# (.+)$/m)?.[1] || path.parse(entry.name).name,
+          description: frontMatter.description || '',
+          section: source.routeBasePath,
         });
       }
     }
@@ -76,6 +99,38 @@ function collectMarkdownPages(siteDir, sources = CONTENT_SOURCES) {
   }
 
   return pages;
+}
+
+/** @typedef {{title: string, description: string, url: string}} SiteInfo */
+
+/**
+ * @param {MarkdownPage[]} pages
+ * @param {SiteInfo} site
+ * @returns {string}
+ */
+function buildLlmsTxt(pages, {title, description, url}) {
+  const sections = CONTENT_SOURCES.map(({routeBasePath}) => {
+    const links = pages
+      .filter((page) => page.section === routeBasePath)
+      .sort((a, b) => a.outputPath.localeCompare(b.outputPath))
+      .map((page) => {
+        const suffix = page.description ? `: ${page.description}` : '';
+        return `- [${page.title}](${url}/${page.outputPath})${suffix}`;
+      });
+    const heading = routeBasePath[0].toUpperCase() + routeBasePath.slice(1);
+    return links.length ? `## ${heading}\n\n${links.join('\n')}\n` : '';
+  });
+  return [`# ${title}\n\n> ${description}\n`, ...sections.filter(Boolean)].join('\n');
+}
+
+/**
+ * @param {MarkdownPage[]} pages
+ * @param {SiteInfo} site
+ * @returns {string}
+ */
+function buildLlmsFullTxt(pages, {title, description, url}) {
+  const bodies = pages.map((page) => `---\nSource: ${url}/${page.outputPath}\n\n${page.content}\n`);
+  return [`# ${title}\n\n> ${description}\n`, ...bodies].join('\n');
 }
 
 /**
@@ -99,6 +154,10 @@ function rawMarkdownPlugin(context) {
         fs.mkdirSync(path.dirname(outputFile), {recursive: true});
         fs.writeFileSync(outputFile, `${page.content}\n`, 'utf8');
       }
+      const {title, tagline, url} = context.siteConfig;
+      const site = {title, description: tagline, url};
+      fs.writeFileSync(path.join(outDir, 'llms.txt'), buildLlmsTxt(content, site), 'utf8');
+      fs.writeFileSync(path.join(outDir, 'llms-full.txt'), buildLlmsFullTxt(content, site), 'utf8');
     },
   };
 }
@@ -107,3 +166,5 @@ module.exports = rawMarkdownPlugin;
 module.exports.normalizeMarkdown = normalizeMarkdown;
 module.exports.markdownOutputPath = markdownOutputPath;
 module.exports.collectMarkdownPages = collectMarkdownPages;
+module.exports.buildLlmsTxt = buildLlmsTxt;
+module.exports.buildLlmsFullTxt = buildLlmsFullTxt;

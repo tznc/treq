@@ -5,7 +5,7 @@ import Head from '@docusaurus/Head';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
 import {DOWNLOAD_HREF} from '@site/src/lib/downloads';
-import {FAQ_ITEMS, PRICING_SCHEMA} from '@site/src/lib/pricing';
+import {FAQ_ITEMS, FAQ_SCHEMA, PRICING_SCHEMA} from '@site/src/lib/pricing';
 
 import styles from './pricing.module.css';
 
@@ -293,6 +293,7 @@ export default function PricingPage(): ReactNode {
         <script type="application/ld+json">
           {JSON.stringify(PRICING_SCHEMA)}
         </script>
+        <script type="application/ld+json">{JSON.stringify(FAQ_SCHEMA)}</script>
       </Head>
       <main className={styles.page}>
         <header className={styles.header}>
