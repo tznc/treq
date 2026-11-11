@@ -16,15 +16,19 @@ test("terminal: shift+scroll moves the row of columns", async ({ page }) => {
     await page.keyboard.press(`${mod}+\\`);
     await settle(page, 1500);
   }
-  const first = page.getByRole("button", { name: "Shell" }).first();
+  const first = page.getByRole("group", { name: "Shell terminal" }).first();
   const x = async () => (await first.boundingBox())!.x;
-  const box = (await page.getByTestId("terminal-scroll-container").boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const box = (await page.getByRole("group", { name: "Shell terminal" }).last().boundingBox())!;
+  const shiftWheel = async (dy: number) => {
+    // `capture` parks the pointer, so hover the row again.
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.keyboard.down("Shift");
+    await page.mouse.wheel(0, dy);
+    await page.keyboard.up("Shift");
+  };
 
   // Start from the left end.
-  await page.keyboard.down("Shift");
-  await page.mouse.wheel(0, -100_000);
-  await page.keyboard.up("Shift");
+  await shiftWheel(-100_000);
   await settle(page, 600);
   const start = await x();
   await capture(page, {
@@ -33,9 +37,7 @@ test("terminal: shift+scroll moves the row of columns", async ({ page }) => {
     expectations: ["The first Shell column starts at the row's left edge"],
   });
 
-  await page.keyboard.down("Shift");
-  await page.mouse.wheel(0, 400); // down
-  await page.keyboard.up("Shift");
+  await shiftWheel(400); // down
   await settle(page, 600);
   const afterDown = await x();
   expect(afterDown).toBeLessThan(start);
@@ -48,9 +50,7 @@ test("terminal: shift+scroll moves the row of columns", async ({ page }) => {
     ],
   });
 
-  await page.keyboard.down("Shift");
-  await page.mouse.wheel(0, -400); // up
-  await page.keyboard.up("Shift");
+  await shiftWheel(-400); // up
   await settle(page, 600);
   expect(await x()).toBeGreaterThan(afterDown);
   await capture(page, {

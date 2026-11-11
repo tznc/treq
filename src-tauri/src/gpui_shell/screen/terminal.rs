@@ -209,7 +209,11 @@ pub fn scroll_delta(row: (f32, f32), column: (f32, f32)) -> f32 {
 /// How far shift+wheel scrolls the row right: down is right, whether the
 /// platform reports it vertically or already turned it horizontal.
 pub fn shift_scroll_right(dx: f32, dy: f32) -> f32 {
-  if dy.abs() >= dx.abs() { -dy } else { dx }
+  if dy.abs() >= dx.abs() {
+    -dy
+  } else {
+    dx
+  }
 }
 
 /// `resizeTerminalPair`: moves the divider between two columns, neither
@@ -4566,6 +4570,9 @@ impl Render for TerminalPane {
                   move |b, _, _| row_bounds.set(Some(b)),
                   move |b, _, window, _| {
                     let row_scroll = row_scroll.clone();
+                    // Painted inside the scrolled row: undo the scroll to get
+                    // the row's own bounds.
+                    let b = Bounds::new(b.origin - row_scroll.offset(), b.size);
                     // Ahead of GPUI's own scroll, which maps shift+down left.
                     window.on_mouse_event(move |e: &ScrollWheelEvent, phase, window, cx| {
                       if phase != gpui::DispatchPhase::Capture
@@ -4585,8 +4592,8 @@ impl Render for TerminalPane {
                     });
                   },
                 )
-                  .absolute()
-                  .size_full(),
+                .absolute()
+                .size_full(),
               ),
           )
           .children(scrollbar)
