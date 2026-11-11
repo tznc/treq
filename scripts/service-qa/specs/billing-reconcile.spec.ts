@@ -4,7 +4,7 @@
  * Stripe itself is the only stub (the outbound adapter); every write goes
  * through billing_stale_subscriptions and billing_record_subscription_snapshot.
  */
-import { expect, it } from "vitest";
+import { expect, it } from "@jest/globals";
 import {
   reconcileStaleSubscriptions,
   reconcileStoreFor,

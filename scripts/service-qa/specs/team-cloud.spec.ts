@@ -7,7 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { beforeAll, expect, it } from "vitest";
+import { beforeAll, expect, it } from "@jest/globals";
 import { userHasCloud } from "../../../supabase/functions/_shared/billing/entitlement";
 import { spendStatusFor } from "../../../supabase/functions/_shared/billing/spend-cap";
 import {
@@ -238,7 +238,7 @@ it("lets an owner choose managed, BYOS or both for members, who bill to the orga
     expect(ownerSavesKey.status).toBe(200);
     expect(JSON.stringify(ownerSavesKey.json)).not.toContain("org-boat-key");
     expect((memberList.json.credentials as unknown[]).length).toBe(1);
-    expect(byos.status, JSON.stringify(byos.json)).toBe(200);
+    expect({ status: byos.status, body: byos.json }).toMatchObject({ status: 200 });
     expect(instance.billing_org_id).toBe(t.orgId);
     expect(pl).toMatchObject({
       billing_org_id: t.orgId,
@@ -284,7 +284,7 @@ it("bills organization usage to the organization's customer and enforces both ca
     });
     await t.member.client.rpc("set_cloud_profile", { p_org_id: t.orgId });
     const ensured = await call(t.member, "ensure");
-    expect(ensured.status, JSON.stringify(ensured.json)).toBe(200);
+    expect({ status: ensured.status, body: ensured.json }).toMatchObject({ status: 200 });
     const { data: inst } = await admin
       .from("remote_instances")
       .select("id, active_placement_id")

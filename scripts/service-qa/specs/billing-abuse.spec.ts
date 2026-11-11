@@ -4,7 +4,7 @@
  * handlers in-process against the real database.
  */
 import { randomUUID } from "node:crypto";
-import { beforeAll, expect, it } from "vitest";
+import { beforeAll, expect, it } from "@jest/globals";
 import { userHasPro } from "../../../supabase/functions/_shared/billing/entitlement";
 import { spendStatusFor } from "../../../supabase/functions/_shared/billing/spend-cap";
 import { LocalProvider } from "../../../supabase/functions/_shared/remote/local-provider";

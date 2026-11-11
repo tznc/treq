@@ -11,7 +11,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { randomBytes } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, it } from "@jest/globals";
 import {
   StripeApiError,
   type StripeClient,
