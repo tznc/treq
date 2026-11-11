@@ -41,11 +41,11 @@ test('points each plan at the right next step', async ({ page }) => {
   );
   await expect(plans.getByRole('link', { name: 'Get Pro' })).toHaveAttribute(
     'href',
-    '/dashboard?tab=account',
+    '/dashboard/?tab=account',
   );
   await expect(plans.getByRole('link', { name: 'Set up Team' })).toHaveAttribute(
     'href',
-    '/dashboard?tab=account',
+    '/dashboard/?tab=account',
   );
 
   // Signed out, the Account page asks you to sign in first.
