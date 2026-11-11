@@ -1465,11 +1465,6 @@ impl Sidebar {
       Some(pr) => pr_color(pr, palette),
       None => palette.muted_foreground,
     };
-    let title_color = if row.selected {
-      palette.sidebar_foreground
-    } else {
-      palette.muted_foreground
-    };
 
     let label = row.name.as_ref().unwrap_or(&row.title).clone();
     let tip = TooltipContent::Branch {
@@ -1580,7 +1575,7 @@ impl Sidebar {
           .when(row.name.is_none(), |this| {
             this.font_family(theme::MONO_FONT)
           })
-          .text_color(title_color)
+          .text_color(palette.sidebar_foreground)
           .child(label.clone()),
       )
       .child(
