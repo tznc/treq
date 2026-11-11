@@ -1197,7 +1197,6 @@ impl ChangesView {
       .as_ref()
       .is_some_and(|s| s.lines.len() > 1);
     let border = p.border.opacity(0.4);
-    let dragging = self.review.selection.as_ref().is_some_and(|s| s.dragging);
     let text = line.get(1..).filter(|t| !t.is_empty()).unwrap_or(" ");
     let at = (h, l);
     let (press, drag, add) = (path.to_string(), path.to_string(), path.to_string());
@@ -1248,9 +1247,6 @@ impl ChangesView {
           .border_color(border)
           .text_color(p.muted_foreground)
           .cursor_pointer()
-          .when(gutter_hovers(selected, dragging), |this| {
-            this.hover(move |s| s.bg(p.hover()))
-          })
           .when(!conflicted, |this| {
             this.on_mouse_down(
               MouseButton::Left,
@@ -2434,12 +2430,6 @@ pub(super) fn comment_strip_fill(p: &Palette) -> Hsla {
   p.commented()
 }
 
-/// Whether the gutter shows its hover fill. The fill sits on the gutter cell,
-/// above the row's own fill, so on a selected row (the drag head is always
-/// under the cursor) it would cut a grey gap into the selection band.
-pub(super) fn gutter_hovers(selected: bool, dragging: bool) -> bool {
-  !selected && !dragging
-}
 
 #[cfg(test)]
 mod row_paint_tests {
@@ -2496,13 +2486,5 @@ mod row_paint_tests {
       row_fill(true, true, LineKind::Added, &p),
       Some(p.selected())
     );
-  }
-
-  #[test]
-  fn gutter_hover_never_paints_over_a_selection_or_a_drag() {
-    assert!(gutter_hovers(false, false));
-    assert!(!gutter_hovers(true, false), "selected row under the cursor");
-    assert!(!gutter_hovers(true, true), "drag head");
-    assert!(!gutter_hovers(false, true), "rows crossed mid-drag");
   }
 }
