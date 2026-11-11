@@ -6,7 +6,6 @@ use crate::{
   core::remote::{GithubQuery, TreqCommandRequest},
   github::{GhListPage, GhPullRequest},
 };
-use gpui_kit::component::Selectable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
@@ -16,15 +15,18 @@ use gpui_kit::{
     IconName, Sizable,
   },
   div, px, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-  Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window,
+  Render, ScrollHandle, StatefulInteractiveElement, Styled, Window,
 };
 use treq_ui::{Badge, Tone};
 
 use super::{on_epoch, pr_detail};
+use crate::github_filters::{filter_options, filter_pr_indices, PrFilters};
+use crate::mobile::ui::sheet;
 use crate::mobile::{
   errors, remote,
   ui::{load, widgets, Load},
 };
+use std::rc::Rc;
 
 /// How many results a search asks for.
 pub const SEARCH_LIMIT: u32 = 50;
@@ -69,6 +71,11 @@ impl Filter {
       Filter::All => "All",
     }
   }
+}
+
+/// The Filters button's count: the set filters, with "Only mine".
+pub fn filter_count(filters: &PrFilters, mine: bool) -> usize {
+  filters.active_count() + usize::from(mine)
 }
 
 pub fn list_request(repo: &str, filter: Filter, page: u32) -> TreqCommandRequest {
@@ -150,6 +157,8 @@ pub struct PullRequestsScreen {
   /// The search the results are for; empty lists by `filter`.
   searched: String,
   mine: bool,
+  /// The Filters sheet's selects, over the loaded pull requests.
+  filters: PrFilters,
   list: Load<Vec<GhPullRequest>>,
   page: u32,
   has_more: bool,
@@ -185,6 +194,7 @@ impl PullRequestsScreen {
       query,
       searched: String::new(),
       mine: false,
+      filters: PrFilters::default(),
       list,
       page: 1,
       has_more: false,
@@ -297,6 +307,107 @@ impl PullRequestsScreen {
     );
     cx.notify();
   }
+
+  fn state_menu(&mut self, cx: &mut Context<Self>) {
+    let this = cx.weak_entity();
+    let current = (!self.mine).then_some(self.filter);
+    let entries = Filter::ALL
+      .iter()
+      .map(|&filter| {
+        let this = this.clone();
+        sheet::MenuEntry::new(
+          format!("state-{}", filter.value()),
+          filter.label(),
+          move |_, cx| {
+            this
+              .update(cx, |screen, cx| screen.set_filter(filter, cx))
+              .ok();
+          },
+        )
+        .selected(current == Some(filter))
+      })
+      .collect();
+    sheet::menu("State", entries, cx);
+  }
+
+  /// The advanced filters, as desktop's Filters popover offers them.
+  fn filters_sheet(&mut self, cx: &mut Context<Self>) {
+    let options = filter_options(self.list.ready().map(Vec::as_slice).unwrap_or_default());
+    let this = cx.weak_entity();
+    let set = |apply: fn(&mut PrFilters, Option<String>)| -> Rc<dyn Fn(Option<String>, &mut App)> {
+      let this = this.clone();
+      Rc::new(move |value, cx| {
+        this
+          .update(cx, |screen, cx| {
+            apply(&mut screen.filters, value);
+            cx.notify();
+          })
+          .ok();
+      })
+    };
+    let f = &self.filters;
+    let mine = this.clone();
+    let mut entries = vec![
+      sheet::MenuEntry::new(
+        "filter-mine",
+        if self.mine {
+          "Only mine: On"
+        } else {
+          "Only mine: Off"
+        },
+        move |_, cx| {
+          mine.update(cx, |screen, cx| screen.toggle_mine(cx)).ok();
+        },
+      )
+      .selected(self.mine),
+      widgets::filter_field(
+        "filter-author",
+        "Author",
+        f.author.clone(),
+        options.authors,
+        set(|f, v| f.author = v),
+      ),
+      widgets::filter_field(
+        "filter-label",
+        "Label",
+        f.label.clone(),
+        options.labels,
+        set(|f, v| f.label = v),
+      ),
+      widgets::filter_field(
+        "filter-base",
+        "Base",
+        f.base.clone(),
+        options.bases,
+        set(|f, v| f.base = v),
+      ),
+      widgets::filter_field(
+        "filter-conflict",
+        "Conflicts",
+        f.conflict.clone(),
+        vec!["conflicting".into(), "clean".into()],
+        set(|f, v| f.conflict = v),
+      ),
+    ];
+    if filter_count(&self.filters, self.mine) > 0 {
+      entries.push(sheet::MenuEntry::new(
+        "filter-clear",
+        "Clear filters",
+        move |_, cx| {
+          this
+            .update(cx, |screen, cx| {
+              screen.filters = screen.filters.cleared();
+              if screen.mine {
+                screen.toggle_mine(cx);
+              }
+              cx.notify();
+            })
+            .ok();
+        },
+      ));
+    }
+    sheet::menu("Filters", entries, cx);
+  }
 }
 
 impl Render for PullRequestsScreen {
@@ -321,46 +432,46 @@ impl Render for PullRequestsScreen {
         },
         cx,
       )),
-      Load::Ready(list) => widgets::card(cx).children(list.iter().enumerate().map(|(i, pr)| {
-        let repo = self.repo.clone();
-        let number = pr.number;
-        widgets::row_full(
-          format!("pr-{i}"),
-          None,
-          pr.title.clone(),
-          Some(detail_line(pr).into()),
-          Some(state_tag(pr, cx).into_any_element()),
+      Load::Ready(list)
+        if filter_pr_indices(list, &self.filters, chrono::Utc::now()).is_empty() =>
+      {
+        widgets::card(cx).child(widgets::empty(
+          "pull-requests-no-match",
+          "No loaded pull requests match. Clear the filters to see them all.",
           cx,
-        )
-        .on_click(move |_, _, cx| pr_detail::open(repo.clone(), number, cx))
-      })),
+        ))
+      }
+      Load::Ready(list) => widgets::card(cx).children(
+        filter_pr_indices(list, &self.filters, chrono::Utc::now())
+          .into_iter()
+          .map(|ix| &list[ix])
+          .enumerate()
+          .map(|(i, pr)| {
+            let repo = self.repo.clone();
+            let number = pr.number;
+            widgets::row_full(
+              format!("pr-{i}"),
+              None,
+              pr.title.clone(),
+              Some(detail_line(pr).into()),
+              Some(state_tag(pr, cx).into_any_element()),
+              cx,
+            )
+            .on_click(move |_, _, cx| pr_detail::open(repo.clone(), number, cx))
+          }),
+      ),
     };
-    let filter = self.filter;
-    let mine = self.mine;
-    let chip = |id: SharedString, label: &'static str, on: bool| {
-      Button::new(id)
-        .h(px(44.))
-        .label(label)
-        .outline()
-        .selected(on)
-    };
-    let chips = h_flex()
-      .gap_2()
-      .flex_wrap()
-      .children(Filter::ALL.map(|f| {
-        chip(
-          SharedString::from(format!("filter-{}", f.value())),
-          f.label(),
-          !searching && filter == f,
-        )
-        .on_click(cx.listener(move |this, _, _, cx| this.set_filter(f, cx)))
-        .touch()
-      }))
-      .child(
-        chip("filter-mine".into(), "Mine", mine)
-          .on_click(cx.listener(|this, _, _, cx| this.toggle_mine(cx)))
-          .touch(),
-      );
+    let chips = widgets::filter_row(
+      "prs",
+      if self.mine {
+        "Open"
+      } else {
+        self.filter.label()
+      },
+      cx.listener(|this, _, _, cx| this.state_menu(cx)),
+      filter_count(&self.filters, self.mine),
+      cx.listener(|this, _, _, cx| this.filters_sheet(cx)),
+    );
     div()
       .id("pull-requests")
       .size_full()
@@ -442,6 +553,16 @@ pub(crate) mod tests {
       latest_reviews: vec![],
       reviews: vec![],
     }
+  }
+
+  #[core::prelude::v1::test]
+  fn only_mine_counts_as_a_filter() {
+    let filters = crate::github_filters::PrFilters {
+      label: Some("bug".into()),
+      ..Default::default()
+    };
+    assert_eq!(filter_count(&filters, false), 1);
+    assert_eq!(filter_count(&filters, true), 2);
   }
 
   #[core::prelude::v1::test]

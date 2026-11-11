@@ -340,6 +340,75 @@ pub fn markdown(id: impl Into<ElementId>, text: &str, cx: &App) -> Div {
 
 /// A 412x892 window showing the view `build` makes, drawn once and past
 /// the spinner delay.
+/// The Filters button's label: the set filters' count beside it.
+pub fn filters_label(count: usize) -> String {
+  if count == 0 {
+    "Filters".into()
+  } else {
+    format!("Filters · {count}")
+  }
+}
+
+/// A list's filter row, as desktop's GitHub toolbar: the state as a value
+/// with a caret, opening a menu of states, and Filters, opening the
+/// advanced filters.
+pub fn filter_row(
+  id: &str,
+  state: &str,
+  on_state: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+  count: usize,
+  on_filters: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Div {
+  gpui_kit::component::h_flex()
+    .gap_2()
+    .child(
+      Button::new(SharedString::from(format!("{id}-state")))
+        .outline()
+        .h(px(treq_ui::theme::TOUCH_TARGET))
+        .label(state.to_string())
+        .dropdown_caret(true)
+        .accessibility_label(format!("State: {state}"))
+        .on_click(on_state)
+        .touch(),
+    )
+    .child(
+      Button::new(SharedString::from(format!("{id}-filters")))
+        .outline()
+        .h(px(treq_ui::theme::TOUCH_TARGET))
+        .label(filters_label(count))
+        .on_click(on_filters)
+        .touch(),
+    )
+}
+
+/// A Filters sheet entry: "Author: ada", opening a menu of "Any" and
+/// `values` that hands the pick to `on_pick` (`None` for Any).
+pub fn filter_field(
+  id: &'static str,
+  name: &'static str,
+  current: Option<String>,
+  values: Vec<String>,
+  on_pick: std::rc::Rc<dyn Fn(Option<String>, &mut App)>,
+) -> super::sheet::MenuEntry {
+  let label = format!("{name}: {}", current.as_deref().unwrap_or("Any"));
+  super::sheet::MenuEntry::new(id, label, move |_, cx| {
+    let entries = std::iter::once(None)
+      .chain(values.iter().cloned().map(Some))
+      .enumerate()
+      .map(|(i, value)| {
+        let on_pick = on_pick.clone();
+        let selected = value == current;
+        let label = value.clone().unwrap_or_else(|| "Any".into());
+        super::sheet::MenuEntry::new(format!("{id}-{i}"), label, move |_, cx| {
+          on_pick(value.clone(), cx)
+        })
+        .selected(selected)
+      })
+      .collect();
+    super::sheet::menu(name, entries, cx);
+  })
+}
+
 #[cfg(test)]
 pub(crate) fn mount_for_test<V: gpui_kit::Render>(
   cx: &mut gpui_kit::TestAppContext,
@@ -375,6 +444,12 @@ pub(crate) fn mount_for_test<V: gpui_kit::Render>(
 
 #[cfg(test)]
 mod tests {
+  #[core::prelude::v1::test]
+  fn the_filters_button_counts_set_filters() {
+    assert_eq!(super::filters_label(0), "Filters");
+    assert_eq!(super::filters_label(2), "Filters · 2");
+  }
+
   use std::{cell::Cell, rc::Rc};
 
   use gpui_kit::base::TextSelection;
