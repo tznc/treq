@@ -421,25 +421,24 @@ impl HomeScreen {
   /// The right side of the tablet Overview: recent repositories grouped by
   /// machine; tapping one opens its machine.
   fn recents(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let mut machines: Vec<(Machine, String)> = store::user_managed_endpoints()
+    let signed_in = model(cx).read(cx).user.is_some();
+    let machines = store::user_managed_endpoints()
       .into_iter()
       .map(|h| {
         let name = h.display_name.clone();
         (Machine::Host(h), name)
       })
-      .collect();
-    if model(cx).read(cx).user.is_some() {
-      machines.push((Machine::Managed, "Cloud machine".into()));
-    }
+      .chain(signed_in.then(|| (Machine::Managed, "Cloud machine".to_string())));
     let groups: Vec<Div> = machines
       .into_iter()
       .filter_map(|(machine, name)| {
         let endpoint = match &machine {
           Machine::Host(record) => record.to_endpoint(),
-          Machine::Managed => crate::mobile::backend::get()
-            .connection_to(machine.id())?
-            .endpoint
-            .clone(),
+          Machine::Managed => {
+            crate::mobile::backend::get()
+              .connection_to(machine.id())?
+              .endpoint
+          }
         };
         let repos = store::saved_repositories(&endpoint.id, store::endpoint_generation(&endpoint));
         if repos.is_empty() {
