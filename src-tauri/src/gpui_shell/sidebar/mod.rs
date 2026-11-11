@@ -119,6 +119,9 @@ pub struct SidebarRow {
   pub conflicted: bool,
   pub status: Option<RowStatus>,
   pub pr: Option<PrState>,
+  /// The branch the workspace merges into.
+  #[serde(default)]
+  pub target: Option<String>,
   /// Being archived: dimmed, with a spinner, and not clickable.
   #[serde(default)]
   pub archiving: bool,
@@ -1125,6 +1128,7 @@ impl Sidebar {
     let tip = TooltipContent::Branch {
       name: None,
       title: label.clone().into(),
+      target: None,
       conflicted: false,
       pr: None,
     };
@@ -1470,6 +1474,7 @@ impl Sidebar {
     let tip = TooltipContent::Branch {
       name: row.name.clone().map(Into::into),
       title: row.title.clone().into(),
+      target: row.target.clone().map(Into::into),
       conflicted: row.conflicted,
       pr: row.pr,
     };
