@@ -162,8 +162,6 @@ pub struct Root {
   /// Whether the last tap in a split was on the left pane, so a page it
   /// opens replaces the one beside it instead of stacking on top.
   list_focus: bool,
-  /// Whether the first frame has asked for a second one; see `render`.
-  refreshed: bool,
 }
 
 pub(crate) struct Nav {
@@ -379,7 +377,6 @@ impl Root {
       tap_guard: false,
       split: false,
       list_focus: false,
-      refreshed: false,
     };
     restore(cx);
     root
@@ -575,13 +572,6 @@ impl Render for Root {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     // Keep clear of the status bar, navigation bar and soft keyboard.
     let visible = window.fully_visible_bounds();
-    // On a cold start Android can report the system bar insets before GPUI
-    // listens for them, so the first frame lays out without them. Draw once
-    // more to pick them up. Workaround until tauri-gpui redraws on its own.
-    if !self.refreshed {
-      self.refreshed = true;
-      window.on_next_frame(|window, _| window.refresh());
-    }
     let viewport = window.viewport_size();
     let depth = self.stack.len();
     self.split = panes(visible.size.width, depth) == 2;
