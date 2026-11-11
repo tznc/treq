@@ -80,7 +80,7 @@ export function onHost(script: string): string {
 
 /**
  * Replaces QA_SSH_REPO with a fresh Git repository whose origin is the
- * repository the host's fake `gh` answers for.
+ * repository the host's fake `gh` answers for, and gives #418 a diff.
  */
 export function seedRepo(): void {
   onHost(
@@ -89,9 +89,29 @@ export function seedRepo(): void {
      git config user.name QA; git config user.email qa@example.com
      printf '# event-bus\\n' > README.md
      git add .; git commit -qm 'Initial commit'
-     git remote add origin https://github.com/lorem-ipsum/event-bus.git`,
+     git remote add origin https://github.com/lorem-ipsum/event-bus.git
+     cat > ~/fake-gh-pr-diff-418.diff <<'DIFF'
+${PR_418_DIFF}DIFF`,
   );
 }
+
+/** What the fake `gh` serves as #418's diff (`gh pr diff 418`). */
+const PR_418_DIFF = `diff --git a/web/src/events/post.ts b/web/src/events/post.ts
+index 1111111..2222222 100644
+--- a/web/src/events/post.ts
++++ b/web/src/events/post.ts
+@@ -1,5 +1,7 @@
+ import type { EventBody } from "../../../api/src/schema";
+ 
+ export async function postEvent(body: EventBody): Promise<Response> {
+-  const message = body.event_message;
++  const message =
++    typeof body.event_message === "string" && body.event_message.length > 0
++      ? body.event_message
++      : JSON.stringify(body);
+   return fetch("/events", { method: "POST", body: message });
+ }
+`;
 
 /** Adds the host through the add-host form and trusts its key, as a user does. */
 export async function addHost(page: Page): Promise<void> {

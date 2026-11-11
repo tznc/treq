@@ -62,11 +62,15 @@ test("pull request detail and review", async () => {
   ]);
   await page.getByRole("button", { name: "Review changes" }).click();
   await expect(page.getByRole("button", { name: "Submit review" })).toBeVisible();
-  await page.waitForTimeout(1500);
-  await capture(page, {
-    name: "mobile-github-05-review-light",
-    title: "Review #418",
-    expectations: ["The review page with Submit review as its one filled button"],
-    issue: "The fake gh serves no `gh pr diff`, so the file list is empty",
-  });
+  await expect(page.getByText("web/src/events/post.ts")).toBeVisible();
+  await shot("05-review", "Review #418", [
+    "1 FILE: web/src/events/post.ts with +4 −1",
+    "Submit review is the one filled button",
+  ]);
+  await page.getByText("web/src/events/post.ts").click();
+  await expect(page.getByRole("button", { name: "Files" })).toBeVisible();
+  await shot("06-review-file", "Review #418: the file's diff", [
+    "The hunk @@ -1,5 +1,7 @@ with one removed (red) and four added (green) lines, numbered",
+    "Previous, Files and Next above Submit review; Previous and Next are disabled (one file)",
+  ]);
 });
