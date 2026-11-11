@@ -2428,10 +2428,10 @@ pub(super) fn row_fill(
   }
 }
 
-/// Behind the comments under a line: the same amber as the commented rows,
-/// so the band runs on into the comments.
+/// Behind the comments under a line: the plain background, so the row's
+/// highlight stops at the row and does not wash over the comments.
 pub(super) fn comment_strip_fill(p: &Palette) -> Hsla {
-  p.commented()
+  p.background
 }
 
 /// Whether the gutter shows its hover fill. The fill sits on the gutter cell,
@@ -2479,13 +2479,10 @@ mod row_paint_tests {
   }
 
   #[test]
-  fn the_comment_strip_matches_its_commented_rows() {
+  fn the_comment_strip_is_not_tinted_like_its_rows() {
     for dark in [true, false] {
       let p = theme::palette(dark);
-      assert_eq!(
-        Some(comment_strip_fill(&p)),
-        row_fill(false, true, LineKind::Added, &p)
-      );
+      assert_eq!(comment_strip_fill(&p), p.background);
     }
   }
 
