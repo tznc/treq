@@ -855,6 +855,48 @@
             }
           ]
         },
+        "github": {
+          "description": "GitHub tokens for agents in a treq cloud sandbox, through integration-proxy",
+          "afterHelp": "Examples:\n  treq github token tznc/treq\n  git config --global credential.https://github.com.helper \"/usr/local/bin/treq github credential\"\n  treq github gh -- pr list -R tznc/treq",
+          "subcommands": {
+            "token": {
+              "description": "Print an installation token for a repository the sandbox owner can push to",
+              "args": [
+                {
+                  "name": "repository",
+                  "index": 1,
+                  "takesValue": true,
+                  "required": true,
+                  "description": "The repository, as owner/name"
+                }
+              ]
+            },
+            "credential": {
+              "description": "Git credential helper: answers `get` for https://github.com/<owner>/<name> (needs credential.useHttpPath)",
+              "args": [
+                {
+                  "name": "operation",
+                  "index": 1,
+                  "takesValue": true,
+                  "required": true,
+                  "description": "get, store or erase, as git passes it"
+                }
+              ]
+            },
+            "gh": {
+              "description": "Run the GitHub CLI with a token for the repository it works on (-R/--repo, else the current directory's remote)",
+              "args": [
+                {
+                  "name": "args",
+                  "index": 1,
+                  "takesValue": true,
+                  "multiple": true,
+                  "description": "Arguments for gh, after --"
+                }
+              ]
+            }
+          }
+        },
         "gateway": {
           "description": "Run the cloud machine's SSH gateway: a WebSocket server that lets the Treq SSH relay reach this machine's sshd",
           "afterHelp": "Example:\n  treq gateway --placement-id pl_123 --listen 127.0.0.1:8022",

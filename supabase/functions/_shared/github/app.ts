@@ -58,6 +58,12 @@ function appCredentials(): { appId: string; privateKey: string } {
   }
   return { appId, privateKey: atob(keyB64) };
 }
+
+/** A fresh App JWT from GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_BASE64. */
+export function appJWT(): Promise<string> {
+  const { appId, privateKey } = appCredentials();
+  return createAppJWT(appId, privateKey);
+}
 // Fetch installation metadata using app-level (JWT) auth. Used by the
 // installation linking flow to verify an installation actually exists and
 // which account it belongs to.

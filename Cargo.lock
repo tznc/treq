@@ -12659,6 +12659,7 @@ dependencies = [
  "gpui-pre",
  "gpui-testing-library",
  "gtk",
+ "hmac 0.13.0",
  "ignore",
  "image",
  "imara-diff 0.1.8",

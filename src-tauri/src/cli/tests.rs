@@ -2049,6 +2049,44 @@ fn agent_start_takes_the_harness_to_start() {
 }
 
 #[test]
+fn github_parses_its_subcommands() {
+  use super::GithubCommand;
+  assert!(is_supported_cli_command("github"));
+  let parse = |argv: &[&str]| {
+    let sub = parsed_subcommand(argv);
+    assert_eq!(sub.name, "github");
+    super::parse_github_command(&sub.matches)
+  };
+  assert_eq!(
+    parse(&["treq", "github", "token", "tznc/treq"]),
+    Ok(GithubCommand::Token {
+      repository: "tznc/treq".into()
+    })
+  );
+  assert_eq!(
+    parse(&["treq", "github", "credential", "get"]),
+    Ok(GithubCommand::Credential {
+      operation: "get".into()
+    })
+  );
+  assert_eq!(
+    parse(&[
+      "treq",
+      "github",
+      "gh",
+      "--",
+      "pr",
+      "list",
+      "-R",
+      "tznc/treq"
+    ]),
+    Ok(GithubCommand::Gh {
+      args: vec!["pr".into(), "list".into(), "-R".into(), "tznc/treq".into()],
+    })
+  );
+}
+
+#[test]
 fn gateway_defaults_secret_file_and_listen() {
   let matches = super::args::parse(["treq", "gateway", "--placement-id", "pl_1"]).unwrap();
   let args = super::parse_gateway_args(&matches.subcommand.unwrap().matches).unwrap();

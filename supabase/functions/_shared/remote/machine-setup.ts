@@ -24,6 +24,12 @@ import {
   MANAGED_SSHD_SERVICE_NAME,
 } from "./ssh-vm-config.ts";
 import { must } from "./db.ts";
+import {
+  integrationProxyUrl,
+  type IntegrationSecretStore,
+  provisionIntegrationCredential,
+  supabaseIntegrationSecrets,
+} from "./integration-credential.ts";
 
 /** Where per-placement gateway secrets are kept (Vault, via 051_gateway_secrets.sql). */
 export interface GatewaySecretStore {
@@ -76,6 +82,25 @@ export async function provisionGateway(
     [GATEWAY_SECRET_ENV]: secret,
   });
   await provider.ensureService(providerResourceId, GATEWAY_SERVICE_NAME, gatewayServiceSpec(placementId, provider.gatewayListenAddress ?? listen));
+}
+
+/**
+ * Everything a placement runs or holds: the gateway, then the integration
+ * credential its sandbox signs integration-proxy requests with.
+ */
+export async function provisionPlacementServices(
+  secrets: { gateway: GatewaySecretStore; integration: IntegrationSecretStore },
+  provider: SandboxProvider,
+  providerResourceId: string,
+  placementId: string,
+  proxyUrl: string,
+): Promise<void> {
+  await provisionGateway(secrets.gateway, provider, providerResourceId, placementId);
+  await provisionIntegrationCredential(secrets.integration, provider, providerResourceId, placementId, proxyUrl);
+}
+
+function supabasePlacementSecrets(supabase: SupabaseClient) {
+  return { gateway: supabaseGatewaySecrets(supabase), integration: supabaseIntegrationSecrets(supabase) };
 }
 
 /**
@@ -215,11 +240,12 @@ export async function establishSshTrust(
   }
   if (p.placementId && "capabilities" in provider) {
     try {
-      await provisionGateway(
-        supabaseGatewaySecrets(supabase),
+      await provisionPlacementServices(
+        supabasePlacementSecrets(supabase),
         provider as SandboxProvider,
         p.providerResourceId,
         p.placementId,
+        integrationProxyUrl(),
       );
     } catch (err) {
       await recordAuditEvent(supabase, {
@@ -251,11 +277,12 @@ export function supabaseMachineSetup(
       await runBootManifest(provider, providerResourceId);
       await provisionManagedSshd(provider, providerResourceId, caPublicKeyLine(caKeyMaterialFromEnv()));
       if (placementId) {
-        await provisionGateway(
-          supabaseGatewaySecrets(supabase),
+        await provisionPlacementServices(
+          supabasePlacementSecrets(supabase),
           provider,
           providerResourceId,
           placementId,
+          integrationProxyUrl(),
         );
       }
     },
