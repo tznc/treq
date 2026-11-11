@@ -2,7 +2,7 @@
 //! system prompt, filesystem settings and skills, wrapped so its temp files
 //! are removed and Treq hears when it exits.
 
-use super::agent_cli::{write_agent_cli_files, AgentCliFiles};
+use super::agent_cli::{write_agent_cli_files, write_agent_task_file, AgentCliFiles};
 use super::remote::shell_quote;
 use serde_json::{json, Map, Value};
 use std::path::Path;
@@ -186,7 +186,13 @@ pub fn build_auto_command(
   files: &AgentCliFiles,
 ) -> Result<String, String> {
   let pending = options.pending_prompt.filter(|p| !p.is_empty());
+  let with_task = |command: String| match (&files.task_path, pending) {
+    (Some(path), Some(_)) => format!("{command} -- \"{}\"", shell_cat(path)),
+    (None, Some(prompt)) => append_agent_prompt(&command, prompt),
+    (_, None) => command,
+  };
   let mut cleanup = vec![files.prompt_path.clone()];
+  cleanup.extend(files.task_path.clone());
   if !files.skill_dir.is_empty() {
     cleanup.push(files.skill_dir.clone());
   }
@@ -199,10 +205,7 @@ pub fn build_auto_command(
         "codex -c \"developer_instructions={}\"",
         shell_cat(&files.prompt_path)
       );
-      match pending {
-        Some(prompt) => append_agent_prompt(&command, prompt),
-        None => command,
-      }
+      with_task(command)
     }
     "cursor" => {
       let plan = if options.permission_mode == Some("plan") {
@@ -239,10 +242,7 @@ pub fn build_auto_command(
         "copilot --allow-all-tools -- \"{}\"",
         shell_cat(&files.prompt_path)
       );
-      match pending {
-        Some(prompt) => append_agent_prompt(&command, prompt),
-        None => command,
-      }
+      with_task(command)
     }
     _ => {
       let mode = if options.permission_mode == Some("plan") {
@@ -264,10 +264,7 @@ pub fn build_auto_command(
         " --append-system-prompt-file {}",
         shell_quote(&files.prompt_path)
       ));
-      if let Some(prompt) = pending {
-        command.push_str(&format!(" -- {}", shell_quote(prompt)));
-      }
-      command
+      with_task(command)
     }
   };
 
@@ -328,7 +325,15 @@ pub fn prepare_auto_command(
       write_agent_cli_files(&prompt, settings.as_deref(), None)?
     }
   };
+  let pending_prompt = if matches!(options.agent, "cursor" | "devin" | "gemini") {
+    None
+  } else {
+    options.pending_prompt.filter(|p| !p.is_empty())
+  };
+  let mut files = files;
+  files.task_path = pending_prompt.map(write_agent_task_file).transpose()?;
   let file_paths = std::iter::once(files.prompt_path.clone())
+    .chain(files.task_path.clone())
     .chain(files.settings_path.clone())
     .chain(Some(files.skill_dir.clone()).filter(|d| !d.is_empty()))
     .chain(files.agents_skill_path.clone())
@@ -340,11 +345,6 @@ pub fn prepare_auto_command(
         .to_string()
     })
   });
-  let pending_prompt = if matches!(options.agent, "cursor" | "devin" | "gemini") {
-    None
-  } else {
-    options.pending_prompt
-  };
   let command = build_auto_command(
     &AutoCommand {
       pending_prompt,
@@ -376,6 +376,7 @@ mod tests {
       agents_skill_path: None,
       claude_skill_path: None,
       skill_write_warning: None,
+      task_path: None,
     }
   }
 
@@ -753,7 +754,8 @@ mod tests {
       },
     )
     .unwrap();
-    assert!(prepared.command.contains("-- 'hi'"));
+    assert!(prepared.command.contains("-- \"$(cat -- "));
+    assert!(!prepared.command.contains("hi'"));
     let settings = prepared
       .file_paths
       .iter()
@@ -763,6 +765,52 @@ mod tests {
     assert_eq!(written["extra"], 1);
     assert!(written.get("sandbox").is_none());
     super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+  }
+
+  /// A fresh shell reads typed input in canonical mode, which caps a line
+  /// (1024 bytes on macOS, where the Enter is then dropped).
+  #[test]
+  fn keeps_a_long_task_prompt_out_of_the_typed_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    let task = format!("Fix the parser.\n{}", "x".repeat(4000));
+    for agent in ["claude", "codex", "copilot"] {
+      let prepared = prepare_auto_command(
+        &AgentPaths {
+          workspace_path: None,
+          repo_path: cwd,
+          supporting_repo_paths: NONE,
+          project: None,
+        },
+        &AutoCommand {
+          pending_prompt: Some(&task),
+          ..opts(agent)
+        },
+      )
+      .unwrap();
+      assert!(
+        prepared.command.len() < 1024,
+        "{agent}: {}",
+        prepared.command
+      );
+      let task_file = prepared
+        .file_paths
+        .iter()
+        .find(|p| std::fs::read_to_string(p).ok().as_deref() == Some(task.as_str()))
+        .unwrap_or_else(|| panic!("{agent}: no file holds the task"));
+      assert!(
+        prepared
+          .command
+          .contains(&format!("-- \"$(cat -- {})\"", shell_quote(task_file))),
+        "{agent}: {}",
+        prepared.command
+      );
+      assert!(prepared
+        .command
+        .contains(&format!("rm -rf {}", shell_quote(&prepared.file_paths[0]))));
+      assert!(prepared.command.contains(&shell_quote(task_file)));
+      super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+    }
   }
 
   #[test]
