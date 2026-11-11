@@ -770,6 +770,25 @@ impl PtyManager {
     }
   }
 
+  /// Whether a command the shell started holds the terminal: its
+  /// foreground process group is not the shell's. `None` for no session, or
+  /// where the platform cannot tell.
+  pub fn runs_command(&self, session_id: &str) -> Option<bool> {
+    #[cfg(unix)]
+    {
+      let sessions = self.sessions.lock_or_recover();
+      let session = sessions.get(session_id)?;
+      let shell = session.child.process_id()?;
+      let foreground = session.master.process_group_leader()?;
+      Some(foreground as u32 != shell)
+    }
+    #[cfg(not(unix))]
+    {
+      let _ = session_id;
+      None
+    }
+  }
+
   pub fn session_exists(&self, session_id: &str) -> bool {
     let stale = {
       let mut sessions = self.sessions.lock_or_recover();
@@ -923,6 +942,36 @@ mod tests {
     assert!(duplicate.is_err());
     assert!(manager.session_exists("duplicate"));
     manager.close_session("duplicate").unwrap();
+  }
+
+  /// The foreground process tells whether the typed command started.
+  #[cfg(unix)]
+  #[test]
+  fn runs_command_once_the_shell_hands_over_the_terminal() {
+    let manager = PtyManager::new();
+    manager
+      .create_session(
+        "fg".into(),
+        None,
+        None,
+        shell(),
+        vec!["-i".into()],
+        None,
+        None,
+        Box::new(|_| {}),
+      )
+      .unwrap();
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(manager.runs_command("fg"), Some(false));
+
+    manager.write_to_session("fg", "sleep 5\r").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while manager.runs_command("fg") != Some(true) && Instant::now() < deadline {
+      thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(manager.runs_command("fg"), Some(true));
+    assert_eq!(manager.runs_command("missing"), None);
+    manager.close_session("fg").unwrap();
   }
 
   #[test]

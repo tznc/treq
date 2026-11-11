@@ -1463,6 +1463,29 @@ fn agent_terminals_register_for_messages_by_harness_and_session(cx: &mut TestApp
   );
 }
 
+/// A terminal whose shell never ran the agent (stuck at `quote>`) is not
+/// a running agent: `treq agent msg --list` must not show it.
+#[gpui::test]
+fn agent_terminals_register_for_messages_only_once_the_agent_starts(cx: &mut TestAppContext) {
+  let host = terminal_host();
+  host.not_started.lock().unwrap().push(agent_pty());
+  let (mut h, host) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let registered = |host: &FakeHost| host.calls().iter().any(|c| c.starts_with("msg register"));
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(2));
+  h.cx.run_until_parked();
+  assert!(!registered(&host), "{:?}", host.calls());
+
+  host.not_started.lock().unwrap().clear();
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(1));
+  h.cx.run_until_parked();
+  assert!(registered(&host), "{:?}", host.calls());
+}
+
 #[gpui::test]
 fn typing_into_an_agent_terminal_notes_the_keystroke(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));

@@ -125,6 +125,11 @@ pub trait TerminalHost:
   /// [`TerminalHost::listen`].
   fn spawn_pty(&self, spawn: &Spawn) -> Result<(), String>;
   fn pty_exists(&self, id: &str) -> bool;
+  /// Whether PTY `id`'s shell has started the command typed into it. A
+  /// shell left at a continuation prompt (`quote>`) never does.
+  fn agent_started(&self, _id: &str) -> bool {
+    true
+  }
   fn write_pty(&self, id: &str, data: &str) -> Result<(), String>;
   fn resize_pty(&self, id: &str, rows: u16, cols: u16) -> Result<(), String>;
   fn close_pty(&self, id: &str) -> Result<(), String>;
@@ -304,6 +309,18 @@ impl TerminalHost for Backend {
       });
     }
     Ok(())
+  }
+
+  fn agent_started(&self, id: &str) -> bool {
+    use tauri::Manager;
+    // A remote agent is launched, not typed into a shell.
+    is_remote_pty(id)
+      || self
+        .app()
+        .state::<crate::AppState>()
+        .pty_manager
+        .runs_command(id)
+        .unwrap_or(true)
   }
 
   fn pty_exists(&self, id: &str) -> bool {
