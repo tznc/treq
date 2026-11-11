@@ -56,6 +56,16 @@ fn listen_for_deep_links(app: &tauri::App) {
 
 /// Runs the mobile app. The app crate passes its own `generate_context!()`,
 /// so the mobile Tauri config, not this crate's, drives the build.
+// The Playwright server is for the desktop build e2e/mobile drives. A
+// release or phone build with it would ship a remote-control port.
+#[cfg(all(
+  feature = "mobile-e2e",
+  any(not(debug_assertions), target_os = "android", target_os = "ios")
+))]
+compile_error!(
+  "`mobile-e2e` is for debug desktop builds only; production mobile builds use `mobile-ui`"
+);
+
 /// Starts gpui-playwright when `GPUI_PLAYWRIGHT` asks for it, so
 /// e2e/mobile drives the app as e2e/desktop drives the desktop one. The
 /// app has one window, so a page adopts it.

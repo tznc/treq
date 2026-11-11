@@ -40,7 +40,8 @@ gpui-shell = ["gui", "dep:gtk", "dep:tauri-plugin-gpui", "dep:gpui-kit", "dep:tr
 # set, and release builds leave the feature out.
 e2e = ["gpui-shell", "dep:gpui-playwright"]
 # The same Playwright server in the mobile app's desktop build, for
-# e2e/mobile. It listens only when `GPUI_PLAYWRIGHT` is set.
+# e2e/mobile. It listens only when `GPUI_PLAYWRIGHT` is set, and a release
+# or Android/iOS build with it fails to compile (see `mobile/mod.rs`).
 mobile-e2e = ["mobile-ui", "dep:gpui-playwright"]
 # The GPUI mobile app (`mobile`). Mobile builds turn it on
 # (`tauri android|ios build --features mobile-ui`); it also builds on
