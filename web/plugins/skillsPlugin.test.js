@@ -1,6 +1,4 @@
 // @ts-check
-const test = require('node:test');
-const assert = require('node:assert/strict');
 const {buildAuthorPages, skillPageTitle} = require('./skillsPlugin');
 
 const catalog = {
@@ -16,18 +14,15 @@ const catalog = {
 
 test('one author page per source with skills, sorted by name and without file lists', () => {
   const pages = buildAuthorPages(catalog);
-  assert.equal(pages.length, 1);
+  expect(pages.length).toBe(1);
   const [page] = pages;
-  assert.equal(page.route, '/skills/mattpocock');
-  assert.deepEqual(page.source, catalog.sources[0]);
-  assert.deepEqual(
-    page.skills.map((s) => s.name),
-    ['chief-of-staff', 'wizard'],
-  );
-  assert.ok(page.skills.every((s) => !('files' in s)));
+  expect(page.route).toBe('/skills/mattpocock');
+  expect(page.source).toEqual(catalog.sources[0]);
+  expect(page.skills.map((s) => s.name)).toEqual(['chief-of-staff', 'wizard']);
+  expect(page.skills.every((s) => !('files' in s))).toBeTruthy();
 });
 
 test('skill page title names the author', () => {
-  assert.equal(skillPageTitle(catalog.skills[0], catalog.sources), 'wizard skill by Matt Pocock');
-  assert.equal(skillPageTitle({...catalog.skills[0], source: 'unknown'}, catalog.sources), 'wizard skill by unknown');
+  expect(skillPageTitle(catalog.skills[0], catalog.sources)).toBe('wizard skill by Matt Pocock');
+  expect(skillPageTitle({...catalog.skills[0], source: 'unknown'}, catalog.sources)).toBe('wizard skill by unknown');
 });
