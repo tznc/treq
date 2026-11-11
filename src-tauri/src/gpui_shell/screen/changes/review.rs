@@ -10,7 +10,7 @@ use crate::result_ext::ResultExt;
 use std::{ops::Range, time::Duration};
 
 use super::*;
-use crate::core::review::{selected_range, selected_text, word_at, TextPoint};
+use crate::core::review::{selected_range, selected_row, selected_text, word_at, TextPoint};
 use crate::gpui_shell::screen::{
   changes_review::{
     commented_text, comments_under, compose_suggestion_comment, count_label, is_outdated,
@@ -1166,7 +1166,14 @@ impl ChangesView {
       number_and_side(numbers, l),
       &|c| self.is_outdated_in(c, hunks),
     );
-    let bg = row_fill(selected, has_comment, kind, p);
+    // A text drag across lines fills whole rows, empty ones included.
+    let text_row = self
+      .review
+      .text
+      .as_ref()
+      .filter(|t| t.path == path)
+      .is_some_and(|t| selected_row(hunks, t.anchor, t.head, (h, l)));
+    let bg = row_fill(selected || text_row, has_comment, kind, p);
     // The characters this line changed against its pair, a shade deeper.
     let mark = match kind {
       LineKind::Removed => Tone::DiffRemoved.color(p),
@@ -1180,7 +1187,7 @@ impl ChangesView {
       .as_ref()
       .filter(|t| t.path == path)
       .and_then(|t| selected_range(hunks, t.anchor, t.head, (h, l)))
-      .filter(|r| !r.is_empty());
+      .filter(|r| !text_row && !r.is_empty());
     let changed: Vec<(Range<usize>, Hsla)> = picked
       .map(|r| (r, p.selected()))
       .into_iter()
