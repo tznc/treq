@@ -1,6 +1,4 @@
 // @ts-check
-const test = require('node:test');
-const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -22,12 +20,9 @@ function fixtureSite() {
 test('collects title, description and url from docs, learn and compare', () => {
   const pages = collectMarkdownPages(fixtureSite());
   const rerere = pages.find((p) => p.outputPath === 'learn/git/rerere.md');
-  assert.deepEqual(
-    {title: rerere?.title, description: rerere?.description, section: rerere?.section},
-    {title: 'Git rerere', description: 'Reuse resolutions.', section: 'learn'},
-  );
-  assert.ok(pages.some((p) => p.outputPath === 'compare/treq-vs-orca.md'));
-  assert.ok(!pages.some((p) => p.outputPath === 'learn/draft.md'));
+  expect({title: rerere?.title, description: rerere?.description, section: rerere?.section}).toEqual({title: 'Git rerere', description: 'Reuse resolutions.', section: 'learn'});
+  expect(pages.some((p) => p.outputPath === 'compare/treq-vs-orca.md')).toBeTruthy();
+  expect(!pages.some((p) => p.outputPath === 'learn/draft.md')).toBeTruthy();
 });
 
 test('llms.txt links every page under its section', () => {
@@ -36,9 +31,9 @@ test('llms.txt links every page under its section', () => {
     description: 'Tagline',
     url: 'https://treq.dev',
   });
-  assert.match(txt, /^# Treq\n\n> Tagline\n/);
-  assert.match(txt, /## Learn\n\n- \[Git rerere\]\(https:\/\/treq\.dev\/learn\/git\/rerere\.md\): Reuse resolutions\./);
-  assert.match(txt, /## Compare\n\n- \[Treq vs Orca\]\(https:\/\/treq\.dev\/compare\/treq-vs-orca\.md\)\n/);
+  expect(txt).toMatch(/^# Treq\n\n> Tagline\n/);
+  expect(txt).toMatch(/## Learn\n\n- \[Git rerere\]\(https:\/\/treq\.dev\/learn\/git\/rerere\.md\): Reuse resolutions\./);
+  expect(txt).toMatch(/## Compare\n\n- \[Treq vs Orca\]\(https:\/\/treq\.dev\/compare\/treq-vs-orca\.md\)\n/);
 });
 
 test('llms-full.txt inlines page content', () => {
@@ -47,5 +42,5 @@ test('llms-full.txt inlines page content', () => {
     description: 'Tagline',
     url: 'https://treq.dev',
   });
-  for (const body of ['Body A', 'Body B', 'Body C']) assert.ok(txt.includes(body));
+  for (const body of ['Body A', 'Body B', 'Body C']) expect(txt.includes(body)).toBeTruthy();
 });
