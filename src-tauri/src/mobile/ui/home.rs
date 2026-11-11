@@ -78,14 +78,14 @@ fn missing_tools(state: &MachineState) -> Option<String> {
   match (!check.holds_terminals(backend), check.agents.is_empty()) {
     (false, false) => None,
     (true, true) => Some(
-      "This host can't keep terminals (Treq supports Linux and macOS hosts), and has no agent CLI (claude, codex, cursor-agent, copilot)."
+      "This host can't keep terminals (Treq supports Linux and macOS hosts), and has no agent CLI (claude, codex, cursor-agent, copilot, devin, gemini)."
         .into(),
     ),
     (true, false) => Some(
       "This host can't keep terminals (Treq supports Linux and macOS hosts): terminals and agents won't start."
         .into(),
     ),
-    (false, true) => Some("No agent CLI found (claude, codex, cursor-agent, copilot).".into()),
+    (false, true) => Some("No agent CLI found (claude, codex, cursor-agent, copilot, devin, gemini).".into()),
   }
 }
 

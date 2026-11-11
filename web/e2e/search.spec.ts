@@ -4,7 +4,7 @@ const QUERY = 'cli workspace status';
 const QUERY_ENCODED = encodeURIComponent(QUERY);
 
 // Known result for QUERY: the CLI reference page whose excerpt contains "workspace status"
-const EXPECTED_RESULT_URL = '/docs/reference/cli';
+const EXPECTED_RESULT_URL = '/docs/reference/cli/';
 const EXPECTED_RESULT_TITLE = 'CLI';
 const EXPECTED_RESULT_KEYWORD = 'status';
 
