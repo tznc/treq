@@ -19,6 +19,9 @@ Treq resolves the default agent from the repository settings first, then the app
 | Claude Code | Uses Claude's plan permission mode | Uses the accept-edits permission mode |
 | Codex | Not available | Runs the task with edit access |
 | Cursor Agent | Starts with the plan flag | Starts without the plan flag |
+| GitHub Copilot CLI | Not available | Runs the task with all tools allowed |
+
+Treq starts GitHub Copilot CLI as `copilot --allow-all-tools`, so Copilot runs commands without asking for approval first. The workspace gives it its own working copy, but its commands run with your user's permissions and can reach files outside the workspace.
 
 ## Plan and Edit Modes
 

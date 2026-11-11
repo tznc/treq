@@ -618,7 +618,7 @@ function ResourcesSection(): ReactNode {
           <Link className={styles.resourceCard} to="/skills">
             <span className={styles.resourceKind}>Skills</span>
             <Heading as="h3" className={styles.resourceTitle}>Agent skills catalog</Heading>
-            <p>Reusable instructions you can drop into Claude, Codex, or Cursor sessions.</p>
+            <p>Reusable instructions you can drop into Claude, Codex, Cursor, or Copilot sessions.</p>
           </Link>
           <Link className={styles.resourceCard} to="/roadmap">
             <span className={styles.resourceKind}>Roadmap</span>
