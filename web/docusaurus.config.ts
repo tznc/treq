@@ -117,12 +117,8 @@ const config: Config = {
   // Set the /<baseUrl>/ pathname under which your site is served
   baseUrl: '/',
 
-  // NOTE: trailingSlash intentionally left unset (Docusaurus default).
-  // Setting it to true or false here breaks the site's relative doc links
-  // (e.g. "./sibling-page" in /learn/**), which assume the current
-  // (undefined) resolution behavior. The /page vs /page/ duplicate-URL
-  // issue seen in GSC should instead be fixed at the hosting/CDN layer by
-  // adding a single 301-redirect rule normalizing one form to the other.
+  // One canonical form per URL; /page 301s to /page/ instead of both being indexed.
+  trailingSlash: true,
 
   customFields: {
     featureFlags,

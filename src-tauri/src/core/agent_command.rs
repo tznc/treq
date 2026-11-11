@@ -179,7 +179,7 @@ pub struct AutoCommand<'a> {
 /// The PTY auto-command for an agent CLI.
 ///
 /// Long prompt/settings bodies are never inlined. Claude reads files via native
-/// flags; Codex and Cursor have no append-from-file flags, so the shell expands
+/// flags; Codex, Cursor, Devin and Gemini have no append-from-file flags, so the shell expands
 /// `$(cat -- path)` at exec time (the typed command stays short).
 pub fn build_auto_command(
   options: &AutoCommand<'_>,
@@ -212,6 +212,25 @@ pub fn build_auto_command(
       };
       format!(
         "cursor-agent{plan} -- \"{}\"",
+        shell_cat(&files.prompt_path)
+      )
+    }
+    "devin" => {
+      let plan = if options.permission_mode == Some("plan") {
+        " --permission-mode plan"
+      } else {
+        ""
+      };
+      format!("devin{plan} -- \"{}\"", shell_cat(&files.prompt_path))
+    }
+    "gemini" => {
+      let mode = if options.permission_mode == Some("plan") {
+        "plan"
+      } else {
+        "auto_edit"
+      };
+      format!(
+        "gemini --approval-mode {mode} -i \"{}\"",
         shell_cat(&files.prompt_path)
       )
     }
@@ -281,7 +300,8 @@ pub fn prepare_auto_command(
   }
   let system = system_prompt(paths);
   let (prompt, settings) = match options.agent {
-    "cursor" => (
+    // No system-prompt flag: the task rides in the prompt file.
+    "cursor" | "devin" | "gemini" => (
       cursor_prompt_file_contents(&system, options.pending_prompt),
       None,
     ),
@@ -320,7 +340,7 @@ pub fn prepare_auto_command(
         .to_string()
     })
   });
-  let pending_prompt = if options.agent == "cursor" {
+  let pending_prompt = if matches!(options.agent, "cursor" | "devin" | "gemini") {
     None
   } else {
     options.pending_prompt
@@ -666,8 +686,28 @@ mod tests {
   }
 
   #[test]
+  fn starts_devin_and_gemini_with_the_prompt_file_and_mode() {
+    let plan = |agent| {
+      build_auto_command(
+        &AutoCommand {
+          permission_mode: Some("plan"),
+          ..opts(agent)
+        },
+        &files(),
+      )
+      .unwrap()
+    };
+    let edit = |agent| build_auto_command(&opts(agent), &files()).unwrap();
+    let prompt = "\"$(cat -- '/tmp/treq-agent-prompt-1.txt')\"";
+    assert!(plan("devin").contains(&format!("devin --permission-mode plan -- {prompt}")));
+    assert!(edit("devin").contains(&format!("devin -- {prompt}")));
+    assert!(plan("gemini").contains(&format!("gemini --approval-mode plan -i {prompt}")));
+    assert!(edit("gemini").contains(&format!("gemini --approval-mode auto_edit -i {prompt}")));
+  }
+
+  #[test]
   fn tells_treq_when_the_agent_exits() {
-    for agent in ["claude", "codex", "cursor", "copilot"] {
+    for agent in ["claude", "codex", "cursor", "copilot", "devin", "gemini"] {
       let command = build_auto_command(
         &AutoCommand {
           treq_bin_dir: Some("/opt/treq/bin"),
