@@ -39,7 +39,7 @@ Use cherry-pick for an isolated change such as a backport, or to [move a commit 
 | Source history | Unchanged | Old commits stop being reachable from the rebased branch |
 | Common use | Backports and misplaced commits | Updating or reorganizing a private branch |
 
-Neither command moves an existing commit object. Git [commits](./version-control) include their parent IDs, so changing a commit's parent produces a different commit.
+Neither command moves an existing commit object. Git [commits](./version-control.mdx) include their parent IDs, so changing a commit's parent produces a different commit.
 
 ## Applying It in Practice
 
@@ -75,7 +75,7 @@ Interactive rebase lets you reorder, combine, edit, or remove commits before sha
 git rebase -i origin/main
 ```
 
-If the rebased branch already exists on a remote, updating it usually requires a force push. Use [`--force-with-lease`](./force-with-lease), which refuses the update when the remote ref differs from the value your local repository expects:
+If the rebased branch already exists on a remote, updating it usually requires a force push. Use [`--force-with-lease`](./force-with-lease.mdx), which refuses the update when the remote ref differs from the value your local repository expects:
 
 ```bash
 git push --force-with-lease origin feature/my-work
@@ -85,9 +85,9 @@ git push --force-with-lease origin feature/my-work
 
 Cherry-picking the same logical change into several branches is normal for maintained release lines. It does not guarantee conflicts when those branches later meet. Git's merge machinery often recognizes equivalent changes, but later edits around the copied change can still produce confusing history or conflicts. Record backports clearly and avoid cherry-pick as a substitute for merging branches that are meant to converge.
 
-Rebase is safe when nobody else depends on the commits being replaced. That usually means unpushed work, a remote branch owned by one person under an agreed rewrite policy, or a [stack](./stacked-prs) whose owner rebases every layer together. Do not rebase `main`, release branches, or another shared branch.
+Rebase is safe when nobody else depends on the commits being replaced. That usually means unpushed work, a remote branch owned by one person under an agreed rewrite policy, or a [stack](./stacked-prs.mdx) whose owner rebases every layer together. Do not rebase `main`, release branches, or another shared branch.
 
-Rebase also does not guarantee a clean [merge](./merge-vs-rebase). It exposes conflicts against the new base before integration, but `main` can move again afterward. Tests still need to run against the final result.
+Rebase also does not guarantee a clean [merge](./merge-vs-rebase.mdx). It exposes conflicts against the new base before integration, but `main` can move again afterward. Tests still need to run against the final result.
 
 ## Scaling and Operations
 
@@ -109,7 +109,7 @@ git range-diff origin/main...feature/my-work@{1} origin/main...feature/my-work
 
 ## Next Steps
 
-- [Merge vs Rebase](./merge-vs-rebase): compare two ways to integrate diverged branches
-- [Force-with-lease](./force-with-lease): update a rewritten remote branch without clobbering concurrent pushes
-- [What are Stacked PRs?](./stacked-prs): see how dependent branches create rebase cascades
+- [Merge vs Rebase](./merge-vs-rebase.mdx): compare two ways to integrate diverged branches
+- [Force-with-lease](./force-with-lease.mdx): update a rewritten remote branch without clobbering concurrent pushes
+- [What are Stacked PRs?](./stacked-prs.mdx): see how dependent branches create rebase cascades
 - [Stacked PR Workflow](/learn/workflows/git/stacked-pr): maintain a stack in practice
