@@ -100,10 +100,19 @@ pub enum RemoteAgentId {
   Codex,
   CursorAgent,
   Copilot,
+  Devin,
+  Gemini,
 }
 
 impl RemoteAgentId {
-  pub const ALL: [Self; 4] = [Self::Claude, Self::Codex, Self::CursorAgent, Self::Copilot];
+  pub const ALL: [Self; 6] = [
+    Self::Claude,
+    Self::Codex,
+    Self::CursorAgent,
+    Self::Copilot,
+    Self::Devin,
+    Self::Gemini,
+  ];
 
   pub fn binary_name(self) -> &'static str {
     match self {
@@ -111,6 +120,8 @@ impl RemoteAgentId {
       Self::Codex => "codex",
       Self::CursorAgent => "cursor-agent",
       Self::Copilot => "copilot",
+      Self::Devin => "devin",
+      Self::Gemini => "gemini",
     }
   }
 }
@@ -523,7 +534,17 @@ mod tests {
       .iter()
       .map(|a| a.binary_name())
       .collect();
-    assert_eq!(bins, ["claude", "codex", "cursor-agent", "copilot"]);
+    assert_eq!(
+      bins,
+      [
+        "claude",
+        "codex",
+        "cursor-agent",
+        "copilot",
+        "devin",
+        "gemini"
+      ]
+    );
   }
 
   use super::*;

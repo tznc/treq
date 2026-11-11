@@ -35,7 +35,7 @@
     "clean": "cd src-tauri && cargo clean",
     "test": "vitest run",
     "service-qa:up": "bash scripts/service-qa/up.sh",
-    "service-qa": "vitest run --config vitest.service-qa.config.ts",
+    "service-qa": "jest --config jest.service-qa.config.js",
     "service-qa:full": "npm run service-qa:up && npm run service-qa",
     "test:db": "supabase test db --local",
     "format": "biome format --write ./test && cargo fmt",
@@ -54,12 +54,17 @@
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.38.0",
+    "@babel/preset-env": "^7.29.7",
+    "@babel/preset-typescript": "^7.29.7",
     "@biomejs/biome": "2.4.7",
     "@supabase/supabase-js": "^2.95.3",
     "@tauri-apps/cli": "^2.12.2",
     "@types/express": "^4.17.25",
     "@types/node": "^20.10.5",
+    "babel-jest": "^30.5.2",
+    "babel-plugin-transform-import-meta": "^2.3.3",
     "express": "^4.22.3",
+    "jest": "^30.5.2",
     "pngjs": "^7.0.0",
     "vitest": "^4.0.15"
   }

@@ -14,7 +14,7 @@
 // work, so the user is asked rather than surprised.
 
 const AGENT_PROCESS_NAMES =
-  "claude|codex|gemini|opencode|aider|amp|cursor-agent";
+  "claude|codex|gemini|opencode|aider|amp|cursor-agent|devin";
 
 // Gitignored paths a re-clone rebuilds on its own, so losing them is not lost work.
 const REGENERABLE =

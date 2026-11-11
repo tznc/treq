@@ -12,7 +12,7 @@ use gpui_kit::{
     spinner::Spinner,
     v_flex, ActiveTheme, IconName, Sizable,
   },
-  div, px, AnyElement, Context, Div, InteractiveElement, IntoElement, ParentElement, Render,
+  div, px, AnyElement, App, Context, Div, InteractiveElement, IntoElement, ParentElement, Render,
   ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window,
 };
 use treq_ui::{Dot, Tone};
@@ -27,6 +27,22 @@ use crate::mobile::{
 };
 
 const TAGLINE: &str = "Isolates each agent and rebases stacked PRs when the base moves";
+
+/// Whether the landing shows brand and sign-in side by side (tablet width).
+fn landing_split(width: gpui_kit::Pixels) -> bool {
+  width >= super::SPLIT_MIN_WIDTH
+}
+
+/// Whether Home lays out like the desktop Overview: machines in a sidebar,
+/// repositories beside them. Only at tablet width with nothing open beside.
+fn overview_layout(width: gpui_kit::Pixels, beside: bool) -> bool {
+  landing_split(width) && !beside
+}
+
+/// The machines sidebar on a tablet: the desktop's 288px, widened for touch.
+const MACHINES_W: f32 = 320.;
+/// Recent repositories shown per machine.
+const RECENTS_PER_MACHINE: usize = 5;
 
 pub struct HomeScreen {
   scroll: ScrollHandle,
@@ -78,14 +94,14 @@ fn missing_tools(state: &MachineState) -> Option<String> {
   match (!check.holds_terminals(backend), check.agents.is_empty()) {
     (false, false) => None,
     (true, true) => Some(
-      "This host can't keep terminals (Treq supports Linux and macOS hosts), and has no agent CLI (claude, codex, cursor-agent, copilot)."
+      "This host can't keep terminals (Treq supports Linux and macOS hosts), and has no agent CLI (claude, codex, cursor-agent, copilot, devin, gemini)."
         .into(),
     ),
     (true, false) => Some(
       "This host can't keep terminals (Treq supports Linux and macOS hosts): terminals and agents won't start."
         .into(),
     ),
-    (false, true) => Some("No agent CLI found (claude, codex, cursor-agent, copilot).".into()),
+    (false, true) => Some("No agent CLI found (claude, codex, cursor-agent, copilot, devin, gemini).".into()),
   }
 }
 
@@ -226,7 +242,9 @@ impl HomeScreen {
       })
   }
 
-  fn cloud(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  /// `stacked`: sign-in buttons one above the other, for the narrow
+  /// tablet sidebar.
+  fn cloud(&self, stacked: bool, cx: &mut Context<Self>) -> impl IntoElement {
     let model = model(cx).read(cx);
     let busy = model.auth_busy;
     let error = model.auth_error.clone();
@@ -243,7 +261,13 @@ impl HomeScreen {
             "Sign in to reach your Treq Cloud machine.",
             cx,
           ))
-          .child(h_flex().gap_2().children(provider_buttons(busy, false)))
+          .map(|card| {
+            if stacked {
+              card.child(v_flex().gap_2().children(provider_buttons(busy, true)))
+            } else {
+              card.child(h_flex().gap_2().children(provider_buttons(busy, false)))
+            }
+          })
           .children(error.map(|e| widgets::error_text(e, cx).px_4().pb_3())),
       );
     }
@@ -318,45 +342,35 @@ impl HomeScreen {
     let model = model(cx).read(cx);
     let email = model.user.clone()?;
     let busy = model.auth_busy;
-    let delete_email = email.clone();
     Some(
-      widgets::section("Account", cx)
-        .child(
-          widgets::card(cx).p_4().child(
-            h_flex()
-              .gap_3()
-              .items_center()
-              .child(div().flex_1().min_w_0().truncate().child(email))
-              .child(
-                Button::new("sign-out")
-                  .outline()
-                  .label("Sign out")
-                  .loading(busy)
-                  .on_click(|_, _, cx| super::sign_out(cx))
-                  .touch(),
-              ),
-          ),
-        )
-        .child(
-          Button::new("delete-account")
-            .ghost()
-            .w_full()
-            .text_color(cx.theme().danger)
-            .label("Delete account")
-            .disabled(busy)
-            .on_click(move |_, _, cx| super::delete_account::open(delete_email.clone(), cx))
-            .touch(),
+      widgets::section("Account", cx).child(
+        widgets::card(cx).p_4().child(
+          h_flex()
+            .gap_3()
+            .items_center()
+            .child(div().flex_1().min_w_0().truncate().child(email))
+            .child(
+              Button::new("sign-out")
+                .outline()
+                .label("Sign out")
+                .loading(busy)
+                .on_click(|_, _, cx| super::sign_out(cx))
+                .touch(),
+            ),
         ),
+      ),
     )
   }
 
   /// The signed-out start screen: brand centered, sign-in within thumb reach.
-  fn landing(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  /// On a tablet: brand on the left, sign-in on the right.
+  fn landing(&self, split: bool, cx: &mut Context<Self>) -> impl IntoElement {
     let model = model(cx).read(cx);
     let busy = model.auth_busy;
     let error = model.auth_error.clone();
     let notice = model.auth_notice.clone();
-    v_flex()
+    let panes = if split { h_flex() } else { v_flex() };
+    panes
       .min_h_full()
       .p_6()
       .gap_6()
@@ -373,9 +387,11 @@ impl HomeScreen {
       .child(
         v_flex()
           .gap_3()
+          .when(split, |col| col.flex_1().justify_center().max_w(px(420.)))
           .children(provider_buttons(busy, true))
           .children(error.map(|e| widgets::error_text(e, cx).text_center()))
           .children(notice.map(|n| widgets::muted(n, cx).text_center()))
+          .child(or_divider(cx))
           .child(
             Button::new("add-host")
               .outline()
@@ -390,14 +406,123 @@ impl HomeScreen {
   }
 }
 
+impl HomeScreen {
+  /// The right side of the tablet Overview: recent repositories grouped by
+  /// machine; tapping one opens its machine.
+  fn recents(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let signed_in = model(cx).read(cx).user.is_some();
+    let machines = store::user_managed_endpoints()
+      .into_iter()
+      .map(|h| {
+        let name = h.display_name.clone();
+        (Machine::Host(h), name)
+      })
+      .chain(signed_in.then(|| (Machine::Managed, "Cloud machine".to_string())));
+    let groups: Vec<Div> = machines
+      .into_iter()
+      .filter_map(|(machine, name)| {
+        let endpoint = match &machine {
+          Machine::Host(record) => record.to_endpoint(),
+          Machine::Managed => {
+            crate::mobile::backend::get()
+              .connection_to(machine.id())?
+              .endpoint
+          }
+        };
+        let repos = store::saved_repositories(&endpoint.id, store::endpoint_generation(&endpoint));
+        if repos.is_empty() {
+          return None;
+        }
+        let rows = repos
+          .into_iter()
+          .take(RECENTS_PER_MACHINE)
+          .map(|repo| {
+            let machine = machine.clone();
+            widgets::row(
+              SharedString::from(format!("recent-{}", repo.id)),
+              repo_name(&repo.canonical_remote_path).to_string(),
+              Some(repo.canonical_remote_path.clone().into()),
+              cx,
+            )
+            .on_click(move |_, _, cx| super::open_machine(machine.clone(), cx))
+          })
+          .collect::<Vec<_>>();
+        Some(widgets::section(name, cx).child(widgets::card(cx).children(rows)))
+      })
+      .collect();
+    let empty = groups.is_empty().then(|| {
+      widgets::card(cx).child(widgets::empty(
+        "recents-empty",
+        "No recent repositories",
+        cx,
+      ))
+    });
+    v_flex()
+      .flex_1()
+      .min_w_0()
+      .p_6()
+      .gap_5()
+      .child(
+        v_flex()
+          .gap_1()
+          .child(
+            div()
+              .text_xl()
+              .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+              .child("Open a repository"),
+          )
+          .child(widgets::muted(
+            "Pick a recent repository, or a machine to open one on.",
+            cx,
+          )),
+      )
+      .children(groups)
+      .children(empty)
+  }
+}
+
 impl Render for HomeScreen {
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let model = model(cx).read(cx);
     let landing = super::is_landing(model.user.as_deref(), super::has_machines(model));
     let content = if landing {
-      self.landing(cx).into_any_element()
+      let split = landing_split(window.viewport_size().width);
+      self.landing(split, cx).into_any_element()
+    } else if overview_layout(
+      window.viewport_size().width,
+      super::nav::beside(cx.entity_id(), cx).is_some(),
+    ) {
+      let palette = treq_ui::theme::current(cx);
+      let sidebar = div()
+        .id("home-machines")
+        .flex_none()
+        .w(px(MACHINES_W))
+        .h_full()
+        .overflow_y_scroll()
+        .border_r_1()
+        .border_color(cx.theme().border)
+        .bg(palette.sidebar)
+        .child(
+          widgets::page()
+            .child(self.hosts(cx))
+            .child(self.cloud(true, cx))
+            .children(self.account(cx)),
+        );
+      let recents = div()
+        .id("home-recents")
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .overflow_y_scroll()
+        .child(self.recents(cx));
+      return h_flex()
+        .size_full()
+        .bg(cx.theme().background)
+        .child(sidebar)
+        .child(recents)
+        .into_any_element();
     } else {
-      let cloud = self.cloud(cx);
+      let cloud = self.cloud(false, cx);
       let hosts = self.hosts(cx);
       let account = self.account(cx);
       widgets::page()
@@ -413,32 +538,46 @@ impl Render for HomeScreen {
       .track_scroll(&self.scroll)
       .bg(cx.theme().background)
       .child(content)
+      .into_any_element()
   }
 }
 
 /// One sign-in button per OAuth provider; `cta` makes them full-width.
+/// A rule with "or" in its middle, between sign-in and the SSH host option.
+fn or_divider(cx: &App) -> impl IntoElement {
+  let theme = cx.theme();
+  let rule = || div().flex_1().h(px(1.)).bg(theme.border);
+  h_flex()
+    .gap_3()
+    .items_center()
+    .child(rule())
+    .child(widgets::muted("or", cx))
+    .child(rule())
+}
+
 fn provider_buttons(busy: bool, cta: bool) -> Vec<treq_ui::press::Press> {
   [
     (
       "sign-in-github",
       "Continue with GitHub",
+      treq_ui::theme::ICON_GITHUB,
       OAuthProvider::Github,
     ),
     (
       "sign-in-google",
       "Continue with Google",
+      treq_ui::theme::ICON_GOOGLE,
       OAuthProvider::Google,
     ),
   ]
   .into_iter()
-  .enumerate()
-  .map(|(i, (id, label, provider))| {
-    let button = Button::new(id).label(label).loading(busy).disabled(busy);
-    let button = if i == 0 {
-      button.primary()
-    } else {
-      button.outline()
-    };
+  .map(|(id, label, icon, provider)| {
+    let button = Button::new(id)
+      .outline()
+      .icon(gpui_kit::component::Icon::default().path(icon))
+      .label(label)
+      .loading(busy)
+      .disabled(busy);
     let button = if cta {
       button.large().w_full().h(px(widgets::CTA_H))
     } else {
@@ -511,6 +650,23 @@ mod tests {
       .contains("agent CLI"));
     // An older treq gives no check, so nothing is claimed missing.
     assert_eq!(missing_tools(&MachineState::default()), None);
+  }
+
+  /// On a tablet the landing puts the brand left and sign-in right.
+  #[core::prelude::v1::test]
+  fn the_landing_splits_on_a_tablet() {
+    assert!(!landing_split(px(390.)));
+    assert!(landing_split(px(768.)));
+    assert!(landing_split(px(1024.)));
+  }
+
+  /// A full-width tablet Home takes the desktop Overview layout; beside
+  /// an open machine, or on a phone, it stays a single list.
+  #[core::prelude::v1::test]
+  fn home_takes_the_overview_layout_on_a_tablet() {
+    assert!(overview_layout(px(1024.), false));
+    assert!(!overview_layout(px(1024.), true));
+    assert!(!overview_layout(px(390.), false));
   }
 
   #[core::prelude::v1::test]
