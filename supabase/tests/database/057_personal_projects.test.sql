@@ -1,4 +1,4 @@
--- Personal projects from 078_personal_projects.sql: a project with no
+-- Personal projects from 080_personal_projects.sql: a project with no
 -- organization belongs to one user, who alone reads and writes it.
 begin;
 select plan(7);
