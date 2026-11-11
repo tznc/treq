@@ -11,7 +11,7 @@
  * only. Those providers set the same columns at account creation.
  */
 import type { User } from "@supabase/supabase-js";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it } from "@jest/globals";
 import { isFirstSignIn } from "../../../web/src/lib/analytics";
 import { getServiceClient } from "../clients";
 import { recordOutcome } from "../record";
