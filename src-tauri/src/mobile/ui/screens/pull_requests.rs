@@ -480,6 +480,7 @@ impl Render for PullRequestsScreen {
       .child(
         widgets::page()
           .gap_3()
+          .child(chips)
           .child(
             h_flex()
               .gap_2()
@@ -500,7 +501,6 @@ impl Render for PullRequestsScreen {
                   .touch(),
               ),
           )
-          .child(chips)
           .when(searching, |page| {
             page.child(widgets::muted("Showing open pull requests that match.", cx))
           })
