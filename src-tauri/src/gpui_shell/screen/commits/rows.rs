@@ -711,7 +711,6 @@ impl CommitsView {
         .justify_end()
         .text_color(gutter_fg)
         .cursor_pointer()
-        .hover(move |s| s.bg(p.hover()))
         .child(n.map(|n| n.to_string()).unwrap_or_default())
         .on_mouse_down(
           MouseButton::Left,
