@@ -260,13 +260,19 @@ fn changes_tab_keeps_file_actions_inside_a_long_row(cx: &mut TestAppContext) {
   let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
   h.click(leak(format!("file-row-{path}")));
   h.cx.run_until_parked();
-  let row = h.cx.debug_bounds(leak(format!("file-row-{path}"))).expect("row");
+  let row = h
+    .cx
+    .debug_bounds(leak(format!("file-row-{path}")))
+    .expect("row");
   for action in ["discard", "stage"] {
     let b = h
       .cx
       .debug_bounds(leak(format!("{action}-{path}")))
       .unwrap_or_else(|| panic!("{action} not drawn"));
-    assert!(b.right() <= row.right(), "{action} {b:?} past the row {row:?}");
+    assert!(
+      b.right() <= row.right(),
+      "{action} {b:?} past the row {row:?}"
+    );
   }
 }
 
