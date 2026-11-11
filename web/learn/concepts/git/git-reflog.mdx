@@ -10,13 +10,13 @@ _The reflog is a local journal of where `HEAD` and branch refs pointed over time
 
 ## Introduction
 
-Git's commit history is the directed acyclic graph of parent links. The **reflog** records something else: each time a local reference moves. Checkouts, commits, resets, [rebases](./merge-vs-rebase), and similar commands append entries so you can find commits that no longer hang from any branch tip.
+Git's commit history is the directed acyclic graph of parent links. The **reflog** records something else: each time a local reference moves. Checkouts, commits, resets, [rebases](./merge-vs-rebase.mdx), and similar commands append entries so you can find commits that no longer hang from any branch tip.
 
 That journal stays on the machine that wrote it. `git push` and `git fetch` do not send reflogs, so recovery with them is always local.
 
 ## Understanding the Concept
 
-A **reflog** is an append-only log of reference updates for one [clone](./git-worktrees-vs-clones). Global `HEAD` updates go in `.git/logs/HEAD`. Branch updates go in files such as `.git/logs/refs/heads/main`. Each entry stores the previous and new tip hashes, who made the change, a timestamp, and a short description of the action.
+A **reflog** is an append-only log of reference updates for one [clone](./git-worktrees-vs-clones.mdx). Global `HEAD` updates go in `.git/logs/HEAD`. Branch updates go in files such as `.git/logs/refs/heads/main`. Each entry stores the previous and new tip hashes, who made the change, a timestamp, and a short description of the action.
 
 <DefinitionCard
   term="Reflog"
@@ -95,7 +95,7 @@ Keep protected branches free of unexpected force pushes, and coordinate when a s
 
 Recovery races the retention window. Once an entry expires and `git gc` prunes the unreachable objects, the tip is gone from that clone.
 
-Jujutsu logs repository-changing commands in an [operation log](./version-control). `jj undo` and `jj op log` cover a similar recovery need with a different command model.
+Jujutsu logs repository-changing commands in an [operation log](./version-control.mdx). `jj undo` and `jj op log` cover a similar recovery need with a different command model.
 
 In Treq, [discard and abandon](/docs/how-to/discarding-changes) restore from the **Undo** button on the success toast while that operation is still HEAD. Use the reflog for Git-side ref movement, not for those Treq working-copy actions.
 
@@ -123,7 +123,7 @@ Do that only after you have rotated credentials and confirmed no remaining local
 
 - [Discarding Changes](/docs/how-to/discarding-changes): Treq toast undo for discarded working-copy edits
 - [Recover a Deleted Git Branch](/learn/how-to/recover-deleted-git-branch): recreate a deleted branch from a `HEAD` reflog tip
-- [What is Version Control?](./version-control): review commits, branches, and recovery basics
-- [Merge vs Rebase](./merge-vs-rebase): understand rewrite operations that move refs
-- [Cherry-pick vs Rebase](./cherry-pick-vs-rebase): compare selective replay with branch rewriting
-- [What are Git Worktrees?](./git-worktrees): each worktree keeps its own `HEAD` and reflog entries
+- [What is Version Control?](./version-control.mdx): review commits, branches, and recovery basics
+- [Merge vs Rebase](./merge-vs-rebase.mdx): understand rewrite operations that move refs
+- [Cherry-pick vs Rebase](./cherry-pick-vs-rebase.mdx): compare selective replay with branch rewriting
+- [What are Git Worktrees?](./git-worktrees.mdx): each worktree keeps its own `HEAD` and reflog entries
