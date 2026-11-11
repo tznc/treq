@@ -469,7 +469,12 @@ impl HomeScreen {
       .child(
         v_flex()
           .gap_1()
-          .child(div().text_xl().font_weight(gpui_kit::FontWeight::SEMIBOLD).child("Open a repository"))
+          .child(
+            div()
+              .text_xl()
+              .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+              .child("Open a repository"),
+          )
           .child(widgets::muted(
             "Pick a recent repository, or a machine to open one on.",
             cx,
