@@ -242,7 +242,9 @@ impl HomeScreen {
       })
   }
 
-  fn cloud(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  /// `stacked`: sign-in buttons one above the other, for the narrow
+  /// tablet sidebar.
+  fn cloud(&self, stacked: bool, cx: &mut Context<Self>) -> impl IntoElement {
     let model = model(cx).read(cx);
     let busy = model.auth_busy;
     let error = model.auth_error.clone();
@@ -259,7 +261,13 @@ impl HomeScreen {
             "Sign in to reach your Treq Cloud machine.",
             cx,
           ))
-          .child(h_flex().gap_2().children(provider_buttons(busy, false)))
+          .map(|card| {
+            if stacked {
+              card.child(v_flex().gap_2().children(provider_buttons(busy, true)))
+            } else {
+              card.child(h_flex().gap_2().children(provider_buttons(busy, false)))
+            }
+          })
           .children(error.map(|e| widgets::error_text(e, cx).px_4().pb_3())),
       );
     }
@@ -509,7 +517,7 @@ impl Render for HomeScreen {
         .child(
           widgets::page()
             .child(self.hosts(cx))
-            .child(self.cloud(cx))
+            .child(self.cloud(true, cx))
             .children(self.account(cx)),
         );
       let recents = div()
@@ -526,7 +534,7 @@ impl Render for HomeScreen {
         .child(recents)
         .into_any_element();
     } else {
-      let cloud = self.cloud(cx);
+      let cloud = self.cloud(false, cx);
       let hosts = self.hosts(cx);
       let account = self.account(cx);
       widgets::page()
