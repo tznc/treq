@@ -111,6 +111,34 @@ fn commits_tab_opens_the_commit_react_asked_for(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn commits_tab_drag_over_code_copies_the_text(cx: &mut TestAppContext) {
+  use gpui::{Modifiers, MouseButton};
+  let (mut h, _) = workspace_harness(cx, commits_host(), commits_route());
+  h.click("commit-row-a");
+  h.cx.run_until_parked();
+  let from = h.cx.debug_bounds("commit-code-src/a.rs-0-1").expect("code");
+  let to = h.cx.debug_bounds("commit-code-src/a.rs-0-2").expect("code");
+  let start = gpui::point(from.left() + gpui::px(1.), from.center().y);
+  let end = gpui::point(to.right() - gpui::px(1.), to.center().y);
+  h.cx
+    .simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+  h.cx
+    .simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::none());
+  h.cx
+    .simulate_mouse_up(end, MouseButton::Left, Modifiers::none());
+  h.cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+    "cmd-c"
+  } else {
+    "ctrl-c"
+  });
+  h.cx.run_until_parked();
+  assert_eq!(
+    h.cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
+    Some("b\nc")
+  );
+}
+
+#[gpui::test]
 fn commits_tab_sends_a_line_comment_to_an_agent(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
   h.click("commit-row-a");

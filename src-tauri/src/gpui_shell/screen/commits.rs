@@ -14,9 +14,11 @@ mod rows;
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use crate::core::review::{selected_text, TextPoint};
 use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet, VecDeque},
+  cell::RefCell,
   rc::Rc,
   time::Duration,
 };
@@ -106,6 +108,19 @@ pub(super) struct Selection {
   pub dragging: bool,
 }
 
+/// Code picked by dragging over a diff's text: what Copy takes.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct TextPick {
+  pub commit_id: String,
+  pub path: String,
+  pub anchor: TextPoint,
+  pub head: TextPoint,
+  pub dragging: bool,
+}
+
+/// Each drawn line's text layout, by commit, path and line.
+pub(super) type Layouts = Rc<RefCell<HashMap<(String, String, LineRef), gpui::TextLayout>>>;
+
 /// The comment box open under a diff line (`pendingComment`).
 pub(super) struct Comment {
   pub commit_id: String,
@@ -179,6 +194,9 @@ pub struct CommitsView {
   /// The commit whose "Move commit" menu is open.
   pub(super) move_menu: Option<String>,
   pub(super) selection: Option<Selection>,
+  pub(super) text: Option<TextPick>,
+  pub(super) layouts: Layouts,
+  focus: gpui::FocusHandle,
   pub(super) comment: Option<Comment>,
   pub(super) dialog: Option<Dialog>,
   /// The change id React asked to show (`scrollToCommitId`).
@@ -234,6 +252,9 @@ impl CommitsView {
       shifting: false,
       move_menu: None,
       selection: None,
+      text: None,
+      layouts: Layouts::default(),
+      focus: cx.focus_handle(),
       comment: None,
       dialog: None,
       confirm: None,
@@ -1007,8 +1028,78 @@ impl CommitsView {
       lines: vec![at],
       dragging: true,
     });
+    self.text = None;
     self.comment = None;
     cx.notify();
+  }
+
+  /// The byte of `at`'s code under `position`, once the line was drawn.
+  fn text_index(
+    &self,
+    commit_id: &str,
+    path: &str,
+    at: LineRef,
+    position: gpui::Point<Pixels>,
+  ) -> Option<usize> {
+    let layouts = self.layouts.borrow();
+    let layout = layouts.get(&(commit_id.to_string(), path.to_string(), at))?;
+    Some(layout.index_for_position(position).unwrap_or_else(|i| i))
+  }
+
+  /// A press on the code: starts a text selection there.
+  pub(super) fn press_text(
+    &mut self,
+    commit_id: &str,
+    path: &str,
+    at: LineRef,
+    position: gpui::Point<Pixels>,
+    cx: &mut Context<Self>,
+  ) {
+    let Some(i) = self.text_index(commit_id, path, at, position) else {
+      return;
+    };
+    self.selection = None;
+    self.text = Some(TextPick {
+      commit_id: commit_id.into(),
+      path: path.into(),
+      anchor: (at, i),
+      head: (at, i),
+      dragging: true,
+    });
+    cx.notify();
+  }
+
+  /// Moves a text selection's head while dragging.
+  pub(super) fn drag_text(
+    &mut self,
+    commit_id: &str,
+    path: &str,
+    at: LineRef,
+    position: gpui::Point<Pixels>,
+    cx: &mut Context<Self>,
+  ) {
+    if !self
+      .text
+      .as_ref()
+      .is_some_and(|t| t.dragging && t.commit_id == commit_id && t.path == path)
+    {
+      return;
+    }
+    let Some(i) = self.text_index(commit_id, path, at, position) else {
+      return;
+    };
+    if let Some(t) = self.text.as_mut().filter(|t| t.head != (at, i)) {
+      t.head = (at, i);
+      cx.notify();
+    }
+  }
+
+  /// The selected code, as Copy takes it; `None` when nothing is selected.
+  fn selected_code(&self) -> Option<String> {
+    let t = self.text.as_ref()?;
+    let file = self.file_diff(&t.commit_id, &t.path)?;
+    let text = selected_text(&file.hunks, t.anchor, t.head);
+    (!text.is_empty()).then_some(text)
   }
 
   /// `handleLineMouseEnter` while dragging.
@@ -1043,6 +1134,10 @@ impl CommitsView {
   fn end_drag(&mut self, cx: &mut Context<Self>) {
     if let Some(s) = self.selection.as_mut().filter(|s| s.dragging) {
       s.dragging = false;
+      cx.notify();
+    }
+    if let Some(t) = self.text.as_mut().filter(|t| t.dragging) {
+      t.dragging = false;
       cx.notify();
     }
   }
@@ -1613,6 +1708,16 @@ impl Render for CommitsView {
       .size_full()
       .bg(p.background)
       .text_color(p.foreground)
+      .track_focus(&self.focus)
+      .on_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
+        let held = crate::gpui_shell::keys::held(e.keystroke.modifiers);
+        if e.keystroke.key == "c" && (held.platform || held.control) && !held.shift {
+          if let Some(text) = view.selected_code() {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            cx.stop_propagation();
+          }
+        }
+      }))
       .on_mouse_up(
         MouseButton::Left,
         cx.listener(|view, _, _, cx| view.end_drag(cx)),
