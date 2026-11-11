@@ -588,12 +588,22 @@ impl TerminalHost for Backend {
     let supporting = self.supporting_repos(&start.repo_path);
     let project = crate::gpui_shell::projects::window_project(self.app(), self.label())
       .map(agent_command::ProjectContext::from);
+    let (app_instructions, repo_instructions) = self
+      .with_db(|db| {
+        Ok::<_, rusqlite::Error>((
+          db.get_setting(agent_command::AGENT_INSTRUCTIONS_SETTING)?,
+          db.get_repo_setting(&start.repo_path, agent_command::AGENT_INSTRUCTIONS_SETTING)?,
+        ))
+      })
+      .unwrap_or_default();
     let prepared = agent_command::prepare_auto_command(
       &AgentPaths {
         workspace_path: start.workspace_path.as_deref(),
         repo_path: &start.repo_path,
         supporting_repo_paths: &supporting,
         project: project.as_ref(),
+        app_instructions: app_instructions.as_deref(),
+        repo_instructions: repo_instructions.as_deref(),
       },
       &AutoCommand {
         agent: &start.agent,

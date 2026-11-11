@@ -12,6 +12,9 @@ use std::path::Path;
 /// agent, which is how Treq closes or restarts a session, so it stays quiet.
 const NOTIFY_ON_AGENT_EXIT: &str = "[ $? -lt 128 ] && treq notify --agent-exited >/dev/null 2>&1";
 
+/// The app and repository setting holding instructions added to every agent.
+pub const AGENT_INSTRUCTIONS_SETTING: &str = "agent_instructions";
+
 pub struct AgentPaths<'a> {
   pub workspace_path: Option<&'a str>,
   pub repo_path: &'a str,
@@ -19,6 +22,10 @@ pub struct AgentPaths<'a> {
   pub supporting_repo_paths: &'a [String],
   /// The saved project of the window the agent starts in.
   pub project: Option<&'a ProjectContext>,
+  /// Instructions from the Application settings, added to every agent.
+  pub app_instructions: Option<&'a str>,
+  /// Instructions from the repository's settings.
+  pub repo_instructions: Option<&'a str>,
 }
 
 /// What a project adds to its agents (`core::projects`).
@@ -96,6 +103,15 @@ pub fn system_prompt(paths: &AgentPaths<'_>) -> String {
       .map(String::from),
     );
   }
+  for (label, text) in [
+    ("Application", paths.app_instructions),
+    ("Repository", paths.repo_instructions),
+  ] {
+    let text = one_line(text.unwrap_or_default());
+    if !text.is_empty() {
+      parts.push(format!("{label} instructions: {text}"));
+    }
+  }
   if let Some(project) = paths.project {
     parts.push(format!(
       "This work is part of the Treq project \"{}\".",
@@ -104,11 +120,7 @@ pub fn system_prompt(paths: &AgentPaths<'_>) -> String {
     parts.push(
       "Run `treq project status` to see every repository and workspace in the project, and `treq project add-repo <owner/name|url|path>` to add (and clone) a repository; never clone it yourself.".into(),
     );
-    let prompt = project
-      .prompt
-      .split_whitespace()
-      .collect::<Vec<_>>()
-      .join(" ");
+    let prompt = one_line(&project.prompt);
     if !prompt.is_empty() {
       parts.push(format!("Project instructions: {prompt}"));
     }
@@ -120,6 +132,10 @@ pub fn system_prompt(paths: &AgentPaths<'_>) -> String {
     }
   }
   parts.join(" ")
+}
+
+fn one_line(text: &str) -> String {
+  text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Workspace/home filesystem allow and deny lists for Claude `--settings`.
@@ -411,6 +427,8 @@ mod tests {
       repo_path: "/repos/treq",
       supporting_repo_paths: NONE,
       project: None,
+      app_instructions: None,
+      repo_instructions: None,
     });
     assert!(prompt.contains("You are operating inside a Treq workspace."));
     assert!(prompt.contains(
@@ -430,6 +448,8 @@ mod tests {
       repo_path: "/repos/app",
       supporting_repo_paths: &supporting,
       project: None,
+      app_instructions: None,
+      repo_instructions: None,
     });
     assert!(prompt.contains("You are operating in the Treq home repository."));
     assert!(!prompt.contains("sibling workspaces"));
@@ -446,6 +466,8 @@ mod tests {
         repo_path: "/repos/app",
         supporting_repo_paths: &supporting,
         project: None,
+        app_instructions: None,
+        repo_instructions: None,
       }),
       json!({
         "denyRead": ["/repos/app"],
@@ -459,6 +481,8 @@ mod tests {
         repo_path: "/repos/app",
         supporting_repo_paths: NONE,
         project: None,
+        app_instructions: None,
+        repo_instructions: None,
       }),
       json!({ "allowRead": ["/repos/app"], "allowWrite": ["/repos/app"] })
     );
@@ -480,6 +504,8 @@ mod tests {
       repo_path: "/repos/app",
       supporting_repo_paths: NONE,
       project: Some(&project),
+      app_instructions: None,
+      repo_instructions: None,
     });
     assert!(prompt.contains("Treq project \"Checkout\""));
     assert!(prompt.contains("treq project status"));
@@ -496,10 +522,48 @@ mod tests {
       repo_path: "/repos/app",
       supporting_repo_paths: NONE,
       project: None,
+      app_instructions: None,
+      repo_instructions: None,
     });
     assert!(!prompt.contains("Treq project"));
     assert!(!prompt.contains("treq project status"));
     assert!(!prompt.contains("Project instructions"));
+  }
+
+  #[test]
+  fn adds_app_then_repository_instructions_on_one_line() {
+    let project = project();
+    let prompt = system_prompt(&AgentPaths {
+      workspace_path: None,
+      repo_path: "/repos/app",
+      supporting_repo_paths: NONE,
+      project: Some(&project),
+      app_instructions: Some("Be terse.\nPrefer TDD."),
+      repo_instructions: Some("Use cargo nextest."),
+    });
+    let app = prompt
+      .find("Application instructions: Be terse. Prefer TDD.")
+      .unwrap();
+    let repo = prompt
+      .find("Repository instructions: Use cargo nextest.")
+      .unwrap();
+    let proj = prompt.find("Project instructions:").unwrap();
+    assert!(app < repo && repo < proj);
+    assert!(!prompt.contains('\n'));
+  }
+
+  #[test]
+  fn skips_blank_app_and_repository_instructions() {
+    let prompt = system_prompt(&AgentPaths {
+      workspace_path: None,
+      repo_path: "/repos/app",
+      supporting_repo_paths: NONE,
+      project: None,
+      app_instructions: Some(" \n "),
+      repo_instructions: None,
+    });
+    assert!(!prompt.contains("Application instructions"));
+    assert!(!prompt.contains("Repository instructions"));
   }
 
   #[test]
@@ -514,6 +578,8 @@ mod tests {
       repo_path: "/repos/app",
       supporting_repo_paths: NONE,
       project: Some(&project),
+      app_instructions: None,
+      repo_instructions: None,
     });
     assert!(prompt.contains("Treq project \"Checkout\""));
     assert!(!prompt.contains("Project instructions"));
@@ -552,6 +618,8 @@ mod tests {
         repo_path: repo,
         supporting_repo_paths: NONE,
         project: Some(&project),
+        app_instructions: None,
+        repo_instructions: None,
       },
       &opts("claude"),
     )
@@ -591,6 +659,8 @@ mod tests {
         repo_path: "/repos/app",
         supporting_repo_paths: NONE,
         project: Some(&project),
+        app_instructions: None,
+        repo_instructions: None,
       }),
       json!({ "allowRead": ["/repos/app", "/docs/style.md"], "allowWrite": ["/repos/app"] })
     );
@@ -747,6 +817,8 @@ mod tests {
         repo_path: cwd,
         supporting_repo_paths: NONE,
         project: None,
+        app_instructions: None,
+        repo_instructions: None,
       },
       &AutoCommand {
         pending_prompt: Some("hi"),
@@ -823,6 +895,8 @@ mod tests {
         repo_path: dir.path().to_str().unwrap(),
         supporting_repo_paths: NONE,
         project: None,
+        app_instructions: None,
+        repo_instructions: None,
       },
       &opts("claude"),
     )
