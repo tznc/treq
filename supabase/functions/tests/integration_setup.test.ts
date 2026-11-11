@@ -3,6 +3,7 @@
 
 import { assert, assertEquals, assertMatch } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
+  configureGithubHelpersCommand,
   installIntegrationConfigCommand,
   INTEGRATION_CONFIG_ENV,
   INTEGRATION_CONFIG_FILE,
@@ -43,8 +44,9 @@ Deno.test("provisionIntegrationCredential saves a new secret, then writes the co
   await provisionIntegrationCredential(store, provider, "m1", "pl-1", PROXY);
   const secret = store.saved["pl-1"];
   assertMatch(secret, /^[0-9a-f]{64}$/);
-  assertEquals(execs.length, 1);
+  assertEquals(execs.length, 2);
   assert(execs[0].includes(INTEGRATION_CONFIG_FILE));
+  assertEquals(execs[1], configureGithubHelpersCommand().join(" "));
   // The secret travels in the exec environment, never the command line.
   assert(!execs[0].includes(secret), "secret must not be in the command line");
   assertEquals(JSON.parse(envs[0][INTEGRATION_CONFIG_ENV]), {
@@ -97,10 +99,20 @@ Deno.test("provisionPlacementServices starts the gateway, then installs the inte
     "pl-1",
     PROXY,
   );
-  assertEquals(execs.length, 2);
+  assertEquals(execs.length, 3);
   assert(execs[0].includes("/etc/treq/gateway.secret"));
   assert(execs[1].includes(INTEGRATION_CONFIG_FILE));
   assertMatch(gateway.saved["pl-1"], /^[0-9a-f]{64}$/);
   assertMatch(integration.saved["pl-1"], /^[0-9a-f]{64}$/);
   assert(gateway.saved["pl-1"] !== integration.saved["pl-1"], "two different secrets");
+});
+
+Deno.test("git and gh in the sandbox get GitHub tokens from treq", () => {
+  const script = configureGithubHelpersCommand().join(" ");
+  assert(script.includes('credential.https://github.com.helper "/usr/local/bin/treq github credential"'));
+  assert(script.includes("credential.https://github.com.useHttpPath true"));
+  // gh is shimmed only when it is installed, and the shim runs the real one through treq.
+  assert(script.includes("if [ -x /usr/bin/gh ]"));
+  assert(script.includes('exec /usr/local/bin/treq github gh -- "$@"'));
+  assert(!/[0-9a-f]{64}/.test(script));
 });
