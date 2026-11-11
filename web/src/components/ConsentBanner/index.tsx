@@ -29,7 +29,7 @@ export default function ConsentBanner(): ReactNode {
   return (
     <div className={styles.banner} role="dialog" aria-label="Analytics cookies">
       <p className={styles.text}>
-        We use Google Analytics cookies to see which pages help people. No ads.{' '}
+        We use analytics cookies to improve your experience on this site.{' '}
         <Link to="/privacy">Privacy policy</Link>
       </p>
       <div className={styles.actions}>

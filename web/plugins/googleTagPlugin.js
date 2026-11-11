@@ -25,15 +25,18 @@ function buildGoogleTagHeadTags(trackingID) {
     {tagName: 'link', attributes: {rel: 'preconnect', href: 'https://www.googletagmanager.com'}},
     {
       tagName: 'script',
-      innerHTML: [
-        'window.dataLayer = window.dataLayer || [];',
-        'function gtag(){dataLayer.push(arguments);}',
-        `gtag('consent', 'default', ${JSON.stringify(regionDefault)});`,
-        `gtag('consent', 'default', ${JSON.stringify(globalDefault)});`,
-        `try { var c = localStorage.getItem('${CONSENT_STORAGE_KEY}'); if (c === 'granted' || c === 'denied') gtag('consent', 'update', {analytics_storage: c}); } catch (e) {}`,
-        "gtag('js', new Date());",
-        `gtag('config', '${trackingID}');`,
-      ].join('\n'),
+      innerHTML: `
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('consent', 'default', ${JSON.stringify(regionDefault)});
+gtag('consent', 'default', ${JSON.stringify(globalDefault)});
+try {
+  var c = localStorage.getItem('${CONSENT_STORAGE_KEY}');
+  if (c === 'granted' || c === 'denied') gtag('consent', 'update', {analytics_storage: c});
+} catch (e) {}
+gtag('js', new Date());
+gtag('config', '${trackingID}');
+`,
     },
     {
       tagName: 'script',

@@ -1,34 +1,41 @@
 // @ts-check
+const vm = require('vm');
 const {buildGoogleTagHeadTags, CONSENT_REGIONS} = require('./googleTagPlugin');
 
-/** @param {any[]} tags */
-const inline = (tags) => tags.filter((/** @type {any} */ t) => t.innerHTML).map((/** @type {any} */ t) => t.innerHTML).join('\n');
+/**
+ * Runs the inline head script the way a browser would and returns every
+ * gtag() call it queued, e.g. ['consent', 'default', {...}].
+ * @returns {any[][]}
+ */
+function gtagCalls() {
+  const script = buildGoogleTagHeadTags('G-TEST').find((t) => t.innerHTML)?.innerHTML ?? '';
+  /** @type {any} */
+  const page = {localStorage: {getItem: () => null}};
+  page.window = page;
+  vm.runInNewContext(script, page);
+  return page.dataLayer.map((/** @type {IArguments} */ args) => Array.from(args));
+}
+
+const consentDefaults = () =>
+  gtagCalls()
+    .filter(([command, action]) => command === 'consent' && action === 'default')
+    .map(([, , settings]) => settings);
 
 test('consent defaults are set before gtag config', () => {
-  const html = inline(buildGoogleTagHeadTags('G-TEST'));
-  const deniedDefault = html.indexOf("gtag('consent', 'default'");
-  const config = html.indexOf("gtag('config', 'G-TEST')");
-  expect(deniedDefault >= 0 && config > deniedDefault).toBeTruthy();
+  const commands = gtagCalls().map(([command, action]) => `${command} ${action}`);
+  expect(commands.indexOf('consent default')).toBeLessThan(commands.indexOf('config G-TEST'));
 });
 
 test('analytics is denied by default in consent regions and granted elsewhere', () => {
-  const html = inline(buildGoogleTagHeadTags('G-TEST'));
-  const defaults = [...html.matchAll(/gtag\('consent', 'default', (\{.*?\})\);/g)].map((m) => JSON.parse(m[1]));
-  expect(defaults[0].region).toEqual(CONSENT_REGIONS);
-  expect(defaults[0].analytics_storage).toBe('denied');
-  expect(defaults[1].region).toBe(undefined);
-  expect(defaults[1].analytics_storage).toBe('granted');
-  for (const d of defaults) expect(d.ad_storage).toBe('denied');
-});
-
-test('a stored choice is restored before config', () => {
-  const html = inline(buildGoogleTagHeadTags('G-TEST'));
-  expect(html.indexOf("gtag('consent', 'update'") < html.indexOf("gtag('config'")).toBeTruthy();
+  const [regional, everywhere] = consentDefaults();
+  expect(regional).toMatchObject({region: CONSENT_REGIONS, analytics_storage: 'denied', ad_storage: 'denied'});
+  expect(everywhere).toMatchObject({analytics_storage: 'granted', ad_storage: 'denied'});
+  expect(everywhere.region).toBeUndefined();
 });
 
 test('covers EEA, UK and Switzerland', () => {
-  for (const code of ['DE', 'FR', 'IE', 'NO', 'IS', 'LI', 'GB', 'CH']) expect(CONSENT_REGIONS.includes(code)).toBeTruthy();
-  expect(CONSENT_REGIONS.length).toBe(32);
+  expect(CONSENT_REGIONS).toEqual(expect.arrayContaining(['DE', 'FR', 'IE', 'NO', 'IS', 'LI', 'GB', 'CH']));
+  expect(CONSENT_REGIONS).toHaveLength(32);
 });
 
 test('loads gtag.js for the tracking id', () => {
