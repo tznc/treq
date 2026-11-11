@@ -4573,7 +4573,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.20",
- "windows 0.62.2",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -6062,7 +6062,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -9190,7 +9190,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -11820,8 +11820,8 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-gpui"
-version = "0.1.0"
-source = "git+https://github.com/ziinc/tauri-gpui?branch=main#5625f54f20011db82bdfed3290d6125a2a0c5cc4"
+version = "0.1.1"
+source = "git+https://github.com/ziinc/tauri-gpui?branch=main#9feb6fd92d327c87b9a9527b88ec9778fdf7b845"
 dependencies = [
  "accesskit_macos",
  "accesskit_unix",
