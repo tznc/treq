@@ -23,7 +23,7 @@ A **merge commit** has two or more parents. In a normal two-branch merge, the fi
   definition="A commit with two or more parents that records the point where separate lines of history were combined."
 />
 
-A **rebase** computes patches from commits on the current branch, applies them to a new base in order, and moves the [branch ref](./version-control) to the new commits. Their object IDs change because their parent history changes.
+A **rebase** computes patches from commits on the current branch, applies them to a new base in order, and moves the [branch ref](./version-control.mdx) to the new commits. Their object IDs change because their parent history changes.
 
 <DefinitionCard
   term="Fast-forward"
@@ -60,7 +60,7 @@ git switch feature/my-work
 git rebase origin/main
 ```
 
-If that branch already exists on a remote and its rewrite is agreed, update it with [`--force-with-lease`](./force-with-lease):
+If that branch already exists on a remote and its rewrite is agreed, update it with [`--force-with-lease`](./force-with-lease.mdx):
 
 ```bash
 git push --force-with-lease origin feature/my-work
@@ -81,7 +81,7 @@ git merge --squash feature/my-work
 git commit -m "Add user authentication"
 ```
 
-Hosting platforms also offer rebase-and-merge. That option [replays](./cherry-pick-vs-rebase) pull-request commits onto the target branch and usually creates new object IDs. Check the platform's exact behavior before making policy depend on it.
+Hosting platforms also offer rebase-and-merge. That option [replays](./cherry-pick-vs-rebase.mdx) pull-request commits onto the target branch and usually creates new object IDs. Check the platform's exact behavior before making policy depend on it.
 
 ## Engineering Considerations
 
@@ -91,7 +91,7 @@ Merge is the safe choice on a shared branch, because it replaces nothing. The gr
 git log --first-parent --oneline main
 ```
 
-Rebase is good for tidying private work and for moving a branch onto the base it should have had. A straight line is easier to scan, but you lose the shape of the original branches. Never rewrite commits colleagues have built on unless everyone agrees how to recover. A [stack of dependent branches](./stacked-prs) needs that agreement on every rebase.
+Rebase is good for tidying private work and for moving a branch onto the base it should have had. A straight line is easier to scan, but you lose the shape of the original branches. Never rewrite commits colleagues have built on unless everyone agrees how to recover. A [stack of dependent branches](./stacked-prs.mdx) needs that agreement on every rebase.
 
 `git bisect` works on straight and merged histories alike. A merge commit can muddy a regression when neither parent reproduces it on its own, and a squash can bury the step that caused the bug. What makes history useful is commits that build and stay focused, not the shape of the graph.
 
@@ -109,13 +109,13 @@ Each option throws away something different. Merge commits keep the shape. Squas
 
 Block force pushes on shared branches. If feature branches can be rewritten, say so out loud, so reviewers know whether it is safe to build on one.
 
-After a big rebase, use `git range-diff` to check the rewritten series still says what you meant. Run the full test suite after you resolve conflicts, whichever strategy you picked. [zdiff3](./zdiff3) makes conflict markers easier to read when both sides share surrounding lines. When the same conflict keeps returning on a long-lived branch, [git rerere](./git-rerere) can reuse the resolution you already chose.
+After a big rebase, use `git range-diff` to check the rewritten series still says what you meant. Run the full test suite after you resolve conflicts, whichever strategy you picked. [zdiff3](./zdiff3.mdx) makes conflict markers easier to read when both sides share surrounding lines. When the same conflict keeps returning on a long-lived branch, [git rerere](./git-rerere.mdx) can reuse the resolution you already chose.
 
 ## Next Steps
 
-- [Cherry-pick vs Rebase](./cherry-pick-vs-rebase): distinguish selected patch copying from branch rewriting
-- [Force-with-lease](./force-with-lease): update a rewritten remote branch without clobbering concurrent pushes
-- [What is zdiff3?](./zdiff3): shrink conflict markers while keeping the merge base
-- [What is Git Rerere?](./git-rerere): reuse a conflict resolution when the same conflict returns
-- [What are Stacked PRs?](./stacked-prs): manage branches that depend on one another
+- [Cherry-pick vs Rebase](./cherry-pick-vs-rebase.mdx): distinguish selected patch copying from branch rewriting
+- [Force-with-lease](./force-with-lease.mdx): update a rewritten remote branch without clobbering concurrent pushes
+- [What is zdiff3?](./zdiff3.mdx): shrink conflict markers while keeping the merge base
+- [What is Git Rerere?](./git-rerere.mdx): reuse a conflict resolution when the same conflict returns
+- [What are Stacked PRs?](./stacked-prs.mdx): manage branches that depend on one another
 - [Parallel Development Workflow](/learn/workflows/git/parallel-development): combine integration policy with concurrent branch work

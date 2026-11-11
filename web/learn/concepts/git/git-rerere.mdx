@@ -10,7 +10,7 @@ _Git rerere records how you resolved a merge conflict and reuses that resolution
 
 ## Introduction
 
-**Rerere** stands for reuse recorded resolution. When a merge or [rebase](./merge-vs-rebase) hits the same conflict again, Git can apply the resolution you already chose instead of asking you to edit the markers by hand.
+**Rerere** stands for reuse recorded resolution. When a merge or [rebase](./merge-vs-rebase.mdx) hits the same conflict again, Git can apply the resolution you already chose instead of asking you to edit the markers by hand.
 
 That matters when a long-lived branch keeps meeting the same overlapping edits on `main`, or when you rebuild an integration branch after dropping one topic. You still review the result. You stop retyping the same fix.
 
@@ -44,7 +44,7 @@ Merge and rebase call rerere for you once it is on. You do not need to run `git 
 | --- | --- |
 | Preimage | Conflicted state with markers |
 | Postimage | Hand-resolved file content |
-| `$GIT_COMMON_DIR/rr-cache/` | Repo-wide cache shared by [linked worktrees](./git-worktrees) |
+| `$GIT_COMMON_DIR/rr-cache/` | Repo-wide cache shared by [linked worktrees](./git-worktrees.mdx) |
 
 ## Applying It in Practice
 
@@ -115,11 +115,11 @@ git rerere gc
 
 By default, `gc.rerereResolved` keeps completed resolutions for 60 days and `gc.rerereUnresolved` drops abandoned preimages after 15 days. Adjust those values when your integration cycle is longer than the defaults.
 
-Do not treat the rerere cache as shared team state across clones unless you copy it on purpose. Enable `rerere.enabled` in shared setup docs so every machine that rebases the same [pull-request stacks](./stacked-prs) builds a useful cache.
+Do not treat the rerere cache as shared team state across clones unless you copy it on purpose. Enable `rerere.enabled` in shared setup docs so every machine that rebases the same [pull-request stacks](./stacked-prs.mdx) builds a useful cache.
 
 ## Next Steps
 
-- [Cherry-pick vs Rebase](./cherry-pick-vs-rebase): distinguish selected patch copying from branch rewriting
+- [Cherry-pick vs Rebase](./cherry-pick-vs-rebase.mdx): distinguish selected patch copying from branch rewriting
 - [Stacked PR Workflow](/learn/workflows/git/stacked-pr): apply rebasing to a pull-request stack
 - [Auto-Rebasing AI Workspaces](/learn/how-to/auto-rebase-ai-branches): keep dependent branches current without treating a rebase as approval
 - [Parallel Development Workflow](/learn/workflows/git/parallel-development): combine concurrent branches with an integration policy

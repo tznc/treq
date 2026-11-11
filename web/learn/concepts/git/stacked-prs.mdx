@@ -39,7 +39,7 @@ main
         └── auth/api  PR 3: auth/api -> auth/service
 ```
 
-If `auth/schema` changes during review, the branches above it still contain commits based on the old version. [Rebasing](./merge-vs-rebase) each dependent branch in order is a **restack**.
+If `auth/schema` changes during review, the branches above it still contain commits based on the old version. [Rebasing](./merge-vs-rebase.mdx) each dependent branch in order is a **restack**.
 
 <DefinitionCard
   term="Restack"
@@ -125,7 +125,7 @@ Avoid dependencies on branches owned by another team unless both teams agree on 
 
 ## Next Steps
 
-- [Merge vs Rebase](./merge-vs-rebase): understand the rewrite and integration choices behind restacking
-- [Cherry-pick vs Rebase](./cherry-pick-vs-rebase): choose the correct operation for dependent commits
+- [Merge vs Rebase](./merge-vs-rebase.mdx): understand the rewrite and integration choices behind restacking
+- [Cherry-pick vs Rebase](./cherry-pick-vs-rebase.mdx): choose the correct operation for dependent commits
 - [Stacked PR Workflow](/learn/workflows/git/stacked-pr): create and maintain a stack step by step
 - [Parallel Development Workflow](/learn/workflows/git/parallel-development): separate independent work from dependent layers
