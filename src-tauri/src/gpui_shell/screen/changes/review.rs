@@ -2430,7 +2430,6 @@ pub(super) fn comment_strip_fill(p: &Palette) -> Hsla {
   p.commented()
 }
 
-
 #[cfg(test)]
 mod row_paint_tests {
   use super::*;
