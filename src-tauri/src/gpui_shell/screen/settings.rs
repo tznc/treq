@@ -252,6 +252,7 @@ pub struct Application {
   pub notify_agent_finished: bool,
   pub checklist: checklist::Checklist,
   pub setup_script: SetupScript,
+  pub agent_instructions: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -297,6 +298,7 @@ pub struct RepositoryFields {
   pub review_prompt: String,
   pub review_agent: String,
   pub auto_review_trigger: String,
+  pub agent_instructions: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1579,6 +1581,7 @@ impl SettingsView {
           "app.defaultAgent" => app.default_agent = text,
           "app.conflictMarkerStyle" => app.conflict_marker_style = text,
           "app.notifyAgentFinished" => app.notify_agent_finished = value.as_bool().unwrap_or(true),
+          "app.agentInstructions" => app.agent_instructions = text,
           _ => {}
         }
       }
@@ -1651,6 +1654,7 @@ impl SettingsView {
           ("snapshot", "JJ Snapshot"),
         ]),
         notify_agent_finished: app.notify_agent_finished,
+        agent_instructions: app.agent_instructions,
         checklist: checklist::from_statuses(
           "Command-line tools",
           self.statuses.as_deref(),
@@ -2226,6 +2230,14 @@ impl SettingsView {
       window,
       cx,
     );
+    let instructions = self.controls.textarea(
+      "app.agentInstructions",
+      &app.agent_instructions,
+      "Added to every agent's system prompt",
+      4,
+      window,
+      cx,
+    );
     let script = self.controls.textarea(
       "app.setupScript",
       &app.setup_script.script,
@@ -2308,6 +2320,13 @@ impl SettingsView {
         form::select_field("settings-default-agent", "Default agent", &agent, false),
         Some("Default agent for new sessions"),
         self.mark_of("app.defaultAgent"),
+        p,
+      ))
+      .child(saved_field_block(
+        "Agent instructions",
+        form::textarea_field(&instructions, true, false),
+        Some("Added to every agent terminal in every repository."),
+        self.mark_of("app.agentInstructions"),
         p,
       ))
       .child(checklist::render(&app.checklist, &ctx))
@@ -2540,6 +2559,14 @@ impl SettingsView {
         window,
         cx,
       );
+      let agent_instructions = self.controls.textarea(
+        "repo.agentInstructions",
+        &f.agent_instructions,
+        "Added to every agent's system prompt in this repository",
+        4,
+        window,
+        cx,
+      );
       let review_agent = self.controls.select(
         "repo.reviewAgent",
         &repo.review_agent_options,
@@ -2607,6 +2634,13 @@ impl SettingsView {
               form::select_field("settings-repo-default-agent", "Default agent", &agent, managed("defaultAgent")),
               Some("Default agent for new sessions in this repository"),
               self.mark_of("repo.defaultAgent"),
+              p,
+            ))
+            .child(saved_field_block(
+              "Agent instructions",
+              form::textarea_field(&agent_instructions, true, false),
+              Some("Added to every agent terminal in this repository, after the application instructions."),
+              self.mark_of("repo.agentInstructions"),
               p,
             )),
         )
