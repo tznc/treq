@@ -1,4 +1,4 @@
--- Team projects from 077_organization_projects.sql: members of an
+-- Team projects from 079_organization_projects.sql: members of an
 -- organization read and write its projects; outsiders see nothing.
 begin;
 select plan(13);
