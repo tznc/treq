@@ -726,7 +726,8 @@ impl CommitsView {
         .flex_none()
         .flex()
         .items_center()
-        .justify_center()
+        .justify_end()
+        .pr_0p5()
         .child(
           div()
             .id(SharedString::from(format!("add-comment-{h}-{l}")))
@@ -739,7 +740,7 @@ impl CommitsView {
             .opacity(0.)
             .group_hover("diff-line", |s| s.opacity(1.))
             .cursor_pointer()
-            .child(ui::icon(theme::ICON_PLUS, 12., p.primary_foreground))
+            .child(ui::icon(theme::ICON_PLUS, 10., p.primary_foreground))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |view, _, _, cx| {
               cx.stop_propagation();

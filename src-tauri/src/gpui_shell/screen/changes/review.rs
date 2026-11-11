@@ -1287,7 +1287,8 @@ impl ChangesView {
           .flex_none()
           .flex()
           .items_center()
-          .justify_center()
+          .justify_end()
+          .pr_0p5()
           .when(!conflicted, |this| {
             this.child(
               self.tip(
@@ -1309,13 +1310,13 @@ impl ChangesView {
                     new.or(old).unwrap_or_default()
                   ))
                   .test_support()
-                  .p_0p5()
+                  .p_px()
                   .rounded(radius::SM)
                   .bg(p.primary)
                   .cursor_pointer()
                   .opacity(0.)
                   .group_hover("diff-line", |s| s.opacity(1.))
-                  .child(ui::icon(theme::ICON_PLUS, 12., p.primary_foreground))
+                  .child(ui::icon(theme::ICON_PLUS, 10., p.primary_foreground))
                   .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                   .on_click(cx.listener(move |view, _, _, cx| {
                     cx.stop_propagation();
