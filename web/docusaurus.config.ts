@@ -15,6 +15,9 @@ const config: Config = {
     require.resolve('./plugins/jsonLdPlugin'),
     require.resolve('./plugins/skillsPlugin'),
     require.resolve('./plugins/landingScreenshotsPlugin'),
+    ...(shouldLoadGoogleTag
+      ? [[require.resolve('./plugins/googleTagPlugin'), {trackingID: 'G-V9MPP2ZWZF'}] as [string, object]]
+      : []),
     [
       '@docusaurus/plugin-content-docs',
       {
@@ -158,12 +161,6 @@ const config: Config = {
             '/integrations/**',
           ],
         },
-        ...(shouldLoadGoogleTag ? {
-          gtag: {
-            trackingID: 'G-V9MPP2ZWZF',
-            anonymizeIP: true,
-          },
-        } : {}),
       } satisfies Preset.Options,
     ],
   ],
