@@ -540,8 +540,12 @@ mod tests {
       app_instructions: Some("Be terse.\nPrefer TDD."),
       repo_instructions: Some("Use cargo nextest."),
     });
-    let app = prompt.find("Application instructions: Be terse. Prefer TDD.").unwrap();
-    let repo = prompt.find("Repository instructions: Use cargo nextest.").unwrap();
+    let app = prompt
+      .find("Application instructions: Be terse. Prefer TDD.")
+      .unwrap();
+    let repo = prompt
+      .find("Repository instructions: Use cargo nextest.")
+      .unwrap();
     let proj = prompt.find("Project instructions:").unwrap();
     assert!(app < repo && repo < proj);
     assert!(!prompt.contains('\n'));

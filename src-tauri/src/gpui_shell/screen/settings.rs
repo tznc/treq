@@ -2322,13 +2322,7 @@ impl SettingsView {
         self.mark_of("app.defaultAgent"),
         p,
       ))
-      .child(saved_field_block(
-        "Agent instructions",
-        form::textarea_field(&instructions, true, false),
-        Some("Added to every agent terminal in every repository."),
-        self.mark_of("app.agentInstructions"),
-        p,
-      ))
+
       .child(checklist::render(&app.checklist, &ctx))
       .child(saved_field_block(
         "Conflict marker style",
@@ -2435,7 +2429,13 @@ impl SettingsView {
                   .child(setup.status.clone()),
               ),
           ),
-      )
+      )      .child(saved_field_block(
+        "Agent instructions",
+        form::textarea_field(&instructions, true, false),
+        Some("Added to every agent terminal in every repository."),
+        self.mark_of("app.agentInstructions"),
+        p,
+      ))
   }
 
   fn repository(

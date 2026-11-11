@@ -663,9 +663,12 @@ pub const SAVED_TICK: std::time::Duration = std::time::Duration::from_millis(150
 /// (theme, zoom, previews) or isn't a setting at all.
 pub fn save_timing(field: &str) -> Option<SaveTiming> {
   match field {
-    "repo.branchNamePattern" | "repo.includedFiles" | "repo.reviewPrompt" | "app.setupScript" => {
-      Some(SaveTiming::Debounced)
-    }
+    "repo.branchNamePattern"
+    | "repo.includedFiles"
+    | "repo.reviewPrompt"
+    | "repo.agentInstructions"
+    | "app.setupScript"
+    | "app.agentInstructions" => Some(SaveTiming::Debounced),
     "repo.defaultModel"
     | "repo.defaultAgent"
     | "repo.autoPush"
