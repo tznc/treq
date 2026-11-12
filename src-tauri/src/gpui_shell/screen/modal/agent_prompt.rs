@@ -1003,8 +1003,6 @@ impl AgentPromptView {
     div()
       .debug_selector(|| "agent-task-input".into())
       .w_full()
-      .max_w(zpx(672.))
-      .mx_auto()
       .child(
         div()
           .id("task-card")
@@ -1368,7 +1366,8 @@ impl Render for AgentPromptView {
     });
     ui::Dialog::new("agent-prompt-dialog", &p)
       .overlay(viewport)
-      .relative_size(0.4, None)
+      // 672px of content plus the dialog's p_5 padding.
+      .width(712.)
       .title("Start a new agent session")
       .focus(&self.focus)
       .on_close(close)
