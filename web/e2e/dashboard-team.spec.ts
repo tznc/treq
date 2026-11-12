@@ -283,6 +283,15 @@ const teamSection = (page: Page) => page.getByRole('region', { name: 'Teams' });
 const orgCard = (page: Page, name: string) => teamSection(page).getByRole('region', { name });
 
 test.describe('Dashboard team tab', () => {
+  test('the Teams header links to the pricing feature comparison', async ({ browser }) => {
+    const { page, close } = await openTeamTab(browser, acmeTeam('owner'));
+    const link = teamSection(page).getByRole('link', { name: 'View full comparison' });
+    await expect(link).toHaveAttribute('href', /\/pricing\/?#feature-comparison$/);
+    await link.click();
+    await expect(page.locator('#feature-comparison')).toBeInViewport();
+    await close();
+  });
+
   test('an owner sees seats, members and pending invites, and invites with a shareable link', async ({
     browser,
   }) => {
