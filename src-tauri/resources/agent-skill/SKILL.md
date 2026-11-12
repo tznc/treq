@@ -4,11 +4,12 @@ description: >-
   Work inside a Treq agent terminal: use the treq CLI to create and inspect
   workspaces, keep the workspace description current with treq set -d (it
   becomes the pull request body), send files or text to the user in the Treq
-  UI, notify the user with treq notify, and create commits with treq commit.
-  Use this skill for every Treq agent session, whenever you need another
-  workspace, change what the workspace does, should show the user a file or
-  preview, finish a task or need the user's input, need to record a commit,
-  or are finishing inplace conflict resolution.
+  UI, notify the user with treq notify, and create commits with treq commit
+  only when the user explicitly asks. Use this skill for every Treq agent
+  session, whenever you need another workspace, change what the workspace
+  does, should show the user a file or preview, finish a task or need the
+  user's input, are asked to record a commit, or are finishing inplace
+  conflict resolution.
 ---
 
 # Treq
@@ -199,7 +200,8 @@ treq notify "Need input: keep the v1 endpoint or remove it?"
 
 ## Commits
 
-When the task needs a commit, use Treq. Do not use `git commit` or `jj commit`
+Never commit on the user's behalf unless they explicitly ask you to. When
+they do, use Treq. Do not use `git commit` or `jj commit`
 for this flow.
 
 ```bash
@@ -214,9 +216,10 @@ treq commit <workspace_name> -m <message> [--push]
 - This records the pending working-copy changes in that workspace. It does
   not merge the workspace into its target.
 
-Create a commit when the user asked for one, when the work is a complete
-reviewable slice, or when leaving uncommitted changes would block a rebase or
-sync. Do not create empty or placeholder commits.
+Commit only when the user explicitly asked for one. A finished task, a
+reviewable slice, or a pending rebase or sync is not permission: leave the
+changes uncommitted and ask the user. Do not create empty or placeholder
+commits.
 
 ## Conflict resolution
 
@@ -233,7 +236,8 @@ record a new commit on the branch.
 2. Edit each conflicted file in the workspace working copy.
 3. Remove conflict markers and keep the intended result.
 4. Run `treq st` until it reports no conflicts.
-5. Run `treq commit <workspace_name> -m "<message>"` with a message that
+5. Ask the user before committing. Once they say yes, run
+   `treq commit <workspace_name> -m "<message>"` with a message that
    describes the resolution.
 
 Do not use `git commit` or `jj commit` for this step.
