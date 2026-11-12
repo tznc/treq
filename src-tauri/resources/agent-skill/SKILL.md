@@ -67,7 +67,7 @@ It shows the home repo's state, and write commands such as `stash`,
 | Instead of | Use |
 | --- | --- |
 | `git status` | `treq st` or `jj st` |
-| `git diff` | `treq diff` or `jj diff` |
+| `git diff` | `treq changes workspace-diff --repo . --workspace <id>` (commits and working copy) or `jj diff` (working copy only) |
 | `git log` | `jj log` |
 | `git show <rev>` | `jj show <rev>` |
 | `git show HEAD~1:<path>` | `jj file show -r @- <path>` |
