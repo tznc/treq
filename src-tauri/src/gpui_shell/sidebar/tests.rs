@@ -20,6 +20,56 @@ fn row(id: i64, title: &str, depth: u32) -> SidebarRow {
   }
 }
 
+fn pr_row(id: i64, depth: u32, pr: Option<PrState>) -> SidebarRow {
+  let mut r = row(id, &format!("b{id}"), depth);
+  r.pr = pr;
+  r
+}
+
+fn ids(rows: &[SidebarRow]) -> Vec<i64> {
+  rows.iter().map(|r| r.id).collect()
+}
+
+#[test]
+fn open_pr_first_moves_open_prs_up_stably() {
+  let rows = vec![
+    pr_row(1, 0, None),
+    pr_row(2, 0, Some(PrState::Open)),
+    pr_row(3, 0, None),
+    pr_row(4, 0, Some(PrState::Open)),
+  ];
+  assert_eq!(ids(&open_pr_first(rows)), [2, 4, 1, 3]);
+}
+
+#[test]
+fn open_pr_first_counts_drafts_but_not_merged_or_closed() {
+  let rows = vec![
+    pr_row(1, 0, Some(PrState::Merged)),
+    pr_row(2, 0, Some(PrState::Closed)),
+    pr_row(3, 0, Some(PrState::Draft)),
+    pr_row(4, 0, None),
+  ];
+  assert_eq!(ids(&open_pr_first(rows)), [3, 1, 2, 4]);
+}
+
+#[test]
+fn open_pr_first_keeps_stacks_together_by_root() {
+  let rows = vec![
+    pr_row(1, 0, None),
+    pr_row(2, 1, Some(PrState::Open)),
+    pr_row(3, 0, Some(PrState::Open)),
+    pr_row(4, 1, None),
+    pr_row(5, 2, None),
+    pr_row(6, 0, None),
+  ];
+  let sorted = open_pr_first(rows);
+  assert_eq!(ids(&sorted), [3, 4, 5, 1, 2, 6]);
+  assert_eq!(
+    sorted.iter().map(|r| r.depth).collect::<Vec<_>>(),
+    [0, 1, 2, 0, 1, 0]
+  );
+}
+
 fn snapshot(workspaces: Vec<SidebarRow>) -> SidebarSnapshot {
   SidebarSnapshot {
     repo_name: "treq".into(),
