@@ -1062,7 +1062,10 @@ fn a_write_to_the_workspace_database_reads_the_workspaces_again(cx: &mut TestApp
   let before = host.count("workspaces /repo");
   {
     let watches = host.db_watches.lock().unwrap();
-    let (_, tx) = watches.iter().find(|(p, _)| p == "/repo").expect("no db watch");
+    let (_, tx) = watches
+      .iter()
+      .find(|(p, _)| p == "/repo")
+      .expect("no db watch");
     let _ = tx.unbounded_send(());
   }
   cx.run_until_parked();

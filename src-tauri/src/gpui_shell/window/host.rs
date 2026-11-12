@@ -589,6 +589,20 @@ impl WindowHost for Backend {
     }
     let dir = Path::new(repo).join(".treq");
     let (tx, changes) = unbounded();
+    // The app's own reads and polls write the database too: send only when
+    // what the window shows from it (titles, descriptions) changed.
+    let repo_path = repo.to_string();
+    let shown = move || {
+      crate::local_db::get_workspaces(&repo_path)
+        .ok()
+        .map(|list| {
+          list
+            .into_iter()
+            .map(|w| (w.id, w.title, w.description))
+            .collect::<Vec<_>>()
+        })
+    };
+    let mut last = shown();
     let mut debouncer = notify_debouncer_full::new_debouncer_opt::<
       _,
       notify::RecommendedWatcher,
@@ -608,7 +622,11 @@ impl WindowHost for Backend {
           })
         });
         if wrote {
-          tx.unbounded_send(()).ignore_closed();
+          let now = shown();
+          if now != last {
+            last = now;
+            tx.unbounded_send(()).ignore_closed();
+          }
         }
       },
       notify_debouncer_full::NoCache,

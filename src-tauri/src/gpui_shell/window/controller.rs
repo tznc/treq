@@ -351,8 +351,8 @@ impl WindowController {
   /// Follows the repository: reads its workspaces again when their database
   /// changes, so a title or description set elsewhere shows at once.
   fn watch_db(&mut self, cx: &mut Context<Self>) {
-    let target = (self.model.has_repo() && !self.model.is_remote())
-      .then(|| self.model.main_repo.clone());
+    let target =
+      (self.model.has_repo() && !self.model.is_remote()).then(|| self.model.main_repo.clone());
     if self.watching_db.as_ref().map(|(path, _)| path) == target.as_ref() {
       return;
     }
@@ -369,7 +369,7 @@ impl WindowController {
         };
         while changes.next().await.is_some() {
           if this
-            .update(cx, |this, cx| this.read(Read::default(), cx))
+            .update(cx, |this, cx| this.read(Read::POLL, cx))
             .is_err()
           {
             break;
