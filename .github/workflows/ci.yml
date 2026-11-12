@@ -185,6 +185,9 @@ jobs:
       # test-rust's packages, plus Xvfb and Mesa's software Vulkan
       # (lavapipe), which GPUI renders with on a runner without a GPU, and
       # xdotool, which presses keys through X for the text shortcut tests.
+      # A stale runner apt index resolves versions the mirror no longer has (404s).
+      - name: refresh apt index
+        run: sudo apt-get update
       - name: install dependencies (ubuntu only)
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
@@ -258,6 +261,9 @@ jobs:
         uses: rui314/setup-mold@da13e0b42e392e3a45d1215033a2270b849d7d36 # v1
 
       # The same packages and cache entry as test-desktop-e2e.
+      # A stale runner apt index resolves versions the mirror no longer has (404s).
+      - name: refresh apt index
+        run: sudo apt-get update
       - name: install dependencies (ubuntu only)
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
@@ -355,6 +361,9 @@ jobs:
       # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
       # cache on subsequent runs. execute_install_scripts is required so dpkg
       # postinst (ldconfig, alternatives) still runs on restore.
+      # A stale runner apt index resolves versions the mirror no longer has (404s).
+      - name: refresh apt index
+        run: sudo apt-get update
       - name: install dependencies (ubuntu only)
         # Tauri links WebKit/GTK; GPUI needs the X11/Wayland/Vulkan libraries.
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
