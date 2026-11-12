@@ -3253,7 +3253,15 @@ impl ChangesView {
               },
             ),
             cx,
-          )),
+          ))
+          .children(
+            (committed
+              && self
+                .snapshot
+                .as_ref()
+                .is_some_and(|s| s.purely_committed(path)))
+            .then(|| badge("Committed", Tone::Neutral)),
+          ),
       );
     let mut right = div().flex().items_center().gap_2();
     if !committed && !self.read_only() {
