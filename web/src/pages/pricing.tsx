@@ -199,6 +199,7 @@ function ComparisonSection(): ReactNode {
     <section className={styles.comparison} aria-label="Feature comparison">
       <Heading
         as="h2"
+        id="feature-comparison"
         className={clsx(styles.sectionHeading, styles.comparisonHeading)}
       >
         Feature comparison
