@@ -1253,20 +1253,20 @@ impl WorkspaceDialog {
                 .flex()
                 .flex_col()
                 .gap_1p5()
-                .child(field_label("Symlink from home repo (optional, one per line)"))
+                .child(field_label(
+                  "Symlink from home repo (optional, one per line)",
+                ))
                 .child(
                   div()
                     .debug_selector(|| "workspace-dialog-symlinks".into())
                     .min_h(zpx(58.))
                     .child(ui::text(Textarea::new(&symlinks), TextSize::Sm)),
                 )
-                .child(
-                  field_hint(
-                      "Heavy dirs are linked instead of copied so each workspace shares the home \
+                .child(field_hint(
+                  "Heavy dirs are linked instead of copied so each workspace shares the home \
                        tree.",
-                      &p,
-                    ),
-                )
+                  &p,
+                ))
                 .when(!chips.is_empty(), |this| {
                   this.child(div().flex().flex_wrap().gap_1p5().children(
                     chips.into_iter().enumerate().map(|(i, chip)| {
