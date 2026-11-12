@@ -440,6 +440,39 @@ fn repositories_without_github_hide_the_pull_request_list(cx: &mut TestAppContex
   assert!(!host.calls().iter().any(|c| c.starts_with("read open prs")));
 }
 
+#[gpui::test]
+fn one_integration_shows_a_header_not_a_tab(cx: &mut TestAppContext) {
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  let (mut h, _host) = dialog(host, cx);
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Heading).name("GitHub"))).to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::Tab).name("GitHub"))
+    .is_none());
+  assert!(h
+    .cx
+    .debug_bounds("open-workspaces-integrations-divider")
+    .is_some());
+}
+
+#[gpui::test]
+fn two_integrations_show_tabs_over_a_divider(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.github.remote = acme();
+  let (mut h, _host) = dialog_with(host, true, cx);
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Tab).name("GitHub"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Tab).name("Linear"))).to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::Heading).name("GitHub"))
+    .is_none());
+  assert!(h
+    .cx
+    .debug_bounds("open-workspaces-integrations-divider")
+    .is_some());
+}
+
 fn linear_host() -> FakeHost {
   let me = user("u1", "Me");
   let mut host = FakeHost::default();
@@ -507,7 +540,10 @@ fn linear_issues_are_picked_from_the_users_task_list(cx: &mut TestAppContext) {
 fn linear_shows_without_github(cx: &mut TestAppContext) {
   let (mut h, _) = dialog_with(linear_host(), true, cx);
   let screen = screen(&mut h);
-  expect(screen.get_by_role(by::role(Role::Tab).name("Linear"))).to_be_selected();
+  expect(screen.get_by_role(by::role(Role::Heading).name("Linear"))).to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::Tab).name("Linear"))
+    .is_none());
   assert!(screen
     .query_by_role(by::role(Role::Tab).name("GitHub"))
     .is_none());

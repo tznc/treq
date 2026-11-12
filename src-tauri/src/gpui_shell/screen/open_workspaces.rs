@@ -1246,7 +1246,55 @@ impl OpenWorkspacesDialog {
       .iter()
       .position(|tab| Some(*tab) == current)
       .unwrap_or(0);
-    let tabs = ui::Tabs::segmented("open-workspaces-tabs", p)
+    // One integration needs no tab to pick it: it is a header.
+    let tabs = if let [only] = integrations[..] {
+      let (icon, label) = match only {
+        Integration::Github => (theme::ICON_GITHUB, "GitHub"),
+        Integration::Linear => (theme::ICON_LINEAR, "Linear"),
+      };
+      ui::SectionHeader::new("open-workspaces-integration", label, p)
+        .icon(icon)
+        .into_any_element()
+    } else {
+      self
+        .integration_tabs(integrations, selected, p, cx)
+        .into_any_element()
+    };
+    // A rule so the tabs do not read as one of the list's filters.
+    let divider = div()
+      .id("open-workspaces-integrations-divider")
+      .debug_selector(|| "open-workspaces-integrations-divider".into())
+      .h(zpx(1.))
+      .w_full()
+      .flex_none()
+      .bg(p.border);
+    div()
+      .flex()
+      .flex_col()
+      .w(zpx(420.))
+      .flex_none()
+      .min_h_0()
+      .border_l_1()
+      .border_color(p.border)
+      .pl_4()
+      .gap_2()
+      .child(tabs)
+      .child(divider)
+      .map(|this| match current {
+        Some(Integration::Linear) => this.child(self.issues_pane(fields.1, p, cx)),
+        _ => this.child(self.prs_pane(fields.0, p, cx)),
+      })
+  }
+
+  /// A tab for each integration, to pick which one's list shows.
+  fn integration_tabs(
+    &self,
+    integrations: Vec<Integration>,
+    selected: usize,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> ui::Tabs {
+    ui::Tabs::segmented("open-workspaces-tabs", p)
       .tabs(integrations.iter().map(|tab| {
         let (icon, label, picked) = match tab {
           Integration::Github => (theme::ICON_GITHUB, "GitHub", self.chosen.len()),
@@ -1271,21 +1319,6 @@ impl OpenWorkspacesDialog {
             })
             .ok();
         }
-      });
-    div()
-      .flex()
-      .flex_col()
-      .w(zpx(420.))
-      .flex_none()
-      .min_h_0()
-      .border_l_1()
-      .border_color(p.border)
-      .pl_4()
-      .gap_2()
-      .child(tabs)
-      .map(|this| match current {
-        Some(Integration::Linear) => this.child(self.issues_pane(fields.1, p, cx)),
-        _ => this.child(self.prs_pane(fields.0, p, cx)),
       })
   }
 
