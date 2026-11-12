@@ -185,11 +185,14 @@ jobs:
       # test-rust's packages, plus Xvfb and Mesa's software Vulkan
       # (lavapipe), which GPUI renders with on a runner without a GPU, and
       # xdotool, which presses keys through X for the text shortcut tests.
+      # A stale runner apt index resolves versions the mirror no longer has (404s).
+      - name: refresh apt index
+        run: sudo apt-get update
       - name: install dependencies (ubuntu only)
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers xdotool
-          version: webkit-4.1-gpui-e2e-2
+          version: webkit-4.1-gpui-e2e-4
           execute_install_scripts: true
 
       # Reads test-rust's cache (warm-caches.yml saves it on main); the
@@ -258,11 +261,14 @@ jobs:
         uses: rui314/setup-mold@da13e0b42e392e3a45d1215033a2270b849d7d36 # v1
 
       # The same packages and cache entry as test-desktop-e2e.
+      # A stale runner apt index resolves versions the mirror no longer has (404s).
+      - name: refresh apt index
+        run: sudo apt-get update
       - name: install dependencies (ubuntu only)
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers xdotool
-          version: webkit-4.1-gpui-e2e-2
+          version: webkit-4.1-gpui-e2e-4
           execute_install_scripts: true
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -355,12 +361,15 @@ jobs:
       # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
       # cache on subsequent runs. execute_install_scripts is required so dpkg
       # postinst (ldconfig, alternatives) still runs on restore.
+      # A stale runner apt index resolves versions the mirror no longer has (404s).
+      - name: refresh apt index
+        run: sudo apt-get update
       - name: install dependencies (ubuntu only)
         # Tauri links WebKit/GTK; GPUI needs the X11/Wayland/Vulkan libraries.
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev mesa-vulkan-drivers
-          version: webkit-4.1-gpui-2
+          version: webkit-4.1-gpui-4
           execute_install_scripts: true
 
       # Runners already ship git + gh. Only jj needs installing; cache the
