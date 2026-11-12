@@ -236,7 +236,7 @@ async function capture(page: Page): Promise<void> {
     width: field.width + 48,
     height: action.y + action.height + 24 - (field.y - 56),
   });
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Close" }).click();
 
   // Two workspaces, each with its own uncommitted edit.
   const { repo } = fixture();
