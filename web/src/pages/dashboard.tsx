@@ -487,7 +487,7 @@ function SubscriptionTab({
               )}
             </div>
           )}
-          {billingCustomer && (
+          {isPro && billingCustomer && (
             <button
               type="button"
               onClick={openPortal}
@@ -1859,7 +1859,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "1.1rem",
   },
   userName: { fontWeight: 600, fontSize: "0.9rem" },
-  userEmail: { fontSize: "0.75rem", color: "var(--ifm-color-emphasis-500)" },
+  userEmail: { fontSize: "0.75rem", color: "var(--dashboard-text-muted)" },
   nav: { display: "flex", flexDirection: "column", gap: "0.25rem" },
   navItem: {
     display: "block",
@@ -1947,7 +1947,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   fieldLabel: {
     fontSize: "0.85rem",
-    color: "var(--ifm-color-emphasis-600)",
+    color: "var(--dashboard-text-subtle)",
     fontWeight: 500,
   },
   fieldValue: { fontSize: "0.9rem", fontWeight: 500 },
@@ -1963,7 +1963,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.2rem 0.6rem",
     borderRadius: "12px",
     backgroundColor: "var(--ifm-color-emphasis-100)",
-    color: "var(--ifm-color-emphasis-600)",
+    color: "var(--dashboard-text-subtle)",
     fontSize: "0.8rem",
     fontWeight: 600,
   },
@@ -2024,7 +2024,7 @@ const styles: Record<string, React.CSSProperties> = {
   comingSoonSubtext: {
     marginTop: "0.5rem",
     fontSize: "0.8rem",
-    color: "var(--ifm-color-emphasis-500)",
+    color: "var(--dashboard-text-muted)",
   },
   // Integrations tab
   integrationHeader: {
@@ -2052,12 +2052,12 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   integrationName: { fontWeight: 600, fontSize: "0.9rem", marginBottom: "0.15rem" },
-  integrationDesc: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-500)" },
+  integrationDesc: { fontSize: "0.8rem", color: "var(--dashboard-text-muted)" },
   integrationFeatureList: {
     margin: "0.4rem 0 0",
     paddingLeft: "1.1rem",
     fontSize: "0.8rem",
-    color: "var(--ifm-color-emphasis-600)",
+    color: "var(--dashboard-text-subtle)",
     lineHeight: 1.55,
   },
   featureProBadge: {
@@ -2095,7 +2095,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   loadingText: {
     fontSize: "0.85rem",
-    color: "var(--ifm-color-emphasis-500)",
+    color: "var(--dashboard-text-muted)",
     padding: "0.5rem 0",
   },
   // Repo config panel
@@ -2120,7 +2120,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.1rem 0.4rem",
     borderRadius: "4px",
     backgroundColor: "var(--ifm-color-emphasis-100)",
-    color: "var(--ifm-color-emphasis-600)",
+    color: "var(--dashboard-text-subtle)",
   },
   input: {
     width: "100%",
@@ -2134,7 +2134,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   inputHint: {
     fontSize: "0.8rem",
-    color: "var(--ifm-color-emphasis-600)",
+    color: "var(--dashboard-text-subtle)",
     marginTop: "0.2rem",
   },
   // Team tab
@@ -2151,7 +2151,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: "0.4rem",
     fontSize: "0.78rem",
     fontWeight: 600,
-    color: "var(--ifm-color-emphasis-600)",
+    color: "var(--dashboard-text-subtle)",
     textTransform: "uppercase",
     letterSpacing: "0.03em",
   },
@@ -2167,7 +2167,7 @@ const styles: Record<string, React.CSSProperties> = {
   teamRowActions: { display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" },
   teamInvite: { borderBottom: "1px solid var(--ifm-color-emphasis-100)" },
   teamLinkRow: { display: "flex", gap: "0.5rem", paddingBottom: "0.6rem" },
-  teamMuted: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-500)" },
+  teamMuted: { fontSize: "0.8rem", color: "var(--dashboard-text-muted)" },
   teamForm: { display: "flex", gap: "0.5rem", marginTop: "0.75rem" },
   teamPerks: {
     display: "flex",
@@ -2188,7 +2188,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: "1rem",
   },
   inviteEmail: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column" },
-  inviteExpiry: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-600)" },
+  inviteExpiry: { fontSize: "0.8rem", color: "var(--dashboard-text-subtle)" },
   iconButton: {
     display: "inline-flex",
     alignItems: "center",

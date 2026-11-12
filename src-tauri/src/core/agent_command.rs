@@ -853,6 +853,8 @@ mod tests {
           repo_path: cwd,
           supporting_repo_paths: NONE,
           project: None,
+          app_instructions: None,
+          repo_instructions: None,
         },
         &AutoCommand {
           pending_prompt: Some(&task),

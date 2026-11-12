@@ -206,6 +206,16 @@ pub fn scroll_delta(row: (f32, f32), column: (f32, f32)) -> f32 {
   }
 }
 
+/// How far shift+wheel scrolls the row right: down is right, whether the
+/// platform reports it vertically or already turned it horizontal.
+pub fn shift_scroll_right(dx: f32, dy: f32) -> f32 {
+  if dy.abs() >= dx.abs() {
+    -dy
+  } else {
+    dx
+  }
+}
+
 /// `resizeTerminalPair`: moves the divider between two columns, neither
 /// going below `min`.
 pub fn resize_pair(left: f32, right: f32, delta: f32, min: f32) -> (f32, f32) {
@@ -1345,8 +1355,8 @@ impl TerminalView {
       return;
     };
     let delta = event.delta.pixel_delta(px(h));
-    // Horizontal swipes scroll the row of columns instead.
-    if f32::from(delta.x).abs() > f32::from(delta.y).abs() {
+    // Horizontal swipes and shift+wheel scroll the row of columns instead.
+    if event.modifiers.shift || f32::from(delta.x).abs() > f32::from(delta.y).abs() {
       return;
     }
     self.scroll_rest += f32::from(delta.y) / h;
@@ -4436,6 +4446,7 @@ impl Render for TerminalPane {
       row.push(self.column(index, &p, cx).into_any_element());
     }
     let row_bounds = self.row.clone();
+    let row_scroll = self.row_scroll.clone();
     let scrollbar = self.row_scrollbar(&p, cx);
     let controls = self.controls(&p, cx);
     let maximized = self.maximized;
@@ -4555,9 +4566,33 @@ impl Render for TerminalPane {
               // After the columns, so a column's index in the row stays
               // what `scroll_to_item` counts.
               .child(
-                gpui::canvas(move |b, _, _| row_bounds.set(Some(b)), |_, _, _, _| {})
-                  .absolute()
-                  .size_full(),
+                gpui::canvas(
+                  move |b, _, _| row_bounds.set(Some(b)),
+                  move |b, _, window, _| {
+                    // Painted inside the scrolled row: undo the scroll to get
+                    // the row's own bounds.
+                    let b = Bounds::new(b.origin - row_scroll.offset(), b.size);
+                    // Ahead of GPUI's own scroll, which maps shift+down left.
+                    window.on_mouse_event(move |e: &ScrollWheelEvent, phase, window, cx| {
+                      if phase != gpui::DispatchPhase::Capture
+                        || !e.modifiers.shift
+                        || !b.contains(&e.position)
+                      {
+                        return;
+                      }
+                      let d = e.delta.pixel_delta(px(20.));
+                      let right = shift_scroll_right(f32::from(d.x), f32::from(d.y));
+                      let mut offset = row_scroll.offset();
+                      let max = row_scroll.max_offset().x;
+                      offset.x = (offset.x - px(right)).clamp(-max, px(0.));
+                      row_scroll.set_offset(offset);
+                      window.refresh();
+                      cx.stop_propagation();
+                    });
+                  },
+                )
+                .absolute()
+                .size_full(),
               ),
           )
           .children(scrollbar)
@@ -4586,6 +4621,15 @@ impl Render for TerminalPane {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn shift_scroll_down_scrolls_right() {
+    // GPUI's wheel delta is negative going down.
+    assert_eq!(shift_scroll_right(0., -30.), 30.);
+    assert_eq!(shift_scroll_right(0., 30.), -30.);
+    // Platforms that turn shift+wheel into a horizontal delta.
+    assert_eq!(shift_scroll_right(30., 0.), 30.);
+  }
 
   #[test]
   fn scrolls_a_column_the_least_to_show_it() {
