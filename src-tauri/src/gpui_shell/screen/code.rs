@@ -1814,7 +1814,7 @@ impl CodeView {
       section(p)
         .debug_selector(|| "workspace-stack-panel".into())
         .p_4()
-        .child(self.branch_row(p, cx))
+        .child(self.branch_row(p))
         .child(header)
         .child(
           div()
@@ -1835,7 +1835,7 @@ impl CodeView {
   }
 
   /// The card's top row: the branch and its target picker.
-  fn branch_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+  fn branch_row(&self, p: &Palette) -> impl IntoElement {
     let card = self.chrome.card.borrow().clone();
     let press = |id: &'static str, react: ActionSink| {
       move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
