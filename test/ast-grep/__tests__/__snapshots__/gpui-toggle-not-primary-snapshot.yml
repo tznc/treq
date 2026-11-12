@@ -1,0 +1,63 @@
+id: gpui-toggle-not-primary
+snapshots:
+  ? |
+    fn chip(on: bool) -> Button {
+      Button::new("open").label("Open").map(|b| if on { b.primary() } else { b.outline() })
+    }
+  : labels:
+    - source: if on { b.primary() } else { b.outline() }
+      style: primary
+      start: 74
+      end: 116
+    - source: b.primary()
+      style: secondary
+      start: 82
+      end: 93
+    - source: b.primary()
+      style: secondary
+      start: 82
+      end: 93
+    - source: b.outline()
+      style: secondary
+      start: 103
+      end: 114
+    - source: b.outline()
+      style: secondary
+      start: 103
+      end: 114
+  ? |
+    fn reaction(mine: bool) -> Button {
+      Button::new("r").map(|b| {
+        if mine {
+          b.primary()
+        } else {
+          b.outline()
+        }
+      })
+    }
+  : labels:
+    - source: |-
+        if mine {
+              b.primary()
+            } else {
+              b.outline()
+            }
+      style: primary
+      start: 69
+      end: 133
+    - source: b.primary()
+      style: secondary
+      start: 85
+      end: 96
+    - source: b.primary()
+      style: secondary
+      start: 85
+      end: 96
+    - source: b.outline()
+      style: secondary
+      start: 116
+      end: 127
+    - source: b.outline()
+      style: secondary
+      start: 116
+      end: 127

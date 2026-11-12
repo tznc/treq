@@ -243,7 +243,11 @@ mod tests {
   #[test]
   fn a_current_choice_is_selected() {
     assert!(!SheetAction::new("o", "Open", |_, _| {}).selected);
-    assert!(SheetAction::new("o", "Open", |_, _| {}).selected(true).selected);
+    assert!(
+      SheetAction::new("o", "Open", |_, _| {})
+        .selected(true)
+        .selected
+    );
   }
 
   #[test]
