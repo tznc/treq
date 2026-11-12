@@ -4569,7 +4569,6 @@ impl Render for TerminalPane {
                 gpui::canvas(
                   move |b, _, _| row_bounds.set(Some(b)),
                   move |b, _, window, _| {
-                    let row_scroll = row_scroll.clone();
                     // Painted inside the scrolled row: undo the scroll to get
                     // the row's own bounds.
                     let b = Bounds::new(b.origin - row_scroll.offset(), b.size);
