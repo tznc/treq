@@ -2169,12 +2169,7 @@ impl Render for SettingsView {
       .track_focus(&self.focus)
       .on_key_down(
         cx.listener(move |view, e: &gpui::KeyDownEvent, window, cx| {
-          let held = crate::gpui_shell::keys::held(e.keystroke.modifiers);
-          if e.keystroke.key == "escape"
-            && !open
-            && !(held.platform || held.control || held.alt || held.shift)
-            && view.focus.is_focused(window)
-          {
+          if ui::is_escape(&e.keystroke) && !open && view.focus.is_focused(window) {
             (view.sink)(
               ScreenAction::Press {
                 id: "settings.close".into(),
