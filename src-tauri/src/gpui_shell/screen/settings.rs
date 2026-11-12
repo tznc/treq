@@ -1738,6 +1738,11 @@ impl SettingsView {
         let mut merged: Vec<(&str, CustomSkillLevel)> = Vec::new();
         let (mut labelled, mut rest) = (Vec::new(), Vec::new());
         for view in data::filter_skills(catalog, &skills.query) {
+          // The registry can't install proprietary skills, so only list
+          // ones already installed.
+          if view.skill.proprietary && view.installed.is_none() {
+            continue;
+          }
           let mut labels = Vec::new();
           let mut customized = view.customized;
           if let Some(installed) = &view.installed {
