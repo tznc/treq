@@ -276,11 +276,16 @@ pub fn push_edits_to_github(repo_path: &str, workspace_id: i64) -> Result<(), St
   });
   #[cfg(not(feature = "gui"))]
   let branch_pr: Option<PrInfo> = None;
-  push_edits(repo_path, workspace_id, branch_pr.as_ref(), |number, title, body| {
-    let remote = super::github_cli::remote(repo_path)?
-      .ok_or_else(|| "The repository has no GitHub remote".to_string())?;
-    super::github_cli::edit_pr(&remote.full_name, number, title, body)
-  })
+  push_edits(
+    repo_path,
+    workspace_id,
+    branch_pr.as_ref(),
+    |number, title, body| {
+      let remote = super::github_cli::remote(repo_path)?
+        .ok_or_else(|| "The repository has no GitHub remote".to_string())?;
+      super::github_cli::edit_pr(&remote.full_name, number, title, body)
+    },
+  )
 }
 
 #[cfg(test)]

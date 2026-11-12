@@ -196,7 +196,11 @@ fn code_tab_sends_a_saved_description_to_the_pr(cx: &mut TestAppContext) {
   h.cx.simulate_input("!");
   h.click("workspace-description-save");
   h.cx.run_until_parked();
-  assert!(host.writes().contains(&"push to PR 7".to_string()), "{:?}", host.writes());
+  assert!(
+    host.writes().contains(&"push to PR 7".to_string()),
+    "{:?}",
+    host.writes()
+  );
 }
 
 /// PR #42's record for `code_host`'s workspace: its description still the
