@@ -3120,9 +3120,17 @@ impl SettingsView {
             .when(s.pro, |b| b.variant(Variant::Outline))
             .size(Size::Sm)
             .child(ui::icon(
-              if s.pro { theme::ICON_EXTERNAL_LINK } else { theme::ICON_CREDIT_CARD },
+              if s.pro {
+                theme::ICON_EXTERNAL_LINK
+              } else {
+                theme::ICON_CREDIT_CARD
+              },
               12.,
-              if s.pro { p.foreground } else { p.primary_foreground },
+              if s.pro {
+                p.foreground
+              } else {
+                p.primary_foreground
+              },
             ))
             .label(s.manage_label.clone())
             .on_click(self.press("account.manage")),
