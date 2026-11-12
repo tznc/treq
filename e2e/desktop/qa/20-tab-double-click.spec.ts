@@ -24,7 +24,7 @@ test("tabs: double-clicking Code returns to its overview", async ({ page }) => {
     expectations: ["The Code tab shows README.md in the file view with a Back row"],
   });
 
-  await page.getByRole("tab", { name: "Code" }).dblclick();
+  await page.getByRole("tab", { name: "Code", exact: true }).first().dblclick();
   await expect(goToFile).toBeVisible();
   await settle(page, 1000);
   await capture(page, {
