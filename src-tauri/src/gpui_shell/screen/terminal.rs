@@ -456,6 +456,9 @@ pub struct TerminalView {
   _msg_watch: Option<Task<()>>,
 }
 
+/// How long after sending text to an agent its Enter follows.
+const SUBMIT_DELAY: Duration = Duration::from_millis(100);
+
 /// How often a terminal looks for changes to its waiting messages.
 const MSG_WATCH: Duration = Duration::from_secs(1);
 
@@ -2603,7 +2606,15 @@ impl TerminalPane {
       return false;
     };
     if let Some(view) = self.view(&column) {
-      view.update(cx, |view, cx| view.write(&format!("{text}\n"), cx));
+      view.update(cx, |view, cx| view.write(text, cx));
+      // Enter as its own later write: a TUI reads a burst ending in it
+      // as a paste and leaves the text unsent.
+      let view = view.downgrade();
+      cx.spawn(async move |_, cx| {
+        cx.background_executor().timer(SUBMIT_DELAY).await;
+        let _ = view.update(cx, |view, cx| view.write("\r", cx));
+      })
+      .detach();
     }
     self.focus_next = Some(column);
     cx.notify();
