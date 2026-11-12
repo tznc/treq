@@ -450,7 +450,7 @@ pub fn run(
         repo_path,
         &BranchWorkspaceRequest {
           head_branch: branch.clone(),
-          base_branch: base.clone(),
+          base_branch: base,
           title: row.title.clone(),
           description: None,
           pr_number: None,

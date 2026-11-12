@@ -227,7 +227,7 @@ pub fn rebase_root_subtree_from_workspace_force(
               workspace_path: full_path.clone(),
               branch_name: workspace.branch_name.clone(),
               bookmark: info.bookmark.clone(),
-              commits: info.commits.clone(),
+              commits: info.commits,
             });
           }
           Err(_) => {}
