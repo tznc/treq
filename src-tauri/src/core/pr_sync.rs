@@ -234,14 +234,22 @@ pub fn push_plan(workspace: &Workspace, record: &PrSyncRecord) -> Option<SyncPla
 }
 
 /// Sends a workspace's local title and description edits to its PR through
-/// `edit` (PR number, title, body), then follows the PR again. Nothing
-/// happens for a workspace not opened from a PR or with no edits.
+/// `edit` (PR number, title, body), then follows the PR again. A workspace
+/// not opened from a PR uses `branch_pr`, its branch's PR, and starts
+/// following it. Nothing happens with neither, or with no edits.
 pub fn push_edits(
   repo_path: &str,
   workspace_id: i64,
+  branch_pr: Option<&PrInfo>,
   edit: impl FnOnce(u64, Option<&str>, Option<&str>) -> Result<(), String>,
 ) -> Result<(), String> {
-  let Some(record) = record(repo_path, workspace_id) else {
+  let Some(record) = record(repo_path, workspace_id).or_else(|| {
+    branch_pr.map(|pr| PrSyncRecord {
+      pr_number: pr.number,
+      title: Some(pr.title.clone()),
+      description: Some(pr_description(pr)),
+    })
+  }) else {
     return Ok(());
   };
   let Some(workspace) = local_db::get_workspace_by_id(repo_path, workspace_id)? else {
@@ -260,7 +268,15 @@ pub fn push_edits(
 
 /// [`push_edits`] through `gh pr edit` on the repository's GitHub remote.
 pub fn push_edits_to_github(repo_path: &str, workspace_id: i64) -> Result<(), String> {
-  push_edits(repo_path, workspace_id, |number, title, body| {
+  #[cfg(feature = "gui")]
+  let branch_pr = local_db::get_workspace_by_id(repo_path, workspace_id)?.and_then(|ws| {
+    crate::pr_status::global()
+      .get_cached(repo_path, &ws.branch_name)
+      .flatten()
+  });
+  #[cfg(not(feature = "gui"))]
+  let branch_pr: Option<PrInfo> = None;
+  push_edits(repo_path, workspace_id, branch_pr.as_ref(), |number, title, body| {
     let remote = super::github_cli::remote(repo_path)?
       .ok_or_else(|| "The repository has no GitHub remote".to_string())?;
     super::github_cli::edit_pr(&remote.full_name, number, title, body)
@@ -493,7 +509,7 @@ mod tests {
     local_db::update_workspace_description(&repo, id, "mine").unwrap();
     let sent = std::cell::RefCell::new(Vec::new());
 
-    push_edits(&repo, id, |number, title, body| {
+    push_edits(&repo, id, None, |number, title, body| {
       sent
         .borrow_mut()
         .push((number, title.map(str::to_string), body.map(str::to_string)));
@@ -512,7 +528,7 @@ mod tests {
     record_created(&repo, &load(&repo, id), 7).unwrap();
     local_db::update_workspace_description(&repo, id, "mine").unwrap();
 
-    let err = push_edits(&repo, id, |_, _, _| Err("offline".into())).unwrap_err();
+    let err = push_edits(&repo, id, None, |_, _, _| Err("offline".into())).unwrap_err();
 
     assert!(err.contains("offline"), "{err}");
     assert!(!sync_state(&repo, &load(&repo, id)).unwrap().description);
@@ -521,7 +537,24 @@ mod tests {
   #[test]
   fn push_edits_does_nothing_for_a_workspace_not_from_a_pr() {
     let (_dir, repo, id) = repo_with_workspace(Some("notes"));
-    push_edits(&repo, id, |_, _, _| panic!("no PR to edit")).unwrap();
+    push_edits(&repo, id, None, |_, _, _| panic!("no PR to edit")).unwrap();
+  }
+
+  #[test]
+  fn push_edits_sends_edits_to_the_branch_pr_when_not_opened_from_it() {
+    let (_dir, repo, id) = repo_with_workspace(Some("mine"));
+    let title = load(&repo, id).title;
+    let mut sent = Vec::new();
+
+    push_edits(&repo, id, Some(&pr(9, &title, "PR body")), |n, t, b| {
+      sent.push((n, t.map(str::to_string), b.map(str::to_string)));
+      Ok(())
+    })
+    .unwrap();
+
+    assert_eq!(sent, vec![(9, None, Some("mine".to_string()))]);
+    let st = sync_state(&repo, &load(&repo, id)).unwrap();
+    assert!(st.title && st.description);
   }
 
   #[test]
