@@ -192,7 +192,7 @@ jobs:
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers xdotool
-          version: webkit-4.1-gpui-e2e-3
+          version: webkit-4.1-gpui-e2e-4
           execute_install_scripts: true
 
       # Reads test-rust's cache (warm-caches.yml saves it on main); the
@@ -268,7 +268,7 @@ jobs:
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers xdotool
-          version: webkit-4.1-gpui-e2e-3
+          version: webkit-4.1-gpui-e2e-4
           execute_install_scripts: true
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -369,7 +369,7 @@ jobs:
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev mesa-vulkan-drivers
-          version: webkit-4.1-gpui-3
+          version: webkit-4.1-gpui-4
           execute_install_scripts: true
 
       # Runners already ship git + gh. Only jj needs installing; cache the
