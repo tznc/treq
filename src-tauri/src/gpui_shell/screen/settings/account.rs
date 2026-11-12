@@ -3611,6 +3611,37 @@ impl SettingsView {
   }
 }
 
+/// The Linear card's body on the free plan: what Linear gives, and the
+/// upgrade button.
+fn linear_paywall(p: &Palette, upgrade: Button) -> AnyElement {
+  let benefits = [
+    "See your team's Linear issues in the sidebar",
+    "Start a workspace from an issue, on its suggested branch",
+    "Turn sub-issues into nested workspaces in one step",
+    "Keep each workspace linked to its issue",
+  ];
+  div()
+    .debug_selector(|| "linear-paywall".into())
+    .flex()
+    .flex_col()
+    .gap_3()
+    .py_3()
+    .child(
+      ui::text(div(), TextSize::Sm)
+        .text_color(p.muted_foreground)
+        .child("Linear is a Pro feature. Connect it to work from your issues."),
+    )
+    .child(
+      ui::text(div(), TextSize::Sm)
+        .flex()
+        .flex_col()
+        .gap_1()
+        .children(benefits.map(|b| div().child(format!("• {b}")))),
+    )
+    .child(div().flex().justify_end().child(upgrade))
+    .into_any_element()
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -3652,35 +3683,4 @@ mod tests {
     assert!(!is_pro(Some(&sub("free", "active"))));
     assert!(!is_pro(None));
   }
-}
-
-/// The Linear card's body on the free plan: what Linear gives, and the
-/// upgrade button.
-fn linear_paywall(p: &Palette, upgrade: Button) -> AnyElement {
-  let benefits = [
-    "See your team's Linear issues in the sidebar",
-    "Start a workspace from an issue, on its suggested branch",
-    "Turn sub-issues into nested workspaces in one step",
-    "Keep each workspace linked to its issue",
-  ];
-  div()
-    .debug_selector(|| "linear-paywall".into())
-    .flex()
-    .flex_col()
-    .gap_3()
-    .py_3()
-    .child(
-      ui::text(div(), TextSize::Sm)
-        .text_color(p.muted_foreground)
-        .child("Linear is a Pro feature. Connect it to work from your issues."),
-    )
-    .child(
-      ui::text(div(), TextSize::Sm)
-        .flex()
-        .flex_col()
-        .gap_1()
-        .children(benefits.map(|b| div().child(format!("• {b}")))),
-    )
-    .child(div().flex().justify_end().child(upgrade))
-    .into_any_element()
 }
