@@ -498,6 +498,9 @@ impl Drop for TerminalView {
   }
 }
 
+/// How often a terminal checks whether its shell started the agent.
+const AGENT_START_POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
 fn now_millis() -> u128 {
   std::time::SystemTime::now()
     .duration_since(std::time::UNIX_EPOCH)
@@ -578,6 +581,25 @@ impl TerminalView {
     else {
       return;
     };
+    // An agent runs once its shell starts the typed command; until then
+    // `treq agent msg` neither lists it nor types into its shell.
+    if !self.host.agent_started(&self.pty) {
+      self._tasks.push(cx.spawn(async move |this, cx| loop {
+        cx.background_executor().timer(AGENT_START_POLL).await;
+        let started = this.update(cx, |view, cx| {
+          let started = view.host.agent_started(&view.pty);
+          if started {
+            let (cols, rows) = view.pty_size.unwrap_or((cols, rows));
+            view.register_for_messages(cols, rows, cx);
+          }
+          started
+        });
+        if started.unwrap_or(true) {
+          break;
+        }
+      }));
+      return;
+    }
     let session = crate::core::agent_msg::hub::SessionInfo {
       pty_id: self.pty.clone(),
       handle: crate::core::agent_msg::hub::handle(&start.agent, start.session_id),

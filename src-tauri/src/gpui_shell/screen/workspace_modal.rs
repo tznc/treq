@@ -26,7 +26,10 @@ use super::{
   workspace_dialog_data::{self, WorkspaceDialogHost},
   ActionSink, Host, ScreenAction,
 };
-use crate::gpui_shell::ui::{self, TextSize};
+use crate::gpui_shell::{
+  theme::Palette,
+  ui::{self, TextSize},
+};
 
 /// The dialog React has open, tagged by `kind`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -184,10 +187,21 @@ pub fn press(sink: &ActionSink, id: &str, cx: &mut gpui::App) {
   sink(ScreenAction::Press { id: id.into() }, cx);
 }
 
-/// `<Label className="text-xs">`: `font-medium leading-none`.
-pub fn label_xs(text: impl Into<SharedString>) -> Div {
-  ui::text(div(), TextSize::Xs)
+/// Field labels and input hints are body text, the size of the control's
+/// own text.
+pub const FIELD_TEXT_SIZE: TextSize = TextSize::Sm;
+
+/// A field's label: `text-sm font-medium`.
+pub fn field_label(text: impl Into<SharedString>) -> Div {
+  ui::text(div(), FIELD_TEXT_SIZE)
     .font_weight(FontWeight::MEDIUM)
+    .child(text.into())
+}
+
+/// The muted helper line under an input: `text-sm text-muted-foreground`.
+pub fn field_hint(text: impl Into<SharedString>, p: &Palette) -> Div {
+  ui::text(div(), FIELD_TEXT_SIZE)
+    .text_color(p.muted_foreground)
     .child(text.into())
 }
 
@@ -206,5 +220,16 @@ impl From<Check> for ui::CheckState {
       Check::Off => ui::CheckState::Off,
       Check::Some => ui::CheckState::Mixed,
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn field_text_matches_body_text_not_captions() {
+    assert_eq!(FIELD_TEXT_SIZE.metrics(), TextSize::Sm.metrics());
+    assert!(FIELD_TEXT_SIZE.metrics().0 > TextSize::Xs.metrics().0);
   }
 }
