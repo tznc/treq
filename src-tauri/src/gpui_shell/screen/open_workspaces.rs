@@ -35,7 +35,7 @@ use super::{
   open_workspaces_data::{self as data, Checked, Line, OpenWorkspacesHost, Route, Target},
   workspace_data::WorkspaceHost,
   workspace_dialog_data::{self as dialog_data, WorkspaceDialogHost},
-  workspace_modal::{label_xs, press},
+  workspace_modal::{field_hint, field_label, press},
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -903,7 +903,7 @@ impl OpenWorkspacesDialog {
         .flex_1()
         .min_w_0()
         .gap_1p5()
-        .child(label_xs(label))
+        .child(field_label(label))
         .child(
           div()
             .debug_selector(move || selector.into())
@@ -1011,7 +1011,7 @@ impl OpenWorkspacesDialog {
           .flex()
           .flex_col()
           .gap_1p5()
-          .child(label_xs("Workspaces"))
+          .child(field_label("Workspaces"))
           .child(
             div()
               .debug_selector(|| "open-workspaces-lines".into())
@@ -1023,9 +1023,7 @@ impl OpenWorkspacesDialog {
               )),
           )
           .child(
-            ui::text(div(), TextSize::Xs)
-              .text_color(p.muted_foreground)
-              .child("One per line: a title or branch name for a new workspace, an existing branch, or a GitHub pull request or branch link of one of your repositories. Indent lines (Tab) to stack each on the line above."),
+            field_hint("One per line: a title or branch name for a new workspace, an existing branch, or a GitHub pull request or branch link of one of your repositories. Indent lines (Tab) to stack each on the line above.", p),
           ),
       )
       .child(options)
@@ -1530,7 +1528,7 @@ fn pane(
             .id(SharedString::from(format!("{id}-heading")))
             .role(gpui::Role::Heading)
             .aria_label(heading)
-            .child(label_xs(heading))
+            .child(field_label(heading))
             .test_support(),
         )
         .when(picked > 0, |this| {
