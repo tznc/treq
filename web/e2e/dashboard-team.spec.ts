@@ -288,7 +288,7 @@ test.describe('Dashboard team tab', () => {
     const link = teamSection(page).getByRole('link', { name: 'View full comparison' });
     await expect(link).toHaveAttribute('href', /\/pricing\/?#feature-comparison$/);
     await link.click();
-    await expect(page.locator('#feature-comparison')).toBeInViewport();
+    await expect(page.getByRole('heading', { name: 'Feature comparison' })).toBeInViewport();
     await close();
   });
 
