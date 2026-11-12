@@ -188,7 +188,6 @@ fn code_tab_saves_the_description_on_secondary_enter(cx: &mut TestAppContext) {
   assert!(!h.drawn("workspace-description-input"));
 }
 
-
 /// PR #42's record for `code_host`'s workspace: its description still the
 /// PR's, or edited since.
 fn synced(description: bool) -> Option<crate::local_db::PrSyncRecord> {

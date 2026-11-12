@@ -30,8 +30,8 @@ use gpui_kit::component::{
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, prelude::*, px, relative, rems, Animation, AnimationExt as _,
-  AnyElement, App, Context, Div, Entity, FontWeight, Hsla, KeyDownEvent, Pixels, Role, ScrollHandle,
-  SharedString, Stateful, Subscription, Window,
+  AnyElement, App, Context, Div, Entity, FontWeight, Hsla, KeyDownEvent, Pixels, Role,
+  ScrollHandle, SharedString, Stateful, Subscription, Window,
 };
 
 use super::{
