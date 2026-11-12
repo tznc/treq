@@ -592,16 +592,7 @@ impl WindowHost for Backend {
     // The app's own reads and polls write the database too: send only when
     // what the window shows from it (titles, descriptions) changed.
     let repo_path = repo.to_string();
-    let shown = move || {
-      crate::local_db::get_workspaces(&repo_path)
-        .ok()
-        .map(|list| {
-          list
-            .into_iter()
-            .map(|w| (w.id, w.title, w.description))
-            .collect::<Vec<_>>()
-        })
-    };
+    let shown = move || crate::core::workspaces::workspace_texts(&repo_path);
     let mut last = shown();
     let mut debouncer = notify_debouncer_full::new_debouncer_opt::<
       _,
