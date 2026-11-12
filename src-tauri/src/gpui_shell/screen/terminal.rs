@@ -2612,7 +2612,9 @@ impl TerminalPane {
       let view = view.downgrade();
       cx.spawn(async move |_, cx| {
         cx.background_executor().timer(SUBMIT_DELAY).await;
-        let _ = view.update(cx, |view, cx| view.write("\r", cx));
+        view
+          .update(cx, |view, cx| view.write("\r", cx))
+          .ignore_closed();
       })
       .detach();
     }
