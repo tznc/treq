@@ -350,7 +350,7 @@ pub fn skill_details(skill: &SkillCatalogEntry) -> Vec<(String, String)> {
 pub const NOTIFY_AGENT_FINISHED: &str = "notify_agent_finished";
 
 /// Each preview feature's title and its page on the website.
-pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 5] = [
+pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 4] = [
   (
     PreviewFeature::SkillsInstallation,
     "Skills installation",
@@ -366,7 +366,6 @@ pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 5] = [
     "Linear integration",
     "/docs/concepts/linear-integration",
   ),
-  (PreviewFeature::Logs, "Logs", "/docs/concepts/logs"),
   (
     PreviewFeature::Devcontainers,
     "Devcontainer environments",
@@ -700,6 +699,11 @@ pub fn save_repo_settings(
 #[cfg(test)]
 mod save_timing_tests {
   use super::*;
+
+  #[test]
+  fn preview_features_omit_logs() {
+    assert!(PREVIEW_FEATURES.iter().all(|(_, title, _)| *title != "Logs"));
+  }
 
   #[test]
   fn names_a_repository_by_its_folder() {

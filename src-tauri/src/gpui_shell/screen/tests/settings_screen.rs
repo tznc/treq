@@ -234,7 +234,7 @@ fn settings_switches_previews_itself(cx: &mut TestAppContext) {
   let screen = drawn_settings(&mut h);
   assert!(!screen.tabs.contains(&settings::Tab::Skills));
   h.click("settings-preview-skillsInstallation");
-  h.click("settings-preview-docs-logs");
+  h.click("settings-preview-docs-devcontainers");
   h.cx.run_until_parked();
   assert!(drawn_settings(&mut h).tabs.contains(&settings::Tab::Skills));
   assert_eq!(
@@ -242,7 +242,7 @@ fn settings_switches_previews_itself(cx: &mut TestAppContext) {
     [
       "set feature_preview.skillsInstallation=true",
       "notify settingsChanged",
-      "open http://localhost:3001/docs/concepts/logs",
+      "open http://localhost:3001/docs/how-to/devcontainer-environments",
     ]
   );
 }
