@@ -75,6 +75,8 @@ struct FakeHost {
   calls: Mutex<Vec<String>>,
   /// The watched checkouts, each with the sender that reports an edit.
   watches: Mutex<Vec<(String, UnboundedSender<()>)>>,
+  /// The watched workspace databases, each with the sender that reports a write.
+  db_watches: Mutex<Vec<(String, UnboundedSender<()>)>>,
 }
 
 impl FakeHost {
@@ -266,6 +268,15 @@ impl WindowHost for FakeHost {
   fn watch_files(&self, path: &str) -> Option<FileWatch> {
     let (tx, changes) = futures::channel::mpsc::unbounded();
     self.watches.lock().unwrap().push((path.into(), tx));
+    Some(FileWatch {
+      changes,
+      _watcher: Box::new(()),
+    })
+  }
+
+  fn watch_db(&self, repo: &str) -> Option<FileWatch> {
+    let (tx, changes) = futures::channel::mpsc::unbounded();
+    self.db_watches.lock().unwrap().push((repo.into(), tx));
     Some(FileWatch {
       changes,
       _watcher: Box::new(()),
@@ -1041,6 +1052,21 @@ fn edits_on_disk_in_the_selected_checkout_read_the_changes_again(cx: &mut TestAp
   edit(&host, "/repo");
   cx.run_until_parked();
   assert_eq!(revision(cx), before + 1, "the old watch stopped");
+}
+
+#[gpui::test]
+fn a_write_to_the_workspace_database_reads_the_workspaces_again(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let _window = Window::open(cx, host.clone(), Some("/repo"));
+  cx.run_until_parked();
+  let before = host.count("workspaces /repo");
+  {
+    let watches = host.db_watches.lock().unwrap();
+    let (_, tx) = watches.iter().find(|(p, _)| p == "/repo").expect("no db watch");
+    let _ = tx.unbounded_send(());
+  }
+  cx.run_until_parked();
+  assert!(host.count("workspaces /repo") > before);
 }
 
 #[gpui::test]
