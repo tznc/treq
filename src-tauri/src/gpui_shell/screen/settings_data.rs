@@ -702,7 +702,9 @@ mod save_timing_tests {
 
   #[test]
   fn preview_features_omit_logs() {
-    assert!(PREVIEW_FEATURES.iter().all(|(_, title, _)| *title != "Logs"));
+    assert!(PREVIEW_FEATURES
+      .iter()
+      .all(|(_, title, _)| *title != "Logs"));
   }
 
   #[test]
