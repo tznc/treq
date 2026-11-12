@@ -245,6 +245,10 @@ pub enum Variant {
   /// A muted icon that tints red on hover: a destructive action that asks
   /// for confirmation next.
   DestructiveGhost,
+  /// A muted, search-field-like outline with its keyboard shortcut at the
+  /// end ([`Button::shortcut`]): an action reached by a key, such as Go to
+  /// file.
+  Command,
 }
 
 /// `ui/button.tsx` sizes.
@@ -292,6 +296,8 @@ pub struct Button {
   hover_bg: Option<Hsla>,
   /// The accessible name: the first label, unless set with `aria_label`.
   name: Option<SharedString>,
+  /// The action's shortcut, drawn after every other child.
+  shortcut: Option<Kbd>,
 }
 
 impl Button {
@@ -311,6 +317,7 @@ impl Button {
       style: StyleRefinement::default(),
       hover_bg: None,
       name: None,
+      shortcut: None,
     }
   }
 
@@ -369,6 +376,13 @@ impl Button {
   pub fn copy_icon(mut self, copied: impl Into<copy_feedback::Copied>, size: f32) -> Self {
     let copied = copied.into();
     self.children.push(ButtonChild::CopyIcon(copied, size));
+    self
+  }
+
+  /// The action's shortcut as a key cap at the button's end, whatever
+  /// order the other children were added in.
+  pub fn shortcut(mut self, kbd: Kbd) -> Self {
+    self.shortcut = Some(kbd);
     self
   }
 
@@ -434,7 +448,7 @@ impl Button {
       Variant::Warning => p.warning_foreground,
       Variant::Success | Variant::Github => p.primary_foreground,
       Variant::DestructiveOutline => p.destructive,
-      Variant::DestructiveGhost => p.muted_foreground,
+      Variant::DestructiveGhost | Variant::Command => p.muted_foreground,
     }
   }
 }
@@ -481,6 +495,7 @@ impl Button {
         p.destructive.opacity(0.1),
       ),
       Variant::DestructiveGhost => (clear, clear, p.destructive.opacity(0.1)),
+      Variant::Command => (p.background, p.border, p.hover()),
     };
     let hover_bg = self.hover_bg.unwrap_or(hover_bg);
     let (bg, hover_bg) = if self.selected && !self.filled() {
@@ -573,7 +588,10 @@ impl RenderOnce for Button {
       .rounded(zpx(theme::RADIUS_MD))
       .p_0()
       .min_h_0()
-      .when(self.variant != Variant::Outline, |b| b.border_0())
+      .when(
+        !matches!(self.variant, Variant::Outline | Variant::Command),
+        |b| b.border_0(),
+      )
       .map(|b| match self.size {
         Size::Default => text(b.h(zpx(40.)).px_4(), TextSize::Sm),
         Size::Icon => b.size(zpx(40.)),
@@ -583,6 +601,9 @@ impl RenderOnce for Button {
         Size::Md => text(b.h(zpx(theme::CONTROL_MD)).px_2p5(), TextSize::Sm),
         Size::Sm => text(b.h(zpx(32.)).px_3(), TextSize::Sm),
         Size::Xs => text(b.h(zpx(24.)).px_2(), TextSize::Sm),
+      })
+      .when(self.variant == Variant::Command, |b| {
+        b.gap_3().px_4().rounded(radius::LG)
       })
       .when(filled && !disabled, |b| b.shadow_sm())
       .when_some(self.on_click.filter(|_| !disabled), |b, f| {
@@ -600,7 +621,10 @@ impl RenderOnce for Button {
         ButtonChild::CopyIcon(copied, size) => {
           copy_feedback::copy_icon(id.clone(), copied, size, icon_color, palette.success)
         }
-      }));
+      }))
+      .when_some(self.shortcut, |b, kbd| {
+        b.child(gpui::div().ml_auto().child(kbd))
+      });
     el.style().refine(&style);
     el
   }
@@ -903,6 +927,26 @@ mod tests {
     let ghost = Button::new("d", &p).variant(Variant::DestructiveGhost);
     assert_eq!(ghost.colors().hover_bg, p.destructive.opacity(0.1));
     assert_eq!(ghost.foreground(), p.muted_foreground);
+  }
+
+  #[test]
+  fn a_command_button_is_a_muted_field_with_its_shortcut_last() {
+    let p = theme::palette(false);
+    let command = Button::new("c", &p)
+      .variant(Variant::Command)
+      .shortcut(Kbd::from_label("Ctrl + P", &p))
+      .icon(theme::ICON_SEARCH, 16.)
+      .label("Go to file");
+    assert!(!command.filled());
+    assert_eq!(command.colors().bg, p.background);
+    assert_eq!(command.colors().border, p.border);
+    assert_eq!(command.colors().hover_bg, p.hover());
+    assert_eq!(command.foreground(), p.muted_foreground);
+    assert!(matches!(
+      command.children[..],
+      [ButtonChild::Icon(..), ButtonChild::Element(_)]
+    ));
+    assert!(command.shortcut.is_some());
   }
 
   #[test]
