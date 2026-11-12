@@ -8,7 +8,7 @@ test("the home Code tab's Agent button starts a session", async ({
   page,
 }) => {
   await goHome(page);
-  await page.getByRole("button", { name: "Agent", exact: true }).click();
+  await page.getByRole("button", { name: "Start an agent", exact: true }).click();
   const dialog = page.getByRole("dialog", {
     name: "Start a new agent session",
   });

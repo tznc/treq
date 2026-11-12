@@ -57,7 +57,7 @@ test("code: workspace Code tab, action row, alerts and Agent", async ({ page, co
   await page.keyboard.press("Escape");
   await expect(conflicts).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Agent", exact: true }).click();
+  await page.getByRole("button", { name: "Start an agent", exact: true }).click();
   const title = (p: Page) => p.getByRole("dialog", { name: "Start a new agent session" });
   await expect(title(page)).toBeVisible();
   const dialog = page;
