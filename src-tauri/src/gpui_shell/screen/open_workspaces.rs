@@ -1464,9 +1464,8 @@ impl OpenWorkspacesDialog {
       .variant(Variant::Outline)
       .size(ui::Size::Sm)
       .h(zpx(28.))
-      .icon(theme::ICON_USER, 12.)
+      .checked(self.assigned)
       .label("Assigned to me")
-      .pressed(self.assigned)
       .on_click(cx.listener(|view, _, _, cx| {
         view.assigned = !view.assigned;
         view.load_prs(cx);
