@@ -238,10 +238,6 @@ fn serializes_actions_for_react() {
     serde_json::json!({"kind": "startAgent", "id": null})
   );
   assert_eq!(
-    json(SidebarAction::BulkArchive),
-    serde_json::json!({"kind": "bulkArchive"})
-  );
-  assert_eq!(
     json(SidebarAction::HomeMenu {
       repo_path: "/r".into()
     }),

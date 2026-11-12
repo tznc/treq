@@ -1280,7 +1280,7 @@ mod tests {
   fn leaves_menus_and_drags_to_their_own_handlers() {
     let (mut model, data) = (model(), data());
     assert_eq!(
-      model.sidebar_action(&SidebarAction::BulkArchive, &data),
+      model.sidebar_action(&SidebarAction::ProjectMenu, &data),
       None
     );
   }

@@ -37,7 +37,6 @@ pub fn handles(action: &SidebarAction) -> bool {
       | SidebarAction::WorkspaceMenu { .. }
       | SidebarAction::WorkspacesMenu
       | SidebarAction::RepoWorkspaceMenu { .. }
-      | SidebarAction::BulkArchive
       | SidebarAction::MoveWorkspace { .. }
   )
 }
@@ -110,14 +109,6 @@ pub fn handle(
           show(app, &label, backend, items);
         });
       });
-      true
-    }
-    SidebarAction::BulkArchive => {
-      let ids = selected_ids(active);
-      if ids.is_empty() {
-        return false;
-      }
-      archive_all(app, backend, active.path.clone(), ids);
       true
     }
     SidebarAction::MoveWorkspace { id, onto } => {

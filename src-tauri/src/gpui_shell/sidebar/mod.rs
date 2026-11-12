@@ -226,7 +226,6 @@ pub enum SidebarAction {
   Stack {
     id: Option<i64>,
   },
-  BulkArchive,
   /// Right-click on a repository's home row: React pops its native menu.
   #[serde(rename_all = "camelCase")]
   HomeMenu {
