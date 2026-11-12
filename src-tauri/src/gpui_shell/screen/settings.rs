@@ -981,6 +981,20 @@ impl SettingsView {
           };
         }
       }
+      "skills.title" | "skills.author" => {
+        let Some(skill) = self.catalog_skill(&id).map(|v| &v.skill) else {
+          return;
+        };
+        let path = if action == "skills.title" {
+          skill
+            .route
+            .clone()
+            .unwrap_or_else(|| format!("/skills/{}", skill.id))
+        } else {
+          format!("/skills?provider={}", skill.source)
+        };
+        self.host.open_url(&format!("{}{path}", native::web_url()));
+      }
       "skills.source" => {
         let url = self
           .skills
@@ -2978,15 +2992,27 @@ impl SettingsView {
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(
+                .child({
+                  let selector = format!("skill-title-{id}");
                   ui::text(div(), TextSize::Sm)
+                    .id(selector.clone())
+                    .debug_selector(move || selector)
+                    .cursor_pointer()
+                    .hover(|s| s.opacity(0.8))
+                    .on_click(self.press(&format!("skills.title:{id}")))
                     .font_weight(FontWeight::MEDIUM)
                     .truncate()
-                    .child(row.name.clone()),
-                )
+                    .child(row.name.clone())
+                })
                 .when(!row.source.is_empty(), |this| {
+                  let selector = format!("skill-author-{id}");
                   this.child(
                     ui::text(div(), TextSize::Xs)
+                      .id(selector.clone())
+                      .debug_selector(move || selector)
+                      .cursor_pointer()
+                      .hover(|s| s.text_color(p.foreground))
+                      .on_click(self.press(&format!("skills.author:{id}")))
                       .text_color(p.muted_foreground)
                       .child(row.source.clone()),
                   )

@@ -324,6 +324,31 @@ fn skills_uninstall_and_move_between_levels(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn skills_title_and_author_open_the_web_skill_library(cx: &mut TestAppContext) {
+  let mut pdf = skill("anthropic/pdf", "PDF", None);
+  pdf.skill.source = "anthropic".into();
+  pdf.skill.route = Some("/skills/anthropic/pdf".into());
+  let host = Arc::new(FakeHost {
+    skills: vec![pdf],
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, settings_route("skills"), host.clone());
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  h.click("skill-title-anthropic/pdf");
+  h.click("skill-author-anthropic/pdf");
+  h.cx.run_until_parked();
+  let web = crate::gpui_shell::native::web_url();
+  assert_eq!(
+    host.writes(),
+    [
+      format!("open {web}/skills/anthropic/pdf"),
+      format!("open {web}/skills?provider=anthropic"),
+    ]
+  );
+}
+
+#[gpui::test]
 fn skills_dialog_cancels(cx: &mut TestAppContext) {
   let (mut h, host) = skills_harness(cx);
   h.click("skill-install-docx");

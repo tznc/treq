@@ -64,10 +64,14 @@ export default function SkillsPage() {
   const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState('all');
 
-  // Deep-link support: /skills?q=<name> (used by the sitewide search index).
+  // Deep-link support: /skills?q=<name> (used by the sitewide search index)
+  // and /skills?provider=<source> (the desktop app's author links).
   useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get('q');
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get('q');
     if (q) setQuery(q);
+    const provider = params.get('provider');
+    if (provider) setSelectedProviders(new Set([provider]));
   }, []);
 
   const providerMatch = (skill: Skill) =>
