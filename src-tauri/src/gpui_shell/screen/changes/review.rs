@@ -2394,6 +2394,7 @@ impl ChangesView {
         .description("They are deleted from this machine. This can't be undone.")
         .on_close(ui::handler(cx, move |view, _, cx| close(view, cx)))
         .on_primary(ui::handler(cx, |view, _, cx| view.discard_review(cx)))
+        .confirm()
         .footer([
           Button::new("keep-reviewing", p)
             .variant(Variant::Outline)
