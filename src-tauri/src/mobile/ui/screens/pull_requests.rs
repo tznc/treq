@@ -334,7 +334,7 @@ impl PullRequestsScreen {
   fn filters_sheet(&mut self, cx: &mut Context<Self>) {
     let options = filter_options(self.list.ready().map(Vec::as_slice).unwrap_or_default());
     let this = cx.weak_entity();
-    let set = |apply: fn(&mut PrFilters, Option<String>)| -> Rc<dyn Fn(Option<String>, &mut App)> {
+    let set = |apply: fn(&mut PrFilters, Option<String>)| -> widgets::OnPick {
       let this = this.clone();
       Rc::new(move |value, cx| {
         this

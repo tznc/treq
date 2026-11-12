@@ -497,18 +497,17 @@ impl IssuesScreen {
       .unwrap_or_default();
     let options = issue_filter_options(items);
     let this = cx.weak_entity();
-    let set =
-      |apply: fn(&mut IssueFilters, Option<String>)| -> Rc<dyn Fn(Option<String>, &mut App)> {
-        let this = this.clone();
-        Rc::new(move |value, cx| {
-          this
-            .update(cx, |screen, cx| {
-              apply(&mut screen.filters, value);
-              cx.notify();
-            })
-            .ok();
-        })
-      };
+    let set = |apply: fn(&mut IssueFilters, Option<String>)| -> widgets::OnPick {
+      let this = this.clone();
+      Rc::new(move |value, cx| {
+        this
+          .update(cx, |screen, cx| {
+            apply(&mut screen.filters, value);
+            cx.notify();
+          })
+          .ok();
+      })
+    };
     let mut entries = vec![
       widgets::filter_field(
         "filter-author",

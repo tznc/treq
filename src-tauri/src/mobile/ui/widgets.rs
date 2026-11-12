@@ -381,6 +381,9 @@ pub fn filter_row(
     )
 }
 
+/// What a Filters sheet entry does with the value picked (`None` for Any).
+pub type OnPick = std::rc::Rc<dyn Fn(Option<String>, &mut App)>;
+
 /// A Filters sheet entry: "Author: ada", opening a menu of "Any" and
 /// `values` that hands the pick to `on_pick` (`None` for Any).
 pub fn filter_field(
@@ -388,7 +391,7 @@ pub fn filter_field(
   name: &'static str,
   current: Option<String>,
   values: Vec<String>,
-  on_pick: std::rc::Rc<dyn Fn(Option<String>, &mut App)>,
+  on_pick: OnPick,
 ) -> super::sheet::MenuEntry {
   let label = format!("{name}: {}", current.as_deref().unwrap_or("Any"));
   super::sheet::MenuEntry::new(id, label, move |_, cx| {
