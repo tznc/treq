@@ -338,7 +338,7 @@ mod tests {
         request_id: "r-1".into(),
         repo: "/src/app".into(),
         op: Op::List {
-          repo: repo.clone(),
+          repo,
           local_only: false,
           pty: None,
           everywhere: false,
