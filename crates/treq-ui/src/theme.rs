@@ -652,7 +652,11 @@ impl Palette {
   /// The GitHub button's fill: GitHub's own near-black in light, and its
   /// dark-theme button grey in dark, where near-black meets the background.
   pub fn github(&self) -> Hsla {
-    tw::color(if self.dark { tw::GITHUB_DARK } else { tw::GITHUB })
+    tw::color(if self.dark {
+      tw::GITHUB_DARK
+    } else {
+      tw::GITHUB
+    })
   }
 }
 
