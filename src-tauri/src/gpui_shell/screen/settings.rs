@@ -2964,6 +2964,28 @@ impl SettingsView {
       .child(div().flex().flex_col().gap_3().children(rows))
   }
 
+  /// A skill's title or author, opening its treq.dev skill library page.
+  fn skill_link(
+    &self,
+    selector: String,
+    kind: &str,
+    id: &str,
+    label: &str,
+    p: &Palette,
+  ) -> gpui::Stateful<gpui::Div> {
+    let name = SharedString::from(label.to_string());
+    let foreground = p.foreground;
+    ui::text(div(), TextSize::Sm)
+      .id(selector.clone())
+      .debug_selector(move || selector)
+      .role(gpui::Role::Link)
+      .aria_label(name.clone())
+      .cursor_pointer()
+      .hover(move |s| s.text_color(foreground))
+      .on_click(self.press(&format!("skills.{kind}:{id}")))
+      .child(name)
+  }
+
   /// `SkillRow`: one registry skill, with its install control.
   fn skill_row(
     &self,
@@ -2992,29 +3014,18 @@ impl SettingsView {
                 .flex()
                 .items_center()
                 .gap_2()
-                .child({
-                  let selector = format!("skill-title-{id}");
-                  ui::text(div(), TextSize::Sm)
-                    .id(selector.clone())
-                    .debug_selector(move || selector)
-                    .cursor_pointer()
-                    .hover(|s| s.opacity(0.8))
-                    .on_click(self.press(&format!("skills.title:{id}")))
+                .child(
+                  self
+                    .skill_link(format!("skill-title-{id}"), "title", id, &row.name, p)
                     .font_weight(FontWeight::MEDIUM)
-                    .truncate()
-                    .child(row.name.clone())
-                })
+                    .truncate(),
+                )
                 .when(!row.source.is_empty(), |this| {
-                  let selector = format!("skill-author-{id}");
                   this.child(
-                    ui::text(div(), TextSize::Xs)
-                      .id(selector.clone())
-                      .debug_selector(move || selector)
-                      .cursor_pointer()
-                      .hover(|s| s.text_color(p.foreground))
-                      .on_click(self.press(&format!("skills.author:{id}")))
-                      .text_color(p.muted_foreground)
-                      .child(row.source.clone()),
+                    self
+                      .skill_link(format!("skill-author-{id}"), "author", id, &row.source, p)
+                      .text_xs()
+                      .text_color(p.muted_foreground),
                   )
                 })
                 .children(row.labels.iter().map(|label| {
