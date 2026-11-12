@@ -58,7 +58,7 @@ pub struct SidebarSnapshot {
   /// Why "Open shell" is unavailable here, or `None` when it works.
   #[serde(default)]
   pub shell_unavailable: Option<String>,
-  /// The "Archive N workspaces" button's count, or `None` to hide it.
+  /// How many workspaces are multi-selected, or `None` with none.
   #[serde(default)]
   pub bulk_archive: Option<u32>,
   /// The window's repositories: the main one first.
@@ -236,6 +236,9 @@ pub enum SidebarAction {
   WorkspaceMenu {
     id: i64,
   },
+  /// Right-click on one of several selected workspace rows: the menu acts
+  /// on every selected workspace.
+  WorkspacesMenu,
   /// A click on the modal backdrop drawn over the sidebar.
   DismissModal,
   /// A workspace row dropped onto another row, to stack it there, or onto
@@ -350,17 +353,12 @@ enum Item {
   Skeleton(usize, usize),
   /// Workspace row `.1` of the repository.
   Row(usize, usize),
-  /// "Archive N workspaces", under the active repository's rows.
-  BulkArchive(usize),
 }
 
 impl Item {
   fn repo(self) -> usize {
     match self {
-      Item::Label(repo)
-      | Item::Skeleton(repo, _)
-      | Item::Row(repo, _)
-      | Item::BulkArchive(repo) => repo,
+      Item::Label(repo) | Item::Skeleton(repo, _) | Item::Row(repo, _) => repo,
     }
   }
 }
@@ -379,9 +377,6 @@ fn items(snapshot: &SidebarSnapshot) -> Vec<Item> {
       items.extend((0..6).map(|i| Item::Skeleton(index, i)));
     }
     items.extend((0..repo.workspaces.len()).map(|row| Item::Row(index, row)));
-    if repo.active && snapshot.bulk_archive.is_some() {
-      items.push(Item::BulkArchive(index));
-    }
   }
   items
 }
@@ -1423,12 +1418,6 @@ impl Sidebar {
           .into_any_element(),
         None => div().into_any_element(),
       },
-      Item::BulkArchive(_) => {
-        bulk_archive_button(self.snapshot.bulk_archive.unwrap_or(0), &palette)
-          .on_click(self.on_action(SidebarAction::BulkArchive))
-          .test_support()
-          .into_any_element()
-      }
     };
     // Each repository's rows sit in their own element, so workspace ids,
     // which are per repository, do not collide.
@@ -1659,7 +1648,9 @@ impl Sidebar {
       .on_mouse_down(
         MouseButton::Right,
         self.on_menu(
-          if repo_active {
+          if repo_active && row.selected && self.snapshot.bulk_archive.is_some_and(|n| n > 1) {
+            SidebarAction::WorkspacesMenu
+          } else if repo_active {
             SidebarAction::WorkspaceMenu { id }
           } else {
             SidebarAction::RepoWorkspaceMenu {
@@ -1706,35 +1697,4 @@ fn skeleton_row(index: usize, palette: &Palette) -> impl IntoElement {
         .rounded_md()
         .bg(palette.muted),
     )
-}
-
-/// "Archive N workspaces", shown while workspaces are multi-selected.
-fn bulk_archive_button(count: u32, palette: &Palette) -> gpui::Stateful<gpui::Div> {
-  let label = if count == 1 {
-    "Archive 1 workspace".to_string()
-  } else {
-    format!("Archive {count} workspaces")
-  };
-  div()
-    .id("bulk-archive")
-    .debug_selector(|| "bulk-archive".into())
-    .role(Role::Button)
-    .aria_label(label.clone())
-    .flex()
-    .items_center()
-    .justify_center()
-    .gap_2()
-    .mt_2()
-    .h(zpx(32.))
-    .rounded_md()
-    .bg(palette.destructive)
-    .text_color(palette.destructive_foreground)
-    .cursor_pointer()
-    .hover(|style| style.opacity(0.9))
-    .child(icon(
-      theme::ICON_ARCHIVE,
-      14.,
-      palette.destructive_foreground,
-    ))
-    .child(label)
 }
