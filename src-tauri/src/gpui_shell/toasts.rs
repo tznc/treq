@@ -161,11 +161,17 @@ mod tests {
     use toast_queue::ToastKind::*;
     for kind in [Success, Info] {
       assert_eq!(expiry(&toast(kind, None)), toast_queue::PLAIN_DURATION);
-      assert_eq!(expiry(&toast(kind, Some("Undo"))), toast_queue::ACTION_DURATION);
+      assert_eq!(
+        expiry(&toast(kind, Some("Undo"))),
+        toast_queue::ACTION_DURATION
+      );
     }
     for kind in [Error, Warning] {
       assert_eq!(expiry(&toast(kind, None)), toast_queue::ACTION_DURATION);
-      assert_eq!(expiry(&toast(kind, Some("Retry"))), toast_queue::ACTION_DURATION);
+      assert_eq!(
+        expiry(&toast(kind, Some("Retry"))),
+        toast_queue::ACTION_DURATION
+      );
     }
   }
 }
