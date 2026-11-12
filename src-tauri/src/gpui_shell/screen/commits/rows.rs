@@ -8,6 +8,7 @@
 //! what the nested layout's collapsing margins made it, and each row in the
 //! timeline draws its own stretch of the rule.
 
+use crate::core::review::selected_range;
 use crate::gpui_shell::ui::radius;
 use gpui_kit::base::TestSupportExt as _;
 use std::{collections::HashSet, rc::Rc};
@@ -711,7 +712,6 @@ impl CommitsView {
         .justify_end()
         .text_color(gutter_fg)
         .cursor_pointer()
-        .hover(move |s| s.bg(p.hover()))
         .child(n.map(|n| n.to_string()).unwrap_or_default())
         .on_mouse_down(
           MouseButton::Left,
@@ -727,7 +727,8 @@ impl CommitsView {
         .flex_none()
         .flex()
         .items_center()
-        .justify_center()
+        .justify_end()
+        .pr_0p5()
         .child(
           div()
             .id(SharedString::from(format!("add-comment-{h}-{l}")))
@@ -740,7 +741,7 @@ impl CommitsView {
             .opacity(0.)
             .group_hover("diff-line", |s| s.opacity(1.))
             .cursor_pointer()
-            .child(ui::icon(theme::ICON_PLUS, 12., p.primary_foreground))
+            .child(ui::icon(theme::ICON_PLUS, 10., p.primary_foreground))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |view, _, _, cx| {
               cx.stop_propagation();
@@ -749,15 +750,39 @@ impl CommitsView {
         )
     };
     let (id, file) = (commit.commit_id.clone(), path.to_string());
+    let (press_id, press_file) = (commit.commit_id.clone(), path.to_string());
     let selector = format!("commit-line-{path}-{h}-{l}");
+    let code_selector = format!("commit-code-{path}-{h}-{l}");
+    let picked: Vec<_> = self
+      .text
+      .as_ref()
+      .filter(|t| t.commit_id == commit.commit_id && t.path == path)
+      .zip(self.file_diff(&commit.commit_id, path))
+      .and_then(|(t, f)| selected_range(&f.hunks, t.anchor, t.head, at))
+      .filter(|r| !r.is_empty())
+      .map(|r| (r, p.selected()))
+      .into_iter()
+      .collect();
+    let styled = highlight::styled_marked(
+      line.get(1..).unwrap_or(""),
+      highlight::language(path),
+      p.dark,
+      &picked,
+    );
+    let layout = styled.layout().clone();
+    let (layouts, key) = (
+      self.layouts.clone(),
+      (commit.commit_id.clone(), path.to_string(), at),
+    );
     div()
       .id(SharedString::from(format!("diff-line-{h}-{l}")))
       .debug_selector(move || selector)
       .group("diff-line")
       .flex()
       .when_some(bg, |this, bg| this.bg(bg))
-      .on_mouse_move(cx.listener(move |view, _: &MouseMoveEvent, _, cx| {
+      .on_mouse_move(cx.listener(move |view, e: &MouseMoveEvent, _, cx| {
         view.drag_to(&id, &file, at, cx);
+        view.drag_text(&id, &file, at, e.position, cx);
       }))
       .child(gutter(old, "old", cx))
       .child(gutter(new, "new", cx))
@@ -773,15 +798,32 @@ impl CommitsView {
       )
       .child(
         div()
+          .id(SharedString::from(code_selector.clone()))
+          .debug_selector(move || code_selector)
+          .relative()
           .flex_1()
           .min_w_0()
           .overflow_hidden()
           .whitespace_nowrap()
-          .child(highlight::styled(
-            line.get(1..).unwrap_or(""),
-            highlight::language(path),
-            p.dark,
-          )),
+          .cursor_text()
+          .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |view, e: &gpui::MouseDownEvent, window, cx| {
+              window.focus(&view.focus, cx);
+              view.press_text(&press_id, &press_file, at, e.position, cx);
+            }),
+          )
+          .child(styled)
+          .child(
+            gpui::canvas(
+              move |_, _, _| {
+                layouts.borrow_mut().insert(key.clone(), layout.clone());
+              },
+              |_, _, _, _| {},
+            )
+            .absolute()
+            .size_0(),
+          ),
       )
   }
 }

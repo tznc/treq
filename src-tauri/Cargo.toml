@@ -185,7 +185,7 @@ treq-ui = { path = "../crates/treq-ui", optional = true }
 # Playwright protocol server inside the GPUI app (the `e2e` feature). It
 # reads the elements gpui-kit observes; `painted-text` adds their text. The
 # branch adds `Server::on_adopt_page` (not in 0.1.0 yet).
-gpui-playwright = { git = "https://github.com/Ziinc/gpui-playwright", branch = "claude/project-thread-yruhjk", features = ["painted-text"], optional = true }
+gpui-playwright = { git = "https://github.com/Ziinc/gpui-playwright", branch = "claude/gallant-turing-nhki5r", features = ["painted-text"], optional = true }
 # Syntax highlighting for GPUI diffs, the same syntect set gpui-kit uses.
 syntect = { version = "5.3.0", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy"], optional = true }
 two-face = { version = "0.4.5", default-features = false, features = ["syntect-fancy"], optional = true }
@@ -251,7 +251,7 @@ async-trait = "0.1.92"
 base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "http2"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "io-util", "net", "sync"] }
-russh = "0.63.1"
+russh = "0.65"
 # WebSocket transport for managed SSH through the `remote-ssh-relay` Edge
 # Function. TLS uses the same rustls + ring stack reqwest already pulls in.
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
