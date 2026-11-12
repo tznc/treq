@@ -487,7 +487,7 @@ function SubscriptionTab({
               )}
             </div>
           )}
-          {billingCustomer && (
+          {isPro && billingCustomer && (
             <button
               type="button"
               onClick={openPortal}
