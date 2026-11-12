@@ -83,26 +83,23 @@ pub fn push(
   redraw(app, label);
   let (app, label) = (app.clone(), label.to_string());
   tauri::async_runtime::spawn(async move {
-    // Only a plain success toast goes by itself; errors, warnings and
-    // toasts with an action wait to be dismissed.
-    let Some(duration) = expiry(&toast) else {
-      return;
-    };
-    tokio::time::sleep(duration).await;
+    tokio::time::sleep(expiry(&toast)).await;
     if remove(&label, &toast.id) {
       redraw(&app, &label);
     }
   });
 }
 
-/// How long a toast shows before it dismisses itself; `None` stays until
-/// closed.
-fn expiry(toast: &QueuedToast) -> Option<Duration> {
-  let plain = toast.kind == toast_queue::ToastKind::Success && toast.action.is_none();
-  match (plain, toast.description.is_none()) {
-    (true, true) => Some(Duration::from_secs(4)),
-    (true, false) => Some(toast.duration()),
-    _ => None,
+/// How long a toast shows before it dismisses itself: errors, warnings and
+/// toasts with an action stay longer.
+fn expiry(toast: &QueuedToast) -> Duration {
+  use toast_queue::ToastKind::{Error, Warning};
+  if matches!(toast.kind, Error | Warning) {
+    return toast_queue::ACTION_DURATION;
+  }
+  match (toast.action.is_none(), toast.description.is_none()) {
+    (true, true) => Duration::from_secs(4),
+    _ => toast.duration(),
   }
 }
 
@@ -143,4 +140,32 @@ fn redraw(app: &AppHandle, label: &str) {
 /// Forgets a destroyed window's toasts.
 pub fn forget(label: &str) {
   windows().lock_or_recover().remove(label);
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn toast(kind: toast_queue::ToastKind, action: Option<&str>) -> QueuedToast {
+    QueuedToast {
+      id: "treq-1".into(),
+      title: "t".into(),
+      description: Some("d".into()),
+      kind,
+      action: action.map(str::to_string),
+    }
+  }
+
+  #[test]
+  fn every_toast_dismisses_itself() {
+    use toast_queue::ToastKind::*;
+    for kind in [Success, Info] {
+      assert_eq!(expiry(&toast(kind, None)), toast_queue::PLAIN_DURATION);
+      assert_eq!(expiry(&toast(kind, Some("Undo"))), toast_queue::ACTION_DURATION);
+    }
+    for kind in [Error, Warning] {
+      assert_eq!(expiry(&toast(kind, None)), toast_queue::ACTION_DURATION);
+      assert_eq!(expiry(&toast(kind, Some("Retry"))), toast_queue::ACTION_DURATION);
+    }
+  }
 }
