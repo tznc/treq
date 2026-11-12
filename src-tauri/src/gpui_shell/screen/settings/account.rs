@@ -907,7 +907,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
         "Create cloud workspace"
       }
       .into(),
-      disabled: cloud.submitting || stage.is_some(),
+      disabled: cloud.submitting || stage.is_some() || pro_required.is_some(),
       spinning: creating || stage.is_some(),
       stage,
     }),
@@ -2412,6 +2412,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
             Button::new("cloud-upgrade", p)
               .variant(Variant::Outline)
               .size(Size::Sm)
+              .child(ui::icon(theme::ICON_CREDIT_CARD, 12., p.foreground))
               .label("Upgrade to Pro")
               .on_click(press("cloud.upgrade")),
           ),
@@ -3116,9 +3117,13 @@ impl SettingsView {
       .child(
         ui::card_actions().mt_4().child(
           Button::new("account-manage-subscription", p)
-            .variant(Variant::Outline)
+            .when(s.pro, |b| b.variant(Variant::Outline))
             .size(Size::Sm)
-            .child(ui::icon(theme::ICON_EXTERNAL_LINK, 12., p.foreground))
+            .child(ui::icon(
+              if s.pro { theme::ICON_EXTERNAL_LINK } else { theme::ICON_CREDIT_CARD },
+              12.,
+              if s.pro { p.foreground } else { p.primary_foreground },
+            ))
             .label(s.manage_label.clone())
             .on_click(self.press("account.manage")),
         ),
