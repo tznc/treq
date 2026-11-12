@@ -432,3 +432,29 @@ test("open-workspaces: Tab reaches a pull request checkbox and Space toggles it"
     ],
   });
 });
+
+for (const [state, key] of [
+  ["single", null],
+  ["multi", "lin_api_qa"],
+] as const) {
+  test(`open-workspaces: ${state} integration header`, async ({ page }) => {
+    linearKey(key);
+    await home(page);
+    await page.getByRole("button", { name: "New workspace…" }).first().click();
+    await expect(
+      page.getByRole("heading", { name: "Your pull requests" }),
+    ).toBeVisible();
+    await settle(page, 800);
+    await capture(page, {
+      name: `13-open-workspaces-integrations-${state}`,
+      title: `New workspace dialog, ${state} integration`,
+      expectations: [
+        key === null
+          ? "Right column opens with a GITHUB header and icon, no tab strip"
+          : "Right column opens with GitHub / Linear tabs",
+        "A divider line separates it from 'Your pull requests' below",
+      ],
+    });
+    await page.keyboard.press("Escape");
+  });
+}
