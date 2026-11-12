@@ -2380,7 +2380,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.8.9",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -5047,7 +5047,7 @@ dependencies = [
 [[package]]
 name = "gpui-playwright"
 version = "0.1.0"
-source = "git+https://github.com/Ziinc/gpui-playwright?branch=claude%2Fproject-thread-yruhjk#f3006ae395f4e39b220bf20bced6c0eb94a115c7"
+source = "git+https://github.com/Ziinc/gpui-playwright?branch=claude%2Fgallant-turing-nhki5r#ae646246d4cb5d53c7fbb71d562144e9f9154fe7"
 dependencies = [
  "async-channel",
  "base64 0.22.1",
@@ -5066,7 +5066,7 @@ dependencies = [
 [[package]]
 name = "gpui-playwright-selectors"
 version = "0.1.0"
-source = "git+https://github.com/Ziinc/gpui-playwright?branch=claude%2Fproject-thread-yruhjk#f3006ae395f4e39b220bf20bced6c0eb94a115c7"
+source = "git+https://github.com/Ziinc/gpui-playwright?branch=claude%2Fgallant-turing-nhki5r#ae646246d4cb5d53c7fbb71d562144e9f9154fe7"
 dependencies = [
  "regex",
  "serde_json",
@@ -7820,7 +7820,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -8337,7 +8337,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -10535,7 +10535,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8050abb251097357e24aff63ba2c52a6309ecb7d23a5474023df960a02694d8"
 dependencies = [
  "annotate-snippets",
- "base64 0.23.1",
+ "base64 0.21.7",
  "encoding_rs_io",
  "granit-parser",
  "nohash-hasher",
