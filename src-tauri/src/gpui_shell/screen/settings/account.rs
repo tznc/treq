@@ -3114,11 +3114,10 @@ impl SettingsView {
           }),
       )
       .child(
-        div().mt_4().child(
+        ui::card_actions().mt_4().child(
           Button::new("account-manage-subscription", p)
             .variant(Variant::Outline)
             .size(Size::Sm)
-            .w_full()
             .child(ui::icon(theme::ICON_EXTERNAL_LINK, 12., p.foreground))
             .label(s.manage_label.clone())
             .on_click(self.press("account.manage")),

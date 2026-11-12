@@ -856,6 +856,16 @@ pub fn card(p: &Palette) -> Div {
     .text_color(p.card_foreground)
 }
 
+/// A card's action row for a hand-built [`card`]: buttons pulled right at
+/// their own width, like a dialog footer. [`Card`] does this via [`CardFooter`].
+pub fn card_actions() -> Div {
+  div()
+    .flex()
+    .items_center()
+    .justify_end()
+    .gap(zpx(theme::space::SM))
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
