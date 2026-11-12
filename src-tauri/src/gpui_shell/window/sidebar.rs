@@ -199,6 +199,7 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
                 streaming.get(branch).copied().unwrap_or(false),
               ),
               pr,
+              target: workspace.target_branch.clone(),
               archiving: false,
               exiting: false,
             }

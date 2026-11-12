@@ -96,6 +96,8 @@ pub enum TooltipContent {
   Branch {
     name: Option<SharedString>,
     title: SharedString,
+    /// The branch it merges into, drawn after an arrow.
+    target: Option<SharedString>,
     conflicted: bool,
     pr: Option<PrState>,
   },
@@ -578,11 +580,15 @@ fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
     TooltipContent::Branch {
       name,
       title,
+      target,
       conflicted,
       pr,
     } => {
       // `gap-1.5` after a `w-3` icon.
       let mut width = 12. + 6. + text_width(cx, title, theme::MONO_FONT);
+      if let Some(target) = target {
+        width += text_width(cx, &format!(" → {target}"), theme::MONO_FONT);
+      }
       let mut lines = 1;
       if let Some(name) = name {
         // A long title wraps; its lines sit flush, without the `gap-1`.
@@ -891,6 +897,7 @@ impl PopupView {
       TooltipContent::Branch {
         name,
         title,
+        target,
         conflicted,
         pr,
       } => div()
@@ -919,7 +926,14 @@ impl PopupView {
                 .flex_none()
                 .text_color(palette.popover_foreground),
             )
-            .child(title.clone()),
+            .child(title.clone())
+            .when_some(target.as_ref(), |this, target| {
+              this.child(
+                div()
+                  .text_color(palette.muted_foreground)
+                  .child(format!("→ {target}")),
+              )
+            }),
         )
         .when(*conflicted, |this| {
           this.child(
@@ -2006,6 +2020,7 @@ mod tests {
       let branch = |name: Option<&str>| TooltipContent::Branch {
         name: name.map(|n| n.to_string().into()),
         title: "zn/blissful-shannon".into(),
+        target: None,
         conflicted: false,
         pr: None,
       };
