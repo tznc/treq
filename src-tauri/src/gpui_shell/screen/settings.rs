@@ -3093,7 +3093,11 @@ impl SettingsView {
       )
     };
     // The proprietary note stays on the left; every action sits on the right.
-    let (note, right) = if row.proprietary { (right, None) } else { (None, right) };
+    let (note, right) = if row.proprietary {
+      (right, None)
+    } else {
+      (None, right)
+    };
     div()
       .w_full()
       .flex()
