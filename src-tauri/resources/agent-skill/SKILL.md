@@ -19,8 +19,9 @@ direct file reads and writes. Use the `treq` CLI when you need to create or
 manage other workspaces. Those commands may write under `.treq/workspaces/`
 outside the current working directory.
 
-Run `treq --help` if a flag is unclear. Prefer `treq` over raw `git` or `jj`
-for workspace, description, commit, send, notify, and resolve operations.
+Run `treq --help` if a flag is unclear. Use `treq` for workspace,
+description, commit, send, notify, and resolve operations, and `jj` for
+anything treq lacks. Never run `git` in a workspace (see Git and jj).
 
 ## Workspaces
 
@@ -55,6 +56,29 @@ branch. When stacking more work on an existing workspace, pass its branch to
 `treq add` with `-s`. After creation, run `treq st` from the home repository and
 confirm the new workspace appears below its target. If it does not, correct the
 metadata with `treq set <workspace_name> -t <target_branch>` before continuing.
+
+## Git and jj
+
+Workspaces are jj workspaces under the home repo's `.treq/workspaces/`, which
+the home repo ignores, so `git` there silently reads and writes the home repo.
+It shows the home repo's state, and write commands such as `stash`,
+`checkout`, and `reset` damage the home repo's working tree.
+
+| Instead of | Use |
+| --- | --- |
+| `git status` | `treq st` or `jj st` |
+| `git diff` | `treq diff` or `jj diff` |
+| `git log` | `jj log` |
+| `git show <rev>` | `jj show <rev>` |
+| `git show HEAD~1:<path>` | `jj file show -r @- <path>` |
+| `git blame <path>` | `jj file annotate <path>` |
+| `git check-ignore` | `jj file list` (tracked files) or `jj st` |
+| `git checkout -- <path>` | `jj restore <path>` |
+| `git commit` | `treq commit` |
+
+To check a test fails on old code, do not stash. Edit the file back
+temporarily, run the test, then return to your version, or use
+`jj restore <path>` to drop the experiment.
 
 ## Workspace description
 
