@@ -323,6 +323,14 @@ impl Model {
       // Pages.
       "settings.close" => self.close_settings(),
       "skills.installRequest.close" => self.skill_install = None,
+      // An upsell, such as Linear's Pro error: billing is on Account.
+      "account.manage" => {
+        self.dialogs.open_workspaces = None;
+        self.open_settings();
+        if let Page::Settings { tab } = &mut self.page {
+          *tab = "account".into();
+        }
+      }
       "linear.openSettings" => {
         self.open_settings();
         if let Page::Settings { tab } = &mut self.page {
@@ -1335,6 +1343,20 @@ mod tests {
     );
     model.screen_action(&press("settings.close"), &data);
     assert!(matches!(model.page, Page::Github(_)));
+  }
+
+  #[test]
+  fn manage_account_opens_the_account_settings() {
+    let (mut model, data) = (model(), data());
+    model.dialogs.open_workspaces = Some(None);
+    model.screen_action(&press("account.manage"), &data);
+    assert!(model.dialogs.open_workspaces.is_none());
+    assert_eq!(
+      model.page,
+      Page::Settings {
+        tab: "account".into()
+      }
+    );
   }
 
   #[test]

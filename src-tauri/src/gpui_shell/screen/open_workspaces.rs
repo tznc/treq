@@ -1347,12 +1347,21 @@ impl OpenWorkspacesDialog {
             err.clone(),
             p,
           )
-          .action(crate::gpui_shell::ui::error_actions(
-            "open-workspaces-issues",
-            err.clone(),
-            Some(Box::new(cx.listener(|view, _, _, cx| view.load_issues(cx)))),
-            p,
-          )),
+          .action(if err == crate::linear::PRO_REQUIRED {
+            Button::new("open-workspaces-issues-manage-account", p)
+              .size(ui::Size::Sm)
+              .label("Manage account")
+              .on_click(cx.listener(|view, _, _, cx| press(&view.sink, "account.manage", cx)))
+              .into_any_element()
+          } else {
+            crate::gpui_shell::ui::error_actions(
+              "open-workspaces-issues",
+              err.clone(),
+              Some(Box::new(cx.listener(|view, _, _, cx| view.load_issues(cx)))),
+              p,
+            )
+            .into_any_element()
+          }),
         )
         .into_any_element()
     } else if items.is_empty() {

@@ -21,6 +21,8 @@ pub(super) struct Fixture {
   documents: Vec<LinearDocument>,
   /// Comments, by the id of what they are on.
   comments: Vec<(String, LinearComment)>,
+  /// Whether reading issues fails for want of Pro.
+  pub(super) pro_required: bool,
   /// Whether reading issues and projects fails, as with no API key.
   failing: bool,
   /// Whether reading comments fails.
@@ -35,6 +37,9 @@ impl linear_data::LinearHost for FakeHost {
 
   fn linear_issues(&self, _: &str, team: Option<&str>) -> Result<Vec<LinearIssue>, String> {
     self.record(format!("read linear issues {team:?}"));
+    if self.linear.pro_required {
+      return Err(crate::linear::PRO_REQUIRED.into());
+    }
     if self.linear.failing {
       return Err(crate::linear::NOT_CONNECTED.into());
     }
@@ -247,6 +252,7 @@ fn fixture() -> Fixture {
       updated_at: "2026-10-19T00:00:00Z".into(),
     }],
     comments: vec![("1".into(), comment("c1", Some("the API")))],
+    pro_required: false,
     failing: false,
     comments_failing: false,
   }
@@ -929,4 +935,26 @@ fn linear_comments_that_fail_to_load_offer_retry(cx: &mut TestAppContext) {
     .click(&page.get_by_role(by::role(Role::Button).name("Retry")));
   h.cx.run_until_parked();
   assert_eq!(reads(), before + 1);
+}
+
+#[gpui::test]
+fn linear_without_pro_offers_manage_account(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.linear.pro_required = true;
+  let (mut h, _) = linear_harness(cx, host);
+  h.cx.run_until_parked();
+  let page = screen(&mut h);
+  assert!(page
+    .query_by_role(by::role(Role::Button).name("Retry"))
+    .is_none());
+  page
+    .user()
+    .click(&page.get_by_role(by::role(Role::Button).name("Manage account")));
+  h.cx.run_until_parked();
+  assert_eq!(
+    h.sent(),
+    [ScreenAction::Press {
+      id: "account.manage".into()
+    }]
+  );
 }
