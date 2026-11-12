@@ -427,7 +427,7 @@
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -491,7 +491,7 @@
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -545,7 +545,7 @@
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -609,7 +609,7 @@
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -663,7 +663,7 @@
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -707,7 +707,7 @@
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -761,7 +761,7 @@
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -944,7 +944,7 @@
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {

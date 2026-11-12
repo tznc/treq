@@ -114,6 +114,23 @@ pub(super) fn lookup_workspace_from_cwd(repo_path: &str) -> Option<local_db::Wor
     .flatten()
 }
 
+/// Without `--repo`, the repository `cwd` is in (a workspace's home repo).
+pub(super) fn fill_repo_from_cwd(matches: &mut Matches, cwd: &Path) {
+  if get_arg_value(matches, "repo").is_some() {
+    return;
+  }
+  let Some(root) = find_repo_root(cwd) else {
+    return;
+  };
+  matches.args.insert(
+    "repo".into(),
+    args::ArgData {
+      value: serde_json::Value::String(normalize_repo_path(&root)),
+      occurrences: 1,
+    },
+  );
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
   Human,
@@ -858,6 +875,11 @@ fn handle_remote_review_command(
   matches: &Matches,
   format: OutputFormat,
 ) -> Result<(), String> {
+  let mut matches = matches.clone();
+  if let Ok(cwd) = std::env::current_dir() {
+    fill_repo_from_cwd(&mut matches, &cwd);
+  }
+  let matches = &matches;
   let request = parse_remote_command_request(command, matches)?;
   let status = matches!(request, core::remote::TreqCommandRequest::PtyStatus);
   let value = crate::core::remote::execute_local_request(request)?;
