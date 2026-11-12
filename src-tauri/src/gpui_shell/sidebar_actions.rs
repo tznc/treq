@@ -24,7 +24,6 @@ use crate::{
     context_menu::{self, EditorApps, HomeMenu, MenuAction},
   },
   local_db::Workspace,
-  result_ext::ResultExt,
 };
 
 /// Whether GPUI may handle `action` (a window the model does not drive
@@ -311,29 +310,17 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
     MenuAction::OpenBranchSwitcher => open(OpenRequest::BranchSwitcher),
     MenuAction::SaveProject => open(OpenRequest::SaveProject { closing: false }),
     MenuAction::ProjectContext => open(OpenRequest::ProjectContext),
+    // A pick runs inside a GPUI update, where `run_on_main_thread` runs at
+    // once and the new window could not attach GPUI: open it after.
     MenuAction::SwitchProject(id) => {
-      let main = app.clone();
-      main
-        .run_on_main_thread({
-          let app = app.clone();
-          move || super::projects::open_project(&app, &id)
-        })
-        .ignore_closed();
+      super::defer_main(app, move |app| super::projects::open_project(app, &id))
     }
-    MenuAction::NewWindow => {
-      let main = app.clone();
-      main
-        .run_on_main_thread({
-          let app = app.clone();
-          move || {
-            let label = crate::open_new_window::new_repo_window_label();
-            if let Err(err) = super::open_window(&app, &label, None, "Treq") {
-              log::error!("failed to open window: {err}");
-            }
-          }
-        })
-        .ignore_closed();
-    }
+    MenuAction::NewWindow => super::defer_main(app, |app| {
+      let label = crate::open_new_window::new_repo_window_label();
+      if let Err(err) = super::open_window(app, &label, None, "Treq") {
+        log::error!("failed to open window: {err}");
+      }
+    }),
     MenuAction::AddRepository => open(OpenRequest::AddRepository),
     MenuAction::OpenRepoSettings(repo_path) => open(OpenRequest::RepoSettings { repo_path }),
     MenuAction::LocateRepo(repo_path) => open(OpenRequest::LocateRepo { repo_path }),
