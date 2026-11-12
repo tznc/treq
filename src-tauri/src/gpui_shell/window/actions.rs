@@ -690,7 +690,13 @@ impl Model {
           self.page = Page::Workspace;
           if let Some(id) = session.workspace_id {
             if let Some(workspace) = self.workspace_in(&repo, id, data) {
-              self.set_selected(Some(workspace.id));
+              if self.selected != Some(workspace.id) {
+                // Keep the tab the user was on, at its base page.
+                let tab = self.view.tab;
+                self.set_selected(Some(workspace.id));
+                self.view.tab = tab;
+                self.view.file_browser = None;
+              }
             }
           }
           break;
@@ -1552,6 +1558,36 @@ mod tests {
     assert_eq!(model.selected, Some(1));
     model.screen_action(&field("terminal.shortcut", "k".into()), &data);
     assert!(model.dialogs.palette);
+  }
+
+  /// Clicking another workspace's terminal keeps the tab the user was on,
+  /// at its base page: no file or commit carried over from the last one.
+  #[test]
+  fn a_terminal_click_keeps_the_tab_at_its_base_page() {
+    let (mut model, mut data) = (model(), data());
+    data.apply(
+      "/repo",
+      RepoRead {
+        sessions: Some(vec![Session {
+          id: 5,
+          workspace_id: Some(3),
+          name: "Claude 1".into(),
+          created_at: String::new(),
+          last_accessed: String::new(),
+          model: None,
+        }]),
+        ..RepoRead::default()
+      },
+    );
+    model.set_selected(Some(1));
+    model.open_file("/repo/.treq/workspaces/a/src/main.rs");
+    model.view.scroll_to_commit = Some("abc".into());
+    model.view.tab = Tab::Changes;
+    model.screen_action(&field("terminal.activeSession", 5.into()), &data);
+    assert_eq!(model.selected, Some(3));
+    assert_eq!(model.view.tab, Tab::Changes);
+    assert_eq!(model.view.file_browser, None);
+    assert_eq!(model.view.scroll_to_commit, None);
   }
 
   /// The AI Review agent's turn ending is the review done: the controller
