@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Layout from "@theme/Layout";
 import Head from "@docusaurus/Head";
 import BrowserOnly from "@docusaurus/BrowserOnly";
+import Link from "@docusaurus/Link";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import { supabase } from "../lib/supabase";
 import { proRequiredMessage } from "../lib/pro-required";
@@ -1346,9 +1347,14 @@ function TeamTab({
 
   return (
     <section aria-labelledby="team-heading">
-      <h2 id="team-heading" style={styles.sectionTitle}>
-        Teams
-      </h2>
+      <div style={styles.sectionHeader}>
+        <h2 id="team-heading" style={{ ...styles.sectionTitle, marginBottom: 0 }}>
+          Teams
+        </h2>
+        <Link to="/pricing#feature-comparison" style={styles.comparisonLink}>
+          View full comparison
+        </Link>
+      </div>
       <ul aria-label="Team plan" style={styles.teamPerks}>
         {TEAM_PERKS.map((perk) => (
           <li key={perk} style={styles.teamPerk}>
@@ -1932,6 +1938,14 @@ const styles: Record<string, React.CSSProperties> = {
   pageTitle: { fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.25rem" },
   accountSection: { marginTop: "2.5rem" },
   sectionTitle: { fontSize: "1.25rem", fontWeight: 700, marginBottom: "1rem" },
+  sectionHeader: {
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: "1rem",
+    marginBottom: "1rem",
+  },
+  comparisonLink: { fontSize: "0.85rem", fontWeight: 600 },
   card: {
     padding: "1.5rem",
     borderRadius: "10px",

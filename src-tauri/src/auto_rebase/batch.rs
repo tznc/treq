@@ -214,7 +214,7 @@ pub fn check_and_rebase_all(
 
     if !workspace_branches.is_empty() {
       results.push(AutoRebaseResult {
-        target_branch: target_branch.clone(),
+        target_branch,
         workspaces_rebased: workspace_branches,
         rebase_result: JjRebaseResult {
           success: all_success,
