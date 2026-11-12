@@ -141,6 +141,22 @@ fn skills_list_labels_every_skill_by_install_status(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn proprietary_registry_skills_are_hidden_unless_installed(cx: &mut TestAppContext) {
+  let mut docx = skill("docx", "Word", None);
+  docx.skill.proprietary = true;
+  let mut xlsx = skill("xlsx", "Excel", Some("application"));
+  xlsx.skill.proprietary = true;
+  let host = Arc::new(FakeHost {
+    skills: vec![skill("pdf", "PDF", None), docx, xlsx],
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, settings_route("skills"), host);
+  let skills = drawn_settings(&mut h).skills.expect("skills tab");
+  let names: Vec<_> = skills.rows.iter().map(|r| r.name.as_str()).collect();
+  assert_eq!(names, ["Excel", "PDF"]);
+}
+
+#[gpui::test]
 fn skill_filter_chips_narrow_the_list(cx: &mut TestAppContext) {
   let (mut h, _) = skills_status_harness(cx);
   let shown = |h: &mut Harness| -> Vec<String> {
