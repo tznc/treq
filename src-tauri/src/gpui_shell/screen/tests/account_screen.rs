@@ -730,7 +730,10 @@ fn integrations_sign_in_when_signed_out(cx: &mut TestAppContext) {
   h.set_account(account_state(serde_json::json!({})));
   let integrations = drawn_settings(&mut h).integrations.expect("integrations");
   assert_eq!(integrations.github, settings::GithubSection::SignedOut);
-  assert!(integrations.linear.is_some(), "Linear shows without the preview");
+  assert!(
+    integrations.linear.is_some(),
+    "Linear shows without the preview"
+  );
   // Collapsed, the card only says it isn't connected.
   assert!(h.drawn("integration-card-github"));
   assert!(!h.drawn("integrations-sign-in"));

@@ -1229,36 +1229,36 @@ impl SettingsView {
     };
     let pro = self.signed_in_pro();
     let linear = Some({
-        let linear = self
-          .account
-          .linear
-          .as_ref()
-          .filter(|l| Some(&l.path) == self.route.repo_path.as_ref());
-        let key = linear.and_then(|l| l.key.clone());
-        LinearSection {
-          repo: self.repo.is_some(),
-          connected: key.is_some(),
-          description: if key.is_some() {
-            "Direct API access configured"
-          } else {
-            "Paste a Linear personal API key"
-          }
-          .into(),
-          editing: linear.is_some_and(|l| l.editing),
-          draft: linear.map(|l| l.draft.clone()).unwrap_or_default(),
-          saving: linear.is_some_and(|l| l.saving),
-          edit_label: format!("{} API key", if key.is_some() { "Update" } else { "Add" }),
-          oauth: pro && native::feature_flag("pro"),
-          upgrade: !pro && !crate::linear::e2e_pro(),
-          oauth_description: if key.is_some() {
-            "API key takes priority, but you can also connect via OAuth"
-          } else {
-            "Pro plan: connect via OAuth"
-          }
-          .into(),
-          oauth_loading: account.as_ref().is_some_and(|a| a.linear_oauth_loading),
-          key_priority_note: key.is_some() && pro,
+      let linear = self
+        .account
+        .linear
+        .as_ref()
+        .filter(|l| Some(&l.path) == self.route.repo_path.as_ref());
+      let key = linear.and_then(|l| l.key.clone());
+      LinearSection {
+        repo: self.repo.is_some(),
+        connected: key.is_some(),
+        description: if key.is_some() {
+          "Direct API access configured"
+        } else {
+          "Paste a Linear personal API key"
         }
+        .into(),
+        editing: linear.is_some_and(|l| l.editing),
+        draft: linear.map(|l| l.draft.clone()).unwrap_or_default(),
+        saving: linear.is_some_and(|l| l.saving),
+        edit_label: format!("{} API key", if key.is_some() { "Update" } else { "Add" }),
+        oauth: pro && native::feature_flag("pro"),
+        upgrade: !pro && !crate::linear::e2e_pro(),
+        oauth_description: if key.is_some() {
+          "API key takes priority, but you can also connect via OAuth"
+        } else {
+          "Pro plan: connect via OAuth"
+        }
+        .into(),
+        oauth_loading: account.as_ref().is_some_and(|a| a.linear_oauth_loading),
+        key_priority_note: key.is_some() && pro,
+      }
     });
     IntegrationsTab {
       github_connected: matches!(github, GithubSection::SignedIn { .. }),
@@ -3656,10 +3656,7 @@ mod tests {
 
 /// The Linear card's body on the free plan: what Linear gives, and the
 /// upgrade button.
-fn linear_paywall(
-  p: &Palette,
-  upgrade: Button,
-) -> AnyElement {
+fn linear_paywall(p: &Palette, upgrade: Button) -> AnyElement {
   let benefits = [
     "See your team's Linear issues in the sidebar",
     "Start a workspace from an issue, on its suggested branch",
@@ -3684,7 +3681,6 @@ fn linear_paywall(
         .gap_1()
         .children(benefits.map(|b| div().child(format!("• {b}")))),
     )
-    .child(
-      div().flex().justify_end().child(upgrade))
+    .child(div().flex().justify_end().child(upgrade))
     .into_any_element()
 }
