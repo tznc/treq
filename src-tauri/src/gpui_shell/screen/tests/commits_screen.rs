@@ -474,7 +474,7 @@ fn commits_tab_finds_text_in_messages_and_open_diffs(cx: &mut TestAppContext) {
     h.cx.run_until_parked();
     h.screen.read_with(&h.cx, |screen, cx| {
       let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-      let find = &workspace.commits().expect("commits").read(cx).find;
+      let find = &workspace.commits().expect("commits").read(cx).search;
       (find.current, find.total)
     })
   };

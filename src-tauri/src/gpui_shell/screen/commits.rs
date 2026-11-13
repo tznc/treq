@@ -212,7 +212,8 @@ pub struct CommitsView {
   hidden_at: Option<u64>,
   /// The commit row the pointer rests on, whose diff is read ahead.
   hovered: prefetch::Intent<String>,
-  pub(super) find: search::Find,
+  pub(super) search: super::find::Find,
+  hits: search::Hits,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -266,7 +267,8 @@ impl CommitsView {
       layout_gen: 0,
       hidden_at: None,
       hovered: prefetch::Intent::default(),
-      find: search::Find::default(),
+      search: super::find::Find::default(),
+      hits: search::Hits::default(),
       _subscriptions: Vec::new(),
     };
     this.load(cx);
@@ -337,7 +339,7 @@ impl CommitsView {
     match (shown, self.hidden_at) {
       (false, None) => {
         self.hidden_at = Some(self.parent.revision);
-        self.unwatch_find_key();
+        super::find::unwatch_key(self);
       }
       (true, Some(at)) => {
         self.hidden_at = None;
@@ -1706,8 +1708,10 @@ impl Render for CommitsView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.tips.sync(cx);
     self.ensure_inputs(window, cx);
-    self.watch_find_key(window, cx);
-    self.ensure_find_input(window, cx);
+    if self.hidden_at.is_none() {
+      super::find::watch_key(self, window, cx);
+    }
+    super::find::ensure_input(self, window, cx);
     self.sync_rows(window);
     self.index_find();
     self.reveal_find();

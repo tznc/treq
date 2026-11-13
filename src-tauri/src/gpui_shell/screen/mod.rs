@@ -43,6 +43,7 @@ mod environment;
 mod file_browser;
 mod file_browser_data;
 pub(super) mod file_picker;
+mod find;
 mod github;
 mod github_data;
 mod highlight;

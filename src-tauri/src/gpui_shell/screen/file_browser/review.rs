@@ -222,109 +222,12 @@ impl FileBrowserView {
   }
 
   /// `SearchOverlay`, top right of the code.
-  pub(super) fn search_bar(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-    if !self.search.open {
-      return None;
-    }
-    let input = self.search.input.clone()?;
-    let empty = self.search.query.trim().is_empty();
-    let total = self.search.matches.len();
-    let shown = if total > 0 {
-      self.search.current + 1
-    } else {
-      0
-    };
-    let muted = p.muted_foreground;
-    Some(
-      div()
-        .id("file-search")
-        .debug_selector(|| "file-search".into())
-        .absolute()
-        .top_2()
-        .right_2()
-        .bg(p.background)
-        .border_1()
-        .border_color(p.border)
-        .rounded(radius::MD)
-        .shadow_lg()
-        .p_0p5()
-        .flex()
-        .items_center()
-        .gap_0p5()
-        .font_family(theme::SANS_FONT)
-        .capture_action(cx.listener(|view, _: &Escape, _, cx| {
-          view.close_search(cx);
-          cx.stop_propagation();
-        }))
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .debug_selector(|| "file-search-input".into())
-            .h_6()
-            .w_48()
-            .px_2()
-            .flex()
-            .items_center()
-            .rounded(radius::MD)
-            .border_1()
-            .border_color(p.input)
-            .child(ui::input(&input).appearance(false).bordered(false)),
-        )
-        .child(
-          // Short label (['count']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
-          ui::text(div(), TextSize::Xs)
-            .debug_selector(|| "file-search-count".into())
-            .px_2()
-            .whitespace_nowrap()
-            .text_color(muted)
-            .child(format!("{shown} of {total}")),
-        )
-        .child(
-          self.tip(
-            "file-search-prev-tip",
-            "Previous (Shift+Enter)",
-            Side::Top,
-            ui::IconButton::new(
-              "file-search-prev",
-              theme::ICON_CHEVRON_UP,
-              "Previous match",
-              p,
-            )
-            .size(ui::IconButtonSize::Small)
-            .disabled(empty)
-            .on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx))),
-            cx,
-          ),
-        )
-        .child(
-          self.tip(
-            "file-search-next-tip",
-            "Next (Enter)",
-            Side::Top,
-            ui::IconButton::new(
-              "file-search-next",
-              theme::ICON_CHEVRON_DOWN,
-              "Next match",
-              p,
-            )
-            .size(ui::IconButtonSize::Small)
-            .disabled(empty)
-            .on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx))),
-            cx,
-          ),
-        )
-        .child(
-          self.tip(
-            "file-search-close-tip",
-            "Close (Esc)",
-            Side::Top,
-            ui::IconButton::new("file-search-close", theme::ICON_X, "Close search", p)
-              .size(ui::IconButtonSize::Small)
-              .on_click(cx.listener(|view, _, _, cx| view.close_search(cx))),
-            cx,
-          ),
-        ),
-    )
+  pub(super) fn search_bar(
+    &mut self,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<impl IntoElement> {
+    super::find::bar(self, "file-search", p, cx)
   }
 
   /// The Finish review popover, under its button.

@@ -410,7 +410,7 @@ impl CommitsView {
     feed.list = self.feed.list.clone();
     feed.rem = self.feed.rem;
     self.feed = feed;
-    self.find.stale = true;
+    self.hits.stale = true;
   }
 
   /// Each row's searchable text, in the list's order: commit headlines and

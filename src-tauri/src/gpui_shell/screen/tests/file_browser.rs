@@ -297,7 +297,7 @@ fn file_browser_finds_text_in_the_open_file(cx: &mut TestAppContext) {
   h.cx.executor().advance_clock(Duration::from_millis(150));
   let count = |h: &mut Harness| {
     let browser = browser(h);
-    browser.read_with(&h.cx, |b, _| (b.search.current, b.search.matches.len()))
+    browser.read_with(&h.cx, |b, _| (b.search.current, b.matches.len()))
   };
   assert_eq!(count(&mut h), (0, 2));
   h.cx.simulate_keystrokes("enter");
