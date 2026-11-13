@@ -71,6 +71,16 @@ pub trait PrReviewHost: ChangesHost {
     line_hash: Option<&str>,
     quoted_text: Option<&str>,
   ) -> Result<(), String>;
+  /// Lines `start..=end` of `path` at the PR's head, for context: the
+  /// PR's files are not checked out.
+  fn pr_file_lines(
+    &self,
+    full_name: &str,
+    number: u64,
+    path: &str,
+    start: usize,
+    end: usize,
+  ) -> Result<Vec<String>, String>;
 }
 
 impl PrReviewHost for Backend {
@@ -140,6 +150,25 @@ impl PrReviewHost for Backend {
     quoted_text: Option<&str>,
   ) -> Result<(), String> {
     core::review_drafts::update_review_draft(repo_path, id, text, line_hash, quoted_text)
+  }
+
+  fn pr_file_lines(
+    &self,
+    full_name: &str,
+    number: u64,
+    path: &str,
+    start: usize,
+    end: usize,
+  ) -> Result<Vec<String>, String> {
+    let text = core::github_cli::pr_file(full_name, number, path)?;
+    Ok(
+      text
+        .lines()
+        .skip(start.saturating_sub(1))
+        .take((end + 1).saturating_sub(start))
+        .map(str::to_string)
+        .collect(),
+    )
   }
 }
 
