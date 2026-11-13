@@ -2,7 +2,7 @@
 //! system prompt, filesystem settings and skills, wrapped so its temp files
 //! are removed and Treq hears when it exits.
 
-use super::agent_cli::{write_agent_cli_files, AgentCliFiles};
+use super::agent_cli::{write_agent_cli_files, write_agent_task_file, AgentCliFiles};
 use super::remote::shell_quote;
 use serde_json::{json, Map, Value};
 use std::path::Path;
@@ -12,6 +12,9 @@ use std::path::Path;
 /// agent, which is how Treq closes or restarts a session, so it stays quiet.
 const NOTIFY_ON_AGENT_EXIT: &str = "[ $? -lt 128 ] && treq notify --agent-exited >/dev/null 2>&1";
 
+/// The app and repository setting holding instructions added to every agent.
+pub const AGENT_INSTRUCTIONS_SETTING: &str = "agent_instructions";
+
 pub struct AgentPaths<'a> {
   pub workspace_path: Option<&'a str>,
   pub repo_path: &'a str,
@@ -19,6 +22,10 @@ pub struct AgentPaths<'a> {
   pub supporting_repo_paths: &'a [String],
   /// The saved project of the window the agent starts in.
   pub project: Option<&'a ProjectContext>,
+  /// Instructions from the Application settings, added to every agent.
+  pub app_instructions: Option<&'a str>,
+  /// Instructions from the repository's settings.
+  pub repo_instructions: Option<&'a str>,
 }
 
 /// What a project adds to its agents (`core::projects`).
@@ -96,6 +103,15 @@ pub fn system_prompt(paths: &AgentPaths<'_>) -> String {
       .map(String::from),
     );
   }
+  for (label, text) in [
+    ("Application", paths.app_instructions),
+    ("Repository", paths.repo_instructions),
+  ] {
+    let text = one_line(text.unwrap_or_default());
+    if !text.is_empty() {
+      parts.push(format!("{label} instructions: {text}"));
+    }
+  }
   if let Some(project) = paths.project {
     parts.push(format!(
       "This work is part of the Treq project \"{}\".",
@@ -104,11 +120,7 @@ pub fn system_prompt(paths: &AgentPaths<'_>) -> String {
     parts.push(
       "Run `treq project status` to see every repository and workspace in the project, and `treq project add-repo <owner/name|url|path>` to add (and clone) a repository; never clone it yourself.".into(),
     );
-    let prompt = project
-      .prompt
-      .split_whitespace()
-      .collect::<Vec<_>>()
-      .join(" ");
+    let prompt = one_line(&project.prompt);
     if !prompt.is_empty() {
       parts.push(format!("Project instructions: {prompt}"));
     }
@@ -120,6 +132,10 @@ pub fn system_prompt(paths: &AgentPaths<'_>) -> String {
     }
   }
   parts.join(" ")
+}
+
+fn one_line(text: &str) -> String {
+  text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Workspace/home filesystem allow and deny lists for Claude `--settings`.
@@ -186,7 +202,13 @@ pub fn build_auto_command(
   files: &AgentCliFiles,
 ) -> Result<String, String> {
   let pending = options.pending_prompt.filter(|p| !p.is_empty());
+  let with_task = |command: String| match (&files.task_path, pending) {
+    (Some(path), Some(_)) => format!("{command} -- \"{}\"", shell_cat(path)),
+    (None, Some(prompt)) => append_agent_prompt(&command, prompt),
+    (_, None) => command,
+  };
   let mut cleanup = vec![files.prompt_path.clone()];
+  cleanup.extend(files.task_path.clone());
   if !files.skill_dir.is_empty() {
     cleanup.push(files.skill_dir.clone());
   }
@@ -199,10 +221,7 @@ pub fn build_auto_command(
         "codex -c \"developer_instructions={}\"",
         shell_cat(&files.prompt_path)
       );
-      match pending {
-        Some(prompt) => append_agent_prompt(&command, prompt),
-        None => command,
-      }
+      with_task(command)
     }
     "cursor" => {
       let plan = if options.permission_mode == Some("plan") {
@@ -239,10 +258,7 @@ pub fn build_auto_command(
         "copilot --allow-all-tools -- \"{}\"",
         shell_cat(&files.prompt_path)
       );
-      match pending {
-        Some(prompt) => append_agent_prompt(&command, prompt),
-        None => command,
-      }
+      with_task(command)
     }
     _ => {
       let mode = if options.permission_mode == Some("plan") {
@@ -264,10 +280,7 @@ pub fn build_auto_command(
         " --append-system-prompt-file {}",
         shell_quote(&files.prompt_path)
       ));
-      if let Some(prompt) = pending {
-        command.push_str(&format!(" -- {}", shell_quote(prompt)));
-      }
-      command
+      with_task(command)
     }
   };
 
@@ -328,7 +341,15 @@ pub fn prepare_auto_command(
       write_agent_cli_files(&prompt, settings.as_deref(), None)?
     }
   };
+  let pending_prompt = if matches!(options.agent, "cursor" | "devin" | "gemini") {
+    None
+  } else {
+    options.pending_prompt.filter(|p| !p.is_empty())
+  };
+  let mut files = files;
+  files.task_path = pending_prompt.map(write_agent_task_file).transpose()?;
   let file_paths = std::iter::once(files.prompt_path.clone())
+    .chain(files.task_path.clone())
     .chain(files.settings_path.clone())
     .chain(Some(files.skill_dir.clone()).filter(|d| !d.is_empty()))
     .chain(files.agents_skill_path.clone())
@@ -340,11 +361,6 @@ pub fn prepare_auto_command(
         .to_string()
     })
   });
-  let pending_prompt = if matches!(options.agent, "cursor" | "devin" | "gemini") {
-    None
-  } else {
-    options.pending_prompt
-  };
   let command = build_auto_command(
     &AutoCommand {
       pending_prompt,
@@ -376,6 +392,7 @@ mod tests {
       agents_skill_path: None,
       claude_skill_path: None,
       skill_write_warning: None,
+      task_path: None,
     }
   }
 
@@ -410,6 +427,8 @@ mod tests {
       repo_path: "/repos/treq",
       supporting_repo_paths: NONE,
       project: None,
+      app_instructions: None,
+      repo_instructions: None,
     });
     assert!(prompt.contains("You are operating inside a Treq workspace."));
     assert!(prompt.contains(
@@ -429,6 +448,8 @@ mod tests {
       repo_path: "/repos/app",
       supporting_repo_paths: &supporting,
       project: None,
+      app_instructions: None,
+      repo_instructions: None,
     });
     assert!(prompt.contains("You are operating in the Treq home repository."));
     assert!(!prompt.contains("sibling workspaces"));
@@ -445,6 +466,8 @@ mod tests {
         repo_path: "/repos/app",
         supporting_repo_paths: &supporting,
         project: None,
+        app_instructions: None,
+        repo_instructions: None,
       }),
       json!({
         "denyRead": ["/repos/app"],
@@ -458,6 +481,8 @@ mod tests {
         repo_path: "/repos/app",
         supporting_repo_paths: NONE,
         project: None,
+        app_instructions: None,
+        repo_instructions: None,
       }),
       json!({ "allowRead": ["/repos/app"], "allowWrite": ["/repos/app"] })
     );
@@ -479,6 +504,8 @@ mod tests {
       repo_path: "/repos/app",
       supporting_repo_paths: NONE,
       project: Some(&project),
+      app_instructions: None,
+      repo_instructions: None,
     });
     assert!(prompt.contains("Treq project \"Checkout\""));
     assert!(prompt.contains("treq project status"));
@@ -495,10 +522,48 @@ mod tests {
       repo_path: "/repos/app",
       supporting_repo_paths: NONE,
       project: None,
+      app_instructions: None,
+      repo_instructions: None,
     });
     assert!(!prompt.contains("Treq project"));
     assert!(!prompt.contains("treq project status"));
     assert!(!prompt.contains("Project instructions"));
+  }
+
+  #[test]
+  fn adds_app_then_repository_instructions_on_one_line() {
+    let project = project();
+    let prompt = system_prompt(&AgentPaths {
+      workspace_path: None,
+      repo_path: "/repos/app",
+      supporting_repo_paths: NONE,
+      project: Some(&project),
+      app_instructions: Some("Be terse.\nPrefer TDD."),
+      repo_instructions: Some("Use cargo nextest."),
+    });
+    let app = prompt
+      .find("Application instructions: Be terse. Prefer TDD.")
+      .unwrap();
+    let repo = prompt
+      .find("Repository instructions: Use cargo nextest.")
+      .unwrap();
+    let proj = prompt.find("Project instructions:").unwrap();
+    assert!(app < repo && repo < proj);
+    assert!(!prompt.contains('\n'));
+  }
+
+  #[test]
+  fn skips_blank_app_and_repository_instructions() {
+    let prompt = system_prompt(&AgentPaths {
+      workspace_path: None,
+      repo_path: "/repos/app",
+      supporting_repo_paths: NONE,
+      project: None,
+      app_instructions: Some(" \n "),
+      repo_instructions: None,
+    });
+    assert!(!prompt.contains("Application instructions"));
+    assert!(!prompt.contains("Repository instructions"));
   }
 
   #[test]
@@ -513,6 +578,8 @@ mod tests {
       repo_path: "/repos/app",
       supporting_repo_paths: NONE,
       project: Some(&project),
+      app_instructions: None,
+      repo_instructions: None,
     });
     assert!(prompt.contains("Treq project \"Checkout\""));
     assert!(!prompt.contains("Project instructions"));
@@ -551,6 +618,8 @@ mod tests {
         repo_path: repo,
         supporting_repo_paths: NONE,
         project: Some(&project),
+        app_instructions: None,
+        repo_instructions: None,
       },
       &opts("claude"),
     )
@@ -590,6 +659,8 @@ mod tests {
         repo_path: "/repos/app",
         supporting_repo_paths: NONE,
         project: Some(&project),
+        app_instructions: None,
+        repo_instructions: None,
       }),
       json!({ "allowRead": ["/repos/app", "/docs/style.md"], "allowWrite": ["/repos/app"] })
     );
@@ -746,6 +817,8 @@ mod tests {
         repo_path: cwd,
         supporting_repo_paths: NONE,
         project: None,
+        app_instructions: None,
+        repo_instructions: None,
       },
       &AutoCommand {
         pending_prompt: Some("hi"),
@@ -753,7 +826,8 @@ mod tests {
       },
     )
     .unwrap();
-    assert!(prepared.command.contains("-- 'hi'"));
+    assert!(prepared.command.contains("-- \"$(cat -- "));
+    assert!(!prepared.command.contains("hi'"));
     let settings = prepared
       .file_paths
       .iter()
@@ -763,6 +837,54 @@ mod tests {
     assert_eq!(written["extra"], 1);
     assert!(written.get("sandbox").is_none());
     super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+  }
+
+  /// A fresh shell reads typed input in canonical mode, which caps a line
+  /// (1024 bytes on macOS, where the Enter is then dropped).
+  #[test]
+  fn keeps_a_long_task_prompt_out_of_the_typed_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    let task = format!("Fix the parser.\n{}", "x".repeat(4000));
+    for agent in ["claude", "codex", "copilot"] {
+      let prepared = prepare_auto_command(
+        &AgentPaths {
+          workspace_path: None,
+          repo_path: cwd,
+          supporting_repo_paths: NONE,
+          project: None,
+          app_instructions: None,
+          repo_instructions: None,
+        },
+        &AutoCommand {
+          pending_prompt: Some(&task),
+          ..opts(agent)
+        },
+      )
+      .unwrap();
+      assert!(
+        prepared.command.len() < 1024,
+        "{agent}: {}",
+        prepared.command
+      );
+      let task_file = prepared
+        .file_paths
+        .iter()
+        .find(|p| std::fs::read_to_string(p).ok().as_deref() == Some(task.as_str()))
+        .unwrap_or_else(|| panic!("{agent}: no file holds the task"));
+      assert!(
+        prepared
+          .command
+          .contains(&format!("-- \"$(cat -- {})\"", shell_quote(task_file))),
+        "{agent}: {}",
+        prepared.command
+      );
+      assert!(prepared
+        .command
+        .contains(&format!("rm -rf {}", shell_quote(&prepared.file_paths[0]))));
+      assert!(prepared.command.contains(&shell_quote(task_file)));
+      super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+    }
   }
 
   #[test]
@@ -775,6 +897,8 @@ mod tests {
         repo_path: dir.path().to_str().unwrap(),
         supporting_repo_paths: NONE,
         project: None,
+        app_instructions: None,
+        repo_instructions: None,
       },
       &opts("claude"),
     )

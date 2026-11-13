@@ -24,7 +24,7 @@ fn settings_saves_the_repository_itself(cx: &mut TestAppContext) {
   assert_eq!(
     host.writes(),
     [
-      "set repo /repo branch_name_pattern=treq/{name} included_copy_files= default_model= default_agent= auto_push=true review_prompt= review_agent= auto_review_trigger=on-pull",
+      "set repo /repo branch_name_pattern=treq/{name} included_copy_files= default_model= default_agent= auto_push=true review_prompt= review_agent= auto_review_trigger=on-pull agent_instructions=",
       "notify repoSettingsChanged",
     ]
   );
@@ -182,9 +182,9 @@ fn settings_saves_the_application_itself(cx: &mut TestAppContext) {
     [
       "set theme=dark",
       "notify settingsChanged",
-      "set default_model= default_agent= conflict_marker_style=git notify_agent_finished=true terminal_font_size=16 ui_zoom=120",
+      "set default_model= default_agent= conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120",
       "notify settingsChanged",
-      "set default_model= default_agent=codex conflict_marker_style=git notify_agent_finished=true terminal_font_size=16 ui_zoom=120",
+      "set default_model= default_agent=codex conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120",
       "notify settingsChanged",
     ]
   );

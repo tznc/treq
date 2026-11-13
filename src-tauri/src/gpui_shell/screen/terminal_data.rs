@@ -125,6 +125,11 @@ pub trait TerminalHost:
   /// [`TerminalHost::listen`].
   fn spawn_pty(&self, spawn: &Spawn) -> Result<(), String>;
   fn pty_exists(&self, id: &str) -> bool;
+  /// Whether PTY `id`'s shell has started the command typed into it. A
+  /// shell left at a continuation prompt (`quote>`) never does.
+  fn agent_started(&self, _id: &str) -> bool {
+    true
+  }
   fn write_pty(&self, id: &str, data: &str) -> Result<(), String>;
   fn resize_pty(&self, id: &str, rows: u16, cols: u16) -> Result<(), String>;
   fn close_pty(&self, id: &str) -> Result<(), String>;
@@ -304,6 +309,18 @@ impl TerminalHost for Backend {
       });
     }
     Ok(())
+  }
+
+  fn agent_started(&self, id: &str) -> bool {
+    use tauri::Manager;
+    // A remote agent is launched, not typed into a shell.
+    is_remote_pty(id)
+      || self
+        .app()
+        .state::<crate::AppState>()
+        .pty_manager
+        .runs_command(id)
+        .unwrap_or(true)
   }
 
   fn pty_exists(&self, id: &str) -> bool {
@@ -588,12 +605,22 @@ impl TerminalHost for Backend {
     let supporting = self.supporting_repos(&start.repo_path);
     let project = crate::gpui_shell::projects::window_project(self.app(), self.label())
       .map(agent_command::ProjectContext::from);
+    let (app_instructions, repo_instructions) = self
+      .with_db(|db| {
+        Ok::<_, rusqlite::Error>((
+          db.get_setting(agent_command::AGENT_INSTRUCTIONS_SETTING)?,
+          db.get_repo_setting(&start.repo_path, agent_command::AGENT_INSTRUCTIONS_SETTING)?,
+        ))
+      })
+      .unwrap_or_default();
     let prepared = agent_command::prepare_auto_command(
       &AgentPaths {
         workspace_path: start.workspace_path.as_deref(),
         repo_path: &start.repo_path,
         supporting_repo_paths: &supporting,
         project: project.as_ref(),
+        app_instructions: app_instructions.as_deref(),
+        repo_instructions: repo_instructions.as_deref(),
       },
       &AutoCommand {
         agent: &start.agent,
