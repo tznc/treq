@@ -912,6 +912,36 @@ mod tests {
     }
   }
 
+  /// The typed `trap` names each temp path, and macOS's `$TMPDIR` is long, so
+  /// one launch's temp files share a single dir to keep the line short.
+  #[test]
+  fn keeps_one_launchs_temp_files_in_a_single_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let prepared = prepare_auto_command(
+      &AgentPaths {
+        workspace_path: None,
+        repo_path: dir.path().to_str().unwrap(),
+        supporting_repo_paths: NONE,
+        project: None,
+        app_instructions: None,
+        repo_instructions: None,
+      },
+      &AutoCommand {
+        pending_prompt: Some("fix the bug"),
+        ..opts("claude")
+      },
+    )
+    .unwrap();
+    let temp = std::env::temp_dir();
+    let in_temp: Vec<&String> = prepared
+      .file_paths
+      .iter()
+      .filter(|p| Path::new(p).parent() == Some(temp.as_path()))
+      .collect();
+    super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+    assert_eq!(in_temp.len(), 1, "{:?}", prepared.file_paths);
+  }
+
   #[test]
   fn refuses_to_start_in_a_deleted_workspace() {
     let dir = tempfile::tempdir().unwrap();
