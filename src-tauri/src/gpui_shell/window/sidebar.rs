@@ -13,7 +13,7 @@ use crate::{
   github::PrInfo,
   gpui_shell::screen::display_title,
   gpui_shell::sidebar::{
-    PrState, RepoSection, RowStatus, SidebarRow, SidebarSnapshot, StatusColor,
+    open_pr_first, PrState, RepoSection, RowStatus, SidebarRow, SidebarSnapshot, StatusColor,
   },
   local_db::Workspace,
 };
@@ -173,38 +173,40 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
       let workspaces = if missing {
         Vec::new()
       } else {
-        nodes(data, path)
-          .into_iter()
-          .map(|node| {
-            let workspace = &node.workspace;
-            let branch = &workspace.branch_name;
-            let selected = active
-              && (model.multi.contains(&workspace.id)
-                || (page_selects && model.selected == Some(workspace.id)));
-            let pr = repo
-              .and_then(|r| r.prs.get(branch))
-              .and_then(Option::as_ref)
-              .filter(|_| has_remote)
-              .map(pr_state);
-            SidebarRow {
-              id: workspace.id,
-              title: branch.clone(),
-              name: row_name(workspace),
-              depth: node.depth,
-              selected,
-              conflicted: node.conflicted,
-              status: status_indicator(
-                node.conflicted,
-                node.has_changes,
-                streaming.get(branch).copied().unwrap_or(false),
-              ),
-              pr,
-              target: workspace.target_branch.clone(),
-              archiving: false,
-              exiting: false,
-            }
-          })
-          .collect()
+        open_pr_first(
+          nodes(data, path)
+            .into_iter()
+            .map(|node| {
+              let workspace = &node.workspace;
+              let branch = &workspace.branch_name;
+              let selected = active
+                && (model.multi.contains(&workspace.id)
+                  || (page_selects && model.selected == Some(workspace.id)));
+              let pr = repo
+                .and_then(|r| r.prs.get(branch))
+                .and_then(Option::as_ref)
+                .filter(|_| has_remote)
+                .map(pr_state);
+              SidebarRow {
+                id: workspace.id,
+                title: branch.clone(),
+                name: row_name(workspace),
+                depth: node.depth,
+                selected,
+                conflicted: node.conflicted,
+                status: status_indicator(
+                  node.conflicted,
+                  node.has_changes,
+                  streaming.get(branch).copied().unwrap_or(false),
+                ),
+                pr,
+                target: workspace.target_branch.clone(),
+                archiving: false,
+                exiting: false,
+              }
+            })
+            .collect(),
+        )
       };
       let loaded = data.loaded(path);
       RepoSection {

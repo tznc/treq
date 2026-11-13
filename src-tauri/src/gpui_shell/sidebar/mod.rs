@@ -130,6 +130,21 @@ pub struct SidebarRow {
   pub exiting: bool,
 }
 
+/// Moves stacks whose root has an open or draft PR above the rest, keeping
+/// each stack whole and the order within both groups.
+pub fn open_pr_first(rows: Vec<SidebarRow>) -> Vec<SidebarRow> {
+  let mut stacks: Vec<Vec<SidebarRow>> = Vec::new();
+  for row in rows {
+    match stacks.last_mut() {
+      Some(stack) if row.depth > 0 => stack.push(row),
+      _ => stacks.push(vec![row]),
+    }
+  }
+  let open = |s: &Vec<SidebarRow>| matches!(s[0].pr, Some(PrState::Open | PrState::Draft));
+  stacks.sort_by_key(|s| !open(s));
+  stacks.into_iter().flatten().collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct RowStatus {
   pub color: StatusColor,
