@@ -619,8 +619,14 @@ impl Palette {
 
   /// Lines with a review comment, and the comments under them: one amber,
   /// so a comment reads as part of the lines it is on.
+  /// Dark uses GitHub's dark attention tint (`#bb8009` at 15%), which sits
+  /// lighter on the code than yellow-500.
   pub fn commented(&self) -> Hsla {
-    self.warning.opacity(if self.dark { 0.15 } else { 0.1 })
+    if self.dark {
+      Hsla::from(rgb(0xbb8009)).opacity(0.15)
+    } else {
+      self.warning.opacity(0.1)
+    }
   }
 
   /// Behind every modal dialog, and behind controls laid over an image.
