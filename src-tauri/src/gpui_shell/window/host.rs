@@ -432,7 +432,7 @@ impl WindowHost for Backend {
   fn flags(&self) -> Flags {
     self.with_db(|db| Flags {
       linear: feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
-      logs: feature_preview::is_enabled(db, PreviewFeature::Logs),
+      logs: true,
       remote_ssh: feature_preview::is_enabled(db, PreviewFeature::RemoteSsh),
     })
   }

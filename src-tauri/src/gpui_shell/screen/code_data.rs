@@ -451,7 +451,7 @@ impl CodeHost for Backend {
   }
 
   fn logs_enabled(&self) -> bool {
-    self.with_db(|db| feature_preview::is_enabled(db, PreviewFeature::Logs))
+    true
   }
 
   fn run_setup(
