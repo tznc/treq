@@ -444,7 +444,7 @@ impl PrReviewView {
       .map_or_else(|| format!("Pull request #{number}"), |pr| pr.title.clone());
     let mono = |text: String| div().font_family(theme::MONO_FONT).child(text);
     let subtitle = self.pr.as_ref().map(|pr| {
-      ui::text(div(), TextSize::Xs)
+      ui::text(div(), TextSize::Sm)
         .debug_selector(|| "pr-review-subtitle".into())
         .flex()
         .gap_1()
