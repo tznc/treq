@@ -33,21 +33,31 @@ jobs:
     timeout-minutes: 15
     name: detect changes
     runs-on: ubuntu-22.04
-    # The merge queue runs everything: it checks the combined result.
     outputs:
-      rust_changed: ${{ github.event_name == 'merge_group' || steps.filter.outputs.rust == 'true' }}
-      js_changed: ${{ github.event_name == 'merge_group' || steps.filter.outputs.js == 'true' }}
-      e2e_changed: ${{ github.event_name == 'merge_group' || steps.filter.outputs.e2e == 'true' }}
+      rust_changed: ${{ steps.filter.outputs.rust }}
+      js_changed: ${{ steps.filter.outputs.js }}
+      e2e_changed: ${{ steps.filter.outputs.e2e }}
     # No checkout: on pull_request, paths-filter lists the changed files
     # through the GitHub API.
     permissions:
+      contents: read
       pull-requests: read
     steps:
+      # A merge group has no PR to ask the API about, so paths-filter diffs
+      # the queued commits against the base locally. Trees only, no blobs.
+      - if: github.event_name == 'merge_group'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
       - name: Check for Rust and JS/TS changes
-        if: github.event_name == 'pull_request'
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
+          # Ignored on pull_request.
+          base: ${{ github.event.merge_group.base_sha }}
+          ref: ${{ github.event.merge_group.head_sha }}
           filters: |
             rust:
               - "src-tauri/**"
