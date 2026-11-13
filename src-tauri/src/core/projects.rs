@@ -595,11 +595,14 @@ pub fn projects_with_repo(conn: &Connection, repo: &str) -> Result<Vec<Project>,
   )
 }
 
-/// The repositories that share a project, saved or draft, with `repo`, in
-/// first-seen order.
+/// The repositories that share a project, saved or draft, with `repo`:
+/// oldest project first, each in its sidebar order.
 pub fn repos_alongside(conn: &Connection, repo: &str) -> Result<Vec<String>, String> {
   let mut stmt = conn
-    .prepare("SELECT DISTINCT project_id FROM project_repos WHERE repo_path = ?1")
+    .prepare(
+      "SELECT r.project_id FROM project_repos r JOIN projects p ON p.id = r.project_id
+       WHERE r.repo_path = ?1 ORDER BY p.created_at, p.id",
+    )
     .map_err(err)?;
   let ids: Vec<String> = stmt
     .query_map([repo], |r| r.get(0))
