@@ -1105,7 +1105,7 @@ impl RemoteView {
           ))
           .when(!form.resolve_error.is_empty(), |this| {
             this.child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .text_color(p.destructive)
                 .child(form.resolve_error.clone()),
             )
@@ -1302,6 +1302,8 @@ impl RemoteView {
         .flex_col()
         .gap_2()
         .child(
+          // Short label (['section heading']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .font_weight(FontWeight::MEDIUM)
             .text_color(p.muted_foreground)
@@ -1334,7 +1336,7 @@ impl RemoteView {
                     .child(title.clone().unwrap_or_else(|| label.clone())),
                 )
                 .child(
-                  ui::text(div(), TextSize::Xs)
+                  ui::text(div(), TextSize::Sm)
                     .text_color(p.muted_foreground)
                     .truncate()
                     .child(match &title {

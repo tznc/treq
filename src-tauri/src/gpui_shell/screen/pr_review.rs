@@ -444,7 +444,7 @@ impl PrReviewView {
       .map_or_else(|| format!("Pull request #{number}"), |pr| pr.title.clone());
     let mono = |text: String| div().font_family(theme::MONO_FONT).child(text);
     let subtitle = self.pr.as_ref().map(|pr| {
-      ui::text(div(), TextSize::Xs)
+      ui::text(div(), TextSize::Sm)
         .debug_selector(|| "pr-review-subtitle".into())
         .flex()
         .gap_1()
@@ -627,12 +627,14 @@ impl PrReviewView {
           .rounded_none()
           .leading(ui::icon(theme::ICON_FILE_TEXT, 12., p.muted_foreground).flex_none())
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .truncate()
               .flex_1()
               .child(name),
           )
           .trailing(
+            // Short label (['status letter']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(file.status.clone()),
@@ -724,7 +726,7 @@ impl PrReviewView {
               .min_w_0()
               .child(div().font_weight(FontWeight::MEDIUM).child(event.label()))
               .child(
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
                   .text_color(p.muted_foreground)
                   .child(if disabled { OWN_PR_HINT } else { event.hint() }),
               ),

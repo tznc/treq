@@ -1568,6 +1568,8 @@ impl FileBrowserView {
                 if count == 1 { "" } else { "s" }
               ),
               Side::Top,
+              // Short label (['count']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .flex()
                 .items_center()
