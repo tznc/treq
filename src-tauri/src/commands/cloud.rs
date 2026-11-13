@@ -98,6 +98,11 @@ impl CloudEffects for AppEffects {
   }
 
   fn access_token(&self, supabase_url: &str, token: Option<&str>) {
+    // Project sync runs only while signed in.
+    match (token, crate::commands::cloud::owned_cloud(&self.app)) {
+      (Some(_), Some(cloud)) => PROJECT_SYNC.signed_in(move || sync_projects(cloud)),
+      _ => PROJECT_SYNC.signed_out(),
+    }
     if let Some(state) = self.app.try_state::<RemoteExecState>() {
       state.0.set_relay_access_token(token.map(str::to_string));
     }
@@ -179,18 +184,18 @@ pub fn start(app: &AppHandle) {
     cloud.start().await;
     cloud.keep_fresh().await;
   });
-  tauri::async_runtime::spawn(sync_projects(sync_cloud.clone()));
   tauri::async_runtime::spawn(sync_config(sync_cloud));
 }
 
-/// Team project sync, once signed in, then hourly (`core::project_sync`).
+/// The project sync loop, started on sign-in and stopped on sign-out.
+static PROJECT_SYNC: std::sync::LazyLock<crate::core::project_sync::Runner> =
+  std::sync::LazyLock::new(Default::default);
+
+/// Team project sync: a pass now, then hourly (`core::project_sync`). Runs
+/// only while signed in ([`PROJECT_SYNC`]).
 async fn sync_projects(cloud: Arc<Cloud>) {
   use crate::core::{cloud_catalog, project_sync, projects};
   loop {
-    if cloud.supabase.auth.session().is_none() {
-      tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-      continue;
-    }
     {
       if let Ok(orgs) = cloud_catalog::fetch_cloud_organizations(&cloud.supabase).await {
         let org_ids: Vec<String> = orgs.into_iter().map(|o| o.org_id).collect();

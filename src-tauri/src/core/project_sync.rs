@@ -14,6 +14,46 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 
+/// Runs the sync loop only while signed in: started by sign-in (a token
+/// refresh leaves the running loop alone), stopped by sign-out.
+#[derive(Default)]
+pub struct Runner(std::sync::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>);
+
+impl Runner {
+  pub fn signed_in<F, Fut>(&self, start: F)
+  where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+  {
+    let mut task = self
+      .0
+      .lock()
+      .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if task.is_none() {
+      *task = Some(tauri::async_runtime::spawn(start()));
+    }
+  }
+
+  pub fn signed_out(&self) {
+    if let Some(task) = self
+      .0
+      .lock()
+      .unwrap_or_else(std::sync::PoisonError::into_inner)
+      .take()
+    {
+      task.abort();
+    }
+  }
+
+  pub fn is_running(&self) -> bool {
+    self
+      .0
+      .lock()
+      .unwrap_or_else(std::sync::PoisonError::into_inner)
+      .is_some()
+  }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteProject {
   pub id: String,
@@ -234,6 +274,33 @@ mod tests {
       prompt: "p".into(),
       context_paths: vec![],
     }
+  }
+
+  #[tokio::test]
+  async fn runner_runs_only_while_signed_in() {
+    let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let runner = Runner::default();
+    let start = |runs: Arc<std::sync::atomic::AtomicUsize>| {
+      move || async move {
+        runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        std::future::pending::<()>().await;
+      }
+    };
+    assert!(!runner.is_running(), "nothing runs before sign-in");
+    runner.signed_in(start(runs.clone()));
+    // A token refresh signs in again: still one loop.
+    runner.signed_in(start(runs.clone()));
+    // The loop runs on the app runtime: give it a moment to start.
+    for _ in 0..100 {
+      if runs.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+        break;
+      }
+      tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(runner.is_running());
+    assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1);
+    runner.signed_out();
+    assert!(!runner.is_running(), "signing out stops it");
   }
 
   #[tokio::test]
