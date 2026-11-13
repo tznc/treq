@@ -343,7 +343,6 @@ impl GithubView {
 
   fn content() -> Div {
     div()
-      .debug_selector(|| "github-detail-column".into())
       .w_full()
       .max_w(zpx(theme::CONTENT_MAX_WIDTH))
       .px_4()
