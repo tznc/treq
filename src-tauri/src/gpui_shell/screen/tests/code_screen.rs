@@ -170,6 +170,24 @@ fn code_tab_saves_the_description(cx: &mut TestAppContext) {
   assert!(!h.drawn("workspace-description-input"));
 }
 
+#[gpui::test]
+fn code_tab_saves_the_description_on_secondary_enter(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  h.click("workspace-description-edit");
+  h.cx.simulate_input("!");
+  h.cx.simulate_keystrokes("secondary-enter");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .iter()
+      .any(|c| c.starts_with("set description 7 ") && c.contains('!')),
+    "{:?}",
+    host.writes()
+  );
+  assert!(!h.drawn("workspace-description-input"));
+}
+
 /// PR #42's record for `code_host`'s workspace: its description still the
 /// PR's, or edited since.
 fn synced(description: bool) -> Option<crate::local_db::PrSyncRecord> {
