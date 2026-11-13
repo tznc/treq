@@ -480,16 +480,20 @@ fn commits_tab_finds_text_in_messages_and_open_diffs(cx: &mut TestAppContext) {
   };
   h.cx.simulate_keystrokes("cmd-f");
   assert!(h.drawn("commits-search"));
-  // Messages "a work" and "b work"; a's diff is closed.
-  h.cx.simulate_input("b");
-  assert_eq!(count(&mut h), (0, 1));
-  h.click("commit-row-a");
-  // a's diff: " a", "+b", "+c", above b's message.
+  // Both messages read "work".
+  h.cx.simulate_input("work");
   assert_eq!(count(&mut h), (0, 2));
   h.click("commits-search-next");
   assert_eq!(count(&mut h), (1, 2));
   h.click("commits-search-next");
   assert_eq!(count(&mut h), (0, 2));
+  // a's diff (" a", "+b", "+c") is searched once open.
+  // Cmd+F again focuses the input and selects its text.
+  h.cx.simulate_keystrokes("cmd-f");
+  h.cx.simulate_input("b");
+  assert_eq!(count(&mut h), (0, 0));
+  h.click("commit-row-a");
+  assert_eq!(count(&mut h), (0, 1));
   h.click("commits-search-close");
   assert!(!h.drawn("commits-search"));
 }

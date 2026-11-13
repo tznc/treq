@@ -3,6 +3,7 @@
 
 use std::ops::Range;
 
+use gpui::Hsla;
 use gpui_kit::component::input::Escape;
 
 use super::*;
@@ -34,6 +35,22 @@ pub(in crate::gpui_shell::screen) struct Find {
 }
 
 impl CommitsView {
+  fn tip(
+    &self,
+    key: String,
+    text: &'static str,
+    el: impl IntoElement,
+    cx: &mut Context<Self>,
+  ) -> Stateful<Div> {
+    self.tips.wrap(
+      key,
+      Side::Top,
+      Some(TooltipContent::Text(text.into())),
+      el,
+      cx,
+    )
+  }
+
   /// Listens for Cmd+F in this view's window, focused or not.
   pub(super) fn watch_find_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     if self.find._find_key.is_some() || self.hidden_at.is_some() {
