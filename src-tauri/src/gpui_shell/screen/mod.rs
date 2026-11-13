@@ -763,6 +763,7 @@ impl Render for Screen {
         }
       }
     };
+    let palette = ctx.palette;
     let body = self.with_terminal(body, dark, cx);
     let remote_open = self.snapshot.remote.is_open();
     let remote = if remote_open {
@@ -792,8 +793,8 @@ impl Render for Screen {
     };
     div()
       .size_full()
-      .bg(ctx.palette.background)
-      .text_color(ctx.palette.foreground)
+      .bg(palette.background)
+      .text_color(palette.foreground)
       .font_family(theme::SANS_FONT)
       // A mouse-down blurs the focused input, as in a browser; an input
       // under the pointer takes focus again in the bubble phase.
@@ -869,11 +870,14 @@ impl Screen {
       .flex()
       .flex_col()
       .child(
-        gpui::canvas(move |bounds, _, _| container.set(Some(bounds)), |_, _, _, _| {})
-          .absolute()
-          .top_0()
-          .left_0()
-          .size_full(),
+        gpui::canvas(
+          move |bounds, _, _| container.set(Some(bounds)),
+          |_, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full(),
       )
       .when(!covered, |d| {
         d.child(div().flex_1().min_h_0().overflow_hidden().child(body))

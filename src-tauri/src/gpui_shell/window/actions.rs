@@ -606,7 +606,7 @@ impl Model {
           // The reviewer stays on the screen they started it from; the
           // terminal pane shows the agent on every screen.
           select: false,
-        })
+        });
       }
       _ => return None,
     }

@@ -1572,6 +1572,7 @@ fn terminal_pane_shows_on_the_github_view(cx: &mut TestAppContext) {
       "repoPath": "/repo",
       "tab": "prs",
       "filter": "open",
+      "creating": false,
       "runningChecks": [],
       "globalTerminal": { "repoPath": "/repo", "activeSessionId": 3 },
     }))
