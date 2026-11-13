@@ -598,6 +598,12 @@ impl Palette {
     self.foreground.opacity(if self.dark { 0.1 } else { 0.07 })
   }
 
+  /// The elbow linking a stacked workspace row to its parent: at least 3:1
+  /// against the sidebar and the selected fill, so it shows on both.
+  pub fn stack_connector(&self) -> Hsla {
+    self.muted_foreground
+  }
+
   /// Hover on something already filled with [`Palette::selected`].
   pub fn selected_hover(&self) -> Hsla {
     self.primary.opacity(if self.dark { 0.32 } else { 0.2 })
@@ -621,8 +627,14 @@ impl Palette {
 
   /// Lines with a review comment, and the comments under them: one amber,
   /// so a comment reads as part of the lines it is on.
+  /// Dark uses GitHub's dark attention tint (`#bb8009` at 15%), which sits
+  /// lighter on the code than yellow-500.
   pub fn commented(&self) -> Hsla {
-    self.warning.opacity(if self.dark { 0.15 } else { 0.1 })
+    if self.dark {
+      Hsla::from(rgb(0xbb8009)).opacity(0.15)
+    } else {
+      self.warning.opacity(0.1)
+    }
   }
 
   /// Behind every modal dialog, and behind controls laid over an image.
@@ -785,6 +797,54 @@ mod tests {
       assert!(p.selected_hover().a > p.selected().a);
       assert_ne!(p.primary_hover(), p.primary);
       assert!(p.handle_hover().a < 1.);
+    }
+  }
+
+  fn linear(c: Hsla) -> [f32; 3] {
+    let c = c.to_rgb();
+    [c.r, c.g, c.b].map(|v| {
+      if v <= 0.04045 {
+        v / 12.92
+      } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+      }
+    })
+  }
+
+  fn over(fg: Hsla, bg: Hsla) -> Hsla {
+    let (f, b) = (fg.to_rgb(), bg.to_rgb());
+    let mix = |x: f32, y: f32| x * f.a + y * (1. - f.a);
+    gpui::Rgba {
+      r: mix(f.r, b.r),
+      g: mix(f.g, b.g),
+      b: mix(f.b, b.b),
+      a: 1.,
+    }
+    .into()
+  }
+
+  fn contrast(a: Hsla, b: Hsla) -> f32 {
+    let lum = |c| {
+      let [r, g, b] = linear(c);
+      0.2126 * r + 0.7152 * g + 0.0722 * b
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+  }
+
+  /// WCAG 1.4.11: a UI line needs 3:1 against what it sits on.
+  #[test]
+  fn stack_connector_shows_on_sidebar_and_selected_row() {
+    for dark in [false, true] {
+      let p = palette(dark);
+      let line = p.stack_connector();
+      let row = contrast(line, p.sidebar);
+      let selected = contrast(line, over(p.selected(), p.sidebar));
+      assert!(row >= 3., "dark={dark}: {row:.2} on the sidebar");
+      assert!(
+        selected >= 3.,
+        "dark={dark}: {selected:.2} on a selected row"
+      );
     }
   }
 

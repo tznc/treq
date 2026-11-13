@@ -288,10 +288,6 @@ fn serializes_actions_for_react() {
     serde_json::json!({"kind": "startAgent", "id": null})
   );
   assert_eq!(
-    json(SidebarAction::BulkArchive),
-    serde_json::json!({"kind": "bulkArchive"})
-  );
-  assert_eq!(
     json(SidebarAction::HomeMenu {
       repo_path: "/r".into()
     }),
@@ -567,12 +563,29 @@ fn shows_skeleton_rows_while_loading(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn bulk_archive_button_archives_the_selection(cx: &mut TestAppContext) {
+fn multi_selection_draws_no_archive_button(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![row(7, "a", 0), row(8, "b", 0)]));
-  assert!(h.bounds("bulk-archive").is_none());
   h.update(|s| s.bulk_archive = Some(2));
-  h.click("bulk-archive");
-  assert_eq!(h.sent(), vec![SidebarAction::BulkArchive]);
+  assert!(h.bounds("bulk-archive").is_none());
+}
+
+#[gpui::test]
+fn right_click_on_a_multi_selected_row_opens_the_selection_menu(cx: &mut TestAppContext) {
+  let mut selected = row(7, "a", 0);
+  selected.selected = true;
+  let mut other = row(8, "b", 0);
+  other.selected = true;
+  let mut h = Harness::new(cx, snapshot(vec![selected, other, row(9, "c", 0)]));
+  h.update(|s| s.bulk_archive = Some(2));
+  right_click(&mut h, "workspace-7");
+  right_click(&mut h, "workspace-9");
+  assert_eq!(
+    h.sent(),
+    vec![
+      SidebarAction::WorkspacesMenu,
+      SidebarAction::WorkspaceMenu { id: 9 },
+    ]
+  );
 }
 
 #[gpui::test]

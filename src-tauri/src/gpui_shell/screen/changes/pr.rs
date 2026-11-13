@@ -160,7 +160,7 @@ impl ChangesView {
   }
 
   /// Runs `work` against the PR off the main thread, then `apply`s it.
-  fn run_pr<T: Send + 'static>(
+  pub(super) fn run_pr<T: Send + 'static>(
     &self,
     work: impl FnOnce(&dyn PrReviewHost, &PrTarget) -> T + Send + 'static,
     apply: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
