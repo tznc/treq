@@ -989,7 +989,10 @@ impl Overlay {
       Some(Item::Entry(index)) => {
         let selected = self.selected == Some(index);
         // A `list` item sizes to its content; stretch it like the column rows.
-        self.row(&p, index, selected, cx).w_full().into_any_element()
+        self
+          .row(&p, index, selected, cx)
+          .w_full()
+          .into_any_element()
       }
       None => div().into_any_element(),
     }
