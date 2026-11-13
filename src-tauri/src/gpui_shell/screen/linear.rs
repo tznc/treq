@@ -2223,6 +2223,7 @@ impl LinearView {
         .on_close(ui::handler(cx, |view, _, cx| view.cancel_delete(cx)))
         .on_primary(ui::handler(cx, |view, _, cx| view.delete_issue(cx)))
         .primary_disabled(pending)
+        .confirm()
         .footer([
           Button::new("linear-delete-cancel", p)
             .variant(Variant::Outline)

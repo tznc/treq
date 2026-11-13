@@ -176,10 +176,10 @@ test("dialogs: stack workspace", async ({ page, context }) => {
     rest: false,
     expectations: [
       "'Stack on' reads feat/keyvalues-cache",
-      "Buttons aligned at the bottom right",
+      "An X top-right; the verb alone at the bottom right",
     ],
   });
-  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await dialog.getByRole("button", { name: "Close" }).click();
   await expect(heading(dialog)).toHaveCount(0);
 
   // Ctrl+Shift+N stacks on the open workspace.
@@ -194,7 +194,7 @@ test("dialogs: stack workspace", async ({ page, context }) => {
     rest: false,
     expectations: ["Same dialog, 'Stack on' reads the open workspace"],
   });
-  await again.getByRole("button", { name: "Cancel" }).click();
+  await again.getByRole("button", { name: "Close" }).click();
 });
 
 test("dialogs: rename workspace from the context menu", async ({ page, context }) => {

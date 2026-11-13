@@ -2085,26 +2085,18 @@ impl Render for WorkspaceDialog {
             .child(self.error.clone()),
         )
       })
-      .footer([
-        Button::new("workspace-dialog-cancel", &p)
-          .variant(Variant::Outline)
-          .disabled(loading)
-          .label("Cancel")
-          .on_click(cx.listener(|view, _, _, cx| view.close_unless_creating(cx)))
-          .into_any_element(),
-        Button::new("workspace-dialog-submit", &p)
-          .disabled(!can_submit)
-          .when(loading, |this| {
-            this.child(ui::spinner(
-              "workspace-dialog-spin",
-              14.,
-              p.primary_foreground,
-            ))
-          })
-          .label(self.submit_label())
-          .on_click(cx.listener(|view, _, _, cx| view.submit(cx)))
-          .into_any_element(),
-      ])
+      .footer([Button::new("workspace-dialog-submit", &p)
+        .disabled(!can_submit)
+        .when(loading, |this| {
+          this.child(ui::spinner(
+            "workspace-dialog-spin",
+            14.,
+            p.primary_foreground,
+          ))
+        })
+        .label(self.submit_label())
+        .on_click(cx.listener(|view, _, _, cx| view.submit(cx)))
+        .into_any_element()])
       .into_any_element()
   }
 }

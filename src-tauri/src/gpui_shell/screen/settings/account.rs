@@ -3271,6 +3271,7 @@ impl SettingsView {
                 )
               }),
           )
+          .confirm()
           .footer([
             Button::new("account-delete-cancel", p)
               .variant(Variant::Outline)

@@ -311,7 +311,7 @@ fn skills_uninstall_and_move_between_levels(cx: &mut TestAppContext) {
 fn skills_dialog_cancels(cx: &mut TestAppContext) {
   let (mut h, host) = skills_harness(cx);
   h.click("skill-install-docx");
-  h.click("skill-dialog-cancel");
+  h.click("skill-install-dialog-close");
   assert!(!h.drawn("skill-install-dialog"));
   assert!(host.writes().is_empty());
 }

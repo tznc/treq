@@ -17,7 +17,7 @@ use crate::{
   gpui_shell::{
     native::{NativeEvent, ToastTone},
     theme,
-    ui::{self, Button, Variant},
+    ui::{self, Button},
   },
 };
 
@@ -170,19 +170,11 @@ impl Render for ChangeMoveDialog {
       .on_close(ui::handler(cx, |view, _, cx| view.cancel(cx)))
       .on_primary(ui::handler(cx, |view, _, cx| view.confirm(cx)))
       .primary_disabled(pending)
-      .footer([
-        Button::new("change-move-cancel", &p)
-          .variant(Variant::Outline)
-          .disabled(pending)
-          .label("Cancel")
-          .on_click(cx.listener(|view, _, _, cx| view.cancel(cx)))
-          .into_any_element(),
-        Button::new("change-move-confirm", &p)
-          .disabled(pending)
-          .label("Move")
-          .on_click(cx.listener(|view, _, _, cx| view.confirm(cx)))
-          .into_any_element(),
-      ])
+      .footer([Button::new("change-move-confirm", &p)
+        .disabled(pending)
+        .label("Move")
+        .on_click(cx.listener(|view, _, _, cx| view.confirm(cx)))
+        .into_any_element()])
       .into_any_element()
   }
 }

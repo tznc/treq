@@ -987,7 +987,7 @@ impl OpenWorkspacesDialog {
     options: Div,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> (Div, [gpui::AnyElement; 3]) {
+  ) -> (Div, [gpui::AnyElement; 2]) {
     let checks = self.lines();
     let targets = self.targets();
     let unchecked = checks.iter().filter(|(_, c)| c.is_none()).count();
@@ -1052,12 +1052,6 @@ impl OpenWorkspacesDialog {
         .flex_1()
         .min_w_0()
         .child(self.status(status, invalid, &checks, p, cx))
-        .into_any_element(),
-      Button::new("open-workspaces-cancel", p)
-        .variant(Variant::Outline)
-        .disabled(self.pending)
-        .label("Cancel")
-        .on_click(cx.listener(|view, _, _, cx| view.close(cx)))
         .into_any_element(),
       Button::new("open-workspaces-submit", p)
         .disabled(!self.can_submit())

@@ -568,7 +568,7 @@ fn settings_survive_random_edits() {
 // The workspace dialogs: create, stack and rename, and their validation.
 
 const DIALOG_CLICKS: &[&str] = &[
-  "workspace-dialog-cancel",
+  "workspace-dialog-close",
   "workspace-dialog-submit",
   "workspace-dialog-target",
   "position-before",
@@ -832,10 +832,10 @@ const PROJECT_CLICKS: &[&str] = &[
   "project-home-tab-changes",
   "project-home-tab-commits",
   "save-project-discard",
-  "save-project-cancel",
+  "save-project-dialog-close",
   "save-project-submit",
   "project-context-add-files",
-  "project-context-cancel",
+  "project-context-dialog-close",
   "project-context-save",
 ];
 

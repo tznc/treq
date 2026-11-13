@@ -835,6 +835,7 @@ impl GithubView {
       .on_close(ui::handler(cx, move |view, _, cx| cancel(view, cx)))
       .on_primary(ui::handler(cx, move |view, _, cx| delete(view, cx)))
       .primary_disabled(pending)
+      .confirm()
       .footer([
         Button::new("github-delete-cancel", p)
           .variant(Variant::Outline)
