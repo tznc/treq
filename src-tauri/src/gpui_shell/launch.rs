@@ -39,12 +39,12 @@ impl LaunchStore for Store<'_> {
       .with_db(|db| crate::core::sessions::create_session(db, &scope, workspace_id, name.into()))
   }
 
-  fn session_count(&self, repo: &str, workspace_id: Option<i64>) -> usize {
+  fn session_names(&self, repo: &str) -> Vec<String> {
     crate::core::sessions::list_sessions(&self.0.state_scope(repo))
       .unwrap_or_default()
-      .iter()
-      .filter(|s| s.workspace_id == workspace_id)
-      .count()
+      .into_iter()
+      .map(|s| s.name)
+      .collect()
   }
 
   fn repo_setting(&self, repo: &str, key: &str) -> Option<String> {

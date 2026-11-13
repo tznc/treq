@@ -120,6 +120,24 @@ fn terminal_label_shows_the_workspace_title_else_the_branch() {
   assert_eq!(place.workspace_label("/elsewhere"), None);
 }
 
+#[test]
+fn terminal_label_counts_show_the_workspace_diff_stats_unless_zero() {
+  let loc = |insertions, deletions| workspace::Loc {
+    insertions,
+    deletions,
+  };
+  let mut place = terminal::Place {
+    loc: Some(("/ws/a".into(), loc(5, 3))),
+    ..terminal::Place::default()
+  };
+  assert_eq!(place.workspace_loc("/ws/a"), Some(&loc(5, 3)));
+  assert_eq!(place.workspace_loc("/ws/b"), None);
+  place.loc = Some(("/ws/a".into(), loc(0, 0)));
+  assert_eq!(place.workspace_loc("/ws/a"), None);
+  place.loc = None;
+  assert_eq!(place.workspace_loc("/ws/a"), None);
+}
+
 #[gpui::test]
 fn workspace_header_controls_share_one_height(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());

@@ -177,6 +177,17 @@ fn shell_cat(path: &str) -> String {
   format!("$(cat -- {})", shell_quote(path))
 }
 
+/// The task as the agent's positional argument, read from its file at exec
+/// time: the terminal's line editor takes control bytes in a typed command
+/// (Ctrl-C, Ctrl-U, Tab, CR, Esc) as keystrokes, which no quoting survives.
+const TASK_ARG: &str = "-- \"${treq_task%.}\"";
+
+/// Reads the task file into `treq_task`; the `.` keeps trailing newlines,
+/// which `$(...)` would strip.
+fn read_task(path: &str) -> String {
+  format!("treq_task=$(cat -- {}; printf .); ", shell_quote(path))
+}
+
 pub fn cursor_prompt_file_contents(system_prompt: &str, pending_prompt: Option<&str>) -> String {
   match pending_prompt.filter(|p| !p.is_empty()) {
     Some(prompt) => format!("{system_prompt} {prompt}"),
@@ -203,7 +214,7 @@ pub fn build_auto_command(
 ) -> Result<String, String> {
   let pending = options.pending_prompt.filter(|p| !p.is_empty());
   let with_task = |command: String| match (&files.task_path, pending) {
-    (Some(path), Some(_)) => format!("{command} -- \"{}\"", shell_cat(path)),
+    (Some(_), Some(_)) => format!("{command} {TASK_ARG}"),
     (None, Some(prompt)) => append_agent_prompt(&command, prompt),
     (_, None) => command,
   };
@@ -286,8 +297,14 @@ pub fn build_auto_command(
 
   let quoted: Vec<String> = cleanup.iter().map(|p| shell_quote(p)).collect();
   command = format!(
-    "( trap \"rm -rf {}\" EXIT; {command} ); {NOTIFY_ON_AGENT_EXIT}",
-    quoted.join(" ")
+    "( trap \"rm -rf {}\" EXIT; {}{command} ); {NOTIFY_ON_AGENT_EXIT}",
+    quoted.join(" "),
+    files
+      .task_path
+      .as_deref()
+      .filter(|_| pending.is_some())
+      .map(read_task)
+      .unwrap_or_default()
   );
   if let Some(bin) = options.treq_bin_dir.filter(|b| !b.is_empty()) {
     command = format!("export PATH={}:$PATH; {command}", shell_quote(bin));
@@ -826,7 +843,7 @@ mod tests {
       },
     )
     .unwrap();
-    assert!(prepared.command.contains("-- \"$(cat -- "));
+    assert!(prepared.command.contains(TASK_ARG));
     assert!(!prepared.command.contains("hi'"));
     let settings = prepared
       .file_paths
@@ -873,12 +890,14 @@ mod tests {
         .find(|p| std::fs::read_to_string(p).ok().as_deref() == Some(task.as_str()))
         .unwrap_or_else(|| panic!("{agent}: no file holds the task"));
       assert!(
-        prepared
-          .command
-          .contains(&format!("-- \"$(cat -- {})\"", shell_quote(task_file))),
+        prepared.command.contains(&format!(
+          "treq_task=$(cat -- {}; printf .); ",
+          shell_quote(task_file)
+        )),
         "{agent}: {}",
         prepared.command
       );
+      assert!(prepared.command.contains(TASK_ARG), "{agent}");
       assert!(prepared
         .command
         .contains(&format!("rm -rf {}", shell_quote(&prepared.file_paths[0]))));
@@ -906,5 +925,181 @@ mod tests {
     .expect("a deleted workspace must not start an agent");
     assert!(error.contains("no longer exists"), "{error}");
     assert!(!workspace.exists());
+  }
+
+  /// Bytes a shell's line editor inserts as typed. Control bytes (Ctrl-C,
+  /// Ctrl-U, Tab, CR, Esc...) are keystrokes to it, so no quoting can type them.
+  fn types_as_text(command: &str) -> bool {
+    command.chars().all(|c| c == ' ' || c.is_ascii_graphic())
+  }
+
+  fn prepare_task(dir: &Path, agent: &str, bin: Option<&str>, prompt: &str) -> Prepared {
+    prepare_auto_command(
+      &AgentPaths {
+        workspace_path: None,
+        repo_path: dir.to_str().unwrap(),
+        supporting_repo_paths: NONE,
+        project: None,
+        app_instructions: None,
+        repo_instructions: None,
+      },
+      &AutoCommand {
+        pending_prompt: Some(prompt),
+        treq_bin_dir: bin,
+        ..opts(agent)
+      },
+    )
+    .unwrap()
+  }
+
+  proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    /// The task never rides in the typed line, so nothing in it reaches
+    /// the line editor; the task file holds it byte for byte.
+    #[test]
+    fn typed_command_never_carries_the_task(prompt in "\\PC*|[\\x00-\\x1f\\x7f'`$()\"!\\\\]{1,40}") {
+      let dir = tempfile::tempdir().unwrap();
+      for agent in ["claude", "codex", "copilot"] {
+        let prepared = prepare_task(dir.path(), agent, None, &prompt);
+        let task = prepared.file_paths.iter().find(|p| p.contains("treq-agent-task-")).cloned();
+        let written = task.as_deref().map(std::fs::read_to_string);
+        super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+        proptest::prop_assert!(types_as_text(&prepared.command), "{:?}", prepared.command);
+        if prompt.is_empty() {
+          proptest::prop_assert!(task.is_none());
+        } else {
+          proptest::prop_assert_eq!(written.unwrap().unwrap(), prompt.clone());
+        }
+      }
+    }
+  }
+
+  /// Types the agent command into an interactive shell on a real PTY, as
+  /// the terminal does, and returns the task the fake agent received.
+  #[cfg(unix)]
+  fn start_in_pty(shell: &str, prompt: &str) -> Option<String> {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, Instant};
+
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let out = dir.path().join("received");
+    let agent = bin.join("claude");
+    std::fs::write(
+      &agent,
+      "#!/bin/sh\nwhile [ \"$1\" != -- ]; do shift; done\nprintf %s \"$2\" > \"$TREQ_TEST_OUT\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let prepared = prepare_task(dir.path(), "claude", bin.to_str(), prompt);
+
+    let pair = native_pty_system()
+      .openpty(PtySize {
+        rows: 24,
+        cols: 80,
+        pixel_width: 0,
+        pixel_height: 0,
+      })
+      .unwrap();
+    let mut cmd = CommandBuilder::new(shell);
+    match shell {
+      "zsh" => cmd.args(["-f", "-i"]),
+      _ => cmd.args(["--norc", "--noprofile", "-i"]),
+    };
+    cmd.env("TREQ_TEST_OUT", &out);
+    cmd.env("PATH", std::env::var("PATH").unwrap_or_default());
+    let mut child = pair.slave.spawn_command(cmd).unwrap();
+    drop(pair.slave);
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    std::thread::spawn(move || std::io::copy(&mut reader, &mut std::io::sink()));
+    let mut writer = pair.master.take_writer().unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    writer
+      .write_all(normalize_command(&prepared.command).as_bytes())
+      .unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !out.exists() && Instant::now() < deadline {
+      std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(50));
+    child.kill().ok();
+    std::fs::read(&out)
+      .ok()
+      .map(|b| String::from_utf8(b).unwrap())
+  }
+
+  #[cfg(unix)]
+  fn shells() -> Vec<&'static str> {
+    ["bash", "zsh"]
+      .into_iter()
+      .filter(|s| {
+        std::process::Command::new(s)
+          .arg("-c")
+          .arg(":")
+          .status()
+          .is_ok_and(|s| s.success())
+      })
+      .collect()
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn agent_receives_the_task_byte_for_byte_from_a_typed_start() {
+    let long = (0..100)
+      .map(|i| format!("line {i}: it's `pwd` $HOME (a \"b\" ! \\ \t tab"))
+      .collect::<Vec<_>>()
+      .join("\n");
+    assert!(long.len() > 4096);
+    let mut prompts: Vec<String> = [
+      "Run treq st to read this workspace's description",
+      "back`tick",
+      "$HOME and ${PATH}",
+      "open ( paren",
+      "close ) paren",
+      "a \"double\" quote",
+      "bang! !! !$",
+      "multi\nline\nprompt",
+      "trailing newlines\n\n",
+      "unicode: é 中文 🎉 \u{200b}",
+      "crlf\r\nline",
+    ]
+    .map(String::from)
+    .to_vec();
+    // Every control byte but NUL, which no argv can carry.
+    prompts.extend(
+      (1u8..32)
+        .chain([127])
+        .map(|b| format!("it's {} ok", b as char)),
+    );
+    prompts.push(long);
+    for shell in shells() {
+      for prompt in &prompts {
+        assert_eq!(
+          start_in_pty(shell, prompt).as_deref(),
+          Some(prompt.as_str()),
+          "{shell}: {prompt:?}"
+        );
+      }
+    }
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn starting_twice_on_a_workspace_starts_both() {
+    for shell in shells() {
+      for _ in 0..2 {
+        let prompt = "Run treq st to read this workspace's description";
+        assert_eq!(
+          start_in_pty(shell, prompt).as_deref(),
+          Some(prompt),
+          "{shell}"
+        );
+      }
+    }
   }
 }
