@@ -917,7 +917,16 @@ pub fn gh_list_prs_impl(
     };
     let q = format!("q=repo:{repo_full_name} is:pr {filter}");
     let args = [
-      "api", "-X", "GET", "search/issues", "-f", &q, "-f", "per_page=1", "--jq", ".total_count",
+      "api",
+      "-X",
+      "GET",
+      "search/issues",
+      "-f",
+      &q,
+      "-f",
+      "per_page=1",
+      "--jq",
+      ".total_count",
     ];
     list.total_count = run_gh(gh_path, &args, extended_path)
       .and_then(check_gh_output)
