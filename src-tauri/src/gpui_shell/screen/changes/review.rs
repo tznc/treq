@@ -2469,10 +2469,7 @@ mod row_paint_tests {
   fn a_commented_row_is_tinted_over_its_diff_colour() {
     let p = theme::palette(true);
     for kind in [LineKind::Added, LineKind::Removed, LineKind::Context] {
-      assert_eq!(
-        row_fill(false, true, kind, &p),
-        Some(Tone::Warning.tint(&p))
-      );
+      assert_eq!(row_fill(false, true, kind, &p), Some(p.commented()));
     }
   }
 
