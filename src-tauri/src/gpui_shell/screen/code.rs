@@ -1176,9 +1176,28 @@ fn markdown_view(
     TextView::markdown(id, prepared_markdown(text))
       .style(style)
       .selectable(true)
-      .scrollable(scrollable),
+      .scrollable(scrollable)
+      .on_link_click(|url, event, _, cx| {
+        let opens = match event {
+          gpui::ClickEvent::Mouse(click) => matches!(
+            click.up.button,
+            gpui::MouseButton::Left | gpui::MouseButton::Middle
+          ),
+          gpui::ClickEvent::Keyboard(_) => true,
+          gpui::ClickEvent::Touch(click) => !click.long_press,
+        };
+        if let Some(opener) = opens.then(|| cx.try_global::<UrlOpener>()).flatten() {
+          (opener.0)(url);
+        }
+      }),
   )
 }
+
+/// Opens a link in the system browser: `App::open_url`, `TextView`'s
+/// default, does nothing under tauri-plugin-gpui. Set by [`super::Screen`].
+pub(super) struct UrlOpener(pub(super) Rc<dyn Fn(&str)>);
+
+impl gpui::Global for UrlOpener {}
 
 /// The texts [`prepared_markdown`] keeps; a page shows only a few.
 const PREPARED_MAX: usize = 64;
