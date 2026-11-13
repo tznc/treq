@@ -1000,7 +1000,7 @@ mod tests {
       let dir = tempfile::tempdir().unwrap();
       for agent in ["claude", "codex", "copilot"] {
         let prepared = prepare_task(dir.path(), agent, None, &prompt);
-        let task = prepared.file_paths.iter().find(|p| p.contains("treq-agent-task-")).cloned();
+        let task = launch_files(&prepared).into_iter().find(|p| p.ends_with("task.txt"));
         let written = task.as_deref().map(std::fs::read_to_string);
         super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
         proptest::prop_assert!(types_as_text(&prepared.command), "{:?}", prepared.command);
