@@ -823,6 +823,11 @@ impl WorkspaceView {
       return;
     };
     let (header, tab_row) = workspace_view(&route, loaded, &self.pr, self.pending);
+    if let (Some((pane, _)), Some(workspace)) = (&self.terminal, &loaded.workspace) {
+      let loc = tab_row.as_ref().and_then(|row| row.loc.clone());
+      let dir = super::merge::full_path(workspace);
+      pane.update(cx, |pane, cx| pane.set_loc(loc.map(|loc| (dir, loc)), cx));
+    }
     let snapshot = Some(Workspace { header, tab_row });
     if self.snapshot != snapshot {
       self.snapshot = snapshot;
@@ -1745,6 +1750,14 @@ async fn in_front(this: &WeakEntity<WorkspaceView>, cx: &mut gpui::AsyncWindowCo
   }
 }
 
+/// One of `LocDiffMarker`'s counts, `+N` or `-N`, in its tone's color.
+pub(super) fn loc_count(text: String, color: Hsla) -> Div {
+  ui::text(div(), TextSize::Xs)
+    .font_family(theme::MONO_FONT)
+    .text_color(color)
+    .child(text)
+}
+
 /// `LocDiffMarker`: green `+N`, a centered insertion/deletion bar, red `-N`.
 fn loc_marker(loc: &Loc, p: &Palette) -> Div {
   const HALF: f32 = 14.;
@@ -1758,12 +1771,7 @@ fn loc_marker(loc: &Loc, p: &Palette) -> Div {
   };
   let (added, removed) = (ui::Tone::DiffAdded, ui::Tone::DiffRemoved);
   let (green, red) = (added.color(p), removed.color(p));
-  let count = |text: String, color: Hsla| {
-    ui::text(div(), TextSize::Xs)
-      .font_family(theme::MONO_FONT)
-      .text_color(color)
-      .child(text)
-  };
+  let count = loc_count;
   div()
     .debug_selector(|| "loc-diff-marker".into())
     .flex()
@@ -2532,6 +2540,7 @@ fn terminal_place(
       .iter()
       .map(|w| (super::merge::full_path(w), w.id))
       .collect(),
+    loc: None,
     repo_path: repo,
   }
 }
