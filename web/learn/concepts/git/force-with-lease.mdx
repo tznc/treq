@@ -8,7 +8,7 @@ import DefinitionCard from "@site/src/components/DefinitionCard";
 
 _Refuse a force push when the remote tip has moved past what you expect._
 
-After you rewrite local history with [rebase](./merge-vs-rebase) or amend, a normal push is rejected because the remote tip is not an ancestor of your new tip. A [force push](/docs/how-to/pushing-to-remote) overwrites that remote tip. `--force-with-lease` still overwrites, but only when the remote matches the tip your repository already expects.
+After you rewrite local history with [rebase](./merge-vs-rebase.mdx) or amend, a normal push is rejected because the remote tip is not an ancestor of your new tip. A [force push](/docs/how-to/pushing-to-remote) overwrites that remote tip. `--force-with-lease` still overwrites, but only when the remote matches the tip your repository already expects.
 
 Treq Push uses that same check. You do not pass the Git flag.
 
@@ -103,7 +103,7 @@ git push --force-with-lease --force-if-includes origin feature/my-work
 
 `--force-if-includes` is a no-op with `--force-with-lease=<refname>:<expect>`, because that form already names the expected tip instead of reading the tracking cache. Other mitigations include a push-only remote that never receives fetches into the same tracking refs, or an explicit `<refname>:<expect>` value taken from a known good commit.
 
-Do not use any force push form on protected shared branches such as `main` or release lines. Prefer lease-protected force pushes for branches with a single owner, an agreed rewrite policy, or a [dependent stack](./stacked-prs) whose owner rebases every layer together.
+Do not use any force push form on protected shared branches such as `main` or release lines. Prefer lease-protected force pushes for branches with a single owner, an agreed rewrite policy, or a [dependent stack](./stacked-prs.mdx) whose owner rebases every layer together.
 
 ## Scaling and Operations
 
@@ -117,7 +117,7 @@ When a lease rejection appears in CI, fail the job and surface the unexpected re
 
 ## Next Steps
 
-- [Cherry-pick vs Rebase](./cherry-pick-vs-rebase): distinguish selected patch copying from branch rewriting
+- [Cherry-pick vs Rebase](./cherry-pick-vs-rebase.mdx): distinguish selected patch copying from branch rewriting
 - [Pushing to Remote](/docs/how-to/pushing-to-remote): push rewritten branches from the Treq workflow
 - [Auto-rebase AI Branches](/learn/how-to/auto-rebase-ai-branches): keep dependent agent branches current without dropping lease protection
 - [Stacked PR Workflow](/learn/workflows/git/stacked-pr): force-push rewritten stacks without clobbering dependents

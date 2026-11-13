@@ -28,6 +28,7 @@ pub mod files;
 pub mod generated;
 pub mod github_cli;
 pub mod github_issues;
+pub mod github_user_token;
 pub mod idempotency_store;
 pub mod linear_review;
 pub mod managed;

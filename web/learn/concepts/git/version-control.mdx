@@ -16,14 +16,14 @@ Git is the default for most software projects. Jujutsu offers a different set of
 
 ## Understanding the Concept
 
-A **repository** holds your files plus the history needed to rebuild any past state of them. Git is distributed, so each normal [clone](./git-worktrees-vs-clones) carries that history and can make commits without reaching a central server.
+A **repository** holds your files plus the history needed to rebuild any past state of them. Git is distributed, so each normal [clone](./git-worktrees-vs-clones.mdx) carries that history and can make commits without reaching a central server.
 
 <DefinitionCard
   term="Repository"
   definition="The stored history and metadata for a versioned set of files, usually paired with a working directory where those files are edited."
 />
 
-A **commit** records a snapshot of the project, some metadata, and the IDs of its parents. Those parent links form a directed acyclic graph. A commit with one parent continues a line of history, while a [merge commit](./merge-vs-rebase) has multiple parents.
+A **commit** records a snapshot of the project, some metadata, and the IDs of its parents. Those parent links form a directed acyclic graph. A commit with one parent continues a line of history, while a [merge commit](./merge-vs-rebase.mdx) has multiple parents.
 
 <DefinitionCard
   term="Commit"
@@ -91,7 +91,7 @@ jj bookmark create feature/add-login
 jj git push --bookmark feature/add-login
 ```
 
-Jujutsu also logs every command that changes the repository. `jj undo` reverses the last one, and `jj op log` shows earlier states. Git gives you the same kind of rescue at a lower level, through refs and [reflogs](./git-reflog).
+Jujutsu also logs every command that changes the repository. `jj undo` reverses the last one, and `jj op log` shows earlier states. Git gives you the same kind of rescue at a lower level, through refs and [reflogs](./git-reflog.mdx).
 
 Pick Jujutsu because its working-copy, conflict, and history-editing model suits your team. Do not pick it expecting Git hosting and tooling to go away, because most collaboration still crosses a Git boundary.
 
@@ -99,7 +99,7 @@ Pick Jujutsu because its working-copy, conflict, and history-editing model suits
 
 A commit should hold one coherent change and say why in its message. Small commits that still build are easier to review and make `git bisect` far more useful.
 
-Treat published history as an interface. Rewriting a private branch is routine. Rewriting a branch that others use changes commit IDs beneath their work and requires coordination, which is the problem [stacked PRs](./stacked-prs) are built to manage.
+Treat published history as an interface. Rewriting a private branch is routine. Rewriting a branch that others use changes commit IDs beneath their work and requires coordination, which is the problem [stacked PRs](./stacked-prs.mdx) are built to manage.
 
 Version control is not a backup. A clone can leave out unreachable objects, local-only refs, server settings, issue data, release assets, and large files. Back up the hosting service and any outside artifact stores on their own.
 
@@ -115,9 +115,9 @@ Keep generated files, credentials, and build output out of commits unless the pr
 
 ## Next Steps
 
-- [What are Git Worktrees?](./git-worktrees): use several working directories with one repository
-- [Git Worktrees vs Clones](./git-worktrees-vs-clones): compare shared and independent repositories
-- [What are Git Submodules?](./git-submodules): pin another repository inside your tree by commit
-- [Merge vs Rebase](./merge-vs-rebase): choose how to integrate diverged histories
-- [What is the Git Reflog?](./git-reflog): recover local tips after resets and rewrites
-- [What are Stacked PRs?](./stacked-prs): organize dependent changes for review
+- [What are Git Worktrees?](./git-worktrees.mdx): use several working directories with one repository
+- [Git Worktrees vs Clones](./git-worktrees-vs-clones.mdx): compare shared and independent repositories
+- [What are Git Submodules?](./git-submodules.mdx): pin another repository inside your tree by commit
+- [Merge vs Rebase](./merge-vs-rebase.mdx): choose how to integrate diverged histories
+- [What is the Git Reflog?](./git-reflog.mdx): recover local tips after resets and rewrites
+- [What are Stacked PRs?](./stacked-prs.mdx): organize dependent changes for review

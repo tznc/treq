@@ -636,3 +636,14 @@ a:hover {
   visibility: visible;
   opacity: 1;
 }
+
+/* Dashboard grey text: darker in light theme for contrast, unchanged in dark. */
+:root {
+  --dashboard-text-muted: var(--ifm-color-emphasis-700);
+  --dashboard-text-subtle: var(--ifm-color-emphasis-800);
+}
+
+[data-theme='dark'] {
+  --dashboard-text-muted: var(--ifm-color-emphasis-500);
+  --dashboard-text-subtle: var(--ifm-color-emphasis-600);
+}

@@ -23,6 +23,9 @@ pub struct AgentCliFiles {
   pub claude_skill_path: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub skill_write_warning: Option<String>,
+  /// The task prompt, kept out of the typed command (see [`write_agent_task_file`]).
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub task_path: Option<String>,
 }
 
 /// Write the agent system prompt, optional Claude settings, and bundled Treq skill pack.
@@ -76,7 +79,17 @@ pub fn write_agent_cli_files(
     } else {
       Some(skill_write_warnings.join(" "))
     },
+    task_path: None,
   })
+}
+
+/// Writes an agent's task prompt to a temp file. A fresh shell reads the
+/// typed command in canonical mode, which caps a line (1024 bytes on macOS,
+/// where the Enter is then dropped), so long prompts are never typed.
+pub fn write_agent_task_file(task: &str) -> Result<String, String> {
+  let path = std::env::temp_dir().join(format!("{FILE_PREFIX}task-{}.txt", uuid::Uuid::new_v4()));
+  fs::write(&path, task).map_err(|e| format!("Failed to write agent task file: {e}"))?;
+  Ok(path_to_string(&path))
 }
 
 /// Delete temp files previously created by [`write_agent_cli_files`].

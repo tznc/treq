@@ -933,9 +933,7 @@ mod remote_header_tests {
   #[test]
   fn a_workspace_header_reads_everything_side_by_side() {
     let (remote, transport) = answered(Duration::from_millis(40));
-    let started = std::time::Instant::now();
     let header = read_remote_header(&remote, &route(Some(3)));
-    let took = started.elapsed();
     assert_eq!(header.workspace.map(|w| w.id), Some(3));
     assert_eq!(
       kinds(&transport),
@@ -947,8 +945,12 @@ mod remote_header_tests {
         "WorkspaceDiff"
       ]
     );
-    // Five serial reads would take 200 ms.
-    assert!(took < Duration::from_millis(120), "{took:?}");
+    // Counts overlapping reads rather than timing them: a loaded CI runner
+    // took 167 ms for reads that do run side by side.
+    let most = transport
+      .most_reading
+      .load(std::sync::atomic::Ordering::SeqCst);
+    assert!(most > 1, "reads ran one at a time");
   }
 
   #[test]

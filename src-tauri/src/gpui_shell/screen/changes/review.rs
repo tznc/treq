@@ -10,7 +10,7 @@ use crate::result_ext::ResultExt;
 use std::{ops::Range, time::Duration};
 
 use super::*;
-use crate::core::review::{selected_range, selected_text, word_at, TextPoint};
+use crate::core::review::{selected_range, selected_row, selected_text, word_at, TextPoint};
 use crate::gpui_shell::screen::{
   changes_review::{
     commented_text, comments_under, compose_suggestion_comment, count_label, is_outdated,
@@ -1166,7 +1166,14 @@ impl ChangesView {
       number_and_side(numbers, l),
       &|c| self.is_outdated_in(c, hunks),
     );
-    let bg = row_fill(selected, has_comment, kind, p);
+    // A text drag across lines fills whole rows, empty ones included.
+    let text_row = self
+      .review
+      .text
+      .as_ref()
+      .filter(|t| t.path == path)
+      .is_some_and(|t| selected_row(hunks, t.anchor, t.head, (h, l)));
+    let bg = row_fill(selected || text_row, has_comment, kind, p);
     // The characters this line changed against its pair, a shade deeper.
     let mark = match kind {
       LineKind::Removed => Tone::DiffRemoved.color(p),
@@ -1180,7 +1187,7 @@ impl ChangesView {
       .as_ref()
       .filter(|t| t.path == path)
       .and_then(|t| selected_range(hunks, t.anchor, t.head, (h, l)))
-      .filter(|r| !r.is_empty());
+      .filter(|r| !text_row && !r.is_empty());
     let changed: Vec<(Range<usize>, Hsla)> = picked
       .map(|r| (r, p.selected()))
       .into_iter()
@@ -1197,7 +1204,6 @@ impl ChangesView {
       .as_ref()
       .is_some_and(|s| s.lines.len() > 1);
     let border = p.border.opacity(0.4);
-    let dragging = self.review.selection.as_ref().is_some_and(|s| s.dragging);
     let text = line.get(1..).filter(|t| !t.is_empty()).unwrap_or(" ");
     let at = (h, l);
     let (press, drag, add) = (path.to_string(), path.to_string(), path.to_string());
@@ -1248,9 +1254,6 @@ impl ChangesView {
           .border_color(border)
           .text_color(p.muted_foreground)
           .cursor_pointer()
-          .when(gutter_hovers(selected, dragging), |this| {
-            this.hover(move |s| s.bg(p.hover()))
-          })
           .when(!conflicted, |this| {
             this.on_mouse_down(
               MouseButton::Left,
@@ -1291,7 +1294,8 @@ impl ChangesView {
           .flex_none()
           .flex()
           .items_center()
-          .justify_center()
+          .justify_end()
+          .pr_0p5()
           .when(!conflicted, |this| {
             this.child(
               self.tip(
@@ -1313,13 +1317,13 @@ impl ChangesView {
                     new.or(old).unwrap_or_default()
                   ))
                   .test_support()
-                  .p_0p5()
+                  .p_px()
                   .rounded(radius::SM)
                   .bg(p.primary)
                   .cursor_pointer()
                   .opacity(0.)
                   .group_hover("diff-line", |s| s.opacity(1.))
-                  .child(ui::icon(theme::ICON_PLUS, 12., p.primary_foreground))
+                  .child(ui::icon(theme::ICON_PLUS, 10., p.primary_foreground))
                   .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                   .on_click(cx.listener(move |view, _, _, cx| {
                     cx.stop_propagation();
@@ -2428,17 +2432,10 @@ pub(super) fn row_fill(
   }
 }
 
-/// Behind the comments under a line: the same amber as the commented rows,
-/// so the band runs on into the comments.
+/// Behind the comments under a line: the plain background, so the row's
+/// highlight stops at the row and does not wash over the comments.
 pub(super) fn comment_strip_fill(p: &Palette) -> Hsla {
-  p.commented()
-}
-
-/// Whether the gutter shows its hover fill. The fill sits on the gutter cell,
-/// above the row's own fill, so on a selected row (the drag head is always
-/// under the cursor) it would cut a grey gap into the selection band.
-pub(super) fn gutter_hovers(selected: bool, dragging: bool) -> bool {
-  !selected && !dragging
+  p.background
 }
 
 #[cfg(test)]
@@ -2479,13 +2476,10 @@ mod row_paint_tests {
   }
 
   #[test]
-  fn the_comment_strip_matches_its_commented_rows() {
+  fn the_comment_strip_is_not_tinted_like_its_rows() {
     for dark in [true, false] {
       let p = theme::palette(dark);
-      assert_eq!(
-        Some(comment_strip_fill(&p)),
-        row_fill(false, true, LineKind::Added, &p)
-      );
+      assert_eq!(comment_strip_fill(&p), p.background);
     }
   }
 
@@ -2496,13 +2490,5 @@ mod row_paint_tests {
       row_fill(true, true, LineKind::Added, &p),
       Some(p.selected())
     );
-  }
-
-  #[test]
-  fn gutter_hover_never_paints_over_a_selection_or_a_drag() {
-    assert!(gutter_hovers(false, false));
-    assert!(!gutter_hovers(true, false), "selected row under the cursor");
-    assert!(!gutter_hovers(true, true), "drag head");
-    assert!(!gutter_hovers(false, true), "rows crossed mid-drag");
   }
 }
