@@ -1693,6 +1693,7 @@ impl LinearView {
         )
       })
       .when_some(fetch.error.clone(), |this, error| {
+        let pro = error == crate::linear::PRO_REQUIRED;
         this.child(
           div()
             .size_full()
@@ -1704,12 +1705,24 @@ impl LinearView {
                 .error(true)
                 .icon(theme::ICON_CIRCLE_ALERT)
                 .message(error)
-                .action(
+                .action(if pro {
+                  Button::new("linear-issues-manage-account", p)
+                    .size(Size::Sm)
+                    .label("Manage account")
+                    .on_click(cx.listener(|view, _, _, cx| {
+                      view.send_react(
+                        ScreenAction::Press {
+                          id: "account.manage".into(),
+                        },
+                        cx,
+                      )
+                    }))
+                } else {
                   Button::new("linear-issues-retry", p)
                     .size(Size::Sm)
                     .label("Retry")
-                    .on_click(cx.listener(|view, _, _, cx| view.load_issues(cx))),
-                ),
+                    .on_click(cx.listener(|view, _, _, cx| view.load_issues(cx)))
+                }),
             ),
         )
       });

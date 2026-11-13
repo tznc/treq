@@ -964,3 +964,27 @@ fn tab_reaches_assigned_to_me_and_the_pull_request_checkboxes(cx: &mut TestAppCo
     .not()
     .to_be_checked();
 }
+
+#[gpui::test]
+fn linear_without_pro_offers_manage_account(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.github.remote = acme();
+  host.linear.pro_required = true;
+  let (mut h, _) = dialog_with(host, true, cx);
+  let screen = screen(&mut h);
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Tab).name("Linear")));
+  let screen = self::screen(&mut h);
+  assert!(screen
+    .query_by_role(by::role(Role::Button).name("Retry"))
+    .is_none());
+  assert!(screen
+    .query_by_role(by::role(Role::Button).name("Copy error"))
+    .is_none());
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Manage account")));
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![press("account.manage")]);
+}
