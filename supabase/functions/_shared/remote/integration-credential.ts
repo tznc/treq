@@ -75,4 +75,32 @@ export async function provisionIntegrationCredential(
       `integration credential install exited ${out.exitCode}: ${out.stderr || out.stdout}`,
     );
   }
+  const helpers = await provider.execOnMachine(providerResourceId, configureGithubHelpersCommand());
+  if (helpers.exitCode !== 0) {
+    throw new ProviderError(
+      "other",
+      `GitHub helper setup exited ${helpers.exitCode}: ${helpers.stderr || helpers.stdout}`,
+    );
+  }
+}
+
+// Points git (system-wide, for https://github.com, per repository path) and
+// gh at `treq github`, which fetches installation tokens with the
+// integration credential. gh is shimmed only when it is installed; the shim
+// in /usr/local/bin runs the real /usr/bin/gh through treq. Needs a treq
+// release that has `treq github`.
+export function configureGithubHelpersCommand(): string[] {
+  const script = `#!/bin/sh
+set -eu
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then SUDO="sudo -n"; fi
+$SUDO git config --system credential.https://github.com.helper "/usr/local/bin/treq github credential"
+$SUDO git config --system credential.https://github.com.useHttpPath true
+if [ -x /usr/bin/gh ]; then
+  printf '%s\\n' '#!/bin/sh' 'exec /usr/local/bin/treq github gh -- "$@"' | $SUDO tee /usr/local/bin/gh >/dev/null
+  $SUDO chmod 755 /usr/local/bin/gh
+fi
+echo "treq: GitHub helpers configured"
+`;
+  return ["/bin/sh", "-c", script];
 }

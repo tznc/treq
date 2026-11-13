@@ -207,13 +207,13 @@ test.describe('Dashboard subscription tab', () => {
     await close();
   });
 
-  test('a free user with a billing account is offered Pro and Manage billing', async ({ browser }) => {
+  test('a free user with a billing account is offered Pro but not Manage billing', async ({ browser }) => {
     const { page, close } = await openDashboard(browser, {
       subscriptions: [FREE],
       billingCustomer: { trial_used_at: '2026-09-01T00:00:00Z' },
     });
     await expect(card(page).getByRole('button', { name: 'Upgrade to Pro' })).toBeVisible();
-    await expect(card(page).getByRole('button', { name: 'Manage billing' })).toBeVisible();
+    await expect(card(page).getByRole('button', { name: 'Manage billing' })).toHaveCount(0);
     await close();
   });
 

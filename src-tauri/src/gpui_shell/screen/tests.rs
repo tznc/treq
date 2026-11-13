@@ -120,6 +120,8 @@ struct FakeHost {
   /// The devcontainers preview.
   devcontainers: bool,
   ptys: Mutex<Vec<String>>,
+  /// The PTYs whose shell has not yet started the typed agent command.
+  not_started: Mutex<Vec<String>>,
   /// The sizes PTYs were given, as (id, cols, rows).
   resizes: Mutex<Vec<(String, u16, u16)>>,
   /// PTY output listeners, by PTY id.
@@ -1176,6 +1178,10 @@ impl terminal_data::TerminalHost for FakeHost {
 
   fn pty_exists(&self, id: &str) -> bool {
     self.ptys.lock().unwrap().iter().any(|p| p == id)
+  }
+
+  fn agent_started(&self, id: &str) -> bool {
+    !self.not_started.lock().unwrap().iter().any(|p| p == id)
   }
 
   fn write_pty(&self, id: &str, data: &str) -> Result<(), String> {
