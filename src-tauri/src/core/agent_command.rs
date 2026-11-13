@@ -917,7 +917,7 @@ mod tests {
   /// The typed `trap` names each temp path, and macOS's `$TMPDIR` is long, so
   /// one launch's temp files share a single dir to keep the line short.
   #[test]
-  fn keeps_one_launchs_temp_files_in_a_single_dir() {
+  fn keeps_each_launch_in_a_single_temp_dir() {
     let dir = tempfile::tempdir().unwrap();
     let prepared = prepare_auto_command(
       &AgentPaths {
