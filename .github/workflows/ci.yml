@@ -330,7 +330,7 @@ jobs:
     if: ${{ needs.detect-changes.outputs.rust_changed == 'true' }}
     timeout-minutes: 10
     name: cargo-deny / ubuntu-22.04
-    runs-on: small
+    runs-on: medium
     steps:
       - uses: actions/checkout@v7
 
