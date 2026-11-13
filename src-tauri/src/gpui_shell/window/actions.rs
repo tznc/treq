@@ -603,8 +603,10 @@ impl Model {
           prompt: value["prompt"].as_str().map(str::to_string),
           mode: Some("acceptEdits".into()),
           name: Some("AI Review".into()),
-          select: true,
-        })
+          // The reviewer stays on the screen they started it from; the
+          // terminal pane shows the agent on every screen.
+          select: false,
+        });
       }
       _ => return None,
     }
@@ -1078,7 +1080,14 @@ impl Model {
           repo_path.clone(),
         ))]
       }
-      OpenRequest::RemoveRepo { repo_path } => self.ask(Confirm::remove_supporting(repo_path)),
+      OpenRequest::RemoveRepo { repo_path } => {
+        let running = self
+          .terminals
+          .iter()
+          .filter(|t| t.streaming && t.repo_path.as_deref() == Some(repo_path.as_str()))
+          .count();
+        self.ask(Confirm::remove_supporting(repo_path, running))
+      }
       OpenRequest::RenameWorkspace {
         repo_path,
         workspace_id,
@@ -1324,7 +1333,7 @@ mod tests {
   fn leaves_menus_and_drags_to_their_own_handlers() {
     let (mut model, data) = (model(), data());
     assert_eq!(
-      model.sidebar_action(&SidebarAction::BulkArchive, &data),
+      model.sidebar_action(&SidebarAction::ProjectMenu, &data),
       None
     );
   }
@@ -1433,6 +1442,24 @@ mod tests {
         name: Some(name),
         ..
       } if prompt == "Tune it" && name == "Tune review prompt"
+    )));
+  }
+
+  #[test]
+  fn starting_an_ai_review_keeps_the_github_view() {
+    let (mut model, data) = (model(), data());
+    model.open_github();
+    model.screen_action(&press("github.review:12"), &data);
+    let effects = model
+      .screen_action(
+        &field("prReview.startAgentReview", json!({"prompt": "Review it"})),
+        &data,
+      )
+      .unwrap_or_default();
+    assert!(matches!(&model.page, Page::Github(g) if g.review == Some(12)));
+    assert!(effects.iter().any(|effect| matches!(
+      effect,
+      Effect::StartAgent { select: false, name: Some(name), .. } if name == "AI Review"
     )));
   }
 
@@ -1856,5 +1883,66 @@ mod tests {
       }]
     );
     assert_eq!(model.menu(Menu::ViewLogs, &data), [Effect::OpenLogDir]);
+  }
+  fn removing(model: &mut Model, data: &Data, terminals: Value) -> Confirm {
+    model.screen_action(&field("terminal.summaries", terminals), data);
+    let what = OpenRequest::RemoveRepo {
+      repo_path: "/other".into(),
+    };
+    model.open_request(&what, data);
+    model.confirm.take().expect("asks")
+  }
+
+  #[test]
+  fn removing_a_repo_with_running_agents_offers_to_close_them() {
+    let (mut model, data) = (model(), data());
+    let summary = |repo: &str, streaming: bool| json!({"kind": "agent", "repoPath": repo, "isStreaming": streaming});
+    let confirm = removing(
+      &mut model,
+      &data,
+      json!([
+        summary("/other", true),
+        summary("/other", true),
+        summary("/other", false),
+        summary("/repo", true)
+      ]),
+    );
+    assert_eq!(confirm.question.verb, "Close sessions and remove");
+    assert!(
+      confirm.question.message.contains("2 running sessions"),
+      "{}",
+      confirm.question.message
+    );
+  }
+
+  #[test]
+  fn removing_a_repo_with_only_idle_sessions_asks_as_before() {
+    let (mut model, data) = (model(), data());
+    let confirm = removing(
+      &mut model,
+      &data,
+      json!([{"kind": "agent", "repoPath": "/other", "isStreaming": false}]),
+    );
+    assert_eq!(confirm.question.verb, "Remove repository");
+  }
+
+  #[test]
+  fn closes_every_terminal_of_a_removed_repo() {
+    let (mut model, data) = (model(), data());
+    model.close_repo_terminals("/repo", &data);
+    let dirs: Vec<_> = model
+      .commands
+      .iter()
+      .filter(|c| c["kind"] == "closeWorkspace")
+      .map(|c| c["dir"].as_str().unwrap().to_string())
+      .collect();
+    let mut expected = vec!["/repo".to_string()];
+    expected.extend(
+      data
+        .workspaces("/repo")
+        .iter()
+        .map(super::super::model::full_path),
+    );
+    assert_eq!(dirs, expected);
   }
 }

@@ -988,7 +988,11 @@ impl Overlay {
         .into_any_element(),
       Some(Item::Entry(index)) => {
         let selected = self.selected == Some(index);
-        self.row(&p, index, selected, cx).into_any_element()
+        // A `list` item sizes to its content; stretch it like the column rows.
+        self
+          .row(&p, index, selected, cx)
+          .w_full()
+          .into_any_element()
       }
       None => div().into_any_element(),
     }

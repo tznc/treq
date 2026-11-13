@@ -608,6 +608,7 @@ impl WindowController {
                 .collect()
             }
             Ok(()) => {
+              this.model.close_repo_terminals(&path, &this.data);
               if this.model.supporting.as_deref() == Some(path.as_str()) {
                 this.model.supporting = None;
                 this.model.selected = None;

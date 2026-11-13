@@ -409,18 +409,28 @@ impl Confirm {
   }
 
   /// Removes the supporting repository at `path` from the window.
-  pub fn remove_supporting(path: &str) -> Self {
+  /// Asks to close them first when `running` sessions stream in it.
+  pub fn remove_supporting(path: &str, running: usize) -> Self {
     let name = path
       .rsplit(['/', '\\'])
       .find(|s| !s.is_empty())
       .unwrap_or(path);
-    Self {
-      question: Question::new(
-        format!("Remove {name} from Treq?"),
-        format!("{path} leaves this window. Its files and workspaces aren't deleted."),
+    let kept = "Its files and workspaces aren't deleted.";
+    let (message, verb) = match running {
+      0 => (
+        format!("{path} leaves this window. {kept}"),
         "Remove repository",
-      )
-      .destructive(),
+      ),
+      n => (
+        format!(
+          "{n} running session{} in {name} will be closed. {kept}",
+          if n == 1 { "" } else { "s" }
+        ),
+        "Close sessions and remove",
+      ),
+    };
+    Self {
+      question: Question::new(format!("Remove {name} from Treq?"), message, verb).destructive(),
       confirmed: Effect::RemoveSupporting(path.to_string()),
       declined: None,
     }
@@ -545,6 +555,14 @@ impl Model {
   pub fn ask(&mut self, confirm: Confirm) {
     if self.confirm.is_none() {
       self.confirm = Some(confirm);
+    }
+  }
+
+  /// Closes the terminals of repository `path` and of its workspaces.
+  pub fn close_repo_terminals(&mut self, path: &str, data: &Data) {
+    let dirs = std::iter::once(path.to_string()).chain(data.workspaces(path).iter().map(full_path));
+    for dir in dirs {
+      self.terminal("closeWorkspace", json!({ "dir": dir }));
     }
   }
 
