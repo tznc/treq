@@ -91,6 +91,7 @@ impl PrReviewHost for FakeHost {
     row.comment_text = draft.text.clone();
     row.line_hash = draft.line_hash.clone();
     row.quoted_text = draft.quoted_text.clone();
+    row.source = crate::review_aggregate::SOURCE_LOCAL_HUMAN.into();
     self.agent.lock().unwrap().push(row);
     Ok(())
   }
@@ -289,6 +290,25 @@ fn pr_review_lists_outdated_drafts_apart(cx: &mut TestAppContext) {
   assert!(h.drawn("outdated-comments"));
   assert!(!h.drawn("inline-comment-card"));
   assert_eq!(counts(&mut h), (0, 1));
+}
+
+#[gpui::test]
+fn pr_review_tags_the_agents_suggestion_as_a_bot(cx: &mut TestAppContext) {
+  let host = pr_host();
+  let mut row = draft_row("d1", 2, None);
+  row.suggested_replacement = Some("bb".into());
+  *host.agent.lock().unwrap() = vec![row];
+  let (mut h, _) = workspace_harness(cx, host, pr_route());
+  assert!(h.drawn("agent-review-suggestion"));
+  assert!(h.drawn("agent-comment-tag"));
+}
+
+#[gpui::test]
+fn pr_review_does_not_tag_the_users_draft_as_a_bot(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, pr_host(), pr_route());
+  comment_line(&mut h, "Nit");
+  assert!(h.drawn("inline-comment-card"));
+  assert!(!h.drawn("agent-comment-tag"));
 }
 
 #[gpui::test]

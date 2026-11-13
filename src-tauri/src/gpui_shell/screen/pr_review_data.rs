@@ -553,7 +553,7 @@ impl<'a, H: HunkList> Placer<'a, H> {
         } else {
           Side::New
         }),
-        source: None,
+        source: Some(row.source.clone()),
         github_author: None,
         github_avatar_url: None,
         github_comment_url: None,

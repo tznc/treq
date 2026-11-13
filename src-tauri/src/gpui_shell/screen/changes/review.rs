@@ -1478,7 +1478,16 @@ impl ChangesView {
           .flex()
           .items_start()
           .gap_2()
-          .child(self.comment_body(id, text, p, cx))
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .flex()
+              .flex_col()
+              .gap_1p5()
+              .children(self.agent_tag(id, p))
+              .child(self.comment_body(id, text, p, cx)),
+          )
           .child(
             self.tip(
               format!("delete-comment-tip-{id}"),
@@ -1509,6 +1518,27 @@ impl ChangesView {
     self
       .tip(format!("edit-comment-tip-{id}"), "Click to edit", card, cx)
       .into_any_element()
+  }
+
+  /// The bot tag on a draft the review agent wrote, as its local cards have.
+  fn agent_tag(&self, id: &str, p: &Palette) -> Option<Div> {
+    let by_agent = self.review.comments.iter().any(|c| {
+      c.id == id && c.source.as_deref() == Some(crate::review_aggregate::SOURCE_LOCAL_AGENT)
+    });
+    by_agent.then(|| {
+      div()
+        .debug_selector(|| "agent-comment-tag".into())
+        .flex()
+        .items_center()
+        .gap_1p5()
+        .child(ui::icon(theme::ICON_BOT, 12., Tone::GitMerged.color(p)))
+        .child(
+          ui::text(div(), TextSize::Xs)
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(Tone::GitMerged.text(p))
+            .child("Agent"),
+        )
+    })
   }
 
   /// A comment's text, with its suggestion drawn as a diff against the
