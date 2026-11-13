@@ -2423,7 +2423,7 @@ impl ChangesView {
           )
           .when_some(dir, |this, dir| {
             this.child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .truncate()
                 .text_color(p.muted_foreground.opacity(0.6))
                 .child(dir),
@@ -2701,7 +2701,7 @@ impl ChangesView {
         )
         .when_some(dir, |this, dir| {
           this.child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .flex_1()
               .truncate()
               .text_color(p.muted_foreground.opacity(0.6))
@@ -2880,7 +2880,7 @@ impl ChangesView {
         )
         .when_some(dir, |this, dir| {
           this.child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .min_w_0()
               .flex_1()
               .truncate()
@@ -3479,6 +3479,8 @@ impl ChangesView {
           "Base" => Tone::Warning,
           _ => Tone::DiffAdded,
         };
+        // Short label (['badge']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .debug_selector(move || format!("conflict-label-{label}"))
           .mr_2()
@@ -3550,6 +3552,8 @@ impl ChangesView {
       .gap_2()
       .font_family(theme::SANS_FONT)
       .child(
+        // Short label (['line-range meta']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .flex()
           .items_center()

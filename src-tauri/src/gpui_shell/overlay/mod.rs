@@ -978,6 +978,8 @@ impl Overlay {
   fn item(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
     let p = theme::palette(self.dark);
     match self.items.get(ix).copied() {
+      // Short label (['group heading']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       Some(Item::Heading(g)) => ui::text(div(), TextSize::Xs)
         .px_3()
         .py_2()

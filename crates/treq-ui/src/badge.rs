@@ -233,6 +233,8 @@ pub(crate) fn caption<E: Styled>(el: E, cx: &App) -> E {
     .copied()
     .unwrap_or_default()
   {
+    // Short label (['badge']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     crate::theme::Density::Desktop => text(el, TextSize::Xs),
     density => {
       let size = density.caption();

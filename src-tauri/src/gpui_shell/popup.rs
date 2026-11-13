@@ -879,6 +879,8 @@ impl PopupView {
         .gap(zpx(KBD_GAP))
         .child(text.clone())
         .child(
+          // Short label (['kbd hint']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .debug_selector(|| "tooltip-kbd".into())
             .h(zpx(KBD_HEIGHT))
@@ -960,7 +962,7 @@ impl PopupView {
             .child(title.clone()),
         )
         .child(
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .flex()
             .flex_col()
             .gap_0p5()
@@ -1090,6 +1092,8 @@ impl PopupView {
           .debug_selector(move || format!("menu-submenu-{index}"))
           .when_some(detail.clone(), |row, detail| {
             row.child(
+              // Short label (['shortcut detail']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .ml(zpx(DETAIL_GAP))
                 .text_color(palette.muted_foreground)

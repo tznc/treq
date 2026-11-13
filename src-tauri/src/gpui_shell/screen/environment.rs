@@ -49,6 +49,8 @@ pub(crate) fn trigger(
     .px(zpx(size.padding))
     .gap_1p5()
     .child(ui::icon(icon, size.icon, p.foreground))
+    // Short label (['badge label']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     .child(ui::text(div(), TextSize::Xs).child(label))
     .when(devcontainer, |b| {
       if starting {

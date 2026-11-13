@@ -155,6 +155,8 @@ impl Popover {
     let setup_running = data.setup_running();
 
     let title = |text: String| {
+      // Short label (['section heading']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .px_2()
         .pb_1()
@@ -166,6 +168,8 @@ impl Popover {
     let mut panel = self.panel("checks-popover", WIDTH, 8., &p);
     if has_treq {
       let logs = input.logs.then(|| {
+        // Short label (['link label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .id("checks-view-logs")
           .role(gpui::Role::Button)
@@ -398,6 +402,8 @@ impl Popover {
         this.mt_2().border_t_1().border_color(p.border).pt_2()
       })
       .child(
+        // Short label (['section heading with count']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .px_2()
           .pb_1()

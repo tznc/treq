@@ -3005,6 +3005,8 @@ impl SettingsView {
                 )
                 .when(!row.source.is_empty(), |this| {
                   this.child(
+                    // Short label (['source tag']): 11px is fine.
+                    // ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .text_color(p.muted_foreground)
                       .child(row.source.clone()),
@@ -3016,6 +3018,8 @@ impl SettingsView {
                     LABEL_CUSTOM_REPO | LABEL_CUSTOM_GLOBAL => p.warning,
                     _ => p.muted_foreground,
                   };
+                  // Short label (['tag']): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .flex_none()
                     .px_1p5()
@@ -3256,7 +3260,7 @@ impl SettingsView {
                 ),
             )
             .child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .text_color(p.muted_foreground)
                 .child("Treq verifies the downloaded files against this checksum before installing."),
             )

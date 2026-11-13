@@ -2072,6 +2072,8 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       .gap_1()
       .when_some(c.idle_stop.clone(), |this, eta| {
         this.child(
+          // Short label (['countdown']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .debug_selector(|| "cloud-idle-stop".into())
             .text_color(p.muted_foreground)
@@ -2105,7 +2107,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           ),
           (None, false) => None,
         };
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .flex()
           .items_center()
           .gap_2()
@@ -2237,7 +2239,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   let body: AnyElement = match (&c.instance, &c.create) {
     (Some(instance), _) => {
       let usage = instance.usage.as_ref().map(|usage| match usage {
-        CloudUsage::Error(error) => ui::text(div(), TextSize::Xs)
+        CloudUsage::Error(error) => ui::text(div(), TextSize::Sm)
           .truncate()
           .text_color(red)
           .child(error.clone())
@@ -2427,7 +2429,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
     })
     .when_some(c.error.clone(), |this, error| {
       this.child(
-        ui::text(div().mt_3(), TextSize::Xs)
+        ui::text(div().mt_3(), TextSize::Sm)
           .id("cloud-error")
           .role(gpui::Role::Alert)
           .aria_label(SharedString::from(error.clone()))
@@ -2439,7 +2441,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
     })
     .when_some(c.error_details.clone(), |this, details| {
       this.child(
-        ui::text(div().mt_1(), TextSize::Xs)
+        ui::text(div().mt_1(), TextSize::Sm)
           .truncate()
           .text_color(p.muted_foreground)
           .child(details),
@@ -2599,6 +2601,8 @@ impl SettingsView {
       .rounded(radius::MD)
       .bg(Tone::Warning.tint(p))
       .child(
+        // Short label (['section heading']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .mb_2()
           .font_weight(FontWeight::MEDIUM)
@@ -2626,7 +2630,7 @@ impl SettingsView {
       )
       .when_some(dev.error.clone(), |this, error| {
         this.child(
-          ui::text(div().mt_1(), TextSize::Xs)
+          ui::text(div().mt_1(), TextSize::Sm)
             .text_color(Tone::Danger.color(p))
             .child(error),
         )
@@ -2998,7 +3002,7 @@ impl SettingsView {
       ))
       .when_some(editor.error.clone(), |this, error| {
         this.child(
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .text_color(p.destructive)
             .child(error),
         )

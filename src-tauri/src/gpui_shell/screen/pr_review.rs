@@ -633,6 +633,8 @@ impl PrReviewView {
               .child(name),
           )
           .trailing(
+            // Short label (['status letter']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(file.status.clone()),
@@ -724,7 +726,7 @@ impl PrReviewView {
               .min_w_0()
               .child(div().font_weight(FontWeight::MEDIUM).child(event.label()))
               .child(
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
                   .text_color(p.muted_foreground)
                   .child(if disabled { OWN_PR_HINT } else { event.hint() }),
               ),
