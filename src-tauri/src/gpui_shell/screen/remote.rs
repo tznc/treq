@@ -174,9 +174,9 @@ fn caption(text: &'static str) -> Div {
 
 type Div = gpui::Div;
 
-/// `text-xs text-muted-foreground`.
+/// `text-sm text-muted-foreground`.
 fn hint(text: impl Into<SharedString>, p: &Palette) -> Div {
-  ui::text(div(), TextSize::Xs)
+  ui::text(div(), TextSize::Sm)
     .text_color(p.muted_foreground)
     .child(text.into())
 }

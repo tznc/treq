@@ -86,7 +86,7 @@ Merge from the root upward. After a lower layer lands, retarget or restack the n
 
 ## Engineering Considerations
 
-Use a stack when layers have a clear dependency order and one combined pull request would be hard to review. Use [parallel development](./parallel-development) when branches can merge in any order.
+Use a stack when layers have a clear dependency order and one combined pull request would be hard to review. Use [parallel development](./parallel-development.mdx) when branches can merge in any order.
 
 Keep stacks shallow enough for the team to maintain. Depth is less important than change frequency near the root. A stable four-layer stack can cost less than a two-layer stack whose base changes repeatedly.
 
@@ -112,6 +112,6 @@ git diff auth/schema...auth/service
 ## Next Steps
 
 - [What are Stacked PRs?](/learn/concepts/git/stacked-prs): understand the branch and pull-request model
-- [Parallel Development Workflow](./parallel-development): run independent work without a dependency chain
-- [Human-in-the-Loop Review Workflow](./human-in-the-loop-review): review each layer and revision
+- [Parallel Development Workflow](./parallel-development.mdx): run independent work without a dependency chain
+- [Human-in-the-Loop Review Workflow](./human-in-the-loop-review.mdx): review each layer and revision
 - [Merge vs Rebase](/learn/concepts/git/merge-vs-rebase): choose safe integration and rewrite strategies

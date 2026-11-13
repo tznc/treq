@@ -6,6 +6,7 @@ wrapperClassName: legal-page
 ---
 
 import ContentPageLayout from '@site/src/components/ContentPageLayout';
+import {ConsentSettingsButton} from '@site/src/components/ConsentBanner';
 
 export const toc = [
   { id: 'summary', value: 'Summary', level: 2 },
@@ -101,6 +102,7 @@ You can also ask us to access, correct, export, or delete your personal data, or
 
 - Manage billing details and download invoices in the customer portal, from the Subscription tab of the [dashboard](/dashboard).
 - Uninstall the Treq GitHub App in your GitHub settings, and revoke Treq's Linear access in your Linear settings.
+- In the EEA, UK and Switzerland, website analytics stays off until you accept it. Change your choice at any time: <ConsentSettingsButton />
 - Block website analytics with your browser's tracking protection or an ad blocker. treq.dev works without it.
 
 ## Security

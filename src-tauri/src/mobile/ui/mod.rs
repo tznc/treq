@@ -4,7 +4,6 @@
 //! [`Root`] owns the stack and the app-wide [`AppModel`] (sign-in and
 //! connection state). Screens push and pop pages through [`nav`].
 
-mod delete_account;
 mod hold;
 mod home;
 mod load;
@@ -458,7 +457,7 @@ impl Root {
 }
 
 /// The narrowest window that shows a page beside the one under it.
-const SPLIT_MIN_WIDTH: Pixels = px(768.);
+pub(super) const SPLIT_MIN_WIDTH: Pixels = px(768.);
 /// The width of the left pane in a split.
 const LIST_PANE_WIDTH: Pixels = px(360.);
 

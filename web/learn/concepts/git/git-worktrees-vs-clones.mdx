@@ -23,7 +23,7 @@ A **linked worktree** has its own working tree, `HEAD`, and index. It shares the
   definition="An additional working directory attached to an existing Git repository, with its own HEAD and index but a shared object database and shared refs."
 />
 
-A **clone** has its own Git directory. Its local branches, remote-tracking refs, config, [reflogs](./git-reflog), stash, and object database all move on their own, with no effect on another clone.
+A **clone** has its own Git directory. Its local branches, remote-tracking refs, config, [reflogs](./git-reflog.mdx), stash, and object database all move on their own, with no effect on another clone.
 
 <DefinitionCard
   term="Clone"
@@ -82,7 +82,7 @@ Worktrees fit parallel work in one trusted repository. Commits and branches show
 
 Shared state is the catch. A fetch, a branch deletion, a tag update, a stash, or a maintenance command can hit every linked worktree. Hooks come from the common Git directory unless something like `core.hooksPath` says otherwise. Git can hold some config per worktree through `extensions.worktreeConfig`, but you have to turn that on yourself.
 
-Clones fit jobs that need their own refs, config, maintenance, or deletion. They are not a security boundary on their own. Two clones running as the same OS user still reach the same files, credentials, processes, and network. When one project must pin another project's history inside its tree, use [Git submodules](./git-submodules) instead of a second clone.
+Clones fit jobs that need their own refs, config, maintenance, or deletion. They are not a security boundary on their own. Two clones running as the same OS user still reach the same files, credentials, processes, and network. When one project must pin another project's history inside its tree, use [Git submodules](./git-submodules.mdx) instead of a second clone.
 
 ## Scaling and Operations
 
@@ -100,6 +100,6 @@ Use clones or a stronger sandbox when jobs must not share Git refs or config. [C
 
 ## Next Steps
 
-- [What are Git Worktrees?](./git-worktrees): learn the worktree lifecycle and shared-state model
+- [What are Git Worktrees?](./git-worktrees.mdx): learn the worktree lifecycle and shared-state model
 - [Parallel Development Workflow](/learn/workflows/git/parallel-development): use isolated directories for concurrent work
 - [What are Coding Agents?](/learn/concepts/ai-engineering/coding-agents): understand why agents need separate working directories

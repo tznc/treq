@@ -2766,14 +2766,16 @@ impl ChangesView {
         status_color,
         cx,
       ));
-    if last && selected && !staged {
+    if !staged {
+      // The selection's last row keeps its buttons; the others show them on hover.
+      let hidden = !(last && selected);
       let target = path.clone();
       let tip_key = format!("discard-tip-{}", file.path);
       let el = small(
         format!("discard-{}", file.path),
         theme::ICON_UNDO,
         red,
-        false,
+        hidden,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
@@ -2786,7 +2788,7 @@ impl ChangesView {
         format!("stage-{}", file.path),
         theme::ICON_PLUS,
         name_color,
-        false,
+        hidden,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
