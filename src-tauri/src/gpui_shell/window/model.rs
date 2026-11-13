@@ -561,7 +561,7 @@ impl Model {
   /// Closes the terminals of repository `path` and of its workspaces.
   pub fn close_repo_terminals(&mut self, path: &str, data: &Data) {
     let dirs = std::iter::once(path.to_string()).chain(data.workspaces(path).iter().map(full_path));
-    for dir in dirs.collect::<Vec<_>>() {
+    for dir in dirs {
       self.terminal("closeWorkspace", json!({ "dir": dir }));
     }
   }
