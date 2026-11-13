@@ -1199,9 +1199,10 @@ fn prepared_markdown(text: &str) -> SharedString {
   #[expect(clippy::expect_used, reason = "constant pattern")]
   static HTML_COMMENT: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("regex"));
-  let prepared: SharedString =
-    super::code_data::emojify(&super::code_data::embed_media(&HTML_COMMENT.replace_all(text, "")))
-      .into();
+  let prepared: SharedString = super::code_data::emojify(&super::code_data::embed_media(
+    &HTML_COMMENT.replace_all(text, ""),
+  ))
+  .into();
   PREPARED.with(|p| {
     let mut p = p.borrow_mut();
     if p.len() >= PREPARED_MAX {

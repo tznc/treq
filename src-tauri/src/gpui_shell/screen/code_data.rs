@@ -596,7 +596,7 @@ pub fn embed_media(text: &str) -> String {
       if fenced {
         return line.to_string();
       }
-      let end = &line[line.trim_end().len()..];
+      let end = line.get(line.trim_end().len()..).unwrap_or_default();
       if ATTACHMENT.is_match(trimmed) {
         format!("\n> ▶ **[Video attachment, open in browser]({trimmed})**\n{end}")
       } else if IMAGE.is_match(trimmed) {
