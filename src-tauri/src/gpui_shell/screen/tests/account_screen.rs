@@ -1512,3 +1512,14 @@ fn linear_on_free_offers_upgrade_instead_of_api_key(cx: &mut TestAppContext) {
     host.writes()
   );
 }
+
+#[gpui::test]
+fn cloud_create_is_disabled_when_pro_is_required(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let gated = cloud(serde_json::json!({
+    "provisioningError": "[pro_required] Cloud workspaces need Pro.\nhttp 402",
+  }));
+  let mut h = signed_in_with_cloud(cx, host, gated);
+  let create = cloud_card(&mut h).create.expect("create");
+  assert!(create.disabled);
+}
