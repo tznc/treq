@@ -152,7 +152,7 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
     return model
       .empty_project
       .as_ref()
-      .map(|name| empty(model, data, name));
+      .map(|name| without_repos(model, data, name));
   }
   let on_screen = model.repo().to_string();
   let multi = !data.supporting().is_empty();
@@ -268,7 +268,7 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
 
 /// The sidebar of a project with no repository: its name, its Home and the
 /// pages that need none; the list says it is empty.
-fn empty(model: &Model, data: &Data, name: &str) -> SidebarSnapshot {
+fn without_repos(model: &Model, data: &Data, name: &str) -> SidebarSnapshot {
   SidebarSnapshot {
     repo_name: name.to_string(),
     settings_open: matches!(model.page, Page::Settings { .. }),

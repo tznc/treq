@@ -908,7 +908,7 @@ const PALETTE_TOOLTIP: &str = "Command palette (Ctrl+K)";
 
 /// The WORKSPACES heading's create button.
 pub(super) const OPEN_WORKSPACES_LABEL: &str = "New workspace…";
-const ADD_REPOSITORY_LABEL: &str = "Add Repository…";
+const ADD_REPOSITORY_LABEL: &str = "Add repository…";
 
 /// A row's stack button: a new workspace on the home row, one stacked on the
 /// workspace elsewhere.
@@ -923,42 +923,17 @@ impl Sidebar {
   /// The WORKSPACES heading's Open button.
   /// A project with no repository: says so, and offers to add one.
   fn no_repositories(&self, palette: &Palette) -> impl IntoElement {
-    div()
-      .flex()
-      .flex_col()
-      .gap_2()
-      .px_4()
-      .py_2()
-      .child(
-        ui::text(div(), TextSize::Sm)
-          .text_color(palette.sidebar_foreground.opacity(0.7))
-          .child("No repositories"),
-      )
-      .child(
-        ui::text(div(), TextSize::Xs)
-          .id("add-repository")
-          .debug_selector(|| "add-repository".into())
-          .role(Role::Button)
-          .aria_label(ADD_REPOSITORY_LABEL)
-          .test_support()
-          .flex()
-          .flex_none()
-          .items_center()
-          .gap_1()
-          .px_1p5()
-          .h(zpx(22.))
-          .rounded_md()
-          .text_color(palette.sidebar_foreground.opacity(0.7))
-          .cursor_pointer()
-          .hover(|style| style.bg(palette.hover()))
-          .child(icon(
-            theme::ICON_FOLDER_PLUS,
-            12.,
-            palette.sidebar_foreground.opacity(0.7),
-          ))
-          .child(ADD_REPOSITORY_LABEL)
-          .on_click(self.on_action(SidebarAction::AddRepository)),
-      )
+    div().px_2().py_2().child(
+      ui::EmptyState::new("no-repositories", "No repositories", palette)
+        .icon(theme::ICON_FOLDER_PLUS)
+        .message("Add one to start a workspace.")
+        .action(
+          ui::Button::new("add-repository", palette)
+            .size(ui::Size::Sm)
+            .label(ADD_REPOSITORY_LABEL)
+            .on_click(self.on_action(SidebarAction::AddRepository)),
+        ),
+    )
   }
 
   fn open_workspaces_button(&self, palette: &Palette) -> impl IntoElement {
