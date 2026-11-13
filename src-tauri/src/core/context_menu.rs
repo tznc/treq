@@ -521,7 +521,10 @@ mod tests {
     let teams = vec![("o1".to_string(), "Acme".to_string())];
     assert_eq!(project_owner_item(&[], None), None);
     let item = project_owner_item(&teams, Some("o1")).unwrap();
-    assert_eq!(labels(&[item.clone()]), ["Move to: [Personal, ✓ Acme]"]);
+    assert_eq!(
+      labels(std::slice::from_ref(&item)),
+      ["Move to: [Personal, ✓ Acme]"]
+    );
     let MenuItem::Submenu { items, .. } = item else {
       panic!()
     };
