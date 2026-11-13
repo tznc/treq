@@ -17,10 +17,13 @@ on:
   pull_request:
     # Every check runs on drafts, so marking a PR ready doesn't rerun CI.
     types: [opened, synchronize, reopened]
+  # The merge queue reruns CI on the queued result; ci-ok must report there.
+  merge_group:
 
 # A new push supersedes the previous run; free its runners for other PRs.
+# Merge group runs have no PR number; each queue entry has its own ref.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -30,16 +33,18 @@ jobs:
     timeout-minutes: 15
     name: detect changes
     runs-on: ubuntu-22.04
+    # The merge queue runs everything: it checks the combined result.
     outputs:
-      rust_changed: ${{ steps.filter.outputs.rust }}
-      js_changed: ${{ steps.filter.outputs.js }}
-      e2e_changed: ${{ steps.filter.outputs.e2e }}
+      rust_changed: ${{ github.event_name == 'merge_group' || steps.filter.outputs.rust == 'true' }}
+      js_changed: ${{ github.event_name == 'merge_group' || steps.filter.outputs.js == 'true' }}
+      e2e_changed: ${{ github.event_name == 'merge_group' || steps.filter.outputs.e2e == 'true' }}
     # No checkout: on pull_request, paths-filter lists the changed files
     # through the GitHub API.
     permissions:
       pull-requests: read
     steps:
       - name: Check for Rust and JS/TS changes
+        if: github.event_name == 'pull_request'
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
@@ -473,3 +478,15 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: cargo nextest run --locked --workspace --profile ci
+
+  # The one required check: jobs skipped by detect-changes count as passing.
+  ci-ok:
+    name: ci-ok
+    if: ${{ always() }}
+    needs: [detect-changes, verify, test-desktop-e2e, landing-capture, cargo-deny, test-rust]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any job failed or was cancelled
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: exit 1
