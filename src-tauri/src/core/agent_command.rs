@@ -935,13 +935,13 @@ mod tests {
     )
     .unwrap();
     let temp = std::env::temp_dir();
-    let in_temp: Vec<&String> = prepared
+    let in_temp = prepared
       .file_paths
       .iter()
       .filter(|p| Path::new(p).parent() == Some(temp.as_path()))
-      .collect();
+      .count();
     super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
-    assert_eq!(in_temp.len(), 1, "{:?}", prepared.file_paths);
+    assert_eq!(in_temp, 1, "{:?}", prepared.file_paths);
   }
 
   #[test]
