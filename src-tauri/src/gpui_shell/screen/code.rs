@@ -24,14 +24,14 @@ use std::{
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
-  input::{Enter, Escape, Textarea, TextareaState},
+  input::{Escape, Textarea, TextareaState},
   text::{TextView, TextViewStyle},
 };
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, prelude::*, px, relative, rems, Animation, AnimationExt as _,
-  AnyElement, App, Context, Div, Entity, FontWeight, Hsla, Pixels, Role, ScrollHandle,
-  SharedString, Stateful, Subscription, Window,
+  AnyElement, App, Context, Div, Entity, FontWeight, Hsla, KeyDownEvent, Pixels, Role,
+  ScrollHandle, SharedString, Stateful, Subscription, Window,
 };
 
 use super::{
@@ -1681,8 +1681,11 @@ impl CodeView {
             .flex()
             .flex_col()
             .gap_2()
-            .capture_action(cx.listener(|view, action: &Enter, _, cx| {
-              if action.secondary {
+            // ⌘/Ctrl+Enter is unbound in inputs (`treq_ui::theme`), so
+            // read the key itself.
+            .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
+              let k = &e.keystroke;
+              if k.key == "enter" && k.modifiers.secondary() {
                 view.save_description(false, cx);
                 cx.stop_propagation();
               }
