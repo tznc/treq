@@ -39,6 +39,17 @@ pub fn screen(model: &Model, data: &Data) -> Option<ScreenSnapshot> {
     value["modal"] = modal;
   }
   value["remote"] = remote_dialogs(model, data);
+  if model.has_repo() {
+    // The terminal pane shows at the bottom of every screen.
+    value["globalTerminal"] = json!({
+      "repoPath": model.repo(),
+      "activeSessionId": model.active_session,
+      "sessionsRevision": data.sessions_revision,
+      "commands": model.commands,
+      "remoteShell": model.is_remote(),
+      "mainRepoPath": model.main_repo,
+    });
+  }
   if let Some(repository) = &model.remote.repository {
     value["repository"] = serde_json::to_value(repository).unwrap_or_default();
   }

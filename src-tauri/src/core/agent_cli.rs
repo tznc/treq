@@ -13,6 +13,8 @@ const CLAUDE_SKILL_RELATIVE: &str = ".claude/skills/treq";
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCliFiles {
+  /// Holds every temp file of one launch, so cleanup names one path.
+  pub dir: String,
   pub prompt_path: String,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub settings_path: Option<String>,
@@ -34,10 +36,10 @@ pub fn write_agent_cli_files(
   settings_json: Option<&str>,
   cwd: Option<&str>,
 ) -> Result<AgentCliFiles, String> {
-  let id = uuid::Uuid::new_v4();
-  let dir = std::env::temp_dir();
+  let dir = std::env::temp_dir().join(format!("{FILE_PREFIX}{}", uuid::Uuid::new_v4()));
+  create_private_dir(&dir).map_err(|e| format!("Failed to create agent temp dir: {e}"))?;
 
-  let skill_dir = write_treq_skill_pack(&dir, &id)?;
+  let skill_dir = write_treq_skill_pack(&dir)?;
   let mut skill_write_warnings = Vec::new();
   let (agents_skill_path, claude_skill_path) = match cwd {
     Some(path) => {
@@ -54,14 +56,14 @@ pub fn write_agent_cli_files(
     "{prompt} The bundled Treq skill file is at {}/skills/treq/SKILL.md.",
     skill_dir.to_string_lossy()
   );
-  let prompt_path = dir.join(format!("{FILE_PREFIX}prompt-{id}.txt"));
+  let prompt_path = dir.join("prompt.txt");
   write_private(&prompt_path, &prompt_with_skill)
     .map_err(|e| format!("Failed to write agent prompt file: {e}"))?;
 
   let settings_path = match settings_json {
     Some(json) => {
       let merged = with_skill_dir_filesystem_access(json, &skill_dir)?;
-      let path = dir.join(format!("{FILE_PREFIX}settings-{id}.json"));
+      let path = dir.join("settings.json");
       fs::write(&path, merged).map_err(|e| format!("Failed to write agent settings file: {e}"))?;
       Some(path_to_string(&path))
     }
@@ -69,6 +71,7 @@ pub fn write_agent_cli_files(
   };
 
   Ok(AgentCliFiles {
+    dir: path_to_string(&dir),
     prompt_path: path_to_string(&prompt_path),
     settings_path,
     skill_dir: path_to_string(&skill_dir),
@@ -83,11 +86,11 @@ pub fn write_agent_cli_files(
   })
 }
 
-/// Writes an agent's task prompt to a temp file. A fresh shell reads the
-/// typed command in canonical mode, which caps a line (1024 bytes on macOS,
-/// where the Enter is then dropped), so long prompts are never typed.
-pub fn write_agent_task_file(task: &str) -> Result<String, String> {
-  let path = std::env::temp_dir().join(format!("{FILE_PREFIX}task-{}.txt", uuid::Uuid::new_v4()));
+/// Writes an agent's task prompt into the launch's temp `dir`. A fresh shell
+/// reads the typed command in canonical mode, which caps a line (1024 bytes
+/// on macOS, where the Enter is then dropped), so long prompts are never typed.
+pub fn write_agent_task_file(dir: &str, task: &str) -> Result<String, String> {
+  let path = Path::new(dir).join("task.txt");
   write_private(&path, task).map_err(|e| format!("Failed to write agent task file: {e}"))?;
   Ok(path_to_string(&path))
 }
@@ -103,8 +106,18 @@ fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
   options.open(path)?.write_all(contents.as_bytes())
 }
 
+/// Creates a new dir only its owner can enter (0700 on Unix), so the
+/// settings and skill files inside are private too.
+fn create_private_dir(path: &Path) -> std::io::Result<()> {
+  let mut builder = fs::DirBuilder::new();
+  #[cfg(unix)]
+  std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+  builder.create(path)
+}
+
 /// Delete temp files previously created by [`write_agent_cli_files`].
-/// Refuses paths that are not `treq-agent-*` files or dirs under the process temp dir.
+/// Refuses paths that are not `treq-agent-*` files or dirs under the process
+/// temp dir, or paths inside one.
 pub fn cleanup_agent_cli_files(paths: &[String]) -> Result<(), String> {
   let temp_dir = std::env::temp_dir()
     .canonicalize()
@@ -133,8 +146,8 @@ pub fn cleanup_agent_cli_files(paths: &[String]) -> Result<(), String> {
   Ok(())
 }
 
-fn write_treq_skill_pack(temp_dir: &Path, id: &uuid::Uuid) -> Result<PathBuf, String> {
-  let skill_dir = temp_dir.join(format!("{FILE_PREFIX}skills-{id}"));
+fn write_treq_skill_pack(dir: &Path) -> Result<PathBuf, String> {
+  let skill_dir = dir.join("skills");
   let copies = [
     skill_dir.join("skills/treq/SKILL.md"),
     skill_dir.join(".claude/skills/treq/SKILL.md"),
@@ -223,8 +236,12 @@ fn push_unique_path(
 }
 
 fn is_safe_agent_cli_temp_path(canonical: &Path, temp_dir: &Path) -> bool {
-  let file_name = canonical.file_name().and_then(|n| n.to_str()).unwrap_or("");
-  canonical.starts_with(temp_dir) && file_name.starts_with(FILE_PREFIX)
+  canonical
+    .strip_prefix(temp_dir)
+    .ok()
+    .and_then(|rest| rest.components().next())
+    .and_then(|top| top.as_os_str().to_str())
+    .is_some_and(|name| name.starts_with(FILE_PREFIX))
 }
 
 fn path_to_string(path: &Path) -> String {
@@ -248,12 +265,7 @@ mod tests {
     let prompt = fs::read_to_string(&files.prompt_path).expect("read prompt");
     assert!(prompt.starts_with("you are in a workspace"));
     assert!(prompt.contains("/skills/treq/SKILL.md"));
-    assert!(Path::new(&files.prompt_path)
-      .file_name()
-      .unwrap()
-      .to_str()
-      .unwrap()
-      .starts_with("treq-agent-prompt-"));
+    assert!(Path::new(&files.prompt_path).starts_with(&files.dir));
 
     let settings_path = files.settings_path.expect("settings path");
     let settings = fs::read_to_string(&settings_path).expect("read settings");
