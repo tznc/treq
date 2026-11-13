@@ -419,6 +419,16 @@ impl Model {
           self.view.tab = tab;
         }
       }
+      "workspace.tabHome" => {
+        if let Some(tab) = value.as_str().and_then(Tab::parse) {
+          self.view.tab = tab;
+          match tab {
+            Tab::Overview => self.view.file_browser = None,
+            Tab::Commits => self.view.scroll_to_commit = None,
+            _ => {}
+          }
+        }
+      }
       "workspace.openLogs" => {
         if let Some(source) = value.as_str().filter(|_| data.flags.logs) {
           self.open_logs(source);
@@ -1145,7 +1155,11 @@ mod tests {
   use std::collections::HashMap;
 
   use super::{
-    super::{data::RepoRead, model::Dialogs, tree::tests::workspace},
+    super::{
+      data::RepoRead,
+      model::{Dialogs, FileBrowser},
+      tree::tests::workspace,
+    },
     *,
   };
   use crate::local_db::Session;
@@ -1238,6 +1252,22 @@ mod tests {
     let effects = model.screen_action(&press("saveProject.saved"), &data);
     assert_eq!(model.dialogs.save_project, None);
     assert!(format!("{effects:?}").contains("Refresh"));
+  }
+
+  #[test]
+  fn double_clicking_a_tab_returns_it_to_its_base_page() {
+    let (mut model, data) = (model(), data());
+    model.view.file_browser = Some(FileBrowser {
+      selected_file: Some("a.rs".into()),
+      expanded_dir: None,
+    });
+    model.view.scroll_to_commit = Some("zz".into());
+    model.screen_action(&field("workspace.tabHome", json!("overview")), &data);
+    assert_eq!(model.view.tab, Tab::Overview);
+    assert_eq!(model.view.file_browser, None);
+    model.screen_action(&field("workspace.tabHome", json!("commits")), &data);
+    assert_eq!(model.view.tab, Tab::Commits);
+    assert_eq!(model.view.scroll_to_commit, None);
   }
 
   #[test]

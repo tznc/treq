@@ -1682,6 +1682,8 @@ impl WorkspaceView {
     }
     let selected = values.iter().position(|t| *t == row.tab).unwrap_or(0);
     let sink = self.sink.clone();
+    let home_sink = self.sink.clone();
+    let home_values = values.clone();
     let list = ui::Tabs::segmented("workspace-tabs", p)
       .tabs(tabs)
       .selected(selected)
@@ -1690,6 +1692,16 @@ impl WorkspaceView {
           ScreenAction::Field {
             field: "workspace.tab".into(),
             value: values[ix].value().into(),
+          },
+          cx,
+        )
+      })
+      // A double click returns the tab to its base page.
+      .on_double_click(move |ix, _, cx| {
+        home_sink(
+          ScreenAction::Field {
+            field: "workspace.tabHome".into(),
+            value: home_values[ix].value().into(),
           },
           cx,
         )
