@@ -111,6 +111,19 @@ pub struct ScreenSnapshot {
   /// backend sends what the screens read and change in it over SSH.
   #[serde(default)]
   pub repository: Option<super::remote_repo::RemoteRepository>,
+  /// The terminal pane under every screen but the workspace view, which
+  /// draws its own.
+  #[serde(default)]
+  pub global_terminal: Option<GlobalTerminal>,
+}
+
+/// The terminal pane's route outside the workspace view.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalTerminal {
+  pub repo_path: String,
+  #[serde(flatten)]
+  pub route: terminal::Route,
 }
 
 /// One screen's data, tagged by `kind`.
@@ -750,6 +763,7 @@ impl Render for Screen {
         }
       }
     };
+    let body = self.with_terminal(body, dark, cx);
     let remote_open = self.snapshot.remote.is_open();
     let remote = if remote_open {
       let route = self.snapshot.remote.clone();
@@ -814,6 +828,60 @@ fn window_layer(layer: impl IntoElement, priority: usize, window: &Window) -> gp
 }
 
 impl Screen {
+  /// `body` with the terminal pane at the bottom, on every screen but the
+  /// workspace view, which places the pane itself.
+  fn with_terminal(
+    &mut self,
+    body: gpui::AnyElement,
+    dark: bool,
+    cx: &mut Context<Self>,
+  ) -> gpui::AnyElement {
+    let global = match (&self.snapshot.view, &self.snapshot.global_terminal) {
+      (View::Workspace(_), _) | (_, None) => return body,
+      (_, Some(global)) => global.clone(),
+    };
+    let pane = match &self.terminal {
+      Some(pane) => pane.clone(),
+      None => {
+        let host: Arc<dyn terminal_data::TerminalHost> = self.host.clone();
+        let place = terminal::Place {
+          repo_path: global.repo_path.clone(),
+          working_directory: global.repo_path.clone(),
+          ..terminal::Place::default()
+        };
+        let (sink, popups) = (self.sink.clone(), self.popups.clone());
+        let pane = cx.new(|cx| terminal::TerminalPane::new(host, sink, popups, place, cx));
+        self.terminal = Some(pane.clone());
+        pane
+      }
+    };
+    let sink = self.sink.clone();
+    pane.update(cx, |pane, cx| {
+      pane.set_react(sink);
+      pane.set_dark(dark, cx);
+      pane.set_route(global.route, cx);
+    });
+    let covered = pane.read(cx).covers();
+    let container = pane.read(cx).container.clone();
+    div()
+      .relative()
+      .size_full()
+      .flex()
+      .flex_col()
+      .child(
+        gpui::canvas(move |bounds, _, _| container.set(Some(bounds)), |_, _, _, _| {})
+          .absolute()
+          .top_0()
+          .left_0()
+          .size_full(),
+      )
+      .when(!covered, |d| {
+        d.child(div().flex_1().min_h_0().overflow_hidden().child(body))
+      })
+      .child(pane)
+      .into_any_element()
+  }
+
   /// The open dialog's view, kept while the same kind stays open.
   fn modal_view(&mut self, dark: bool, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
     let env = || modal::Env {

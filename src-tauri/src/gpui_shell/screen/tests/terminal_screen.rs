@@ -1557,3 +1557,25 @@ fn a_remote_agent_session_registers_for_messages_and_a_shell_does_not(cx: &mut T
   assert_eq!(registered.len(), 1, "{:?}", host.calls());
   assert!(registered[0].ends_with(" agent-k2"), "{registered:?}");
 }
+
+/// The terminal pane is window-wide: it stays at the bottom while the
+/// GitHub view replaces the workspace view.
+#[gpui::test]
+fn terminal_pane_shows_on_the_github_view(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  assert!(h.drawn("terminal-scroll-container"));
+  h.update(|s| {
+    *s = serde_json::from_value(serde_json::json!({
+      "kind": "github",
+      "dark": false,
+      "repoPath": "/repo",
+      "tab": "prs",
+      "filter": "open",
+      "runningChecks": [],
+      "globalTerminal": { "repoPath": "/repo", "activeSessionId": 3 },
+    }))
+    .expect("github route");
+  });
+  assert!(h.drawn("terminal-scroll-container"));
+}
