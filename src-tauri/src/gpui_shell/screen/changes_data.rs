@@ -455,8 +455,16 @@ impl Snapshot {
   }
 
   /// How many files the review summary counts.
+  /// Uncommitted and committed paths, each once: an empty working copy
+  /// on top of branch commits still has a diff to review.
   pub fn review_file_count(&self) -> usize {
-    self.files.len()
+    let paths: HashSet<&str> = self
+      .files
+      .iter()
+      .map(|f| f.path.as_str())
+      .chain(self.committed.iter().map(|f| f.path.as_str()))
+      .collect();
+    paths.len()
   }
 
   /// What `loadChangedFiles` keeps of a workspace's diff.
@@ -1664,7 +1672,7 @@ mod tests {
   fn built_in_review_prompt_does_not_send_the_agent_to_git_diff() {
     let prompt = review_prompt(None, "7", "");
     assert!(!prompt.contains("git diff"), "prompt suggests `git diff`");
-    assert!(prompt.contains("treq diff"));
+    assert!(prompt.contains("treq changes workspace-diff"));
   }
 
   #[test]
