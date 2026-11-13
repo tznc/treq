@@ -1,5 +1,5 @@
-//! Each shell window's toasts ([`ToastQueue`]), drawn by `popup` over the
-//! window. Toasts (`Backend::toast`, `NativeEvent::Toast`) go straight in,
+//! Each shell window's toasts ([`ToastQueue`]), drawn in that window by
+//! `toast_layer`. Toasts (`Backend::toast`, `NativeEvent::Toast`) go straight in,
 //! with their timers here.
 
 use std::{
