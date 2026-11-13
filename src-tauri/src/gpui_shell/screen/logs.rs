@@ -1084,7 +1084,7 @@ impl LogsView {
     }
     let selected = self.selection.selected.len();
     let multi = self.selection.multi;
-    let toolbar = ui::text(div(), TextSize::Xs)
+    let toolbar = ui::text(div(), TextSize::Sm)
       .flex()
       .items_center()
       .gap_2()
@@ -1187,7 +1187,7 @@ impl LogsView {
           .flex_1()
           .min_h_0()
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .debug_selector(move || spec.output.into())
               .size_full()
               .flex()
@@ -1280,7 +1280,7 @@ impl LogsView {
   }
 
   fn inspect_panel(&self, record: &LogRecordView, p: &Palette, cx: &mut Context<Self>) -> Div {
-    ui::text(div(), TextSize::Xs)
+    ui::text(div(), TextSize::Sm)
       .debug_selector(|| "log-inspect-panel".into())
       .flex_none()
       .border_t_1()
@@ -1375,6 +1375,8 @@ impl LogsView {
             .child(ui::input(&input).appearance(false).bordered(false)),
         )
         .child(
+          // Short label (['count']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .px_2()
             .whitespace_nowrap()
@@ -1448,6 +1450,8 @@ impl LogsView {
       .justify_center()
       .gap_3()
       .children(SERIES.iter().zip(colors).map(|((_, label), color)| {
+        // Short label (['legend label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .flex()
           .items_center()
@@ -1512,6 +1516,8 @@ impl LogsView {
       .h(zpx(plot_height))
       .children(ticks.iter().map(|t| {
         let y = plot_height - plot_height * (*t as f32 / top as f32);
+        // Short label (['axis label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .absolute()
           .right_0()
@@ -1536,6 +1542,8 @@ impl LogsView {
         let column = (((k as f32 + 0.5) * columns as f32 / labelled as f32 - 0.5).round() as usize)
           .min(columns - 1);
         let centre = (column as f32 + 0.5) / columns as f32;
+        // Short label (['axis label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .absolute()
           .top_0()
@@ -1601,7 +1609,7 @@ impl LogsView {
         ),
       )
       .child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .flex()
           .gap_1()
           .text_color(p.muted_foreground)
@@ -1614,7 +1622,7 @@ impl LogsView {
       .border_b_1()
       .border_color(p.border)
       .child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .debug_selector(|| "sql-editor".into())
           .font_family(theme::MONO_FONT)
           .children(self.explorer.input.as_ref().map(|input| {
@@ -1667,7 +1675,7 @@ impl LogsView {
       .overflow_scroll();
     if let Some(error) = &self.explorer.error {
       results = results.child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .debug_selector(|| "sql-error".into())
           .m_3()
           .p_3()
@@ -1688,7 +1696,7 @@ impl LogsView {
       );
     } else if let Some(result) = &self.explorer.result {
       results = results.child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .px_4()
           .py_2()
           .border_b_1()
@@ -1751,7 +1759,7 @@ impl LogsView {
         longest as f32 * 6.6 + 24.
       })
       .collect();
-    ui::text(div(), TextSize::Xs)
+    ui::text(div(), TextSize::Sm)
       .debug_selector(|| "sql-results".into())
       .font_family(theme::MONO_FONT)
       .flex()
@@ -1892,7 +1900,7 @@ impl LogsView {
                   .child(*label),
               )
               .child(
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
                   .text_color(p.muted_foreground)
                   .child(*description),
               )

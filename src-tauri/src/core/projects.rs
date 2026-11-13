@@ -22,6 +22,8 @@ pub struct Project {
   pub prompt: String,
   /// Files, folders or URLs agents may read for context.
   pub context_paths: Vec<String>,
+  /// An unsaved window's project: kept, but not listed until promoted.
+  pub draft: bool,
 }
 
 /// What closing a window should do.
@@ -57,6 +59,10 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
     (
       "context_paths",
       "ALTER TABLE projects ADD COLUMN context_paths TEXT NOT NULL DEFAULT '[]'",
+    ),
+    (
+      "draft",
+      "ALTER TABLE projects ADD COLUMN draft INTEGER NOT NULL DEFAULT 0",
     ),
   ] {
     let has: i64 = conn.query_row(
@@ -108,21 +114,73 @@ fn repos_of(conn: &Connection, id: &str) -> Result<Vec<String>, String> {
 
 pub fn save(conn: &Connection, name: &str, repos: &[String]) -> Result<Project, String> {
   let name = clean_name(name)?;
+  if repos.is_empty() {
+    return Err("A project needs at least one repository".to_string());
+  }
+  insert(conn, &name, repos, false)
+}
+
+/// An unsaved window's project, named after its first repository.
+pub fn draft(conn: &Connection, repos: &[String]) -> Result<Project, String> {
+  let name = repos
+    .first()
+    .and_then(|r| r.rsplit(['/', '\\']).find(|s| !s.is_empty()))
+    .unwrap_or("Untitled")
+    .to_string();
+  insert(conn, &name, repos, true)
+}
+
+/// The draft an unsaved window on `repo` keeps its repositories in: the
+/// newest draft led by `repo`, else a new one of `repo` and `seed()`.
+pub fn draft_for_repo(
+  conn: &Connection,
+  repo: &str,
+  seed: impl FnOnce() -> Vec<String>,
+) -> Result<Project, String> {
+  let found: Option<String> = conn
+    .query_row(
+      "SELECT p.id FROM projects p JOIN project_repos r ON r.project_id = p.id
+       WHERE p.draft = 1 AND r.repo_path = ?1
+         AND r.position = (SELECT MIN(position) FROM project_repos WHERE project_id = p.id)
+       ORDER BY p.created_at DESC LIMIT 1",
+      [repo],
+      |r| r.get(0),
+    )
+    .optional()
+    .map_err(err)?;
+  if let Some(project) = found.map(|id| get(conn, &id)).transpose()?.flatten() {
+    return Ok(project);
+  }
+  let repos: Vec<String> = std::iter::once(repo.to_string()).chain(seed()).collect();
+  draft(conn, &repos)
+}
+
+/// Saves draft `id` as a listed project named `name`.
+pub fn promote(conn: &Connection, id: &str, name: &str) -> Result<(), String> {
+  let name = clean_name(name)?;
+  exists(conn, id)?;
+  conn
+    .execute(
+      "UPDATE projects SET name = ?2, draft = 0 WHERE id = ?1",
+      params![id, name],
+    )
+    .map_err(err)
+    .map(drop)
+}
+
+fn insert(conn: &Connection, name: &str, repos: &[String], draft: bool) -> Result<Project, String> {
   let mut unique: Vec<String> = Vec::new();
   for repo in repos {
     if !unique.contains(repo) {
       unique.push(repo.clone());
     }
   }
-  if unique.is_empty() {
-    return Err("A project needs at least one repository".to_string());
-  }
   let id = uuid::Uuid::new_v4().to_string();
   let at = now();
   conn
     .execute(
-      "INSERT INTO projects (id, name, created_at, last_opened_at) VALUES (?1, ?2, ?3, ?3)",
-      params![id, name, at],
+      "INSERT INTO projects (id, name, created_at, last_opened_at, draft) VALUES (?1, ?2, ?3, ?3, ?4)",
+      params![id, name, at, draft],
     )
     .map_err(err)?;
   for (position, repo) in unique.iter().enumerate() {
@@ -139,7 +197,7 @@ pub fn save(conn: &Connection, name: &str, repos: &[String]) -> Result<Project, 
 pub fn get(conn: &Connection, id: &str) -> Result<Option<Project>, String> {
   let row = conn
     .query_row(
-      "SELECT name, created_at, last_opened_at, prompt, context_paths FROM projects WHERE id = ?1",
+      "SELECT name, created_at, last_opened_at, prompt, context_paths, draft FROM projects WHERE id = ?1",
       [id],
       |r| {
         Ok((
@@ -148,12 +206,13 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<Project>, String> {
           r.get::<_, String>(2)?,
           r.get::<_, String>(3)?,
           r.get::<_, String>(4)?,
+          r.get::<_, bool>(5)?,
         ))
       },
     )
     .optional()
     .map_err(err)?;
-  let Some((name, created_at, last_opened_at, prompt, context)) = row else {
+  let Some((name, created_at, last_opened_at, prompt, context, draft)) = row else {
     return Ok(None);
   };
   Ok(Some(Project {
@@ -164,13 +223,14 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<Project>, String> {
     last_opened_at,
     prompt,
     context_paths: serde_json::from_str(&context).unwrap_or_default(),
+    draft,
   }))
 }
 
 /// Saved projects, most recently opened first.
 pub fn list(conn: &Connection) -> Result<Vec<Project>, String> {
   let mut stmt = conn
-    .prepare("SELECT id FROM projects ORDER BY last_opened_at DESC, name")
+    .prepare("SELECT id FROM projects WHERE draft = 0 ORDER BY last_opened_at DESC, name")
     .map_err(err)?;
   let ids: Vec<String> = stmt
     .query_map([], |r| r.get(0))
@@ -234,13 +294,7 @@ pub fn add_repo(conn: &Connection, id: &str, repo: &str) -> Result<bool, String>
 }
 
 pub fn remove_repo(conn: &Connection, id: &str, repo: &str) -> Result<(), String> {
-  let repos = {
-    exists(conn, id)?;
-    repos_of(conn, id)?
-  };
-  if repos.len() <= 1 && repos.iter().any(|r| r == repo) {
-    return Err("A project keeps at least one repository".to_string());
-  }
+  exists(conn, id)?;
   conn
     .execute(
       "DELETE FROM project_repos WHERE project_id = ?1 AND repo_path = ?2",
@@ -694,10 +748,61 @@ mod tests {
   }
 
   #[test]
-  fn refuses_to_remove_last_repo() {
+  fn a_project_can_lose_its_last_repo() {
     let conn = conn();
     let p = save(&conn, "P", &repos(&["/r/a"])).expect("save");
-    assert!(remove_repo(&conn, &p.id, "/r/a").is_err());
+    remove_repo(&conn, &p.id, "/r/a").expect("remove");
+    assert!(get(&conn, &p.id).unwrap().unwrap().repos.is_empty());
+  }
+
+  #[test]
+  fn drafts_hold_repos_but_are_not_listed() {
+    let conn = conn();
+    let d = draft(&conn, &repos(&["/r/a", "/r/b", "/r/a"])).expect("draft");
+    assert!(d.draft);
+    assert_eq!(d.name, "a");
+    assert_eq!(d.repos, repos(&["/r/a", "/r/b"]));
+    assert!(list(&conn).unwrap().is_empty());
+  }
+
+  #[test]
+  fn a_draft_with_no_repos_is_named_untitled() {
+    let conn = conn();
+    assert_eq!(draft(&conn, &[]).expect("draft").name, "Untitled");
+  }
+
+  #[test]
+  fn a_repos_draft_is_seeded_once_then_reused() {
+    let conn = conn();
+    let d = draft_for_repo(&conn, "/r/a", || repos(&["/r/b"])).expect("draft");
+    assert_eq!(d.repos, repos(&["/r/a", "/r/b"]));
+    let again = draft_for_repo(&conn, "/r/a", || panic!("not seeded twice")).expect("again");
+    assert_eq!(again.id, d.id);
+  }
+
+  #[test]
+  fn a_repos_draft_ignores_saved_projects_and_other_repos() {
+    let conn = conn();
+    let saved = save(&conn, "P", &repos(&["/r/a"])).expect("save");
+    let other = draft(&conn, &repos(&["/r/x", "/r/a"])).expect("other");
+    let d = draft_for_repo(&conn, "/r/a", Vec::new).expect("draft");
+    assert_ne!(d.id, saved.id);
+    assert_ne!(d.id, other.id);
+    assert_eq!(d.repos, repos(&["/r/a"]));
+  }
+
+  #[test]
+  fn promoting_a_draft_names_and_lists_it() {
+    let conn = conn();
+    let d = draft(&conn, &repos(&["/r/a"])).expect("draft");
+    promote(&conn, &d.id, " Checkout ").expect("promote");
+    let listed = list(&conn).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+      (listed[0].name.as_str(), listed[0].draft),
+      ("Checkout", false)
+    );
+    assert!(promote(&conn, &d.id, "  ").is_err());
   }
 
   #[test]
@@ -975,6 +1080,7 @@ mod tests {
       last_opened_at: String::new(),
       prompt: String::new(),
       context_paths: Vec::new(),
+      draft: false,
     };
     let overview = overview(&project);
     crate::local_db::release_connections_under(dir.path());
@@ -1068,6 +1174,7 @@ mod tests {
       last_opened_at: String::new(),
       prompt: String::new(),
       context_paths: Vec::new(),
+      draft: false,
     };
     let repo = &overview(&project)[0];
     assert_eq!(repo.path, "/srv/app");
@@ -1101,6 +1208,7 @@ mod tests {
       last_opened_at: String::new(),
       prompt: String::new(),
       context_paths: Vec::new(),
+      draft: false,
     };
     let overview = overview(&project);
     assert_eq!(overview.len(), 1);
@@ -1308,13 +1416,8 @@ mod proptests {
       }
       Op::RemoveRepo(i, repo) => {
         let Some(id) = pick(model, *i) else { return };
-        let m = model.get_mut(&id).unwrap();
-        let last = m.repos.len() <= 1 && m.repos.contains(repo);
-        let result = remove_repo(conn, &id, repo);
-        assert_eq!(result.is_ok(), !last, "{result:?}");
-        if result.is_ok() {
-          m.repos.retain(|r| r != repo);
-        }
+        remove_repo(conn, &id, repo).expect("remove repo");
+        model.get_mut(&id).unwrap().repos.retain(|r| r != repo);
       }
       Op::Delete(i) => {
         let Some(id) = pick(model, *i) else { return };
@@ -1371,7 +1474,6 @@ mod proptests {
         (&got.name, &got.repos, &got.prompt, &got.context_paths),
         (&m.name, &m.repos, &m.prompt, &m.paths)
       );
-      assert!(!got.repos.is_empty(), "a project keeps a repository");
       assert!(got.created_at <= got.last_opened_at);
     }
     for (id, m) in model {

@@ -297,6 +297,8 @@ impl ChangesView {
       .filter(|c| c.status != "resolved")
       .count();
     (open > 0).then(|| {
+      // Short label (['count']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .debug_selector(|| "agent-review-comment-count".into())
         .text_color(Tone::GitMerged.color(p))
@@ -449,6 +451,8 @@ impl ChangesView {
     }
     if thread.is_resolved {
       toggle = toggle.child(
+        // Short label (['status pill']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .flex_none()
           .flex()
@@ -466,7 +470,7 @@ impl ChangesView {
     }
     if let (true, Some(first)) = (collapsed, first) {
       toggle = toggle.child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .debug_selector(|| "github-thread-collapsed-preview".into())
           .min_w_0()
           .truncate()
@@ -477,6 +481,8 @@ impl ChangesView {
     if !collapsed {
       let n = thread.comments.len();
       toggle = toggle.child(
+        // Short label (['count']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .text_color(muted)
           .child(format!("{n} comment{}", if n == 1 { "" } else { "s" })),
@@ -541,6 +547,8 @@ impl ChangesView {
           .child(avatar(&comment.author.login, 32., p))
           .child(profile_link(&comment.author.login, p, cx))
           .child(
+            // Short label (['timestamp']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(comment_date(&comment.created_at, this_year)),
@@ -623,13 +631,15 @@ impl ChangesView {
           .gap_2()
           .child(ui::icon(theme::ICON_BOT, 14., Tone::GitMerged.color(p)))
           .child(
+            // Short label (['tag']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .font_weight(FontWeight::MEDIUM)
               .text_color(Tone::GitMerged.color(p))
               .child("Local"),
           )
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .text_color(muted)
               .child(format!("{}:{range}", comment.file_path)),
           ),
@@ -717,6 +727,8 @@ fn violet(p: &Palette, alpha: f32) -> Hsla {
 
 /// `AuthorAvatar`'s fallback: the login's initial in a circle.
 fn avatar(login: &str, size: f32, p: &Palette) -> impl IntoElement {
+  // Short label (['avatar initial']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .size(zpx(size))
     .flex_none()
@@ -739,6 +751,8 @@ fn avatar(login: &str, size: f32, p: &Palette) -> impl IntoElement {
 /// `AuthorProfileLink`: "@login", opening the GitHub profile.
 fn profile_link(login: &str, p: &Palette, cx: &mut Context<ChangesView>) -> impl IntoElement {
   let url = format!("https://github.com/{login}");
+  // Short label (['username']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .id(SharedString::from(format!("profile-{login}")))
     .role(gpui::Role::Link)
@@ -768,6 +782,8 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
   suggested: &str,
   p: &Palette,
 ) -> impl IntoElement {
+  // Short label (['section heading']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   let header = ui::text(div(), TextSize::Xs)
     .px_2()
     .py_1()
@@ -778,7 +794,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
     .child("Suggested change");
   let body = match suggestion_diff(original, suggested) {
     Some(rows) => {
-      let mut el = ui::text(div(), TextSize::Xs)
+      let mut el = ui::text(div(), TextSize::Sm)
         .debug_selector(|| "agent-review-suggestion".into())
         .font_family(theme::MONO_FONT);
       for row in rows {
@@ -830,7 +846,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
       }
       el.into_any_element()
     }
-    None => ui::text(div(), TextSize::Xs)
+    None => ui::text(div(), TextSize::Sm)
       .debug_selector(|| "agent-review-suggestion".into())
       .font_family(theme::MONO_FONT)
       .px_2()

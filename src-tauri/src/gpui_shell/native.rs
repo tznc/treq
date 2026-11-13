@@ -294,6 +294,7 @@ impl Backend {
       .window_repo_paths
       .lock_or_recover()
       .insert(self.label.clone(), path.to_string());
+    super::projects::assign_draft(&self.app, &self.label, path);
   }
 
   /// Tells this window's model what a screen did, and shows its toasts.

@@ -140,6 +140,8 @@ pub enum TextSize {
 impl TextSize {
   pub fn metrics(self) -> (f32, f32) {
     match self {
+      // Short label (["the type scale's own definition"]): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       TextSize::Xs => (11., 16.),
       TextSize::Sm => (13., 20.),
       TextSize::Lg => (15., 22.),

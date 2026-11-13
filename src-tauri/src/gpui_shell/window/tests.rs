@@ -1253,6 +1253,38 @@ fn adds_and_removes_supporting_repositories(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn removing_the_main_repository_shows_the_next_one(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::on("/repo", vec![workspace(1, "a", Some("main"))]));
+  host.supporting.lock().unwrap().push(SupportingRepo {
+    path: "/other".into(),
+    exists: true,
+  });
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  window.controller.update(cx, |c, cx| {
+    c.native_event(
+      &NativeEvent::Open {
+        what: crate::gpui_shell::native::OpenRequest::RemoveRepo {
+          repo_path: "/repo".into(),
+        },
+      },
+      cx,
+    )
+  });
+  cx.run_until_parked();
+  window.click_in_confirm(cx, "Remove repository");
+  let calls = host.calls();
+  let removed = calls
+    .iter()
+    .position(|c| c == "remove /repo")
+    .expect("removed");
+  let opened = calls
+    .iter()
+    .position(|c| c == "open /other")
+    .expect("opens the next");
+  assert!(removed < opened);
+}
+
+#[gpui::test]
 fn force_rebases_the_selected_workspace(cx: &mut TestAppContext) {
   let host = repo_host();
   let window = Window::open(cx, host.clone(), Some("/repo"));

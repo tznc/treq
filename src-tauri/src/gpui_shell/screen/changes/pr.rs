@@ -618,6 +618,8 @@ impl ChangesView {
     let id = thread.id.clone();
     if !reply.is_some_and(|r| r.open) {
       return Some(
+        // Short label (['button label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .id(SharedString::from(format!("reply-{id}")))
           .role(gpui::Role::Button)
@@ -662,7 +664,7 @@ impl ChangesView {
             .map(|(state, _)| ui::text(Textarea::new(state), TextSize::Code).min_h(zpx(60.))),
         )
         .children(reply.error.clone().map(|err| {
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .text_color(p.destructive)
             .child(err)
         }))
@@ -672,6 +674,8 @@ impl ChangesView {
             .justify_end()
             .gap_2()
             .child(
+              // Short label (['button label']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .id(SharedString::from(format!("reply-cancel-{id}")))
                 .role(gpui::Role::Button)
@@ -683,6 +687,8 @@ impl ChangesView {
                 .on_click(cx.listener(move |view, _, _, cx| view.open_reply(&cancel, false, cx))),
             )
             .child({
+              // Short label (['button label']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .id(SharedString::from(format!("reply-send-{id}")))
                 .role(gpui::Role::Button)

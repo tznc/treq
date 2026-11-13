@@ -24,10 +24,65 @@ pub fn window_project(app: &AppHandle, label: &str) -> Option<Project> {
   project_of(db.conn(), id.as_deref())
 }
 
-/// The saved project `id` names; `None` for an unsaved window (no id) or a
-/// project deleted since.
+/// The project window `label` keeps its repositories in: its saved project,
+/// or the draft of an unsaved window.
+pub fn window_repos_project(app: &AppHandle, label: &str) -> Option<Project> {
+  let state = app.state::<AppState>();
+  let id = state.window_projects.lock_or_recover().get(label).cloned();
+  let db = state.db.lock_or_recover();
+  any_project_of(db.conn(), id.as_deref())
+}
+
+/// Gives unsaved window `label`, now showing `repo`, the draft of `repo`
+/// (seeded from its supporting repositories). A saved project is kept.
+pub fn assign_draft(app: &AppHandle, label: &str, repo: &str) {
+  let state = app.state::<AppState>();
+  let mut map = state.window_projects.lock_or_recover();
+  let db = state.db.lock_or_recover();
+  let current = any_project_of(db.conn(), map.get(label).map(String::as_str));
+  if current.as_ref().is_some_and(|p| !p.draft) {
+    return;
+  }
+  if repo.is_empty() {
+    map.remove(label);
+    return;
+  }
+  let seed = || {
+    crate::core::supporting_repos::list(repo)
+      .unwrap_or_default()
+      .into_iter()
+      .map(|r| r.path)
+      .collect()
+  };
+  match projects::draft_for_repo(db.conn(), repo, seed) {
+    Ok(draft) => {
+      map.insert(label.to_string(), draft.id);
+    }
+    Err(err) => log::warn!("no draft project for {repo}: {err}"),
+  }
+}
+
+/// The saved project `id` names; `None` for an unsaved window (no id or a
+/// draft) or a project deleted since.
 fn project_of(conn: &Connection, id: Option<&str>) -> Option<Project> {
+  any_project_of(conn, id).filter(|p| !p.draft)
+}
+
+/// The project `id` names, draft or saved.
+fn any_project_of(conn: &Connection, id: Option<&str>) -> Option<Project> {
   projects::get(conn, id?).ok().flatten()
+}
+
+/// The windows of `window_projects` that show a saved project.
+fn saved_windows(
+  conn: &Connection,
+  window_projects: &HashMap<String, String>,
+) -> HashMap<String, String> {
+  window_projects
+    .iter()
+    .filter(|(_, id)| project_of(conn, Some(id)).is_some())
+    .map(|(label, id)| (label.clone(), id.clone()))
+    .collect()
 }
 
 /// The repositories of saved `project` an agent in `main` may read: the
@@ -184,7 +239,8 @@ fn save_for(
 ) -> Result<Project, String> {
   let project = match window_projects.get(label) {
     Some(id) => {
-      projects::rename(conn, id, name)?;
+      // Names a saved project, or saves a draft under the name.
+      projects::promote(conn, id, name)?;
       projects::get(conn, id)?.ok_or("The project no longer exists")?
     }
     None => projects::save(conn, name, repos)?,
@@ -204,7 +260,14 @@ pub fn close_requested(app: &AppHandle, label: &str) -> bool {
     let main = state.window_repo_paths.lock_or_recover();
     let rest = state.window_supporting_repo_paths.lock_or_recover();
     let projects_map = state.window_projects.lock_or_recover();
-    asks_to_save(&confirmed, &main, &rest, &projects_map, label)
+    let db = state.db.lock_or_recover();
+    asks_to_save(
+      &confirmed,
+      &main,
+      &rest,
+      &saved_windows(db.conn(), &projects_map),
+      label,
+    )
   };
   if prompt {
     Backend::new(app.clone(), label.to_string()).notify(NativeEvent::Open {
@@ -430,6 +493,44 @@ mod tests {
     assert_eq!(p.repos, strings(&["/r/web", "/r/api"]));
     assert_eq!(windows.get("w1"), Some(&p.id));
     assert_eq!(projects::list(&conn).unwrap().len(), 1);
+  }
+
+  #[test]
+  fn save_for_a_draft_window_promotes_its_draft() {
+    let conn = conn();
+    let d = projects::draft(&conn, &strings(&["/r/web", "/r/api"])).unwrap();
+    let mut windows = map(&[("w1", d.id.clone())]);
+    let p = save_for(
+      &conn,
+      &mut windows,
+      "w1",
+      &strings(&["/r/other"]),
+      "Checkout",
+    )
+    .unwrap();
+    assert_eq!(
+      (p.id.as_str(), p.name.as_str(), p.draft),
+      (d.id.as_str(), "Checkout", false)
+    );
+    assert_eq!(p.repos, strings(&["/r/web", "/r/api"]));
+    assert_eq!(projects::list(&conn).unwrap().len(), 1);
+  }
+
+  #[test]
+  fn saved_windows_leave_out_drafts() {
+    let conn = conn();
+    let d = projects::draft(&conn, &strings(&["/r/web"])).unwrap();
+    let p = projects::save(&conn, "P", &strings(&["/r/api"])).unwrap();
+    let windows = map(&[("w1", d.id), ("w2", p.id.clone())]);
+    assert_eq!(saved_windows(&conn, &windows), map(&[("w2", p.id)]));
+  }
+
+  #[test]
+  fn project_of_a_draft_is_none() {
+    let conn = conn();
+    let d = projects::draft(&conn, &strings(&["/r/web"])).unwrap();
+    assert_eq!(project_of(&conn, Some(&d.id)), None);
+    assert_eq!(any_project_of(&conn, Some(&d.id)).map(|p| p.id), Some(d.id));
   }
 
   #[test]

@@ -270,6 +270,8 @@ impl FileBrowserView {
             .child(ui::input(&input).appearance(false).bordered(false)),
         )
         .child(
+          // Short label (['count']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .debug_selector(|| "file-search-count".into())
             .px_2()
@@ -363,7 +365,7 @@ impl FileBrowserView {
           }),
       )
       .child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .text_color(p.muted_foreground)
           .child("Send to idle agent if one is available"),
       )

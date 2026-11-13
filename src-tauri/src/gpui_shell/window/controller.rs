@@ -595,7 +595,20 @@ impl WindowController {
         },
         |this, (path, result), cx| {
           let effects = match result {
+            Ok(()) if this.model.main_repo == path => {
+              // The window's main repository left: the next one takes over.
+              let next = this
+                .data
+                .supporting()
+                .iter()
+                .find(|r| r.exists && r.path != path);
+              next
+                .map(|r| Effect::OpenRepoAt(r.path.clone()))
+                .into_iter()
+                .collect()
+            }
             Ok(()) => {
+              this.model.close_repo_terminals(&path, &this.data);
               if this.model.supporting.as_deref() == Some(path.as_str()) {
                 this.model.supporting = None;
                 this.model.selected = None;

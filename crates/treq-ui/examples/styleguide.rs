@@ -786,7 +786,7 @@ fn indicators() -> Vec<Example> {
                     .child("Notify when the agent finishes"),
                 )
                 .child(
-                  treq_ui::text(div(), treq_ui::TextSize::Xs)
+                  treq_ui::text(div(), treq_ui::TextSize::Sm)
                     .text_color(p.muted_foreground)
                     .child("A desktop notification, only while Treq is in the background."),
                 ),

@@ -643,6 +643,8 @@ impl PrReviewView {
               .when_some(counts.get(&file.path).copied(), |this, count| {
                 let comments = format!("pr-file-comments-{}", file.path);
                 this.child(
+                  // Short label (comment count): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .id(SharedString::from(comments.clone()))
                     .debug_selector(move || comments)
@@ -658,6 +660,8 @@ impl PrReviewView {
                 )
               })
               .child(
+                // Short label (status letter): 11px is fine.
+                // ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .text_color(p.muted_foreground)
                   .child(file.status.clone()),
@@ -750,7 +754,7 @@ impl PrReviewView {
               .min_w_0()
               .child(div().font_weight(FontWeight::MEDIUM).child(event.label()))
               .child(
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
                   .text_color(p.muted_foreground)
                   .child(if disabled { OWN_PR_HINT } else { event.hint() }),
               ),

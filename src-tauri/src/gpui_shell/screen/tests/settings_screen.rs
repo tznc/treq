@@ -234,7 +234,7 @@ fn settings_switches_previews_itself(cx: &mut TestAppContext) {
   let screen = drawn_settings(&mut h);
   assert!(!screen.tabs.contains(&settings::Tab::Skills));
   h.click("settings-preview-skillsInstallation");
-  h.click("settings-preview-docs-logs");
+  h.click("settings-preview-docs-devcontainers");
   h.cx.run_until_parked();
   assert!(drawn_settings(&mut h).tabs.contains(&settings::Tab::Skills));
   assert_eq!(
@@ -242,7 +242,7 @@ fn settings_switches_previews_itself(cx: &mut TestAppContext) {
     [
       "set feature_preview.skillsInstallation=true",
       "notify settingsChanged",
-      "open http://localhost:3001/docs/concepts/logs",
+      "open http://localhost:3001/docs/how-to/devcontainer-environments",
     ]
   );
 }
@@ -409,4 +409,12 @@ fn settings_fields_are_as_tall_as_react_ones(cx: &mut TestAppContext) {
     let bounds = h.cx.debug_bounds(selector).expect("drawn");
     assert_eq!(bounds.size.height, gpui::px(40.), "{selector}");
   }
+}
+
+#[gpui::test]
+fn settings_closes_on_escape(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, settings());
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![press("settings.close")]);
 }

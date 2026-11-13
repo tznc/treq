@@ -297,7 +297,7 @@ impl Render for ProjectContextDialog {
               .child(ui::text(Textarea::new(&paths), TextSize::Sm)),
           )
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .text_color(p.muted_foreground)
               .child("Drop files here, pick them with Add files…, or type a path or URL per line."),
           )

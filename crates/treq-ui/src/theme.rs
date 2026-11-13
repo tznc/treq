@@ -362,6 +362,8 @@ pub mod space {
 pub const FIELD_GAP: f32 = space::LG;
 /// Between a field's label, its control and its hint.
 pub const LABEL_GAP: f32 = 6.;
+/// The widest a detail page's reading column grows.
+pub const CONTENT_MAX_WIDTH: f32 = 820.;
 /// The label column of a horizontal form.
 pub const LABEL_WIDTH: f32 = 140.;
 /// Below this window width, a horizontal form stacks its labels on top.
@@ -475,6 +477,8 @@ pub fn bootstrap(dark: bool, zoom: f32) -> gpui_bootstrap::Theme {
     pill: z(9999.),
   };
   let (body, body_line) = ui::TextSize::Sm.metrics();
+  // Short label (['caption token for badges and tags']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   let (caption, _) = ui::TextSize::Xs.metrics();
   let (title, _) = ui::TextSize::Lg.metrics();
   theme.typography = Typography {
