@@ -218,11 +218,7 @@ pub fn build_auto_command(
     (None, Some(prompt)) => append_agent_prompt(&command, prompt),
     (_, None) => command,
   };
-  let mut cleanup = vec![files.prompt_path.clone()];
-  cleanup.extend(files.task_path.clone());
-  if !files.skill_dir.is_empty() {
-    cleanup.push(files.skill_dir.clone());
-  }
+  let mut cleanup = vec![files.dir.clone()];
   cleanup.extend(files.agents_skill_path.clone());
   cleanup.extend(files.claude_skill_path.clone());
 
@@ -285,7 +281,6 @@ pub fn build_auto_command(
         .settings_path
         .as_deref()
         .ok_or("Claude auto-command requires a settings file path")?;
-      cleanup.push(settings.to_string());
       command.push_str(&format!(" --settings {}", shell_quote(settings)));
       command.push_str(&format!(
         " --append-system-prompt-file {}",
@@ -364,11 +359,10 @@ pub fn prepare_auto_command(
     options.pending_prompt.filter(|p| !p.is_empty())
   };
   let mut files = files;
-  files.task_path = pending_prompt.map(write_agent_task_file).transpose()?;
-  let file_paths = std::iter::once(files.prompt_path.clone())
-    .chain(files.task_path.clone())
-    .chain(files.settings_path.clone())
-    .chain(Some(files.skill_dir.clone()).filter(|d| !d.is_empty()))
+  files.task_path = pending_prompt
+    .map(|task| write_agent_task_file(&files.dir, task))
+    .transpose()?;
+  let file_paths = std::iter::once(files.dir.clone())
     .chain(files.agents_skill_path.clone())
     .chain(files.claude_skill_path.clone())
     .collect();
@@ -403,14 +397,30 @@ mod tests {
 
   fn files() -> AgentCliFiles {
     AgentCliFiles {
-      prompt_path: "/tmp/treq-agent-prompt-1.txt".into(),
-      settings_path: Some("/tmp/treq-agent-settings-1.json".into()),
-      skill_dir: "/tmp/treq-agent-skills-1".into(),
+      dir: "/tmp/treq-agent-1".into(),
+      prompt_path: "/tmp/treq-agent-1/prompt.txt".into(),
+      settings_path: Some("/tmp/treq-agent-1/settings.json".into()),
+      skill_dir: "/tmp/treq-agent-1/skills".into(),
       agents_skill_path: None,
       claude_skill_path: None,
       skill_write_warning: None,
       task_path: None,
     }
+  }
+
+  /// The files a launch wrote, looking one level into its temp dir.
+  fn launch_files(prepared: &Prepared) -> Vec<String> {
+    prepared
+      .file_paths
+      .iter()
+      .flat_map(|p| match std::fs::read_dir(p) {
+        Ok(entries) => entries
+          .flatten()
+          .map(|e| e.path().to_string_lossy().into_owned())
+          .collect(),
+        Err(_) => vec![p.clone()],
+      })
+      .collect()
   }
 
   fn opts(agent: &str) -> AutoCommand<'_> {
@@ -641,8 +651,7 @@ mod tests {
       &opts("claude"),
     )
     .unwrap();
-    let texts: Vec<String> = prepared
-      .file_paths
+    let texts: Vec<String> = launch_files(&prepared)
       .iter()
       .filter_map(|p| std::fs::read_to_string(p).ok())
       .collect();
@@ -723,11 +732,9 @@ mod tests {
     )
     .unwrap();
     assert!(command.contains("claude --permission-mode acceptEdits"));
-    assert!(command.contains("--settings '/tmp/treq-agent-settings-1.json'"));
-    assert!(command.contains("--append-system-prompt-file '/tmp/treq-agent-prompt-1.txt'"));
-    assert!(command.contains(
-      "trap \"rm -rf '/tmp/treq-agent-prompt-1.txt' '/tmp/treq-agent-skills-1' '/ws/.claude/skills/treq' '/tmp/treq-agent-settings-1.json'\" EXIT"
-    ));
+    assert!(command.contains("--settings '/tmp/treq-agent-1/settings.json'"));
+    assert!(command.contains("--append-system-prompt-file '/tmp/treq-agent-1/prompt.txt'"));
+    assert!(command.contains("trap \"rm -rf '/tmp/treq-agent-1' '/ws/.claude/skills/treq'\" EXIT"));
     assert!(command.contains("-- 'fix the bug'"));
     let plan = build_auto_command(
       &AutoCommand {
@@ -758,10 +765,8 @@ mod tests {
     };
     let codex = build_auto_command(&opts("codex"), &files).unwrap();
     assert!(codex
-      .contains("codex -c \"developer_instructions=$(cat -- '/tmp/treq-agent-prompt-1.txt')\""));
-    assert!(codex.contains(
-      "trap \"rm -rf '/tmp/treq-agent-prompt-1.txt' '/tmp/treq-agent-skills-1' '/ws/.agents/skills/treq'\" EXIT"
-    ));
+      .contains("codex -c \"developer_instructions=$(cat -- '/tmp/treq-agent-1/prompt.txt')\""));
+    assert!(codex.contains("trap \"rm -rf '/tmp/treq-agent-1' '/ws/.agents/skills/treq'\" EXIT"));
     let cursor = build_auto_command(
       &AutoCommand {
         permission_mode: Some("plan"),
@@ -770,7 +775,7 @@ mod tests {
       &files,
     )
     .unwrap();
-    assert!(cursor.contains("cursor-agent --plan -- \"$(cat -- '/tmp/treq-agent-prompt-1.txt')\""));
+    assert!(cursor.contains("cursor-agent --plan -- \"$(cat -- '/tmp/treq-agent-1/prompt.txt')\""));
   }
 
   #[test]
@@ -786,7 +791,7 @@ mod tests {
       .unwrap()
     };
     let edit = |agent| build_auto_command(&opts(agent), &files()).unwrap();
-    let prompt = "\"$(cat -- '/tmp/treq-agent-prompt-1.txt')\"";
+    let prompt = "\"$(cat -- '/tmp/treq-agent-1/prompt.txt')\"";
     assert!(plan("devin").contains(&format!("devin --permission-mode plan -- {prompt}")));
     assert!(edit("devin").contains(&format!("devin -- {prompt}")));
     assert!(plan("gemini").contains(&format!("gemini --approval-mode plan -i {prompt}")));
@@ -845,11 +850,8 @@ mod tests {
     .unwrap();
     assert!(prepared.command.contains(TASK_ARG));
     assert!(!prepared.command.contains("hi'"));
-    let settings = prepared
-      .file_paths
-      .iter()
-      .find(|p| p.ends_with(".json"))
-      .unwrap();
+    let files = launch_files(&prepared);
+    let settings = files.iter().find(|p| p.ends_with(".json")).unwrap();
     let written: Value = serde_json::from_str(&std::fs::read_to_string(settings).unwrap()).unwrap();
     assert_eq!(written["extra"], 1);
     assert!(written.get("sandbox").is_none());
@@ -884,8 +886,8 @@ mod tests {
         "{agent}: {}",
         prepared.command
       );
-      let task_file = prepared
-        .file_paths
+      let files = launch_files(&prepared);
+      let task_file = files
         .iter()
         .find(|p| std::fs::read_to_string(p).ok().as_deref() == Some(task.as_str()))
         .unwrap_or_else(|| panic!("{agent}: no file holds the task"));
@@ -903,13 +905,43 @@ mod tests {
         .contains(&format!("rm -rf {}", shell_quote(&prepared.file_paths[0]))));
       assert!(prepared.command.contains(&shell_quote(task_file)));
       #[cfg(unix)]
-      for path in [task_file, &prepared.file_paths[0]] {
+      for (path, expected) in [(task_file, 0o600), (&prepared.file_paths[0], 0o700)] {
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "{agent}: {path} is readable by others");
+        assert_eq!(mode, expected, "{agent}: {path} is readable by others");
       }
       super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
     }
+  }
+
+  /// The typed `trap` names each temp path, and macOS's `$TMPDIR` is long, so
+  /// one launch's temp files share a single dir to keep the line short.
+  #[test]
+  fn keeps_each_launch_in_a_single_temp_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let prepared = prepare_auto_command(
+      &AgentPaths {
+        workspace_path: None,
+        repo_path: dir.path().to_str().unwrap(),
+        supporting_repo_paths: NONE,
+        project: None,
+        app_instructions: None,
+        repo_instructions: None,
+      },
+      &AutoCommand {
+        pending_prompt: Some("fix the bug"),
+        ..opts("claude")
+      },
+    )
+    .unwrap();
+    let temp = std::env::temp_dir();
+    let in_temp = prepared
+      .file_paths
+      .iter()
+      .filter(|p| Path::new(p).parent() == Some(temp.as_path()))
+      .count();
+    super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+    assert_eq!(in_temp, 1, "{:?}", prepared.file_paths);
   }
 
   #[test]
@@ -968,7 +1000,7 @@ mod tests {
       let dir = tempfile::tempdir().unwrap();
       for agent in ["claude", "codex", "copilot"] {
         let prepared = prepare_task(dir.path(), agent, None, &prompt);
-        let task = prepared.file_paths.iter().find(|p| p.contains("treq-agent-task-")).cloned();
+        let task = launch_files(&prepared).into_iter().find(|p| p.ends_with("task.txt"));
         let written = task.as_deref().map(std::fs::read_to_string);
         super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
         proptest::prop_assert!(types_as_text(&prepared.command), "{:?}", prepared.command);
