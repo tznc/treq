@@ -15,7 +15,7 @@ permissions:
 jobs:
   check:
     name: new migrations sort last
-    runs-on: small
+    runs-on: scripts
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7

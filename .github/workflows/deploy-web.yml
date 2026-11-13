@@ -234,7 +234,7 @@ jobs:
 
   lighthouse:
     timeout-minutes: 15
-    runs-on: small
+    runs-on: scripts
     needs: build
     if: github.event_name == 'pull_request'
     defaults:

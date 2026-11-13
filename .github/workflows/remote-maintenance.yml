@@ -39,7 +39,7 @@ permissions: {}
 
 jobs:
   run:
-    runs-on: small
+    runs-on: scripts
     timeout-minutes: 15
     steps:
       - name: Call remote-admin
