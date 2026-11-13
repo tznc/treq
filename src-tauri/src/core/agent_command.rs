@@ -613,6 +613,7 @@ mod tests {
       last_opened_at: String::new(),
       prompt: "Use npm".into(),
       context_paths: vec!["/docs/a.md".into()],
+      draft: false,
     };
     assert_eq!(
       ProjectContext::from(saved),
