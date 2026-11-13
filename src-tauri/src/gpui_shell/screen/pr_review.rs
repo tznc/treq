@@ -627,7 +627,7 @@ impl PrReviewView {
           .rounded_none()
           .leading(ui::icon(theme::ICON_FILE_TEXT, 12., p.muted_foreground).flex_none())
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .truncate()
               .flex_1()
               .child(name),
