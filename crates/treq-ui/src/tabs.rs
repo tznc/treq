@@ -260,6 +260,7 @@ impl RenderOnce for Tabs {
         } else {
           fg
         };
+        let on_fill = active && selected_fill.is_some();
         text(div(), if bar { TextSize::Xs } else { TextSize::Sm })
           .id(tab.id)
           .debug_selector(move || selector)
@@ -326,7 +327,11 @@ impl RenderOnce for Tabs {
                 .when(bar, |el| {
                   el.absolute().top(zpx(4.)).left(gpui::relative(0.55))
                 })
-                .child(Count::new(count, &p)),
+                .child(if on_fill {
+                  Count::new(count, &p).on_selected(fg)
+                } else {
+                  Count::new(count, &p)
+                }),
             )
           })
           .when_some(tab.dot, |el, (tone, label)| {
