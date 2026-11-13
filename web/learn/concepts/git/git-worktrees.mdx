@@ -114,11 +114,11 @@ git worktree prune
 
 Automation has to cope with half-created worktrees and failed cleanup. Check that a branch is not already checked out before you assign it, and do not run repository maintenance while other Git processes are writing shared state.
 
-Use [separate clones](./git-worktrees-vs-clones) when tasks need their own refs, remotes, or config. Use [Git submodules](./git-submodules) when one repository must version another repository in-tree. Use an OS sandbox when they need a real security boundary.
+Use [separate clones](./git-worktrees-vs-clones.mdx) when tasks need their own refs, remotes, or config. Use [Git submodules](./git-submodules.mdx) when one repository must version another repository in-tree. Use an OS sandbox when they need a real security boundary.
 
 ## Next Steps
 
-- [Git Worktrees vs Clones](./git-worktrees-vs-clones): choose the required level of repository isolation
-- [What are Stacked PRs?](./stacked-prs): organize dependent branches into reviewable changes
+- [Git Worktrees vs Clones](./git-worktrees-vs-clones.mdx): choose the required level of repository isolation
+- [What are Stacked PRs?](./stacked-prs.mdx): organize dependent branches into reviewable changes
 - [Parallel Development Workflow](/learn/workflows/git/parallel-development): apply worktrees to concurrent tasks
 - [What are Coding Agents?](/learn/concepts/ai-engineering/coding-agents): isolate agent changes in separate directories

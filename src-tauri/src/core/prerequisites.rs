@@ -4,13 +4,21 @@
 use serde::Serialize;
 
 /// Executables the checklist reports on, in display order.
-pub const PREREQUISITE_BINARIES: [&str; 6] =
-  ["git", "claude", "codex", "cursor-agent", "copilot", "gh"];
+pub const PREREQUISITE_BINARIES: [&str; 8] = [
+  "git",
+  "claude",
+  "codex",
+  "cursor-agent",
+  "copilot",
+  "devin",
+  "gemini",
+  "gh",
+];
 
 /// What a machine Treq works on over SSH (or in a container) needs: the
 /// local list plus jj, which the host runs itself, and tmux, which a host
 /// set to tmux terminals needs.
-pub const HOST_BINARIES: [&str; 8] = [
+pub const HOST_BINARIES: [&str; 10] = [
   "git",
   "jj",
   "tmux",
@@ -18,6 +26,8 @@ pub const HOST_BINARIES: [&str; 8] = [
   "codex",
   "cursor-agent",
   "copilot",
+  "devin",
+  "gemini",
   "gh",
 ];
 
@@ -59,6 +69,15 @@ mod tests {
   use super::*;
   use crate::binary_paths::detect_binary_in;
   use tempfile::TempDir;
+
+  #[test]
+  fn checks_every_agent_binary_locally_and_on_hosts() {
+    for agent in crate::core::remote_pty::RemoteAgentId::ALL {
+      let bin = agent.binary_name();
+      assert!(PREREQUISITE_BINARIES.contains(&bin), "{bin}");
+      assert!(HOST_BINARIES.contains(&bin), "{bin}");
+    }
+  }
 
   fn installed(statuses: &[PrerequisiteStatus], binary: &str) -> bool {
     statuses

@@ -15,12 +15,15 @@ env:
 
 on:
   pull_request:
-    # ready_for_review runs the desktop e2e suite, which drafts skip.
-    types: [opened, synchronize, reopened, ready_for_review]
+    # Every check runs on drafts, so marking a PR ready doesn't rerun CI.
+    types: [opened, synchronize, reopened]
+  # The merge queue reruns CI on the queued result; ci-ok must report there.
+  merge_group:
 
 # A new push supersedes the previous run; free its runners for other PRs.
+# Merge group runs have no PR number; each queue entry has its own ref.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -37,12 +40,24 @@ jobs:
     # No checkout: on pull_request, paths-filter lists the changed files
     # through the GitHub API.
     permissions:
+      contents: read
       pull-requests: read
     steps:
+      # A merge group has no PR to ask the API about, so paths-filter diffs
+      # the queued commits against the base locally. Trees only, no blobs.
+      - if: github.event_name == 'merge_group'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
       - name: Check for Rust and JS/TS changes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
+          # Ignored on pull_request.
+          base: ${{ github.event.merge_group.base_sha }}
+          ref: ${{ github.event.merge_group.head_sha }}
           filters: |
             rust:
               - "src-tauri/**"
@@ -143,7 +158,7 @@ jobs:
 
       - name: Install typos and cargo-machete
         if: ${{ !cancelled() }}
-        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
           tool: typos,cargo-machete
 
@@ -157,9 +172,6 @@ jobs:
         if: ${{ !cancelled() && env.RUST == 'true' }}
         run: cargo machete
 
-  # The e2e suite skips draft PRs; marking the PR ready for review runs it.
-  # clippy, the Rust tests and cargo-deny run on drafts too.
-  #
   # The end-to-end suite (e2e/desktop): the app built with the `e2e`
   # feature, which embeds a Playwright server (gpui-playwright), driven by
   # stock @playwright/test under Xvfb on a fixture repository. The desktop
@@ -167,7 +179,7 @@ jobs:
   # run covers them.
   test-desktop-e2e:
     needs: detect-changes
-    if: ${{ !github.event.pull_request.draft && (needs.detect-changes.outputs.rust_changed == 'true' || needs.detect-changes.outputs.e2e_changed == 'true') }}
+    if: ${{ needs.detect-changes.outputs.rust_changed == 'true' || needs.detect-changes.outputs.e2e_changed == 'true' }}
     timeout-minutes: 20
     name: test-desktop-e2e / playwright / ubuntu-22.04
     runs-on: ubuntu-22.04
@@ -185,11 +197,14 @@ jobs:
       # test-rust's packages, plus Xvfb and Mesa's software Vulkan
       # (lavapipe), which GPUI renders with on a runner without a GPU, and
       # xdotool, which presses keys through X for the text shortcut tests.
+      # A stale runner apt index resolves versions the mirror no longer has (404s).
+      - name: refresh apt index
+        run: sudo apt-get update
       - name: install dependencies (ubuntu only)
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers xdotool
-          version: webkit-4.1-gpui-e2e-2
+          version: webkit-4.1-gpui-e2e-4
           execute_install_scripts: true
 
       # Reads test-rust's cache (warm-caches.yml saves it on main); the
@@ -258,11 +273,14 @@ jobs:
         uses: rui314/setup-mold@da13e0b42e392e3a45d1215033a2270b849d7d36 # v1
 
       # The same packages and cache entry as test-desktop-e2e.
+      # A stale runner apt index resolves versions the mirror no longer has (404s).
+      - name: refresh apt index
+        run: sudo apt-get update
       - name: install dependencies (ubuntu only)
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers xdotool
-          version: webkit-4.1-gpui-e2e-2
+          version: webkit-4.1-gpui-e2e-4
           execute_install_scripts: true
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -317,7 +335,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
           tool: cargo-deny
 
@@ -344,7 +362,7 @@ jobs:
           toolchain: stable
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
           tool: cargo-nextest
 
@@ -355,12 +373,15 @@ jobs:
       # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
       # cache on subsequent runs. execute_install_scripts is required so dpkg
       # postinst (ldconfig, alternatives) still runs on restore.
+      # A stale runner apt index resolves versions the mirror no longer has (404s).
+      - name: refresh apt index
+        run: sudo apt-get update
       - name: install dependencies (ubuntu only)
         # Tauri links WebKit/GTK; GPUI needs the X11/Wayland/Vulkan libraries.
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev mesa-vulkan-drivers
-          version: webkit-4.1-gpui-2
+          version: webkit-4.1-gpui-4
           execute_install_scripts: true
 
       # Runners already ship git + gh. Only jj needs installing; cache the
@@ -467,3 +488,15 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: cargo nextest run --locked --workspace --profile ci
+
+  # The one required check: jobs skipped by detect-changes count as passing.
+  ci-ok:
+    name: ci-ok
+    if: ${{ always() }}
+    needs: [detect-changes, verify, test-desktop-e2e, landing-capture, cargo-deny, test-rust]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any job failed or was cancelled
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: exit 1

@@ -10,7 +10,7 @@ _Git submodules embed another repository inside a parent repository and pin it t
 
 ## Introduction
 
-A **Git submodule** lets a primary repository, called the **superproject**, record an independent Git [repository](./version-control) as a subdirectory. The superproject does not copy the submodule's blobs or trees into its own object store. It stores a pointer to one commit in the submodule's history.
+A **Git submodule** lets a primary repository, called the **superproject**, record an independent Git [repository](./version-control.mdx) as a subdirectory. The superproject does not copy the submodule's blobs or trees into its own object store. It stores a pointer to one commit in the submodule's history.
 
 <DefinitionCard
   term="Git Submodule"
@@ -89,7 +89,7 @@ Treat the gitlink as the contract between repositories. The superproject history
 
 Detached `HEAD` is intentional for that pin. If you need to change the submodule, check out a branch inside it before you commit. Commits made on a detached `HEAD` are easy to lose on the next `git submodule update` unless a branch or remote ref still points at them.
 
-Submodules and [worktrees](./git-worktrees) solve different isolation problems. A worktree adds another checkout of the same repository. A submodule nests a different repository and versions it by commit. Use [clones](./git-worktrees-vs-clones) when you need fully separate remotes and config without nesting. Use submodules when one project must pin another project's history in-tree.
+Submodules and [worktrees](./git-worktrees.mdx) solve different isolation problems. A worktree adds another checkout of the same repository. A submodule nests a different repository and versions it by commit. Use [clones](./git-worktrees-vs-clones.mdx) when you need fully separate remotes and config without nesting. Use submodules when one project must pin another project's history in-tree.
 
 Keep `.gitmodules` and the staged gitlink hashes in sync during review. A parent commit that updates only one of those two records is hard to reason about later.
 
@@ -105,6 +105,6 @@ Agents and scripts should treat the submodule directory as its own repository. R
 
 ## Next Steps
 
-- [Git Worktrees vs Clones](./git-worktrees-vs-clones): choose shared checkouts versus separate repositories
+- [Git Worktrees vs Clones](./git-worktrees-vs-clones.mdx): choose shared checkouts versus separate repositories
 - [Parallel Development Workflow](/learn/workflows/git/parallel-development): run concurrent tasks in isolated directories
 - [What are Coding Agents?](/learn/concepts/ai-engineering/coding-agents): give agents separate working directories

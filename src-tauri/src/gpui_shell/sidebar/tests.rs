@@ -14,6 +14,7 @@ fn row(id: i64, title: &str, depth: u32) -> SidebarRow {
     conflicted: false,
     status: None,
     pr: None,
+    target: None,
     archiving: false,
     exiting: false,
   }
@@ -580,12 +581,30 @@ fn workspace_tooltip_opens_a_popup_beside_the_row(cx: &mut TestAppContext) {
       content: TooltipContent::Branch {
         name: None,
         title: "feat-a".into(),
+        target: None,
         conflicted: false,
         pr: None,
       },
       dark: false,
     }]
   );
+}
+
+#[gpui::test]
+fn workspace_tooltip_names_the_target_branch(cx: &mut TestAppContext) {
+  let mut targeted = row(7, "fix/transform-non-map-dest", 0);
+  targeted.target = Some("main".into());
+  let mut h = Harness::new(cx, snapshot(vec![targeted]));
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  assert!(matches!(
+    h.popups.borrow().as_slice(),
+    [PopupRequest::ShowTooltip {
+      content: TooltipContent::Branch { target: Some(target), .. },
+      ..
+    }] if target.as_ref() == "main"
+  ));
 }
 
 #[gpui::test]

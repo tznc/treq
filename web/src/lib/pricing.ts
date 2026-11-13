@@ -70,3 +70,13 @@ export const FAQ_ITEMS = [
       'Create an account, then start Pro from the Subscription tab of your dashboard. For Team, create an organization on the Team tab, buy Team there, and send your teammates their invite links.',
   },
 ] as const;
+
+export const FAQ_SCHEMA = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: FAQ_ITEMS.map((item) => ({
+    '@type': 'Question',
+    name: item.question,
+    acceptedAnswer: {'@type': 'Answer', text: item.answer},
+  })),
+};
