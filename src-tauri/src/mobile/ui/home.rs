@@ -47,6 +47,9 @@ const MACHINES_W: f32 = 320.;
 /// Recent repositories shown per machine.
 const RECENTS_PER_MACHINE: usize = 5;
 
+/// The user's projects, and their teams as (id, name).
+type Listing = (Vec<Project>, Vec<(String, String)>);
+
 pub struct HomeScreen {
   scroll: ScrollHandle,
   /// Settings: the machines and the account instead of the projects.
@@ -54,7 +57,7 @@ pub struct HomeScreen {
   /// The signed-in user the projects were read for.
   read_for: Option<String>,
   /// The projects and the user's teams as (id, name).
-  projects: super::Load<(Vec<Project>, Vec<(String, String)>)>,
+  projects: super::Load<Listing>,
   /// Why the last project tapped did not open.
   open_error: Option<String>,
 }

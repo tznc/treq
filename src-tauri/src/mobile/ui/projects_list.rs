@@ -63,8 +63,8 @@ mod tests {
   use super::*;
   use gpui_kit::test::TestWindowExt as _;
   use gpui_kit::{
-    div, px, size, AppContext as _, Bounds, Context, ParentElement as _, Point, Render,
-    Styled as _, TestAppContext, Window, WindowBounds, WindowOptions,
+    div, px, size, AppContext as _, Bounds, Context, Point, Render, TestAppContext, Window,
+    WindowBounds, WindowOptions,
   };
   use std::cell::RefCell;
 
@@ -125,7 +125,7 @@ mod tests {
       )
       .expect("open test window")
     });
-    cx.update_window(handle.into(), |_, window, cx| {
+    cx.update_window(handle, |_, window, cx| {
       window.render_frame(cx);
       assert!(window.try_find("projects-section-Personal").is_some());
       assert!(window.try_find("projects-section-Acme").is_some());
