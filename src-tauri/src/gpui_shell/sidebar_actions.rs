@@ -77,6 +77,9 @@ pub fn handle(
         missing: snapshot.repos[index].missing,
         on_screen: repo_path == &active.path,
         supporting: index > 0,
+        // A saved project can drop its first repository; the next one
+        // takes over the window.
+        removable: index > 0 || (snapshot.project.is_some() && snapshot.repos.len() > 1),
       };
       let items = context_menu::home_items(&menu, editors(&*backend));
       show(app, label, backend, items);
