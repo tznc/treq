@@ -1775,6 +1775,7 @@ impl CodeView {
       .child(ui::icon(theme::ICON_LAYERS, 16., p.muted_foreground))
       .child("Stack")
       .child(help)
+      .children(self.stack_button(p, cx))
       .child(
         ui::text(div(), TextSize::Xs)
           .ml_auto()
@@ -1816,7 +1817,7 @@ impl CodeView {
       section(p)
         .debug_selector(|| "workspace-stack-panel".into())
         .p_4()
-        .child(self.branch_row(p, cx))
+        .child(self.branch_row(p))
         .child(header)
         .child(
           div()
@@ -1836,8 +1837,8 @@ impl CodeView {
     )
   }
 
-  /// The card's top row: the branch, its target picker, and Stack on this….
-  fn branch_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+  /// The card's top row: the branch and its target picker.
+  fn branch_row(&self, p: &Palette) -> impl IntoElement {
     let card = self.chrome.card.borrow().clone();
     let press = |id: &'static str, react: ActionSink| {
       move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
@@ -1909,24 +1910,45 @@ impl CodeView {
           ),
         );
     }
-    if let Some(tooltip) = card.stack_tooltip {
-      let button = Button::new("workspace-stack", p)
-        .variant(Variant::Outline)
-        .size(Size::Sm)
-        .gap_1()
-        .px_2()
-        .icon(theme::ICON_LAYERS, 16.)
-        .label(super::workspace::stack_label(false))
-        .on_click(press("workspace.stack", self.react.clone()));
-      row = row.child(div().flex_1()).child(self.tips.wrap(
-        "workspace-stack",
-        Side::Top,
-        Some(TooltipContent::Text(tooltip.into())),
-        button,
-        cx,
-      ));
-    }
     row
+  }
+
+  /// Stacks a new workspace on this one; `None` without a tooltip.
+  fn stack_button(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+    let tooltip = self.chrome.card.borrow().stack_tooltip.clone()?;
+    let react = self.react.clone();
+    let button = Button::new("workspace-stack", p)
+      .variant(Variant::Outline)
+      .size(Size::Sm)
+      .gap_1()
+      .px_2()
+      .ml_2()
+      .font_weight(FontWeight::NORMAL)
+      .icon(theme::ICON_PR_CREATE, 16.)
+      .label("Stack new workspace")
+      .on_click(move |_, _, cx| {
+        let react = react.clone();
+        cx.defer(move |cx| {
+          react(
+            ScreenAction::Press {
+              id: "workspace.stack".into(),
+            },
+            cx,
+          )
+        });
+      });
+    Some(
+      self
+        .tips
+        .wrap(
+          "workspace-stack",
+          Side::Top,
+          Some(TooltipContent::Text(tooltip.into())),
+          button,
+          cx,
+        )
+        .into_any_element(),
+    )
   }
 
   fn stack_row(
