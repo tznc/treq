@@ -177,6 +177,9 @@ pub struct Place {
   pub titles: Vec<(String, String)>,
   /// Workspace ids by directory, so a new agent opens in its column's.
   pub workspace_ids: Vec<(String, i64)>,
+  /// The shown workspace's directory and diff line counts, from the
+  /// workspace view's tab row.
+  pub loc: Option<(String, super::workspace::Loc)>,
 }
 
 impl Place {
@@ -190,6 +193,16 @@ impl Place {
         .map(|(_, v)| v.clone())
     };
     find(&self.titles).or_else(|| find(&self.branches))
+  }
+
+  /// The diff line counts a column's chip shows for the workspace at
+  /// `dir`: None when unknown or both zero.
+  pub fn workspace_loc(&self, dir: &str) -> Option<&super::workspace::Loc> {
+    self
+      .loc
+      .as_ref()
+      .filter(|(path, loc)| path == dir && (loc.insertions > 0 || loc.deletions > 0))
+      .map(|(_, loc)| loc)
   }
 }
 
@@ -455,6 +468,9 @@ pub struct TerminalView {
   /// Redraws when `treq agent msg` changes what waits here.
   _msg_watch: Option<Task<()>>,
 }
+
+/// How long after sending text to an agent its Enter follows.
+const SUBMIT_DELAY: Duration = Duration::from_millis(100);
 
 /// How often a terminal looks for changes to its waiting messages.
 const MSG_WATCH: Duration = Duration::from_secs(1);
@@ -2478,7 +2494,10 @@ impl TerminalPane {
     self.maximized && !self.collapsed && !self.columns.is_empty()
   }
 
-  pub fn set_place(&mut self, place: Place, cx: &mut Context<Self>) {
+  pub fn set_place(&mut self, mut place: Place, cx: &mut Context<Self>) {
+    if place.loc.is_none() {
+      place.loc = self.place.loc.clone();
+    }
     if self.place == place {
       return;
     }
@@ -2509,6 +2528,14 @@ impl TerminalPane {
       },
       cx,
     );
+  }
+
+  /// The shown workspace's diff line counts, for its columns' chips.
+  pub fn set_loc(&mut self, loc: Option<(String, super::workspace::Loc)>, cx: &mut Context<Self>) {
+    if self.place.loc != loc {
+      self.place.loc = loc;
+      cx.notify();
+    }
   }
 
   /// Takes React's latest word on sessions and commands, acted on when
@@ -2625,7 +2652,17 @@ impl TerminalPane {
       return false;
     };
     if let Some(view) = self.view(&column) {
-      view.update(cx, |view, cx| view.write(&format!("{text}\n"), cx));
+      view.update(cx, |view, cx| view.write(text, cx));
+      // Enter as its own later write: a TUI reads a burst ending in it
+      // as a paste and leaves the text unsent.
+      let view = view.downgrade();
+      cx.spawn(async move |_, cx| {
+        cx.background_executor().timer(SUBMIT_DELAY).await;
+        view
+          .update(cx, |view, cx| view.write("\r", cx))
+          .ignore_closed();
+      })
+      .detach();
     }
     self.focus_next = Some(column);
     cx.notify();
@@ -3613,14 +3650,33 @@ impl TerminalPane {
     } else {
       (p.muted_foreground, p.foreground)
     };
+    let place = self.place.clone();
     let label = |name: String, main: bool, key: String, react: ActionSink| {
+      let tones = if on_dark { &d } else { p };
+      let loc = place.workspace_loc(&key).map(|loc| {
+        div()
+          .flex()
+          .flex_none()
+          .gap_1()
+          .debug_selector(|| "terminal-workspace-loc".into())
+          .child(super::workspace::loc_count(
+            format!("+{}", loc.insertions),
+            ui::Tone::DiffAdded.text(tones),
+          ))
+          .child(super::workspace::loc_count(
+            format!("-{}", loc.deletions),
+            ui::Tone::DiffRemoved.text(tones),
+          ))
+      });
       ui::text(div(), TextSize::Xs)
         .id(SharedString::from(format!("terminal-workspace-label-{id}")))
         .role(gpui::Role::Button)
         .aria_label(name.clone())
         .debug_selector(|| "terminal-workspace-label".into())
         .max_w(zpx(200.))
-        .truncate()
+        .flex()
+        .items_center()
+        .gap_2()
         .rounded_sm()
         .bg(if on_dark {
           d.foreground.opacity(0.08)
@@ -3644,7 +3700,8 @@ impl TerminalPane {
             cx,
           )
         })
-        .child(name)
+        .child(div().min_w_0().truncate().child(name))
+        .children(loc)
     };
     let close_id = column.id.clone();
     let close = div()

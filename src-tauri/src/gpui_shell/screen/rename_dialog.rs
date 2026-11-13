@@ -19,7 +19,7 @@ use super::{
 use crate::gpui_shell::{
   native::NativeEvent,
   theme,
-  ui::{self, Button, TextSize, Variant},
+  ui::{self, Button, TextSize},
 };
 
 /// `useDebounce(branchName, 500)`.
@@ -332,19 +332,11 @@ impl Render for RenameDialog {
             )
           }),
       )
-      .footer([
-        Button::new("rename-cancel", &p)
-          .variant(Variant::Outline)
-          .disabled(pending)
-          .label("Cancel")
-          .on_click(cx.listener(|view, _, _, cx| view.close(cx)))
-          .into_any_element(),
-        Button::new("rename-submit", &p)
-          .disabled(!can_submit)
-          .label(if pending { "Renaming…" } else { "Rename" })
-          .on_click(cx.listener(|view, _, _, cx| view.submit(cx)))
-          .into_any_element(),
-      ])
+      .footer([Button::new("rename-submit", &p)
+        .disabled(!can_submit)
+        .label(if pending { "Renaming…" } else { "Rename" })
+        .on_click(cx.listener(|view, _, _, cx| view.submit(cx)))
+        .into_any_element()])
       .into_any_element()
   }
 }

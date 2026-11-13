@@ -9,6 +9,7 @@
 //!
 //! [`code_data`]: super::code_data
 
+use crate::gpui_shell::actions;
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
@@ -24,14 +25,14 @@ use std::{
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
-  input::{Enter, Escape, Textarea, TextareaState},
+  input::{Escape, Textarea, TextareaState},
   text::{TextView, TextViewStyle},
 };
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, prelude::*, px, relative, rems, Animation, AnimationExt as _,
-  AnyElement, App, Context, Div, Entity, FontWeight, Hsla, Pixels, Role, ScrollHandle,
-  SharedString, Stateful, Subscription, Window,
+  AnyElement, App, Context, Div, Entity, FontWeight, Hsla, KeyDownEvent, Pixels, Role,
+  ScrollHandle, SharedString, Stateful, Subscription, Window,
 };
 
 use super::{
@@ -269,6 +270,8 @@ fn read_stack(host: &dyn CodeHost, parent: &Parent) -> Option<Vec<StackRow>> {
 pub enum Menu {
   /// The description editor's Save options.
   SaveDescription,
+  /// The description's Sync options: keep the local text or GitHub's.
+  SyncDescription,
 }
 
 /// Which side of a local draft the title and description card shows.
@@ -816,8 +819,8 @@ impl CodeView {
 
   /// The card's footer on a workspace opened from a pull request: a check
   /// while title and description match the PR, else that a local draft
-  /// waits for the next push, with Sync to take the PR's text back.
-  fn pr_footer(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+  /// waits for the next push.
+  fn pr_footer(&self, p: &Palette) -> Option<AnyElement> {
     let sync = self.pr_sync()?;
     let note = |id: &'static str, text: String| {
       ui::text(div(), TextSize::Xs)
@@ -864,16 +867,90 @@ impl CodeView {
             sync.pr_number
           ),
         ))
-        .child(
-          Button::new("workspace-description-resync", p)
-            .variant(Variant::Warning)
-            .size(Size::Sm)
-            .disabled(self.resyncing)
-            .label("Sync")
-            .on_click(cx.listener(|view, _, _, cx| view.resync_from_pr(cx))),
-        )
         .into_any_element(),
     )
+  }
+
+  /// Sync, while the text differs from the PR: a menu that saves the local
+  /// version to the PR or takes GitHub's.
+  fn sync_button(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+    let sync = self.pr_sync()?;
+    if sync.title && sync.description {
+      return None;
+    }
+    let open = self.menu == Some(Menu::SyncDescription);
+    let panel = menu_panel("workspace-description-sync-menu", p)
+      .top(zpx(24.))
+      .right_0()
+      .w(zpx(240.))
+      .child(
+        ui::MenuItem::new("workspace-description-sync-local", "Save local version", p)
+          .description("Update the pull request with the text here")
+          .on_click(cx.listener(|view, _, _, cx| view.push_to_pr(cx))),
+      )
+      .child(
+        ui::MenuItem::new(
+          "workspace-description-sync-github",
+          "Save GitHub version",
+          p,
+        )
+        .description("Replace the text here with the pull request's")
+        .on_click(cx.listener(|view, _, _, cx| {
+          view.menu = None;
+          view.resync_from_pr(cx)
+        })),
+      );
+    Some(
+      div()
+        .relative()
+        .child(
+          Button::new("workspace-description-sync", p)
+            .variant(Variant::Warning)
+            .size(Size::Sm)
+            .h(zpx(20.))
+            .disabled(self.resyncing)
+            .label("Sync")
+            .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::SyncDescription, cx))),
+        )
+        .when(open, |this| {
+          this.child(deferred(self.close_menu_on_outside(panel, cx)).with_priority(1))
+        })
+        .into_any_element(),
+    )
+  }
+
+  /// Sends the local title and description to the PR.
+  fn push_to_pr(&mut self, cx: &mut Context<Self>) {
+    let Some(ws) = &self.parent.workspace else {
+      return;
+    };
+    if self.resyncing {
+      return;
+    }
+    let id = ws.id;
+    self.resyncing = true;
+    self.menu = None;
+    self.read(
+      move |host, parent| host.push_to_pr(&parent.repo_path, id),
+      |view, result, _| {
+        view.resyncing = false;
+        match result {
+          Ok(()) => tell(
+            view.host.as_ref(),
+            NativeEvent::WorkspaceChanged {
+              repo_path: view.parent.repo_path.clone(),
+            },
+          ),
+          Err(err) => tell(
+            view.host.as_ref(),
+            Toast::error("Failed to update the pull request")
+              .description(err)
+              .into(),
+          ),
+        }
+      },
+      cx,
+    );
   }
 
   fn edit_description(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -1285,33 +1362,15 @@ impl CodeView {
     })
   }
 
-  /// One row under the title card: Agent on the left; the alerts button
+  /// One row under the title card: Start an agent on the left; the alerts button
   /// and Go to file on the right.
   fn action_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let react = self.react.clone();
-    let agent = Button::new("code-agent", p)
-      .variant(Variant::Outline)
-      .size(Size::Sm)
-      .gap_1p5()
-      .icon(theme::ICON_BOT, 14.)
-      .label("Agent")
-      .on_click(move |_, _, cx| {
-        let react = react.clone();
-        cx.defer(move |cx| {
-          react(
-            ScreenAction::Press {
-              id: "code.agentPrompt".into(),
-            },
-            cx,
-          )
-        });
-      });
     div()
       .debug_selector(|| "code-action-row".into())
       .flex()
       .items_center()
       .gap_2()
-      .child(agent)
+      .child(self.start_agent(p))
       .child(div().flex_1())
       .children(self.status_button(p, cx))
       .child(self.go_to_file(p))
@@ -1535,13 +1594,23 @@ impl CodeView {
     self.parent.workspace.as_ref()?;
     let github = draft && self.about_tab == AboutTab::GitHub;
     let body = if github {
-      Some(self.github_text(p).into_any_element())
+      Some(
+        div()
+          .relative()
+          .child(self.github_text(p))
+          .children(
+            self
+              .sync_button(p, cx)
+              .map(|sync| div().absolute().top_0().right_0().child(sync)),
+          )
+          .into_any_element(),
+      )
     } else {
       self
         .description(p, window, cx)
         .map(IntoElement::into_any_element)
     };
-    let footer = self.pr_footer(p, cx).map(IntoElement::into_any_element);
+    let footer = self.pr_footer(p).map(IntoElement::into_any_element);
     if !draft && body.is_none() && footer.is_none() {
       return None;
     }
@@ -1654,18 +1723,26 @@ impl CodeView {
       return Some(
         card
           .child(
-            div().absolute().top_0().right_0().child(
-              Button::new("workspace-description-edit", p)
-                .aria_label("Edit description")
-                .variant(Variant::Ghost)
-                .size(Size::Icon)
-                .w(zpx(20.))
-                .h(zpx(20.))
-                .child(ui::icon(theme::ICON_PENCIL, 16., p.muted_foreground))
-                .on_click(cx.listener(move |view, _, window, cx| {
-                  view.edit_description(text.clone(), window, cx)
-                })),
-            ),
+            div()
+              .absolute()
+              .top_0()
+              .right_0()
+              .flex()
+              .items_center()
+              .gap_2()
+              .children(self.sync_button(p, cx))
+              .child(
+                Button::new("workspace-description-edit", p)
+                  .aria_label("Edit description")
+                  .variant(Variant::Ghost)
+                  .size(Size::Icon)
+                  .w(zpx(20.))
+                  .h(zpx(20.))
+                  .child(ui::icon(theme::ICON_PENCIL, 16., p.muted_foreground))
+                  .on_click(cx.listener(move |view, _, window, cx| {
+                    view.edit_description(text.clone(), window, cx)
+                  })),
+              ),
           )
           .child(shown)
           .into_any_element(),
@@ -1681,8 +1758,11 @@ impl CodeView {
             .flex()
             .flex_col()
             .gap_2()
-            .capture_action(cx.listener(|view, action: &Enter, _, cx| {
-              if action.secondary {
+            // ⌘/Ctrl+Enter is unbound in inputs (`treq_ui::theme`), so
+            // read the key itself.
+            .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
+              let k = &e.keystroke;
+              if k.key == "enter" && k.modifiers.secondary() {
                 view.save_description(false, cx);
                 cx.stop_propagation();
               }
@@ -1772,6 +1852,7 @@ impl CodeView {
       .child(ui::icon(theme::ICON_LAYERS, 16., p.muted_foreground))
       .child("Stack")
       .child(help)
+      .children(self.stack_button(p, cx))
       .child(
         ui::text(div(), TextSize::Xs)
           .ml_auto()
@@ -1813,7 +1894,7 @@ impl CodeView {
       section(p)
         .debug_selector(|| "workspace-stack-panel".into())
         .p_4()
-        .child(self.branch_row(p, cx))
+        .child(self.branch_row(p))
         .child(header)
         .child(
           div()
@@ -1833,8 +1914,8 @@ impl CodeView {
     )
   }
 
-  /// The card's top row: the branch, its target picker, and Stack on this….
-  fn branch_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+  /// The card's top row: the branch and its target picker.
+  fn branch_row(&self, p: &Palette) -> impl IntoElement {
     let card = self.chrome.card.borrow().clone();
     let press = |id: &'static str, react: ActionSink| {
       move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
@@ -1906,24 +1987,45 @@ impl CodeView {
           ),
         );
     }
-    if let Some(tooltip) = card.stack_tooltip {
-      let button = Button::new("workspace-stack", p)
-        .variant(Variant::Outline)
-        .size(Size::Sm)
-        .gap_1()
-        .px_2()
-        .icon(theme::ICON_LAYERS, 16.)
-        .label(super::workspace::stack_label(false))
-        .on_click(press("workspace.stack", self.react.clone()));
-      row = row.child(div().flex_1()).child(self.tips.wrap(
-        "workspace-stack",
-        Side::Top,
-        Some(TooltipContent::Text(tooltip.into())),
-        button,
-        cx,
-      ));
-    }
     row
+  }
+
+  /// Stacks a new workspace on this one; `None` without a tooltip.
+  fn stack_button(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+    let tooltip = self.chrome.card.borrow().stack_tooltip.clone()?;
+    let react = self.react.clone();
+    let button = Button::new("workspace-stack", p)
+      .variant(Variant::Outline)
+      .size(Size::Sm)
+      .gap_1()
+      .px_2()
+      .ml_2()
+      .font_weight(FontWeight::NORMAL)
+      .icon(theme::ICON_PR_CREATE, 16.)
+      .label("Stack new workspace")
+      .on_click(move |_, _, cx| {
+        let react = react.clone();
+        cx.defer(move |cx| {
+          react(
+            ScreenAction::Press {
+              id: "workspace.stack".into(),
+            },
+            cx,
+          )
+        });
+      });
+    Some(
+      self
+        .tips
+        .wrap(
+          "workspace-stack",
+          Side::Top,
+          Some(TooltipContent::Text(tooltip.into())),
+          button,
+          cx,
+        )
+        .into_any_element(),
+    )
   }
 
   fn stack_row(
@@ -1992,46 +2094,49 @@ impl CodeView {
   }
 
   fn go_to_file(&self, p: &Palette) -> impl IntoElement {
-    let react = self.react.clone();
-    div().flex_none().w(zpx(280.)).child(
-      div()
-        .id("code-go-to-file")
-        .debug_selector(|| "code-go-to-file".into())
-        .role(gpui::Role::Button)
-        .aria_label("Go to file")
-        .test_support()
-        .flex()
-        .items_center()
-        .gap_3()
-        .px_4()
-        .py_2()
-        .border_1()
-        .border_color(p.border)
-        .rounded(radius::LG)
-        .bg(p.background)
-        .hover(move |s| s.bg(p.hover()))
-        .cursor_pointer()
-        .w_full()
-        .child(ui::icon(theme::ICON_SEARCH, 16., p.muted_foreground))
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .flex_1()
-            .text_color(p.muted_foreground)
-            .child("Go to file"),
-        )
-        .child(ui::Kbd::new("secondary-p", p))
-        .on_click(move |_, _, cx| {
-          let react = react.clone();
-          cx.defer(move |cx| {
-            react(
-              ScreenAction::Press {
-                id: "code.filePicker".into(),
-              },
-              cx,
-            )
-          });
-        }),
+    let button = self.command_button(
+      "code-go-to-file",
+      theme::ICON_SEARCH,
+      actions::GO_TO_FILE,
+      "Go to file",
+      "code.filePicker",
+      p,
+    );
+    div().flex_none().w(zpx(280.)).child(button.w_full())
+  }
+
+  /// Opens the "Start a new agent session" modal.
+  fn start_agent(&self, p: &Palette) -> Button {
+    self.command_button(
+      "code-agent",
+      theme::ICON_BOT,
+      actions::NEW_AGENT_WITH_PROMPT,
+      "Start an agent",
+      "code.agentPrompt",
+      p,
     )
+  }
+
+  /// A [`Variant::Command`] button: icon, `label` and `action`'s shortcut.
+  fn command_button(
+    &self,
+    id: &'static str,
+    icon: &'static str,
+    action: actions::Action,
+    label: &'static str,
+    press: &'static str,
+    p: &Palette,
+  ) -> Button {
+    let react = self.react.clone();
+    Button::new(id, p)
+      .variant(Variant::Command)
+      .icon(icon, 16.)
+      .label(label)
+      .shortcut(ui::Kbd::from_label(action.keys.join(" + "), p))
+      .on_click(move |_, _, cx| {
+        let react = react.clone();
+        cx.defer(move |cx| react(ScreenAction::Press { id: press.into() }, cx));
+      })
   }
 
   /// Records row `i`'s pitch (any row but the first) and, from the first row drawn (`first`),

@@ -115,8 +115,9 @@ fn styleguide() -> Styleguide {
     )
     .describe(
       "Dialog",
-      "Radius 12 on the scrim. An action pair goes in the footer with no X; otherwise an X \
-       closes it. Confirmations ask a question and answer with verbs, never Yes/No.",
+      "Radius 12 on the scrim. An X top-right closes it, and the footer holds only the verb. \
+       A yes/no confirmation keeps an outline Cancel beside its verb instead of an X, and asks \
+       a question answered with verbs, never Yes/No.",
     )
     .describe(
       "Floating",
@@ -1074,16 +1075,10 @@ fn surfaces() -> Vec<Example> {
         .primary_disabled(busy)
         .on_close(|_, _| {})
         .child("A custom header, and a verb that is busy: Enter waits for it.")
-        .footer([
-          Button::new("rename-cancel", &p)
-            .variant(Variant::Outline)
-            .label("Cancel")
-            .into_any_element(),
-          Button::new("rename-confirm", &p)
-            .disabled(busy)
-            .label(if busy { "Renaming…" } else { "Rename" })
-            .into_any_element(),
-        ])
+        .footer([Button::new("rename-confirm", &p)
+          .disabled(busy)
+          .label(if busy { "Renaming…" } else { "Rename" })
+          .into_any_element()])
     })
     .component("Dialog")
     .title("Custom header, busy verb")

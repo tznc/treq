@@ -217,14 +217,6 @@ impl Render for SaveProjectDialog {
       );
     }
     footer.push(
-      Button::new("save-project-cancel", &p)
-        .variant(Variant::Outline)
-        .disabled(pending)
-        .label("Cancel")
-        .on_click(cx.listener(|view, _, _, cx| view.close(cx)))
-        .into_any_element(),
-    );
-    footer.push(
       Button::new("save-project-submit", &p)
         .disabled(!can_submit)
         .label(match (pending, self.route.saved) {

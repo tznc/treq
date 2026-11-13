@@ -91,6 +91,7 @@ pub struct Tabs {
   selected: usize,
   focus: Option<FocusHandle>,
   on_select: Option<OnSelect>,
+  on_double_click: Option<OnSelect>,
 }
 
 impl Tabs {
@@ -103,6 +104,7 @@ impl Tabs {
       selected: 0,
       focus: None,
       on_select: None,
+      on_double_click: None,
     }
   }
 
@@ -146,6 +148,12 @@ impl Tabs {
   /// Takes the arrow keys while `focus` is focused.
   pub fn focus(mut self, focus: &FocusHandle) -> Self {
     self.focus = Some(focus.clone());
+    self
+  }
+
+  /// Called with a tab's index when it is double-clicked.
+  pub fn on_double_click(mut self, f: impl Fn(usize, &mut Window, &mut App) + 'static) -> Self {
+    self.on_double_click = Some(Rc::new(f));
     self
   }
 
@@ -237,6 +245,7 @@ impl RenderOnce for Tabs {
       .children(self.tabs.into_iter().enumerate().map(|(ix, tab)| {
         let active = ix == selected;
         let on_select = self.on_select.clone().filter(|_| !tab.disabled);
+        let on_double = self.on_double_click.clone().filter(|_| !tab.disabled);
         let selector = tab.id.to_string();
         let id = tab.id.to_string();
         let fg = if tab.disabled {
@@ -251,6 +260,7 @@ impl RenderOnce for Tabs {
         } else {
           fg
         };
+        let on_fill = active && selected_fill.is_some();
         text(div(), if bar { TextSize::Xs } else { TextSize::Sm })
           .id(tab.id)
           .debug_selector(move || selector)
@@ -317,7 +327,11 @@ impl RenderOnce for Tabs {
                 .when(bar, |el| {
                   el.absolute().top(zpx(4.)).left(gpui::relative(0.55))
                 })
-                .child(Count::new(count, &p)),
+                .child(if on_fill {
+                  Count::new(count, &p).on_selected(fg)
+                } else {
+                  Count::new(count, &p)
+                }),
             )
           })
           .when_some(tab.dot, |el, (tone, label)| {
@@ -331,8 +345,17 @@ impl RenderOnce for Tabs {
                 .child(Dot::new(tone, label, &p)),
             )
           })
-          .when_some(on_select, move |el, f| {
-            el.on_click(move |_, window, cx| f(ix, window, cx))
+          .when(on_select.is_some() || on_double.is_some(), move |el| {
+            el.on_click(move |e, window, cx| {
+              if e.click_count() >= 2 {
+                if let Some(f) = &on_double {
+                  return f(ix, window, cx);
+                }
+              }
+              if let Some(f) = &on_select {
+                f(ix, window, cx)
+              }
+            })
           })
       }));
     // A segmented track is as wide as its tabs: the row around it takes

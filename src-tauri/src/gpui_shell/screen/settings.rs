@@ -3144,12 +3144,6 @@ impl SettingsView {
               )),
           )
           .footer([
-            Button::new("skill-dialog-cancel", p)
-              .variant(Variant::Outline)
-              .disabled(busy)
-              .label("Cancel")
-              .on_click(self.press("skills.dialog.cancel"))
-              .into_any_element(),
             Button::new("skill-dialog-application", p)
               .variant(Variant::Outline)
               .disabled(busy)

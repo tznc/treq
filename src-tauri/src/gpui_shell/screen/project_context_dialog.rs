@@ -310,12 +310,6 @@ impl Render for ProjectContextDialog {
           }),
       )
       .footer([
-        Button::new("project-context-cancel", &p)
-          .variant(Variant::Outline)
-          .disabled(pending)
-          .label("Cancel")
-          .on_click(cx.listener(|view, _, _, cx| view.close(cx)))
-          .into_any_element(),
         Button::new("project-context-save", &p)
           .disabled(pending)
           .label(if pending { "Saving…" } else { "Save" })
