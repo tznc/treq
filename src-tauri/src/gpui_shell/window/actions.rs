@@ -603,8 +603,10 @@ impl Model {
           prompt: value["prompt"].as_str().map(str::to_string),
           mode: Some("acceptEdits".into()),
           name: Some("AI Review".into()),
-          select: true,
-        })
+          // The reviewer stays on the screen they started it from; the
+          // terminal pane shows the agent on every screen.
+          select: false,
+        });
       }
       _ => return None,
     }
@@ -1440,6 +1442,24 @@ mod tests {
         name: Some(name),
         ..
       } if prompt == "Tune it" && name == "Tune review prompt"
+    )));
+  }
+
+  #[test]
+  fn starting_an_ai_review_keeps_the_github_view() {
+    let (mut model, data) = (model(), data());
+    model.open_github();
+    model.screen_action(&press("github.review:12"), &data);
+    let effects = model
+      .screen_action(
+        &field("prReview.startAgentReview", json!({"prompt": "Review it"})),
+        &data,
+      )
+      .unwrap_or_default();
+    assert!(matches!(&model.page, Page::Github(g) if g.review == Some(12)));
+    assert!(effects.iter().any(|effect| matches!(
+      effect,
+      Effect::StartAgent { select: false, name: Some(name), .. } if name == "AI Review"
     )));
   }
 
