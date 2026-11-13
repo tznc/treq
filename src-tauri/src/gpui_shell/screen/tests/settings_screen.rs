@@ -410,3 +410,11 @@ fn settings_fields_are_as_tall_as_react_ones(cx: &mut TestAppContext) {
     assert_eq!(bounds.size.height, gpui::px(40.), "{selector}");
   }
 }
+
+#[gpui::test]
+fn settings_closes_on_escape(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, settings());
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![press("settings.close")]);
+}
