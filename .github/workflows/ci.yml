@@ -91,7 +91,7 @@ jobs:
     if: needs.detect-changes.outputs.js_changed == 'true' || needs.detect-changes.outputs.rust_changed == 'true'
     timeout-minutes: 15
     name: verify / ubuntu-22.04
-    runs-on: medium
+    runs-on: ubuntu-22.04
     env:
       JS: ${{ needs.detect-changes.outputs.js_changed }}
       RUST: ${{ needs.detect-changes.outputs.rust_changed }}
