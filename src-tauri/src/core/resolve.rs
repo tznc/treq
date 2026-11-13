@@ -232,7 +232,7 @@ fn build_resolve_target(
   }
 
   let (workspace_name, resolve_path) =
-    jj::create_resolve_workspace(repo_path, &commit.change_id, workspace_slug)
+    jj::create_resolve_workspace(repo_path, &commit.commit_id, workspace_slug)
       .map_err(|e| e.to_string())?;
   let conflicted_files = conflicted_files_or_empty(&resolve_path);
 

@@ -303,8 +303,11 @@ fn start_resolve_handles_divergent_change_id() {
     ],
   )
   .expect("describe b");
-  TestRepo::run_jj_cli(&repo.repo_path, &["--ignore-working-copy", "log", "-r", "@"])
-    .expect("merge concurrent ops");
+  TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &["--ignore-working-copy", "log", "-r", "@"],
+  )
+  .expect("merge concurrent ops");
 
   let session = core::start_resolve_conflicts(&repo.repo_path, Some(workspace.id), None)
     .expect("start_resolve_conflicts must not fail on a divergent change id");

@@ -1434,7 +1434,14 @@ fn commits_ahead_handles_target_bookmark_conflicted_with_deletion() {
   // conflicted but has a single present term.
   TestRepo::run_jj_cli(
     &repo.repo_path,
-    &["--at-op", op, "--ignore-working-copy", "bookmark", "delete", &default_branch],
+    &[
+      "--at-op",
+      op,
+      "--ignore-working-copy",
+      "bookmark",
+      "delete",
+      &default_branch,
+    ],
   )
   .expect("delete");
   TestRepo::run_jj_cli(
@@ -1447,7 +1454,7 @@ fn commits_ahead_handles_target_bookmark_conflicted_with_deletion() {
       "set",
       &default_branch,
       "-r",
-      "@-",
+      "@",
       "--allow-backwards",
     ],
   )
@@ -1457,7 +1464,10 @@ fn commits_ahead_handles_target_bookmark_conflicted_with_deletion() {
     &["--ignore-working-copy", "bookmark", "list", &default_branch],
   )
   .expect("list");
-  assert!(listed.contains("conflict"), "bookmark should be conflicted: {listed}");
+  assert!(
+    listed.contains("conflict"),
+    "bookmark should be conflicted: {listed}"
+  );
 
   let ahead = treq_lib::jj::jj_get_commits_ahead(&workspace_path, &default_branch)
     .expect("commits ahead must not fail on a conflicted target");
