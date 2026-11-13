@@ -201,7 +201,7 @@ async fn sync_projects(cloud: Arc<Cloud>) {
         let org_ids: Vec<String> = orgs.into_iter().map(|o| o.org_id).collect();
         let supabase = cloud.supabase.clone();
         // rusqlite's Connection is not Sync, so the pass runs on its own thread.
-        let _ = tauri::async_runtime::spawn_blocking(move || {
+        let pass = tauri::async_runtime::spawn_blocking(move || {
           let app_dir = crate::core::app_data_dir()?;
           let db = crate::db::Database::new(app_dir.join("treq.db")).ok()?;
           let known = projects::list(db.conn())
@@ -224,6 +224,9 @@ async fn sync_projects(cloud: Arc<Cloud>) {
           .ok()
         })
         .await;
+        if let Err(error) = pass {
+          log::warn!("project sync stopped: {error}");
+        }
       }
     }
     tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
