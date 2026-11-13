@@ -1533,6 +1533,8 @@ impl ChangesView {
         .gap_1p5()
         .child(ui::icon(theme::ICON_BOT, 12., Tone::GitMerged.color(p)))
         .child(
+          // Short label (tag): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .font_weight(FontWeight::MEDIUM)
             .text_color(Tone::GitMerged.text(p))
