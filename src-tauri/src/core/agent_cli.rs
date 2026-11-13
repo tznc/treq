@@ -55,7 +55,7 @@ pub fn write_agent_cli_files(
     skill_dir.to_string_lossy()
   );
   let prompt_path = dir.join(format!("{FILE_PREFIX}prompt-{id}.txt"));
-  fs::write(&prompt_path, prompt_with_skill)
+  write_private(&prompt_path, &prompt_with_skill)
     .map_err(|e| format!("Failed to write agent prompt file: {e}"))?;
 
   let settings_path = match settings_json {
@@ -88,8 +88,19 @@ pub fn write_agent_cli_files(
 /// where the Enter is then dropped), so long prompts are never typed.
 pub fn write_agent_task_file(task: &str) -> Result<String, String> {
   let path = std::env::temp_dir().join(format!("{FILE_PREFIX}task-{}.txt", uuid::Uuid::new_v4()));
-  fs::write(&path, task).map_err(|e| format!("Failed to write agent task file: {e}"))?;
+  write_private(&path, task).map_err(|e| format!("Failed to write agent task file: {e}"))?;
   Ok(path_to_string(&path))
+}
+
+/// Writes a new file only its owner can read (0600 on Unix): prompts can
+/// carry diffs and secrets, and the temp dir is shared.
+fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
+  use std::io::Write;
+  let mut options = fs::OpenOptions::new();
+  options.write(true).create_new(true);
+  #[cfg(unix)]
+  std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+  options.open(path)?.write_all(contents.as_bytes())
 }
 
 /// Delete temp files previously created by [`write_agent_cli_files`].
