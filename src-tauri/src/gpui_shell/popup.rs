@@ -1056,8 +1056,6 @@ impl PopupView {
   }
 }
 
-impl PopupView {}
-
 /// A menu row: `rounded-sm px-2 py-1.5 text-sm`, the hover fill on hover and
 /// the selected fill while its submenu is open.
 fn menu_row(
