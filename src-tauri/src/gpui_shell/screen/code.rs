@@ -9,6 +9,7 @@
 //!
 //! [`code_data`]: super::code_data
 
+use crate::gpui_shell::actions;
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
@@ -1285,33 +1286,15 @@ impl CodeView {
     })
   }
 
-  /// One row under the title card: Agent on the left; the alerts button
+  /// One row under the title card: Start an agent on the left; the alerts button
   /// and Go to file on the right.
   fn action_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let react = self.react.clone();
-    let agent = Button::new("code-agent", p)
-      .variant(Variant::Outline)
-      .size(Size::Sm)
-      .gap_1p5()
-      .icon(theme::ICON_BOT, 14.)
-      .label("Agent")
-      .on_click(move |_, _, cx| {
-        let react = react.clone();
-        cx.defer(move |cx| {
-          react(
-            ScreenAction::Press {
-              id: "code.agentPrompt".into(),
-            },
-            cx,
-          )
-        });
-      });
     div()
       .debug_selector(|| "code-action-row".into())
       .flex()
       .items_center()
       .gap_2()
-      .child(agent)
+      .child(self.start_agent(p))
       .child(div().flex_1())
       .children(self.status_button(p, cx))
       .child(self.go_to_file(p))
@@ -2017,46 +2000,49 @@ impl CodeView {
   }
 
   fn go_to_file(&self, p: &Palette) -> impl IntoElement {
-    let react = self.react.clone();
-    div().flex_none().w(zpx(280.)).child(
-      div()
-        .id("code-go-to-file")
-        .debug_selector(|| "code-go-to-file".into())
-        .role(gpui::Role::Button)
-        .aria_label("Go to file")
-        .test_support()
-        .flex()
-        .items_center()
-        .gap_3()
-        .px_4()
-        .py_2()
-        .border_1()
-        .border_color(p.border)
-        .rounded(radius::LG)
-        .bg(p.background)
-        .hover(move |s| s.bg(p.hover()))
-        .cursor_pointer()
-        .w_full()
-        .child(ui::icon(theme::ICON_SEARCH, 16., p.muted_foreground))
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .flex_1()
-            .text_color(p.muted_foreground)
-            .child("Go to file"),
-        )
-        .child(ui::Kbd::new("secondary-p", p))
-        .on_click(move |_, _, cx| {
-          let react = react.clone();
-          cx.defer(move |cx| {
-            react(
-              ScreenAction::Press {
-                id: "code.filePicker".into(),
-              },
-              cx,
-            )
-          });
-        }),
+    let button = self.command_button(
+      "code-go-to-file",
+      theme::ICON_SEARCH,
+      actions::GO_TO_FILE,
+      "Go to file",
+      "code.filePicker",
+      p,
+    );
+    div().flex_none().w(zpx(280.)).child(button.w_full())
+  }
+
+  /// Opens the "Start a new agent session" modal.
+  fn start_agent(&self, p: &Palette) -> Button {
+    self.command_button(
+      "code-agent",
+      theme::ICON_BOT,
+      actions::NEW_AGENT_WITH_PROMPT,
+      "Start an agent",
+      "code.agentPrompt",
+      p,
     )
+  }
+
+  /// A [`Variant::Command`] button: icon, `label` and `action`'s shortcut.
+  fn command_button(
+    &self,
+    id: &'static str,
+    icon: &'static str,
+    action: actions::Action,
+    label: &'static str,
+    press: &'static str,
+    p: &Palette,
+  ) -> Button {
+    let react = self.react.clone();
+    Button::new(id, p)
+      .variant(Variant::Command)
+      .icon(icon, 16.)
+      .label(label)
+      .shortcut(ui::Kbd::from_label(action.keys.join(" + "), p))
+      .on_click(move |_, _, cx| {
+        let react = react.clone();
+        cx.defer(move |cx| react(ScreenAction::Press { id: press.into() }, cx));
+      })
   }
 
   /// Records row `i`'s pitch (any row but the first) and, from the first row drawn (`first`),

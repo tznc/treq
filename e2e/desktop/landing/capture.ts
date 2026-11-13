@@ -136,7 +136,7 @@ async function typePrompt(
   name: string,
   text: string,
 ): Promise<void> {
-  await page.getByRole("button", { name: "Agent", exact: true }).click();
+  await page.getByRole("button", { name: "Start an agent", exact: true }).click();
   const dialog = promptDialog(page);
   await expect(dialog).toBeVisible();
   const box = dialog.getByRole("textbox", { name: "Describe a task…" });
