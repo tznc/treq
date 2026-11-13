@@ -1565,7 +1565,7 @@ impl Sidebar {
             .w(zpx(6.))
             .border_l_1()
             .border_b_1()
-            .border_color(palette.border)
+            .border_color(palette.stack_connector())
             .rounded_bl(ui::radius::SM),
         )
       })
