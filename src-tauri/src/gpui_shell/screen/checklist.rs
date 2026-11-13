@@ -194,7 +194,7 @@ struct Known {
 
 /// The tools, in display order. Their binaries are
 /// `core::PREREQUISITE_BINARIES`, and `core::HOST_BINARIES` on a host.
-const TOOLS: [Known; 8] = [
+const TOOLS: [Known; 10] = [
   Known {
     binary: "git",
     host_only: false,
@@ -249,6 +249,22 @@ const TOOLS: [Known; 8] = [
     label: "GitHub Copilot CLI",
     kind: Kind::Agent,
     install_url: "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
+    note: None,
+  },
+  Known {
+    binary: "devin",
+    host_only: false,
+    label: "Devin",
+    kind: Kind::Agent,
+    install_url: "https://docs.devin.ai/cli",
+    note: None,
+  },
+  Known {
+    binary: "gemini",
+    host_only: false,
+    label: "Gemini CLI",
+    kind: Kind::Agent,
+    install_url: "https://geminicli.com/docs/get-started/installation",
     note: None,
   },
   Known {

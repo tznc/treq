@@ -126,6 +126,13 @@ pub fn selected_range(
   Some(from..to.max(from))
 }
 
+/// Whether line `at` is painted as a whole row: a selection from `a` to `b`
+/// that spans lines fills each of its rows, like a GitHub line range.
+pub fn selected_row(hunks: &[JjDiffHunk], a: TextPoint, b: TextPoint, at: LineRef) -> bool {
+  let (start, end) = ordered(a, b);
+  start.0 != end.0 && selection(hunks, start.0, end.0).contains(&at)
+}
+
 /// The code between two points, in either order, one line per diff line:
 /// what copying a text selection gives, without markers or line numbers.
 pub fn selected_text(hunks: &[JjDiffHunk], a: TextPoint, b: TextPoint) -> String {
@@ -753,6 +760,18 @@ mod tests {
     assert_eq!(selected_range(&h, a, b, (0, 1)), Some(0..10));
     assert_eq!(selected_range(&h, a, b, (0, 2)), Some(0..3));
     assert_eq!(selected_range(&h, a, b, (1, 0)), None);
+  }
+
+  #[test]
+  fn selected_row_is_whole_rows_of_a_multi_line_selection() {
+    let h = text_hunks();
+    let (a, b) = (((0, 0), 6), ((0, 2), 3));
+    assert!(selected_row(&h, a, b, (0, 0)));
+    assert!(selected_row(&h, b, a, (0, 1)));
+    assert!(selected_row(&h, a, b, (0, 2)));
+    assert!(!selected_row(&h, a, b, (1, 0)));
+    let one = (((0, 1), 0), ((0, 1), 4));
+    assert!(!selected_row(&h, one.0, one.1, (0, 1)), "within one line");
   }
 
   #[test]

@@ -25,6 +25,8 @@ icons! {
   ICON_AGENT_CODEX => "agent-codex",
   ICON_AGENT_COPILOT => "agent-copilot",
   ICON_AGENT_CURSOR => "agent-cursor",
+  ICON_AGENT_DEVIN => "agent-devin",
+  ICON_AGENT_GEMINI => "agent-gemini",
   ICON_ARCHIVE => "archive",
   ICON_ARROW_DOWN => "arrow-down",
   ICON_ARROW_LEFT => "arrow-left",
@@ -647,9 +649,14 @@ impl Palette {
     rgb(if self.dark { 0xf87171 } else { 0xdc2626 }).into()
   }
 
-  /// The GitHub button's fill, GitHub's own near-black in both themes.
+  /// The GitHub button's fill: GitHub's own near-black in light, and its
+  /// dark-theme button grey in dark, where near-black meets the background.
   pub fn github(&self) -> Hsla {
-    tw::color(tw::GITHUB)
+    tw::color(if self.dark {
+      tw::GITHUB_DARK
+    } else {
+      tw::GITHUB
+    })
   }
 }
 
@@ -883,6 +890,7 @@ pub mod tw {
   }
 
   pub const GITHUB: u32 = 0x24292f;
+  pub const GITHUB_DARK: u32 = 0x3d444d;
   pub const BLUE_500: u32 = 0x3b82f6;
   pub const BLUE_600: u32 = 0x2563eb;
   pub const EMERALD_500: u32 = 0x10b981;

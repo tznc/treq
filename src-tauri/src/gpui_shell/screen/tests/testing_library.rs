@@ -19,11 +19,23 @@ fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
 
 // agent-notification-setting.test.tsx
 
+/// The toggle sits below the setup checklist, so scroll the page to it.
+fn notify_toggle(screen: &gpui_testing_library::Screen) -> gpui_testing_library::Node {
+  let name = "Notify when an agent finishes";
+  let page = screen.get_by_role(by::role(Role::ComboBox).name("Theme"));
+  screen.fire_event().scroll(
+    &page,
+    gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-2000.))),
+  );
+  screen.redraw();
+  screen.get_by_role(by::role(Role::Switch).name(name))
+}
+
 #[gpui::test]
 fn the_agent_finished_notification_is_on_by_default(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, settings_route("application"));
   let screen = screen(&mut h);
-  let toggle = screen.get_by_role(by::role(Role::Switch).name("Notify when an agent finishes"));
+  let toggle = notify_toggle(&screen);
   expect(&toggle).to_be_checked();
 }
 
@@ -34,7 +46,7 @@ fn turning_the_agent_finished_notification_off_saves_it(cx: &mut TestAppContext)
   let screen = screen(&mut h);
   let user = screen.user();
 
-  let toggle = screen.get_by_role(by::role(Role::Switch).name("Notify when an agent finishes"));
+  let toggle = notify_toggle(&screen);
   user.click(&toggle);
   expect(&toggle).not().to_be_checked();
   // The switch saves as it flips, with no Save button and no toast.
@@ -124,7 +136,10 @@ fn the_agent_picker_lists_every_agent(cx: &mut TestAppContext) {
     .iter()
     .filter_map(|n| n.name())
     .collect();
-  assert_eq!(agents, ["Claude", "Codex", "Cursor", "Copilot"]);
+  assert_eq!(
+    agents,
+    ["Claude", "Codex", "Cursor", "Copilot", "Devin", "Gemini"]
+  );
 }
 
 #[gpui::test]
@@ -154,6 +169,8 @@ fn the_agent_picker_hides_agents_that_are_not_installed(cx: &mut TestAppContext)
       ("codex", false),
       ("cursor-agent", true),
       ("copilot", false),
+      ("devin", false),
+      ("gemini", false),
     ],
     ..FakeHost::default()
   };

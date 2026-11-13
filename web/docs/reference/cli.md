@@ -124,7 +124,7 @@ treq agent start <branch> <prompt> [-r <repo>] [-m <edit|plan>]
 - `prompt`: prompt to send to the agent.
 - `-r, --repo`: start the agent in a workspace of a [supporting repository](#supporting-repositories).
 - `-m, --mode`: [permission mode](/docs/concepts/agent-sessions). Use `edit` or `plan`.
-- `-a, --agent`: the agent to start: `claude`, `codex`, `cursor` or `copilot`. The default is the repository's default agent.
+- `-a, --agent`: the agent to start: `claude`, `codex`, `cursor`, `copilot`, `devin` or `gemini`. The default is the repository's default agent.
 
 ### `treq agent msg`
 

@@ -12,7 +12,7 @@ export default function DownloadCTA({
     <aside className={styles.cta}>
       <p className={styles.title}>{title}</p>
       <p className={styles.body}>
-        Free, open source desktop app for Claude, Codex, Cursor, and Copilot workspaces.
+        Free, open source desktop app for Claude, Codex, Cursor, Copilot, Devin, and Gemini workspaces.
         macOS, Windows, and Linux.
       </p>
       <div className={styles.actions}>
