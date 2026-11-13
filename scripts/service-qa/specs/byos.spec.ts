@@ -9,7 +9,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { expect, it } from "vitest";
+import { expect, it } from "@jest/globals";
 import { userHasPro } from "../../../supabase/functions/_shared/billing/entitlement";
 import {
   providerForPlacement,
@@ -231,7 +231,7 @@ it("keeps Vault and other users' credentials out of reach of API roles", async (
         (await client.rpc("can_byos", { p_user_id: a.user.id })).error?.code ??
         null;
     }
-    for (const [k, v] of Object.entries(denied)) expect(v, k).not.toBeNull();
+    for (const [k, v] of Object.entries(denied)) expect({ [k]: v }).not.toEqual({ [k]: null });
 
     const secretCol = await cb.client
       .from("remote_provider_credentials")
@@ -334,7 +334,7 @@ it("runs a BYOS workspace on the owner's key and keeps the key while a machine l
       provider_kind: "boat",
       region: "eu_west",
     });
-    expect(ensured.status, JSON.stringify(ensured.json)).toBe(200);
+    expect({ status: ensured.status, body: ensured.json }).toMatchObject({ status: 200 });
     const { data: placement } = await admin
       .from("remote_instance_placements")
       .select(

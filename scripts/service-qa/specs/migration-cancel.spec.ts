@@ -9,7 +9,7 @@
  * this also proves the action is not Pro-gated.
  */
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "@jest/globals";
 import { userHasPro } from "../../../supabase/functions/_shared/billing/entitlement";
 import { LocalProvider } from "../../../supabase/functions/_shared/remote/local-provider";
 import { handleRemoteInstanceAction } from "../../../supabase/functions/remote-instance/lib";
