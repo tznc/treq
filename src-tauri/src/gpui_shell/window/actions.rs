@@ -195,6 +195,10 @@ impl Model {
         self.new_workspaces(None);
         done()
       }
+      SidebarAction::AddRepository if self.has_repo() || self.empty_project.is_some() => {
+        Some(vec![Effect::PickFolder(FolderPurpose::AddSupporting)])
+      }
+      SidebarAction::AddRepository => done(),
       SidebarAction::OpenProjectHome => {
         self.open_project_home();
         done()
@@ -1064,7 +1068,7 @@ impl Model {
   fn open_request(&mut self, what: &OpenRequest, data: &Data) -> Vec<Effect> {
     match what {
       OpenRequest::BranchSwitcher => self.dialogs.branch_switcher = true,
-      OpenRequest::AddRepository if self.has_repo() => {
+      OpenRequest::AddRepository if self.has_repo() || self.empty_project.is_some() => {
         return vec![Effect::PickFolder(FolderPurpose::AddSupporting)]
       }
       OpenRequest::AddRepository => {}
@@ -1114,7 +1118,7 @@ impl Model {
     match item {
       Menu::Dashboard => self.return_home(),
       Menu::Settings => self.open_settings(),
-      Menu::AddRepository if self.has_repo() => {
+      Menu::AddRepository if self.has_repo() || self.empty_project.is_some() => {
         return vec![Effect::PickFolder(FolderPurpose::AddSupporting)]
       }
       Menu::AddRepository => {}
@@ -1209,6 +1213,20 @@ mod tests {
       field: name.into(),
       value,
     }
+  }
+
+  #[test]
+  fn the_sidebar_adds_a_repository_to_an_empty_project() {
+    let (mut model, data) = (Model::new(None), Data::default());
+    assert_eq!(
+      model.sidebar_action(&SidebarAction::AddRepository, &data),
+      Some(vec![])
+    );
+    model.show_empty_project("Checkout".into());
+    assert_eq!(
+      model.sidebar_action(&SidebarAction::AddRepository, &data),
+      Some(vec![Effect::PickFolder(FolderPurpose::AddSupporting)])
+    );
   }
 
   #[test]

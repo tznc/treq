@@ -447,6 +447,8 @@ pub struct Model {
   pub main_repo: String,
   /// A supporting repository put on screen in the sidebar.
   pub supporting: Option<String>,
+  /// The name of the window's project while it holds no repository.
+  pub empty_project: Option<String>,
   pub page: Page,
   /// Where closing Settings, GitHub or Linear goes (`previousViewModeRef`).
   pub back: Page,
@@ -506,6 +508,19 @@ impl Model {
     }
   }
 
+  /// The window's project lost its last repository: it shows the project's
+  /// Home, empty, until one is added.
+  pub fn show_empty_project(&mut self, name: String) {
+    self.main_repo.clear();
+    self.supporting = None;
+    self.selected = None;
+    self.active_session = None;
+    self.multi.clear();
+    self.page = Page::ProjectHome;
+    self.view = WorkspaceView::default();
+    self.empty_project = Some(name);
+  }
+
   pub fn has_repo(&self) -> bool {
     !self.main_repo.is_empty()
   }
@@ -530,6 +545,7 @@ impl Model {
       effects.push(Effect::from(RemoteEffect::Show(None)));
     }
     self.main_repo = path.to_string();
+    self.empty_project = None;
     self.supporting = None;
     self.selected = None;
     self.active_session = None;

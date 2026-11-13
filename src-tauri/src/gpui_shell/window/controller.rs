@@ -119,6 +119,12 @@ impl WindowController {
       _pollers: pollers,
     };
     this.model.prefs.system_dark = system_dark.unwrap_or_default();
+    // A window on a project that holds no repository shows it empty.
+    if !this.model.has_repo() && remote.is_none() {
+      if let Some(name) = this.host.project_name() {
+        this.model.show_empty_project(name);
+      }
+    }
     let host = this.host.clone();
     cx.background_spawn(async move { host.detect_editors() })
       .detach();
@@ -144,6 +150,8 @@ impl WindowController {
         },
         cx,
       ),
+      // An empty project stays as it is.
+      None if this.model.empty_project.is_some() => {}
       None => effects.push(Effect::from(match remote {
         Some(remote) => RemoteEffect::OpenSaved {
           id: remote.saved_id(),
@@ -596,16 +604,26 @@ impl WindowController {
         |this, (path, result), cx| {
           let effects = match result {
             Ok(()) if this.model.main_repo == path => {
-              // The window's main repository left: the next one takes over.
+              // The window's main repository left: the next one takes over,
+              // or the project shows empty.
               let next = this
                 .data
                 .supporting()
                 .iter()
                 .find(|r| r.exists && r.path != path);
-              next
-                .map(|r| Effect::OpenRepoAt(r.path.clone()))
-                .into_iter()
-                .collect()
+              match next {
+                Some(next) => vec![Effect::OpenRepoAt(next.path.clone())],
+                None => {
+                  this.host.clear_repo();
+                  let name = this
+                    .host
+                    .project_name()
+                    .unwrap_or_else(|| "Untitled".into());
+                  this.model.show_empty_project(name);
+                  this.data.clear();
+                  Vec::new()
+                }
+              }
             }
             Ok(()) => {
               if this.model.supporting.as_deref() == Some(path.as_str()) {
@@ -866,6 +884,7 @@ impl WindowController {
           },
           |this, result, cx| {
             let effect = match result {
+              Ok(added) if !this.model.has_repo() => Effect::OpenRepoAt(added),
               Ok(added) => {
                 let name = added
                   .rsplit(['/', '\\'])
