@@ -32,7 +32,7 @@ jobs:
   detect-changes:
     timeout-minutes: 15
     name: detect changes
-    runs-on: ubuntu-22.04
+    runs-on: blacksmith-2vcpu-ubuntu-2204
     outputs:
       rust_changed: ${{ steps.filter.outputs.rust }}
       js_changed: ${{ steps.filter.outputs.js }}
@@ -330,7 +330,7 @@ jobs:
     if: ${{ needs.detect-changes.outputs.rust_changed == 'true' }}
     timeout-minutes: 10
     name: cargo-deny / ubuntu-22.04
-    runs-on: ubuntu-22.04
+    runs-on: blacksmith-2vcpu-ubuntu-2204
     steps:
       - uses: actions/checkout@v7
 
@@ -494,7 +494,7 @@ jobs:
     name: ci-ok
     if: ${{ always() }}
     needs: [detect-changes, verify, test-desktop-e2e, landing-capture, cargo-deny, test-rust]
-    runs-on: ubuntu-22.04
+    runs-on: blacksmith-2vcpu-ubuntu-2204
     timeout-minutes: 5
     steps:
       - name: Fail if any job failed or was cancelled
