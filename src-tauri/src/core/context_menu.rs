@@ -163,6 +163,8 @@ pub struct HomeMenu {
   pub on_screen: bool,
   /// A supporting repository (not the window's main one).
   pub supporting: bool,
+  /// The window can let this repository go.
+  pub removable: bool,
 }
 
 /// `homeMenuEntries`, with the items `useGpuiSidebar` passes handlers for.
@@ -198,7 +200,7 @@ pub fn home_items(menu: &HomeMenu, editors: EditorApps) -> Vec<MenuItem> {
       MenuItem::item("Locate…", MenuAction::LocateRepo(path.clone())).icon(MenuIcon::FolderSearch),
     );
   }
-  if menu.supporting {
+  if menu.removable {
     repo.push(
       MenuItem::item("Remove Repository", MenuAction::RemoveRepo(path.clone()))
         .icon(MenuIcon::Trash)
@@ -552,6 +554,7 @@ mod tests {
       repo_path: "/r".into(),
       missing: true,
       supporting: true,
+      removable: true,
       on_screen: false,
     };
     let items = home_items(&menu, NO_EDITORS);
@@ -563,10 +566,32 @@ mod tests {
   }
 
   #[test]
+  fn offers_to_remove_the_main_repository_when_removable() {
+    let menu = HomeMenu {
+      repo_path: "/m".into(),
+      removable: true,
+      ..Default::default()
+    };
+    let items = home_items(&menu, NO_EDITORS);
+    assert_eq!(
+      labels(&items)[3..],
+      ["---", "Add Repository…", "Remove Repository"]
+    );
+    let fixed = HomeMenu {
+      removable: false,
+      ..menu
+    };
+    assert!(!labels(&home_items(&fixed, NO_EDITORS))
+      .iter()
+      .any(|l| l == "Remove Repository"));
+  }
+
+  #[test]
   fn offers_settings_for_a_present_supporting_repository() {
     let menu = HomeMenu {
       repo_path: "/s".into(),
       supporting: true,
+      removable: true,
       ..Default::default()
     };
     let items = home_items(&menu, NO_EDITORS);
