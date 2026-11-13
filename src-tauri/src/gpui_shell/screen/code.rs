@@ -270,6 +270,8 @@ fn read_stack(host: &dyn CodeHost, parent: &Parent) -> Option<Vec<StackRow>> {
 pub enum Menu {
   /// The description editor's Save options.
   SaveDescription,
+  /// The description's Sync options: keep the local text or GitHub's.
+  SyncDescription,
 }
 
 /// Which side of a local draft the title and description card shows.
@@ -817,8 +819,8 @@ impl CodeView {
 
   /// The card's footer on a workspace opened from a pull request: a check
   /// while title and description match the PR, else that a local draft
-  /// waits for the next push, with Sync to take the PR's text back.
-  fn pr_footer(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+  /// waits for the next push.
+  fn pr_footer(&self, p: &Palette) -> Option<AnyElement> {
     let sync = self.pr_sync()?;
     let note = |id: &'static str, text: String| {
       ui::text(div(), TextSize::Xs)
@@ -865,16 +867,90 @@ impl CodeView {
             sync.pr_number
           ),
         ))
-        .child(
-          Button::new("workspace-description-resync", p)
-            .variant(Variant::Warning)
-            .size(Size::Sm)
-            .disabled(self.resyncing)
-            .label("Sync")
-            .on_click(cx.listener(|view, _, _, cx| view.resync_from_pr(cx))),
-        )
         .into_any_element(),
     )
+  }
+
+  /// Sync, while the text differs from the PR: a menu that saves the local
+  /// version to the PR or takes GitHub's.
+  fn sync_button(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+    let sync = self.pr_sync()?;
+    if sync.title && sync.description {
+      return None;
+    }
+    let open = self.menu == Some(Menu::SyncDescription);
+    let panel = menu_panel("workspace-description-sync-menu", p)
+      .top(zpx(24.))
+      .right_0()
+      .w(zpx(240.))
+      .child(
+        ui::MenuItem::new("workspace-description-sync-local", "Save local version", p)
+          .description("Update the pull request with the text here")
+          .on_click(cx.listener(|view, _, _, cx| view.push_to_pr(cx))),
+      )
+      .child(
+        ui::MenuItem::new(
+          "workspace-description-sync-github",
+          "Save GitHub version",
+          p,
+        )
+        .description("Replace the text here with the pull request's")
+        .on_click(cx.listener(|view, _, _, cx| {
+          view.menu = None;
+          view.resync_from_pr(cx)
+        })),
+      );
+    Some(
+      div()
+        .relative()
+        .child(
+          Button::new("workspace-description-sync", p)
+            .variant(Variant::Warning)
+            .size(Size::Sm)
+            .h(zpx(20.))
+            .disabled(self.resyncing)
+            .label("Sync")
+            .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::SyncDescription, cx))),
+        )
+        .when(open, |this| {
+          this.child(deferred(self.close_menu_on_outside(panel, cx)).with_priority(1))
+        })
+        .into_any_element(),
+    )
+  }
+
+  /// Sends the local title and description to the PR.
+  fn push_to_pr(&mut self, cx: &mut Context<Self>) {
+    let Some(ws) = &self.parent.workspace else {
+      return;
+    };
+    if self.resyncing {
+      return;
+    }
+    let id = ws.id;
+    self.resyncing = true;
+    self.menu = None;
+    self.read(
+      move |host, parent| host.push_to_pr(&parent.repo_path, id),
+      |view, result, _| {
+        view.resyncing = false;
+        match result {
+          Ok(()) => tell(
+            view.host.as_ref(),
+            NativeEvent::WorkspaceChanged {
+              repo_path: view.parent.repo_path.clone(),
+            },
+          ),
+          Err(err) => tell(
+            view.host.as_ref(),
+            Toast::error("Failed to update the pull request")
+              .description(err)
+              .into(),
+          ),
+        }
+      },
+      cx,
+    );
   }
 
   fn edit_description(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -1518,13 +1594,23 @@ impl CodeView {
     self.parent.workspace.as_ref()?;
     let github = draft && self.about_tab == AboutTab::GitHub;
     let body = if github {
-      Some(self.github_text(p).into_any_element())
+      Some(
+        div()
+          .relative()
+          .child(self.github_text(p))
+          .children(
+            self
+              .sync_button(p, cx)
+              .map(|sync| div().absolute().top_0().right_0().child(sync)),
+          )
+          .into_any_element(),
+      )
     } else {
       self
         .description(p, window, cx)
         .map(IntoElement::into_any_element)
     };
-    let footer = self.pr_footer(p, cx).map(IntoElement::into_any_element);
+    let footer = self.pr_footer(p).map(IntoElement::into_any_element);
     if !draft && body.is_none() && footer.is_none() {
       return None;
     }
@@ -1637,18 +1723,26 @@ impl CodeView {
       return Some(
         card
           .child(
-            div().absolute().top_0().right_0().child(
-              Button::new("workspace-description-edit", p)
-                .aria_label("Edit description")
-                .variant(Variant::Ghost)
-                .size(Size::Icon)
-                .w(zpx(20.))
-                .h(zpx(20.))
-                .child(ui::icon(theme::ICON_PENCIL, 16., p.muted_foreground))
-                .on_click(cx.listener(move |view, _, window, cx| {
-                  view.edit_description(text.clone(), window, cx)
-                })),
-            ),
+            div()
+              .absolute()
+              .top_0()
+              .right_0()
+              .flex()
+              .items_center()
+              .gap_2()
+              .children(self.sync_button(p, cx))
+              .child(
+                Button::new("workspace-description-edit", p)
+                  .aria_label("Edit description")
+                  .variant(Variant::Ghost)
+                  .size(Size::Icon)
+                  .w(zpx(20.))
+                  .h(zpx(20.))
+                  .child(ui::icon(theme::ICON_PENCIL, 16., p.muted_foreground))
+                  .on_click(cx.listener(move |view, _, window, cx| {
+                    view.edit_description(text.clone(), window, cx)
+                  })),
+              ),
           )
           .child(shown)
           .into_any_element(),

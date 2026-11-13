@@ -235,11 +235,12 @@ fn code_tab_says_the_description_follows_the_pr(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.cx.run_until_parked();
   assert!(h.drawn("workspace-description-synced"));
-  assert!(!h.drawn("workspace-description-resync"));
+  assert!(!h.drawn("workspace-description-sync"));
 }
 
-#[gpui::test]
-fn code_tab_resyncs_a_locally_edited_description(cx: &mut TestAppContext) {
+/// PR #42 with a locally edited description: `code_tab`'s harness, the
+/// Sync menu open.
+fn open_sync_menu(cx: &mut TestAppContext) -> (Harness, std::sync::Arc<FakeHost>) {
   let host = FakeHost {
     pr_sync: synced(false),
     ..code_host()
@@ -248,19 +249,41 @@ fn code_tab_resyncs_a_locally_edited_description(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   assert!(!h.drawn("workspace-description-synced"));
   assert!(h.drawn("workspace-pr-draft"));
-  // In the card's footer, under the description.
-  let resync = h.cx.debug_bounds("workspace-description-resync").unwrap();
-  let text = h.cx.debug_bounds("workspace-description").unwrap();
-  let card = h.cx.debug_bounds("workspace-about").unwrap();
-  assert!(resync.top() >= text.bottom(), "{resync:?} {text:?}");
-  assert!(card.contains(&resync.center()), "{card:?} {resync:?}");
-  h.click("workspace-description-resync");
+  // Beside the edit button, at the top of the description.
+  let sync = h.cx.debug_bounds("workspace-description-sync").unwrap();
+  let edit = h.cx.debug_bounds("workspace-description-edit").unwrap();
+  assert!(sync.right() <= edit.left(), "{sync:?} {edit:?}");
+  assert!(sync.top() <= edit.bottom(), "{sync:?} {edit:?}");
+  assert!(!h.drawn("workspace-description-sync-local"));
+  h.click("workspace-description-sync");
+  h.cx.run_until_parked();
+  (h, host)
+}
+
+#[gpui::test]
+fn code_tab_sync_menu_saves_the_local_version(cx: &mut TestAppContext) {
+  let (mut h, host) = open_sync_menu(cx);
+  h.click("workspace-description-sync-local");
+  h.cx.run_until_parked();
+  assert!(
+    host.writes().contains(&"push to PR 7".to_string()),
+    "{:?}",
+    host.writes()
+  );
+  assert!(!host.writes().iter().any(|w| w.starts_with("resync")));
+}
+
+#[gpui::test]
+fn code_tab_sync_menu_saves_the_github_version(cx: &mut TestAppContext) {
+  let (mut h, host) = open_sync_menu(cx);
+  h.click("workspace-description-sync-github");
   h.cx.run_until_parked();
   assert!(
     host.writes().contains(&"resync from PR 7".to_string()),
     "{:?}",
     host.writes()
   );
+  assert!(!host.writes().iter().any(|w| w.starts_with("push")));
 }
 
 #[gpui::test]
@@ -301,8 +324,8 @@ fn code_tab_shows_github_beside_a_local_draft(cx: &mut TestAppContext) {
   assert!(h.drawn("workspace-about-github"));
   assert!(!h.drawn("workspace-description-edit"));
   assert!(host.calls().contains(&"read pr text".to_string()));
-  // Sync stays in the footer under either tab.
-  assert!(h.drawn("workspace-description-resync"));
+  // Sync shows under either tab.
+  assert!(h.drawn("workspace-description-sync"));
   h.click("workspace-about-tab-draft");
   assert!(h.drawn("workspace-description-edit"));
 }
@@ -411,7 +434,7 @@ fn code_tab_shows_no_sync_note_without_a_pr(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
   h.cx.run_until_parked();
   assert!(!h.drawn("workspace-description-synced"));
-  assert!(!h.drawn("workspace-description-resync"));
+  assert!(!h.drawn("workspace-description-sync"));
   assert!(!h.drawn("workspace-pr-draft"));
 }
 
