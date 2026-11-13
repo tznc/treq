@@ -2166,7 +2166,7 @@ impl Render for SettingsView {
           .overflow_y_scroll()
           .child(
             div()
-              .max_w(zpx(896.))
+              .max_w(zpx(1088.))
               .mx_auto()
               .p_6()
               .flex()
