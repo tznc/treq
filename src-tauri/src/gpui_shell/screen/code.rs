@@ -970,7 +970,7 @@ impl CodeView {
       return;
     };
     let text = editor.read(cx).value().to_string();
-    let (id, to_pr) = (ws.id, !draft && self.pr_sync.1.is_some());
+    let (id, to_pr) = (ws.id, !draft);
     self.saving_description = true;
     self.menu = None;
     self.read(

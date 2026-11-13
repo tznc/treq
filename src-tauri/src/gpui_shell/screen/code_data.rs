@@ -346,8 +346,9 @@ impl CodeHost for Backend {
   }
 
   fn push_to_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    // A remote host doesn't sync PR text; saving there stays local.
     if self.remote_containing(repo_path).is_some() {
-      return Err(unsupported("Updating the pull request"));
+      return Ok(());
     }
     core::pr_sync::push_edits_to_github(repo_path, workspace_id)
   }

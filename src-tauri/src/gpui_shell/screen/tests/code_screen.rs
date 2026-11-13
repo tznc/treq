@@ -188,6 +188,21 @@ fn code_tab_saves_the_description_on_secondary_enter(cx: &mut TestAppContext) {
   assert!(!h.drawn("workspace-description-input"));
 }
 
+/// A workspace not opened from a PR may still have one on its branch.
+#[gpui::test]
+fn code_tab_sends_a_saved_description_to_the_pr(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  h.click("workspace-description-edit");
+  h.cx.simulate_input("!");
+  h.click("workspace-description-save");
+  h.cx.run_until_parked();
+  assert!(
+    host.writes().contains(&"push to PR 7".to_string()),
+    "{:?}",
+    host.writes()
+  );
+}
+
 /// PR #42's record for `code_host`'s workspace: its description still the
 /// PR's, or edited since.
 fn synced(description: bool) -> Option<crate::local_db::PrSyncRecord> {
@@ -421,12 +436,9 @@ fn code_tab_saves_a_pr_title_as_a_local_draft(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn code_tab_offers_no_draft_without_a_pr(cx: &mut TestAppContext) {
-  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
   h.click("workspace-description-edit");
   assert!(!h.drawn("workspace-description-save-menu"));
-  h.click("workspace-description-save");
-  h.cx.run_until_parked();
-  assert!(!host.writes().contains(&"push to PR 7".to_string()));
 }
 
 #[gpui::test]
