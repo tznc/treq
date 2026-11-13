@@ -15,12 +15,15 @@ env:
 
 on:
   pull_request:
-    # ready_for_review runs the desktop e2e suite, which drafts skip.
-    types: [opened, synchronize, reopened, ready_for_review]
+    # Every check runs on drafts, so marking a PR ready doesn't rerun CI.
+    types: [opened, synchronize, reopened]
+  # The merge queue reruns CI on the queued result; ci-ok must report there.
+  merge_group:
 
 # A new push supersedes the previous run; free its runners for other PRs.
+# Merge group runs have no PR number; each queue entry has its own ref.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -37,12 +40,24 @@ jobs:
     # No checkout: on pull_request, paths-filter lists the changed files
     # through the GitHub API.
     permissions:
+      contents: read
       pull-requests: read
     steps:
+      # A merge group has no PR to ask the API about, so paths-filter diffs
+      # the queued commits against the base locally. Trees only, no blobs.
+      - if: github.event_name == 'merge_group'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
       - name: Check for Rust and JS/TS changes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
+          # Ignored on pull_request.
+          base: ${{ github.event.merge_group.base_sha }}
+          ref: ${{ github.event.merge_group.head_sha }}
           filters: |
             rust:
               - "src-tauri/**"
@@ -157,9 +172,6 @@ jobs:
         if: ${{ !cancelled() && env.RUST == 'true' }}
         run: cargo machete
 
-  # The e2e suite skips draft PRs; marking the PR ready for review runs it.
-  # clippy, the Rust tests and cargo-deny run on drafts too.
-  #
   # The end-to-end suite (e2e/desktop): the app built with the `e2e`
   # feature, which embeds a Playwright server (gpui-playwright), driven by
   # stock @playwright/test under Xvfb on a fixture repository. The desktop
@@ -167,7 +179,7 @@ jobs:
   # run covers them.
   test-desktop-e2e:
     needs: detect-changes
-    if: ${{ !github.event.pull_request.draft && (needs.detect-changes.outputs.rust_changed == 'true' || needs.detect-changes.outputs.e2e_changed == 'true') }}
+    if: ${{ needs.detect-changes.outputs.rust_changed == 'true' || needs.detect-changes.outputs.e2e_changed == 'true' }}
     timeout-minutes: 20
     name: test-desktop-e2e / playwright / ubuntu-22.04
     runs-on: ubuntu-22.04
@@ -476,3 +488,15 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: cargo nextest run --locked --workspace --profile ci
+
+  # The one required check: jobs skipped by detect-changes count as passing.
+  ci-ok:
+    name: ci-ok
+    if: ${{ always() }}
+    needs: [detect-changes, verify, test-desktop-e2e, landing-capture, cargo-deny, test-rust]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any job failed or was cancelled
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: exit 1
