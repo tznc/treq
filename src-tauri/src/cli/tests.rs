@@ -2110,11 +2110,14 @@ fn gateway_requires_placement_id() {
 #[test]
 fn agent_start_refuses_a_harness_treq_does_not_launch() {
   let sub = parsed_subcommand(&[
-    "treq", "agent", "start", "feat/x", "do it", "--agent", "gemini",
+    "treq", "agent", "start", "feat/x", "do it", "--agent", "aider",
   ]);
   let start = sub.matches.subcommand.expect("start subcommand");
   let error = super::workspace_handlers::start_agent_kind(&start.matches, "/no/repo").unwrap_err();
-  assert!(error.contains("claude, codex, cursor, copilot"), "{error}");
+  assert!(
+    error.contains("claude, codex, cursor, copilot, devin, gemini"),
+    "{error}"
+  );
 }
 
 #[test]

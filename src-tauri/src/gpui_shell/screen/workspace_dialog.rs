@@ -28,7 +28,7 @@ use super::{
     self as data, branch_from_title, branch_name_error, new_workspace_chain, ChainEntry, Position,
     Route, Source, StashCommit, Submit, Submitted, Tab, WorkspaceDialogHost,
   },
-  workspace_modal::{label_xs, press, Check},
+  workspace_modal::{field_hint, field_label, press, Check},
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -1072,7 +1072,7 @@ impl WorkspaceDialog {
         .flex()
         .flex_col()
         .gap_1p5()
-        .child(label_xs("Stacking on"))
+        .child(field_label("Stacking on"))
         .child(stacking_on),
     );
 
@@ -1104,7 +1104,7 @@ impl WorkspaceDialog {
           .flex()
           .items_center()
           .gap_2()
-          .child(label_xs("Position:"))
+          .child(field_label("Position:"))
           .child(
             div()
               .flex()
@@ -1162,7 +1162,7 @@ impl WorkspaceDialog {
           .flex()
           .flex_col()
           .gap_1p5()
-          .child(label_xs("Target workspace"))
+          .child(field_label("Target workspace"))
           .child(match select {
             None => ui::EmptyState::new("no-other-workspaces", "No other workspaces", &p)
               .message("Create another workspace to move changes into.")
@@ -1188,7 +1188,7 @@ impl WorkspaceDialog {
             .flex()
             .flex_col()
             .gap_1p5()
-            .child(label_xs("Title (optional)"))
+            .child(field_label("Title (optional)"))
             .child(
               div()
                 .id("workspace-dialog-title")
@@ -1205,7 +1205,7 @@ impl WorkspaceDialog {
             .flex()
             .flex_col()
             .gap_1p5()
-            .child(label_xs("Description (optional)"))
+            .child(field_label("Description (optional)"))
             .child(
               div()
                 .debug_selector(|| "workspace-dialog-description".into())
@@ -1240,7 +1240,7 @@ impl WorkspaceDialog {
                 .flex()
                 .flex_col()
                 .gap_1p5()
-                .child(label_xs("Sparse paths (optional, one per line)"))
+                .child(field_label("Sparse paths (optional, one per line)"))
                 .child(
                   div()
                     .debug_selector(|| "workspace-dialog-sparse".into())
@@ -1253,21 +1253,20 @@ impl WorkspaceDialog {
                 .flex()
                 .flex_col()
                 .gap_1p5()
-                .child(label_xs("Symlink from home repo (optional, one per line)"))
+                .child(field_label(
+                  "Symlink from home repo (optional, one per line)",
+                ))
                 .child(
                   div()
                     .debug_selector(|| "workspace-dialog-symlinks".into())
                     .min_h(zpx(58.))
                     .child(ui::text(Textarea::new(&symlinks), TextSize::Sm)),
                 )
-                .child(
-                  ui::text(div(), TextSize::Xs)
-                    .text_color(p.muted_foreground)
-                    .child(
-                      "Heavy dirs are linked instead of copied so each workspace shares the home \
+                .child(field_hint(
+                  "Heavy dirs are linked instead of copied so each workspace shares the home \
                        tree.",
-                    ),
-                )
+                  &p,
+                ))
                 .when(!chips.is_empty(), |this| {
                   this.child(div().flex().flex_wrap().gap_1p5().children(
                     chips.into_iter().enumerate().map(|(i, chip)| {

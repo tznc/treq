@@ -1603,6 +1603,9 @@ mod tests {
     assert!(prompt.starts_with("You are reviewing the current changes in this repository."));
     assert!(prompt.contains("--target-type workspace_diff --target-id 7"));
     assert!(prompt.contains("What is under review: the feat/a workspace diff"));
+    // In a Treq workspace git reads the home repo, so never point at it.
+    assert!(!prompt.contains("git diff"));
+    assert!(prompt.contains("treq changes workspace-diff"));
     assert_eq!(
       review_prompt(Some("Look at {workspace_id}"), "7", ""),
       "Look at 7"

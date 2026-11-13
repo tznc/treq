@@ -55,7 +55,14 @@ while :; do sleep 0.2; done
 // The app reads agents' PATH from the login shell, whose system profile
 // can put a real `claude` ahead of the fixture's: a shell that skips the
 // profiles keeps the run on the fake agent.
-const shell = writeBin(fixture.bin, "qa-shell", '#!/bin/sh\nexec bash --noprofile --norc "$@"\n');
+// A `slow-shell` file in the fixture root makes new shells start the way a
+// real login shell's profile does: slowly, so treq types the agent command
+// before the shell reads it (29-agent-start-long-prompt).
+const shell = writeBin(
+  fixture.bin,
+  "qa-shell",
+  `#!/bin/sh\n[ -f '${join(fixture.root, "slow-shell")}' ] && sleep 1\nexec bash --noprofile --norc "$@"\n`,
+);
 
 const { treq } = seedLandingRepo(fixture);
 const { repo, home } = fixture;
