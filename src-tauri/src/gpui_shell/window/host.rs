@@ -126,6 +126,9 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   /// Watches a local checkout for edits on disk (an agent's, an editor's):
   /// each settled burst sends once. `None` when there is nothing to watch.
   fn watch_files(&self, path: &str) -> Option<FileWatch>;
+  /// Watches a local repository's workspace database (`.treq/local.db`) for
+  /// writes: each settled burst sends once.
+  fn watch_db(&self, repo: &str) -> Option<FileWatch>;
   fn force_rebase(
     &self,
     repo: &str,
@@ -578,6 +581,58 @@ impl WindowHost for Backend {
 
   fn open_url(&self, url: &str) {
     Backend::open_url(self, url);
+  }
+
+  fn watch_db(&self, repo: &str) -> Option<FileWatch> {
+    if self.remote(repo).is_some() {
+      return None;
+    }
+    let dir = Path::new(repo).join(".treq");
+    let (tx, changes) = unbounded();
+    // The app's own reads and polls write the database too: send only when
+    // what the window shows from it (titles, descriptions) changed.
+    let repo_path = repo.to_string();
+    let shown = move || crate::core::workspaces::workspace_texts(&repo_path);
+    let mut last = shown();
+    let mut debouncer = notify_debouncer_full::new_debouncer_opt::<
+      _,
+      notify::RecommendedWatcher,
+      notify_debouncer_full::NoCache,
+    >(
+      WATCH_SETTLE,
+      None,
+      move |result: notify_debouncer_full::DebounceEventResult| {
+        let wrote = result.is_ok_and(|events| {
+          events.iter().any(|e| {
+            !e.kind.is_access()
+              && e.paths.iter().any(|p| {
+                p.file_name()
+                  .and_then(|n| n.to_str())
+                  .is_some_and(|n| n.starts_with("local.db"))
+              })
+          })
+        });
+        if wrote {
+          let now = shown();
+          if now != last {
+            last = now;
+            tx.unbounded_send(()).ignore_closed();
+          }
+        }
+      },
+      notify_debouncer_full::NoCache,
+      notify::Config::default(),
+    )
+    .map_err(|err| log::warn!("Failed to create a database watcher: {err}"))
+    .ok()?;
+    debouncer
+      .watch(&dir, notify::RecursiveMode::NonRecursive)
+      .map_err(|err| log::warn!("Failed to watch {}: {err}", dir.display()))
+      .ok()?;
+    Some(FileWatch {
+      changes,
+      _watcher: Box::new(debouncer),
+    })
   }
 
   fn watch_files(&self, path: &str) -> Option<FileWatch> {

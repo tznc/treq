@@ -65,6 +65,9 @@ pub struct WindowController {
   recheck_branch: bool,
   /// The checkout watched for edits on disk, and the task that hears them.
   watching: Option<(String, Task<()>)>,
+  /// The repository whose workspace database is watched for writes from
+  /// outside the window (the CLI, another window), and the task that hears them.
+  watching_db: Option<(String, Task<()>)>,
   /// Another window or app has the focus: polls read only every
   /// [`BACKGROUND_EVERY`]th tick, and what they skip waits in `skipped`
   /// for the window to come back.
@@ -110,6 +113,7 @@ impl WindowController {
       queued: None,
       recheck_branch: false,
       watching: None,
+      watching_db: None,
       background: false,
       skipped: None,
       _pollers: pollers,
@@ -316,6 +320,7 @@ impl WindowController {
 
   /// Follows the selection: watches its checkout, dropping the last one.
   fn watch(&mut self, cx: &mut Context<Self>) {
+    self.watch_db(cx);
     let target = self.watch_target();
     if self.watching.as_ref().map(|(path, _)| path) == target.as_ref() {
       return;
@@ -340,6 +345,38 @@ impl WindowController {
         }
       });
       (path, task)
+    });
+  }
+
+  /// Follows the repository: reads its workspaces again when their database
+  /// changes, so a title or description set elsewhere shows at once.
+  fn watch_db(&mut self, cx: &mut Context<Self>) {
+    let target =
+      (self.model.has_repo() && !self.model.is_remote()).then(|| self.model.main_repo.clone());
+    if self.watching_db.as_ref().map(|(path, _)| path) == target.as_ref() {
+      return;
+    }
+    self.watching_db = target.map(|repo| {
+      let (host, at) = (self.host.clone(), repo.clone());
+      let task = cx.spawn(async move |this, cx| {
+        let watch = cx.background_spawn(async move { host.watch_db(&at) }).await;
+        let Some(FileWatch {
+          mut changes,
+          _watcher,
+        }) = watch
+        else {
+          return;
+        };
+        while changes.next().await.is_some() {
+          if this
+            .update(cx, |this, cx| this.read(Read::POLL, cx))
+            .is_err()
+          {
+            break;
+          }
+        }
+      });
+      (repo, task)
     });
   }
 
