@@ -96,6 +96,7 @@ fn page<T>(items: Vec<T>, more: bool, cursor: Option<&str>) -> GhListPage<T> {
     items,
     has_more: more,
     end_cursor: cursor.map(str::to_string),
+    total_count: None,
   }
 }
 
@@ -429,6 +430,16 @@ fn github_lists_issues_and_hands_moves_to_react(cx: &mut TestAppContext) {
       press("github.new"),
     ]
   );
+}
+
+#[gpui::test]
+fn github_tabs_show_the_total_count_for_the_filter(cx: &mut TestAppContext) {
+  let mut fake = issues();
+  fake.issue_pages[0].total_count = Some(42);
+  let (mut h, _) = harness(cx, fake, route("issues", None, false));
+  assert!(h.drawn("github-tab-issues-count"));
+  // The pull requests are not read yet, so their tab shows no count.
+  assert!(!h.drawn("github-tab-prs-count"));
 }
 
 #[gpui::test]
