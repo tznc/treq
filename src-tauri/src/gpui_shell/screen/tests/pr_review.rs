@@ -120,6 +120,20 @@ impl PrReviewHost for FakeHost {
     }
     Ok(())
   }
+
+  fn pr_file_lines(
+    &self,
+    full_name: &str,
+    number: u64,
+    path: &str,
+    start: usize,
+    end: usize,
+  ) -> Result<Vec<String>, String> {
+    self.record(format!(
+      "read pr lines {full_name} {number} {path} {start}..{end}"
+    ));
+    Ok((start..=end).map(|n| format!("line {n}")).collect())
+  }
 }
 
 const DIFF: &str = "diff --git a/a.rs b/a.rs
@@ -466,4 +480,59 @@ fn the_finish_popover_verdicts_are_named_radio_buttons(cx: &mut TestAppContext) 
     "{:?}",
     host.writes()
   );
+}
+
+/// A hunk in the middle of a file, with hidden lines on both sides.
+const MID_DIFF: &str = "diff --git a/a.rs b/a.rs
+--- a/a.rs
++++ b/a.rs
+@@ -10,7 +10,7 @@
+ a
+ b
+ c
+-d
++D
+ e
+ f
+ g
+";
+
+/// The PR's files are not checked out, so "Show more lines below" reads
+/// the file at the PR's head.
+#[gpui::test]
+fn pr_review_shows_more_lines_below_the_last_hunk(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_diff: Some(Ok(MID_DIFF.into())),
+    ..pr_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, pr_route());
+  h.click("expand-after-a.rs-0");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .calls()
+      .contains(&"read pr lines o/r 5 a.rs 17..36".to_string()),
+    "{:?}",
+    host.calls()
+  );
+}
+
+/// "Expand all" in a hunk header reads the whole gap from the PR's head.
+#[gpui::test]
+fn pr_review_expands_all_lines_above_a_hunk(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_diff: Some(Ok(MID_DIFF.into())),
+    ..pr_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, pr_route());
+  h.click("expand-all-above-a.rs-0");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .calls()
+      .contains(&"read pr lines o/r 5 a.rs 1..9".to_string()),
+    "{:?}",
+    host.calls()
+  );
+  assert!(!h.drawn("expand-all-above-a.rs-0"));
 }

@@ -1498,10 +1498,6 @@ impl ChangesView {
 
   /// `handleExpandContext`; `all` reads the whole gap ("Expand all").
   fn expand_context(&mut self, path: &str, h: usize, dir: Dir, all: bool, cx: &mut Context<Self>) {
-    // The PR's files are not checked out.
-    if self.read_only() {
-      return;
-    }
     // A committed card's lines are read from the working copy, which only
     // matches the branch head while the file has no uncommitted edits.
     if !self.hunks.contains_key(path)
@@ -1532,31 +1528,41 @@ impl ChangesView {
     };
     let key = (path.to_string(), h, dir);
     let file = path.to_string();
+    let apply = move |view: &mut Self, result: Result<Vec<String>, String>| {
+      let Ok(lines) = result else {
+        return;
+      };
+      view.layout_gen += 1;
+      if dir == Dir::After && lines.len() <= end - start {
+        view.context_ended.insert((key.0.clone(), h));
+      }
+      if lines.is_empty() {
+        return;
+      }
+      let entry = view.context.entry(key).or_default();
+      match dir {
+        Dir::Before => {
+          let mut all = lines;
+          all.append(entry);
+          *entry = all;
+        }
+        Dir::After => entry.extend(lines),
+      }
+    };
+    // The PR's files are not checked out: read them at the PR's head.
+    if self.read_only() {
+      self.run_pr(
+        move |host, pr| host.pr_file_lines(&pr.full_name, pr.number, &file, start, end),
+        move |view, result, _| apply(view, result),
+        cx,
+      );
+      return;
+    }
     self.run(
       move |host, parent| {
         host.file_lines(&parent.repo_path, parent.workspace_id(), &file, start, end)
       },
-      move |view, result, _| {
-        let Ok(lines) = result else {
-          return;
-        };
-        view.layout_gen += 1;
-        if dir == Dir::After && lines.len() <= end - start {
-          view.context_ended.insert((key.0.clone(), h));
-        }
-        if lines.is_empty() {
-          return;
-        }
-        let entry = view.context.entry(key).or_default();
-        match dir {
-          Dir::Before => {
-            let mut all = lines;
-            all.append(entry);
-            *entry = all;
-          }
-          Dir::After => entry.extend(lines),
-        }
-      },
+      move |view, result, _| apply(view, result),
       cx,
     );
   }
