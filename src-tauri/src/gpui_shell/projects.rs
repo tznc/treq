@@ -40,7 +40,7 @@ pub fn assign_draft(app: &AppHandle, label: &str, repo: &str) {
   let mut map = state.window_projects.lock_or_recover();
   let db = state.db.lock_or_recover();
   let current = any_project_of(db.conn(), map.get(label).map(String::as_str));
-  if current.as_ref().is_some_and(|p| !p.draft) {
+  if keeps_project(current.as_ref(), repo) {
     return;
   }
   if repo.is_empty() {
@@ -60,6 +60,12 @@ pub fn assign_draft(app: &AppHandle, label: &str, repo: &str) {
     }
     Err(err) => log::warn!("no draft project for {repo}: {err}"),
   }
+}
+
+/// Whether a window on `current` that now shows `repo` keeps it: a saved
+/// project always, a draft while it holds `repo`.
+fn keeps_project(current: Option<&Project>, repo: &str) -> bool {
+  current.is_some_and(|p| !p.draft || p.repos.iter().any(|r| r == repo))
 }
 
 /// The saved project `id` names; `None` for an unsaved window (no id or a
@@ -514,6 +520,17 @@ mod tests {
     );
     assert_eq!(p.repos, strings(&["/r/web", "/r/api"]));
     assert_eq!(projects::list(&conn).unwrap().len(), 1);
+  }
+
+  #[test]
+  fn a_window_keeps_a_project_that_holds_the_repo_it_now_shows() {
+    let conn = conn();
+    let d = projects::draft(&conn, &strings(&["/r/web", "/r/api"])).unwrap();
+    assert!(keeps_project(Some(&d), "/r/api"));
+    assert!(!keeps_project(Some(&d), "/r/other"));
+    let p = projects::save(&conn, "P", &strings(&["/r/web"])).unwrap();
+    assert!(keeps_project(Some(&p), "/r/other"), "a saved project stays");
+    assert!(!keeps_project(None, "/r/web"));
   }
 
   #[test]
