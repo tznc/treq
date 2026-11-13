@@ -1453,3 +1453,17 @@ fn a_failed_list_is_an_error_state_with_retry(cx: &mut TestAppContext) {
   expect(screen.get_by_role(by::role(gpui::Role::Button).name("Retry"))).to_be_visible();
   expect(screen.get_by_role(by::role(gpui::Role::Button).name("Copy error"))).to_be_visible();
 }
+
+#[gpui::test]
+fn github_pr_detail_caps_its_content_width(cx: &mut TestAppContext) {
+  let fake = Fake {
+    pr: Some(pr(1, "feat/a", "main")),
+    ..prs()
+  };
+  let (mut h, _) = harness(cx, fake, route("prs", Some(1), false));
+  let column = h.cx.debug_bounds("github-detail-column").expect("column");
+  assert!(
+    f32::from(column.size.width) <= treq_ui::theme::CONTENT_MAX_WIDTH,
+    "{column:?}"
+  );
+}

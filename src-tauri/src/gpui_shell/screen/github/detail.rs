@@ -330,13 +330,22 @@ impl GithubView {
       .child(body)
   }
 
-  /// The scrolling `px-4 py-3 space-y-4` column of a detail.
-  fn content() -> gpui::Stateful<Div> {
+  /// The scrolling detail page around its `px-4 py-3 space-y-4` column,
+  /// capped at `CONTENT_MAX_WIDTH`.
+  fn scroll(column: Div) -> gpui::Stateful<Div> {
     div()
       .id("github-detail-scroll")
       .flex_1()
       .min_h_0()
       .overflow_y_scroll()
+      .child(column)
+  }
+
+  fn content() -> Div {
+    div()
+      .debug_selector(|| "github-detail-column".into())
+      .w_full()
+      .max_w(zpx(theme::CONTENT_MAX_WIDTH))
       .px_4()
       .py_3()
       .flex()
@@ -725,13 +734,15 @@ impl GithubView {
       .into_any_element()
     };
     let add = self.add_comment(true, vec![actions], p, window, cx);
-    Self::content()
-      .child(head)
-      .when(!editing, |d| {
-        d.children(self.body("github-issue-body", &issue.body, p))
-      })
-      .children(self.comments(&issue.comments, &[], p, cx))
-      .child(add)
+    Self::scroll(
+      Self::content()
+        .child(head)
+        .when(!editing, |d| {
+          d.children(self.body("github-issue-body", &issue.body, p))
+        })
+        .children(self.comments(&issue.comments, &[], p, cx))
+        .child(add),
+    )
   }
 
   /// `IssueEditForm`.
@@ -1096,13 +1107,15 @@ impl GithubView {
       );
     }
     let add = self.add_comment(false, actions, p, window, cx);
-    Self::content()
-      .child(head)
-      .children(checks_list)
-      .children(treq)
-      .children(self.body("github-pr-body", &pr.body, p))
-      .children(self.comments(&pr.comments, &pr.reviews, p, cx))
-      .child(add)
+    Self::scroll(
+      Self::content()
+        .child(head)
+        .children(checks_list)
+        .children(treq)
+        .children(self.body("github-pr-body", &pr.body, p))
+        .children(self.comments(&pr.comments, &pr.reviews, p, cx))
+        .child(add),
+    )
   }
 
   /// `CiStatusButton`: the passed/total pill and its checks popover.
