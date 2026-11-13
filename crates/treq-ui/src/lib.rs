@@ -357,6 +357,19 @@ impl Button {
     self
   }
 
+  /// A filter toggle where a switch won't fit: a checkbox leads the label,
+  /// checked while on, and it reads out as pressed or not. Unlike
+  /// [`Self::pressed`], the fill stays the variant's; the box shows state.
+  pub fn checked(mut self, on: bool) -> Self {
+    self.pressed = Some(on);
+    self.selected = false;
+    let check = checkbox::Checkbox::new(format!("{}-check", self.id), &self.palette).checked(on);
+    self
+      .children
+      .insert(0, ButtonChild::Element(check.into_any_element()));
+    self
+  }
+
   /// Text in the button's own color.
   pub fn label(mut self, label: impl Into<SharedString>) -> Self {
     let label: SharedString = label.into();
@@ -905,6 +918,25 @@ mod tests {
     assert_eq!(on.colors().bg, p.selected());
     // A plain button is no toggle.
     assert_eq!(Button::new("plain", &p).pressed, None);
+  }
+
+  #[test]
+  fn a_checked_button_is_a_toggle_led_by_a_checkbox() {
+    let p = theme::palette(false);
+    for on in [false, true] {
+      let b = Button::new("assigned", &p)
+        .variant(Variant::Outline)
+        .checked(on)
+        .label("Assigned to me");
+      assert_eq!(b.pressed, Some(on));
+      // The box carries the state, not the selected fill.
+      assert!(!b.selected);
+      assert_eq!(
+        b.colors().bg,
+        Button::new("x", &p).variant(Variant::Outline).colors().bg
+      );
+      assert!(matches!(b.children.first(), Some(ButtonChild::Element(_))));
+    }
   }
 
   #[test]

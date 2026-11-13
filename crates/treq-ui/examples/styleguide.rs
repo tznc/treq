@@ -581,6 +581,18 @@ fn buttons() -> Vec<Example> {
     .component("Copy feedback")
     .title("States")
     .size(232., 56.),
+    example!("button/check-toggle", |knobs, _, cx| {
+      let p = p(cx);
+      // A filter toggle in a narrow row, where a switch won't fit.
+      Button::new("assigned", &p)
+        .variant(Variant::Outline)
+        .size(treq_ui::Size::Sm)
+        .checked(knobs.bool("checked", true))
+        .label("Assigned to me")
+    })
+    .component("Button")
+    .title("Check toggle")
+    .size(232., 56.),
     example!("split-button/playground", |knobs, _, cx| {
       let p = p(cx);
       SplitButton::new("push", "Push", &p)
