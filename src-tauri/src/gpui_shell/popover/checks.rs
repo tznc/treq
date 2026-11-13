@@ -38,7 +38,7 @@ pub struct Input {
   pub running_workflows: Vec<String>,
   /// The setup script is being re-run from this window.
   pub setup_rerunning: bool,
-  /// "View logs" is offered (the Logs preview is on).
+  /// "View logs" is offered.
   pub logs: bool,
 }
 
