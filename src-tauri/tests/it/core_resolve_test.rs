@@ -256,3 +256,57 @@ fn resolve_commit_with_stdin_replacements_rewrites_tree() {
   let status = core::workspace_status(&repo.repo_path, Some(workspace.id)).expect("status");
   assert!(!status.partial.has_conflicts);
 }
+
+#[test]
+fn start_resolve_handles_divergent_change_id() {
+  let repo = TestRepo::new().expect("test repo");
+  let workspace = setup_rebase_conflict(&repo);
+  let log = core::list_commits(&repo.repo_path, Some(workspace.id), false, None, None)
+    .expect("list commits");
+  let conflicted = log
+    .commits
+    .iter()
+    .find(|c| c.has_conflicts && !c.on_target_only)
+    .expect("conflicted commit");
+
+  // Rewrite the commit from a stale operation so its change id becomes divergent.
+  let op = TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &["op", "log", "--no-graph", "-n1", "-T", "id.short()"],
+  )
+  .expect("op id");
+  TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &[
+      "--at-op",
+      op.trim(),
+      "--ignore-working-copy",
+      "describe",
+      "-r",
+      &conflicted.commit_id,
+      "-m",
+      "concurrent a",
+    ],
+  )
+  .expect("describe a");
+  TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &[
+      "--at-op",
+      op.trim(),
+      "--ignore-working-copy",
+      "describe",
+      "-r",
+      &conflicted.commit_id,
+      "-m",
+      "concurrent b",
+    ],
+  )
+  .expect("describe b");
+  TestRepo::run_jj_cli(&repo.repo_path, &["--ignore-working-copy", "log", "-r", "@"])
+    .expect("merge concurrent ops");
+
+  let session = core::start_resolve_conflicts(&repo.repo_path, Some(workspace.id), None)
+    .expect("start_resolve_conflicts must not fail on a divergent change id");
+  assert!(!session.targets.is_empty(), "expected resolve targets");
+}

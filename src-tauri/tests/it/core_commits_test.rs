@@ -1412,3 +1412,54 @@ fn abandon_succeeds_again_right_after_undo() {
 
   treq_lib::jj::jj_abandon(path, &f1).unwrap();
 }
+
+#[test]
+fn commits_ahead_handles_target_bookmark_conflicted_with_deletion() {
+  let repo = TestRepo::new().expect("test repo");
+  let default_branch = repo.default_branch().to_string();
+  let workspace = repo
+    .create_workspace_with_commit("feat/ahead-conflict", "a.txt", "a\n", None)
+    .expect("workspace");
+  let workspace_path = repo.workspace_full_path(&workspace);
+
+  repo.create_file("main.txt", "main\n").expect("write");
+  treq_lib::jj::jj_commit(&repo.repo_path, "main commit").expect("commit main");
+  let op = TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &["op", "log", "--no-graph", "-n1", "-T", "id.short()"],
+  )
+  .expect("op id");
+  let op = op.trim();
+  // One side deletes the bookmark, the other moves it: the merged bookmark is
+  // conflicted but has a single present term.
+  TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &["--at-op", op, "--ignore-working-copy", "bookmark", "delete", &default_branch],
+  )
+  .expect("delete");
+  TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &[
+      "--at-op",
+      op,
+      "--ignore-working-copy",
+      "bookmark",
+      "set",
+      &default_branch,
+      "-r",
+      "@-",
+      "--allow-backwards",
+    ],
+  )
+  .expect("set");
+  let listed = TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &["--ignore-working-copy", "bookmark", "list", &default_branch],
+  )
+  .expect("list");
+  assert!(listed.contains("conflict"), "bookmark should be conflicted: {listed}");
+
+  let ahead = treq_lib::jj::jj_get_commits_ahead(&workspace_path, &default_branch)
+    .expect("commits ahead must not fail on a conflicted target");
+  assert!(!ahead.commits.is_empty());
+}
