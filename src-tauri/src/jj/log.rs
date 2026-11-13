@@ -117,6 +117,9 @@ pub(super) fn resolve_local_target_branch_revision(
     if let Some(ahead) = upstream_tip_ahead_of(loaded, workspace_path, target_branch, &ids[0]) {
       return Ok(ahead);
     }
+    if target.has_conflict() {
+      return Ok(ids[0].hex());
+    }
     return Ok(format_revset_symbol(target_branch));
   }
 
