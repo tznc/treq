@@ -94,7 +94,7 @@ pub(in crate::gpui_shell::screen) fn match_ranges(text: &str, query: &str) -> Ve
 
 /// How many `match_ranges` `text` has. ASCII text and queries, the usual
 /// case, are counted in place: the index counts every line every frame.
-fn match_count(text: &str, query: &str) -> usize {
+pub(in crate::gpui_shell::screen) fn match_count(text: &str, query: &str) -> usize {
   if !(text.is_ascii() && query.is_ascii()) {
     return match_ranges(text, query).len();
   }

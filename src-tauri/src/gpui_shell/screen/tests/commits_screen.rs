@@ -466,3 +466,30 @@ fn a_diff_that_fails_to_load_offers_retry(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   assert_eq!(reads(), before + 1);
 }
+
+#[gpui::test]
+fn commits_tab_finds_text_in_messages_and_open_diffs(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, commits_host(), commits_route());
+  let count = |h: &mut Harness| {
+    h.cx.run_until_parked();
+    h.screen.read_with(&h.cx, |screen, cx| {
+      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+      let find = &workspace.commits().expect("commits").read(cx).find;
+      (find.current, find.total)
+    })
+  };
+  h.cx.simulate_keystrokes("cmd-f");
+  assert!(h.drawn("commits-search"));
+  // Messages "a work" and "b work"; a's diff is closed.
+  h.cx.simulate_input("b");
+  assert_eq!(count(&mut h), (0, 1));
+  h.click("commit-row-a");
+  // a's diff: " a", "+b", "+c", above b's message.
+  assert_eq!(count(&mut h), (0, 2));
+  h.click("commits-search-next");
+  assert_eq!(count(&mut h), (1, 2));
+  h.click("commits-search-next");
+  assert_eq!(count(&mut h), (0, 2));
+  h.click("commits-search-close");
+  assert!(!h.drawn("commits-search"));
+}
