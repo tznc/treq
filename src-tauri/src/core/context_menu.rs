@@ -581,7 +581,9 @@ mod tests {
       removable: false,
       ..menu
     };
-    assert!(!labels(&home_items(&fixed, NO_EDITORS)).contains(&"Remove Repository"));
+    assert!(!labels(&home_items(&fixed, NO_EDITORS))
+      .iter()
+      .any(|l| l == "Remove Repository"));
   }
 
   #[test]
