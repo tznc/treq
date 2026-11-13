@@ -32,7 +32,7 @@ jobs:
   detect-changes:
     timeout-minutes: 15
     name: detect changes
-    runs-on: ubuntu-22.04
+    runs-on: small
     outputs:
       rust_changed: ${{ steps.filter.outputs.rust }}
       js_changed: ${{ steps.filter.outputs.js }}
@@ -91,7 +91,7 @@ jobs:
     if: needs.detect-changes.outputs.js_changed == 'true' || needs.detect-changes.outputs.rust_changed == 'true'
     timeout-minutes: 15
     name: verify / ubuntu-22.04
-    runs-on: ubuntu-22.04
+    runs-on: medium
     env:
       JS: ${{ needs.detect-changes.outputs.js_changed }}
       RUST: ${{ needs.detect-changes.outputs.rust_changed }}
@@ -330,7 +330,7 @@ jobs:
     if: ${{ needs.detect-changes.outputs.rust_changed == 'true' }}
     timeout-minutes: 10
     name: cargo-deny / ubuntu-22.04
-    runs-on: ubuntu-22.04
+    runs-on: small
     steps:
       - uses: actions/checkout@v7
 
@@ -494,7 +494,7 @@ jobs:
     name: ci-ok
     if: ${{ always() }}
     needs: [detect-changes, verify, test-desktop-e2e, landing-capture, cargo-deny, test-rust]
-    runs-on: ubuntu-22.04
+    runs-on: small
     timeout-minutes: 5
     steps:
       - name: Fail if any job failed or was cancelled

@@ -15,7 +15,7 @@ permissions:
 jobs:
   check:
     name: new migrations sort last
-    runs-on: ubuntu-latest
+    runs-on: small
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7

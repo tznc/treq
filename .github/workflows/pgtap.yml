@@ -19,7 +19,7 @@ on:
 jobs:
   test-db:
     name: supabase test db
-    runs-on: ubuntu-latest
+    runs-on: medium
     timeout-minutes: 15
 
     steps:
