@@ -15,7 +15,7 @@ on:
 jobs:
   self-hosted:
     name: single-tenant self-hosted image
-    runs-on: medium
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
