@@ -10,8 +10,7 @@
     "skillsInstallation": false,
     "remoteSsh": false,
     "devcontainers": false,
-    "linearIntegration": false,
-    "logs": true
+    "linearIntegration": false
   },
   "env": {
     "dev": {

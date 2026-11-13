@@ -489,6 +489,10 @@ pub struct SettingsView {
   /// each wait: a newer edit restarts it.
   pending: std::collections::HashMap<String, u64>,
   edits: u64,
+  /// Held by the page itself so Escape, with no field or dialog focused,
+  /// goes back.
+  focus: gpui::FocusHandle,
+  focused_once: bool,
   /// An Application save is running; `app_again` holds fields edited
   /// meanwhile, which save once it finishes.
   app_saving: bool,
@@ -550,6 +554,8 @@ impl SettingsView {
       marks: Default::default(),
       pending: Default::default(),
       edits: 0,
+      focus: cx.focus_handle(),
+      focused_once: false,
       app_saving: false,
       app_again: Vec::new(),
       repo_again: Vec::new(),
@@ -2150,12 +2156,30 @@ impl Render for SettingsView {
       _ => None,
     };
 
+    if !std::mem::replace(&mut self.focused_once, true) {
+      window.focus(&self.focus, cx);
+    }
+    let open = dialog.is_some() || confirm.is_some() || delete_dialog.is_some();
     div()
       .relative()
       .size_full()
       .flex()
       .flex_col()
       .bg(p.background)
+      .track_focus(&self.focus)
+      .on_key_down(
+        cx.listener(move |view, e: &gpui::KeyDownEvent, window, cx| {
+          if ui::is_escape(&e.keystroke) && !open && view.focus.is_focused(window) {
+            (view.sink)(
+              ScreenAction::Press {
+                id: "settings.close".into(),
+              },
+              cx,
+            );
+            cx.stop_propagation();
+          }
+        }),
+      )
       .child(header)
       .child(
         div()
@@ -2166,7 +2190,7 @@ impl Render for SettingsView {
           .overflow_y_scroll()
           .child(
             div()
-              .max_w(zpx(896.))
+              .max_w(zpx(1088.))
               .mx_auto()
               .p_6()
               .flex()
