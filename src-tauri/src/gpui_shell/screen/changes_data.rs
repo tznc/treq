@@ -454,6 +454,11 @@ impl Snapshot {
     self.committed.iter().any(|f| f.path == path) && !self.files.iter().any(|f| f.path == path)
   }
 
+  /// How many files the review summary counts.
+  pub fn review_file_count(&self) -> usize {
+    self.files.len()
+  }
+
   /// What `loadChangedFiles` keeps of a workspace's diff.
   pub fn from_workspace_diff(diff: JjRevisionDiff, show_committed: bool) -> Self {
     let files = ChangedFile::parse(&diff.uncommitted_files);
@@ -1626,6 +1631,40 @@ mod tests {
     assert!(!on.shows_branch_diff("clash.rs"));
     let off = Snapshot::from_workspace_diff(diff(), false);
     assert!(!off.shows_branch_diff("both.rs"));
+  }
+
+  /// A jj workspace whose working copy is empty but whose branch has
+  /// commits: the review must count the committed files, not report 0.
+  #[test]
+  fn review_counts_committed_files_when_the_working_copy_is_empty() {
+    let change = |path: &str| JjFileChange {
+      path: path.into(),
+      status: "M".into(),
+      previous_path: None,
+      changed_line_count: 1,
+      diff_deferred: false,
+      content_id: None,
+    };
+    let diff = JjRevisionDiff {
+      committed_files: vec![change("a.rs"), change("b.rs"), change("c.rs")],
+      hunks_by_file: Vec::new(),
+      uncommitted_files: Vec::new(),
+      conflicted_files: Vec::new(),
+      too_large_to_render: false,
+      render_block_reason: None,
+      working_copy_token: None,
+    };
+    let snap = Snapshot::from_workspace_diff(diff, false);
+    assert_eq!(snap.review_file_count(), 3);
+  }
+
+  /// A jj workspace has no `.git` of its own, so `git diff` there reads
+  /// the home repository's working copy. The prompt must not suggest it.
+  #[test]
+  fn built_in_review_prompt_does_not_send_the_agent_to_git_diff() {
+    let prompt = review_prompt(None, "7", "");
+    assert!(!prompt.contains("git diff"), "prompt suggests `git diff`");
+    assert!(prompt.contains("treq diff"));
   }
 
   #[test]
