@@ -407,7 +407,9 @@ impl WindowHost for Backend {
     }
     // A saved project lists its repositories; an unsaved one keeps the
     // main repository's supporting list, as before projects.
-    if let Some(project) = crate::gpui_shell::projects::window_project(self.app(), self.label()) {
+    if let Some(project) =
+      crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+    {
       return project
         .repos
         .into_iter()
@@ -523,25 +525,34 @@ impl WindowHost for Backend {
   }
 
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String> {
-    if let Some(project) = self.project() {
-      let added = std::fs::canonicalize(path)
+    let project = crate::gpui_shell::projects::window_repos_project(self.app(), self.label());
+    let added = match &project {
+      Some(project) if !project.draft => std::fs::canonicalize(path)
         .map_err(|e| format!("Cannot open '{path}': {e}"))?
         .to_string_lossy()
-        .to_string();
-      core::init(&added).map_err(|err| err.to_string())?;
-      self.with_db(|db| crate::core::projects::add_repo(db.conn(), &project.id, &added))?;
-      return Ok(added);
-    }
-    let added = supporting_repos::add(main_repo, path)?;
+        .to_string(),
+      // An unsaved window still records the link on its repository, which
+      // `treq -r` reads.
+      _ => supporting_repos::add(main_repo, path)?,
+    };
     core::init(&added).map_err(|err| err.to_string())?;
+    if let Some(project) = project {
+      self.with_db(|db| crate::core::projects::add_repo(db.conn(), &project.id, &added))?;
+    }
     Ok(added)
   }
 
   fn remove_supporting(&self, main_repo: &str, path: &str) -> Result<(), String> {
-    if let Some(project) = self.project() {
-      return self.with_db(|db| crate::core::projects::remove_repo(db.conn(), &project.id, path));
+    let project = crate::gpui_shell::projects::window_repos_project(self.app(), self.label());
+    if project.as_ref().is_none_or(|p| p.draft) {
+      supporting_repos::remove(main_repo, path)?;
     }
-    supporting_repos::remove(main_repo, path)
+    match project {
+      Some(project) => {
+        self.with_db(|db| crate::core::projects::remove_repo(db.conn(), &project.id, path))
+      }
+      None => Ok(()),
+    }
   }
 
   fn launch(&self, request: &LaunchRequest, select: bool) -> Result<(), String> {

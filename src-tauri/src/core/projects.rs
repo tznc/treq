@@ -130,6 +130,31 @@ pub fn draft(conn: &Connection, repos: &[String]) -> Result<Project, String> {
   insert(conn, &name, repos, true)
 }
 
+/// The draft an unsaved window on `repo` keeps its repositories in: the
+/// newest draft led by `repo`, else a new one of `repo` and `seed()`.
+pub fn draft_for_repo(
+  conn: &Connection,
+  repo: &str,
+  seed: impl FnOnce() -> Vec<String>,
+) -> Result<Project, String> {
+  let found: Option<String> = conn
+    .query_row(
+      "SELECT p.id FROM projects p JOIN project_repos r ON r.project_id = p.id
+       WHERE p.draft = 1 AND r.repo_path = ?1
+         AND r.position = (SELECT MIN(position) FROM project_repos WHERE project_id = p.id)
+       ORDER BY p.created_at DESC LIMIT 1",
+      [repo],
+      |r| r.get(0),
+    )
+    .optional()
+    .map_err(err)?;
+  if let Some(project) = found.map(|id| get(conn, &id)).transpose()?.flatten() {
+    return Ok(project);
+  }
+  let repos: Vec<String> = std::iter::once(repo.to_string()).chain(seed()).collect();
+  draft(conn, &repos)
+}
+
 /// Saves draft `id` as a listed project named `name`.
 pub fn promote(conn: &Connection, id: &str, name: &str) -> Result<(), String> {
   let name = clean_name(name)?;
@@ -744,6 +769,26 @@ mod tests {
   fn a_draft_with_no_repos_is_named_untitled() {
     let conn = conn();
     assert_eq!(draft(&conn, &[]).expect("draft").name, "Untitled");
+  }
+
+  #[test]
+  fn a_repos_draft_is_seeded_once_then_reused() {
+    let conn = conn();
+    let d = draft_for_repo(&conn, "/r/a", || repos(&["/r/b"])).expect("draft");
+    assert_eq!(d.repos, repos(&["/r/a", "/r/b"]));
+    let again = draft_for_repo(&conn, "/r/a", || panic!("not seeded twice")).expect("again");
+    assert_eq!(again.id, d.id);
+  }
+
+  #[test]
+  fn a_repos_draft_ignores_saved_projects_and_other_repos() {
+    let conn = conn();
+    let saved = save(&conn, "P", &repos(&["/r/a"])).expect("save");
+    let other = draft(&conn, &repos(&["/r/x", "/r/a"])).expect("other");
+    let d = draft_for_repo(&conn, "/r/a", Vec::new).expect("draft");
+    assert_ne!(d.id, saved.id);
+    assert_ne!(d.id, other.id);
+    assert_eq!(d.repos, repos(&["/r/a"]));
   }
 
   #[test]
