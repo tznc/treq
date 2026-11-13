@@ -968,6 +968,7 @@ fn tab_reaches_assigned_to_me_and_the_pull_request_checkboxes(cx: &mut TestAppCo
 #[gpui::test]
 fn linear_without_pro_offers_manage_account(cx: &mut TestAppContext) {
   let mut host = linear_host();
+  host.github.remote = acme();
   host.linear.pro_required = true;
   let (mut h, _) = dialog_with(host, true, cx);
   let screen = screen(&mut h);
