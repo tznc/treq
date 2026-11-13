@@ -902,6 +902,12 @@ mod tests {
         .command
         .contains(&format!("rm -rf {}", shell_quote(&prepared.file_paths[0]))));
       assert!(prepared.command.contains(&shell_quote(task_file)));
+      #[cfg(unix)]
+      for path in [task_file, &prepared.file_paths[0]] {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "{agent}: {path} is readable by others");
+      }
       super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
     }
   }
