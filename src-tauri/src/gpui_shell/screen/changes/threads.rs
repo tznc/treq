@@ -469,6 +469,7 @@ impl ChangesView {
       );
     }
     let mut card = div()
+      .min_w_0()
       .rounded(radius::MD)
       .border_1()
       .border_color(sky(p, 0.3))
@@ -510,6 +511,7 @@ impl ChangesView {
       .debug_selector(|| "github-comment-card".into())
       .group("github-comment")
       .relative()
+      .min_w_0()
       .bg(p.background)
       .rounded(radius::MD)
       .p_2p5()
