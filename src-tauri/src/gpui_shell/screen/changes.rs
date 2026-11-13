@@ -2011,6 +2011,10 @@ impl ChangesView {
     if listed.is_empty() && committed == 0 && data.conflicted.is_empty() {
       rows.push(SideRow::Empty);
     } else if listed.is_empty() {
+      // The filter button shares the "Nothing to commit" row.
+      if rows == [SideRow::Filter] {
+        rows.clear();
+      }
       rows.push(SideRow::NothingToCommit);
     } else {
       if !data.staged.is_empty() {
@@ -2110,9 +2114,15 @@ impl ChangesView {
   /// One row of the sidebar.
   fn side_row(&mut self, row: SideRow, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
     match row {
-      SideRow::Filter => self
-        .filter_row(p, cx)
-        .map_or_else(|| div().into_any_element(), IntoElement::into_any_element),
+      SideRow::Filter => self.filter_row(p, cx).map_or_else(
+        || div().into_any_element(),
+        |filter| {
+          div()
+            .pt_3()
+            .child(div().flex().justify_end().child(filter))
+            .into_any_element()
+        },
+      ),
       SideRow::ConflictsHeader => {
         let count = self.side_data.conflicted.len();
         self.conflicts_header(count, p, cx).into_any_element()
@@ -2152,13 +2162,28 @@ impl ChangesView {
           .into_any_element()
       }
       SideRow::CommitBox { .. } => self.commit_box(p, cx).into_any_element(),
-      SideRow::NothingToCommit => ui::text(div(), TextSize::Sm)
-        .debug_selector(|| "changes-nothing-to-commit".into())
-        .py_2()
-        .text_color(p.muted_foreground)
-        .child("Nothing to commit")
+      SideRow::NothingToCommit => div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .child(
+          ui::text(div(), TextSize::Sm)
+            .debug_selector(|| "changes-nothing-to-commit".into())
+            .py_2()
+            .text_color(p.muted_foreground)
+            .child("Nothing to commit"),
+        )
+        .children(self.filter_row(p, cx))
         .into_any_element(),
-      SideRow::CommittedHeader => self.committed_header(p, cx).into_any_element(),
+      SideRow::CommittedHeader => {
+        // Flush under "Nothing to commit": no gap above the header.
+        let d = &self.side_data;
+        let flush = d.staged.is_empty() && d.unstaged.is_empty() && d.conflicted.is_empty();
+        self
+          .committed_header(p, cx)
+          .when(flush, |this| this.pt_0())
+          .into_any_element()
+      }
       SideRow::Committed(i) => self.committed_row(i, p, cx).into_any_element(),
       SideRow::Empty => div()
         .size_full()
@@ -2207,17 +2232,13 @@ impl ChangesView {
     .on_click(cx.listener(|view, _, _, cx| view.filter_menu(cx)))
     .test_support()
     .child(self.anchor("changes-filter".into()));
-    Some(
-      div()
-        .pt_3()
-        .child(div().flex().justify_end().child(self.tips.wrap(
-          "changes-filter-tip",
-          Side::Bottom,
-          Some(TooltipContent::Text("Filter changes".into())),
-          filter,
-          cx,
-        ))),
-    )
+    Some(self.tips.wrap(
+      "changes-filter-tip",
+      Side::Bottom,
+      Some(TooltipContent::Text("Filter changes".into())),
+      filter,
+      cx,
+    ))
   }
 
   /// The filter button's menu: one checkbox item per kind of file shown.

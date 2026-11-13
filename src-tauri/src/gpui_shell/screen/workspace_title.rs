@@ -231,7 +231,6 @@ impl Render for TitleEditor {
         .child(
           heading(div())
             .min_w_0()
-            .max_w(zpx(360.))
             .truncate()
             .debug_selector(|| "workspace-title-text".into())
             .child(self.title.clone()),

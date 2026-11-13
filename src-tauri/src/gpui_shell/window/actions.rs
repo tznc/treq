@@ -419,6 +419,16 @@ impl Model {
           self.view.tab = tab;
         }
       }
+      "workspace.tabHome" => {
+        if let Some(tab) = value.as_str().and_then(Tab::parse) {
+          self.view.tab = tab;
+          match tab {
+            Tab::Overview => self.view.file_browser = None,
+            Tab::Commits => self.view.scroll_to_commit = None,
+            _ => {}
+          }
+        }
+      }
       "workspace.openLogs" => {
         if let Some(source) = value.as_str().filter(|_| data.flags.logs) {
           self.open_logs(source);
@@ -690,7 +700,13 @@ impl Model {
           self.page = Page::Workspace;
           if let Some(id) = session.workspace_id {
             if let Some(workspace) = self.workspace_in(&repo, id, data) {
-              self.set_selected(Some(workspace.id));
+              if self.selected != Some(workspace.id) {
+                // Keep the tab the user was on, at its base page.
+                let tab = self.view.tab;
+                self.set_selected(Some(workspace.id));
+                self.view.tab = tab;
+                self.view.file_browser = None;
+              }
             }
           }
           break;
@@ -1145,7 +1161,11 @@ mod tests {
   use std::collections::HashMap;
 
   use super::{
-    super::{data::RepoRead, model::Dialogs, tree::tests::workspace},
+    super::{
+      data::RepoRead,
+      model::{Dialogs, FileBrowser},
+      tree::tests::workspace,
+    },
     *,
   };
   use crate::local_db::Session;
@@ -1238,6 +1258,22 @@ mod tests {
     let effects = model.screen_action(&press("saveProject.saved"), &data);
     assert_eq!(model.dialogs.save_project, None);
     assert!(format!("{effects:?}").contains("Refresh"));
+  }
+
+  #[test]
+  fn double_clicking_a_tab_returns_it_to_its_base_page() {
+    let (mut model, data) = (model(), data());
+    model.view.file_browser = Some(FileBrowser {
+      selected_file: Some("a.rs".into()),
+      expanded_dir: None,
+    });
+    model.view.scroll_to_commit = Some("zz".into());
+    model.screen_action(&field("workspace.tabHome", json!("overview")), &data);
+    assert_eq!(model.view.tab, Tab::Overview);
+    assert_eq!(model.view.file_browser, None);
+    model.screen_action(&field("workspace.tabHome", json!("commits")), &data);
+    assert_eq!(model.view.tab, Tab::Commits);
+    assert_eq!(model.view.scroll_to_commit, None);
   }
 
   #[test]
@@ -1552,6 +1588,36 @@ mod tests {
     assert_eq!(model.selected, Some(1));
     model.screen_action(&field("terminal.shortcut", "k".into()), &data);
     assert!(model.dialogs.palette);
+  }
+
+  /// Clicking another workspace's terminal keeps the tab the user was on,
+  /// at its base page: no file or commit carried over from the last one.
+  #[test]
+  fn a_terminal_click_keeps_the_tab_at_its_base_page() {
+    let (mut model, mut data) = (model(), data());
+    data.apply(
+      "/repo",
+      RepoRead {
+        sessions: Some(vec![Session {
+          id: 5,
+          workspace_id: Some(3),
+          name: "Claude 1".into(),
+          created_at: String::new(),
+          last_accessed: String::new(),
+          model: None,
+        }]),
+        ..RepoRead::default()
+      },
+    );
+    model.set_selected(Some(1));
+    model.open_file("/repo/.treq/workspaces/a/src/main.rs");
+    model.view.scroll_to_commit = Some("abc".into());
+    model.view.tab = Tab::Changes;
+    model.screen_action(&field("terminal.activeSession", 5.into()), &data);
+    assert_eq!(model.selected, Some(3));
+    assert_eq!(model.view.tab, Tab::Changes);
+    assert_eq!(model.view.file_browser, None);
+    assert_eq!(model.view.scroll_to_commit, None);
   }
 
   /// The AI Review agent's turn ending is the review done: the controller
