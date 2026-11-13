@@ -13,9 +13,7 @@ jobs:
   # Keeps the old title-check job id in case it is a required check.
   check-conventional-title:
     timeout-minutes: 15
-    # Self-hosted, so this API-only job doesn't wait behind CI for a hosted
-    # runner. Safe for pull_request_target: it never checks out PR code.
-    runs-on: small
+    runs-on: ubuntu-latest
     steps:
       - name: Remove codex label
         if: github.event.action == 'opened'
