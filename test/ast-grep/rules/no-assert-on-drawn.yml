@@ -1,0 +1,53 @@
+id: no-assert-on-drawn
+language: rust
+severity: error
+message: >
+  Do not assert on whether an element id was drawn. Assert on what the user
+  sees: query by text or role with gpui-testing-library
+  (`get_by_text`, `get_by_role`) and check its content.
+# Baseline: files that already asserted on drawn ids. Do not add to it;
+# migrate a file and drop it from this list instead.
+ignores:
+  - "src-tauri/src/gpui_shell/overlay/tests.rs"
+  - "src-tauri/src/gpui_shell/popover/tests.rs"
+  - "src-tauri/src/gpui_shell/screen/tests.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/account_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/changes_large.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/changes_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/code_files_large.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/code_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/commit_diffs.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/commits_large.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/commits_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/conflicts.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/dialogs.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/file_browser.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/fuzz.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/github.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/gutter_drag.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/home_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/idle.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/input_latency.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/kept_tabs.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/linear_view.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/logs_explorer.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/logs_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/machines_chaos.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/merge_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/onboarding_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/pr_review.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/prefetch.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/remote_dialog_overflow.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/review_comments.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/settings_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/skills_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/stack_panel.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/tab_badges.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/terminal_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/testing_library.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/virtual_lists.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/workspace_actions.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/workspace_dialogs.rs"
+rule:
+  kind: macro_invocation
+  regex: ^assert(_eq|_ne)?!\(\s*!?\s*[A-Za-z_][A-Za-z_0-9.]*\.drawn\(
