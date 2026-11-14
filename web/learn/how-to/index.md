@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: "Short how-to guides for Git and coding agents: recover branches, run parallel Claude Code sessions, and resolve conflicts."
 ---
 
 import DocCardList from '@theme/DocCardList';

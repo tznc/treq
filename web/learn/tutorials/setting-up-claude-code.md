@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: Install Claude Code in VS Code, give it project context, and use it to plan, build, and test a TypeScript utility.
 ---
 
 # Setting Up Claude Code
