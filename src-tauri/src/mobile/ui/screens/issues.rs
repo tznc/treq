@@ -24,6 +24,7 @@ use gpui_kit::{
 use treq_ui::{Dot, Row, RowDensity, Tone};
 
 use super::{issue, mutation_message, on_epoch};
+use crate::github_filters::{filter_issue_indices, issue_filter_options, IssueFilters};
 use crate::mobile::{
   errors,
   remote::{self, IdempotencyKeys, Mutation},
@@ -143,13 +144,25 @@ pub type OnChanged = Rc<dyn Fn(&mut App)>;
 pub enum Filter {
   Open,
   Closed,
+  All,
 }
 
 impl Filter {
+  pub const ALL: [Filter; 3] = [Filter::Open, Filter::Closed, Filter::All];
+
   fn as_str(self) -> &'static str {
     match self {
       Self::Open => "open",
       Self::Closed => "closed",
+      Self::All => "all",
+    }
+  }
+
+  pub fn label(self) -> &'static str {
+    match self {
+      Self::Open => "Open",
+      Self::Closed => "Closed",
+      Self::All => "All",
     }
   }
 }
@@ -173,6 +186,8 @@ impl From<GhListPage<GhIssue>> for Listed {
 pub struct IssuesScreen {
   repo: String,
   filter: Filter,
+  /// The Filters sheet's author and label; the search box is `query`.
+  filters: IssueFilters,
   list: Load<Listed>,
   loading_more: bool,
   /// Why the last refresh or "Load more" failed, while the list shows.
@@ -196,6 +211,7 @@ impl IssuesScreen {
     let mut this = Self {
       repo,
       filter: Filter::Open,
+      filters: IssueFilters::default(),
       list: Load::Idle,
       loading_more: false,
       refresh_error: None,
@@ -442,32 +458,87 @@ impl IssuesScreen {
   }
 
   fn filter_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let button = |id: &'static str, label: &'static str, filter: Filter, current: Filter| {
-      Button::new(id)
-        .large()
-        .flex_1()
-        .h(px(44.))
-        .label(label)
-        .map(|b| {
-          if filter == current {
-            b.primary()
-          } else {
-            b.outline()
-          }
-        })
+    widgets::filter_row(
+      "issues",
+      self.filter.label(),
+      cx.listener(|this, _, _, cx| this.state_menu(cx)),
+      self.filters.active_count(),
+      cx.listener(|this, _, _, cx| this.filters_sheet(cx)),
+    )
+  }
+
+  fn state_menu(&mut self, cx: &mut Context<Self>) {
+    let this = cx.weak_entity();
+    let entries = Filter::ALL
+      .iter()
+      .map(|&filter| {
+        let this = this.clone();
+        sheet::MenuEntry::new(
+          format!("state-{}", filter.as_str()),
+          filter.label(),
+          move |_, cx| {
+            this
+              .update(cx, |screen, cx| screen.set_filter(filter, cx))
+              .ok();
+          },
+        )
+        .selected(filter == self.filter)
+      })
+      .collect();
+    sheet::menu("State", entries, cx);
+  }
+
+  /// The advanced filters: one entry per field, each opening its values.
+  fn filters_sheet(&mut self, cx: &mut Context<Self>) {
+    let items = self
+      .list
+      .ready()
+      .map(|l| l.items.as_slice())
+      .unwrap_or_default();
+    let options = issue_filter_options(items);
+    let this = cx.weak_entity();
+    let set = |apply: fn(&mut IssueFilters, Option<String>)| -> widgets::OnPick {
+      let this = this.clone();
+      Rc::new(move |value, cx| {
+        this
+          .update(cx, |screen, cx| {
+            apply(&mut screen.filters, value);
+            cx.notify();
+          })
+          .ok();
+      })
     };
-    h_flex()
-      .gap_2()
-      .child(
-        button("filter-open", "Open", Filter::Open, self.filter)
-          .on_click(cx.listener(|this, _, _, cx| this.set_filter(Filter::Open, cx)))
-          .touch(),
-      )
-      .child(
-        button("filter-closed", "Closed", Filter::Closed, self.filter)
-          .on_click(cx.listener(|this, _, _, cx| this.set_filter(Filter::Closed, cx)))
-          .touch(),
-      )
+    let mut entries = vec![
+      widgets::filter_field(
+        "filter-author",
+        "Author",
+        self.filters.author.clone(),
+        options.authors,
+        set(|f, v| f.author = v),
+      ),
+      widgets::filter_field(
+        "filter-label",
+        "Label",
+        self.filters.label.clone(),
+        options.labels,
+        set(|f, v| f.label = v),
+      ),
+    ];
+    if self.filters.active_count() > 0 {
+      entries.push(sheet::MenuEntry::new(
+        "filter-clear",
+        "Clear filters",
+        move |_, cx| {
+          this
+            .update(cx, |screen, cx| {
+              screen.filters = screen.filters.cleared();
+              cx.notify();
+            })
+            .ok();
+        },
+      ));
+    }
+    sheet::menu("Filters", entries, cx);
   }
 }
 
@@ -487,20 +558,22 @@ impl Render for IssuesScreen {
         match self.filter {
           Filter::Open => "No open issues.",
           Filter::Closed => "No closed issues.",
+          Filter::All => "No issues.",
         },
         cx,
       )),
       Load::Ready(listed) => {
-        let shown: Vec<GhIssue> = listed
-          .items
-          .iter()
+        let kept = filter_issue_indices(&listed.items, &self.filters);
+        let shown: Vec<GhIssue> = kept
+          .into_iter()
+          .map(|i| &listed.items[i])
           .filter(|i| matches(i, &query))
           .cloned()
           .collect();
         if shown.is_empty() {
           widgets::card(cx).child(widgets::empty(
             "issues-no-match",
-            "No loaded issues match.",
+            "No loaded issues match. Change the search or clear the filters.",
             cx,
           ))
         } else {
@@ -723,6 +796,13 @@ mod tests {
     assert!(matches(&i, "42"));
     assert!(!matches(&i, "#4"));
     assert!(!matches(&i, "settings"));
+  }
+
+  #[core::prelude::v1::test]
+  fn the_state_menu_offers_open_closed_and_all() {
+    let labels: Vec<&str> = Filter::ALL.iter().map(|f| f.label()).collect();
+    assert_eq!(labels, ["Open", "Closed", "All"]);
+    assert_eq!(Filter::All.as_str(), "all");
   }
 
   #[core::prelude::v1::test]

@@ -1,0 +1,29 @@
+id: gpui-toggle-not-primary
+valid:
+  - |
+    fn chip(on: bool) -> Button {
+      Button::new("open").outline().selected(on).label("Open")
+    }
+  - |
+    fn submit(busy: bool) -> Button {
+      Button::new("submit").primary().loading(busy).label("Submit")
+    }
+  - |
+    fn reveal(on: bool) -> Button {
+      Button::new("x").map(|b| if on { b.primary() } else { b.ghost() })
+    }
+invalid:
+  - |
+    fn chip(on: bool) -> Button {
+      Button::new("open").label("Open").map(|b| if on { b.primary() } else { b.outline() })
+    }
+  - |
+    fn reaction(mine: bool) -> Button {
+      Button::new("r").map(|b| {
+        if mine {
+          b.primary()
+        } else {
+          b.outline()
+        }
+      })
+    }
