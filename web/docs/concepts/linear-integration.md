@@ -1,5 +1,6 @@
 ---
 sidebar_position: 7
+description: How Treq links workspaces to Linear issues, shows and manages issues in the app, and creates a workspace from an issue.
 ---
 
 # Linear Integration

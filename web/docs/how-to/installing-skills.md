@@ -1,5 +1,6 @@
 ---
 sidebar_position: 9
+description: Browse the Treq skill registry, verify each download, and choose where each skill is installed.
 ---
 
 # Installing Skills from the Library

@@ -1,5 +1,6 @@
 ---
 sidebar_position: 6
+description: "Reference for the treq command-line interface: create and inspect workspaces from a terminal inside a Git or Jujutsu repository."
 ---
 
 # CLI

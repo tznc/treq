@@ -1,5 +1,6 @@
 ---
 sidebar_position: 4
+description: Select files or hunks and commit them in Treq. There is no separate staging area, and you can discard what you do not want.
 ---
 
 # Committing Changes

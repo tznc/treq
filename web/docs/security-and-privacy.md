@@ -1,5 +1,6 @@
 ---
 sidebar_position: 2
+description: "How Treq handles your data: what stays on your machine, what it never sends, and which operations the Treq CLI refuses to perform."
 ---
 
 # Security and Privacy

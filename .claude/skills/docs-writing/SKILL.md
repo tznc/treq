@@ -88,6 +88,7 @@ Frontmatter pattern:
 ```markdown
 ---
 sidebar_position: N
+description: 50 to 160 characters, leading with the task or term a reader searches for.
 ---
 
 # Title

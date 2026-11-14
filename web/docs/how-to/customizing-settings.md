@@ -1,5 +1,6 @@
 ---
 sidebar_position: 2
+description: "Change Treq settings: repository, application, account, integrations, skills, and Feature Preview."
 ---
 
 # Customizing Settings

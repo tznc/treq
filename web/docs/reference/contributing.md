@@ -1,5 +1,6 @@
 ---
 sidebar_position: 4
+description: "Developer documentation for working on Treq locally: the Rust and GPUI architecture, finding the owning layer, and writing tests."
 ---
 
 # Contributing
