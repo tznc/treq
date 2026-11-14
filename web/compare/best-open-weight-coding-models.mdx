@@ -1,0 +1,85 @@
+---
+sidebar_position: 27
+title: Best Open-Weight Coding Models (2026)
+description: Best open-weight coding models in 2026. Kimi, DeepSeek, GLM, Qwen, MiniMax, Mistral and gpt-oss compared on license, size, context and API price.
+---
+
+# Best Open-Weight Coding Models
+
+_The current open-weight models for coding agents come from Moonshot AI, DeepSeek, Z.ai, Qwen, MiniMax and Mistral. Read the license before you build on one, because only some use MIT or Apache 2.0._
+
+An open-weight model publishes its trained weights. You can run it on your own GPUs, fine-tune it, or call the vendor's hosted API at a lower price than most closed models. This page compares the open-weight models that vendors position for coding and agent work. Figures were checked against each vendor's official model card, license file and pricing page in November 2026 and will change.
+
+## Models at a Glance
+
+Hosted prices are each vendor's own API list price in US dollars per million tokens.
+
+| Model | Vendor | Weights released | Total / active parameters | Context window | Hosted input | Hosted output |
+| --- | --- | --- | --- | --- | --- | --- |
+| Kimi K3.1 Pro | Moonshot AI | Nov 2026 | 2.8T / 104B | 1M | $2 | $10 |
+| DeepSeek-V4-Pro-0813 | DeepSeek | Aug 2026 | Not stated | 1M | $1.32 | $3.96 |
+| DeepSeek-V4.1-Flash-1017 | DeepSeek | Oct 2026 | Not stated | 1M | $0.30 | $1.20 |
+| GLM-5.3 | Z.ai | Aug 2026 | Not stated | 1M | $1.40 | $4.40 |
+| GLM-5.3-Flash | Z.ai | Aug 2026 | 320B / 18B | 1M | $0.15 | $0.50 |
+| Qwen3.8-2.4T-A95B | Qwen | Aug 2026 | 2.4T / 95B | 262K native | $2 | $6 |
+| Qwen3.8-27B | Qwen | Aug 2026 | 27B dense | 262K native | Not yet hosted | Not yet hosted |
+| MiniMax-M3.1-Flash | MiniMax | Oct 2026 | About 428B / 23B | 1M | $0.15 | $0.60 |
+| Mistral Large 4 | Mistral AI | Sep 2026 | 1.05T / 52B | 1M | $0.70 | $2.10 |
+| gpt-oss-120b | OpenAI | Aug 2025 | 117B / 5.1B | 131K | Not listed | Not listed |
+
+DeepSeek prices are peak rates, and off-peak rates are half. Qwen's hosted price is for Qwen3.8-Max, the hosted version built on the 2.4T weights. It serves a 1M context window, while the weights support 262,144 tokens natively and up to 1,010,000 with extension. Qwen says Qwen3.8-27B will get a hosted version later.
+
+## Licenses
+
+The license decides whether you can ship a product on the weights. MIT and Apache 2.0 grant broad commercial use. The vendor licenses below copy MIT's grant and then add conditions.
+
+| Model | License | Main conditions beyond MIT |
+| --- | --- | --- |
+| DeepSeek-V4-Pro-0813, DeepSeek-V4.1-Flash-1017, GLM-5.3-Flash | MIT | None |
+| Qwen3.8-27B, gpt-oss-120b | Apache 2.0 | None beyond Apache terms |
+| Kimi K3.1 Pro | Kimi K3.1 Pro License | A model-as-a-service business above $20M revenue in 12 months needs a separate agreement. Products above 100M monthly users or $20M monthly revenue must display the model name. |
+| GLM-5.3 | GLM-5.3 License | A model-as-a-service business above $10B revenue in 12 months must pass a Z.ai security review. |
+| Qwen3.8-2.4T-A95B | Qwen3.8-Max License | A model-as-a-service or AI coding or office-assistant business above $50M revenue in 12 months needs a separate license. Large products must display the model name. |
+| MiniMax-M3.1-Flash | MiniMax Community License | The base grant covers non-commercial use. Commercial use requires a "Built with MiniMax M3.1-Flash" notice and a one-time email to MiniMax, and written approval above $20M yearly revenue. |
+| Mistral Large 4 | Mistral Ecosystem Open-Weight License | Any model-as-a-service business needs a separate commercial license, with no revenue threshold. |
+
+Internal use is exempt from the model-as-a-service conditions in the Kimi, Qwen and Mistral licenses. The Qwen3.8-Max License names AI coding products explicitly. If you are building a coding tool, read that clause with a lawyer before you depend on the weights.
+
+## Vendor-Reported Coding Scores
+
+Each vendor publishes benchmark results on its model card. The table shows DeepSWE v1.1, a coding benchmark that five of these model cards report. Each vendor ran it with its own agent framework and context limit, so the scores are not a fair ranking. Treat them as the vendor's claim.
+
+| Model | DeepSWE v1.1 | Agent framework the vendor used | Source |
+| --- | --- | --- | --- |
+| DeepSeek-V4.1-Flash-1017 | 77.0 | Mini-SWE-V2 | [DeepSeek model card](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017) |
+| Kimi K3.1 Pro | 75.5 | Claude Code | [Moonshot AI model card](https://huggingface.co/moonshotai/Kimi-K3.1-Pro) |
+| MiniMax-M3.1-Flash | 73.7 | mini-SWE-agent, 512K context | [MiniMax model card](https://huggingface.co/MiniMaxAI/MiniMax-M3.1-Flash) |
+| GLM-5.3 | 66.9 | mini-swe-agent, 400K context | [Z.ai model card](https://huggingface.co/zai-org/GLM-5.3) |
+| Qwen3.8-Max | 56.6 | Best of Claude Code and mini-SWE-agent, 256K context | [Qwen model card](https://huggingface.co/Qwen/Qwen3.8-2.4T-A95B) |
+
+## Hosting Your Own vs Calling the API
+
+Self-hosting gives you control over data and rate limits, but the largest models need a multi-GPU server. Kimi K3.1 Pro and Qwen3.8 have 2.4T to 2.8T parameters. Moonshot ships Kimi K3.1 Pro weights in MXFP4 to shrink the memory footprint, and Mistral publishes an NVFP4 checkpoint of Large 4 for Blackwell GPUs. At the small end, OpenAI states that gpt-oss-120b fits on a single H100 GPU, and Qwen3.8-27B is a dense 27B model.
+
+Moonshot AI, Z.ai, Qwen and Mistral document vLLM and SGLang support on their model cards. Active parameters set the compute spent per token. GLM-5.3-Flash activates 18B and MiniMax-M3.1-Flash activates 23B, and both sit among the cheapest hosted options.
+
+## Using Them in Coding Tools
+
+You do not need to self-host to try these models in a coding agent. Moonshot AI, DeepSeek and MiniMax offer Anthropic-compatible endpoints, and Moonshot and DeepSeek publish setup guides for Claude Code. DeepSeek also documents Codex and OpenCode. Z.ai sells a coding plan for Claude Code, Cline, OpenCode and Kilo Code. GitHub Copilot lists Kimi K3, the predecessor of K3.1 Pro, as generally available.
+
+## How to Choose
+
+The right model depends on what you will do with it. For a hosted API at the lowest price, GLM-5.3-Flash, MiniMax-M3.1-Flash and DeepSeek's `deepseek-flash` endpoint cost $0.15 to $0.30 per million input tokens. For the largest open models, Kimi K3.1 Pro and Qwen3.8 are the 2.4T-plus options. For a product that redistributes or serves the weights, start from the MIT and Apache 2.0 models and treat the others as needing legal review.
+
+Vendor scores do not transfer to your codebase. Run each candidate on 20 to 50 closed issues from your own repository, with a failing test for each, and compare pass rate and cost per passing task.
+
+## Related Concepts
+
+Open-weight models fit well as cheaper workers under a stronger lead model, a pattern covered in [agent orchestration](/learn/concepts/ai-engineering/agent-orchestration). Whichever model you choose, [quality gates](/learn/concepts/ai-engineering/quality-gates-for-agent-output) decide whether its changes pass.
+
+## Next Steps
+
+- [Best LLMs for Coding Agents](./best-llms-for-coding-agents): open-weight and closed models in one table
+- [Claude vs GPT for Coding](./claude-vs-gpt-for-coding): the two closed flagships side by side
+- [Claude vs Gemini for Coding](./claude-vs-gemini-for-coding): Anthropic and Google compared
+- [What are Coding Agents?](/learn/concepts/ai-engineering/coding-agents): how the agent loop uses a model

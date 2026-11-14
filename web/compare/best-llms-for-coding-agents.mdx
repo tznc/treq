@@ -1,0 +1,120 @@
+---
+sidebar_position: 24
+title: Best LLMs for Coding Agents (2026)
+description: Best LLMs for coding agents in 2026. Claude, GPT, Gemini and open-weight models compared on price, context window, output limits and coding tools.
+---
+
+# Best LLMs for Coding Agents
+
+_Start with the tier each vendor recommends for software work, then step down to a cheaper model wherever your own tests still pass._
+
+A coding agent calls the model once per step, often hundreds of times per task, and resends the conversation each time. Price per token, cached-input price and context limits decide what a task costs. This page compares the current models from Anthropic, OpenAI and Google with the leading open-weight models. Figures were checked against each provider's official model and pricing pages in November 2026 and will change, so confirm them before you commit.
+
+## Frontier Models at a Glance
+
+Prices are standard API list prices in US dollars per million tokens.
+
+| Model | Vendor | Released | Input | Output | Context window | Max output |
+| --- | --- | --- | --- | --- | --- | --- |
+| Claude Fable 5.2 | Anthropic | Nov 9, 2026 | $8 | $40 | 1M | 128K |
+| Claude Opus 5.5 | Anthropic | Sep 22, 2026 | $4 | $20 | 1M | 128K |
+| Claude Sonnet 5.5 | Anthropic | Sep 28, 2026 | $2 | $10 | 1M | 128K |
+| Claude Haiku 5.5 | Anthropic | Oct 7, 2026 | $0.10 | $0.50 | 1M | 128K |
+| GPT-6 Astra | OpenAI | Sep 3, 2026 | $10 | $50 | 1.05M | 128K |
+| GPT-6.1 Sol | OpenAI | Sep 29, 2026 | $2 | $10 | 1.05M | 128K |
+| GPT-6.1 Terra | OpenAI | Oct 26, 2026 | $1 | $5 | 1.05M | 128K |
+| GPT-6 Luna | OpenAI | Sep 22, 2026 | $0.10 | $0.50 | 1.05M | 128K |
+| Gemini 4 Carbon | Google | Nov 10, 2026 | $2, then $4 | $10, then $20 | 1M | 64K, up to 1M |
+| Gemini 4 Argon | Google | Oct 13, 2026 | $2, then $4 | $10, then $20 | 1M | 64K, up to 1M |
+| Gemini 4 Hydrogen | Google | Nov 12, 2026 | $1.50 | $7.50 | 1M | 64K, up to 1M |
+
+Several prices carry conditions. Claude Haiku 5.5 costs $0.50 and $2.50 once a prompt passes 100,000 tokens. OpenAI charges 2x input and 1.5x output for the whole request once a prompt passes 272K tokens, and caps input at 922,000 tokens. Gemini 4 Carbon and Argon are on introductory pricing through November 30, 2026, and the higher price applies from December 1.
+
+Gemini 4 models share one 1,048,576-token window between input, thinking and output. A response stops at 65,536 tokens by default and can run up to the full window with Google's long decode feature.
+
+## Open-Weight Models at a Glance
+
+Open-weight models publish their weights, so you can run them on your own GPUs or call the vendor's hosted API. The prices below are for the vendor's own API.
+
+| Model | Vendor | License | Input | Output | Context window |
+| --- | --- | --- | --- | --- | --- |
+| Kimi K3.1 Pro | Moonshot AI | Kimi K3.1 Pro License | $2 | $10 | 1M |
+| DeepSeek-V4-Pro-0813 | DeepSeek | MIT | $1.32 | $3.96 | 1M |
+| DeepSeek-V4.1-Flash-1017 | DeepSeek | MIT | $0.30 | $1.20 | 1M |
+| GLM-5.3 | Z.ai | GLM-5.3 License | $1.40 | $4.40 | 1M |
+| GLM-5.3-Flash | Z.ai | MIT | $0.15 | $0.50 | 1M |
+| Qwen3.8-Max | Qwen | Qwen3.8-Max License | $2 | $6 | 1M hosted, 262K native |
+| MiniMax-M3.1-Flash | MiniMax | MiniMax Community License | $0.15 | $0.60 | 1M |
+
+DeepSeek prices are peak rates. Off-peak rates are half. The MIT models carry the standard MIT terms. The other licenses add revenue thresholds, attribution or a separate agreement for some businesses. [Best Open-Weight Coding Models](./best-open-weight-coding-models) covers each license and the vendors' own benchmark claims.
+
+## Cached Input Decides the Bill
+
+An agent's request repeats everything from earlier turns: the system prompt, tool definitions, files it read and its own past tool calls. Providers bill a repeated prefix at a cache rate far below the normal input price. On a long session the cached-input price matters as much as the headline input price.
+
+| Model | Cached input per 1M tokens |
+| --- | --- |
+| Claude Fable 5.2 | $0.20 |
+| Claude Opus 5.5 | $0.20 |
+| Claude Sonnet 5.5 | $0.10 |
+| GPT-6 Astra | $1 |
+| GPT-6.1 Sol | $0.10 |
+| Gemini 4 Carbon and Argon | $0.10, then $0.20 |
+| Kimi K3.1 Pro | $0.20 |
+| DeepSeek-V4.1-Flash-1017 | $0.006 peak |
+
+Cache writes cost extra on most of these APIs. Anthropic charges 1.25x the input price for a 5-minute cache write and 2x for a 1-hour write. OpenAI charges 1.25x for its standard cache write. Gemini 4 models support only implicit caching, so you cannot pin a prefix in the cache yourself.
+
+## Reasoning Effort Changes the Price Too
+
+Every current frontier model exposes an effort or thinking-level setting. Higher effort spends more tokens per step and takes longer. The default differs by model, so the same prompt can cost more on one model only because of its default.
+
+| Model | Default effort |
+| --- | --- |
+| Claude Fable 5.2 | `high` |
+| Claude Opus 5.5 | `medium` |
+| Claude Sonnet 5.5 | `high` |
+| GPT-6.1 Sol | `medium` |
+| Gemini 4 Carbon and Argon | `medium` |
+| Gemini 4 Hydrogen | `high` |
+
+Set effort explicitly in your agent configuration, then compare models at matched settings. Google states that Gemini 4 output prices include thinking tokens.
+
+## Where Each Model Runs
+
+Most teams pick a model through a coding tool, the program that runs the agent loop. Claude Code, Codex and GitHub Copilot are the common ones.
+
+| Coding tool | Models it documents |
+| --- | --- |
+| Claude Code | Anthropic models. On the Anthropic API its `opus` alias resolves to Claude Opus 5.5, and `/model fable` selects Fable 5.2. |
+| Codex | The GPT-6 family, for example `codex -m gpt-6.1-sol`. |
+| GitHub Copilot | Claude Fable 5.2, Opus 5.5, Sonnet 5.5, GPT-6 Astra, GPT-6.1 Sol, all three Gemini 4 models and the open-weight Kimi K3, all generally available. |
+| Antigravity agent | Gemini 4 Hydrogen by default, in Gemini Managed Agents. |
+
+Open-weight vendors work with these tools too. Moonshot AI, DeepSeek and MiniMax accept Anthropic-format requests, and Moonshot and DeepSeek document Claude Code setup. Z.ai sells a coding plan for Claude Code, Cline, OpenCode and Kilo Code.
+
+On cloud platforms, Claude models run on Amazon Bedrock, Google Cloud and Microsoft Foundry. GPT-6 models run on Amazon Bedrock, and on Google Cloud in private preview.
+
+## How to Choose
+
+The right model depends on the task, so treat vendor tiers as starting points. Anthropic's docs tell you to start with Claude Opus 5.5 and move to Fable 5.2 only when evals at higher effort still fall short. OpenAI's docs start you on GPT-6 Astra and offer GPT-6.1 Sol to cut cost. Google's docs point most software engineering to Gemini 4 Argon and the hardest debugging and design work to Carbon.
+
+| Work | Models to try first |
+| --- | --- |
+| Long autonomous runs on hard problems | Claude Fable 5.2, GPT-6 Astra or Gemini 4 Carbon. These cost the most, so keep them for tasks where cheaper models fail. |
+| Everyday agent loops | Claude Opus 5.5, Claude Sonnet 5.5, GPT-6.1 Sol or Gemini 4 Argon, at $2 to $4 per million input tokens. |
+| Subagents and bulk work such as search, log summaries and simple edits | Claude Haiku 5.5, GPT-6 Luna, Gemini 4 Hydrogen, GLM-5.3-Flash or DeepSeek's `deepseek-flash` endpoint. |
+| Self-hosting or strict data control | An open-weight model whose license fits your business. |
+
+Benchmark tables from vendors use different agent setups and settings, so they do not rank models for your repository. Build a small eval instead: 20 to 50 closed issues from your own codebase, each with a test that fails before the fix. Run every candidate at matched effort and compare cost per passing task.
+
+## Related Concepts
+
+If you are new to agent workflows, start with [what coding agents are](/learn/concepts/ai-engineering/coding-agents) and how [quality gates](/learn/concepts/ai-engineering/quality-gates-for-agent-output) decide whether an agent's change passes. Running [coding agents in parallel](/learn/parallel-coding-agents) multiplies model cost, so price per task matters more as you scale.
+
+## Next Steps
+
+- [Claude vs GPT for Coding](./claude-vs-gpt-for-coding): the two flagships side by side
+- [Claude vs Gemini for Coding](./claude-vs-gemini-for-coding): pricing, caching and output limits compared
+- [Best Open-Weight Coding Models](./best-open-weight-coding-models): licenses, sizes and hosted prices
+- [Agent Orchestration](/learn/concepts/ai-engineering/agent-orchestration): splitting work across a lead agent and cheaper subagents
