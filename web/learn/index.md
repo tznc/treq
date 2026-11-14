@@ -20,6 +20,6 @@ These guides answer specific workflow questions:
 - [Auto-Rebasing AI Workspaces](/learn/how-to/auto-rebase-ai-branches)
 - [Review AI-Generated PRs](/learn/how-to/review-ai-generated-prs)
 - [Fix Merge Conflicts from Coding Agents](/learn/how-to/merge-conflicts-with-coding-agents)
-- [Git Worktrees vs Clones for Agents](/learn/how-to/git-worktrees-vs-clones-for-agents)
+- [Git Worktrees vs Clones](/learn/concepts/git/git-worktrees-vs-clones)
 
 For the Treq product, see the [Product Documentation overview](/docs/).

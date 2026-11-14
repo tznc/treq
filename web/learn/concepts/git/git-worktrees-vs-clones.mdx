@@ -4,7 +4,7 @@ sidebar_position: 3
 
 import DefinitionCard from "@site/src/components/DefinitionCard";
 
-# Git Worktrees vs Clones
+# Git Worktree vs Clone
 
 _Worktrees share one repository. Clones create separate repositories._
 
@@ -12,7 +12,7 @@ _Worktrees share one repository. Clones create separate repositories._
 
 Git worktrees and clones both give you another directory in which to check out files. A worktree links that directory to an existing repository. A clone builds a whole new repository with its own object database, refs, config, and admin state.
 
-Pick between them on the isolation you need, not just on setup time or disk use.
+Use a worktree when you want another checkout of the same repository, with shared branches and history. Use a clone when the second copy needs its own remotes, config, or lifecycle. Pick on the isolation you need, not on setup time or disk use.
 
 ## Understanding the Concept
 
@@ -84,6 +84,35 @@ Shared state is the catch. A fetch, a branch deletion, a tag update, a stash, or
 
 Clones fit jobs that need their own refs, config, maintenance, or deletion. They are not a security boundary on their own. Two clones running as the same OS user still reach the same files, credentials, processes, and network. When one project must pin another project's history inside its tree, use [Git submodules](./git-submodules.mdx) instead of a second clone.
 
+## Choosing for Coding Agents
+
+Each coding agent needs its own working directory, so two agents never edit the same files. The table below picks the directory type from what the agent's task needs.
+
+| Need | Prefer |
+| --- | --- |
+| Parallel local agents on one repo | Worktrees |
+| Fast creation, shared objects | Worktrees |
+| Immediate visibility of local commits | Worktrees |
+| Different remotes or repo config | Clones |
+| Disposable repo state, or experiments with hooks | Clones |
+| Credential or host isolation | Neither alone. Use a sandbox or separate OS user |
+
+Give each agent a worktree and a branch of its own:
+
+```bash
+git worktree add -b agent/cache-headers ../app-cache-headers origin/main
+```
+
+**Two feature agents on one app.** Use worktrees. You keep shared history and can review each branch from the main checkout.
+
+**An agent that tests a different remote or fork.** Use a clone with its own `origin`.
+
+**An agent that must not see production credentials.** Use a container, VM, or separate OS account, then a worktree or clone inside that boundary.
+
+**CI jobs that change Git config.** Use clones or ephemeral runners. Do not attach them as worktrees to a developer's repository.
+
+Treq follows the worktree model. Each [Treq workspace](/docs/concepts/workspaces) is a separate working copy under `.treq/workspaces/` that shares history through a colocated Jujutsu and Git repository. Treq adds automatic rebase of dependent workspaces on top.
+
 ## Scaling and Operations
 
 Give every concurrent writer its own branch. By default Git blocks one local branch from being checked out in two linked worktrees, because both directories could race to move the same ref.
@@ -96,10 +125,11 @@ git worktree prune
 
 For large pools of short-lived jobs, measure Git object size and working-tree size separately. Worktrees cut duplicate object storage, but installed dependencies, build output, and generated files usually take up far more space.
 
-Use clones or a stronger sandbox when jobs must not share Git refs or config. [Choosing between them for agents](/learn/how-to/git-worktrees-vs-clones-for-agents) walks through the decision. Use containers, virtual machines, or separate user accounts when they must not share credentials or host access.
+Use clones or a stronger sandbox when jobs must not share Git refs or config. [Choosing for coding agents](#choosing-for-coding-agents) walks through the decision. Use containers, virtual machines, or separate user accounts when they must not share credentials or host access.
 
 ## Next Steps
 
 - [What are Git Worktrees?](./git-worktrees.mdx): learn the worktree lifecycle and shared-state model
+- [Worktree or Clone to Review a Pull Request?](/learn/answers/worktrees/worktree-or-clone-to-review-a-pr): check out a PR without touching your branch
 - [Parallel Development Workflow](/learn/workflows/git/parallel-development): use isolated directories for concurrent work
 - [What are Coding Agents?](/learn/concepts/ai-engineering/coding-agents): understand why agents need separate working directories

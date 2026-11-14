@@ -130,7 +130,6 @@ const sidebars: SidebarsConfig = {
         'how-to/auto-rebase-ai-branches',
         'how-to/review-ai-generated-prs',
         'how-to/merge-conflicts-with-coding-agents',
-        'how-to/git-worktrees-vs-clones-for-agents',
         'how-to/recover-deleted-git-branch',
       ],
     },

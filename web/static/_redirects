@@ -1,0 +1,3 @@
+# Cloudflare Pages redirects. plugins/redirects.test.js checks every rule.
+/learn/how-to/git-worktrees-vs-clones-for-agents/ /learn/concepts/git/git-worktrees-vs-clones/ 301
+/learn/how-to/git-worktrees-vs-clones-for-agents /learn/concepts/git/git-worktrees-vs-clones/ 301
