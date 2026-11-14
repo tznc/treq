@@ -652,7 +652,7 @@ impl GithubView {
             )
             .child(div().font_weight(FontWeight::MEDIUM).child(item))
             .child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .text_color(p.muted_foreground)
                 .child(description),
             )

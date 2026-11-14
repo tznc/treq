@@ -1533,6 +1533,8 @@ impl ChangesView {
         .gap_1p5()
         .child(ui::icon(theme::ICON_BOT, 12., Tone::GitMerged.color(p)))
         .child(
+          // Short label (tag): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .font_weight(FontWeight::MEDIUM)
             .text_color(Tone::GitMerged.text(p))
@@ -1704,7 +1706,7 @@ impl ChangesView {
             .italic()
             .text_color(p.muted_foreground)
             .child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .font_weight(FontWeight::MEDIUM)
                 .not_italic()
                 .mb_0p5()
@@ -1795,6 +1797,8 @@ impl ChangesView {
         .flex_col()
         .gap_1p5()
         .child(
+          // Short label (['section heading']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .text_color(p.muted_foreground)
             .child("Suggested change"),
@@ -1809,6 +1813,8 @@ impl ChangesView {
             .child(ui::text(Textarea::new(&input.state), TextSize::Code)),
         )
         .child(
+          // Short label (['section heading']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .text_color(p.muted_foreground)
             .child("Preview"),
@@ -1914,6 +1920,8 @@ impl ChangesView {
                   .items_center()
                   .gap_2()
                   .child(
+                    // Short label (['badge']): 11px is fine.
+                    // ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .px_1p5()
                       .py_0p5()
@@ -1924,6 +1932,8 @@ impl ChangesView {
                       .child("Outdated"),
                   )
                   .child(
+                    // Short label (['status label']): 11px is fine.
+                    // ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .text_color(p.muted_foreground)
                       .child(outdated_label(c)),
@@ -1944,7 +1954,7 @@ impl ChangesView {
           )
           .when(!c.line_content.is_empty(), |this| {
             this.child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .bg(p.muted.opacity(0.6))
                 .rounded(radius::SM)
                 .px_2()
@@ -2280,7 +2290,7 @@ impl ChangesView {
             }),
         )
         .child(
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .text_color(p.muted_foreground)
             .child("Send to idle agent if one is available"),
         )

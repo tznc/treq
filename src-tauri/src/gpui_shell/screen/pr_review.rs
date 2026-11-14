@@ -33,6 +33,7 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   changes::{pr::PrTarget, ChangesView},
   changes_data::{review_prompt_for, split_path},
+  changes_review::count_label,
   pr_review_data::{
     can_submit, comments_to_review, files_label, finish_text, review_summary, Event, PrReviewHost,
     OWN_PR_HINT, TARGET,
@@ -603,14 +604,16 @@ impl PrReviewView {
 
   fn nav_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
     let p = theme::palette(self.dark);
-    let files: Vec<_> = self
+    let (files, counts) = self
       .changes
       .as_ref()
-      .and_then(|c| {
-        c.read(cx)
+      .map(|c| {
+        let c = c.read(cx);
+        let files = c
           .snapshot
           .as_ref()
-          .and_then(|s| s.files.get(range).map(<[_]>::to_vec))
+          .and_then(|s| s.files.get(range).map(<[_]>::to_vec));
+        (files.unwrap_or_default(), c.comment_counts())
       })
       .unwrap_or_default();
     files
@@ -633,9 +636,36 @@ impl PrReviewView {
               .child(name),
           )
           .trailing(
-            ui::text(div(), TextSize::Xs)
-              .text_color(p.muted_foreground)
-              .child(file.status.clone()),
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .when_some(counts.get(&file.path).copied(), |this, count| {
+                let comments = format!("pr-file-comments-{}", file.path);
+                this.child(
+                  // Short label (comment count): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
+                  ui::text(div(), TextSize::Xs)
+                    .id(SharedString::from(comments.clone()))
+                    .debug_selector(move || comments)
+                    .role(gpui::Role::Label)
+                    .aria_label(count_label(count, "review comment"))
+                    .test_support()
+                    .flex()
+                    .items_center()
+                    .gap_0p5()
+                    .text_color(p.muted_foreground)
+                    .child(ui::icon(theme::ICON_MESSAGE, 12., p.muted_foreground))
+                    .child(count.to_string()),
+                )
+              })
+              .child(
+                // Short label (status letter): 11px is fine.
+                // ast-grep-ignore: gpui-text-xs-short-label-only
+                ui::text(div(), TextSize::Xs)
+                  .text_color(p.muted_foreground)
+                  .child(file.status.clone()),
+              ),
           )
           .on_click(cx.listener(move |view, _, _, cx| view.show_file(&path, cx)));
         let tip = file.path.clone();
@@ -724,7 +754,7 @@ impl PrReviewView {
               .min_w_0()
               .child(div().font_weight(FontWeight::MEDIUM).child(event.label()))
               .child(
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
                   .text_color(p.muted_foreground)
                   .child(if disabled { OWN_PR_HINT } else { event.hint() }),
               ),

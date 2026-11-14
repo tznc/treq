@@ -63,7 +63,7 @@ When a run passes and the workspace has uncommitted changes, Treq commits them w
 
 ## Logs
 
-Check output is stored per run. The **Logs** tab reads it when the **Logs** preview is on. Choose **Checks** as the log source to browse and filter it, or open **Logs Explorer** to query it with SQL. **Filter by check** limits the feed and the chart to the runs of the ticked workflows.
+Check output is stored per run. The **Logs** tab reads it. Choose **Checks** as the log source to browse and filter it, or open **Logs Explorer** to query it with SQL. **Filter by check** limits the feed and the chart to the runs of the ticked workflows.
 
 ## Scope
 
