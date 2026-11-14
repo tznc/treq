@@ -77,9 +77,10 @@ pub fn handle(
         missing: snapshot.repos[index].missing,
         on_screen: repo_path == &active.path,
         supporting: index > 0,
-        // Any repository can leave while another remains; the next one
-        // takes over the window when the first leaves.
-        removable: snapshot.repos.len() > 1,
+        // Any local repository can leave; the next takes over the window,
+        // or the project shows empty. A remote window's one repository stays.
+        removable: snapshot.repos.len() > 1
+          || crate::core::projects::remote_repo(repo_path).is_none(),
       };
       let items = context_menu::home_items(&menu, editors(&*backend));
       show(app, label, backend, items);

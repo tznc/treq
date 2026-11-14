@@ -231,6 +231,8 @@ pub enum SidebarAction {
   /// The Open button beside WORKSPACES: opens workspaces from branches,
   /// links and pull requests.
   OpenWorkspaces,
+  /// The empty project's "Add Repository…".
+  AddRepository,
   StartAgent {
     id: Option<i64>,
   },
@@ -841,6 +843,9 @@ impl Render for Sidebar {
             this.child(self.open_workspaces_button(&palette))
           }),
       )
+      .when(snapshot.repos.is_empty(), |this| {
+        this.child(self.no_repositories(&palette))
+      })
       .child(list)
       .child(
         div()
@@ -899,6 +904,7 @@ const PALETTE_TOOLTIP: &str = "Command palette (Ctrl+K)";
 
 /// The WORKSPACES heading's create button.
 pub(super) const OPEN_WORKSPACES_LABEL: &str = "New workspace…";
+const ADD_REPOSITORY_LABEL: &str = "Add repository…";
 
 /// A row's stack button: a new workspace on the home row, one stacked on the
 /// workspace elsewhere.
@@ -911,6 +917,21 @@ pub(super) fn stack_label(id: Option<i64>) -> &'static str {
 
 impl Sidebar {
   /// The WORKSPACES heading's Open button.
+  /// A project with no repository: says so, and offers to add one.
+  fn no_repositories(&self, palette: &Palette) -> impl IntoElement {
+    div().px_2().py_2().child(
+      ui::EmptyState::new("no-repositories", "No repositories", palette)
+        .icon(theme::ICON_FOLDER_PLUS)
+        .message("Add one to start a workspace.")
+        .action(
+          ui::Button::new("add-repository", palette)
+            .size(ui::Size::Sm)
+            .label(ADD_REPOSITORY_LABEL)
+            .on_click(self.on_action(SidebarAction::AddRepository)),
+        ),
+    )
+  }
+
   fn open_workspaces_button(&self, palette: &Palette) -> impl IntoElement {
     // Short label (['button label']): 11px is fine.
     // ast-grep-ignore: gpui-text-xs-short-label-only

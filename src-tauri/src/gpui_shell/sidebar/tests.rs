@@ -334,6 +334,16 @@ fn header_buttons_open_the_palette_and_settings(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn an_empty_project_offers_to_add_a_repository(cx: &mut TestAppContext) {
+  let mut s = snapshot(vec![]);
+  s.repos.clear();
+  s.project = Some("Checkout".into());
+  let mut h = Harness::new(cx, s);
+  h.click("add-repository");
+  assert_eq!(h.sent(), vec![SidebarAction::AddRepository]);
+}
+
+#[gpui::test]
 fn the_open_button_opens_workspaces(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![]));
   h.click("open-workspaces");
