@@ -62,7 +62,6 @@ const CHANGES: Clip = { x: 280, y: 102, width: 1120, height: 759 };
  */
 async function rest(page: Page): Promise<void> {
   await page.mouse.move(140, 880, { steps: 12 });
-  await page.waitForTimeout(400);
 }
 
 async function shot(page: Page, name: string, clip?: Clip): Promise<void> {
@@ -99,7 +98,6 @@ async function openWorkspace(page: Page, branch: string): Promise<void> {
 async function openTab(page: Page, name: string): Promise<void> {
   await page.getByRole("tab", { name }).click();
   await expect(page.getByRole("tab", { name, selected: true })).toBeVisible();
-  await page.waitForTimeout(1500);
   mark(`tab ${name}`);
 }
 
@@ -168,10 +166,12 @@ async function capture(page: Page): Promise<void> {
   await expect(
     page.getByRole("button", { name: "New", exact: true }),
   ).toBeVisible();
-  await page.waitForTimeout(2000);
+  await expect(
+    page.getByText("Empty event payloads drop the Discord body"),
+  ).toBeVisible();
   await shot(page, "github-issues.png", MAIN);
   await page.mouse.click(422, 62); // the "Pull requests" tab
-  await page.waitForTimeout(2000);
+  await expect(page.getByText("fix: retry Slack webhooks on 429")).toBeVisible();
   await shot(page, "github.png", MAIN);
 
   // Prompts typed into a workspace's Agent dialog.
@@ -203,7 +203,6 @@ async function capture(page: Page): Promise<void> {
   await expect(resolve).toBeVisible();
   // Home.tsx under Conflicts (it is listed again under Committed).
   await file(page, "packages/web/src/pages/Home.tsx").first().click();
-  await page.waitForTimeout(1000);
   await resolve.click();
   await expect(page.getByRole("button", { name: "Plan" })).toBeVisible();
   await shot(page, "conflict-new-commit.png", CHANGES);
@@ -212,10 +211,11 @@ async function capture(page: Page): Promise<void> {
 
   // A resolved GitHub thread and a local comment on client.ts.
   await file(page, "packages/web/src/lib/client.ts").click();
-  await page.waitForTimeout(1500);
   await commentOnLine(page, "packages/web/src/lib/client.ts", 6, "remove this");
   await page.mouse.click(571, 474); // unfold the resolved thread
-  await page.waitForTimeout(800);
+  await expect(
+    page.getByText("JSON.stringify is the right fallback when event_message is empty."),
+  ).toBeVisible();
   await shot(page, "review.png", CHANGES);
 
   // The conflicted commit, resolved in place from the Commits tab.
@@ -269,7 +269,6 @@ async function capture(page: Page): Promise<void> {
     await rest(page);
   }
   await openWorkspace(page, "feat/agent-one");
-  await page.waitForTimeout(1500);
   await shot(page, "spawn-after.png", SIDEBAR);
 
   // `treq send` from the workspace shell: the thumbnail, then the lightbox.
@@ -294,10 +293,8 @@ async function capture(page: Page): Promise<void> {
     height: 297,
   });
   await page.mouse.click(364, 690); // the thumbnail
-  await page.waitForTimeout(1500);
   await shot(page, "send-lightbox.png");
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(800);
 
   // The Commits tab with a commit open and an agent in the terminal pane.
   await row(page, MARKETING).hover();
@@ -306,7 +303,6 @@ async function capture(page: Page): Promise<void> {
     .click();
   await page.waitForTimeout(3000);
   await page.mouse.click(330, 346); // unfold "feat: handle empty event messages"
-  await page.waitForTimeout(1500);
   await shot(page, "commits.png");
 
   // Every PNG the site lists came from this run.
