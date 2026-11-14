@@ -7,7 +7,7 @@
  * real ones. Only Linear's GraphQL endpoint is a stub `fetch`. Pro comes from
  * the billing write functions (../billing.ts).
  */
-import { expect, it, vi } from "vitest";
+import { expect, it, jest } from "@jest/globals";
 import {
   PRO_REQUIRED_MESSAGES,
   userHasPro,
@@ -29,7 +29,7 @@ import { createTestUser, deleteTestUser } from "../seed";
 const VIEWER = { data: { viewer: { id: "linear-user" } } };
 
 function stubLinear() {
-  return vi.fn(
+  return jest.fn(
     async (_url: string | URL | Request, _init?: RequestInit) =>
       new Response(JSON.stringify(VIEWER), {
         status: 200,

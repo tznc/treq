@@ -44,11 +44,11 @@ test("creates a workspace from the New workspace dialog", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("Cancel closes the dialog without creating anything", async ({ page }) => {
+test("The X closes the dialog without creating anything", async ({ page }) => {
   await goHome(page);
   await page.getByRole("button", { name: "New workspace…" }).first().click();
   await page.getByLabel("Workspaces", { exact: true }).fill("e2e/never");
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Close" }).click();
   await expect(page.getByRole("heading", heading)).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "e2e/never", exact: true }),

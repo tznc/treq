@@ -580,8 +580,10 @@ impl TerminalHost for Backend {
   }
 
   fn supporting_repos(&self, repo_path: &str) -> Vec<String> {
-    // A saved project's window reads its repositories from the project.
-    if let Some(project) = crate::gpui_shell::projects::window_project(self.app(), self.label()) {
+    // A window reads its repositories from its project, saved or draft.
+    if let Some(project) =
+      crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+    {
       return crate::gpui_shell::projects::supporting_repos(&project, repo_path);
     }
     crate::core::supporting_repos::list(repo_path)

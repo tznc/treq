@@ -65,6 +65,9 @@ pub struct WindowController {
   recheck_branch: bool,
   /// The checkout watched for edits on disk, and the task that hears them.
   watching: Option<(String, Task<()>)>,
+  /// The repository whose workspace database is watched for writes from
+  /// outside the window (the CLI, another window), and the task that hears them.
+  watching_db: Option<(String, Task<()>)>,
   /// Another window or app has the focus: polls read only every
   /// [`BACKGROUND_EVERY`]th tick, and what they skip waits in `skipped`
   /// for the window to come back.
@@ -110,11 +113,18 @@ impl WindowController {
       queued: None,
       recheck_branch: false,
       watching: None,
+      watching_db: None,
       background: false,
       skipped: None,
       _pollers: pollers,
     };
     this.model.prefs.system_dark = system_dark.unwrap_or_default();
+    // A window on a project that holds no repository shows it empty.
+    if !this.model.has_repo() && remote.is_none() {
+      if let Some(name) = this.host.project_name() {
+        this.model.show_empty_project(name);
+      }
+    }
     let host = this.host.clone();
     cx.background_spawn(async move { host.detect_editors() })
       .detach();
@@ -140,6 +150,8 @@ impl WindowController {
         },
         cx,
       ),
+      // An empty project stays as it is.
+      None if this.model.empty_project.is_some() => {}
       None => effects.push(Effect::from(match remote {
         Some(remote) => RemoteEffect::OpenSaved {
           id: remote.saved_id(),
@@ -316,6 +328,7 @@ impl WindowController {
 
   /// Follows the selection: watches its checkout, dropping the last one.
   fn watch(&mut self, cx: &mut Context<Self>) {
+    self.watch_db(cx);
     let target = self.watch_target();
     if self.watching.as_ref().map(|(path, _)| path) == target.as_ref() {
       return;
@@ -340,6 +353,38 @@ impl WindowController {
         }
       });
       (path, task)
+    });
+  }
+
+  /// Follows the repository: reads its workspaces again when their database
+  /// changes, so a title or description set elsewhere shows at once.
+  fn watch_db(&mut self, cx: &mut Context<Self>) {
+    let target =
+      (self.model.has_repo() && !self.model.is_remote()).then(|| self.model.main_repo.clone());
+    if self.watching_db.as_ref().map(|(path, _)| path) == target.as_ref() {
+      return;
+    }
+    self.watching_db = target.map(|repo| {
+      let (host, at) = (self.host.clone(), repo.clone());
+      let task = cx.spawn(async move |this, cx| {
+        let watch = cx.background_spawn(async move { host.watch_db(&at) }).await;
+        let Some(FileWatch {
+          mut changes,
+          _watcher,
+        }) = watch
+        else {
+          return;
+        };
+        while changes.next().await.is_some() {
+          if this
+            .update(cx, |this, cx| this.read(Read::POLL, cx))
+            .is_err()
+          {
+            break;
+          }
+        }
+      });
+      (repo, task)
     });
   }
 
@@ -558,7 +603,30 @@ impl WindowController {
         },
         |this, (path, result), cx| {
           let effects = match result {
+            Ok(()) if this.model.main_repo == path => {
+              // The window's main repository left: the next one takes over,
+              // or the project shows empty.
+              let next = this
+                .data
+                .supporting()
+                .iter()
+                .find(|r| r.exists && r.path != path);
+              match next {
+                Some(next) => vec![Effect::OpenRepoAt(next.path.clone())],
+                None => {
+                  this.host.clear_repo();
+                  let name = this
+                    .host
+                    .project_name()
+                    .unwrap_or_else(|| "Untitled".into());
+                  this.model.show_empty_project(name);
+                  this.data.clear();
+                  Vec::new()
+                }
+              }
+            }
             Ok(()) => {
+              this.model.close_repo_terminals(&path, &this.data);
               if this.model.supporting.as_deref() == Some(path.as_str()) {
                 this.model.supporting = None;
                 this.model.selected = None;
@@ -817,6 +885,7 @@ impl WindowController {
           },
           |this, result, cx| {
             let effect = match result {
+              Ok(added) if !this.model.has_repo() => Effect::OpenRepoAt(added),
               Ok(added) => {
                 let name = added
                   .rsplit(['/', '\\'])

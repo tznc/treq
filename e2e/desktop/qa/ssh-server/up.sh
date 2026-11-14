@@ -9,6 +9,8 @@
 # in front of the spec's agent CLI installs.
 # QA_SSH_PROXY: an HTTPS proxy on this machine's loopback the host must use
 # (the container then shares this machine's network, sshd on QA_SSH_PORT).
+# QA_SSH_FAKE_GH=1: put landing/fake-gh.mjs on the host as `gh` (with this
+# machine's node beside it, off PATH), for specs that read GitHub there.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../../.." && pwd)"
@@ -26,7 +28,22 @@ if [ ! -x "$work/jj" ]; then
     | tar xz -C "$work" ./jj
 fi
 
-docker build -q -t "$name" "$here" >/dev/null
+if [ -n "${QA_SSH_PROXY:-}" ]; then
+  # The image's apt-get reaches the network through the same proxy, which
+  # only tunnels HTTPS: trust QA_SSH_CA and fetch packages over https first.
+  ctx="$(mktemp -d)"
+  cp "${QA_SSH_CA:?QA_SSH_PROXY needs QA_SSH_CA}" "$ctx/qa-proxy.crt"
+  {
+    sed -n '/^FROM /p' "$here/Dockerfile"
+    echo 'COPY qa-proxy.crt /etc/ssl/certs/ca-certificates.crt'
+    echo 'RUN sed -i "s|http://|https://|g" /etc/apt/sources.list.d/ubuntu.sources'
+    sed '1,/^FROM /d' "$here/Dockerfile"
+  } > "$ctx/Dockerfile"
+  docker build -q --network host --build-arg "https_proxy=$QA_SSH_PROXY" -t "$name" "$ctx" >/dev/null
+  rm -rf "$ctx"
+else
+  docker build -q -t "$name" "$here" >/dev/null
+fi
 docker rm -f "$name" >/dev/null 2>&1 || true
 if [ -n "${QA_SSH_PROXY:-}" ]; then
   docker run -d --name "$name" --network host "$name" /usr/sbin/sshd -D -e -p "$port" >/dev/null
@@ -38,6 +55,13 @@ docker cp "$work/id_ed25519.pub" "$name:/home/dev/.ssh/authorized_keys"
 docker cp "$cli" "$name:/usr/local/bin/treq"
 docker cp "$work/jj" "$name:/usr/local/bin/jj"
 docker exec "$name" sh -c 'chown dev:dev /home/dev/.ssh/authorized_keys && chmod 600 /home/dev/.ssh/authorized_keys'
+if [ -n "${QA_SSH_FAKE_GH:-}" ]; then
+  node="$(command -v node)" || { echo "QA_SSH_FAKE_GH needs node on this machine" >&2; exit 1; }
+  docker exec "$name" mkdir -p /opt/fake-gh
+  docker cp "$node" "$name:/opt/fake-gh/node"
+  docker cp "$root/e2e/desktop/landing/fake-gh.mjs" "$name:/opt/fake-gh/fake-gh.mjs"
+  docker exec "$name" sh -c 'printf "#!/bin/sh\nexec /opt/fake-gh/node /opt/fake-gh/fake-gh.mjs \"\$@\"\n" > /usr/local/bin/gh && chmod +x /usr/local/bin/gh'
+fi
 if [ -n "${QA_SSH_CA:-}" ]; then
   docker cp "$QA_SSH_CA" "$name:/usr/local/share/ca-certificates/qa-proxy.crt"
   # sshd sessions read /etc/environment, not the container's env.

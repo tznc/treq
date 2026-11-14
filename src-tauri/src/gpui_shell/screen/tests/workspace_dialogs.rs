@@ -425,7 +425,7 @@ fn the_dialog_opens_over_the_screen_and_closes_through_react(cx: &mut TestAppCon
   assert!(h.drawn("new-workspace-stack-card"));
   // A plain create has no move section.
   assert!(!h.drawn("workspace-dialog-move-section"));
-  h.click("workspace-dialog-cancel");
+  h.click("workspace-dialog-close");
   assert!(!h.drawn("workspace-dialog"));
   assert_eq!(h.sent(), vec![press("workspaceDialog.close")]);
 }
@@ -848,7 +848,7 @@ fn a_failed_move_keeps_the_confirmation_open(cx: &mut TestAppContext) {
     changes(&host).last().map(String::as_str),
     Some("notify toast Failed to move files")
   );
-  h.click("change-move-cancel");
+  h.click("change-move-dialog-close");
   assert_eq!(h.sent(), vec![press("changeMove.cancel")]);
 }
 

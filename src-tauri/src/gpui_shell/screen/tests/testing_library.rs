@@ -818,3 +818,13 @@ fn switching_home_tabs_reads_the_repositories_again(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   assert_eq!(home_reads(&host, "/r/web"), 2);
 }
+
+#[gpui::test]
+fn the_code_tab_offers_start_an_agent(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  let screen = screen(&mut h);
+  let button = screen.get_by_role(by::role(Role::Button).name("Start an agent"));
+  screen.user().click(&button);
+  h.cx.run_until_parked();
+  assert!(h.sent().contains(&press("code.agentPrompt")));
+}
