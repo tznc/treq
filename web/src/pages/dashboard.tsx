@@ -517,6 +517,7 @@ const TEAM_PERKS = [
   "Everything in Pro for every member",
   "Manage team-wide integrations",
   "Sandbox usage management",
+  "Projects shared with every member",
   "One bill for the whole team",
 ];
 

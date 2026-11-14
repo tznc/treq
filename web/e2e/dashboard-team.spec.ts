@@ -572,6 +572,7 @@ test.describe('Dashboard team tab', () => {
       'Everything in Pro for every member',
       'Manage team-wide integrations',
       'Sandbox usage management',
+      'Projects shared with every member',
       'One bill for the whole team',
     ]);
     await expect(teamSection(page).getByRole('button', { name: 'Create organization' })).toHaveCount(0);
