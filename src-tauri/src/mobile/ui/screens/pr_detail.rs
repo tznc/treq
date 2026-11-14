@@ -17,7 +17,7 @@ use gpui_kit::{
   component::{
     button::{Button, ButtonVariants},
     h_flex,
-    input::{Textarea, TextareaState},
+    input::TextareaState,
     v_flex, ActiveTheme, IconName, Sizable, StyledExt,
   },
   div, img, px, AnyElement, App, AppContext, ClipboardItem, Context, Div, Entity, FontWeight,
@@ -509,6 +509,23 @@ impl PrDetailScreen {
     );
   }
 
+  fn open_composer(&mut self, cx: &mut Context<Self>) {
+    if self.busy.is_some() {
+      return;
+    }
+    let this = cx.weak_entity();
+    crate::mobile::ui::composer::open(
+      format!("Comment on #{}", self.number),
+      self.comment.clone(),
+      Rc::new(move |window, cx| {
+        this
+          .update(cx, |screen, cx| screen.send_comment(window, cx))
+          .ok();
+      }),
+      cx,
+    );
+  }
+
   fn send_comment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let body = self.comment.read(cx).value().trim().to_string();
     if body.is_empty() {
@@ -872,17 +889,12 @@ impl Render for PrDetailScreen {
         )))
       })
       .children(comment_rows);
-    let busy = self.busy;
-    let composer = v_flex().gap_2().child(Textarea::new(&self.comment)).child(
-      Button::new("comment")
-        .outline()
-        .large()
-        .w_full()
-        .h(px(widgets::CTA_H - 8.))
-        .label("Comment")
-        .loading(busy == Some("pr-comment"))
-        .on_click(cx.listener(|this, _, window, cx| this.send_comment(window, cx)))
-        .touch(),
+    let text = self.comment.read(cx).value().to_string();
+    let composer = widgets::composer_bar(
+      "pr-composer",
+      &text,
+      cx.listener(|this, _, _, cx| this.open_composer(cx)),
+      cx,
     );
     let checks = self.checks_section(cx);
     v_flex()
@@ -900,7 +912,6 @@ impl Render for PrDetailScreen {
               .child(description)
               .child(checks)
               .child(comments_section)
-              .child(composer)
               .when_some(self.message.clone(), |page, (ok, text)| {
                 page.child(if ok {
                   widgets::muted(text, cx)
@@ -911,9 +922,12 @@ impl Render for PrDetailScreen {
           ),
       )
       .child(
-        // The review is this page's main job, so it stays in thumb reach.
-        div()
+        // The review is this page's main job, so it stays in thumb reach,
+        // under the bar that opens the comment composer.
+        v_flex()
+          .gap_2()
           .p_4()
+          .child(composer)
           .border_t_1()
           .border_color(theme.border)
           .bg(theme.background)
