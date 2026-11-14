@@ -1574,7 +1574,7 @@ impl ChangesView {
     };
     self.starting_review = true;
     cx.notify();
-    let files = self.files().len();
+    let files = self.snapshot.as_ref().map_or(0, |s| s.review_file_count());
     self.run(
       move |host, parent| {
         let keys = ["review_prompt".to_string(), "review_agent".to_string()];
