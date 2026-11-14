@@ -8,7 +8,11 @@ import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 if (process.env.TREQ_FAKE_GH_LOG) {
-  appendFileSync(process.env.TREQ_FAKE_GH_LOG, `${JSON.stringify(args)}\n`);
+  const log = process.env.TREQ_FAKE_GH_LOG;
+  appendFileSync(log, `${JSON.stringify(args)}\n`);
+  // The calls that have answered, so the capture can wait on one.
+  const exits = join(dirname(log), "gh-exits.log");
+  process.on("exit", () => appendFileSync(exits, `${JSON.stringify(args)}\n`));
 }
 // A QA spec signs gh out by leaving this file in HOME.
 if (existsSync(join(process.env.HOME ?? "", "fake-gh-signed-out"))) {
