@@ -1420,14 +1420,6 @@ fn the_discard_review_confirmation_keeps_on_escape_and_discards_on_enter(cx: &mu
   assert!(!h.drawn("review-action-bar"));
 }
 
-fn a11y_screen(h: &mut Harness) -> gpui_testing_library::Screen {
-  h.cx.run_until_parked();
-  let window = h.cx.update(|window, _| window.window_handle());
-  let screen = gpui_testing_library::Screen::new(&h.cx, window);
-  screen.redraw();
-  screen
-}
-
 /// The review toolbar's discard says what it discards, and its
 /// confirmation counts the comments it drops.
 #[gpui::test]

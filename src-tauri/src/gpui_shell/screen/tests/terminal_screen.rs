@@ -1207,6 +1207,19 @@ fn lightbox_asks_before_dropping_unsent_comments(cx: &mut TestAppContext) {
   assert!(!h.drawn("treq-send-preview-lightbox"));
 }
 
+/// The e2e suite finds a `treq send` thumbnail and its lightbox by role.
+#[gpui::test]
+fn send_thumbnail_and_lightbox_are_accessible(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = send_harness(cx);
+  let screen = a11y_screen(&mut h);
+  let previews = screen.query_all_by_role(by::role(gpui::Role::Button).name("Open preview"));
+  assert_eq!(previews.len(), 3, "the pane's three attachments");
+  h.click("terminal-send-preview-t1");
+  let screen = a11y_screen(&mut h);
+  expect(screen.get_by_role(by::role(gpui::Role::Dialog).name("Preview"))).to_be_visible();
+}
+
 #[gpui::test]
 fn lightbox_moves_between_attachments(cx: &mut TestAppContext) {
   let (mut h, _) = send_harness(cx);
