@@ -421,3 +421,8 @@ test.describe('Footer navigation', () => {
     await expect(page.getByRole('heading', { name: 'Roadmap', level: 1 })).toBeVisible();
   });
 });
+
+test('homepage title leads with the brand', async ({ page }) => {
+  await page.goto('/');
+  await expect(page).toHaveTitle('Treq: isolated workspaces and stacked PRs for AI coding agents');
+});
