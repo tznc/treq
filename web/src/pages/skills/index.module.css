@@ -22,6 +22,22 @@
   line-height: 1.5;
 }
 
+.intro {
+  font-size: 0.95rem;
+  color: var(--ifm-color-emphasis-700);
+  margin: 1rem 0 0;
+  max-width: 70ch;
+  line-height: 1.6;
+}
+
+.authors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+
 /* Two-column layout: filters + cards on the left, ranked repos aside on the right. */
 .layout {
   display: flex;
