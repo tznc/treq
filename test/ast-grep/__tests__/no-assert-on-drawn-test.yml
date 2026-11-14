@@ -1,0 +1,32 @@
+id: no-assert-on-drawn
+valid:
+  - |
+    fn t(h: &mut Harness) {
+      expect(screen.get_by_text("42")).to_be_visible();
+    }
+  - |
+    fn t(h: &mut Harness) {
+      h.drawn("x");
+      let shown = h.drawn("x");
+    }
+  - |
+    fn t(h: &mut Harness) {
+      assert_eq!(h.text("count"), "42");
+    }
+invalid:
+  - |
+    fn t(h: &mut Harness) {
+      assert!(h.drawn("github-tab-issues-count"));
+    }
+  - |
+    fn t(h: &mut Harness) {
+      assert!(!h.drawn("github-tab-prs-count"));
+    }
+  - |
+    fn t(h: &mut Harness) {
+      assert!(self.h.drawn("x"), "msg");
+    }
+  - |
+    fn t(h: &mut Harness) {
+      assert_eq!(h.drawn("x"), true);
+    }
