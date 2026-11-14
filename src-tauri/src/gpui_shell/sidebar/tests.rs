@@ -726,6 +726,26 @@ fn button_tooltip_opens_below_and_closes_on_leave(cx: &mut TestAppContext) {
   assert_eq!(h.popups.borrow().last(), Some(&PopupRequest::HideTooltip));
 }
 
+/// Clicking a button closes its tooltip: the dialog or menu it opens would
+/// otherwise sit under a tooltip that no pointer move takes away.
+#[gpui::test]
+fn clicking_a_row_button_closes_its_tooltip(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  h.hover("home");
+  h.hover("home-stack");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  assert!(matches!(
+    h.popups.borrow().last(),
+    Some(PopupRequest::ShowTooltip { .. })
+  ));
+  h.click("home-stack");
+  h.cx.run_until_parked();
+  h.sidebar
+    .read_with(&h.cx, |s, _| assert!(!s.tooltip_shown("home-stack")));
+  assert_eq!(h.popups.borrow().last(), Some(&PopupRequest::HideTooltip));
+}
+
 fn right_click(h: &mut Harness, selector: &'static str) {
   let bounds = h
     .bounds(selector)
