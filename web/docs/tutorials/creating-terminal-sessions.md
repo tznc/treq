@@ -1,5 +1,6 @@
 ---
 sidebar_position: 2
+description: Create and manage terminal sessions in Treq. Each session is a full PTY shell in a workspace directory, for dev servers, tests, or agents.
 ---
 
 # Creating Terminal Sessions

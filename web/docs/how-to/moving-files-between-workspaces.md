@@ -1,5 +1,6 @@
 ---
 sidebar_position: 4
+description: Move uncommitted changes from one Treq workspace to another when work started in the wrong place or belongs on another branch.
 ---
 
 # Moving Files Between Workspaces

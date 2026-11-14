@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: "Treq concepts: workspaces in your Git repository, each with its own files, commit history, review, and terminal sessions."
 ---
 
 # Concepts

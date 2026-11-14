@@ -1,5 +1,6 @@
 ---
 sidebar_position: 5
+description: Run Treq workspaces on a machine you manage over SSH. The UI stays local; files, terminals, and agents run on the remote node. Feature Preview.
 ---
 
 # Remote SSH Workspaces

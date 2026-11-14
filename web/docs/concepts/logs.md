@@ -1,5 +1,6 @@
 ---
 sidebar_position: 8
+description: The Treq Logs tab collects check output, agent chat, and app setup output for a repository in one place.
 ---
 
 # Logs

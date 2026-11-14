@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: "Short, task-focused guides for Treq: GitHub, pull requests, pushing, discarding changes, settings, skills, and remote workspaces."
 ---
 
 import DocCardList from '@theme/DocCardList';
