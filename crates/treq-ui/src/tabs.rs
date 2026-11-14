@@ -325,6 +325,10 @@ impl RenderOnce for Tabs {
             let id = format!("{id}-count");
             el.child(
               div()
+                .id(SharedString::from(id.clone()))
+                .role(gpui::Role::Label)
+                .aria_label(count.to_string())
+                .test_support()
                 .debug_selector(move || id)
                 .when(bar, |el| {
                   el.absolute().top(zpx(4.)).left(gpui::relative(0.55))
