@@ -24,6 +24,8 @@ pub struct Project {
   pub context_paths: Vec<String>,
   /// An unsaved window's project: kept, but not listed until promoted.
   pub draft: bool,
+  /// The Team organization that owns the project; `None` for personal.
+  pub org_id: Option<String>,
 }
 
 /// What closing a window should do.
@@ -64,6 +66,7 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
       "draft",
       "ALTER TABLE projects ADD COLUMN draft INTEGER NOT NULL DEFAULT 0",
     ),
+    ("org_id", "ALTER TABLE projects ADD COLUMN org_id TEXT"),
   ] {
     let has: i64 = conn.query_row(
       "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name = ?1",
@@ -197,7 +200,7 @@ fn insert(conn: &Connection, name: &str, repos: &[String], draft: bool) -> Resul
 pub fn get(conn: &Connection, id: &str) -> Result<Option<Project>, String> {
   let row = conn
     .query_row(
-      "SELECT name, created_at, last_opened_at, prompt, context_paths, draft FROM projects WHERE id = ?1",
+      "SELECT name, created_at, last_opened_at, prompt, context_paths, draft, org_id FROM projects WHERE id = ?1",
       [id],
       |r| {
         Ok((
@@ -207,12 +210,13 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<Project>, String> {
           r.get::<_, String>(3)?,
           r.get::<_, String>(4)?,
           r.get::<_, bool>(5)?,
+          r.get::<_, Option<String>>(6)?,
         ))
       },
     )
     .optional()
     .map_err(err)?;
-  let Some((name, created_at, last_opened_at, prompt, context, draft)) = row else {
+  let Some((name, created_at, last_opened_at, prompt, context, draft, org_id)) = row else {
     return Ok(None);
   };
   Ok(Some(Project {
@@ -224,6 +228,7 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<Project>, String> {
     prompt,
     context_paths: serde_json::from_str(&context).unwrap_or_default(),
     draft,
+    org_id,
   }))
 }
 
@@ -266,6 +271,58 @@ pub fn set_context(
     )
     .map_err(err)
     .map(drop)
+}
+
+/// Saved projects owned by `org_id` (`None`: personal), most recently
+/// opened first.
+pub fn list_for_owner(conn: &Connection, org_id: Option<&str>) -> Result<Vec<Project>, String> {
+  Ok(
+    list(conn)?
+      .into_iter()
+      .filter(|p| p.org_id.as_deref() == org_id)
+      .collect(),
+  )
+}
+
+/// Moves the project to a Team organization, or back to personal with `None`.
+pub fn set_owner(conn: &Connection, id: &str, org_id: Option<&str>) -> Result<(), String> {
+  exists(conn, id)?;
+  conn
+    .execute(
+      "UPDATE projects SET org_id = ?2 WHERE id = ?1",
+      params![id, org_id],
+    )
+    .map_err(err)
+    .map(drop)
+}
+
+/// Writes a team project pulled from the organization under its shared id,
+/// replacing any local copy. Keeps the local `last_opened_at`.
+pub fn put_team_project(
+  conn: &Connection,
+  id: &str,
+  org_id: &str,
+  name: &str,
+  repos: &[String],
+  prompt: &str,
+  context_paths: &[String],
+) -> Result<(), String> {
+  let name = clean_name(name)?;
+  let at = now();
+  conn
+    .execute(
+      "INSERT INTO projects (id, name, created_at, last_opened_at, org_id) VALUES (?1, ?2, ?3, ?3, ?4)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, org_id = excluded.org_id",
+      params![id, name, at, org_id],
+    )
+    .map_err(err)?;
+  conn
+    .execute("DELETE FROM project_repos WHERE project_id = ?1", [id])
+    .map_err(err)?;
+  for repo in repos {
+    add_repo(conn, id, repo)?;
+  }
+  set_context(conn, id, prompt, context_paths)
 }
 
 pub fn rename(conn: &Connection, id: &str, name: &str) -> Result<(), String> {
@@ -680,6 +737,71 @@ mod tests {
 
   fn repos(paths: &[&str]) -> Vec<String> {
     paths.iter().map(|p| p.to_string()).collect()
+  }
+
+  #[test]
+  fn put_team_project_inserts_then_replaces_by_id() {
+    let conn = conn();
+    put_team_project(&conn, "t1", "o1", "Team", &repos(&["/r/a"]), "p", &[]).unwrap();
+    put_team_project(
+      &conn,
+      "t1",
+      "o1",
+      "Team 2",
+      &repos(&["/r/b", "/r/a"]),
+      "q",
+      &repos(&["/d"]),
+    )
+    .unwrap();
+    let got = get(&conn, "t1").unwrap().unwrap();
+    assert_eq!((got.name.as_str(), got.prompt.as_str()), ("Team 2", "q"));
+    assert_eq!(got.repos, repos(&["/r/b", "/r/a"]));
+    assert_eq!(got.context_paths, repos(&["/d"]));
+    assert_eq!(got.org_id.as_deref(), Some("o1"));
+  }
+
+  #[test]
+  fn new_project_is_personal() {
+    let conn = conn();
+    let saved = save(&conn, "Solo", &repos(&["/r/a"])).expect("save");
+    assert_eq!(saved.org_id, None);
+  }
+
+  #[test]
+  fn set_owner_moves_project_to_team_and_back() {
+    let conn = conn();
+    let saved = save(&conn, "Shared", &repos(&["/r/a"])).expect("save");
+    set_owner(&conn, &saved.id, Some("org-1")).expect("to team");
+    assert_eq!(
+      get(&conn, &saved.id).unwrap().unwrap().org_id.as_deref(),
+      Some("org-1")
+    );
+    set_owner(&conn, &saved.id, None).expect("to personal");
+    assert_eq!(get(&conn, &saved.id).unwrap().unwrap().org_id, None);
+  }
+
+  #[test]
+  fn list_for_owner_filters_by_personal_or_org() {
+    let conn = conn();
+    let mine = save(&conn, "Mine", &repos(&["/r/a"])).expect("save");
+    let team = save(&conn, "Team", &repos(&["/r/b"])).expect("save");
+    let other = save(&conn, "Other", &repos(&["/r/c"])).expect("save");
+    set_owner(&conn, &team.id, Some("org-1")).unwrap();
+    set_owner(&conn, &other.id, Some("org-2")).unwrap();
+    let ids = |o| {
+      list_for_owner(&conn, o)
+        .unwrap()
+        .into_iter()
+        .map(|p| p.id)
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(None), vec![mine.id]);
+    assert_eq!(ids(Some("org-1")), vec![team.id]);
+  }
+
+  #[test]
+  fn set_owner_rejects_unknown_project() {
+    assert!(set_owner(&conn(), "missing", None).is_err());
   }
 
   #[test]
@@ -1119,6 +1241,7 @@ mod tests {
       prompt: String::new(),
       context_paths: Vec::new(),
       draft: false,
+      org_id: None,
     };
     let overview = overview(&project);
     crate::local_db::release_connections_under(dir.path());
@@ -1213,6 +1336,7 @@ mod tests {
       prompt: String::new(),
       context_paths: Vec::new(),
       draft: false,
+      org_id: None,
     };
     let repo = &overview(&project)[0];
     assert_eq!(repo.path, "/srv/app");
@@ -1247,6 +1371,7 @@ mod tests {
       prompt: String::new(),
       context_paths: Vec::new(),
       draft: false,
+      org_id: None,
     };
     let overview = overview(&project);
     assert_eq!(overview.len(), 1);

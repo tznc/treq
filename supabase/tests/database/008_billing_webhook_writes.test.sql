@@ -37,8 +37,8 @@ select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 -- ── A subscription that arrives before its customer mapping ───────────────
 select is(
   public.billing_record_subscription_event('evt_sub_created', 'customer.subscription.created',
-    '2026-10-01 00:00:00+00', 'sub_a', 'cus_a', 'pro', 'trialing',
-    '2026-10-15 00:00:00+00', false, '2026-10-15 00:00:00+00'),
+    '2036-10-01 00:00:00+00', 'sub_a', 'cus_a', 'pro', 'trialing',
+    '2036-10-15 00:00:00+00', false, '2036-10-15 00:00:00+00'),
   'applied', 'subscription.created is applied');
 select is(
   (select owner_id from public.billing_subscriptions where stripe_subscription_id = 'sub_a'),
@@ -64,8 +64,8 @@ select is(
   'duplicate', 'a replayed checkout event is a duplicate');
 select is(
   public.billing_record_subscription_event('evt_sub_created', 'customer.subscription.created',
-    '2026-10-01 00:00:00+00', 'sub_a', 'cus_a', 'pro', 'canceled',
-    '2026-10-15 00:00:00+00', false, null),
+    '2036-10-01 00:00:00+00', 'sub_a', 'cus_a', 'pro', 'canceled',
+    '2036-10-15 00:00:00+00', false, null),
   'duplicate', 'a replayed subscription event is a duplicate even with a changed body');
 select is(
   (select status from public.billing_subscriptions where stripe_subscription_id = 'sub_a'),
@@ -76,13 +76,13 @@ select is((select count(*)::int from public.billing_events), 2,
 -- ── Ordering ──────────────────────────────────────────────────────────────
 select is(
   public.billing_record_subscription_event('evt_sub_active', 'customer.subscription.updated',
-    '2026-10-15 00:00:10+00', 'sub_a', 'cus_a', 'pro', 'active',
-    '2026-11-15 00:00:00+00', false, '2026-10-15 00:00:00+00'),
+    '2036-10-15 00:00:10+00', 'sub_a', 'cus_a', 'pro', 'active',
+    '2036-11-15 00:00:00+00', false, '2036-10-15 00:00:00+00'),
   'applied', 'a newer update is applied');
 select is(
   public.billing_record_subscription_event('evt_sub_late', 'customer.subscription.updated',
-    '2026-10-15 00:00:05+00', 'sub_a', 'cus_a', 'pro', 'past_due',
-    '2026-10-15 00:00:00+00', false, '2026-10-15 00:00:00+00'),
+    '2036-10-15 00:00:05+00', 'sub_a', 'cus_a', 'pro', 'past_due',
+    '2036-10-15 00:00:00+00', false, '2036-10-15 00:00:00+00'),
   'stale', 'an older update that arrives late is stale');
 select is(
   (select status from public.billing_subscriptions where stripe_subscription_id = 'sub_a'),
@@ -90,23 +90,23 @@ select is(
 
 select is(
   public.billing_record_subscription_event('evt_sub_canceling', 'customer.subscription.updated',
-    '2026-10-20 00:00:00+00', 'sub_a', 'cus_a', 'pro', 'active',
-    '2026-11-15 00:00:00+00', true, '2026-10-15 00:00:00+00'),
+    '2036-10-20 00:00:00+00', 'sub_a', 'cus_a', 'pro', 'active',
+    '2036-11-15 00:00:00+00', true, '2036-10-15 00:00:00+00'),
   'applied', 'cancel at period end is applied');
 select is(public.has_pro('00000000-0000-0000-0000-0000000000b1'), true,
   'a subscription set to cancel stays entitled until it ends');
 
 select is(
   public.billing_record_subscription_event('evt_sub_deleted', 'customer.subscription.deleted',
-    '2026-11-15 00:00:00+00', 'sub_a', 'cus_a', 'pro', 'canceled',
-    '2026-11-15 00:00:00+00', true, '2026-10-15 00:00:00+00'),
+    '2036-11-15 00:00:00+00', 'sub_a', 'cus_a', 'pro', 'canceled',
+    '2036-11-15 00:00:00+00', true, '2036-10-15 00:00:00+00'),
   'applied', 'subscription.deleted is applied');
 select is(public.has_pro('00000000-0000-0000-0000-0000000000b1'), false,
   'entitlement ends when the subscription is deleted');
 select is(
   public.billing_record_subscription_event('evt_sub_resurrect', 'customer.subscription.updated',
-    '2026-11-15 00:00:00+00', 'sub_a', 'cus_a', 'pro', 'active',
-    '2026-12-15 00:00:00+00', false, null),
+    '2036-11-15 00:00:00+00', 'sub_a', 'cus_a', 'pro', 'active',
+    '2036-12-15 00:00:00+00', false, null),
   'stale', 'an update in the same second as the deletion cannot reactivate it');
 select is(
   (select status from public.billing_subscriptions where stripe_subscription_id = 'sub_a'),
@@ -143,8 +143,8 @@ select is(
   null, 'no trial is recorded before a trialing subscription exists');
 select is(
   public.billing_record_subscription_event('evt_sub_c', 'customer.subscription.created',
-    '2026-10-02 00:00:00+00', 'sub_c', 'cus_c', 'pro', 'trialing',
-    '2026-10-16 00:00:00+00', false, '2026-10-16 00:00:00+00'),
+    '2036-10-02 00:00:00+00', 'sub_c', 'cus_c', 'pro', 'trialing',
+    '2036-10-16 00:00:00+00', false, '2036-10-16 00:00:00+00'),
   'applied', 'the subscription is applied');
 select is(
   (select owner_id from public.billing_subscriptions where stripe_subscription_id = 'sub_c'),
