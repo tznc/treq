@@ -1214,7 +1214,11 @@ fn send_thumbnail_and_lightbox_are_accessible(cx: &mut TestAppContext) {
   let (mut h, _) = send_harness(cx);
   let screen = a11y_screen(&mut h);
   let previews = screen.query_all_by_role(by::role(gpui::Role::Button).name("Open preview"));
-  assert_eq!(previews.len(), 3, "the pane's three attachments");
+  assert_eq!(
+    previews.len(),
+    2,
+    "text and image; browser previews are the panel's"
+  );
   h.click("terminal-send-preview-t1");
   let screen = a11y_screen(&mut h);
   expect(screen.get_by_role(by::role(gpui::Role::Dialog).name("Preview"))).to_be_visible();

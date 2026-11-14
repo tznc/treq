@@ -15,6 +15,7 @@ use std::{
   rc::Rc,
 };
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use tauri_plugin_gpui::gpui::{
   self, div, img, prelude::*, Bounds, ClipboardItem, Context, Div, Entity, EventEmitter,
@@ -1611,6 +1612,9 @@ impl Render for Lightbox {
     div()
       .id("treq-send-preview-lightbox")
       .debug_selector(|| "treq-send-preview-lightbox".into())
+      .role(gpui::Role::Dialog)
+      .aria_label("Preview")
+      .test_support()
       .track_focus(&self.focus)
       .relative()
       .w(viewport.width)
