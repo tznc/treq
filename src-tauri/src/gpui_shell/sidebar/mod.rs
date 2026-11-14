@@ -1047,6 +1047,16 @@ impl Sidebar {
           this.hover_tooltip(key.clone(), *hovered, cx)
         }),
       )
+      // A click closes the tooltip, as base-ui's does: the dialog or menu
+      // the button opens would otherwise sit under it.
+      .on_mouse_down(
+        gpui::MouseButton::Left,
+        cx.listener(|this, _, _, cx| {
+          if this.tooltip.take().is_some() {
+            cx.notify();
+          }
+        }),
+      )
       .when(self.tooltip_shown(&id), |this| {
         this.child(self.tooltip_anchor(
           id.clone(),
