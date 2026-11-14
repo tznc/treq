@@ -1,0 +1,56 @@
+---
+sidebar_position: 8
+description: Compare Treq's stacked agent workspaces with T3 Code, the open-source control plane for coding agents.
+---
+
+# Treq vs T3 Code
+
+_Both are free, open source and run the agents you already pay for. T3 Code puts every agent behind one interface. Treq manages what the agents produce._
+
+T3 Code describes itself as "the open-source control plane for coding agents." It gives Claude Code, Codex, Cursor and other agent harnesses one interface across desktop, web and mobile. Treq is a Stacking ADE: each agent gets an isolated workspace, dependent workspaces form a stack, and Treq rebases the stack when a lower layer changes. Facts about T3 Code were checked on t3.codes and its GitHub repository in November 2026.
+
+## At a Glance
+
+| | Treq | T3 Code |
+| --- | --- | --- |
+| Positioning | Stacking ADE, open-source Graphite alternative | Open-source control plane for coding agents |
+| Isolation model | One Jujutsu workspace per agent, each with its own files | Each agent thread writes to its own branch |
+| Review surface | Local PR-style diffs, comments sent back to the agent | Commit, push and one-click GitHub PRs |
+| Stacked changes | Core workflow | Not offered |
+| Auto-rebase | Core workflow | Not offered |
+| Agents | Claude, Codex, Cursor | Claude Code, Codex, Cursor, OpenCode, Antigravity, Grok and more |
+| Clients | Desktop app | Desktop, web, iOS and Android, CLI |
+| License | Apache 2.0 | MIT |
+| Pricing | Free desktop, [Pro](/pricing) at $15 per user per month | Free |
+
+## What Each Product Does
+
+**T3 Code** is one place to run whichever agent you prefer. You can switch models mid-thread, and it uses your existing subscriptions without reselling tokens. When a thread is done, it commits, pushes and opens a GitHub PR with a generated title, body and changelog. Its README calls it "very very early" and says to expect bugs.
+
+**Treq** starts where the agent finishes. You review each workspace as a PR-style diff, leave line comments, and send them back to the agent. When one task builds on another, the workspaces form a [stack](/learn/concepts/git/stacked-prs). Treq rebases the upper layers whenever a lower one changes and gives any conflict back to the agent.
+
+## Where They Differ
+
+T3 Code optimizes for reach: more agents, more devices, one interface. It is the better fit if you switch agents often or want to check on agents from your phone.
+
+Treq optimizes for the merge. Separate branches stop agents from overwriting each other, but they do not keep dependent work current. Treq's [workspaces](/docs/concepts/workspaces) use colocated Jujutsu for that, so a change to the bottom of a stack reaches every layer above it without manual rebasing.
+
+## Who Should Choose Which
+
+Choose **Treq** if you:
+
+- Split large features into dependent tasks for several agents.
+- Review every agent change before it reaches a pull request.
+- Want stacks rebased for you as lower layers change.
+
+Choose **T3 Code** if you:
+
+- Switch between many agent harnesses and models.
+- Want web and mobile access to running agents.
+- Ship each agent thread as a single independent pull request.
+
+## Next Steps
+
+- [Best Tools for Running AI Coding Agents in Parallel](./best-parallel-agent-tools): the wider field
+- [Treq vs Vibe Kanban](./treq-vs-vibe-kanban): another open source agent manager
+- [What are Stacked PRs?](/learn/concepts/git/stacked-prs): why dependent tasks need stacks

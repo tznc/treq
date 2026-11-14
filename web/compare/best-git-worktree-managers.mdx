@@ -1,0 +1,51 @@
+---
+sidebar_position: 22
+title: Best Git Worktree Managers (2026)
+description: CLIs, TUIs and desktop apps that create, switch and clean up git worktrees, from Worktrunk and lazyworktree to Treq and the Git clients you already use.
+---
+
+# Best Git Worktree Managers
+
+_`git worktree` leaves the bookkeeping to you. These tools handle the paths, branches and cleanup._
+
+A [git worktree](/learn/concepts/git/git-worktrees) checks out another branch of the same repository into its own directory. You get a second working copy without a second clone. The plain `git worktree` commands leave you to pick paths, track which branch lives where, and remove stale directories. Facts were checked against each project's own site or repository in November 2026.
+
+## The Tools
+
+| Tool | Form | Best for |
+| --- | --- | --- |
+| Treq | Desktop app | Worktrees for coding agents, with stacking and review |
+| Worktrunk | CLI | Fast worktree switching for parallel agents |
+| lazyworktree | TUI | Keyboard-driven management with tmux or zellij |
+| wt | CLI and TUI | The bare-repository worktree layout |
+| Your Git client or editor | GUI | Occasional worktrees without a new tool |
+
+## 1. Treq
+
+[Treq](/) creates one workspace per branch, each with its own files, terminal and agent session. It tracks which workspace builds on which, and rebases dependents when a lower workspace changes. Treq manages the directories, so you never type a worktree path. Under the hood it uses colocated Jujutsu workspaces, not `git worktree`, because Git worktrees cannot rebase dependents automatically.
+
+## 2. Worktrunk
+
+Worktrunk is a Rust CLI for creating, switching and removing worktrees, designed around running agents in parallel. It suits developers who want worktrees from the terminal without a GUI.
+
+## 3. lazyworktree
+
+lazyworktree is a terminal UI written in Go. It lists worktrees, shows pull request status, and opens worktrees in tmux or zellij sessions.
+
+## 4. wt
+
+wt is a Go CLI and TUI built for the bare-repository layout, where the repository has no main checkout and every branch lives in its own worktree.
+
+## 5. Your Git Client or Editor
+
+Mainstream Git clients and editors can show and switch worktrees. Check your client's documentation before adding a new tool. This covers occasional use well. It does not track how worktrees depend on each other.
+
+## Worktrees or Clones?
+
+Worktrees share one object store and one set of refs, so they are cheap to create and see each other's branches. Separate clones are fully independent. [Git Worktrees vs Clones](/learn/concepts/git/git-worktrees-vs-clones) explains when each one fits.
+
+## Next Steps
+
+- [Git Worktrees for AI](/learn/git-worktrees-for-ai): run one agent per worktree
+- [Best Tools for Running AI Coding Agents in Parallel](./best-parallel-agent-tools): tools built on worktrees for agents
+- [Best Graphite Alternatives](./best-graphite-alternatives): turn worktree branches into stacked PRs

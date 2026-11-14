@@ -1,0 +1,61 @@
+---
+sidebar_position: 23
+title: Sandbox Providers for AI Coding Agents Compared (2026)
+description: E2B, Daytona, Boat, Cloudflare, Vercel Sandbox, Modal, Runloop, Northflank, Blaxel, Beam and Fly.io compared on isolation, session limits and price for running coding agents.
+---
+
+# Sandbox Providers for AI Coding Agents
+
+_A coding agent in the cloud needs a machine it can break. These providers rent you one by the second._
+
+A sandbox is an isolated machine an agent can run commands on without touching your laptop. Coding agents need more than a code interpreter: a Git checkout, package installs, a test run, and often a session that lasts hours. This page compares the providers built for that work. Prices are list prices for compute only, taken from each provider's pricing page in November 2026. Check the provider before you commit, because sandbox pricing changes often.
+
+## Price for a 2 vCPU, 4 GiB Sandbox
+
+| Provider | Isolation | Price per hour | Free allowance |
+| --- | --- | --- | --- |
+| Northflank | microVM | about $0.07 | Up to $20 per month |
+| Beam | Container, or microVM on request | about $0.04 shared, $0.14 performance | $20 credit each month with the Developer plan |
+| E2B | VM | about $0.17 | $100 one-time credit |
+| Daytona | Containers and VMs | about $0.17 | $200 credit |
+| Blaxel | microVM | about $0.17, no compute charge while suspended | Up to $200 credit |
+| Modal | Sandboxes | about $0.24 non-preemptible | $30 per month on Starter |
+| Runloop | microVM | about $0.32 | $50 credit |
+
+Boat, Cloudflare, Vercel and Fly.io price differently, so they are not in the table. Boat bills per second for a persistent VM. Cloudflare needs the $5 per month Workers Paid plan plus Containers usage. Vercel bills active CPU only, so an idle sandbox costs less than a busy one. Fly.io Machines start at about $6.70 per month for 1 shared vCPU and 1 GB.
+
+## What Matters for Coding Agents
+
+- **Session length.** Agents can run for hours. E2B caps a session at 1 hour on its free Hobby plan and 24 hours on Pro.
+- **Persistence.** A sandbox that keeps its disk lets the agent resume without cloning and installing again. Boat and Vercel Sandbox keep their disk by default. Boat does not keep memory or running processes. Most others offer snapshots.
+- **Idle cost.** An agent spends much of its time waiting for the model. Vercel bills only active CPU. Blaxel stops compute billing while a sandbox is suspended and charges only for snapshot storage.
+- **Forking.** Boat can fork a sandbox, which lets several agents start from one prepared environment.
+- **Self-hosting.** Beam publishes its engine, beta9, under AGPL-3.0. Northflank can run in your own AWS, GCP or Azure account.
+
+## The Providers
+
+**E2B** runs each sandbox in a Linux VM, with SDKs for Python and JavaScript and pause and resume.
+
+**Daytona** creates sandboxes in under 90 milliseconds by its own measure and bills CPU and memory per hour.
+
+**Boat** gives each sandbox a persistent Ubuntu VM with its own kernel, so Docker, systemd and cron work inside it. It supports snapshots and forks.
+
+**Cloudflare** runs each container instance in a microVM with its own kernel, driven by the TypeScript Sandbox SDK.
+
+**Vercel Sandbox** runs Firecracker microVMs that save their state when they stop.
+
+**Modal** bills the larger of requested and used resources, and suits agents that also need GPUs.
+
+**Runloop** isolates at the microVM level and holds SOC 2 Type II.
+
+**Northflank**, **Blaxel**, **Beam** and **Fly.io** round out the list with low list prices, near-instant resume, an open source engine, and plain VMs respectively.
+
+## Running Agents on These Providers With Treq
+
+Treq's [cloud workspaces](/docs/how-to/cloud-workspaces) run on Boat, Daytona, E2B or Cloudflare. With [Pro](/pricing), Treq can run the machine at one price per size on every provider. You can also bring your own provider account and pay Treq a small fixed fee per size. Either way the workspace behaves like a local one, with the same review, stacking and rebasing.
+
+## Next Steps
+
+- [Best Tools for Running AI Coding Agents in Parallel](./best-parallel-agent-tools): local tools for the same job
+- [Parallel Coding Agents](/learn/parallel-coding-agents): why agents need isolation
+- [Cloud Workspaces](/docs/how-to/cloud-workspaces): set up a Treq workspace on a provider

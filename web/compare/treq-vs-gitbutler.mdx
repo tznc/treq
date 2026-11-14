@@ -1,0 +1,51 @@
+---
+sidebar_position: 11
+description: Compare GitButler's parallel and stacked branches in one working directory with Treq's isolated, auto-rebased agent workspaces.
+---
+
+# Treq vs GitButler
+
+_Both stack branches and both target coding agents. GitButler keeps every branch in one working directory. Treq gives each agent a directory of its own._
+
+GitButler calls itself "Version Control for your Agents." It is a Git client for working on several branches at once without switching. It also stacks branches and can undo anything, including commits. Its `but` CLI has JSON output and agent skills so agents can drive it. Treq is a Stacking ADE that runs each agent in an isolated workspace and rebases dependent workspaces as lower ones change. Facts about GitButler were checked on gitbutler.com and its repository in November 2026.
+
+## At a Glance
+
+| | Treq | GitButler |
+| --- | --- | --- |
+| Positioning | Stacking ADE for coding agents | Version control client for agents and humans |
+| Isolation model | One Jujutsu workspace per agent, separate files | Parallel branches in one shared working directory |
+| Stacked branches | Yes, with automatic rebase | Yes |
+| Agent control | Runs Claude, Codex and Cursor sessions in each workspace | Agents call the `but` CLI and skills |
+| Review surface | PR-style diffs, comments sent back to the agent | Commit and history editing in the client |
+| Platforms | macOS, Windows, Linux | macOS on Apple silicon, Windows, Linux |
+| License | Apache 2.0 | Fair Source, becomes MIT after two years |
+| Pricing | Free desktop, [Pro](/pricing) at $15 per user per month | Free client |
+
+## Where They Differ
+
+The core difference is isolation. GitButler's parallel branches share one working directory, which is fast for a person who moves between tasks. Two agents running tests or installs at once still share the same files on disk. Treq gives each agent its own [workspace](/docs/concepts/workspaces), so one agent's build cannot break another's.
+
+The second difference is who drives. GitButler makes Git easier for whoever is at the keyboard, human or agent. Treq starts and supervises the agent sessions itself, then routes your review comments and rebase conflicts back to them.
+
+The licenses differ too. Treq is Apache 2.0. GitButler is fair source: its code is public, but a non-compete clause applies for two years before each release becomes MIT.
+
+## Who Should Choose Which
+
+Choose **Treq** if you:
+
+- Run several agents at once and need their files separated.
+- Want rebase conflicts handed back to the agent.
+- Need an OSI-approved open source license.
+
+Choose **GitButler** if you:
+
+- Want a better Git client for your own day-to-day work.
+- Run one agent at a time and want it to use stacking commands.
+- Value unlimited undo and history editing most.
+
+## Next Steps
+
+- [Best Graphite Alternatives](./best-graphite-alternatives): other stacked branch tools
+- [Treq vs GitHub Stacked PRs](./treq-vs-github-stacked-prs): stacking on github.com
+- [Git Worktrees vs Clones](/learn/concepts/git/git-worktrees-vs-clones): why separate working copies matter
