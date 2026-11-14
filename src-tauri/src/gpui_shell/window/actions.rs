@@ -195,6 +195,10 @@ impl Model {
         self.new_workspaces(None);
         done()
       }
+      SidebarAction::AddRepository if self.has_repo() || self.empty_project.is_some() => {
+        Some(vec![Effect::PickFolder(FolderPurpose::AddSupporting)])
+      }
+      SidebarAction::AddRepository => done(),
       SidebarAction::OpenProjectHome => {
         self.open_project_home();
         done()
@@ -323,6 +327,14 @@ impl Model {
       // Pages.
       "settings.close" => self.close_settings(),
       "skills.installRequest.close" => self.skill_install = None,
+      // An upsell, such as Linear's Pro error: billing is on Account.
+      "account.manage" => {
+        self.dialogs.open_workspaces = None;
+        self.open_settings();
+        if let Page::Settings { tab } = &mut self.page {
+          *tab = "account".into();
+        }
+      }
       "linear.openSettings" => {
         self.open_settings();
         if let Page::Settings { tab } = &mut self.page {
@@ -417,6 +429,16 @@ impl Model {
       "workspace.tab" => {
         if let Some(tab) = value.as_str().and_then(Tab::parse) {
           self.view.tab = tab;
+        }
+      }
+      "workspace.tabHome" => {
+        if let Some(tab) = value.as_str().and_then(Tab::parse) {
+          self.view.tab = tab;
+          match tab {
+            Tab::Overview => self.view.file_browser = None,
+            Tab::Commits => self.view.scroll_to_commit = None,
+            _ => {}
+          }
         }
       }
       "workspace.openLogs" => {
@@ -585,8 +607,10 @@ impl Model {
           prompt: value["prompt"].as_str().map(str::to_string),
           mode: Some("acceptEdits".into()),
           name: Some("AI Review".into()),
-          select: true,
-        })
+          // The reviewer stays on the screen they started it from; the
+          // terminal pane shows the agent on every screen.
+          select: false,
+        });
       }
       _ => return None,
     }
@@ -690,7 +714,13 @@ impl Model {
           self.page = Page::Workspace;
           if let Some(id) = session.workspace_id {
             if let Some(workspace) = self.workspace_in(&repo, id, data) {
-              self.set_selected(Some(workspace.id));
+              if self.selected != Some(workspace.id) {
+                // Keep the tab the user was on, at its base page.
+                let tab = self.view.tab;
+                self.set_selected(Some(workspace.id));
+                self.view.tab = tab;
+                self.view.file_browser = None;
+              }
             }
           }
           break;
@@ -1040,7 +1070,7 @@ impl Model {
   fn open_request(&mut self, what: &OpenRequest, data: &Data) -> Vec<Effect> {
     match what {
       OpenRequest::BranchSwitcher => self.dialogs.branch_switcher = true,
-      OpenRequest::AddRepository if self.has_repo() => {
+      OpenRequest::AddRepository if self.has_repo() || self.empty_project.is_some() => {
         return vec![Effect::PickFolder(FolderPurpose::AddSupporting)]
       }
       OpenRequest::AddRepository => {}
@@ -1054,7 +1084,14 @@ impl Model {
           repo_path.clone(),
         ))]
       }
-      OpenRequest::RemoveRepo { repo_path } => self.ask(Confirm::remove_supporting(repo_path)),
+      OpenRequest::RemoveRepo { repo_path } => {
+        let running = self
+          .terminals
+          .iter()
+          .filter(|t| t.streaming && t.repo_path.as_deref() == Some(repo_path.as_str()))
+          .count();
+        self.ask(Confirm::remove_supporting(repo_path, running))
+      }
       OpenRequest::RenameWorkspace {
         repo_path,
         workspace_id,
@@ -1090,7 +1127,7 @@ impl Model {
     match item {
       Menu::Dashboard => self.return_home(),
       Menu::Settings => self.open_settings(),
-      Menu::AddRepository if self.has_repo() => {
+      Menu::AddRepository if self.has_repo() || self.empty_project.is_some() => {
         return vec![Effect::PickFolder(FolderPurpose::AddSupporting)]
       }
       Menu::AddRepository => {}
@@ -1145,7 +1182,11 @@ mod tests {
   use std::collections::HashMap;
 
   use super::{
-    super::{data::RepoRead, model::Dialogs, tree::tests::workspace},
+    super::{
+      data::RepoRead,
+      model::{Dialogs, FileBrowser},
+      tree::tests::workspace,
+    },
     *,
   };
   use crate::local_db::Session;
@@ -1181,6 +1222,20 @@ mod tests {
       field: name.into(),
       value,
     }
+  }
+
+  #[test]
+  fn the_sidebar_adds_a_repository_to_an_empty_project() {
+    let (mut model, data) = (Model::new(None), Data::default());
+    assert_eq!(
+      model.sidebar_action(&SidebarAction::AddRepository, &data),
+      Some(vec![])
+    );
+    model.show_empty_project("Checkout".into());
+    assert_eq!(
+      model.sidebar_action(&SidebarAction::AddRepository, &data),
+      Some(vec![Effect::PickFolder(FolderPurpose::AddSupporting)])
+    );
   }
 
   #[test]
@@ -1241,6 +1296,22 @@ mod tests {
   }
 
   #[test]
+  fn double_clicking_a_tab_returns_it_to_its_base_page() {
+    let (mut model, data) = (model(), data());
+    model.view.file_browser = Some(FileBrowser {
+      selected_file: Some("a.rs".into()),
+      expanded_dir: None,
+    });
+    model.view.scroll_to_commit = Some("zz".into());
+    model.screen_action(&field("workspace.tabHome", json!("overview")), &data);
+    assert_eq!(model.view.tab, Tab::Overview);
+    assert_eq!(model.view.file_browser, None);
+    model.screen_action(&field("workspace.tabHome", json!("commits")), &data);
+    assert_eq!(model.view.tab, Tab::Commits);
+    assert_eq!(model.view.scroll_to_commit, None);
+  }
+
+  #[test]
   fn project_home_opens_and_a_card_opens_its_repository() {
     let (mut model, data) = (model(), data());
     model.sidebar_action(&SidebarAction::OpenProjectHome, &data);
@@ -1280,7 +1351,7 @@ mod tests {
   fn leaves_menus_and_drags_to_their_own_handlers() {
     let (mut model, data) = (model(), data());
     assert_eq!(
-      model.sidebar_action(&SidebarAction::BulkArchive, &data),
+      model.sidebar_action(&SidebarAction::ProjectMenu, &data),
       None
     );
   }
@@ -1299,6 +1370,20 @@ mod tests {
     );
     model.screen_action(&press("settings.close"), &data);
     assert!(matches!(model.page, Page::Github(_)));
+  }
+
+  #[test]
+  fn manage_account_opens_the_account_settings() {
+    let (mut model, data) = (model(), data());
+    model.dialogs.open_workspaces = Some(None);
+    model.screen_action(&press("account.manage"), &data);
+    assert!(model.dialogs.open_workspaces.is_none());
+    assert_eq!(
+      model.page,
+      Page::Settings {
+        tab: "account".into()
+      }
+    );
   }
 
   #[test]
@@ -1375,6 +1460,24 @@ mod tests {
         name: Some(name),
         ..
       } if prompt == "Tune it" && name == "Tune review prompt"
+    )));
+  }
+
+  #[test]
+  fn starting_an_ai_review_keeps_the_github_view() {
+    let (mut model, data) = (model(), data());
+    model.open_github();
+    model.screen_action(&press("github.review:12"), &data);
+    let effects = model
+      .screen_action(
+        &field("prReview.startAgentReview", json!({"prompt": "Review it"})),
+        &data,
+      )
+      .unwrap_or_default();
+    assert!(matches!(&model.page, Page::Github(g) if g.review == Some(12)));
+    assert!(effects.iter().any(|effect| matches!(
+      effect,
+      Effect::StartAgent { select: false, name: Some(name), .. } if name == "AI Review"
     )));
   }
 
@@ -1552,6 +1655,36 @@ mod tests {
     assert_eq!(model.selected, Some(1));
     model.screen_action(&field("terminal.shortcut", "k".into()), &data);
     assert!(model.dialogs.palette);
+  }
+
+  /// Clicking another workspace's terminal keeps the tab the user was on,
+  /// at its base page: no file or commit carried over from the last one.
+  #[test]
+  fn a_terminal_click_keeps_the_tab_at_its_base_page() {
+    let (mut model, mut data) = (model(), data());
+    data.apply(
+      "/repo",
+      RepoRead {
+        sessions: Some(vec![Session {
+          id: 5,
+          workspace_id: Some(3),
+          name: "Claude 1".into(),
+          created_at: String::new(),
+          last_accessed: String::new(),
+          model: None,
+        }]),
+        ..RepoRead::default()
+      },
+    );
+    model.set_selected(Some(1));
+    model.open_file("/repo/.treq/workspaces/a/src/main.rs");
+    model.view.scroll_to_commit = Some("abc".into());
+    model.view.tab = Tab::Changes;
+    model.screen_action(&field("terminal.activeSession", 5.into()), &data);
+    assert_eq!(model.selected, Some(3));
+    assert_eq!(model.view.tab, Tab::Changes);
+    assert_eq!(model.view.file_browser, None);
+    assert_eq!(model.view.scroll_to_commit, None);
   }
 
   /// The AI Review agent's turn ending is the review done: the controller
@@ -1768,5 +1901,66 @@ mod tests {
       }]
     );
     assert_eq!(model.menu(Menu::ViewLogs, &data), [Effect::OpenLogDir]);
+  }
+  fn removing(model: &mut Model, data: &Data, terminals: Value) -> Confirm {
+    model.screen_action(&field("terminal.summaries", terminals), data);
+    let what = OpenRequest::RemoveRepo {
+      repo_path: "/other".into(),
+    };
+    model.open_request(&what, data);
+    model.confirm.take().expect("asks")
+  }
+
+  #[test]
+  fn removing_a_repo_with_running_agents_offers_to_close_them() {
+    let (mut model, data) = (model(), data());
+    let summary = |repo: &str, streaming: bool| json!({"kind": "agent", "repoPath": repo, "isStreaming": streaming});
+    let confirm = removing(
+      &mut model,
+      &data,
+      json!([
+        summary("/other", true),
+        summary("/other", true),
+        summary("/other", false),
+        summary("/repo", true)
+      ]),
+    );
+    assert_eq!(confirm.question.verb, "Close sessions and remove");
+    assert!(
+      confirm.question.message.contains("2 running sessions"),
+      "{}",
+      confirm.question.message
+    );
+  }
+
+  #[test]
+  fn removing_a_repo_with_only_idle_sessions_asks_as_before() {
+    let (mut model, data) = (model(), data());
+    let confirm = removing(
+      &mut model,
+      &data,
+      json!([{"kind": "agent", "repoPath": "/other", "isStreaming": false}]),
+    );
+    assert_eq!(confirm.question.verb, "Remove repository");
+  }
+
+  #[test]
+  fn closes_every_terminal_of_a_removed_repo() {
+    let (mut model, data) = (model(), data());
+    model.close_repo_terminals("/repo", &data);
+    let dirs: Vec<_> = model
+      .commands
+      .iter()
+      .filter(|c| c["kind"] == "closeWorkspace")
+      .map(|c| c["dir"].as_str().unwrap().to_string())
+      .collect();
+    let mut expected = vec!["/repo".to_string()];
+    expected.extend(
+      data
+        .workspaces("/repo")
+        .iter()
+        .map(super::super::model::full_path),
+    );
+    assert_eq!(dirs, expected);
   }
 }

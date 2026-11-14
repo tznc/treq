@@ -10,7 +10,7 @@
  * Pro comes from the billing write functions (../billing.ts).
  */
 import { randomUUID } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, it } from "@jest/globals";
 import {
   PRO_REQUIRED_MESSAGES,
   userHasPro,

@@ -987,7 +987,7 @@ impl OpenWorkspacesDialog {
     options: Div,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> (Div, [gpui::AnyElement; 3]) {
+  ) -> (Div, [gpui::AnyElement; 2]) {
     let checks = self.lines();
     let targets = self.targets();
     let unchecked = checks.iter().filter(|(_, c)| c.is_none()).count();
@@ -1052,12 +1052,6 @@ impl OpenWorkspacesDialog {
         .flex_1()
         .min_w_0()
         .child(self.status(status, invalid, &checks, p, cx))
-        .into_any_element(),
-      Button::new("open-workspaces-cancel", p)
-        .variant(Variant::Outline)
-        .disabled(self.pending)
-        .label("Cancel")
-        .on_click(cx.listener(|view, _, _, cx| view.close(cx)))
         .into_any_element(),
       Button::new("open-workspaces-submit", p)
         .disabled(!self.can_submit())
@@ -1353,12 +1347,21 @@ impl OpenWorkspacesDialog {
             err.clone(),
             p,
           )
-          .action(crate::gpui_shell::ui::error_actions(
-            "open-workspaces-issues",
-            err.clone(),
-            Some(Box::new(cx.listener(|view, _, _, cx| view.load_issues(cx)))),
-            p,
-          )),
+          .action(if err == crate::linear::PRO_REQUIRED {
+            Button::new("open-workspaces-issues-manage-account", p)
+              .size(ui::Size::Sm)
+              .label("Manage account")
+              .on_click(cx.listener(|view, _, _, cx| press(&view.sink, "account.manage", cx)))
+              .into_any_element()
+          } else {
+            crate::gpui_shell::ui::error_actions(
+              "open-workspaces-issues",
+              err.clone(),
+              Some(Box::new(cx.listener(|view, _, _, cx| view.load_issues(cx)))),
+              p,
+            )
+            .into_any_element()
+          }),
         )
         .into_any_element()
     } else if items.is_empty() {
@@ -1470,9 +1473,8 @@ impl OpenWorkspacesDialog {
       .variant(Variant::Outline)
       .size(ui::Size::Sm)
       .h(zpx(28.))
-      .icon(theme::ICON_USER, 12.)
+      .checked(self.assigned)
       .label("Assigned to me")
-      .pressed(self.assigned)
       .on_click(cx.listener(|view, _, _, cx| {
         view.assigned = !view.assigned;
         view.load_prs(cx);
@@ -1566,6 +1568,8 @@ fn pane(
         )
         .when(picked > 0, |this| {
           this.child(
+            // Short label (['count']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(format!("{picked} selected")),

@@ -489,6 +489,10 @@ pub struct SettingsView {
   /// each wait: a newer edit restarts it.
   pending: std::collections::HashMap<String, u64>,
   edits: u64,
+  /// Held by the page itself so Escape, with no field or dialog focused,
+  /// goes back.
+  focus: gpui::FocusHandle,
+  focused_once: bool,
   /// An Application save is running; `app_again` holds fields edited
   /// meanwhile, which save once it finishes.
   app_saving: bool,
@@ -550,6 +554,8 @@ impl SettingsView {
       marks: Default::default(),
       pending: Default::default(),
       edits: 0,
+      focus: cx.focus_handle(),
+      focused_once: false,
       app_saving: false,
       app_again: Vec::new(),
       repo_again: Vec::new(),
@@ -1738,6 +1744,11 @@ impl SettingsView {
         let mut merged: Vec<(&str, CustomSkillLevel)> = Vec::new();
         let (mut labelled, mut rest) = (Vec::new(), Vec::new());
         for view in data::filter_skills(catalog, &skills.query) {
+          // The registry can't install proprietary skills, so only list
+          // ones already installed.
+          if view.skill.proprietary && view.installed.is_none() {
+            continue;
+          }
           let mut labels = Vec::new();
           let mut customized = view.customized;
           if let Some(installed) = &view.installed {
@@ -2150,12 +2161,30 @@ impl Render for SettingsView {
       _ => None,
     };
 
+    if !std::mem::replace(&mut self.focused_once, true) {
+      window.focus(&self.focus, cx);
+    }
+    let open = dialog.is_some() || confirm.is_some() || delete_dialog.is_some();
     div()
       .relative()
       .size_full()
       .flex()
       .flex_col()
       .bg(p.background)
+      .track_focus(&self.focus)
+      .on_key_down(
+        cx.listener(move |view, e: &gpui::KeyDownEvent, window, cx| {
+          if ui::is_escape(&e.keystroke) && !open && view.focus.is_focused(window) {
+            (view.sink)(
+              ScreenAction::Press {
+                id: "settings.close".into(),
+              },
+              cx,
+            );
+            cx.stop_propagation();
+          }
+        }),
+      )
       .child(header)
       .child(
         div()
@@ -2166,7 +2195,7 @@ impl Render for SettingsView {
           .overflow_y_scroll()
           .child(
             div()
-              .max_w(zpx(896.))
+              .max_w(zpx(1088.))
               .mx_auto()
               .p_6()
               .flex()
@@ -2981,6 +3010,8 @@ impl SettingsView {
                 )
                 .when(!row.source.is_empty(), |this| {
                   this.child(
+                    // Short label (['source tag']): 11px is fine.
+                    // ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .text_color(p.muted_foreground)
                       .child(row.source.clone()),
@@ -2992,6 +3023,8 @@ impl SettingsView {
                     LABEL_CUSTOM_REPO | LABEL_CUSTOM_GLOBAL => p.warning,
                     _ => p.muted_foreground,
                   };
+                  // Short label (['tag']): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .flex_none()
                     .px_1p5()
@@ -3017,8 +3050,8 @@ impl SettingsView {
       .child(self.skill_actions(row, level, p))
   }
 
-  /// A skill row's bottom line: Customise and Docs on the left; the install
-  /// level, its select and Uninstall (or Install…) on the right.
+  /// A skill row's bottom line: Docs, Customise and the install level, its
+  /// select and Uninstall (or Install…), all on the right.
   fn skill_actions(
     &self,
     row: &SkillRow,
@@ -3039,10 +3072,12 @@ impl SettingsView {
       });
     let docs = row.has_url.then(|| {
       Button::new(format!("skill-source-{id}"), p)
-        .variant(Variant::Link)
+        // Ghost tinted as a link, so the label is not underlined.
+        .variant(Variant::Ghost)
         .size(Size::Sm)
+        .text_color(p.primary)
         .aria_label(format!("Docs for {}", row.name))
-        .icon(theme::ICON_EXTERNAL_LINK, 14.)
+        .icon(theme::ICON_BOOK_OPEN, 14.)
         .label("Docs")
         .on_click(self.press(&format!("skills.source:{id}")))
     });
@@ -3090,21 +3125,29 @@ impl SettingsView {
           .into_any_element(),
       )
     };
+    // The proprietary note stays on the left; every action sits on the right.
+    let (note, right) = if row.proprietary {
+      (right, None)
+    } else {
+      (None, right)
+    };
     div()
       .w_full()
       .flex()
       .items_center()
-      .justify_between()
+      .justify_end()
       .gap_2()
+      .when(note.is_some(), |el| el.justify_between())
+      .children(note)
       .child(
         div()
           .flex()
           .items_center()
           .gap_2()
+          .children(docs)
           .children(customise)
-          .children(docs),
+          .children(right),
       )
-      .children(right)
   }
 
   /// The install dialog: where to store the skill.
@@ -3144,12 +3187,6 @@ impl SettingsView {
               )),
           )
           .footer([
-            Button::new("skill-dialog-cancel", p)
-              .variant(Variant::Outline)
-              .disabled(busy)
-              .label("Cancel")
-              .on_click(self.press("skills.dialog.cancel"))
-              .into_any_element(),
             Button::new("skill-dialog-application", p)
               .variant(Variant::Outline)
               .disabled(busy)
@@ -3228,7 +3265,7 @@ impl SettingsView {
                 ),
             )
             .child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .text_color(p.muted_foreground)
                 .child("Treq verifies the downloaded files against this checksum before installing."),
             )
@@ -3275,7 +3312,7 @@ impl SettingsView {
 /// A skill card's Install…, before its click handler.
 pub(super) fn install_button(row: &SkillRow, p: &Palette) -> Button {
   Button::new(format!("skill-install-{}", row.id), p)
-    .variant(Variant::Outline)
+    .variant(Variant::Default)
     .size(Size::Sm)
     .disabled(row.busy)
     .label("Install…")

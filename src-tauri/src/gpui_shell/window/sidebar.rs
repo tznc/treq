@@ -13,7 +13,7 @@ use crate::{
   github::PrInfo,
   gpui_shell::screen::display_title,
   gpui_shell::sidebar::{
-    PrState, RepoSection, RowStatus, SidebarRow, SidebarSnapshot, StatusColor,
+    open_pr_first, PrState, RepoSection, RowStatus, SidebarRow, SidebarSnapshot, StatusColor,
   },
   local_db::Workspace,
 };
@@ -149,7 +149,10 @@ fn streaming_by_branch(
 /// repository open.
 pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
   if !model.has_repo() {
-    return None;
+    return model
+      .empty_project
+      .as_ref()
+      .map(|name| without_repos(model, data, name));
   }
   let on_screen = model.repo().to_string();
   let multi = !data.supporting().is_empty();
@@ -173,38 +176,40 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
       let workspaces = if missing {
         Vec::new()
       } else {
-        nodes(data, path)
-          .into_iter()
-          .map(|node| {
-            let workspace = &node.workspace;
-            let branch = &workspace.branch_name;
-            let selected = active
-              && (model.multi.contains(&workspace.id)
-                || (page_selects && model.selected == Some(workspace.id)));
-            let pr = repo
-              .and_then(|r| r.prs.get(branch))
-              .and_then(Option::as_ref)
-              .filter(|_| has_remote)
-              .map(pr_state);
-            SidebarRow {
-              id: workspace.id,
-              title: branch.clone(),
-              name: row_name(workspace),
-              depth: node.depth,
-              selected,
-              conflicted: node.conflicted,
-              status: status_indicator(
-                node.conflicted,
-                node.has_changes,
-                streaming.get(branch).copied().unwrap_or(false),
-              ),
-              pr,
-              target: workspace.target_branch.clone(),
-              archiving: false,
-              exiting: false,
-            }
-          })
-          .collect()
+        open_pr_first(
+          nodes(data, path)
+            .into_iter()
+            .map(|node| {
+              let workspace = &node.workspace;
+              let branch = &workspace.branch_name;
+              let selected = active
+                && (model.multi.contains(&workspace.id)
+                  || (page_selects && model.selected == Some(workspace.id)));
+              let pr = repo
+                .and_then(|r| r.prs.get(branch))
+                .and_then(Option::as_ref)
+                .filter(|_| has_remote)
+                .map(pr_state);
+              SidebarRow {
+                id: workspace.id,
+                title: branch.clone(),
+                name: row_name(workspace),
+                depth: node.depth,
+                selected,
+                conflicted: node.conflicted,
+                status: status_indicator(
+                  node.conflicted,
+                  node.has_changes,
+                  streaming.get(branch).copied().unwrap_or(false),
+                ),
+                pr,
+                target: workspace.target_branch.clone(),
+                archiving: false,
+                exiting: false,
+              }
+            })
+            .collect(),
+        )
       };
       let loaded = data.loaded(path);
       RepoSection {
@@ -259,6 +264,29 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
     repos,
     modal: None,
   })
+}
+
+/// The sidebar of a project with no repository: its name, its Home and the
+/// pages that need none; the list says it is empty.
+fn without_repos(model: &Model, data: &Data, name: &str) -> SidebarSnapshot {
+  SidebarSnapshot {
+    repo_name: name.to_string(),
+    settings_open: matches!(model.page, Page::Settings { .. }),
+    github: matches!(model.page, Page::Github(_)),
+    linear: data
+      .flags
+      .linear
+      .then_some(matches!(model.page, Page::Linear)),
+    dark: model.prefs.dark(),
+    width: model.prefs.sidebar_width,
+    agent_unavailable: None,
+    shell_unavailable: None,
+    bulk_archive: None,
+    project: Some(name.to_string()),
+    project_home: Some(matches!(model.page, Page::ProjectHome)),
+    repos: Vec::new(),
+    modal: None,
+  }
 }
 
 #[cfg(test)]

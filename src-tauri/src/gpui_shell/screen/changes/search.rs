@@ -488,6 +488,8 @@ impl ChangesView {
             .child(ui::input(&input).appearance(false).bordered(false)),
         )
         .child(
+          // Short label (['count']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .debug_selector(|| "diff-search-count".into())
             .px_2()

@@ -9,7 +9,7 @@
  * posted with ../stripe.ts.
  */
 import { randomBytes } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, it } from "@jest/globals";
 import { userHasPro } from "../../../supabase/functions/_shared/billing/entitlement";
 import {
   billingStoreFor,

@@ -472,11 +472,9 @@ fn setup_dialog_opens_on_your_own_vm_from_the_ssh_hosts_plus(cx: &mut TestAppCon
   );
   assert!(h.drawn("remote-username"));
   assert!(!h.drawn("remote-setup-own-vm"));
-  // An action pair and no X; Cancel closes, as there is no choice to go
-  // back to.
-  assert!(!h.drawn("remote-setup-close"));
+  // No choice to go back to: the X closes it.
   assert!(!h.drawn("remote-setup-back"));
-  h.click("remote-setup-cancel");
+  h.click("remote-setup-dialog-close");
   assert_eq!(h.sent(), vec![press("remote.setup.close")]);
 }
 
@@ -1092,7 +1090,7 @@ fn close_prompt_dont_save_closes_without_saving(cx: &mut TestAppContext) {
 fn close_prompt_cancel_keeps_the_window_open(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
   let mut h = Harness::with_host(cx, save_project_screen(true), host.clone());
-  h.click("save-project-cancel");
+  h.click("save-project-dialog-close");
   h.cx.run_until_parked();
   assert!(project_calls(&host).is_empty());
   assert!(h.sent().contains(&press("saveProject.close")));

@@ -8,7 +8,7 @@
  *
  * Each case signs up / signs in / tears down the Auth user.
  */
-import { it, expect, afterEach } from "vitest";
+import { it, expect, afterEach } from "@jest/globals";
 import {
   getAnonClient,
   getAnonKey,

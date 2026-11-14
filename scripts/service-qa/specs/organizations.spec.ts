@@ -10,7 +10,7 @@
  * write functions (../billing.ts).
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { expect, it } from "vitest";
+import { expect, it } from "@jest/globals";
 import { userHasPro } from "../../../supabase/functions/_shared/billing/entitlement";
 import {
   completeInstallation,

@@ -730,7 +730,10 @@ fn integrations_sign_in_when_signed_out(cx: &mut TestAppContext) {
   h.set_account(account_state(serde_json::json!({})));
   let integrations = drawn_settings(&mut h).integrations.expect("integrations");
   assert_eq!(integrations.github, settings::GithubSection::SignedOut);
-  assert_eq!(integrations.linear, None);
+  assert!(
+    integrations.linear.is_some(),
+    "Linear shows without the preview"
+  );
   // Collapsed, the card only says it isn't connected.
   assert!(h.drawn("integration-card-github"));
   assert!(!h.drawn("integrations-sign-in"));
@@ -786,7 +789,7 @@ fn integrations_list_public_repositories_on_the_free_plan(cx: &mut TestAppContex
 
 #[gpui::test]
 fn integrations_cards_say_whether_each_is_connected(cx: &mut TestAppContext) {
-  let (mut h, _) = linear_harness(cx, false, Some("lin_api_1"));
+  let (mut h, _) = linear_harness(cx, true, Some("lin_api_1"));
   let integrations = drawn_settings(&mut h).integrations.expect("integrations");
   // Signed in with GitHub repositories still loading: connected.
   assert!(integrations.github_connected);
@@ -803,6 +806,32 @@ fn integrations_card_expands_and_collapses(cx: &mut TestAppContext) {
   assert!(h.drawn("linear-api-key-edit"));
   h.click("integration-card-linear");
   assert!(!h.drawn("linear-api-key-edit"));
+}
+
+#[gpui::test]
+fn integrations_linear_card_shows_a_paywall_on_free(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::with_settings(&[(
+    "feature_preview.linearIntegration",
+    "false",
+  )]));
+  let mut h = Harness::with_host(cx, account_route("integrations"), host.clone());
+  h.set_account(account_state(serde_json::json!({ "user": ada() })));
+  assert!(h.drawn("integration-card-linear"));
+  assert!(h.drawn("integration-requires-pro-linear"));
+  assert!(!h.drawn("integration-status-linear"));
+  assert!(!h.drawn("linear-paywall"));
+  h.click("integration-card-linear");
+  assert!(h.drawn("linear-paywall"));
+  h.click("linear-upgrade");
+  h.cx.run_until_parked();
+  assert_eq!(host.writes(), ["open http://localhost:3001/dashboard"]);
+}
+
+#[gpui::test]
+fn integrations_linear_card_shows_status_on_pro(cx: &mut TestAppContext) {
+  let (mut h, _) = linear_harness(cx, true, None);
+  assert!(h.drawn("integration-status-linear"));
+  assert!(!h.drawn("integration-requires-pro-linear"));
 }
 
 fn linear_harness(

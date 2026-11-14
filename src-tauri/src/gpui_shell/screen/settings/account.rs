@@ -50,6 +50,8 @@ struct IntegrationCard {
   /// One line on what connecting it does.
   purpose: &'static str,
   connected: bool,
+  /// Free plan: a "Requires Pro" badge replaces the status.
+  pro_required: bool,
   open: bool,
 }
 
@@ -1226,40 +1228,38 @@ impl SettingsView {
       }
     };
     let pro = self.signed_in_pro();
-    let linear = self
-      .preview_on(crate::core::feature_preview::PreviewFeature::LinearIntegration)
-      .then(|| {
-        let linear = self
-          .account
-          .linear
-          .as_ref()
-          .filter(|l| Some(&l.path) == self.route.repo_path.as_ref());
-        let key = linear.and_then(|l| l.key.clone());
-        LinearSection {
-          repo: self.repo.is_some(),
-          connected: key.is_some(),
-          description: if key.is_some() {
-            "Direct API access configured"
-          } else {
-            "Paste a Linear personal API key"
-          }
-          .into(),
-          editing: linear.is_some_and(|l| l.editing),
-          draft: linear.map(|l| l.draft.clone()).unwrap_or_default(),
-          saving: linear.is_some_and(|l| l.saving),
-          edit_label: format!("{} API key", if key.is_some() { "Update" } else { "Add" }),
-          oauth: pro && native::feature_flag("pro"),
-          upgrade: !pro && !crate::linear::e2e_pro(),
-          oauth_description: if key.is_some() {
-            "API key takes priority, but you can also connect via OAuth"
-          } else {
-            "Pro plan: connect via OAuth"
-          }
-          .into(),
-          oauth_loading: account.as_ref().is_some_and(|a| a.linear_oauth_loading),
-          key_priority_note: key.is_some() && pro,
+    let linear = Some({
+      let linear = self
+        .account
+        .linear
+        .as_ref()
+        .filter(|l| Some(&l.path) == self.route.repo_path.as_ref());
+      let key = linear.and_then(|l| l.key.clone());
+      LinearSection {
+        repo: self.repo.is_some(),
+        connected: key.is_some(),
+        description: if key.is_some() {
+          "Direct API access configured"
+        } else {
+          "Paste a Linear personal API key"
         }
-      });
+        .into(),
+        editing: linear.is_some_and(|l| l.editing),
+        draft: linear.map(|l| l.draft.clone()).unwrap_or_default(),
+        saving: linear.is_some_and(|l| l.saving),
+        edit_label: format!("{} API key", if key.is_some() { "Update" } else { "Add" }),
+        oauth: pro && native::feature_flag("pro"),
+        upgrade: !pro && !crate::linear::e2e_pro(),
+        oauth_description: if key.is_some() {
+          "API key takes priority, but you can also connect via OAuth"
+        } else {
+          "Pro plan: connect via OAuth"
+        }
+        .into(),
+        oauth_loading: account.as_ref().is_some_and(|a| a.linear_oauth_loading),
+        key_priority_note: key.is_some() && pro,
+      }
+    });
     IntegrationsTab {
       github_connected: matches!(github, GithubSection::SignedIn { .. }),
       github,
@@ -2072,6 +2072,8 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       .gap_1()
       .when_some(c.idle_stop.clone(), |this, eta| {
         this.child(
+          // Short label (['countdown']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .debug_selector(|| "cloud-idle-stop".into())
             .text_color(p.muted_foreground)
@@ -2105,7 +2107,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           ),
           (None, false) => None,
         };
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .flex()
           .items_center()
           .gap_2()
@@ -2237,7 +2239,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   let body: AnyElement = match (&c.instance, &c.create) {
     (Some(instance), _) => {
       let usage = instance.usage.as_ref().map(|usage| match usage {
-        CloudUsage::Error(error) => ui::text(div(), TextSize::Xs)
+        CloudUsage::Error(error) => ui::text(div(), TextSize::Sm)
           .truncate()
           .text_color(red)
           .child(error.clone())
@@ -2427,7 +2429,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
     })
     .when_some(c.error.clone(), |this, error| {
       this.child(
-        ui::text(div().mt_3(), TextSize::Xs)
+        ui::text(div().mt_3(), TextSize::Sm)
           .id("cloud-error")
           .role(gpui::Role::Alert)
           .aria_label(SharedString::from(error.clone()))
@@ -2439,7 +2441,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
     })
     .when_some(c.error_details.clone(), |this, details| {
       this.child(
-        ui::text(div().mt_1(), TextSize::Xs)
+        ui::text(div().mt_1(), TextSize::Sm)
           .truncate()
           .text_color(p.muted_foreground)
           .child(details),
@@ -2599,6 +2601,8 @@ impl SettingsView {
       .rounded(radius::MD)
       .bg(Tone::Warning.tint(p))
       .child(
+        // Short label (['section heading']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .mb_2()
           .font_weight(FontWeight::MEDIUM)
@@ -2626,7 +2630,7 @@ impl SettingsView {
       )
       .when_some(dev.error.clone(), |this, error| {
         this.child(
-          ui::text(div().mt_1(), TextSize::Xs)
+          ui::text(div().mt_1(), TextSize::Sm)
             .text_color(Tone::Danger.color(p))
             .child(error),
         )
@@ -2998,7 +3002,7 @@ impl SettingsView {
       ))
       .when_some(editor.error.clone(), |this, error| {
         this.child(
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .text_color(p.destructive)
             .child(error),
         )
@@ -3114,11 +3118,10 @@ impl SettingsView {
           }),
       )
       .child(
-        div().mt_4().child(
+        ui::card_actions().mt_4().child(
           Button::new("account-manage-subscription", p)
             .variant(Variant::Outline)
             .size(Size::Sm)
-            .w_full()
             .child(ui::icon(theme::ICON_EXTERNAL_LINK, 12., p.foreground))
             .label(s.manage_label.clone())
             .on_click(self.press("account.manage")),
@@ -3271,6 +3274,7 @@ impl SettingsView {
                 )
               }),
           )
+          .confirm()
           .footer([
             Button::new("account-delete-cancel", p)
               .variant(Variant::Outline)
@@ -3313,6 +3317,7 @@ impl SettingsView {
         name: "GitHub",
         purpose: "Pull requests, checks and reviews for your repositories",
         connected: tab.github_connected,
+        pro_required: false,
         open: open("github"),
       },
       open("github").then(|| self.github(&tab.github, p)),
@@ -3327,6 +3332,7 @@ impl SettingsView {
           name: "Linear",
           purpose: "Issues to start workspaces from",
           connected: linear.connected,
+          pro_required: linear.upgrade,
           open: open("linear"),
         },
         body,
@@ -3386,7 +3392,16 @@ impl SettingsView {
       .leading(ui::icon(card.icon, 20., p.foreground))
       .title(card.name)
       .meta(card.purpose)
-      .trailing(status)
+      .trailing(if card.pro_required {
+        div()
+          .debug_selector({
+            let id = format!("integration-requires-pro-{}", card.id);
+            move || id
+          })
+          .child(ui::Badge::new("Requires Pro", p))
+      } else {
+        status
+      })
       .trailing(ui::icon(
         if card.open {
           theme::ICON_CHEVRON_UP
@@ -3491,20 +3506,20 @@ impl SettingsView {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> AnyElement {
+    if linear.upgrade {
+      let upgrade = Button::new("linear-upgrade", p)
+        .size(Size::Sm)
+        .child(ui::icon(theme::ICON_CREDIT_CARD, 12., p.primary_foreground))
+        .label("Upgrade to Pro")
+        .on_click(self.press("cloud.upgrade"));
+      return linear_paywall(p, upgrade);
+    }
     if !linear.repo {
       return div()
         .text_center()
         .py_8()
         .text_color(p.muted_foreground)
         .child("Select a repository to configure Linear integration")
-        .into_any_element();
-    }
-    if linear.upgrade {
-      let button = Button::new("linear-upgrade", p)
-        .size(Size::Sm)
-        .label("Upgrade to Pro")
-        .on_click(self.press("cloud.upgrade"));
-      return setting_row("Linear needs Pro", "Upgrade to use Linear", button, p)
         .into_any_element();
     }
     let key_control: AnyElement = if linear.editing {
@@ -3594,6 +3609,37 @@ impl SettingsView {
       })
       .into_any_element()
   }
+}
+
+/// The Linear card's body on the free plan: what Linear gives, and the
+/// upgrade button.
+fn linear_paywall(p: &Palette, upgrade: Button) -> AnyElement {
+  let benefits = [
+    "See your team's Linear issues in the sidebar",
+    "Start a workspace from an issue, on its suggested branch",
+    "Turn sub-issues into nested workspaces in one step",
+    "Keep each workspace linked to its issue",
+  ];
+  div()
+    .debug_selector(|| "linear-paywall".into())
+    .flex()
+    .flex_col()
+    .gap_3()
+    .py_3()
+    .child(
+      ui::text(div(), TextSize::Sm)
+        .text_color(p.muted_foreground)
+        .child("Linear is a Pro feature. Connect it to work from your issues."),
+    )
+    .child(
+      ui::text(div(), TextSize::Sm)
+        .flex()
+        .flex_col()
+        .gap_1()
+        .children(benefits.map(|b| div().child(format!("• {b}")))),
+    )
+    .child(div().flex().justify_end().child(upgrade))
+    .into_any_element()
 }
 
 #[cfg(test)]

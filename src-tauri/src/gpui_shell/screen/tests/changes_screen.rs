@@ -1331,8 +1331,19 @@ fn changes_tab_sends_an_agent_comment_to_the_idle_agent(cx: &mut TestAppContext)
   h.cx.run_until_parked();
   assert!(fields(&h, "changes.agentComment").is_empty());
   let prompt = "Please address this review comment.\n\na.rs:2\n> Use one line\n\nSuggested change:\n```\none()\n```\n";
-  let sent = format!("write {} {:?}", agent_pty(), format!("{prompt}\n"));
-  assert!(pty_writes(&host).contains(&sent), "{:?}", pty_writes(&host));
+  // The text, then Enter as its own later write, so the TUI submits it.
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(500));
+  h.cx.run_until_parked();
+  let writes = pty_writes(&host);
+  let text = format!("write {} {:?}", agent_pty(), prompt);
+  let enter = format!("write {} {:?}", agent_pty(), "\r");
+  let at = writes
+    .iter()
+    .position(|w| *w == text)
+    .expect("text written");
+  assert_eq!(writes.get(at + 1), Some(&enter), "{writes:?}");
   assert!(host.launches.lock().unwrap().is_empty());
   assert!(host
     .calls()

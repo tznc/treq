@@ -91,6 +91,7 @@ impl PrReviewHost for FakeHost {
     row.comment_text = draft.text.clone();
     row.line_hash = draft.line_hash.clone();
     row.quoted_text = draft.quoted_text.clone();
+    row.source = crate::review_aggregate::SOURCE_LOCAL_HUMAN.into();
     self.agent.lock().unwrap().push(row);
     Ok(())
   }
@@ -119,6 +120,20 @@ impl PrReviewHost for FakeHost {
       }
     }
     Ok(())
+  }
+
+  fn pr_file_lines(
+    &self,
+    full_name: &str,
+    number: u64,
+    path: &str,
+    start: usize,
+    end: usize,
+  ) -> Result<Vec<String>, String> {
+    self.record(format!(
+      "read pr lines {full_name} {number} {path} {start}..{end}"
+    ));
+    Ok((start..=end).map(|n| format!("line {n}")).collect())
   }
 }
 
@@ -289,6 +304,25 @@ fn pr_review_lists_outdated_drafts_apart(cx: &mut TestAppContext) {
   assert!(h.drawn("outdated-comments"));
   assert!(!h.drawn("inline-comment-card"));
   assert_eq!(counts(&mut h), (0, 1));
+}
+
+#[gpui::test]
+fn pr_review_tags_the_agents_suggestion_as_a_bot(cx: &mut TestAppContext) {
+  let host = pr_host();
+  let mut row = draft_row("d1", 2, None);
+  row.suggested_replacement = Some("bb".into());
+  *host.agent.lock().unwrap() = vec![row];
+  let (mut h, _) = workspace_harness(cx, host, pr_route());
+  assert!(h.drawn("agent-review-suggestion"));
+  assert!(h.drawn("agent-comment-tag"));
+}
+
+#[gpui::test]
+fn pr_review_does_not_tag_the_users_draft_as_a_bot(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, pr_host(), pr_route());
+  comment_line(&mut h, "Nit");
+  assert!(h.drawn("inline-comment-card"));
+  assert!(!h.drawn("agent-comment-tag"));
 }
 
 #[gpui::test]
@@ -466,4 +500,76 @@ fn the_finish_popover_verdicts_are_named_radio_buttons(cx: &mut TestAppContext) 
     "{:?}",
     host.writes()
   );
+}
+
+/// A file with review threads or drafts shows how many beside its status.
+#[gpui::test]
+fn pr_review_file_list_counts_each_files_comments(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let mut host = pr_host();
+  host.threads = vec![gh_thread("t1", 2, false)];
+  *host.agent.lock().unwrap() = vec![draft_row("d1", 3, None)];
+  let (mut h, _) = workspace_harness(cx, host, pr_route());
+  assert!(h.drawn("pr-file-comments-a.rs"));
+  assert!(!h.drawn("pr-file-comments-b.rs"));
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(Role::Label).name("2 review comments"))).to_be_visible();
+}
+
+/// A hunk in the middle of a file, with hidden lines on both sides.
+const MID_DIFF: &str = "diff --git a/a.rs b/a.rs
+--- a/a.rs
++++ b/a.rs
+@@ -10,7 +10,7 @@
+ a
+ b
+ c
+-d
++D
+ e
+ f
+ g
+";
+
+/// The PR's files are not checked out, so "Show more lines below" reads
+/// the file at the PR's head.
+#[gpui::test]
+fn pr_review_shows_more_lines_below_the_last_hunk(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_diff: Some(Ok(MID_DIFF.into())),
+    ..pr_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, pr_route());
+  h.click("expand-after-a.rs-0");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .calls()
+      .contains(&"read pr lines o/r 5 a.rs 17..36".to_string()),
+    "{:?}",
+    host.calls()
+  );
+}
+
+/// "Expand all" in a hunk header reads the whole gap from the PR's head.
+#[gpui::test]
+fn pr_review_expands_all_lines_above_a_hunk(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_diff: Some(Ok(MID_DIFF.into())),
+    ..pr_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, pr_route());
+  h.click("expand-all-above-a.rs-0");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .calls()
+      .contains(&"read pr lines o/r 5 a.rs 1..9".to_string()),
+    "{:?}",
+    host.calls()
+  );
+  assert!(!h.drawn("expand-all-above-a.rs-0"));
 }
