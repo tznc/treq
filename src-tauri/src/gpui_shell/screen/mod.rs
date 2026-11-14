@@ -264,6 +264,8 @@ impl Screen {
     host: Arc<dyn Host>,
     cx: &mut Context<Self>,
   ) -> Self {
+    let opener: Arc<dyn github_data::GithubHost> = host.clone();
+    cx.set_global(code::UrlOpener(Rc::new(move |url| opener.open_url(url))));
     // What the screen runs itself, the rest going on to the model.
     let react_for_self = react.clone();
     let screen = cx.weak_entity();
