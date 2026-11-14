@@ -256,6 +256,8 @@ pub fn save_window_project(app: &AppHandle, label: &str, name: &str) -> Result<P
       .set_title(&format!("Treq - {}", project.name))
       .best_effort();
   }
+  // Saved projects reach the user's other devices: sync now.
+  crate::core::project_sync::request();
   Ok(project)
 }
 

@@ -9,6 +9,7 @@ mod home;
 mod load;
 #[cfg(test)]
 mod perf;
+mod projects_list;
 mod review;
 mod screens;
 pub mod sheet;
@@ -368,7 +369,7 @@ impl Root {
     let root = Self {
       model,
       stack: vec![Page {
-        title: "Machines".into(),
+        title: "Projects".into(),
         header: nav::Header::default(),
         view: home.into(),
         location: Location::default(),
@@ -926,6 +927,148 @@ fn activate(connection: Connection, model: &Entity<AppModel>, cx: &mut App) {
     m.epoch += 1;
     cx.notify();
   });
+}
+
+/// Every machine on this device, in the order added: the SSH hosts, and the
+/// Treq Cloud machine when signed in. No kind is preferred.
+pub fn machines(cx: &App) -> Vec<Machine> {
+  let signed_in = model(cx).read(cx).user.is_some();
+  store::user_managed_endpoints()
+    .into_iter()
+    .map(Machine::Host)
+    .chain(signed_in.then_some(Machine::Managed))
+    .collect()
+}
+
+/// Opens `project`'s first repository on the machine Treq picks from what
+/// is in use (`projects::pick_machine`), connecting to it first if needed.
+pub fn open_project(
+  project: &crate::mobile::projects::Project,
+  cx: &mut App,
+) -> Result<(), String> {
+  use crate::mobile::projects::{pick_machine, Candidate};
+  let repo = project
+    .repos
+    .first()
+    .cloned()
+    .ok_or("This project has no repositories.")?;
+  let all = machines(cx);
+  let model = model(cx);
+  let candidates: Vec<Candidate> = all
+    .iter()
+    .map(|m| Candidate {
+      id: m.id().to_string(),
+      ready: model.read(cx).machine(m.id()).status == MachineStatus::Ready
+        && backend::get().connection_to(m.id()).is_some(),
+    })
+    .collect();
+  let active = model
+    .read(cx)
+    .connection
+    .as_ref()
+    .map(|c| c.machine().to_string());
+  let last_used = store::session_snapshot().map(|s| match s.endpoint {
+    crate::core::remote_records::SessionEndpoint::Managed => MANAGED_MACHINE.to_string(),
+    crate::core::remote_records::SessionEndpoint::UserManaged { id } => id,
+  });
+  let id = pick_machine(&candidates, active.as_deref(), last_used.as_deref())
+    .ok_or("Add a machine in Settings to open projects.")?;
+  let machine = all
+    .into_iter()
+    .find(|m| m.id() == id)
+    .ok_or("That machine is gone.")?;
+  if let (MachineStatus::Ready, Some(connection)) = (
+    model.read(cx).machine(&id).status,
+    backend::get().connection_to(&id),
+  ) {
+    activate(connection, &model, cx);
+    open_repo_on_active(repo, cx);
+    return Ok(());
+  }
+  connect(machine, false, cx);
+  // Open once the machine is ready; a failed connect shows on its row in
+  // Settings.
+  cx.spawn(async move |cx| {
+    for _ in 0..480 {
+      cx.background_executor()
+        .timer(std::time::Duration::from_millis(250))
+        .await;
+      let status = cx.update(|cx| model.read(cx).machine(&id).status);
+      match status {
+        MachineStatus::Ready => {
+          cx.update(|cx| open_repo_on_active(repo, cx));
+          return;
+        }
+        MachineStatus::Connecting(_) => {}
+        _ => return,
+      }
+    }
+  })
+  .detach();
+  Ok(())
+}
+
+/// Opens project repo `remote` on the active machine: a saved clone of it,
+/// else a new clone under `~/.treq/repos`.
+fn open_repo_on_active(remote: String, cx: &mut App) {
+  use crate::core::remote::{RemoteRepoProbe, TreqCommandRequest};
+  use crate::mobile::projects::{locate, Target};
+  let Ok(endpoint) = backend::get().endpoint() else {
+    return;
+  };
+  let generation = store::endpoint_generation(&endpoint);
+  let saved: Vec<String> = store::saved_repositories(&endpoint.id, generation)
+    .into_iter()
+    .map(|r| r.canonical_remote_path)
+    .collect();
+  let (url, destination) = match locate(&remote, &saved) {
+    Some(Target::Existing(path)) => return screens::workspaces::open(path, cx),
+    Some(Target::Clone { url, destination }) => (url, destination),
+    None => return,
+  };
+  let result = backend::spawn(async move {
+    let key = || uuid::Uuid::new_v4().to_string();
+    let probe = remote::read::<RemoteRepoProbe>(TreqCommandRequest::ProbeRepo {
+      repo: destination.clone(),
+    })
+    .await?;
+    // The host expands `~`; its answer is the path every command uses.
+    let path = if probe.path.is_empty() {
+      destination
+    } else {
+      probe.path
+    };
+    if !probe.is_repo {
+      if let remote::Mutation::Ambiguous(reason) = remote::mutate(TreqCommandRequest::CloneRepo {
+        repo_url: url,
+        destination: path.clone(),
+        idempotency_key: format!("CloneRepo:{}", key()),
+      })
+      .await?
+      {
+        return Err(reason);
+      }
+    }
+    if let remote::Mutation::Ambiguous(reason) = remote::mutate(TreqCommandRequest::InitRepo {
+      repo: path.clone(),
+      idempotency_key: format!("InitRepo:{}", key()),
+    })
+    .await?
+    {
+      return Err(reason);
+    }
+    Ok::<String, String>(path)
+  });
+  cx.spawn(async move |cx| {
+    let Ok(Ok(path)) = result.await else {
+      return;
+    };
+    cx.update(|cx| {
+      store::upsert_saved_repository(&endpoint.id, generation, &path);
+      screens::workspaces::open(path, cx);
+    });
+  })
+  .detach();
 }
 
 /// The active machine's last repository, or its repository picker.

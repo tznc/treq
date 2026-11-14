@@ -1,5 +1,7 @@
 //! Home: a landing page when signed out with no machines, otherwise the
-//! machine list (Treq Cloud and SSH hosts), each with its own connection.
+//! user's projects grouped by owner (Personal, then each team). The same
+//! screen in settings mode manages the machines (Treq Cloud and SSH hosts)
+//! and the account.
 
 use crate::mobile::ui::widgets::TouchButton as _;
 use gpui_kit::component::Disableable as _;
@@ -20,6 +22,7 @@ use treq_ui::{Dot, Tone};
 use super::{model, screens, widgets, Machine, MachineState, MachineStatus};
 use crate::core::auth::OAuthProvider;
 use crate::core::pty_remote_supervisor::PtyBackend;
+use crate::mobile::projects::Project;
 use crate::mobile::{
   backend::MANAGED_MACHINE,
   errors::{self, Fix},
@@ -44,8 +47,19 @@ const MACHINES_W: f32 = 320.;
 /// Recent repositories shown per machine.
 const RECENTS_PER_MACHINE: usize = 5;
 
+/// The user's projects, and their teams as (id, name).
+type Listing = (Vec<Project>, Vec<(String, String)>);
+
 pub struct HomeScreen {
   scroll: ScrollHandle,
+  /// Settings: the machines and the account instead of the projects.
+  settings: bool,
+  /// The signed-in user the projects were read for.
+  read_for: Option<String>,
+  /// The projects and the user's teams as (id, name).
+  projects: super::Load<Listing>,
+  /// Why the last project tapped did not open.
+  open_error: Option<String>,
 }
 
 /// The status line and dot for a machine row.
@@ -107,10 +121,108 @@ fn missing_tools(state: &MachineState) -> Option<String> {
 
 impl HomeScreen {
   pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
-    cx.observe(&model(cx), |_, _, cx| cx.notify()).detach();
-    Self {
+    Self::with_mode(false, cx)
+  }
+
+  /// The machines and account page, opened from the home page.
+  pub fn settings(_window: &mut Window, cx: &mut Context<Self>) -> Self {
+    Self::with_mode(true, cx)
+  }
+
+  fn with_mode(settings: bool, cx: &mut Context<Self>) -> Self {
+    cx.observe(&model(cx), |this, _, cx| {
+      this.reload_if_user_changed(cx);
+      cx.notify();
+    })
+    .detach();
+    let mut this = Self {
       scroll: ScrollHandle::new(),
+      settings,
+      read_for: None,
+      projects: super::Load::Idle,
+      open_error: None,
+    };
+    this.reload_if_user_changed(cx);
+    this
+  }
+
+  /// Reads the projects again when someone signs in or out.
+  fn reload_if_user_changed(&mut self, cx: &mut Context<Self>) {
+    let user = model(cx).read(cx).user.clone();
+    if self.settings || user == self.read_for {
+      return;
     }
+    self.read_for = user.clone();
+    if user.is_none() {
+      self.projects = super::Load::Idle;
+      return;
+    }
+    self.projects = super::Load::Loading;
+    super::load::run(
+      cx,
+      async {
+        let supabase = &crate::mobile::backend::get().supabase;
+        let projects: Vec<Project> = supabase
+          .select(
+            "organization_projects",
+            "select=id,name,org_id,repos&order=name",
+          )
+          .await
+          .map_err(|e| e.to_string())?;
+        let teams = crate::core::cloud_catalog::fetch_cloud_organizations(supabase)
+          .await
+          .map(|orgs| orgs.into_iter().map(|o| (o.org_id, o.name)).collect())
+          .unwrap_or_default();
+        Ok::<_, String>((projects, teams))
+      },
+      |this, result, _| this.projects = super::Load::from_result(result),
+    );
+  }
+
+  /// The home page: projects by owner, or why there are none.
+  fn projects(&self, cx: &mut Context<Self>) -> AnyElement {
+    let signed_in = model(cx).read(cx).user.is_some();
+    let body: AnyElement = match &self.projects {
+      _ if !signed_in => widgets::muted("Sign in to see your projects.", cx).into_any_element(),
+      super::Load::Ready((projects, teams)) if !projects.is_empty() => {
+        let sections = crate::mobile::projects::group(projects, teams);
+        let view = cx.entity().downgrade();
+        let on_open: super::projects_list::OnOpen = std::rc::Rc::new(move |project, cx| {
+          let error = super::open_project(project, cx).err();
+          view
+            .update(cx, |this, cx| {
+              this.open_error = error;
+              cx.notify();
+            })
+            .ok();
+        });
+        super::projects_list::sections(&sections, on_open, cx).into_any_element()
+      }
+      super::Load::Ready(_) => widgets::muted(
+        "No projects yet. Save one in Treq on your computer to see it here.",
+        cx,
+      )
+      .into_any_element(),
+      super::Load::Failed(error) => widgets::error_text(error.clone(), cx).into_any_element(),
+      _ => Spinner::new().into_any_element(),
+    };
+    v_flex()
+      .gap_4()
+      .child(body)
+      .children(self.open_error.clone().map(|e| widgets::error_text(e, cx)))
+      .child(
+        Button::new("settings")
+          .outline()
+          .icon(IconName::Settings)
+          .label("Settings")
+          .on_click(|_, _, cx| {
+            super::nav::push("Settings", super::Location::default(), cx, |window, cx| {
+              gpui_kit::AppContext::new(cx, |cx| HomeScreen::settings(window, cx))
+            })
+          })
+          .touch(),
+      )
+      .into_any_element()
   }
 
   /// One machine: dot, name, status or last repository, and a problem with
@@ -244,98 +356,101 @@ impl HomeScreen {
 
   /// `stacked`: sign-in buttons one above the other, for the narrow
   /// tablet sidebar.
-  fn cloud(&self, stacked: bool, cx: &mut Context<Self>) -> impl IntoElement {
+  /// Every machine in one list, each row alike: Treq Cloud and SSH hosts.
+  /// `stacked` puts the sign-in buttons under one another (the sidebar).
+  fn machines(&self, stacked: bool, cx: &mut Context<Self>) -> impl IntoElement {
+    let machines = super::machines(cx);
     let model = model(cx).read(cx);
-    let busy = model.auth_busy;
-    let error = model.auth_error.clone();
-    let notice = model.auth_notice.clone();
+    let (busy, error, notice) = (
+      model.auth_busy,
+      model.auth_error.clone(),
+      model.auth_notice.clone(),
+    );
     let signed_in = model.user.is_some();
-    let section = widgets::section("Treq Cloud", cx);
-    if !signed_in {
-      return section.child(
-        widgets::card(cx)
-          .p_4()
-          .gap_3()
-          .children(notice.map(|n| div().text_sm().child(n)))
-          .child(widgets::muted(
-            "Sign in to reach your Treq Cloud machine.",
-            cx,
-          ))
-          .map(|card| {
-            if stacked {
-              card.child(v_flex().gap_2().children(provider_buttons(busy, true)))
-            } else {
-              card.child(h_flex().gap_2().children(provider_buttons(busy, false)))
-            }
-          })
-          .children(error.map(|e| widgets::error_text(e, cx).px_4().pb_3())),
-      );
-    }
     let secure_storage = match &model.machine(MANAGED_MACHINE).status {
       MachineStatus::Failed(error) => error
         .strip_prefix(managed::SECURE_STORAGE_PREFIX)
         .map(|detail| detail.trim().to_string()),
       _ => None,
     };
-    let row = self.machine_row(Machine::Managed, "Cloud machine".into(), None, None, cx);
-    section
-      .child(widgets::card(cx).child(row))
-      .when_some(secure_storage, |section, detail| {
-        section.child(
-          Alert::warning("secure-storage", detail)
-            .title("Secure storage isn't set up on this device"),
-        )
-      })
-  }
-
-  fn hosts(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let hosts = store::user_managed_endpoints();
     let palette = treq_ui::theme::current(cx);
-    let count = hosts.len();
-    let title = treq_ui::SectionHeader::new("section-ssh-hosts", "SSH hosts", &palette)
+    let count = machines.len();
+    let title = treq_ui::SectionHeader::new("section-machines", "Machines", &palette)
       .when(count > 0, |header| header.count(count));
-    let list = if hosts.is_empty() {
+    let list = if machines.is_empty() {
       widgets::card(cx).child(widgets::empty(
-        "hosts-empty",
-        "No SSH hosts on this device yet.",
+        "machines-empty",
+        "No machines on this device yet.",
         cx,
       ))
     } else {
-      let rows = hosts
+      let rows = machines
         .into_iter()
-        .map(|host| {
-          let address = format!("{}@{}:{}", host.username, host.hostname, host.port);
-          let edit_record = host.clone();
-          let edit = Button::new(SharedString::from(format!("edit-{}", host.id)))
-            .ghost()
-            .small()
-            .icon(IconName::Ellipsis)
-            .accessibility_label("Edit host")
-            .on_click(move |_, _, cx| {
-              cx.stop_propagation();
-              screens::add_host::edit(edit_record.clone(), cx);
-            })
-            .touch();
-          let name = host.display_name.clone();
-          self.machine_row(
-            Machine::Host(host),
-            name,
-            Some(address),
-            Some(edit.into_any_element()),
-            cx,
-          )
+        .map(|machine| match machine {
+          Machine::Managed => {
+            self.machine_row(Machine::Managed, "Treq Cloud".into(), None, None, cx)
+          }
+          Machine::Host(host) => {
+            let address = format!("{}@{}:{}", host.username, host.hostname, host.port);
+            let edit_record = host.clone();
+            let edit = Button::new(SharedString::from(format!("edit-{}", host.id)))
+              .ghost()
+              .small()
+              .icon(IconName::Ellipsis)
+              .accessibility_label("Edit machine")
+              .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                screens::add_host::edit(edit_record.clone(), cx);
+              })
+              .touch();
+            let name = host.display_name.clone();
+            self.machine_row(
+              Machine::Host(host),
+              name,
+              Some(address),
+              Some(edit.into_any_element()),
+              cx,
+            )
+          }
         })
         .collect::<Vec<_>>();
       widgets::card(cx).children(rows)
     };
-    v_flex().gap_3().child(title).child(list).child(
-      Button::new("add-host")
-        .outline()
-        .icon(IconName::Plus)
-        .label("Add SSH host")
-        .on_click(|_, _, cx| screens::add_host::open(cx))
-        .touch(),
-    )
+    v_flex()
+      .gap_3()
+      .child(title)
+      .child(list)
+      .when_some(secure_storage, |this, detail| {
+        this.child(
+          Alert::warning("secure-storage", detail)
+            .title("Secure storage isn't set up on this device"),
+        )
+      })
+      .child(
+        Button::new("add-host")
+          .outline()
+          .icon(IconName::Plus)
+          .label("Add SSH host")
+          .on_click(|_, _, cx| screens::add_host::open(cx))
+          .touch(),
+      )
+      // Signed out, the cloud machine isn't listed: sign in to add it.
+      .when(!signed_in, |this| {
+        this
+          .children(notice.map(|n| div().text_sm().child(n)))
+          .child(widgets::muted(
+            "Sign in to add your Treq Cloud machine.",
+            cx,
+          ))
+          .map(|this| {
+            if stacked {
+              this.child(v_flex().gap_2().children(provider_buttons(busy, true)))
+            } else {
+              this.child(h_flex().gap_2().children(provider_buttons(busy, false)))
+            }
+          })
+          .children(error.map(|e| widgets::error_text(e, cx)))
+      })
   }
 
   fn account(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
@@ -488,6 +603,8 @@ impl Render for HomeScreen {
     let content = if landing {
       let split = landing_split(window.viewport_size().width);
       self.landing(split, cx).into_any_element()
+    } else if !self.settings {
+      widgets::page().child(self.projects(cx)).into_any_element()
     } else if overview_layout(
       window.viewport_size().width,
       super::nav::beside(cx.entity_id(), cx).is_some(),
@@ -504,8 +621,7 @@ impl Render for HomeScreen {
         .bg(palette.sidebar)
         .child(
           widgets::page()
-            .child(self.hosts(cx))
-            .child(self.cloud(true, cx))
+            .child(self.machines(true, cx))
             .children(self.account(cx)),
         );
       let recents = div()
@@ -522,12 +638,10 @@ impl Render for HomeScreen {
         .child(recents)
         .into_any_element();
     } else {
-      let cloud = self.cloud(false, cx);
-      let hosts = self.hosts(cx);
+      let machines = self.machines(false, cx);
       let account = self.account(cx);
       widgets::page()
-        .child(hosts)
-        .child(cloud)
+        .child(machines)
         .children(account)
         .into_any_element()
     };
