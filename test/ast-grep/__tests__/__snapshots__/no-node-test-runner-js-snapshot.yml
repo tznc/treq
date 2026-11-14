@@ -1,0 +1,65 @@
+id: no-node-test-runner-js
+snapshots:
+  ? |
+    const assert = require("node:assert");
+  : labels:
+    - source: require("node:assert")
+      style: primary
+      start: 15
+      end: 37
+    - source: '"node:assert"'
+      style: secondary
+      start: 23
+      end: 36
+    - source: ("node:assert")
+      style: secondary
+      start: 22
+      end: 37
+  ? |
+    const test = require("node:test");
+  : labels:
+    - source: require("node:test")
+      style: primary
+      start: 13
+      end: 33
+    - source: '"node:test"'
+      style: secondary
+      start: 21
+      end: 32
+    - source: ("node:test")
+      style: secondary
+      start: 20
+      end: 33
+  ? |
+    import assert from "assert";
+  : labels:
+    - source: import assert from "assert";
+      style: primary
+      start: 0
+      end: 28
+    - source: '"assert"'
+      style: secondary
+      start: 19
+      end: 27
+  ? |
+    import assert from "node:assert/strict";
+  : labels:
+    - source: import assert from "node:assert/strict";
+      style: primary
+      start: 0
+      end: 40
+    - source: '"node:assert/strict"'
+      style: secondary
+      start: 19
+      end: 39
+  ? |
+    import { test } from "node:test";
+  : labels:
+    - source: import { test } from "node:test";
+      style: primary
+      start: 0
+      end: 33
+    - source: '"node:test"'
+      style: secondary
+      start: 21
+      end: 32

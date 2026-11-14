@@ -1,0 +1,39 @@
+id: no-playwright-outside-e2e-js
+snapshots:
+  ? |
+    const { test } = require("@playwright/test");
+  : labels:
+    - source: require("@playwright/test")
+      style: primary
+      start: 17
+      end: 44
+    - source: '"@playwright/test"'
+      style: secondary
+      start: 25
+      end: 43
+    - source: ("@playwright/test")
+      style: secondary
+      start: 24
+      end: 44
+  ? |
+    import type { Page } from "@playwright/test";
+  : labels:
+    - source: import type { Page } from "@playwright/test";
+      style: primary
+      start: 0
+      end: 45
+    - source: '"@playwright/test"'
+      style: secondary
+      start: 26
+      end: 44
+  ? |
+    import { test, expect } from "@playwright/test";
+  : labels:
+    - source: import { test, expect } from "@playwright/test";
+      style: primary
+      start: 0
+      end: 48
+    - source: '"@playwright/test"'
+      style: secondary
+      start: 29
+      end: 47
