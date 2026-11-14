@@ -24,7 +24,7 @@ use std::{
   time::Duration,
 };
 
-use gpui_kit::component::input::{Escape, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use serde::Deserialize;
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
@@ -35,7 +35,6 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{
-  changes::search::match_ranges,
   changes_data::{ChangedFile, EditorApps},
   changes_review::{count_label, review_markdown, LineComment},
   code::Parent,
@@ -44,6 +43,7 @@ use super::{
     is_markdown, line_marks, line_number_width, parse_review, readme, relative, review_to_save,
     sorted, status_title, too_large, FileBrowserHost, LineMarks, TreeRow, COMMENT_HUNK,
   },
+  find::{self, match_ranges, Find, Findable},
   highlight, prefetch, ActionSink, ScreenAction,
 };
 use crate::{
@@ -57,8 +57,6 @@ use crate::{
   },
 };
 
-/// `useDebounce(searchQuery, 150)`.
-const SEARCH_DEBOUNCE: Duration = Duration::from_millis(150);
 /// How long edits wait before the review is written (`useDebounce(…, 500)`).
 const SAVE_DELAY: Duration = Duration::from_millis(500);
 /// `TextSize::Code`'s size and line height.
@@ -133,20 +131,6 @@ enum Field {
   Summary,
 }
 
-#[derive(Default)]
-pub(super) struct Search {
-  pub open: bool,
-  query: String,
-  pub applied: String,
-  pub current: usize,
-  /// Every match: its line (0-based) and byte range.
-  pub matches: Vec<(usize, Range<usize>)>,
-  input: Option<Entity<InputState>>,
-  focus: bool,
-  debounce: Option<Task<()>>,
-  _subscription: Option<Subscription>,
-}
-
 pub struct FileBrowserView {
   host: Arc<dyn FileBrowserHost>,
   react: ActionSink,
@@ -201,10 +185,11 @@ pub struct FileBrowserView {
   use_idle: bool,
   pub(super) discard_dialog: bool,
   hydrated: Option<(String, i64)>,
-  pub(super) search: Search,
+  pub(super) search: Find,
+  /// Every find match: its line (0-based) and byte range.
+  pub(super) matches: Vec<(usize, Range<usize>)>,
   anchors: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
   _save: Option<Task<()>>,
-  _find_key: Option<Subscription>,
   /// The files' revision when the browser was hidden, while another tab
   /// or workspace shows.
   hidden_at: Option<u64>,
@@ -276,10 +261,10 @@ impl FileBrowserView {
       use_idle: false,
       discard_dialog: false,
       hydrated: None,
-      search: Search::default(),
+      search: Find::default(),
+      matches: Vec::new(),
       anchors: Rc::default(),
       _save: None,
-      _find_key: None,
       hidden_at: None,
       hovered: prefetch::Intent::default(),
       prefetched: prefetch::Lru::new(8),
@@ -341,7 +326,7 @@ impl FileBrowserView {
       (false, None) => {
         self.hidden_at = Some(self.revision);
         // Cmd+F is the shown view's; drawing again listens again.
-        self._find_key = None;
+        find::unwatch_key(self);
       }
       (true, Some(at)) => {
         self.hidden_at = None;
@@ -563,7 +548,7 @@ impl FileBrowserView {
   pub(super) fn select_file(&mut self, path: &str, cx: &mut Context<Self>) {
     let refreshing = self.selected.as_deref() == Some(path);
     if !refreshing {
-      self.close_search(cx);
+      find::close(self, cx);
       self.selection = None;
       self.anchor = None;
       self.draft = None;
@@ -1099,59 +1084,10 @@ impl FileBrowserView {
 
   // Search.
 
-  fn watch_find_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    if self._find_key.is_some() {
-      return;
-    }
-    let id = window.window_handle().window_id();
-    self._find_key = Some(cx.observe_keystrokes(move |view, event, window, cx| {
-      let k = &event.keystroke;
-      if window.window_handle().window_id() == id
-        && k.key == "f"
-        && (crate::gpui_shell::keys::held(k.modifiers).platform
-          || crate::gpui_shell::keys::held(k.modifiers).control)
-        && !crate::gpui_shell::keys::held(k.modifiers).shift
-        && !crate::gpui_shell::keys::held(k.modifiers).alt
-      {
-        view.open_search(cx);
-      }
-    }));
-  }
-
-  /// Cmd+F, while a text file is open.
-  pub(super) fn open_search(&mut self, cx: &mut Context<Self>) {
-    if self.selected.as_deref().is_none_or(is_binary) {
-      return;
-    }
-    self.search.open = true;
-    self.search.focus = true;
-    cx.notify();
-  }
-
-  fn close_search(&mut self, cx: &mut Context<Self>) {
-    self.search = Search::default();
-    cx.notify();
-  }
-
-  fn set_query(&mut self, query: String, cx: &mut Context<Self>) {
-    self.search.query = query.clone();
-    self.search.debounce = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(SEARCH_DEBOUNCE).await;
-      this
-        .update(cx, |view, cx| {
-          view.search.applied = query;
-          view.search.current = 0;
-          view.index_matches();
-          cx.notify();
-        })
-        .ignore_closed();
-    }));
-    cx.notify();
-  }
-
+  /// Every match of the find query in the open file, in line order.
   fn index_matches(&mut self) {
     let query = self.search.applied.clone();
-    self.search.matches = match self.opened.as_ref() {
+    self.matches = match self.opened.as_ref() {
       Some(opened) if !query.is_empty() => opened
         .lines
         .iter()
@@ -1160,57 +1096,7 @@ impl FileBrowserView {
         .collect(),
       _ => Vec::new(),
     };
-    if self.search.current >= self.search.matches.len() {
-      self.search.current = 0;
-    }
-  }
-
-  pub(super) fn step_match(&mut self, delta: isize, cx: &mut Context<Self>) {
-    let total = self.search.matches.len() as isize;
-    if total == 0 {
-      return;
-    }
-    self.search.current = (self.search.current as isize + delta).rem_euclid(total) as usize;
-    let line = self.search.matches[self.search.current].0;
-    let half = (f32::from(self.list.viewport_bounds().size.height) / LINE_HEIGHT / 2.) as usize;
-    self.list.scroll_to(ListOffset {
-      item_ix: line.saturating_sub(half),
-      offset_in_item: px(0.),
-    });
-    cx.notify();
-  }
-
-  fn ensure_search_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    if !self.search.open {
-      return;
-    }
-    let input = match &self.search.input {
-      Some(input) => input.clone(),
-      None => {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find"));
-        self.search._subscription = Some(cx.subscribe(
-          &input,
-          |view, input, event: &InputEvent, cx| match event {
-            InputEvent::Change => {
-              let query = input.read(cx).value().to_string();
-              view.set_query(query, cx);
-            }
-            InputEvent::PressEnter { shift, .. } => {
-              view.step_match(if *shift { -1 } else { 1 }, cx)
-            }
-            _ => {}
-          },
-        ));
-        self.search.input = Some(input.clone());
-        input
-      }
-    };
-    if std::mem::take(&mut self.search.focus) {
-      input.update(cx, |input, cx| {
-        input.focus(window, cx);
-        input.select_all(window, cx);
-      });
-    }
+    self.search.set_total(self.matches.len());
   }
 
   // Menus.
@@ -1309,11 +1195,38 @@ impl FileBrowserView {
   }
 }
 
+impl Findable for FileBrowserView {
+  fn find(&mut self) -> &mut Find {
+    &mut self.search
+  }
+
+  /// While a text file is open.
+  fn can_find(&self) -> bool {
+    self.selected.as_deref().is_some_and(|p| !is_binary(p))
+  }
+
+  fn query_applied(&mut self, _cx: &mut Context<Self>) {
+    self.index_matches();
+  }
+
+  /// Scrolls the current match's line to the middle.
+  fn reveal_current(&mut self, _cx: &mut Context<Self>) {
+    let Some(&(line, _)) = self.matches.get(self.search.current) else {
+      return;
+    };
+    let half = (f32::from(self.list.viewport_bounds().size.height) / LINE_HEIGHT / 2.) as usize;
+    self.list.scroll_to(ListOffset {
+      item_ix: line.saturating_sub(half),
+      offset_in_item: px(0.),
+    });
+  }
+}
+
 impl Render for FileBrowserView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.tips.sync(cx);
-    self.watch_find_key(window, cx);
-    self.ensure_search_input(window, cx);
+    find::watch_key(self, window, cx);
+    find::ensure_input(self, window, cx);
     self.ensure_inputs(window, cx);
     self.sync_rows();
     let p = theme::palette(self.dark);
@@ -1956,22 +1869,14 @@ impl FileBrowserView {
   /// A line's text, highlighted, with its search matches marked.
   fn marked_line(&self, ix: usize, text: &str) -> gpui::AnyElement {
     // The matches run in line order: this line's are one run of them.
-    let matches = &self.search.matches;
+    let matches = &self.matches;
     let first = matches.partition_point(|(l, _)| *l < ix);
     let count = matches[first..].partition_point(|(l, _)| *l == ix);
     if self.search.applied.is_empty() || count == 0 {
       return highlight::styled(text, self.language, self.dark).into_any_element();
     }
     let primary = theme::palette(self.dark).primary;
-    let marks: Vec<(Range<usize>, Hsla)> = matches[first..first + count]
-      .iter()
-      .enumerate()
-      .map(|(i, (_, r))| {
-        let i = first + i;
-        let current = i == self.search.current;
-        (r.clone(), primary.opacity(if current { 0.6 } else { 0.3 }))
-      })
-      .collect();
+    let marks = self.search.marks(text, first, primary);
     highlight::styled_marked(text, self.language, self.dark, &marks).into_any_element()
   }
 }

@@ -10,6 +10,7 @@
 //! [`commits_data`]: super::commits_data
 
 mod rows;
+mod search;
 
 use crate::core::review::{selected_text, TextPoint};
 use crate::gpui_shell::native::Toast;
@@ -211,6 +212,8 @@ pub struct CommitsView {
   hidden_at: Option<u64>,
   /// The commit row the pointer rests on, whose diff is read ahead.
   hovered: prefetch::Intent<String>,
+  pub(super) search: super::find::Find,
+  hits: search::Hits,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -264,6 +267,8 @@ impl CommitsView {
       layout_gen: 0,
       hidden_at: None,
       hovered: prefetch::Intent::default(),
+      search: super::find::Find::default(),
+      hits: search::Hits::default(),
       _subscriptions: Vec::new(),
     };
     this.load(cx);
@@ -332,7 +337,10 @@ impl CommitsView {
   /// again behind what it draws, unless a newer revision already did.
   pub(super) fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
     match (shown, self.hidden_at) {
-      (false, None) => self.hidden_at = Some(self.parent.revision),
+      (false, None) => {
+        self.hidden_at = Some(self.parent.revision);
+        super::find::unwatch_key(self);
+      }
       (true, Some(at)) => {
         self.hidden_at = None;
         // Until its first read lands (a view made ahead), that read is
@@ -1700,11 +1708,18 @@ impl Render for CommitsView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.tips.sync(cx);
     self.ensure_inputs(window, cx);
+    if self.hidden_at.is_none() {
+      super::find::watch_key(self, window, cx);
+    }
+    super::find::ensure_input(self, window, cx);
     self.sync_rows(window);
+    self.index_find();
+    self.reveal_find();
     self.scroll_to_commit(cx);
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
       .debug_selector(|| "workspace-commits".into())
+      .relative()
       .size_full()
       .bg(p.background)
       .text_color(p.foreground)
@@ -1771,6 +1786,7 @@ impl Render for CommitsView {
     let confirm = confirm::render(Self::confirm_slot, self, window, &p, cx);
     root
       .child(self.feed_list(cx))
+      .children(self.find_bar(&p, cx))
       .children(dialog)
       .children(confirm)
   }
@@ -1878,14 +1894,17 @@ impl CommitsView {
         .child(time::relative(&ts)),
       cx,
     );
-    let mut title = div().min_w_0().truncate().child(headline(commit));
+    let mut title = div()
+      .min_w_0()
+      .truncate()
+      .child(self.marked_headline(commit, p));
     if let Some(label) = label.filter(|l| !l.is_empty()) {
       // The workspace's label in mono after the headline.
       title = div()
         .min_w_0()
         .flex()
         .overflow_hidden()
-        .child(div().flex_none().child(headline(commit)))
+        .child(div().flex_none().child(self.marked_headline(commit, p)))
         .child(
           div()
             .ml_2()

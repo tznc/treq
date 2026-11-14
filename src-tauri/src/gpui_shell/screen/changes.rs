@@ -218,7 +218,8 @@ pub struct ChangesView {
   /// Line comments, notes and the pending review.
   pub(super) review: review::Review,
   /// The find bar.
-  pub(super) search: search::Search,
+  pub(super) search: super::find::Find,
+  pub(super) matches: search::Matches,
   /// GitHub review threads and the review agent's comments.
   pub(super) threads: threads::Threads,
   /// The pull request reviewed instead of a workspace (`PrReviewPage`).
@@ -311,7 +312,8 @@ impl ChangesView {
       scroll_to: None,
       anchors: Rc::default(),
       review: review::Review::default(),
-      search: search::Search::default(),
+      search: super::find::Find::default(),
+      matches: search::Matches::default(),
       threads: threads::Threads::default(),
       pr: None,
       focus: cx.focus_handle(),
@@ -365,7 +367,7 @@ impl ChangesView {
       self.message_input = None;
       self.discard_dialog = false;
       self.review = review::Review::default();
-      self.close_search(cx);
+      super::find::close(self, cx);
       self.watch_threads(cx);
       self.hydrate_review(cx);
       self.hydrate_viewed(cx);
@@ -392,7 +394,7 @@ impl ChangesView {
     self.hidden = !shown;
     if !shown {
       self.stop_threads();
-      self.unwatch_find_key();
+      super::find::unwatch_key(self);
       return;
     }
     self.poll_threads(cx);
@@ -1859,8 +1861,8 @@ impl Render for ChangesView {
     self.ensure_input(window, cx);
     self.ensure_review_inputs(window, cx);
     self.ensure_reply_inputs(window, cx);
-    self.watch_find_key(window, cx);
-    self.ensure_search_input(window, cx);
+    super::find::watch_key(self, window, cx);
+    super::find::ensure_input(self, window, cx);
     // The rows first: the threads and the find index follow their revision.
     self.sync_rows(window);
     if !self.read_only() {
