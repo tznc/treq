@@ -39,6 +39,7 @@ Follow the skeleton the existing docs use.
 ```markdown
 ---
 sidebar_position: N
+description: 50 to 160 characters, leading with the query a reader searches for.
 ---
 
 import DefinitionCard from '...'

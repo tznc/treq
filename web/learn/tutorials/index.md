@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: Step-by-step tutorials that take one coding task from tool setup through review, ending with a working change.
 ---
 
 import DocCardList from "@theme/DocCardList"

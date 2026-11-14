@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: "Workflows for coding agents and Git: AI bug fixes, code review, refactoring, parallel development, and stacked PRs."
 ---
 
 import DocCardList from '@theme/DocCardList';

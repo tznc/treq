@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: "Reference articles on Git and AI engineering: worktrees, rebasing, stacked PRs, coding agents, and AI code review."
 ---
 
 import DocCardList from '@theme/DocCardList';

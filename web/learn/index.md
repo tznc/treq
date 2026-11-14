@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: "Guides to Git workflows and coding agents: worktrees, stacked PRs, rebasing, and reviewing AI-generated code."
 ---
 
 # Learn
