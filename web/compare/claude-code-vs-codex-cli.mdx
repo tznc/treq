@@ -1,0 +1,80 @@
+---
+sidebar_position: 30
+title: Claude Code vs Codex CLI (2026)
+description: Claude Code vs Codex CLI compared on license, pricing, models, sandboxing, MCP, skills and CI use, checked against each tool's own docs.
+---
+
+# Claude Code vs Codex CLI
+
+_Claude Code runs Claude models with a sandbox you turn on. Codex CLI is open source, runs OpenAI models, and sandboxes commands by default._
+
+Claude Code and Codex CLI are terminal [coding agents](/learn/concepts/ai-engineering/coding-agents). Each reads your repository, edits files and runs commands in a loop until the task is done. Anthropic makes Claude Code and OpenAI makes Codex CLI. Facts were checked against each tool's own docs, pricing page and repository in November 2026.
+
+## At a Glance
+
+| | Claude Code | Codex CLI |
+| --- | --- | --- |
+| License | Proprietary, under Anthropic's Commercial Terms | Apache 2.0 |
+| Pricing | Claude Pro, Max, Ultra, Team or Enterprise plan, or pay per token through the Claude Console. The free Claude plan does not include it. | ChatGPT Free, Go, Plus, Pro, Business, Edu or Enterprise plan, or an API key billed at API prices |
+| Models | Claude models, through Anthropic, Amazon Bedrock, Google Cloud's Agent Platform or Microsoft Foundry | OpenAI models. Local models through Ollama or LM Studio with `--oss`, and custom providers that speak the Responses API |
+| Sandbox | Off by default. Seatbelt on macOS, bubblewrap on Linux and WSL2. Not available on native Windows. | On by default. Seatbelt on macOS, bubblewrap and seccomp on Linux, a native Windows sandbox |
+| Permission model | Modes: Manual, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`, plus allow and deny rules | Sandbox modes `read-only`, `workspace-write`, `danger-full-access`, combined with approval policies `on-request`, `never` or `granular` |
+| Network from commands | Allowed unless the sandbox is on, then limited to allowed domains | Off by default in the sandbox |
+| MCP | Yes | Yes, local and remote servers |
+| Project instructions | `CLAUDE.md`, or an existing `AGENTS.md` | `AGENTS.md` |
+| Skills and extensions | Skills, plugins, hooks, subagents | Skills, plugins, hooks, subagents |
+| Headless and CI | `claude -p`, GitHub Actions, GitLab CI/CD | `codex exec`, the `openai/codex-action` GitHub Action |
+| Platforms | macOS 13+, Windows 10 1809+, Ubuntu 20.04+, Debian 10+, Alpine 3.19+ | macOS, Linux, Windows |
+| Other surfaces | VS Code, JetBrains, desktop app, web | IDE extension, desktop app, Codex cloud |
+
+## Licensing and Source Code
+
+Codex CLI is open source. The `openai/codex` repository is Apache 2.0, and OpenAI also publishes the Codex SDK and app server there. The IDE extension and Codex cloud are not open source.
+
+Claude Code is closed source. Its public repository carries a license that reserves all rights and points to Anthropic's Commercial Terms. Anthropic does publish the sandbox it uses as the open source `@anthropic-ai/sandbox-runtime` package.
+
+## Pricing and Models
+
+Codex CLI comes with every ChatGPT plan, including Free and Go. OpenAI lists Go at $8 per month and Plus at $20 per month. Pro starts at $100 per month. You can also sign in with an API key and pay API prices, which OpenAI recommends for CI.
+
+Claude Code needs a paid Claude plan or a Console account. Anthropic lists Pro at $20 per month billed monthly, Max at $100 and Ultra at $200. Teams can route Claude Code through their own cloud account on Amazon Bedrock, Google Cloud or Microsoft Foundry and pay that provider.
+
+The model choice follows the vendor. Claude Code runs Claude models. Codex CLI runs OpenAI models by default. It can also point at a local model through Ollama or LM Studio, or at a custom provider that speaks OpenAI's Responses API.
+
+## Sandboxing and Permissions
+
+Both tools split safety into two layers. The permission layer decides whether an action runs. The OS sandbox limits what a shell command can touch once it runs. The tools differ in their defaults.
+
+Codex turns the sandbox on from the start. In a version-controlled folder, Codex can write inside the workspace and asks before it writes elsewhere or needs the network. Network access is off by default. `codex exec` starts read-only until you pass `--sandbox workspace-write`.
+
+Claude Code starts with the sandbox off. In Manual mode it asks before it edits a file or runs a shell command that is not read-only. You turn the sandbox on with `/sandbox` or a setting. Once on, sandboxed commands can write only to the working directory, a temp directory and directories you add. Network traffic goes through a proxy that allows only the domains you list. Claude Code also has an `auto` mode, where a classifier reviews actions instead of you.
+
+If you want guardrails without any configuration, Codex's defaults are stricter.
+
+## Extending the Agent
+
+Both tools read a project instructions file. Codex reads `AGENTS.md`. Claude Code reads `CLAUDE.md`, and reads `AGENTS.md` when a repository already has one, so one file can serve both agents.
+
+Both support MCP servers, skills written as `SKILL.md` folders, plugins, lifecycle hooks and subagents. Claude Code skills follow the open Agent Skills standard, which other agents also load.
+
+## Headless and CI Use
+
+Both run without a terminal UI. `claude -p "prompt"` prints a result and exits, and Claude Code ships GitHub Actions and GitLab CI/CD integrations. `codex exec "prompt"` does the same, with `--json` for an event stream and `--output-schema` for structured output. OpenAI recommends its `openai/codex-action` GitHub Action over passing an API key to a shell step.
+
+## Which One Suits You
+
+- **Choose Claude Code** if you want Claude models, the same agent in your IDE, desktop app and browser, or permission rules your team commits to the repository.
+- **Choose Codex CLI** if you want source you can read and fork, a sandbox that is on without setup, a free starting plan, or local models.
+
+You can also run both. Give each one its own [git worktree](/learn/git-worktrees-for-ai) so their edits never land in the same checkout.
+
+## Running Several Agents at Once
+
+Running Claude Code and Codex side by side on one repository needs isolation, review and a way to merge the results. [How to Run Multiple Claude Code Sessions](/learn/how-to/how-to-run-multiple-claude-code-sessions) covers the setup, and [Parallel Coding Agents](/learn/parallel-coding-agents) explains why agents need separate workspaces. Treq runs both agents in isolated workspaces with stacked review.
+
+## Next Steps
+
+- [Best Coding Agent CLIs](./best-coding-agent-clis): every current terminal agent in one table
+- [Claude Code vs Gemini CLI](./claude-code-vs-gemini-cli): Google's agent and its move to Antigravity CLI
+- [OpenCode vs Claude Code](./opencode-vs-claude-code): an open source agent for any model
+- [Setting Up Claude Code](/learn/tutorials/setting-up-claude-code): install and configure Claude Code

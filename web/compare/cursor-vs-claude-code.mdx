@@ -1,0 +1,70 @@
+---
+sidebar_position: 33
+title: Cursor vs Claude Code (2026)
+description: Cursor vs Claude Code compared, an IDE agent against a terminal agent, on pricing, models, sandboxing, MCP, skills and CI use.
+---
+
+# Cursor vs Claude Code
+
+_Cursor is an editor with an agent built in and a choice of many models. Claude Code is a terminal agent for Claude models that also plugs into your existing editor._
+
+Cursor and Claude Code start from different places. Cursor is a desktop code editor whose agent works next to your open files. Claude Code is a terminal [coding agent](/learn/concepts/ai-engineering/coding-agents) that also runs inside VS Code, JetBrains, a desktop app and the browser. The gap has narrowed: Cursor now ships a terminal agent, and Claude Code ships an extension for VS Code and Cursor. Facts were checked against each tool's own docs and pricing page in November 2026.
+
+## At a Glance
+
+| | Cursor | Claude Code |
+| --- | --- | --- |
+| Form | Desktop editor, plus the `agent` CLI, cloud agents and a web app | Terminal agent, plus VS Code and JetBrains extensions, a desktop app and the web |
+| License | Proprietary | Proprietary |
+| Pricing | Free with limited agent use. Plus $8, Premium $30, Super $100, Ultra $200 per month. Teams from $30 per user per month. | Claude Pro $20 billed monthly, Max $100, Ultra $200 per month. Team and Enterprise plans, or pay per token through the Console. |
+| Models | Cursor's own Grok and Composer models. Anthropic, OpenAI, Google and other models on Premium and above, billed at API list price | Claude models, through Anthropic, Amazon Bedrock, Google Cloud's Agent Platform or Microsoft Foundry |
+| Permission model | Run Modes: Auto-review, Allowlist, Run Everything | Modes: Manual, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`, plus allow and deny rules |
+| Automated review | Auto-review sends calls that cannot run in the sandbox to a classifier on Cursor's backend | `auto` mode sends actions to a background classifier |
+| Sandbox | Seatbelt on macOS, Landlock and seccomp on Linux. Network blocked by default | Optional. Seatbelt on macOS, bubblewrap on Linux and WSL2. Network limited to allowed domains |
+| MCP | Yes | Yes |
+| Project instructions | `.cursor/rules` and `AGENTS.md` | `CLAUDE.md` or `AGENTS.md` |
+| Skills and extensions | Agent Skills, rules, hooks, plugins from the Cursor Marketplace | Agent Skills, plugins, hooks, subagents |
+| Headless and CI | `agent -p` with `--force` and JSON output, cloud agents, Bugbot code review | `claude -p`, GitHub Actions, GitLab CI/CD, GitHub Code Review |
+| Platforms | macOS, Windows, Linux | macOS, Windows, Linux |
+
+## IDE Agent vs Terminal Agent
+
+An IDE agent sees what you see. Cursor's agent works beside your open files, so you read its diffs in the window you write code in. You switch between typing and delegating without changing tools. That suits people who want to stay close to each change.
+
+A terminal agent starts from a prompt and a directory. Claude Code needs no editor, so it runs over SSH, in CI and in scripts the same way it runs on your laptop. You review its work with `git diff` or in whatever editor you already use. Its VS Code and JetBrains extensions add inline diffs when you want them.
+
+Both tools now cover both styles to some degree. Cursor's `agent` CLI has Agent, Plan and Ask modes and a print mode for scripts. Claude Code's desktop app adds visual diff review and side-by-side sessions.
+
+## Pricing and Models
+
+Cursor became part of SpaceX in August 2026, and its current plans center on its own models. The $8 Plus plan uses only Cursor's own Grok and Composer models and excludes your own API keys. Third-party models from Anthropic, OpenAI, Google and others are available from Premium up, paid from prepaid credit at API list price on top of the plan.
+
+Claude Code runs Claude models only, and usage comes out of your Claude plan's limits or your API bill. If you mainly want Claude models, Claude Code includes them in the subscription. In Cursor, Claude models are billed separately from the plan price.
+
+## Safety Controls
+
+Cursor's docs recommend Auto-review for most people. Allowlisted calls run at once. Other shell commands run in a sandbox when they can. Anything else goes to a classifier that runs on Cursor's backend. Cursor's docs state that Auto-review is not a security boundary. On Linux, the sandbox needs kernel 6.2 or later, and without it Cursor asks before running commands.
+
+Claude Code asks before edits and shell commands in its default Manual mode. Its sandbox is off until you turn it on. Its `auto` mode replaces most prompts with a background classifier, much like Auto-review.
+
+## Extending the Agent
+
+Both tools support MCP servers, Agent Skills, hooks and plugins. Cursor loads skills from `.claude/skills` and `~/.claude/skills` too, so skills you wrote for Claude Code work in Cursor. Both read `AGENTS.md`, so one instructions file can serve both.
+
+## Which One Suits You
+
+- **Choose Cursor** if you want an editor and an agent in one app, a choice of model vendors, or Cursor's cloud agents and Bugbot reviews.
+- **Choose Claude Code** if you live in the terminal, run agents over SSH or in CI, want to keep your current editor, or mainly use Claude models.
+
+You can also use both: run Claude Code in Cursor's terminal or through its extension inside Cursor.
+
+## Running Several Agents at Once
+
+Whether the agent lives in an editor or a terminal, two agents in one checkout overwrite each other. [Parallel Coding Agents](/learn/parallel-coding-agents) explains the isolation they need, and [How to Run Multiple Claude Code Sessions](/learn/how-to/how-to-run-multiple-claude-code-sessions) shows the setup. Treq runs Cursor and Claude Code agents in separate workspaces and stacks the ones that depend on each other.
+
+## Next Steps
+
+- [Best Coding Agent CLIs](./best-coding-agent-clis): every current terminal agent in one table
+- [Claude Code vs Codex CLI](./claude-code-vs-codex-cli): Anthropic's and OpenAI's terminal agents
+- [Best Tools for Running AI Coding Agents in Parallel](./best-parallel-agent-tools): apps that manage several agents
+- [Review AI-Generated PRs](/learn/how-to/review-ai-generated-prs): check agent output before it merges

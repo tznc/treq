@@ -1,0 +1,75 @@
+---
+sidebar_position: 31
+title: Claude Code vs Gemini CLI and Antigravity CLI (2026)
+description: Claude Code vs Gemini CLI compared, including Google's June 2026 move of individual users from Gemini CLI to Antigravity CLI.
+---
+
+# Claude Code vs Gemini CLI and Antigravity CLI
+
+_Gemini CLI now serves enterprise and paid API users. Individuals on Google plans use Antigravity CLI, so that is the tool to compare with Claude Code._
+
+Claude Code is Anthropic's terminal [coding agent](/learn/concepts/ai-engineering/coding-agents). Gemini CLI was Google's. On May 19, 2026, Google announced that Gemini CLI would stop serving free users and Google AI Pro and Ultra subscribers on June 18, 2026. Those users moved to Antigravity CLI, a new agent built on the same core as the Antigravity desktop app. This page compares all three. Facts were checked against each tool's own docs, repository and announcements in November 2026.
+
+## What Changed With Gemini CLI
+
+Gemini CLI still exists and is still Apache 2.0. Its repository now describes it as designed for Gemini Code Assist Standard and Enterprise licenses. It also works with paid Gemini API keys and Vertex AI. It has no free tier for individuals.
+
+The repository also says Gemini CLI is not tuned for the Gemini 4 series and recommends Antigravity CLI for those models. Google also asks people not to benchmark Gemini models with Gemini CLI.
+
+Antigravity CLI runs as `agy`. Google says Agent Skills, hooks, subagents and extensions carry over, with extensions becoming Antigravity plugins. It also says there is no one-to-one feature parity yet. `agy plugin import gemini` converts old extensions.
+
+## At a Glance
+
+| | Claude Code | Gemini CLI | Antigravity CLI |
+| --- | --- | --- | --- |
+| License | Proprietary | Apache 2.0 | No source published |
+| Who can use it | Claude Pro, Max, Ultra, Team, Enterprise or Console accounts | Gemini Code Assist Standard or Enterprise, paid Gemini API keys, Vertex AI | Personal Google accounts on Free, Pro or Ultra plans, Gemini Enterprise, Gemini API keys |
+| Models | Claude models | Gemini models, not tuned for Gemini 4 | Gemini models, plus some partner models depending on plan |
+| Sandbox | Off by default. Seatbelt on macOS, bubblewrap on Linux and WSL2 | Turned on with `--sandbox` or a setting. Seatbelt, Docker or Podman, a Windows sandbox, gVisor or LXC | Turned on with `--sandbox` or a setting, required for `auto` mode. `sandbox-exec` on macOS, namespaces on Linux, Windows 11 24H2+ |
+| Permission modes | Manual, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions` | `default`, `auto_edit`, `plan`, and `yolo` from the command line | `default`, `accept-edits`, `auto`, `plan` |
+| MCP | Yes | Yes, in `settings.json` | Yes, local and remote, in `mcp_config.json` |
+| Project instructions | `CLAUDE.md` or `AGENTS.md` | `GEMINI.md` | `GEMINI.md` and `AGENTS.md` |
+| Skills and extensions | Skills, plugins, hooks, subagents | Agent Skills, extensions, hooks, subagents in preview | Agent Skills, plugins, hooks, subagents |
+| Headless and CI | `claude -p`, GitHub Actions, GitLab CI/CD | `gemini -p` with JSON output, the `run-gemini-cli` GitHub Action | `agy -p` |
+| Platforms | macOS, Windows, Linux | macOS 15+, Windows 11 24H2+, Ubuntu 20.04+ | macOS, Linux, Windows |
+
+## Access and Pricing
+
+Claude Code needs a paid Claude plan or a pay-as-you-go Console account. Anthropic lists Pro at $20 per month billed monthly, Max at $100 and Ultra at $200. Companies can also run it on Amazon Bedrock, Google Cloud or Microsoft Foundry.
+
+Gemini CLI is now for organizations. A Gemini Code Assist Standard or Enterprise license keeps working as before, and a paid API key or Vertex AI billing account works too.
+
+Antigravity CLI signs in with a personal Google account on a Free, Pro or Ultra plan, or with a Gemini Enterprise license. Usage counts against plan quotas and AI credits, which the `/credits` command shows. You can also set a Gemini API key instead of signing in.
+
+## Models
+
+Claude Code runs Claude models only. Gemini CLI runs Gemini models. Antigravity offers Gemini models and some partner models, including Claude and GPT-OSS models, depending on your plan. Google lists some of those partner models for removal on November 18, 2026, so check `agy models` for what your account can use.
+
+## Sandboxing and Permissions
+
+All three ask before edits or shell commands in their default mode. All three can also run shell commands in an OS sandbox that you turn on.
+
+Claude Code's sandbox limits writes to the working directory and sends network traffic through a proxy that allows only listed domains. Gemini CLI offers the widest choice of sandbox backends, including Docker and Podman containers. Antigravity CLI's `auto` mode approves workspace edits and runs commands in the sandbox. It sends commands that need to leave the sandbox to an evaluation step first, and it needs the sandbox to be available.
+
+## Headless and CI Use
+
+`claude -p` and `gemini -p` print a result and exit. Gemini CLI adds `--output-format json` and `stream-json`. Its GitHub Action, `google-github-actions/run-gemini-cli`, reviews pull requests and triages issues. Claude Code ships GitHub Actions and GitLab CI/CD integrations. Antigravity CLI has `agy -p` for one-off prompts and a headless mode.
+
+## Which One Suits You
+
+- **Choose Claude Code** if you want Claude models, detailed allow and deny rules, and the same agent in your IDE, desktop app and browser.
+- **Choose Gemini CLI** if your company already pays for Gemini Code Assist or Vertex AI, or you need open source code you can audit.
+- **Choose Antigravity CLI** if you are an individual on a Google AI plan or want Gemini 4 models in the terminal.
+
+If you are migrating from Gemini CLI, move workspace skills from `.gemini/skills/` to `.agents/skills/`, and move MCP servers into `mcp_config.json`. Google's migration guide covers the rest.
+
+## Running Several Agents at Once
+
+Each of these agents works best on one task in one checkout. To run more than one, give each agent its own [git worktree](/learn/git-worktrees-for-ai) and review each result before you merge it. [How to Run Multiple Claude Code Sessions](/learn/how-to/how-to-run-multiple-claude-code-sessions) walks through that setup. Treq runs Claude, Gemini and other agents in isolated, stacked workspaces.
+
+## Next Steps
+
+- [Best Coding Agent CLIs](./best-coding-agent-clis): every current terminal agent in one table
+- [Claude Code vs Codex CLI](./claude-code-vs-codex-cli): Anthropic's and OpenAI's agents side by side
+- [Cursor vs Claude Code](./cursor-vs-claude-code): an IDE agent against a terminal agent
+- [Quality Gates for Agent Output](/learn/concepts/ai-engineering/quality-gates-for-agent-output): checks to run before you merge agent code
