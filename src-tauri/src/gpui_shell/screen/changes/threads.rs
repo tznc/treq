@@ -273,6 +273,20 @@ impl ChangesView {
 
   // Drawing.
 
+  /// How many review threads and PR drafts each file has.
+  pub(in crate::gpui_shell::screen) fn comment_counts(&self) -> HashMap<String, usize> {
+    let drafts = self
+      .pr_mode()
+      .map(|pr| pr.drafts.iter().map(|d| d.row.file_path.as_str()));
+    let mut counts = HashMap::new();
+    for path in
+      (self.threads.github.iter().map(|t| t.path.as_str())).chain(drafts.into_iter().flatten())
+    {
+      *counts.entry(path.to_string()).or_default() += 1;
+    }
+    counts
+  }
+
   /// What a diff line carries from others: agent comments, then threads.
   /// `ReviewActionBar`'s count of the open local agent comments.
   pub(super) fn agent_count(&self, p: &Palette) -> Option<Div> {
