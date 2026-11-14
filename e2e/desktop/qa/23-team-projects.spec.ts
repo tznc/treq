@@ -191,7 +191,7 @@ test("team projects: save to a team, then Move to", async () => {
     const menu2 = popupBox();
     if (menu2) {
       // Move to is the row above New Window…, the last row.
-      await xPointer(page, menu2.x + 60, menu2.y + menu2.h - 41, 0);
+      await xPointer(page, menu2.x + 60, menu2.y + menu2.h - 41, false);
       await settle(page, 1000);
       await capture(page, {
         name: "23-team-projects-04-move-to-open",
