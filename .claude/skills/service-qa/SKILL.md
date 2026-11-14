@@ -75,7 +75,7 @@ Keep these yourself — they are the skill, not the legwork:
 Every call inside a service-qa spec must hit the local CLI stack at
 `http://127.0.0.1:54321` through the harness clients in
 `scripts/service-qa/clients.ts` (anon JWT for user-scoped calls, service-role
-for seeding / admin). Never `vi.mock("../../src/lib/supabase")`. Never point
+for seeding / admin). Never `jest.mock("../../src/lib/supabase")`. Never point
 at production (`*.supabase.co`).
 
 If a flow needs a signed-in user, use **email/password only** via
@@ -141,7 +141,7 @@ signing uses `STRIPE_WEBHOOK_SECRET` from `supabase/functions/.env`.
    to it rather than duplicating seed setup. Shape:
 
    ```ts
-   import { it, expect } from "vitest";
+   import { it, expect } from "@jest/globals";
    import { getAnonClient, getServiceClient } from "../clients";
    import { createTestUser, linkGithubRepo } from "../seed";
    import { recordOutcome } from "../record";
@@ -182,7 +182,7 @@ signing uses `STRIPE_WEBHOOK_SECRET` from `supabase/functions/.env`.
    for `expect`.** `recordOutcome` requires a non-empty `expectations:
    string[]` — plain-English claims about what the run proved (status codes,
    token single-use, RPC return value, RLS denial). These are written to
-   `<name>.json` so step 5 has a concrete checklist. Keep real Vitest
+   `<name>.json` so step 5 has a concrete checklist. Keep real Jest
    assertions in the spec body too.
 
    **At most 3 expectations per outcome.** If you
@@ -192,14 +192,14 @@ signing uses `STRIPE_WEBHOOK_SECRET` from `supabase/functions/.env`.
    - First run in a session, or after touching migrations / `config.toml`:
      `npm run service-qa:full` (start + reset + all specs).
    - Stack already up, iterating on one spec:
-     `npx vitest run --config vitest.service-qa.config.ts scripts/service-qa/specs/<slug>.spec.ts`
+     `npx jest --config jest.service-qa.config.js scripts/service-qa/specs/<slug>.spec.ts`
    - After a migration-only change with stack already running:
      `make db.reset && npm run service-qa`
 
 5. **Verify each outcome against its expectations before saying the task is
    done.** For every `recordOutcome`: read
    `scripts/service-qa/.generated/<name>.json` and confirm or refute each
-   claim against the Vitest output and, when relevant, a follow-up query via
+   claim against the Jest output and, when relevant, a follow-up query via
    the service-role client or Studio (`http://127.0.0.1:54323`). A spec whose
    `expect` calls passed can still leave the wrong row shape or a half-applied
    migration — the checklist is what forces a second look.

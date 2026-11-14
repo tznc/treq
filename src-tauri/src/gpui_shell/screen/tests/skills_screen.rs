@@ -141,6 +141,22 @@ fn skills_list_labels_every_skill_by_install_status(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn proprietary_registry_skills_are_hidden_unless_installed(cx: &mut TestAppContext) {
+  let mut docx = skill("docx", "Word", None);
+  docx.skill.proprietary = true;
+  let mut xlsx = skill("xlsx", "Excel", Some("application"));
+  xlsx.skill.proprietary = true;
+  let host = Arc::new(FakeHost {
+    skills: vec![skill("pdf", "PDF", None), docx, xlsx],
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, settings_route("skills"), host);
+  let skills = drawn_settings(&mut h).skills.expect("skills tab");
+  let names: Vec<_> = skills.rows.iter().map(|r| r.name.as_str()).collect();
+  assert_eq!(names, ["Excel", "PDF"]);
+}
+
+#[gpui::test]
 fn skill_filter_chips_narrow_the_list(cx: &mut TestAppContext) {
   let (mut h, _) = skills_status_harness(cx);
   let shown = |h: &mut Harness| -> Vec<String> {
@@ -311,7 +327,7 @@ fn skills_uninstall_and_move_between_levels(cx: &mut TestAppContext) {
 fn skills_dialog_cancels(cx: &mut TestAppContext) {
   let (mut h, host) = skills_harness(cx);
   h.click("skill-install-docx");
-  h.click("skill-dialog-cancel");
+  h.click("skill-install-dialog-close");
   assert!(!h.drawn("skill-install-dialog"));
   assert!(host.writes().is_empty());
 }
@@ -509,10 +525,9 @@ fn skill_link_confirmation_cancels_on_escape_and_installs_on_enter(cx: &mut Test
   );
 }
 
-/// Every card repeats Install…, so it is an outline button: the list holds
-/// no filled one per card.
+/// Install… is each card's primary action, so it is a filled button.
 #[gpui::test]
-fn skill_cards_draw_no_filled_install_button(cx: &mut TestAppContext) {
+fn skill_cards_draw_a_filled_install_button(cx: &mut TestAppContext) {
   let (mut h, _) = skills_harness(cx);
   let skills = drawn_settings(&mut h).skills.expect("skills tab");
   let p = crate::gpui_shell::ui::theme::palette(false);
@@ -522,5 +537,5 @@ fn skill_cards_draw_no_filled_install_button(cx: &mut TestAppContext) {
     .find(|r| r.name == "Word")
     .expect("Word not installed");
   assert!(h.drawn("skill-install-docx"));
-  assert!(!settings::install_button(word, &p).filled());
+  assert!(settings::install_button(word, &p).filled());
 }

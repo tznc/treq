@@ -297,7 +297,7 @@ impl Render for ProjectContextDialog {
               .child(ui::text(Textarea::new(&paths), TextSize::Sm)),
           )
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .text_color(p.muted_foreground)
               .child("Drop files here, pick them with Add files…, or type a path or URL per line."),
           )
@@ -310,12 +310,6 @@ impl Render for ProjectContextDialog {
           }),
       )
       .footer([
-        Button::new("project-context-cancel", &p)
-          .variant(Variant::Outline)
-          .disabled(pending)
-          .label("Cancel")
-          .on_click(cx.listener(|view, _, _, cx| view.close(cx)))
-          .into_any_element(),
         Button::new("project-context-save", &p)
           .disabled(pending)
           .label(if pending { "Saving…" } else { "Save" })

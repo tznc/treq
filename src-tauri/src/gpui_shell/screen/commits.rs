@@ -2610,19 +2610,11 @@ impl CommitsView {
                 )
               }),
           )
-          .footer([
-            Button::new("description-cancel", p)
-              .variant(Variant::Outline)
-              .disabled(*saving)
-              .label("Cancel")
-              .on_click(cx.listener(|view, _, _, cx| view.close_dialog(cx)))
-              .into_any_element(),
-            Button::new("description-save", p)
-              .disabled(!can_submit)
-              .label(if *saving { "Saving…" } else { "Save" })
-              .on_click(cx.listener(|view, _, _, cx| view.save_description(cx)))
-              .into_any_element(),
-          ])
+          .footer([Button::new("description-save", p)
+            .disabled(!can_submit)
+            .label(if *saving { "Saving…" } else { "Save" })
+            .on_click(cx.listener(|view, _, _, cx| view.save_description(cx)))
+            .into_any_element()])
       }
       Dialog::Timestamp {
         commit,
@@ -2734,12 +2726,6 @@ impl CommitsView {
               .on_click(cx.listener(|view, _, _, cx| view.shift_to_now(true, cx)))
               .into_any_element(),
             div().flex_1().into_any_element(),
-            Button::new("timestamp-cancel", p)
-              .variant(Variant::Outline)
-              .disabled(*saving)
-              .label("Cancel")
-              .on_click(cx.listener(|view, _, _, cx| view.close_dialog(cx)))
-              .into_any_element(),
             Button::new("timestamp-apply", p)
               .disabled(!can_submit)
               .when(*saving, |this| {
@@ -2815,30 +2801,22 @@ impl CommitsView {
                 .child(err),
             )
           })
-          .footer([
-            Button::new("resolve-cancel", p)
-              .variant(Variant::Outline)
-              .disabled(*submitting)
-              .label("Cancel")
-              .on_click(cx.listener(|view, _, _, cx| view.close_dialog(cx)))
-              .into_any_element(),
-            Button::new("resolve-conflicts-submit", p)
-              .disabled(!ready || *submitting)
-              .when(preparing, |this| {
-                this
-                  .child(ui::spinner("resolve-spin", 16., p.primary_foreground))
-                  .label("Preparing…")
+          .footer([Button::new("resolve-conflicts-submit", p)
+            .disabled(!ready || *submitting)
+            .when(preparing, |this| {
+              this
+                .child(ui::spinner("resolve-spin", 16., p.primary_foreground))
+                .label("Preparing…")
+            })
+            .when(!preparing, |this| {
+              this.label(if *submitting {
+                "Starting…"
+              } else {
+                "Resolve"
               })
-              .when(!preparing, |this| {
-                this.label(if *submitting {
-                  "Starting…"
-                } else {
-                  "Resolve"
-                })
-              })
-              .on_click(cx.listener(|view, _, _, cx| view.submit_resolve(cx)))
-              .into_any_element(),
-          ])
+            })
+            .on_click(cx.listener(|view, _, _, cx| view.submit_resolve(cx)))
+            .into_any_element()])
       }
     };
     Some(

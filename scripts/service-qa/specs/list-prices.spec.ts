@@ -5,7 +5,7 @@
  * provider cost.
  */
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "@jest/globals";
 import { clearBilling, grantPro } from "../billing";
 import { getAnonClient, getServiceClient } from "../clients";
 import { recordOutcome } from "../record";

@@ -1568,6 +1568,8 @@ impl FileBrowserView {
                 if count == 1 { "" } else { "s" }
               ),
               Side::Top,
+              // Short label (['count']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .flex()
                 .items_center()
@@ -2037,10 +2039,7 @@ mod line_fill_tests {
   fn selection_then_comment_then_added() {
     let p = theme::palette(true);
     assert_eq!(line_fill(true, true, true, &p), Some(p.selected()));
-    assert_eq!(
-      line_fill(false, true, true, &p),
-      Some(ui::Tone::Warning.tint(&p))
-    );
+    assert_eq!(line_fill(false, true, true, &p), Some(p.commented()));
     assert_eq!(
       line_fill(false, false, true, &p),
       Some(ui::Tone::DiffAdded.tint(&p))

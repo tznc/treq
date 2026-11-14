@@ -1498,10 +1498,6 @@ impl ChangesView {
 
   /// `handleExpandContext`; `all` reads the whole gap ("Expand all").
   fn expand_context(&mut self, path: &str, h: usize, dir: Dir, all: bool, cx: &mut Context<Self>) {
-    // The PR's files are not checked out.
-    if self.read_only() {
-      return;
-    }
     // A committed card's lines are read from the working copy, which only
     // matches the branch head while the file has no uncommitted edits.
     if !self.hunks.contains_key(path)
@@ -1532,31 +1528,41 @@ impl ChangesView {
     };
     let key = (path.to_string(), h, dir);
     let file = path.to_string();
+    let apply = move |view: &mut Self, result: Result<Vec<String>, String>| {
+      let Ok(lines) = result else {
+        return;
+      };
+      view.layout_gen += 1;
+      if dir == Dir::After && lines.len() <= end - start {
+        view.context_ended.insert((key.0.clone(), h));
+      }
+      if lines.is_empty() {
+        return;
+      }
+      let entry = view.context.entry(key).or_default();
+      match dir {
+        Dir::Before => {
+          let mut all = lines;
+          all.append(entry);
+          *entry = all;
+        }
+        Dir::After => entry.extend(lines),
+      }
+    };
+    // The PR's files are not checked out: read them at the PR's head.
+    if self.read_only() {
+      self.run_pr(
+        move |host, pr| host.pr_file_lines(&pr.full_name, pr.number, &file, start, end),
+        move |view, result, _| apply(view, result),
+        cx,
+      );
+      return;
+    }
     self.run(
       move |host, parent| {
         host.file_lines(&parent.repo_path, parent.workspace_id(), &file, start, end)
       },
-      move |view, result, _| {
-        let Ok(lines) = result else {
-          return;
-        };
-        view.layout_gen += 1;
-        if dir == Dir::After && lines.len() <= end - start {
-          view.context_ended.insert((key.0.clone(), h));
-        }
-        if lines.is_empty() {
-          return;
-        }
-        let entry = view.context.entry(key).or_default();
-        match dir {
-          Dir::Before => {
-            let mut all = lines;
-            all.append(entry);
-            *entry = all;
-          }
-          Dir::After => entry.extend(lines),
-        }
-      },
+      move |view, result, _| apply(view, result),
       cx,
     );
   }
@@ -2011,6 +2017,10 @@ impl ChangesView {
     if listed.is_empty() && committed == 0 && data.conflicted.is_empty() {
       rows.push(SideRow::Empty);
     } else if listed.is_empty() {
+      // The filter button shares the "Nothing to commit" row.
+      if rows == [SideRow::Filter] {
+        rows.clear();
+      }
       rows.push(SideRow::NothingToCommit);
     } else {
       if !data.staged.is_empty() {
@@ -2110,9 +2120,15 @@ impl ChangesView {
   /// One row of the sidebar.
   fn side_row(&mut self, row: SideRow, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
     match row {
-      SideRow::Filter => self
-        .filter_row(p, cx)
-        .map_or_else(|| div().into_any_element(), IntoElement::into_any_element),
+      SideRow::Filter => self.filter_row(p, cx).map_or_else(
+        || div().into_any_element(),
+        |filter| {
+          div()
+            .pt_3()
+            .child(div().flex().justify_end().child(filter))
+            .into_any_element()
+        },
+      ),
       SideRow::ConflictsHeader => {
         let count = self.side_data.conflicted.len();
         self.conflicts_header(count, p, cx).into_any_element()
@@ -2152,13 +2168,28 @@ impl ChangesView {
           .into_any_element()
       }
       SideRow::CommitBox { .. } => self.commit_box(p, cx).into_any_element(),
-      SideRow::NothingToCommit => ui::text(div(), TextSize::Sm)
-        .debug_selector(|| "changes-nothing-to-commit".into())
-        .py_2()
-        .text_color(p.muted_foreground)
-        .child("Nothing to commit")
+      SideRow::NothingToCommit => div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .child(
+          ui::text(div(), TextSize::Sm)
+            .debug_selector(|| "changes-nothing-to-commit".into())
+            .py_2()
+            .text_color(p.muted_foreground)
+            .child("Nothing to commit"),
+        )
+        .children(self.filter_row(p, cx))
         .into_any_element(),
-      SideRow::CommittedHeader => self.committed_header(p, cx).into_any_element(),
+      SideRow::CommittedHeader => {
+        // Flush under "Nothing to commit": no gap above the header.
+        let d = &self.side_data;
+        let flush = d.staged.is_empty() && d.unstaged.is_empty() && d.conflicted.is_empty();
+        self
+          .committed_header(p, cx)
+          .when(flush, |this| this.pt_0())
+          .into_any_element()
+      }
       SideRow::Committed(i) => self.committed_row(i, p, cx).into_any_element(),
       SideRow::Empty => div()
         .size_full()
@@ -2207,17 +2238,13 @@ impl ChangesView {
     .on_click(cx.listener(|view, _, _, cx| view.filter_menu(cx)))
     .test_support()
     .child(self.anchor("changes-filter".into()));
-    Some(
-      div()
-        .pt_3()
-        .child(div().flex().justify_end().child(self.tips.wrap(
-          "changes-filter-tip",
-          Side::Bottom,
-          Some(TooltipContent::Text("Filter changes".into())),
-          filter,
-          cx,
-        ))),
-    )
+    Some(self.tips.wrap(
+      "changes-filter-tip",
+      Side::Bottom,
+      Some(TooltipContent::Text("Filter changes".into())),
+      filter,
+      cx,
+    ))
   }
 
   /// The filter button's menu: one checkbox item per kind of file shown.
@@ -2396,7 +2423,7 @@ impl ChangesView {
           )
           .when_some(dir, |this, dir| {
             this.child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .truncate()
                 .text_color(p.muted_foreground.opacity(0.6))
                 .child(dir),
@@ -2674,7 +2701,7 @@ impl ChangesView {
         )
         .when_some(dir, |this, dir| {
           this.child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .flex_1()
               .truncate()
               .text_color(p.muted_foreground.opacity(0.6))
@@ -2853,7 +2880,7 @@ impl ChangesView {
         )
         .when_some(dir, |this, dir| {
           this.child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .min_w_0()
               .flex_1()
               .truncate()
@@ -3253,7 +3280,15 @@ impl ChangesView {
               },
             ),
             cx,
-          )),
+          ))
+          .children(
+            (committed
+              && self
+                .snapshot
+                .as_ref()
+                .is_some_and(|s| s.purely_committed(path)))
+            .then(|| badge("Committed", Tone::Neutral)),
+          ),
       );
     let mut right = div().flex().items_center().gap_2();
     if !committed && !self.read_only() {
@@ -3444,6 +3479,8 @@ impl ChangesView {
           "Base" => Tone::Warning,
           _ => Tone::DiffAdded,
         };
+        // Short label (['badge']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .debug_selector(move || format!("conflict-label-{label}"))
           .mr_2()
@@ -3515,6 +3552,8 @@ impl ChangesView {
       .gap_2()
       .font_family(theme::SANS_FONT)
       .child(
+        // Short label (['line-range meta']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .flex()
           .items_center()

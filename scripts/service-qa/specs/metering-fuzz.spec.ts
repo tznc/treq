@@ -9,7 +9,7 @@
  * against an independent recomputation from usage_intervals.
  */
 import { randomUUID } from "node:crypto";
-import { beforeAll, expect, it } from "vitest";
+import { beforeAll, expect, it } from "@jest/globals";
 import { clearBilling, grantPro } from "../billing";
 import { getServiceClient } from "../clients";
 import { recordOutcome } from "../record";

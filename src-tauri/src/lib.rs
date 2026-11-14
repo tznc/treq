@@ -630,16 +630,13 @@ pub fn run() {
         gpui_shell::window_focused(window.app_handle(), window.label(), *focused);
       }
       // A shell window losing focus closes its tooltips and menus, as
-      // native ones would; its toasts follow it as it moves or resizes.
+      // native ones would.
       #[cfg(feature = "gpui-shell")]
       #[cfg(desktop)]
       if !window.label().starts_with("gpui-popup-") {
         match event {
           tauri::WindowEvent::Focused(false) => gpui_shell::hide_popups(window.app_handle()),
           tauri::WindowEvent::Focused(true) => commands::cloud::window_focused(window.app_handle()),
-          tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
-            gpui_shell::place_toasts(window.app_handle(), window.label())
-          }
           _ => {}
         }
       }

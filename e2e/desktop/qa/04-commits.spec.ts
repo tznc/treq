@@ -48,7 +48,7 @@ test("commits: conflicted stack, resolve dialog, unfolded diff", async ({ page }
     title: "Resolve conflicts dialog with instructions",
     expectations: ["Typed instructions wrap inside the field"],
   });
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Close" }).click();
   await expect(instructions).toHaveCount(0);
 
   // Unfold the conflicted commit: its chevron, left of the first title. A
