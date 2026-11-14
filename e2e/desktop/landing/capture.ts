@@ -94,7 +94,7 @@ async function settle(page: Page, clip?: Clip, before?: Buffer): Promise<void> {
     last = now;
     if (before) expect(now.equals(before), "still unchanged").toBe(false);
     expect(prev?.equals(now), "still changing").toBe(true);
-  }).toPass({ intervals: [100, 250], timeout: 20_000 });
+  }).toPass({ intervals: [50], timeout: 20_000 });
 }
 
 /** Retries until the fake `gh` has answered a call whose arguments contain `text`. */
@@ -102,7 +102,7 @@ async function ghAnswered(text: string): Promise<void> {
   const exits = join(fixture().root, "gh-exits.log");
   await expect(() => {
     expect(readFileSync(exits, "utf8")).toContain(text);
-  }).toPass({ intervals: [100, 250], timeout: 20_000 });
+  }).toPass({ intervals: [50], timeout: 20_000 });
 }
 
 /** The Code tab's agent prompt dialog. */
@@ -335,7 +335,7 @@ async function capture(page: Page): Promise<void> {
   await row(page, MARKETING)
     .getByRole("button", { name: "Start agent" })
     .click();
-  await expect.poll(() => agentCalls().length).toBeGreaterThan(starts);
+  await expect.poll(() => agentCalls().length, { intervals: [50] }).toBeGreaterThan(starts);
   // The row spins while the agent streams, then shows its conflict dot again.
   await expect(row(page, MARKETING).getByRole("img", { name: "Conflict" })).toBeVisible();
   await page.mouse.click(330, 346); // unfold "feat: handle empty event messages"
