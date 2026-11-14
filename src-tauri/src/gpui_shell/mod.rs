@@ -44,6 +44,7 @@ mod sidebar_actions;
 use treq_ui::theme;
 mod time;
 mod title_bar;
+mod toast_layer;
 mod toasts;
 mod tooltips;
 use treq_ui as ui;
@@ -114,6 +115,8 @@ struct Shell {
   /// Focused while the model's confirmation shows, so it hears Enter and
   /// Escape.
   confirm_focus: Option<gpui::FocusHandle>,
+  /// The window's toasts, over everything in it.
+  toasts: Vec<Toast>,
 }
 
 impl Shell {
@@ -206,7 +209,15 @@ impl Render for Shell {
     ui::apply_zoom(window, cx);
     self.watch_shortcuts(window, cx);
     let confirm = self.confirm(window, dark, cx);
+    let toasts = toast_layer::toast_layer(&self.toasts, theme::palette(dark), {
+      let (app, label) = (self.app.clone(), self.label.to_string());
+      std::rc::Rc::new(move |id, action, _| {
+        let (label, id) = (label.clone(), id.to_string());
+        defer_main(&app, move |app| toasts::click(app, &label, &id, action));
+      })
+    });
     gpui::div()
+      .relative()
       .size_full()
       .flex()
       .font_family(theme::SANS_FONT)
@@ -265,6 +276,7 @@ impl Render for Shell {
           }),
       )
       .children(confirm)
+      .children(toasts)
   }
 }
 
@@ -349,6 +361,7 @@ pub fn open_window(
       os_dark,
       shortcuts: None,
       confirm_focus: None,
+      toasts: Vec::new(),
     });
     cx.default_global::<Shells>()
       .0
@@ -704,31 +717,11 @@ pub fn hide_popups(app: &AppHandle) {
   defer_main(app, |_| popup::hide_all());
 }
 
-/// Draws window `label`'s toasts, in its sidebar's theme.
+/// Draws window `label`'s toasts in that window.
 fn draw_toasts(app: &AppHandle, label: &str, toasts: Vec<Toast>) {
   let label = label.to_string();
-  defer_main(app, move |app| {
-    let dark = tauri_plugin_gpui::with_app({
-      let label = label.clone();
-      move |cx| {
-        let sidebar = cx
-          .try_global::<Shells>()
-          .and_then(|shells| shells.0.get(&label))
-          .and_then(WeakEntity::upgrade)
-          .and_then(|shell| shell.read(cx).sidebar.clone())?;
-        Some(sidebar.read(cx).snapshot().dark)
-      }
-    });
-    let dark = dark.ok().flatten().unwrap_or(false);
-    popup::show_toasts(app, &label, toasts, dark);
-  });
-}
-
-/// Keeps window `label`'s toasts in its corner as it moves or resizes.
-pub fn place_toasts(app: &AppHandle, label: &str) {
-  let label = label.to_string();
-  defer_main(app, move |app| {
-    popup::place_owner_toasts(app, &label);
+  defer_main(app, move |_| {
+    update_shell(&label, move |shell, _| shell.toasts = toasts).ignore_closed();
   });
 }
 
@@ -800,7 +793,6 @@ pub fn forget_terminals() {
 pub use projects::close_requested;
 
 pub fn forget_window(label: &str) {
-  popup::forget_owner(label);
   toasts::forget(label);
   remote_repo::set_window(label, None);
   window::forget(label);
