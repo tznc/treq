@@ -39,7 +39,7 @@ The directories share commits and refs. A commit created in one worktree is imme
 
 Worktrees are not clones and not sandboxes. They do not isolate credentials, hooks, or repository configuration. They also do not copy `.gitignore`d files into the new directory. Dependencies are not installed for you. Setup scripts still need a manual run. Local services such as databases, caches, and listening ports are not isolated either, so two worktrees can fight over the same resource on the host.
 
-Worktrees isolate working files. That is usually enough for concurrent local agents. It is not enough when tasks need separate remotes, configs, or security boundaries. See [Git Worktrees vs Clones for Agents](/learn/how-to/git-worktrees-vs-clones-for-agents).
+Worktrees isolate working files. That is usually enough for concurrent local agents. It is not enough when tasks need separate remotes, configs, or security boundaries. See [Git Worktrees vs Clones](/learn/concepts/git/git-worktrees-vs-clones).
 
 ## Applying It in Practice
 
@@ -126,6 +126,6 @@ Create a workspace per task, start the agent session there, and merge only after
 ## Next Steps
 
 - [What are Git Worktrees?](/learn/concepts/git/git-worktrees): core worktree model and lifecycle
-- [Git Worktrees vs Clones for Agents](/learn/how-to/git-worktrees-vs-clones-for-agents): choose the isolation level
+- [Git Worktrees vs Clones](/learn/concepts/git/git-worktrees-vs-clones): choose the isolation level
 - [How to Run Multiple Claude Code Sessions](/learn/how-to/how-to-run-multiple-claude-code-sessions): run parallel Claude Code sessions
 - [Parallel Coding Agents Without Branch Chaos](/learn/parallel-coding-agents): full parallel-agent workflow

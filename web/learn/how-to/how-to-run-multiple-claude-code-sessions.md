@@ -102,5 +102,5 @@ git branch -d agent/payments-retry agent/search-filters
 
 - [Git Worktrees for AI Coding Agents](/learn/git-worktrees-for-ai)
 - [Parallel Coding Agents Without Branch Chaos](/learn/parallel-coding-agents)
-- [Git Worktrees vs Clones for Agents](/learn/how-to/git-worktrees-vs-clones-for-agents)
+- [Git Worktrees vs Clones](/learn/concepts/git/git-worktrees-vs-clones)
 - [Setting Up Claude Code](/learn/tutorials/setting-up-claude-code)
