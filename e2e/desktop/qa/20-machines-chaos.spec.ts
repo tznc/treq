@@ -348,7 +348,7 @@ test("machines-chaos: own-VM form names", async () => {
   // Double-submit while probing.
   await page.getByRole("button", { name: /Continue|Checking|Resolving/ }).first().dblclick().catch(() => {});
   await shot("form-blackhole-probing", "Probing a host that never answers", [
-    "The form shows it is checking the host, Continue is disabled, Cancel still works",
+    "The form shows it is checking the host, Continue is disabled, the X still works",
   ]);
   await page.waitForTimeout(30_000);
   await alive("probe black hole +30s");
@@ -356,7 +356,7 @@ test("machines-chaos: own-VM form names", async () => {
   await shot("form-blackhole-33s", "33 s into probing a host that never answers", [
     "Either a timeout error or still checking with a way out",
   ]);
-  await page.getByRole("button", { name: "Cancel" }).first().click().catch((e) => note(`cancel: ${e}`));
+  await page.getByRole("button", { name: "Close" }).first().click().catch((e) => note(`close: ${e}`));
   await page.waitForTimeout(1000);
   await closeDialog();
   await alive("cancel probe");

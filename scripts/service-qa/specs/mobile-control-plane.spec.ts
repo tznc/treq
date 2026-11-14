@@ -9,7 +9,7 @@
  * Requires `TREQ_REMOTE_PROVIDER_STUB=1` (set by `scripts/service-qa/up.sh`) so
  * `ensure`/`wake`/`status` resolve without a real Fly.io account.
  */
-import { it, expect, afterEach } from "vitest";
+import { it, expect, afterEach } from "@jest/globals";
 import { getAnonClient, getAnonKey, getFunctionsBaseUrl, getServiceClient } from "../clients";
 import { FEATURES } from "../features";
 import { createTestUser, deleteTestUser, type TestUser } from "../seed";

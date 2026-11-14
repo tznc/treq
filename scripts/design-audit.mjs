@@ -22,6 +22,7 @@ const RULES = [
   "gpui-hover-token",
   "gpui-no-raw-color",
   "gpui-no-raw-text-size",
+  "gpui-text-xs-short-label-only",
   "gpui-no-zpx-spacing",
   "gpui-escape-via-layers",
   "gpui-no-adhoc-controls",

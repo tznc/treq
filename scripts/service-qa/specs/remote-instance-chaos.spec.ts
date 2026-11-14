@@ -5,7 +5,7 @@
  * the provider is the in-memory LocalProvider, wrapped to slow or fail calls.
  */
 import { randomUUID } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, it } from "@jest/globals";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import * as lapseSweep from "../../../supabase/functions/_shared/remote/lapse-sweep";
 import { LocalProvider } from "../../../supabase/functions/_shared/remote/local-provider";
@@ -181,7 +181,7 @@ it("ensure refuses an empty, overlong or control-character idempotency key with 
   try {
     for (const key of ["", "k".repeat(257), "a\u0000b", "line\nbreak"]) {
       const res = await ensure(u.user.id, undefined, { idempotency_key: key });
-      expect(res.status, JSON.stringify(key)).toBe(400);
+      expect({ key, status: res.status }).toEqual({ key, status: 400 });
       expect(res.json.code).toBe("validation_error");
     }
     expect(await rows(admin, u.user.id)).toEqual([]);

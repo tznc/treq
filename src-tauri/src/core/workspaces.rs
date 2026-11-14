@@ -191,6 +191,18 @@ pub struct WorkspaceMetadata {
 /// Parse the creation metadata JSON callers send.
 /// Unknown fields are ignored; empty arrays are normalized to `None`.
 /// Invalid or missing JSON yields an all-`None` metadata.
+/// Each workspace's id, title and description: what a window shows from the
+/// database that the CLI or another window can change. `None` when it can't
+/// be read.
+pub fn workspace_texts(repo_path: &str) -> Option<Vec<(i64, String, Option<String>)>> {
+  local_db::get_workspaces(repo_path).ok().map(|list| {
+    list
+      .into_iter()
+      .map(|w| (w.id, w.title, w.description))
+      .collect()
+  })
+}
+
 pub fn parse_workspace_metadata(metadata: Option<&str>) -> WorkspaceMetadata {
   let parsed: Option<WorkspaceMetadata> = metadata.and_then(|m| serde_json::from_str(m).ok());
   let mut parsed = parsed.unwrap_or_default();
@@ -1954,6 +1966,30 @@ mod tests {
       archived,
       ..test_workspace(id, branch, Some("main"))
     }
+  }
+
+  #[test]
+  fn workspace_texts_change_when_a_title_changes() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    crate::local_db::init_local_db(repo_path).expect("initialize database");
+    let a = crate::local_db::add_workspace_targeting(
+      repo_path,
+      "a".into(),
+      "a".into(),
+      "a".into(),
+      None,
+      None,
+      None,
+      false,
+      "main",
+    )
+    .expect("register a");
+    let before = super::workspace_texts(repo_path);
+    assert!(before.is_some());
+    assert_eq!(super::workspace_texts(repo_path), before);
+    crate::local_db::update_workspace_title(repo_path, a.id, "Renamed").expect("rename");
+    assert_ne!(super::workspace_texts(repo_path), before);
   }
 
   #[test]

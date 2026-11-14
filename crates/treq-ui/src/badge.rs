@@ -114,6 +114,8 @@ impl RenderOnce for Badge {
 pub struct Count {
   count: usize,
   palette: Palette,
+  /// On a selected fill: no pill, the number in this (the label's) colour.
+  on_selected: Option<Hsla>,
 }
 
 impl Count {
@@ -121,7 +123,15 @@ impl Count {
     Self {
       count,
       palette: *palette,
+      on_selected: None,
     }
+  }
+
+  /// Sits on a selected fill: drops the pill and takes the label's colour,
+  /// so a neutral pill doesn't muddy the fill.
+  pub fn on_selected(mut self, label: Hsla) -> Self {
+    self.on_selected = Some(label);
+    self
   }
 
   /// The count as shown, capped so the pill keeps its width.
@@ -137,12 +147,16 @@ impl Count {
 impl RenderOnce for Count {
   fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = &self.palette;
+    let (bg, fg) = match self.on_selected {
+      Some(label) => (gpui::transparent_black(), label.opacity(0.75)),
+      None => (p.muted, p.muted_foreground),
+    };
     pill(cx)
       .min_w(zpx(20.))
       .px(zpx(6.))
       .justify_center()
-      .bg(p.muted)
-      .text_color(p.muted_foreground)
+      .bg(bg)
+      .text_color(fg)
       .font_family(crate::theme::MONO_FONT)
       .child(self.label())
   }
@@ -219,6 +233,8 @@ pub(crate) fn caption<E: Styled>(el: E, cx: &App) -> E {
     .copied()
     .unwrap_or_default()
   {
+    // Short label (['badge']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     crate::theme::Density::Desktop => text(el, TextSize::Xs),
     density => {
       let size = density.caption();

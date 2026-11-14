@@ -115,6 +115,12 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn open_in_new_window(&self, path: &str);
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String>;
   fn remove_supporting(&self, main_repo: &str, path: &str) -> Result<(), String>;
+  /// The name of the project the window keeps its repositories in.
+  fn project_name(&self) -> Option<String> {
+    None
+  }
+  /// Forgets the window's repository but keeps its project.
+  fn clear_repo(&self) {}
   fn launch(&self, request: &LaunchRequest, select: bool) -> Result<(), String>;
   /// Shows `toast` in the window.
   fn show_toast(&self, toast: Toast);
@@ -126,6 +132,9 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   /// Watches a local checkout for edits on disk (an agent's, an editor's):
   /// each settled burst sends once. `None` when there is nothing to watch.
   fn watch_files(&self, path: &str) -> Option<FileWatch>;
+  /// Watches a local repository's workspace database (`.treq/local.db`) for
+  /// writes: each settled burst sends once.
+  fn watch_db(&self, repo: &str) -> Option<FileWatch>;
   fn force_rebase(
     &self,
     repo: &str,
@@ -402,9 +411,10 @@ impl WindowHost for Backend {
     if Backend::remote(self, main_repo).is_some() {
       return Vec::new();
     }
-    // A saved project lists its repositories; an unsaved one keeps the
-    // main repository's supporting list, as before projects.
-    if let Some(project) = crate::gpui_shell::projects::window_project(self.app(), self.label()) {
+    // The window's project, saved or draft, lists its repositories.
+    if let Some(project) =
+      crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+    {
       return project
         .repos
         .into_iter()
@@ -415,7 +425,7 @@ impl WindowHost for Backend {
         })
         .collect();
     }
-    supporting_repos::list(main_repo).unwrap_or_default()
+    Vec::new()
   }
 
   fn project(&self) -> Option<crate::core::projects::Project> {
@@ -429,7 +439,7 @@ impl WindowHost for Backend {
   fn flags(&self) -> Flags {
     self.with_db(|db| Flags {
       linear: feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
-      logs: feature_preview::is_enabled(db, PreviewFeature::Logs),
+      logs: true,
       remote_ssh: feature_preview::is_enabled(db, PreviewFeature::RemoteSsh),
     })
   }
@@ -520,25 +530,39 @@ impl WindowHost for Backend {
   }
 
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String> {
-    if let Some(project) = self.project() {
-      let added = std::fs::canonicalize(path)
-        .map_err(|e| format!("Cannot open '{path}': {e}"))?
-        .to_string_lossy()
-        .to_string();
-      core::init(&added).map_err(|err| err.to_string())?;
-      self.with_db(|db| crate::core::projects::add_repo(db.conn(), &project.id, &added))?;
-      return Ok(added);
-    }
-    let added = supporting_repos::add(main_repo, path)?;
+    let project = crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+      .ok_or("This window has no project to add a repository to")?;
+    let added = supporting_repos::validate(main_repo, path)?;
     core::init(&added).map_err(|err| err.to_string())?;
+    let inserted =
+      self.with_db(|db| crate::core::projects::add_repo(db.conn(), &project.id, &added))?;
+    if !inserted {
+      return Err("This repository is already added".to_string());
+    }
     Ok(added)
   }
 
-  fn remove_supporting(&self, main_repo: &str, path: &str) -> Result<(), String> {
-    if let Some(project) = self.project() {
-      return self.with_db(|db| crate::core::projects::remove_repo(db.conn(), &project.id, path));
-    }
-    supporting_repos::remove(main_repo, path)
+  fn remove_supporting(&self, _main_repo: &str, path: &str) -> Result<(), String> {
+    let project = crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+      .ok_or("This window has no project to remove a repository from")?;
+    self.with_db(|db| crate::core::projects::remove_repo(db.conn(), &project.id, path))
+  }
+
+  fn project_name(&self) -> Option<String> {
+    crate::gpui_shell::projects::window_repos_project(self.app(), self.label()).map(|p| p.name)
+  }
+
+  fn clear_repo(&self) {
+    let state = self.app().state::<AppState>();
+    state
+      .window_repo_paths
+      .lock_or_recover()
+      .remove(self.label());
+    state
+      .window_supporting_repo_paths
+      .lock_or_recover()
+      .remove(self.label());
+    crate::unwatch_unshown_repos(self.app());
   }
 
   fn launch(&self, request: &LaunchRequest, select: bool) -> Result<(), String> {
@@ -578,6 +602,58 @@ impl WindowHost for Backend {
 
   fn open_url(&self, url: &str) {
     Backend::open_url(self, url);
+  }
+
+  fn watch_db(&self, repo: &str) -> Option<FileWatch> {
+    if self.remote(repo).is_some() {
+      return None;
+    }
+    let dir = Path::new(repo).join(".treq");
+    let (tx, changes) = unbounded();
+    // The app's own reads and polls write the database too: send only when
+    // what the window shows from it (titles, descriptions) changed.
+    let repo_path = repo.to_string();
+    let shown = move || crate::core::workspaces::workspace_texts(&repo_path);
+    let mut last = shown();
+    let mut debouncer = notify_debouncer_full::new_debouncer_opt::<
+      _,
+      notify::RecommendedWatcher,
+      notify_debouncer_full::NoCache,
+    >(
+      WATCH_SETTLE,
+      None,
+      move |result: notify_debouncer_full::DebounceEventResult| {
+        let wrote = result.is_ok_and(|events| {
+          events.iter().any(|e| {
+            !e.kind.is_access()
+              && e.paths.iter().any(|p| {
+                p.file_name()
+                  .and_then(|n| n.to_str())
+                  .is_some_and(|n| n.starts_with("local.db"))
+              })
+          })
+        });
+        if wrote {
+          let now = shown();
+          if now != last {
+            last = now;
+            tx.unbounded_send(()).ignore_closed();
+          }
+        }
+      },
+      notify_debouncer_full::NoCache,
+      notify::Config::default(),
+    )
+    .map_err(|err| log::warn!("Failed to create a database watcher: {err}"))
+    .ok()?;
+    debouncer
+      .watch(&dir, notify::RecursiveMode::NonRecursive)
+      .map_err(|err| log::warn!("Failed to watch {}: {err}", dir.display()))
+      .ok()?;
+    Some(FileWatch {
+      changes,
+      _watcher: Box::new(debouncer),
+    })
   }
 
   fn watch_files(&self, path: &str) -> Option<FileWatch> {

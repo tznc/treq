@@ -73,8 +73,12 @@ struct FakeHost {
   read_error: Option<String>,
   /// Every call, in order.
   calls: Mutex<Vec<String>>,
+  /// The name of the project the window keeps its repositories in.
+  project_name: Mutex<Option<String>>,
   /// The watched checkouts, each with the sender that reports an edit.
   watches: Mutex<Vec<(String, UnboundedSender<()>)>>,
+  /// The watched workspace databases, each with the sender that reports a write.
+  db_watches: Mutex<Vec<(String, UnboundedSender<()>)>>,
 }
 
 impl FakeHost {
@@ -233,6 +237,14 @@ impl WindowHost for FakeHost {
     Ok(path.into())
   }
 
+  fn project_name(&self) -> Option<String> {
+    self.project_name.lock().unwrap().clone()
+  }
+
+  fn clear_repo(&self) {
+    self.record("clear repo");
+  }
+
   fn remove_supporting(&self, _: &str, path: &str) -> Result<(), String> {
     self.record(format!("remove {path}"));
     self.supporting.lock().unwrap().retain(|r| r.path != path);
@@ -266,6 +278,15 @@ impl WindowHost for FakeHost {
   fn watch_files(&self, path: &str) -> Option<FileWatch> {
     let (tx, changes) = futures::channel::mpsc::unbounded();
     self.watches.lock().unwrap().push((path.into(), tx));
+    Some(FileWatch {
+      changes,
+      _watcher: Box::new(()),
+    })
+  }
+
+  fn watch_db(&self, repo: &str) -> Option<FileWatch> {
+    let (tx, changes) = futures::channel::mpsc::unbounded();
+    self.db_watches.lock().unwrap().push((repo.into(), tx));
     Some(FileWatch {
       changes,
       _watcher: Box::new(()),
@@ -1044,6 +1065,24 @@ fn edits_on_disk_in_the_selected_checkout_read_the_changes_again(cx: &mut TestAp
 }
 
 #[gpui::test]
+fn a_write_to_the_workspace_database_reads_the_workspaces_again(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let _window = Window::open(cx, host.clone(), Some("/repo"));
+  cx.run_until_parked();
+  let before = host.count("workspaces /repo");
+  {
+    let watches = host.db_watches.lock().unwrap();
+    let (_, tx) = watches
+      .iter()
+      .find(|(p, _)| p == "/repo")
+      .expect("no db watch");
+    let _ = tx.unbounded_send(());
+  }
+  cx.run_until_parked();
+  assert!(host.count("workspaces /repo") > before);
+}
+
+#[gpui::test]
 fn opens_the_dialogs_and_file_picker_from_shortcuts(cx: &mut TestAppContext) {
   let window = Window::open(cx, repo_host(), Some("/repo"));
   window
@@ -1221,6 +1260,112 @@ fn adds_and_removes_supporting_repositories(cx: &mut TestAppContext) {
   assert_eq!(window.last().sidebar.unwrap().repos.len(), 2, "not yet");
   window.click_in_confirm(cx, "Remove repository");
   assert_eq!(window.last().sidebar.unwrap().repos.len(), 1);
+}
+
+#[gpui::test]
+fn removing_the_main_repository_shows_the_next_one(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::on("/repo", vec![workspace(1, "a", Some("main"))]));
+  host.supporting.lock().unwrap().push(SupportingRepo {
+    path: "/other".into(),
+    exists: true,
+  });
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  window.controller.update(cx, |c, cx| {
+    c.native_event(
+      &NativeEvent::Open {
+        what: crate::gpui_shell::native::OpenRequest::RemoveRepo {
+          repo_path: "/repo".into(),
+        },
+      },
+      cx,
+    )
+  });
+  cx.run_until_parked();
+  window.click_in_confirm(cx, "Remove repository");
+  let calls = host.calls();
+  let removed = calls
+    .iter()
+    .position(|c| c == "remove /repo")
+    .expect("removed");
+  let opened = calls
+    .iter()
+    .position(|c| c == "open /other")
+    .expect("opens the next");
+  assert!(removed < opened);
+}
+
+fn remove_repo(window: &Window, cx: &mut TestAppContext, path: &str) {
+  window.controller.update(cx, |c, cx| {
+    c.native_event(
+      &NativeEvent::Open {
+        what: crate::gpui_shell::native::OpenRequest::RemoveRepo {
+          repo_path: path.into(),
+        },
+      },
+      cx,
+    )
+  });
+  cx.run_until_parked();
+  window.click_in_confirm(cx, "Remove repository");
+}
+
+fn project_host(folder: Option<&str>) -> Arc<FakeHost> {
+  let host = FakeHost {
+    folder: folder.map(str::to_string),
+    ..FakeHost::on("/repo", vec![workspace(1, "a", Some("main"))])
+  };
+  *host.project_name.lock().unwrap() = Some("Checkout".into());
+  Arc::new(host)
+}
+
+#[gpui::test]
+fn removing_the_last_repository_leaves_an_empty_project(cx: &mut TestAppContext) {
+  let host = project_host(None);
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  remove_repo(&window, cx, "/repo");
+  assert!(host.calls().contains(&"clear repo".to_string()));
+  let sidebar = window.last().sidebar.expect("the sidebar stays");
+  assert!(sidebar.repos.is_empty());
+  assert_eq!(sidebar.project.as_deref(), Some("Checkout"));
+  assert!(matches!(
+    window.screen_snapshot().view,
+    View::ProjectHome(_)
+  ));
+}
+
+#[gpui::test]
+fn adding_a_repository_to_an_empty_project_opens_it(cx: &mut TestAppContext) {
+  let host = project_host(Some("/new"));
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  remove_repo(&window, cx, "/repo");
+  window
+    .controller
+    .update(cx, |c, cx| c.menu(Menu::AddRepository, cx));
+  cx.run_until_parked();
+  let calls = host.calls();
+  let added = calls.iter().position(|c| c == "add /new").expect("added");
+  let opened = calls.iter().position(|c| c == "open /new").expect("opened");
+  assert!(added < opened);
+}
+
+#[gpui::test]
+fn a_window_on_an_empty_project_shows_it(cx: &mut TestAppContext) {
+  let host = project_host(None);
+  let window = Window::open(cx, host, None);
+  cx.run_until_parked();
+  let sidebar = window.last().sidebar.expect("a sidebar");
+  assert!(sidebar.repos.is_empty());
+  assert!(matches!(
+    window.screen_snapshot().view,
+    View::ProjectHome(_)
+  ));
+}
+
+#[gpui::test]
+fn a_window_without_a_project_or_repo_shows_onboarding(cx: &mut TestAppContext) {
+  let window = Window::open(cx, Arc::new(FakeHost::default()), None);
+  cx.run_until_parked();
+  assert!(window.last().sidebar.is_none());
 }
 
 #[gpui::test]

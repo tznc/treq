@@ -21,9 +21,9 @@ test("opens the repository on its home view", async ({ page }) => {
     await page.getByRole("tab", { name: tab }).hover();
   }
   await expect(page.getByText("e2e fixture")).toHaveCount(1);
-  // The action row's Agent button opens the agent prompt.
+  // The action row's "Start an agent" button opens the agent prompt.
   await expect(
-    page.getByRole("button", { name: "Agent", exact: true }),
+    page.getByRole("button", { name: "Start an agent", exact: true }),
   ).toBeVisible();
 });
 

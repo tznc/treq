@@ -115,8 +115,9 @@ fn styleguide() -> Styleguide {
     )
     .describe(
       "Dialog",
-      "Radius 12 on the scrim. An action pair goes in the footer with no X; otherwise an X \
-       closes it. Confirmations ask a question and answer with verbs, never Yes/No.",
+      "Radius 12 on the scrim. An X top-right closes it, and the footer holds only the verb. \
+       A yes/no confirmation keeps an outline Cancel beside its verb instead of an X, and asks \
+       a question answered with verbs, never Yes/No.",
     )
     .describe(
       "Floating",
@@ -580,6 +581,18 @@ fn buttons() -> Vec<Example> {
     .component("Copy feedback")
     .title("States")
     .size(232., 56.),
+    example!("button/check-toggle", |knobs, _, cx| {
+      let p = p(cx);
+      // A filter toggle in a narrow row, where a switch won't fit.
+      Button::new("assigned", &p)
+        .variant(Variant::Outline)
+        .size(treq_ui::Size::Sm)
+        .checked(knobs.bool("checked", true))
+        .label("Assigned to me")
+    })
+    .component("Button")
+    .title("Check toggle")
+    .size(232., 56.),
     example!("split-button/playground", |knobs, _, cx| {
       let p = p(cx);
       SplitButton::new("push", "Push", &p)
@@ -773,7 +786,7 @@ fn indicators() -> Vec<Example> {
                     .child("Notify when the agent finishes"),
                 )
                 .child(
-                  treq_ui::text(div(), treq_ui::TextSize::Xs)
+                  treq_ui::text(div(), treq_ui::TextSize::Sm)
                     .text_color(p.muted_foreground)
                     .child("A desktop notification, only while Treq is in the background."),
                 ),
@@ -1074,16 +1087,10 @@ fn surfaces() -> Vec<Example> {
         .primary_disabled(busy)
         .on_close(|_, _| {})
         .child("A custom header, and a verb that is busy: Enter waits for it.")
-        .footer([
-          Button::new("rename-cancel", &p)
-            .variant(Variant::Outline)
-            .label("Cancel")
-            .into_any_element(),
-          Button::new("rename-confirm", &p)
-            .disabled(busy)
-            .label(if busy { "Renaming…" } else { "Rename" })
-            .into_any_element(),
-        ])
+        .footer([Button::new("rename-confirm", &p)
+          .disabled(busy)
+          .label(if busy { "Renaming…" } else { "Rename" })
+          .into_any_element()])
     })
     .component("Dialog")
     .title("Custom header, busy verb")

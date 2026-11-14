@@ -1,6 +1,6 @@
 /**
  * Writes a plain-English outcome checklist next to each service-qa run:
- * Vitest asserts prove the contract; this file is the agent-facing checklist
+ * Jest asserts prove the contract; this file is the agent-facing checklist
  * for step 5 of the skill.
  */
 import fs from "node:fs";

@@ -298,7 +298,7 @@ impl PromptHistoryView {
                 .density(ui::RowDensity::TwoLine)
                 .label(workspace_label(entry))
                 .selected(selected),
-              TextSize::Xs,
+              TextSize::Sm,
             )
             .w_full()
             .py_2()
@@ -352,7 +352,7 @@ impl PromptHistoryView {
       );
     };
     let text = entry.prompt_text.clone();
-    let header = ui::text(div(), TextSize::Xs)
+    let header = ui::text(div(), TextSize::Sm)
       .flex()
       .items_center()
       .justify_between()
@@ -397,6 +397,8 @@ impl PromptHistoryView {
               .px_2()
               .gap_1()
               .copy_icon(copied, 12.)
+              // Short label (['button label']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               .child(ui::text(div(), TextSize::Xs).child("Copy"))
               .on_click(copy)
               .into_any_element()
