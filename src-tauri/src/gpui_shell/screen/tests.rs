@@ -24,6 +24,10 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
+  /// How many times a screen listed machines and projects.
+  listings: std::sync::atomic::AtomicUsize,
+  /// Team organizations the save-project dialog offers, as (id, name).
+  project_teams: Vec<(String, String)>,
   /// Repositories whose folder is gone from disk (Home shows them missing).
   gone: Vec<&'static str>,
   /// Saving repository settings fails, as a full disk would.
@@ -311,6 +315,9 @@ impl FakeHost {
 
 impl machines::MachinesHost for FakeHost {
   fn listing(&self) -> machines::Listing {
+    self
+      .listings
+      .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     self.listing.clone()
   }
 
@@ -1956,6 +1963,7 @@ fn onboarding() -> ScreenSnapshot {
 fn listing() -> machines::Listing {
   use machines::{Machine, Place, Recent};
   machines::Listing {
+    teams: Vec::new(),
     machines: vec![
       Machine {
         id: "local".into(),
@@ -2815,8 +2823,15 @@ impl Harness {
 }
 
 impl workspace_dialog_data::WorkspaceDialogHost for FakeHost {
-  fn save_project(&self, name: &str) -> Result<(), String> {
-    self.record(format!("save project {name:?}"));
+  fn project_teams(&self) -> Vec<(String, String)> {
+    self.project_teams.clone()
+  }
+
+  fn save_project(&self, name: &str, org_id: Option<&str>) -> Result<(), String> {
+    match org_id {
+      Some(org) => self.record(format!("save project {name:?} to {org}")),
+      None => self.record(format!("save project {name:?}")),
+    }
     if self.failing.contains(&"save_project") {
       return Err("save failed".into());
     }
