@@ -17,7 +17,7 @@ use crate::{
     form,
     screen::github_data as data,
     theme::{self, Palette},
-    ui::{self, Button, Size, TextSize, Variant},
+    ui::{self, Button, Size, TextSize},
   },
   local_db::Workspace,
 };
@@ -327,21 +327,12 @@ impl GithubView {
       NewPrTab::Workspace => self.workspace_form(p, window, cx),
       NewPrTab::Branch => self.branch_form(p, window, cx),
     };
-    let cancel = Button::new("github-new-pr-cancel", p)
-      .variant(Variant::Outline)
-      .size(Size::Sm)
-      .label("Cancel")
-      .on_click(cx.listener(|view, _, _, cx| view.cancel_new_pr(cx)))
-      .into_any_element();
     let can_create = submit.is_some_and(|(_, pending, disabled)| !pending && !disabled);
     let footer = match submit {
-      Some((draft, pending, disabled)) => vec![
-        cancel,
-        self
-          .split_button(draft, pending, disabled, workspace, p, cx)
-          .into_any_element(),
-      ],
-      None => vec![cancel],
+      Some((draft, pending, disabled)) => vec![self
+        .split_button(draft, pending, disabled, workspace, p, cx)
+        .into_any_element()],
+      None => Vec::new(),
     };
     ui::Dialog::new("github-new-pr-dialog", p)
       .overlay(window.viewport_size())
@@ -661,7 +652,7 @@ impl GithubView {
             )
             .child(div().font_weight(FontWeight::MEDIUM).child(item))
             .child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .text_color(p.muted_foreground)
                 .child(description),
             )

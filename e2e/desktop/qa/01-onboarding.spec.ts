@@ -122,13 +122,13 @@ test("onboarding: first run and open repository", async () => {
     title: "Open a repository: Add SSH host (your own VM) form",
     screen: true,
     expectations: [
-      "The own-VM form opens directly; Cancel and Continue at the bottom and no X, as it has an action pair",
+      "The own-VM form opens directly; Continue at the bottom and an X top-right",
       "Field labels and placeholders readable in this theme",
       "No network is needed to show the form; no stuck spinner",
     ],
   });
-  // The dialog closes with Cancel or Escape, as every other dialog does.
-  const close = page.getByRole("button", { name: "Cancel" });
+  // The dialog closes with its X or Escape, as every other dialog does.
+  const close = page.getByRole("button", { name: "Close" });
   await expect(close).toBeVisible();
   await page.keyboard.press("Escape");
   await page.waitForTimeout(1000);

@@ -35,7 +35,7 @@ use super::{
   open_workspaces_data::{self as data, Checked, Line, OpenWorkspacesHost, Route, Target},
   workspace_data::WorkspaceHost,
   workspace_dialog_data::{self as dialog_data, WorkspaceDialogHost},
-  workspace_modal::{label_xs, press},
+  workspace_modal::{field_hint, field_label, press},
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -903,7 +903,7 @@ impl OpenWorkspacesDialog {
         .flex_1()
         .min_w_0()
         .gap_1p5()
-        .child(label_xs(label))
+        .child(field_label(label))
         .child(
           div()
             .debug_selector(move || selector.into())
@@ -987,7 +987,7 @@ impl OpenWorkspacesDialog {
     options: Div,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> (Div, [gpui::AnyElement; 3]) {
+  ) -> (Div, [gpui::AnyElement; 2]) {
     let checks = self.lines();
     let targets = self.targets();
     let unchecked = checks.iter().filter(|(_, c)| c.is_none()).count();
@@ -1011,7 +1011,7 @@ impl OpenWorkspacesDialog {
           .flex()
           .flex_col()
           .gap_1p5()
-          .child(label_xs("Workspaces"))
+          .child(field_label("Workspaces"))
           .child(
             div()
               .debug_selector(|| "open-workspaces-lines".into())
@@ -1023,9 +1023,7 @@ impl OpenWorkspacesDialog {
               )),
           )
           .child(
-            ui::text(div(), TextSize::Xs)
-              .text_color(p.muted_foreground)
-              .child("One per line: a title or branch name for a new workspace, an existing branch, or a GitHub pull request or branch link of one of your repositories. Indent lines (Tab) to stack each on the line above."),
+            field_hint("One per line: a title or branch name for a new workspace, an existing branch, or a GitHub pull request or branch link of one of your repositories. Indent lines (Tab) to stack each on the line above.", p),
           ),
       )
       .child(options)
@@ -1054,12 +1052,6 @@ impl OpenWorkspacesDialog {
         .flex_1()
         .min_w_0()
         .child(self.status(status, invalid, &checks, p, cx))
-        .into_any_element(),
-      Button::new("open-workspaces-cancel", p)
-        .variant(Variant::Outline)
-        .disabled(self.pending)
-        .label("Cancel")
-        .on_click(cx.listener(|view, _, _, cx| view.close(cx)))
         .into_any_element(),
       Button::new("open-workspaces-submit", p)
         .disabled(!self.can_submit())
@@ -1246,7 +1238,55 @@ impl OpenWorkspacesDialog {
       .iter()
       .position(|tab| Some(*tab) == current)
       .unwrap_or(0);
-    let tabs = ui::Tabs::segmented("open-workspaces-tabs", p)
+    // One integration needs no tab to pick it: it is a header.
+    let tabs = if let [only] = integrations[..] {
+      let (icon, label) = match only {
+        Integration::Github => (theme::ICON_GITHUB, "GitHub"),
+        Integration::Linear => (theme::ICON_LINEAR, "Linear"),
+      };
+      ui::SectionHeader::new("open-workspaces-integration", label, p)
+        .icon(icon)
+        .into_any_element()
+    } else {
+      self
+        .integration_tabs(integrations, selected, p, cx)
+        .into_any_element()
+    };
+    // A rule so the tabs do not read as one of the list's filters.
+    let divider = div()
+      .id("open-workspaces-integrations-divider")
+      .debug_selector(|| "open-workspaces-integrations-divider".into())
+      .h(zpx(1.))
+      .w_full()
+      .flex_none()
+      .bg(p.border);
+    div()
+      .flex()
+      .flex_col()
+      .w(zpx(420.))
+      .flex_none()
+      .min_h_0()
+      .border_l_1()
+      .border_color(p.border)
+      .pl_4()
+      .gap_2()
+      .child(tabs)
+      .child(divider)
+      .map(|this| match current {
+        Some(Integration::Linear) => this.child(self.issues_pane(fields.1, p, cx)),
+        _ => this.child(self.prs_pane(fields.0, p, cx)),
+      })
+  }
+
+  /// A tab for each integration, to pick which one's list shows.
+  fn integration_tabs(
+    &self,
+    integrations: Vec<Integration>,
+    selected: usize,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> ui::Tabs {
+    ui::Tabs::segmented("open-workspaces-tabs", p)
       .tabs(integrations.iter().map(|tab| {
         let (icon, label, picked) = match tab {
           Integration::Github => (theme::ICON_GITHUB, "GitHub", self.chosen.len()),
@@ -1271,21 +1311,6 @@ impl OpenWorkspacesDialog {
             })
             .ok();
         }
-      });
-    div()
-      .flex()
-      .flex_col()
-      .w(zpx(420.))
-      .flex_none()
-      .min_h_0()
-      .border_l_1()
-      .border_color(p.border)
-      .pl_4()
-      .gap_2()
-      .child(tabs)
-      .map(|this| match current {
-        Some(Integration::Linear) => this.child(self.issues_pane(fields.1, p, cx)),
-        _ => this.child(self.prs_pane(fields.0, p, cx)),
       })
   }
 
@@ -1322,12 +1347,21 @@ impl OpenWorkspacesDialog {
             err.clone(),
             p,
           )
-          .action(crate::gpui_shell::ui::error_actions(
-            "open-workspaces-issues",
-            err.clone(),
-            Some(Box::new(cx.listener(|view, _, _, cx| view.load_issues(cx)))),
-            p,
-          )),
+          .action(if err == crate::linear::PRO_REQUIRED {
+            Button::new("open-workspaces-issues-manage-account", p)
+              .size(ui::Size::Sm)
+              .label("Manage account")
+              .on_click(cx.listener(|view, _, _, cx| press(&view.sink, "account.manage", cx)))
+              .into_any_element()
+          } else {
+            crate::gpui_shell::ui::error_actions(
+              "open-workspaces-issues",
+              err.clone(),
+              Some(Box::new(cx.listener(|view, _, _, cx| view.load_issues(cx)))),
+              p,
+            )
+            .into_any_element()
+          }),
         )
         .into_any_element()
     } else if items.is_empty() {
@@ -1439,9 +1473,8 @@ impl OpenWorkspacesDialog {
       .variant(Variant::Outline)
       .size(ui::Size::Sm)
       .h(zpx(28.))
-      .icon(theme::ICON_USER, 12.)
+      .checked(self.assigned)
       .label("Assigned to me")
-      .pressed(self.assigned)
       .on_click(cx.listener(|view, _, _, cx| {
         view.assigned = !view.assigned;
         view.load_prs(cx);
@@ -1530,11 +1563,13 @@ fn pane(
             .id(SharedString::from(format!("{id}-heading")))
             .role(gpui::Role::Heading)
             .aria_label(heading)
-            .child(label_xs(heading))
+            .child(field_label(heading))
             .test_support(),
         )
         .when(picked > 0, |this| {
           this.child(
+            // Short label (['count']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(format!("{picked} selected")),

@@ -177,6 +177,9 @@ pub struct Place {
   pub titles: Vec<(String, String)>,
   /// Workspace ids by directory, so a new agent opens in its column's.
   pub workspace_ids: Vec<(String, i64)>,
+  /// The shown workspace's directory and diff line counts, from the
+  /// workspace view's tab row.
+  pub loc: Option<(String, super::workspace::Loc)>,
 }
 
 impl Place {
@@ -191,6 +194,16 @@ impl Place {
     };
     find(&self.titles).or_else(|| find(&self.branches))
   }
+
+  /// The diff line counts a column's chip shows for the workspace at
+  /// `dir`: None when unknown or both zero.
+  pub fn workspace_loc(&self, dir: &str) -> Option<&super::workspace::Loc> {
+    self
+      .loc
+      .as_ref()
+      .filter(|(path, loc)| path == dir && (loc.insertions > 0 || loc.deletions > 0))
+      .map(|(_, loc)| loc)
+  }
 }
 
 /// `scrollTerminalFullyIntoView`: how far the row scrolls right (negative:
@@ -203,6 +216,16 @@ pub fn scroll_delta(row: (f32, f32), column: (f32, f32)) -> f32 {
     column.1 - row.1
   } else {
     0.
+  }
+}
+
+/// How far shift+wheel scrolls the row right: down is right, whether the
+/// platform reports it vertically or already turned it horizontal.
+pub fn shift_scroll_right(dx: f32, dy: f32) -> f32 {
+  if dy.abs() >= dx.abs() {
+    -dy
+  } else {
+    dx
   }
 }
 
@@ -446,6 +469,9 @@ pub struct TerminalView {
   _msg_watch: Option<Task<()>>,
 }
 
+/// How long after sending text to an agent its Enter follows.
+const SUBMIT_DELAY: Duration = Duration::from_millis(100);
+
 /// How often a terminal looks for changes to its waiting messages.
 const MSG_WATCH: Duration = Duration::from_secs(1);
 
@@ -487,6 +513,9 @@ impl Drop for TerminalView {
     remove_files(self.host.clone(), std::mem::take(&mut self.session_files));
   }
 }
+
+/// How often a terminal checks whether its shell started the agent.
+const AGENT_START_POLL: std::time::Duration = std::time::Duration::from_millis(250);
 
 fn now_millis() -> u128 {
   std::time::SystemTime::now()
@@ -568,6 +597,25 @@ impl TerminalView {
     else {
       return;
     };
+    // An agent runs once its shell starts the typed command; until then
+    // `treq agent msg` neither lists it nor types into its shell.
+    if !self.host.agent_started(&self.pty) {
+      self._tasks.push(cx.spawn(async move |this, cx| loop {
+        cx.background_executor().timer(AGENT_START_POLL).await;
+        let started = this.update(cx, |view, cx| {
+          let started = view.host.agent_started(&view.pty);
+          if started {
+            let (cols, rows) = view.pty_size.unwrap_or((cols, rows));
+            view.register_for_messages(cols, rows, cx);
+          }
+          started
+        });
+        if started.unwrap_or(true) {
+          break;
+        }
+      }));
+      return;
+    }
     let session = crate::core::agent_msg::hub::SessionInfo {
       pty_id: self.pty.clone(),
       handle: crate::core::agent_msg::hub::handle(&start.agent, start.session_id),
@@ -1022,6 +1070,8 @@ impl TerminalView {
         .size(ui::Size::Xs)
         .h_6()
         .px_2(),
+      // Short label (['button label']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       TextSize::Xs,
     )
     .label("Deliver")
@@ -1345,8 +1395,8 @@ impl TerminalView {
       return;
     };
     let delta = event.delta.pixel_delta(px(h));
-    // Horizontal swipes scroll the row of columns instead.
-    if f32::from(delta.x).abs() > f32::from(delta.y).abs() {
+    // Horizontal swipes and shift+wheel scroll the row of columns instead.
+    if event.modifiers.shift || f32::from(delta.x).abs() > f32::from(delta.y).abs() {
       return;
     }
     self.scroll_rest += f32::from(delta.y) / h;
@@ -2446,7 +2496,10 @@ impl TerminalPane {
     self.maximized && !self.collapsed && !self.columns.is_empty()
   }
 
-  pub fn set_place(&mut self, place: Place, cx: &mut Context<Self>) {
+  pub fn set_place(&mut self, mut place: Place, cx: &mut Context<Self>) {
+    if place.loc.is_none() {
+      place.loc = self.place.loc.clone();
+    }
     if self.place == place {
       return;
     }
@@ -2477,6 +2530,14 @@ impl TerminalPane {
       },
       cx,
     );
+  }
+
+  /// The shown workspace's diff line counts, for its columns' chips.
+  pub fn set_loc(&mut self, loc: Option<(String, super::workspace::Loc)>, cx: &mut Context<Self>) {
+    if self.place.loc != loc {
+      self.place.loc = loc;
+      cx.notify();
+    }
   }
 
   /// Takes React's latest word on sessions and commands, acted on when
@@ -2593,7 +2654,17 @@ impl TerminalPane {
       return false;
     };
     if let Some(view) = self.view(&column) {
-      view.update(cx, |view, cx| view.write(&format!("{text}\n"), cx));
+      view.update(cx, |view, cx| view.write(text, cx));
+      // Enter as its own later write: a TUI reads a burst ending in it
+      // as a paste and leaves the text unsent.
+      let view = view.downgrade();
+      cx.spawn(async move |_, cx| {
+        cx.background_executor().timer(SUBMIT_DELAY).await;
+        view
+          .update(cx, |view, cx| view.write("\r", cx))
+          .ignore_closed();
+      })
+      .detach();
     }
     self.focus_next = Some(column);
     cx.notify();
@@ -3153,7 +3224,7 @@ impl TerminalPane {
             .rounded(radius::MD),
         )
       } else {
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .size_full()
           .px_1()
           .flex()
@@ -3581,14 +3652,35 @@ impl TerminalPane {
     } else {
       (p.muted_foreground, p.foreground)
     };
+    let place = self.place.clone();
     let label = |name: String, main: bool, key: String, react: ActionSink| {
+      let tones = if on_dark { &d } else { p };
+      let loc = place.workspace_loc(&key).map(|loc| {
+        div()
+          .flex()
+          .flex_none()
+          .gap_1()
+          .debug_selector(|| "terminal-workspace-loc".into())
+          .child(super::workspace::loc_count(
+            format!("+{}", loc.insertions),
+            ui::Tone::DiffAdded.text(tones),
+          ))
+          .child(super::workspace::loc_count(
+            format!("-{}", loc.deletions),
+            ui::Tone::DiffRemoved.text(tones),
+          ))
+      });
+      // Short label (['workspace label']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .id(SharedString::from(format!("terminal-workspace-label-{id}")))
         .role(gpui::Role::Button)
         .aria_label(name.clone())
         .debug_selector(|| "terminal-workspace-label".into())
         .max_w(zpx(200.))
-        .truncate()
+        .flex()
+        .items_center()
+        .gap_2()
         .rounded_sm()
         .bg(if on_dark {
           d.foreground.opacity(0.08)
@@ -3612,7 +3704,8 @@ impl TerminalPane {
             cx,
           )
         })
-        .child(name)
+        .child(div().min_w_0().truncate().child(name))
+        .children(loc)
     };
     let close_id = column.id.clone();
     let close = div()
@@ -3752,6 +3845,8 @@ impl TerminalPane {
             .disabled(stopping)
             .h_6()
             .px_2(),
+          // Short label (['button label']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           TextSize::Xs,
         )
         .label("Stop")
@@ -3807,6 +3902,8 @@ impl TerminalPane {
                 )
                 .child(self.title(&column.id, column_title(&column.kind), muted, cx))
                 .children(ended.map(|status| {
+                  // Short label (['status label']): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .debug_selector(|| "remote-terminal-ended".into())
                     .text_color(ui::Tone::Warning.text(p))
@@ -4046,7 +4143,7 @@ pub(super) fn send_asset_icon(asset: &SendAsset) -> &'static str {
 impl Render for SendAssetDrag {
   fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
     let d = theme::palette(true);
-    ui::text(div(), TextSize::Xs)
+    ui::text(div(), TextSize::Sm)
       .px_2()
       .py_1()
       .rounded(radius::MD)
@@ -4436,6 +4533,7 @@ impl Render for TerminalPane {
       row.push(self.column(index, &p, cx).into_any_element());
     }
     let row_bounds = self.row.clone();
+    let row_scroll = self.row_scroll.clone();
     let scrollbar = self.row_scrollbar(&p, cx);
     let controls = self.controls(&p, cx);
     let maximized = self.maximized;
@@ -4555,9 +4653,33 @@ impl Render for TerminalPane {
               // After the columns, so a column's index in the row stays
               // what `scroll_to_item` counts.
               .child(
-                gpui::canvas(move |b, _, _| row_bounds.set(Some(b)), |_, _, _, _| {})
-                  .absolute()
-                  .size_full(),
+                gpui::canvas(
+                  move |b, _, _| row_bounds.set(Some(b)),
+                  move |b, _, window, _| {
+                    // Painted inside the scrolled row: undo the scroll to get
+                    // the row's own bounds.
+                    let b = Bounds::new(b.origin - row_scroll.offset(), b.size);
+                    // Ahead of GPUI's own scroll, which maps shift+down left.
+                    window.on_mouse_event(move |e: &ScrollWheelEvent, phase, window, cx| {
+                      if phase != gpui::DispatchPhase::Capture
+                        || !e.modifiers.shift
+                        || !b.contains(&e.position)
+                      {
+                        return;
+                      }
+                      let d = e.delta.pixel_delta(px(20.));
+                      let right = shift_scroll_right(f32::from(d.x), f32::from(d.y));
+                      let mut offset = row_scroll.offset();
+                      let max = row_scroll.max_offset().x;
+                      offset.x = (offset.x - px(right)).clamp(-max, px(0.));
+                      row_scroll.set_offset(offset);
+                      window.refresh();
+                      cx.stop_propagation();
+                    });
+                  },
+                )
+                .absolute()
+                .size_full(),
               ),
           )
           .children(scrollbar)
@@ -4586,6 +4708,15 @@ impl Render for TerminalPane {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn shift_scroll_down_scrolls_right() {
+    // GPUI's wheel delta is negative going down.
+    assert_eq!(shift_scroll_right(0., -30.), 30.);
+    assert_eq!(shift_scroll_right(0., 30.), -30.);
+    // Platforms that turn shift+wheel into a horizontal delta.
+    assert_eq!(shift_scroll_right(30., 0.), 30.);
+  }
 
   #[test]
   fn scrolls_a_column_the_least_to_show_it() {

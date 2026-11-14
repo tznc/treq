@@ -30,8 +30,12 @@ Part of the `service-qa` skill.
    and every Pro gate see a real row.
 6. **`recordOutcome(name, { expectations, details })`** — writes
    `scripts/service-qa/.generated/<name>.json`. These are plain-English claims for the
-   agent checklist in step 5 — complementary to the Vitest `expect` calls,
+   agent checklist in step 5 — complementary to the Jest `expect` calls,
    not a replacement.
 
-`vitest.service-qa.config.ts` uses the **node** environment (not jsdom) and is
+`jest.service-qa.config.js` uses the **node** environment (not jsdom) and is
 **excluded** from `npm test`, so the main suite stays runnable without Docker.
+Specs import `describe`, `it`, `expect` and hooks from `@jest/globals`. Jest's
+`expect` takes one argument: put any failure context (a response body, a
+key) into the compared value, for example
+`expect({ status: res.status, body: res.json }).toMatchObject({ status: 200 })`.

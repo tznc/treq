@@ -256,12 +256,9 @@ impl WorkspaceHost for Backend {
           .find(|w| w.id == id)
       });
       let (review_count, uncommitted_count) = changed_counts(repo, route, workspace.as_ref());
-      let (linear_enabled, logs_enabled) = self.with_db(|db| {
-        (
-          feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
-          feature_preview::is_enabled(db, PreviewFeature::Logs),
-        )
-      });
+      let linear_enabled =
+        self.with_db(|db| feature_preview::is_enabled(db, PreviewFeature::LinearIntegration));
+      let logs_enabled = true;
       let (home_ahead, home_dry_run) = super::joined(home);
       Loaded {
         workspace,
@@ -496,12 +493,9 @@ fn read_remote_header(remote: &Remote, route: &Route) -> RemoteHeader {
 /// local-only (`assertLocalOperation`), so they stay empty.
 fn load_remote(backend: &Backend, remote: &Remote, route: &Route) -> Loaded {
   let header = read_remote_header(remote, route);
-  let (linear_enabled, logs_enabled) = backend.with_db(|db| {
-    (
-      feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
-      feature_preview::is_enabled(db, PreviewFeature::Logs),
-    )
-  });
+  let linear_enabled =
+    backend.with_db(|db| feature_preview::is_enabled(db, PreviewFeature::LinearIntegration));
+  let logs_enabled = true;
   Loaded {
     workspace: header.workspace,
     status: header.status,
@@ -933,9 +927,7 @@ mod remote_header_tests {
   #[test]
   fn a_workspace_header_reads_everything_side_by_side() {
     let (remote, transport) = answered(Duration::from_millis(40));
-    let started = std::time::Instant::now();
     let header = read_remote_header(&remote, &route(Some(3)));
-    let took = started.elapsed();
     assert_eq!(header.workspace.map(|w| w.id), Some(3));
     assert_eq!(
       kinds(&transport),
@@ -947,8 +939,12 @@ mod remote_header_tests {
         "WorkspaceDiff"
       ]
     );
-    // Five serial reads would take 200 ms.
-    assert!(took < Duration::from_millis(120), "{took:?}");
+    // Counts overlapping reads rather than timing them: a loaded CI runner
+    // took 167 ms for reads that do run side by side.
+    let most = transport
+      .most_reading
+      .load(std::sync::atomic::Ordering::SeqCst);
+    assert!(most > 1, "reads ran one at a time");
   }
 
   #[test]

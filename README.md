@@ -18,7 +18,7 @@ Download the latest release [here](https://github.com/tznc/treq/releases/latest)
 
 ## Features
 
-- Works with [Claude Code, Codex, and Cursor Agent](https://treq.dev/docs/concepts/agent-sessions).
+- Works with [Claude Code, Codex, Cursor Agent, GitHub Copilot CLI, Devin, and Gemini CLI](https://treq.dev/docs/concepts/agent-sessions).
 - [Review diffs, commits, and files](https://treq.dev/docs/concepts/changes-and-reviews) locally and send line comments to an agent.
 - Gives each agent an [isolated workspace](https://treq.dev/docs/concepts/workspaces) with its own checkout.
 - [Auto-rebases](https://treq.dev/docs/concepts/workspaces) dependent workspaces when a target branch moves.

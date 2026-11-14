@@ -240,6 +240,53 @@ fn changes_tab_commits_the_working_copy(cx: &mut TestAppContext) {
   );
 }
 
+/// A long name and path truncate before the row's action buttons.
+#[gpui::test]
+fn changes_tab_keeps_file_actions_inside_a_long_row(cx: &mut TestAppContext) {
+  let path = "src/some/deeply/nested/directory/tree/a_really_long_file_name_for_testing.rs";
+  let mut host = changes_host();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [],
+    "uncommitted_files": [
+      {"path": path, "status": "M", "previous_path": null, "changed_line_count": 1, "diff_deferred": false}
+    ],
+    "hunks_by_file": [
+      {"path": path, "hunks": [{"id": "h", "header": "@@ -1,1 +1,1 @@", "lines": ["+a"], "patch": ""}]}
+    ],
+    "too_large_to_render": false
+  }))
+  .ok();
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+  h.click(leak(format!("file-row-{path}")));
+  h.cx.run_until_parked();
+  let row = h
+    .cx
+    .debug_bounds(leak(format!("file-row-{path}")))
+    .expect("row");
+  for action in ["discard", "stage"] {
+    let b = h
+      .cx
+      .debug_bounds(leak(format!("{action}-{path}")))
+      .unwrap_or_else(|| panic!("{action} not drawn"));
+    assert!(
+      b.right() <= row.right(),
+      "{action} {b:?} past the row {row:?}"
+    );
+  }
+}
+
+/// An unselected row draws its discard and stage buttons too, shown on hover.
+#[gpui::test]
+fn changes_tab_offers_file_actions_on_unselected_rows(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("file-row-a.rs");
+  h.cx.run_until_parked();
+  for selector in ["discard-b.rs", "stage-b.rs"] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+}
+
 #[gpui::test]
 fn changes_tab_commits_only_staged_files(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
@@ -1284,8 +1331,19 @@ fn changes_tab_sends_an_agent_comment_to_the_idle_agent(cx: &mut TestAppContext)
   h.cx.run_until_parked();
   assert!(fields(&h, "changes.agentComment").is_empty());
   let prompt = "Please address this review comment.\n\na.rs:2\n> Use one line\n\nSuggested change:\n```\none()\n```\n";
-  let sent = format!("write {} {:?}", agent_pty(), format!("{prompt}\n"));
-  assert!(pty_writes(&host).contains(&sent), "{:?}", pty_writes(&host));
+  // The text, then Enter as its own later write, so the TUI submits it.
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(500));
+  h.cx.run_until_parked();
+  let writes = pty_writes(&host);
+  let text = format!("write {} {:?}", agent_pty(), prompt);
+  let enter = format!("write {} {:?}", agent_pty(), "\r");
+  let at = writes
+    .iter()
+    .position(|w| *w == text)
+    .expect("text written");
+  assert_eq!(writes.get(at + 1), Some(&enter), "{writes:?}");
   assert!(host.launches.lock().unwrap().is_empty());
   assert!(host
     .calls()

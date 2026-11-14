@@ -314,7 +314,7 @@ impl RenderOnce for Row {
         .child(title)
     });
     let meta = self.meta.map(|meta| {
-      text(div(), if two_line { TextSize::Xs } else { TextSize::Sm })
+      text(div(), TextSize::Sm)
         .when(touch, |el| {
           el.text_size(px(body_px - 1.)).line_height(px(body_px + 4.))
         })

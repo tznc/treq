@@ -25,6 +25,8 @@ icons! {
   ICON_AGENT_CODEX => "agent-codex",
   ICON_AGENT_COPILOT => "agent-copilot",
   ICON_AGENT_CURSOR => "agent-cursor",
+  ICON_AGENT_DEVIN => "agent-devin",
+  ICON_AGENT_GEMINI => "agent-gemini",
   ICON_ARCHIVE => "archive",
   ICON_ARROW_DOWN => "arrow-down",
   ICON_ARROW_LEFT => "arrow-left",
@@ -68,6 +70,7 @@ icons! {
   ICON_FOLDER_PLUS => "folder-plus",
   ICON_FOLDER_SEARCH => "folder-search",
   ICON_GITHUB => "github",
+  ICON_GOOGLE => "google",
   ICON_HISTORY => "history",
   ICON_HOUSE => "house",
   ICON_INFO => "info",
@@ -359,6 +362,8 @@ pub mod space {
 pub const FIELD_GAP: f32 = space::LG;
 /// Between a field's label, its control and its hint.
 pub const LABEL_GAP: f32 = 6.;
+/// The widest a detail page's reading column grows.
+pub const CONTENT_MAX_WIDTH: f32 = 820.;
 /// The label column of a horizontal form.
 pub const LABEL_WIDTH: f32 = 140.;
 /// Below this window width, a horizontal form stacks its labels on top.
@@ -472,6 +477,8 @@ pub fn bootstrap(dark: bool, zoom: f32) -> gpui_bootstrap::Theme {
     pill: z(9999.),
   };
   let (body, body_line) = ui::TextSize::Sm.metrics();
+  // Short label (['caption token for badges and tags']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   let (caption, _) = ui::TextSize::Xs.metrics();
   let (title, _) = ui::TextSize::Lg.metrics();
   theme.typography = Typography {
@@ -593,6 +600,12 @@ impl Palette {
     self.foreground.opacity(if self.dark { 0.1 } else { 0.07 })
   }
 
+  /// The elbow linking a stacked workspace row to its parent: at least 3:1
+  /// against the sidebar and the selected fill, so it shows on both.
+  pub fn stack_connector(&self) -> Hsla {
+    self.muted_foreground
+  }
+
   /// Hover on something already filled with [`Palette::selected`].
   pub fn selected_hover(&self) -> Hsla {
     self.primary.opacity(if self.dark { 0.32 } else { 0.2 })
@@ -616,8 +629,14 @@ impl Palette {
 
   /// Lines with a review comment, and the comments under them: one amber,
   /// so a comment reads as part of the lines it is on.
+  /// Dark uses GitHub's dark attention tint (`#bb8009` at 15%), which sits
+  /// lighter on the code than yellow-500.
   pub fn commented(&self) -> Hsla {
-    self.warning.opacity(if self.dark { 0.15 } else { 0.1 })
+    if self.dark {
+      Hsla::from(rgb(0xbb8009)).opacity(0.15)
+    } else {
+      self.warning.opacity(0.1)
+    }
   }
 
   /// Behind every modal dialog, and behind controls laid over an image.
@@ -646,9 +665,14 @@ impl Palette {
     rgb(if self.dark { 0xf87171 } else { 0xdc2626 }).into()
   }
 
-  /// The GitHub button's fill, GitHub's own near-black in both themes.
+  /// The GitHub button's fill: GitHub's own near-black in light, and its
+  /// dark-theme button grey in dark, where near-black meets the background.
   pub fn github(&self) -> Hsla {
-    tw::color(tw::GITHUB)
+    tw::color(if self.dark {
+      tw::GITHUB_DARK
+    } else {
+      tw::GITHUB
+    })
   }
 }
 
@@ -778,6 +802,54 @@ mod tests {
     }
   }
 
+  fn linear(c: Hsla) -> [f32; 3] {
+    let c = c.to_rgb();
+    [c.r, c.g, c.b].map(|v| {
+      if v <= 0.04045 {
+        v / 12.92
+      } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+      }
+    })
+  }
+
+  fn over(fg: Hsla, bg: Hsla) -> Hsla {
+    let (f, b) = (fg.to_rgb(), bg.to_rgb());
+    let mix = |x: f32, y: f32| x * f.a + y * (1. - f.a);
+    gpui::Rgba {
+      r: mix(f.r, b.r),
+      g: mix(f.g, b.g),
+      b: mix(f.b, b.b),
+      a: 1.,
+    }
+    .into()
+  }
+
+  fn contrast(a: Hsla, b: Hsla) -> f32 {
+    let lum = |c| {
+      let [r, g, b] = linear(c);
+      0.2126 * r + 0.7152 * g + 0.0722 * b
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+  }
+
+  /// WCAG 1.4.11: a UI line needs 3:1 against what it sits on.
+  #[test]
+  fn stack_connector_shows_on_sidebar_and_selected_row() {
+    for dark in [false, true] {
+      let p = palette(dark);
+      let line = p.stack_connector();
+      let row = contrast(line, p.sidebar);
+      let selected = contrast(line, over(p.selected(), p.sidebar));
+      assert!(row >= 3., "dark={dark}: {row:.2} on the sidebar");
+      assert!(
+        selected >= 3.,
+        "dark={dark}: {selected:.2} on a selected row"
+      );
+    }
+  }
+
   #[test]
   fn hover_on_dark_is_one_light_tint_in_both_themes() {
     let (light, dark) = (palette(false), palette(true));
@@ -882,6 +954,7 @@ pub mod tw {
   }
 
   pub const GITHUB: u32 = 0x24292f;
+  pub const GITHUB_DARK: u32 = 0x3d444d;
   pub const BLUE_500: u32 = 0x3b82f6;
   pub const BLUE_600: u32 = 0x2563eb;
   pub const EMERALD_500: u32 = 0x10b981;

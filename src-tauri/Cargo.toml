@@ -39,6 +39,10 @@ gpui-shell = ["gui", "dep:gtk", "dep:tauri-plugin-gpui", "dep:gpui-kit", "dep:tr
 # e2e/desktop suite can drive it. It only listens when `GPUI_PLAYWRIGHT` is
 # set, and release builds leave the feature out.
 e2e = ["gpui-shell", "dep:gpui-playwright"]
+# The same Playwright server in the mobile app's desktop build, for
+# e2e/mobile. It listens only when `GPUI_PLAYWRIGHT` is set, and a release
+# or Android/iOS build with it fails to compile (see `mobile/mod.rs`).
+mobile-e2e = ["mobile-ui", "dep:gpui-playwright"]
 # The GPUI mobile app (`mobile`). Mobile builds turn it on
 # (`tauri android|ios build --features mobile-ui`); it also builds on
 # desktop, for its unit tests.
@@ -185,7 +189,7 @@ treq-ui = { path = "../crates/treq-ui", optional = true }
 # Playwright protocol server inside the GPUI app (the `e2e` feature). It
 # reads the elements gpui-kit observes; `painted-text` adds their text. The
 # branch adds `Server::on_adopt_page` (not in 0.1.0 yet).
-gpui-playwright = { git = "https://github.com/Ziinc/gpui-playwright", branch = "claude/project-thread-yruhjk", features = ["painted-text"], optional = true }
+gpui-playwright = { git = "https://github.com/Ziinc/gpui-playwright", branch = "claude/gallant-turing-nhki5r", features = ["painted-text"], optional = true }
 # Syntax highlighting for GPUI diffs, the same syntect set gpui-kit uses.
 syntect = { version = "5.3.0", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy"], optional = true }
 two-face = { version = "0.4.5", default-features = false, features = ["syntect-fancy"], optional = true }
@@ -251,7 +255,7 @@ async-trait = "0.1.92"
 base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "http2"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "io-util", "net", "sync"] }
-russh = "0.63.1"
+russh = "0.65"
 # WebSocket transport for managed SSH through the `remote-ssh-relay` Edge
 # Function. TLS uses the same rustls + ring stack reqwest already pulls in.
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }

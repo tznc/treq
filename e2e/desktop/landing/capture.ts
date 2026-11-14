@@ -37,6 +37,16 @@ const expected: string[] = JSON.parse(
 const written = new Set<string>();
 const expect = baseExpect.configure({ timeout: 15_000 });
 
+// Per-step timing, so a slow CI run shows which step took the time.
+const started = Date.now();
+let last = started;
+function mark(step: string): void {
+  const now = Date.now();
+  const s = (ms: number) => (ms / 1000).toFixed(1);
+  console.log(`[landing] +${s(now - last)}s (total ${s(now - started)}s) ${step}`);
+  last = now;
+}
+
 type Clip = { x: number; y: number; width: number; height: number };
 
 // Regions of the 1400x900 window.
@@ -62,6 +72,7 @@ async function shot(page: Page, name: string, clip?: Clip): Promise<void> {
   await rest(page);
   await page.screenshot({ path: join(outDir, name), clip });
   written.add(name);
+  mark(name);
 }
 
 /** The Code tab's agent prompt dialog. */
@@ -89,6 +100,7 @@ async function openTab(page: Page, name: string): Promise<void> {
   await page.getByRole("tab", { name }).click();
   await expect(page.getByRole("tab", { name, selected: true })).toBeVisible();
   await page.waitForTimeout(1500);
+  mark(`tab ${name}`);
 }
 
 /** Comments on a diff line through its gutter's add button. */
@@ -124,7 +136,7 @@ async function typePrompt(
   name: string,
   text: string,
 ): Promise<void> {
-  await page.getByRole("button", { name: "Agent", exact: true }).click();
+  await page.getByRole("button", { name: "Start an agent", exact: true }).click();
   const dialog = promptDialog(page);
   await expect(dialog).toBeVisible();
   const box = dialog.getByRole("textbox", { name: "Describe a task…" });
@@ -224,7 +236,7 @@ async function capture(page: Page): Promise<void> {
     width: field.width + 48,
     height: action.y + action.height + 24 - (field.y - 56),
   });
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Close" }).click();
 
   // Two workspaces, each with its own uncommitted edit.
   const { repo } = fixture();
@@ -326,8 +338,10 @@ let page: Page | undefined;
 let failed = false;
 try {
   await waitForApp(app);
+  mark("app ready");
   const browser = await chromium.connect(`ws://127.0.0.1:${port}/`);
   page = await (await browser.newContext()).newPage();
+  mark("connected");
   await capture(page);
   console.log(`wrote ${written.size} screenshots to ${outDir}`);
 } catch (error) {

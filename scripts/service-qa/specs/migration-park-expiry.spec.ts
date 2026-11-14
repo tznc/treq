@@ -8,7 +8,7 @@
  * and the local provider, as migration-cancel.spec.ts runs its handler.
  */
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "@jest/globals";
 import { LocalProvider } from "../../../supabase/functions/_shared/remote/local-provider";
 import { advanceMigrations } from "../../../supabase/functions/_shared/remote/operator-controls";
 import { getServiceClient } from "../clients";

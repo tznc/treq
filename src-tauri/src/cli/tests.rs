@@ -2110,14 +2110,52 @@ fn gateway_requires_placement_id() {
 #[test]
 fn agent_start_refuses_a_harness_treq_does_not_launch() {
   let sub = parsed_subcommand(&[
-    "treq", "agent", "start", "feat/x", "do it", "--agent", "gemini",
+    "treq", "agent", "start", "feat/x", "do it", "--agent", "aider",
   ]);
   let start = sub.matches.subcommand.expect("start subcommand");
   let error = super::workspace_handlers::start_agent_kind(&start.matches, "/no/repo").unwrap_err();
-  assert!(error.contains("claude, codex, cursor, copilot"), "{error}");
+  assert!(
+    error.contains("claude, codex, cursor, copilot, devin, gemini"),
+    "{error}"
+  );
 }
 
 #[test]
 fn agent_without_start_no_longer_takes_a_branch() {
   assert!(super::args::parse(["treq", "agent", "feat/x", "do it"]).is_err());
+}
+
+#[test]
+fn review_commands_parse_without_repo() {
+  for args in [
+    &["treq", "changes", "list"][..],
+    &["treq", "workspace", "list"][..],
+    &["treq", "commits", "list"][..],
+  ] {
+    let sub = parsed_subcommand(args);
+    assert_eq!(super::get_arg_value(&sub.matches, "repo"), None, "{args:?}");
+  }
+}
+
+#[test]
+fn a_missing_repo_comes_from_the_current_workspace() {
+  let dir = tempfile::tempdir().unwrap();
+  let home = dir.path().canonicalize().unwrap();
+  let ws = home.join(".treq/workspaces/feat-a/src");
+  fs::create_dir_all(home.join(".jj")).unwrap();
+  fs::create_dir_all(home.join(".treq/workspaces/feat-a/.jj")).unwrap();
+  fs::create_dir_all(&ws).unwrap();
+  let mut matches = remote_matches(&[("action", "list")]);
+  super::fill_repo_from_cwd(&mut matches, &ws);
+  assert_eq!(
+    super::get_arg_value(&matches, "repo").as_deref(),
+    home.to_str()
+  );
+  // An explicit --repo wins.
+  let mut matches = remote_matches(&[("action", "list"), ("repo", "/srv/r")]);
+  super::fill_repo_from_cwd(&mut matches, &ws);
+  assert_eq!(
+    super::get_arg_value(&matches, "repo").as_deref(),
+    Some("/srv/r")
+  );
 }

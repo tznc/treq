@@ -403,6 +403,42 @@ fn issues() -> Fake {
 }
 
 #[gpui::test]
+fn github_detail_markdown_links_open_in_the_browser(cx: &mut TestAppContext) {
+  let mut linked = issue(1, "Crash on start");
+  let label = "the docs ".repeat(20);
+  linked.body = Some(format!("[{label}](https://example.com/docs)"));
+  let (mut h, host) = harness(
+    cx,
+    Fake {
+      issue: Some(linked),
+      ..issues()
+    },
+    route("issues", Some(1), false),
+  );
+  assert!(h.drawn("github-detail"));
+  // The body, a link across its width, sits just above the comments.
+  let detail = h.cx.debug_bounds("github-detail").expect("detail");
+  let heading = h
+    .cx
+    .debug_bounds("github-comments-heading")
+    .expect("heading");
+  let opened = || {
+    host
+      .calls()
+      .contains(&"open https://example.com/docs".to_string())
+  };
+  let x = detail.left() + gpui::px(60.);
+  let mut y = heading.top() - gpui::px(8.);
+  while !opened() && y > heading.top() - gpui::px(160.) {
+    h.cx
+      .simulate_click(gpui::point(x, y), gpui::Modifiers::none());
+    h.cx.run_until_parked();
+    y -= gpui::px(4.);
+  }
+  assert!(opened(), "{:?}", host.calls());
+}
+
+#[gpui::test]
 fn github_lists_issues_and_hands_moves_to_react(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, issues(), route("issues", None, false));
   assert!(h.drawn("github-issue-1"));
@@ -1129,7 +1165,7 @@ fn github_new_pr_from_a_branch(cx: &mut TestAppContext) {
     .contains(&"create pr acme/treq \"Add docs\" \"\" docs->trunk draft=false".to_string()));
   // The failure shows in the form.
   assert!(view(&mut h, |v| v.new_pr.as_ref().and_then(|n| n.error.clone())).is_some());
-  h.click("github-new-pr-cancel");
+  h.click("github-new-pr-dialog-close");
   assert_eq!(h.sent(), [press("github.close")]);
 }
 
@@ -1419,10 +1455,9 @@ fn github_new_pr_closes_on_escape_and_creates_on_enter(cx: &mut TestAppContext) 
   let (mut h, host) = harness(cx, new_pr_fake(), route("prs", None, true));
   h.click("github-new-pr-ws-4");
   assert!(h.drawn("github-new-pr-create"));
-  // Cancel comes before the verb.
-  let cancel = h.cx.debug_bounds("github-new-pr-cancel").expect("cancel");
-  let create = h.cx.debug_bounds("github-new-pr-create").expect("create");
-  assert!(cancel.right() <= create.left(), "{cancel:?} {create:?}");
+  // The X closes it; the footer holds only the verb.
+  assert!(h.drawn("github-new-pr-dialog-close"));
+  assert!(!h.drawn("github-new-pr-cancel"));
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
   assert!(host.writes().contains(&"push 4".to_string()));

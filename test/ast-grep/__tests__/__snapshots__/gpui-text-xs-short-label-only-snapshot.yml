@@ -1,0 +1,16 @@
+id: gpui-text-xs-short-label-only
+snapshots:
+  ? |
+    fn f() { treq_ui::text(div(), treq_ui::TextSize::Xs).child(description); }
+  : labels:
+    - source: treq_ui::TextSize::Xs
+      style: primary
+      start: 30
+      end: 51
+  ? |
+    fn f() { ui::text(div(), TextSize::Xs).child(path); }
+  : labels:
+    - source: TextSize::Xs
+      style: primary
+      start: 25
+      end: 37

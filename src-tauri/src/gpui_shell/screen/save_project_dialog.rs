@@ -217,14 +217,6 @@ impl Render for SaveProjectDialog {
       );
     }
     footer.push(
-      Button::new("save-project-cancel", &p)
-        .variant(Variant::Outline)
-        .disabled(pending)
-        .label("Cancel")
-        .on_click(cx.listener(|view, _, _, cx| view.close(cx)))
-        .into_any_element(),
-    );
-    footer.push(
       Button::new("save-project-submit", &p)
         .disabled(!can_submit)
         .label(match (pending, self.route.saved) {
@@ -263,7 +255,7 @@ impl Render for SaveProjectDialog {
               .child(Styled::h(ui::input(&input).disabled(pending), zpx(40.))),
           )
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .text_color(p.muted_foreground)
               .child(format!("Repositories: {repos}")),
           )

@@ -17,11 +17,13 @@ use serde::{Deserialize, Serialize};
 use crate::lock_ext::LockExt;
 
 /// Every agent treq can launch.
-pub const AGENTS: [(&str, &str); 4] = [
+pub const AGENTS: [(&str, &str); 6] = [
   ("claude", "Claude"),
   ("codex", "Codex"),
   ("cursor", "Cursor"),
   ("copilot", "Copilot"),
+  ("devin", "Devin"),
+  ("gemini", "Gemini"),
 ];
 
 /// `toAgentKind`: the agent id, when treq knows it.
@@ -159,8 +161,8 @@ pub trait LaunchStore {
     workspace_id: Option<i64>,
     name: &str,
   ) -> Result<i64, String>;
-  /// How many sessions run in the workspace (`None`: the home repository).
-  fn session_count(&self, repo_path: &str, workspace_id: Option<i64>) -> usize;
+  /// The names of every session in the repository, across its workspaces.
+  fn session_names(&self, repo_path: &str) -> Vec<String>;
   fn repo_setting(&self, repo_path: &str, key: &str) -> Option<String>;
   fn app_setting(&self, key: &str) -> Option<String>;
   fn set_repo_setting(&self, repo_path: &str, key: &str, value: &str) -> Result<(), String>;
@@ -326,7 +328,7 @@ pub struct LaunchRequest {
   pub prompt: Option<String>,
   pub mode: Option<String>,
   pub agent: Option<String>,
-  /// Default: `<Agent> <n>`, numbered within the workspace.
+  /// Default: `<Agent> <n>`, numbered across the repository's workspaces.
   pub session_name: Option<String>,
 }
 
@@ -337,8 +339,16 @@ pub fn launch_session(
 ) -> Result<SessionStart, String> {
   let repo = &request.repo_path;
   let name = request.session_name.clone().unwrap_or_else(|| {
-    let index = store.session_count(repo, request.workspace_id) + 1;
-    format!("{} {index}", agent_label(request.agent.as_deref()))
+    let label = agent_label(request.agent.as_deref());
+    let prefix = format!("{label} ");
+    let index = store
+      .session_names(repo)
+      .iter()
+      .filter_map(|n| n.strip_prefix(&prefix)?.parse::<usize>().ok())
+      .max()
+      .unwrap_or(0)
+      + 1;
+    format!("{label} {index}")
   });
   let session_id = store.create_session(repo, request.workspace_id, &name)?;
   Ok(SessionStart {
@@ -769,7 +779,7 @@ mod tests {
   struct FakeStore {
     calls: RefCell<Vec<String>>,
     settings: HashMap<String, String>,
-    sessions: usize,
+    sessions: Vec<String>,
     fail_issue: Option<String>,
   }
 
@@ -781,8 +791,8 @@ mod tests {
         .push(format!("session {repo} {ws:?} {name}"));
       Ok(7)
     }
-    fn session_count(&self, _: &str, _: Option<i64>) -> usize {
-      self.sessions
+    fn session_names(&self, _: &str) -> Vec<String> {
+      self.sessions.clone()
     }
     fn repo_setting(&self, _: &str, key: &str) -> Option<String> {
       self.settings.get(&format!("repo.{key}")).cloned()
@@ -956,8 +966,8 @@ mod tests {
       fn create_session(&self, _: &str, _: Option<i64>, _: &str) -> Result<i64, String> {
         Ok(1)
       }
-      fn session_count(&self, _: &str, _: Option<i64>) -> usize {
-        0
+      fn session_names(&self, _: &str) -> Vec<String> {
+        Vec::new()
       }
       fn repo_setting(&self, _: &str, _: &str) -> Option<String> {
         None
@@ -1073,7 +1083,7 @@ mod tests {
   #[test]
   fn launch_names_unnamed_sessions_after_the_agent() {
     let store = FakeStore {
-      sessions: 2,
+      sessions: vec!["Codex 1".into(), "Codex 2".into()],
       ..Default::default()
     };
     let start = launch_session(
@@ -1089,6 +1099,26 @@ mod tests {
     record_prompt(&store, &start).unwrap();
     // No prompt: nothing recorded.
     assert_eq!(store.calls.borrow().len(), 1);
+  }
+
+  #[test]
+  fn numbers_sessions_across_the_repository() {
+    // Other workspaces' sessions and deleted ones (gaps at 2-6) must not
+    // lead to a reused number.
+    let store = FakeStore {
+      sessions: vec!["Claude 1".into(), "Claude 7".into(), "Codex 9".into()],
+      ..Default::default()
+    };
+    let start = launch_session(
+      &store,
+      &LaunchRequest {
+        repo_path: "/repo".into(),
+        workspace_id: Some(3),
+        ..Default::default()
+      },
+    )
+    .unwrap();
+    assert_eq!(start.session_name, "Claude 8");
   }
 
   #[test]
@@ -1123,6 +1153,14 @@ mod tests {
     assert_eq!(
       resolve_agent(&store, "/r", Some("copilot")).as_deref(),
       Some("copilot")
+    );
+    assert_eq!(
+      resolve_agent(&store, "/r", Some("devin")).as_deref(),
+      Some("devin")
+    );
+    assert_eq!(
+      resolve_agent(&store, "/r", Some("gemini")).as_deref(),
+      Some("gemini")
     );
     assert_eq!(resolve_agent(&store, "/r", Some("bogus")), None);
   }

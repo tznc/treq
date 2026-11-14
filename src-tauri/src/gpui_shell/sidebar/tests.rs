@@ -14,9 +14,60 @@ fn row(id: i64, title: &str, depth: u32) -> SidebarRow {
     conflicted: false,
     status: None,
     pr: None,
+    target: None,
     archiving: false,
     exiting: false,
   }
+}
+
+fn pr_row(id: i64, depth: u32, pr: Option<PrState>) -> SidebarRow {
+  let mut r = row(id, &format!("b{id}"), depth);
+  r.pr = pr;
+  r
+}
+
+fn ids(rows: &[SidebarRow]) -> Vec<i64> {
+  rows.iter().map(|r| r.id).collect()
+}
+
+#[test]
+fn open_pr_first_moves_open_prs_up_stably() {
+  let rows = vec![
+    pr_row(1, 0, None),
+    pr_row(2, 0, Some(PrState::Open)),
+    pr_row(3, 0, None),
+    pr_row(4, 0, Some(PrState::Open)),
+  ];
+  assert_eq!(ids(&open_pr_first(rows)), [2, 4, 1, 3]);
+}
+
+#[test]
+fn open_pr_first_counts_drafts_but_not_merged_or_closed() {
+  let rows = vec![
+    pr_row(1, 0, Some(PrState::Merged)),
+    pr_row(2, 0, Some(PrState::Closed)),
+    pr_row(3, 0, Some(PrState::Draft)),
+    pr_row(4, 0, None),
+  ];
+  assert_eq!(ids(&open_pr_first(rows)), [3, 1, 2, 4]);
+}
+
+#[test]
+fn open_pr_first_keeps_stacks_together_by_root() {
+  let rows = vec![
+    pr_row(1, 0, None),
+    pr_row(2, 1, Some(PrState::Open)),
+    pr_row(3, 0, Some(PrState::Open)),
+    pr_row(4, 1, None),
+    pr_row(5, 2, None),
+    pr_row(6, 0, None),
+  ];
+  let sorted = open_pr_first(rows);
+  assert_eq!(ids(&sorted), [3, 4, 5, 1, 2, 6]);
+  assert_eq!(
+    sorted.iter().map(|r| r.depth).collect::<Vec<_>>(),
+    [0, 1, 2, 0, 1, 0]
+  );
 }
 
 fn snapshot(workspaces: Vec<SidebarRow>) -> SidebarSnapshot {
@@ -237,10 +288,6 @@ fn serializes_actions_for_react() {
     serde_json::json!({"kind": "startAgent", "id": null})
   );
   assert_eq!(
-    json(SidebarAction::BulkArchive),
-    serde_json::json!({"kind": "bulkArchive"})
-  );
-  assert_eq!(
     json(SidebarAction::HomeMenu {
       repo_path: "/r".into()
     }),
@@ -284,6 +331,16 @@ fn header_buttons_open_the_palette_and_settings(cx: &mut TestAppContext) {
       SidebarAction::OpenSettings
     ]
   );
+}
+
+#[gpui::test]
+fn an_empty_project_offers_to_add_a_repository(cx: &mut TestAppContext) {
+  let mut s = snapshot(vec![]);
+  s.repos.clear();
+  s.project = Some("Checkout".into());
+  let mut h = Harness::new(cx, s);
+  h.click("add-repository");
+  assert_eq!(h.sent(), vec![SidebarAction::AddRepository]);
 }
 
 #[gpui::test]
@@ -516,12 +573,29 @@ fn shows_skeleton_rows_while_loading(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn bulk_archive_button_archives_the_selection(cx: &mut TestAppContext) {
+fn multi_selection_draws_no_archive_button(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![row(7, "a", 0), row(8, "b", 0)]));
-  assert!(h.bounds("bulk-archive").is_none());
   h.update(|s| s.bulk_archive = Some(2));
-  h.click("bulk-archive");
-  assert_eq!(h.sent(), vec![SidebarAction::BulkArchive]);
+  assert!(h.bounds("bulk-archive").is_none());
+}
+
+#[gpui::test]
+fn right_click_on_a_multi_selected_row_opens_the_selection_menu(cx: &mut TestAppContext) {
+  let mut selected = row(7, "a", 0);
+  selected.selected = true;
+  let mut other = row(8, "b", 0);
+  other.selected = true;
+  let mut h = Harness::new(cx, snapshot(vec![selected, other, row(9, "c", 0)]));
+  h.update(|s| s.bulk_archive = Some(2));
+  right_click(&mut h, "workspace-7");
+  right_click(&mut h, "workspace-9");
+  assert_eq!(
+    h.sent(),
+    vec![
+      SidebarAction::WorkspacesMenu,
+      SidebarAction::WorkspaceMenu { id: 9 },
+    ]
+  );
 }
 
 #[gpui::test]
@@ -580,12 +654,30 @@ fn workspace_tooltip_opens_a_popup_beside_the_row(cx: &mut TestAppContext) {
       content: TooltipContent::Branch {
         name: None,
         title: "feat-a".into(),
+        target: None,
         conflicted: false,
         pr: None,
       },
       dark: false,
     }]
   );
+}
+
+#[gpui::test]
+fn workspace_tooltip_names_the_target_branch(cx: &mut TestAppContext) {
+  let mut targeted = row(7, "fix/transform-non-map-dest", 0);
+  targeted.target = Some("main".into());
+  let mut h = Harness::new(cx, snapshot(vec![targeted]));
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  assert!(matches!(
+    h.popups.borrow().as_slice(),
+    [PopupRequest::ShowTooltip {
+      content: TooltipContent::Branch { target: Some(target), .. },
+      ..
+    }] if target.as_ref() == "main"
+  ));
 }
 
 #[gpui::test]

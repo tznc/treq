@@ -35,8 +35,8 @@ pub fn handles(action: &SidebarAction) -> bool {
     SidebarAction::HomeMenu { .. }
       | SidebarAction::ProjectMenu
       | SidebarAction::WorkspaceMenu { .. }
+      | SidebarAction::WorkspacesMenu
       | SidebarAction::RepoWorkspaceMenu { .. }
-      | SidebarAction::BulkArchive
       | SidebarAction::MoveWorkspace { .. }
   )
 }
@@ -77,6 +77,10 @@ pub fn handle(
         missing: snapshot.repos[index].missing,
         on_screen: repo_path == &active.path,
         supporting: index > 0,
+        // Any local repository can leave; the next takes over the window,
+        // or the project shows empty. A remote window's one repository stays.
+        removable: snapshot.repos.len() > 1
+          || crate::core::projects::remote_repo(repo_path).is_none(),
       };
       let items = context_menu::home_items(&menu, editors(&*backend));
       show(app, label, backend, items);
@@ -88,31 +92,26 @@ pub fn handle(
     SidebarAction::RepoWorkspaceMenu { repo_path, id } => {
       workspace_menu(app, label, backend, repo_path, *id, false, cx)
     }
-    SidebarAction::BulkArchive => {
-      let ids: Vec<i64> = active
-        .workspaces
-        .iter()
-        .filter(|row| row.selected)
-        .map(|row| row.id)
-        .collect();
+    SidebarAction::WorkspacesMenu => {
+      let ids = selected_ids(active);
       if ids.is_empty() {
         return false;
       }
-      let (app, repo_path) = (app.clone(), active.path.clone());
+      let (app, label, repo_path) = (app.clone(), label.to_string(), active.path.clone());
       std::thread::spawn(move || {
         let Some(workspaces) =
-          workspaces_or_toast(&backend, &repo_path, "Failed to archive workspaces")
+          workspaces_or_toast(&backend, &repo_path, "Failed to load the workspace menu")
         else {
           return;
         };
-        let selected: Vec<Removed> = workspaces
-          .iter()
+        let selected: Vec<Workspace> = workspaces
+          .into_iter()
           .filter(|w| ids.contains(&w.id))
-          .map(Removed::of)
           .collect();
-        for workspace in workspace_ops::archive_all(&*backend, &selected) {
-          super::close_workspace_terminals(&app, backend.label(), workspace.path);
-        }
+        super::defer_main(&app.clone(), move |app| {
+          let items = context_menu::workspaces_items(&selected, &repo_path, editors(&*backend));
+          show(app, &label, backend, items);
+        });
       });
       true
     }
@@ -155,6 +154,37 @@ pub fn handle(
     }
     _ => false,
   }
+}
+
+/// The ids of `repo`'s selected workspace rows.
+fn selected_ids(repo: &super::sidebar::RepoSection) -> Vec<i64> {
+  repo
+    .workspaces
+    .iter()
+    .filter(|row| row.selected)
+    .map(|row| row.id)
+    .collect()
+}
+
+/// Archives workspaces `ids` of `repo_path`, off the main thread, closing
+/// the terminals of each one archived.
+fn archive_all(app: &AppHandle, backend: Arc<Backend>, repo_path: String, ids: Vec<i64>) {
+  let app = app.clone();
+  std::thread::spawn(move || {
+    let Some(workspaces) =
+      workspaces_or_toast(&backend, &repo_path, "Failed to archive workspaces")
+    else {
+      return;
+    };
+    let selected: Vec<Removed> = workspaces
+      .iter()
+      .filter(|w| ids.contains(&w.id))
+      .map(Removed::of)
+      .collect();
+    for workspace in workspace_ops::archive_all(&*backend, &selected) {
+      super::close_workspace_terminals(&app, backend.label(), workspace.path);
+    }
+  });
 }
 
 /// `repo_path`'s workspaces, over SSH for the window's remote repository.
@@ -336,6 +366,10 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
         }
       });
     }
+    MenuAction::ArchiveWorkspaces {
+      repo_path,
+      workspace_ids,
+    } => archive_all(app, backend, repo_path, workspace_ids),
     _ => {}
   }
 }

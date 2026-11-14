@@ -64,8 +64,16 @@ pub fn workspace_label(entry: &PromptHistoryEntry) -> String {
 
 /// A prompt's opening, for its row: the row truncates it anyway, and
 /// shaping a long prompt whole for one line is wasted.
+/// The prompt's first 200 characters on one line: a uniform list's rows
+/// share one height, so a line break would spill into the next row.
 fn preview(text: &str) -> String {
-  text.chars().take(200).collect()
+  text
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ")
+    .chars()
+    .take(200)
+    .collect()
 }
 
 /// `formatPromptsForCopy`.
@@ -290,7 +298,7 @@ impl PromptHistoryView {
                 .density(ui::RowDensity::TwoLine)
                 .label(workspace_label(entry))
                 .selected(selected),
-              TextSize::Xs,
+              TextSize::Sm,
             )
             .w_full()
             .py_2()
@@ -344,7 +352,7 @@ impl PromptHistoryView {
       );
     };
     let text = entry.prompt_text.clone();
-    let header = ui::text(div(), TextSize::Xs)
+    let header = ui::text(div(), TextSize::Sm)
       .flex()
       .items_center()
       .justify_between()
@@ -389,6 +397,8 @@ impl PromptHistoryView {
               .px_2()
               .gap_1()
               .copy_icon(copied, 12.)
+              // Short label (['button label']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               .child(ui::text(div(), TextSize::Xs).child("Copy"))
               .on_click(copy)
               .into_any_element()
@@ -492,5 +502,18 @@ impl Render for PromptHistoryView {
       .focus(&self.focus)
       .on_close(ui::handler(cx, |view, _, cx| view.close(cx)))
       .child(body)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::preview;
+
+  #[test]
+  fn preview_keeps_a_multi_line_prompt_on_one_line() {
+    assert_eq!(
+      preview("## Code Review\n\n### Comments\n  - one"),
+      "## Code Review ### Comments - one"
+    );
   }
 }

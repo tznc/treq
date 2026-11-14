@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use super::{account_data::AccountHost, checklist::ToolsHost, settings::RepositoryFields};
 use crate::{
   core::{
+    agent_command::AGENT_INSTRUCTIONS_SETTING,
     app_setup_script::{self, AppSetupScriptStatus},
     feature_preview::{self, PreviewFeature},
     skills::{
@@ -349,7 +350,7 @@ pub fn skill_details(skill: &SkillCatalogEntry) -> Vec<(String, String)> {
 pub const NOTIFY_AGENT_FINISHED: &str = "notify_agent_finished";
 
 /// Each preview feature's title and its page on the website.
-pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 5] = [
+pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 4] = [
   (
     PreviewFeature::SkillsInstallation,
     "Skills installation",
@@ -365,7 +366,6 @@ pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 5] = [
     "Linear integration",
     "/docs/concepts/linear-integration",
   ),
-  (PreviewFeature::Logs, "Logs", "/docs/concepts/logs"),
   (
     PreviewFeature::Devcontainers,
     "Devcontainer environments",
@@ -410,6 +410,7 @@ pub struct AppFields {
   pub default_agent: String,
   pub conflict_marker_style: String,
   pub notify_agent_finished: bool,
+  pub agent_instructions: String,
 }
 
 /// The keys the screen loads: the Application tab's and the preview flags.
@@ -422,6 +423,7 @@ pub fn app_keys() -> Vec<String> {
     "default_agent",
     "conflict_marker_style",
     NOTIFY_AGENT_FINISHED,
+    AGENT_INSTRUCTIONS_SETTING,
   ]
   .into_iter()
   .map(str::to_string)
@@ -455,6 +457,7 @@ impl AppFields {
       // On unless turned off, as the backend reads it.
       notify_agent_finished: string(values, NOTIFY_AGENT_FINISHED)
         .is_none_or(|value| value.trim() != "false"),
+      agent_instructions: string(values, AGENT_INSTRUCTIONS_SETTING).unwrap_or_default(),
     }
   }
 
@@ -468,6 +471,7 @@ impl AppFields {
         NOTIFY_AGENT_FINISHED,
         self.notify_agent_finished.to_string(),
       ),
+      (AGENT_INSTRUCTIONS_SETTING, self.agent_instructions.clone()),
       ("terminal_font_size", self.font_size.to_string()),
       ("ui_zoom", (self.zoom.round() as i64).to_string()),
     ]
@@ -492,7 +496,7 @@ pub fn preview_flags(values: &Values) -> Vec<(PreviewFeature, bool)> {
 }
 
 /// The repository settings behind each field, in the order React saves them.
-const REPO_KEYS: [&str; 8] = [
+const REPO_KEYS: [&str; 9] = [
   "branch_name_pattern",
   "included_copy_files",
   "default_model",
@@ -501,6 +505,7 @@ const REPO_KEYS: [&str; 8] = [
   "review_prompt",
   "review_agent",
   "auto_review_trigger",
+  AGENT_INSTRUCTIONS_SETTING,
 ];
 
 pub fn repo_keys() -> Vec<String> {
@@ -535,6 +540,7 @@ impl RepositoryFields {
       review_prompt: get("review_prompt").unwrap_or_default(),
       review_agent: get("review_agent").unwrap_or_default(),
       auto_review_trigger: auto_review_trigger(get("auto_review_trigger").as_deref()),
+      agent_instructions: get(AGENT_INSTRUCTIONS_SETTING).unwrap_or_default(),
     }
   }
 
@@ -548,6 +554,7 @@ impl RepositoryFields {
       self.review_prompt.clone(),
       self.review_agent.clone(),
       self.auto_review_trigger.clone(),
+      self.agent_instructions.clone(),
     ];
     REPO_KEYS
       .iter()
@@ -569,6 +576,7 @@ impl RepositoryFields {
       "reviewPrompt" => self.review_prompt = text(),
       "reviewAgent" => self.review_agent = text(),
       "autoReviewTrigger" => self.auto_review_trigger = text(),
+      "agentInstructions" => self.agent_instructions = text(),
       _ => {}
     }
   }
@@ -654,9 +662,12 @@ pub const SAVED_TICK: std::time::Duration = std::time::Duration::from_millis(150
 /// (theme, zoom, previews) or isn't a setting at all.
 pub fn save_timing(field: &str) -> Option<SaveTiming> {
   match field {
-    "repo.branchNamePattern" | "repo.includedFiles" | "repo.reviewPrompt" | "app.setupScript" => {
-      Some(SaveTiming::Debounced)
-    }
+    "repo.branchNamePattern"
+    | "repo.includedFiles"
+    | "repo.reviewPrompt"
+    | "repo.agentInstructions"
+    | "app.setupScript"
+    | "app.agentInstructions" => Some(SaveTiming::Debounced),
     "repo.defaultModel"
     | "repo.defaultAgent"
     | "repo.autoPush"
@@ -688,6 +699,13 @@ pub fn save_repo_settings(
 #[cfg(test)]
 mod save_timing_tests {
   use super::*;
+
+  #[test]
+  fn preview_features_omit_logs() {
+    assert!(PREVIEW_FEATURES
+      .iter()
+      .all(|(_, title, _)| *title != "Logs"));
+  }
 
   #[test]
   fn names_a_repository_by_its_folder() {
