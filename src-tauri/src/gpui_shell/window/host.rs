@@ -411,8 +411,7 @@ impl WindowHost for Backend {
     if Backend::remote(self, main_repo).is_some() {
       return Vec::new();
     }
-    // A saved project lists its repositories; an unsaved one keeps the
-    // main repository's supporting list, as before projects.
+    // The window's project, saved or draft, lists its repositories.
     if let Some(project) =
       crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
     {
@@ -426,7 +425,7 @@ impl WindowHost for Backend {
         })
         .collect();
     }
-    supporting_repos::list(main_repo).unwrap_or_default()
+    Vec::new()
   }
 
   fn project(&self) -> Option<crate::core::projects::Project> {
@@ -531,38 +530,22 @@ impl WindowHost for Backend {
   }
 
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String> {
-    let project = crate::gpui_shell::projects::window_repos_project(self.app(), self.label());
-    let added = match &project {
-      Some(project) if !project.draft => std::fs::canonicalize(path)
-        .map_err(|e| format!("Cannot open '{path}': {e}"))?
-        .to_string_lossy()
-        .to_string(),
-      // An unsaved window still records the link on its repository, which
-      // `treq -r` reads.
-      _ if !main_repo.is_empty() => supporting_repos::add(main_repo, path)?,
-      _ => std::fs::canonicalize(path)
-        .map_err(|e| format!("Cannot open '{path}': {e}"))?
-        .to_string_lossy()
-        .to_string(),
-    };
+    let project = crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+      .ok_or("This window has no project to add a repository to")?;
+    let added = supporting_repos::validate(main_repo, path)?;
     core::init(&added).map_err(|err| err.to_string())?;
-    if let Some(project) = project {
+    let inserted =
       self.with_db(|db| crate::core::projects::add_repo(db.conn(), &project.id, &added))?;
+    if !inserted {
+      return Err("This repository is already added".to_string());
     }
     Ok(added)
   }
 
-  fn remove_supporting(&self, main_repo: &str, path: &str) -> Result<(), String> {
-    let project = crate::gpui_shell::projects::window_repos_project(self.app(), self.label());
-    if project.as_ref().is_none_or(|p| p.draft) && main_repo != path {
-      supporting_repos::remove(main_repo, path)?;
-    }
-    match project {
-      Some(project) => {
-        self.with_db(|db| crate::core::projects::remove_repo(db.conn(), &project.id, path))
-      }
-      None => Ok(()),
-    }
+  fn remove_supporting(&self, _main_repo: &str, path: &str) -> Result<(), String> {
+    let project = crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+      .ok_or("This window has no project to remove a repository from")?;
+    self.with_db(|db| crate::core::projects::remove_repo(db.conn(), &project.id, path))
   }
 
   fn project_name(&self) -> Option<String> {
