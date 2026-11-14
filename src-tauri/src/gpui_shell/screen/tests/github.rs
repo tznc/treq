@@ -437,9 +437,21 @@ fn github_tabs_show_the_total_count_for_the_filter(cx: &mut TestAppContext) {
   let mut fake = issues();
   fake.issue_pages[0].total_count = Some(42);
   let (mut h, _) = harness(cx, fake, route("issues", None, false));
-  assert!(h.drawn("github-tab-issues-count"));
+  use gpui_testing_library::prelude::*;
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  let count_in = |tab: &str| {
+    let tab = gpui::ElementId::from(tab.to_string());
+    screen
+      .query_all_by_text("42")
+      .iter()
+      .any(|n| n.snapshot().path().contains(&tab))
+  };
+  assert!(count_in("github-tab-issues"));
   // The pull requests are not read yet, so their tab shows no count.
-  assert!(!h.drawn("github-tab-prs-count"));
+  assert!(!count_in("github-tab-prs"));
 }
 
 #[gpui::test]
