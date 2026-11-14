@@ -142,13 +142,24 @@ test.describe("Skill detail page", () => {
     ).toBeVisible();
   });
 
-  test("SKILL.md is selected by default and its content loads", async ({
+  test("SKILL.md is part of the page, with credit to its author and license", async ({
+    page,
+  }) => {
+    await expect(page.getByTestId("skill-body")).toContainText("MCP");
+    await expect(page.getByTestId("skill-credit")).toContainText(
+      "Apache-2.0 license",
+    );
+  });
+
+  test("the file browser opens on the next file and loads it", async ({
     page,
   }) => {
     // Content is fetched live from GitHub's raw CDN, so give the network
     // request more headroom than the default UI-interaction assertions.
     test.setTimeout(30_000);
-    await expect(page.getByTestId("viewer-path")).toHaveText("SKILL.md");
+    await expect(page.getByTestId("viewer-path")).toHaveText(
+      "reference/evaluation.md",
+    );
     await expect(page.getByTestId("viewer-body")).toContainText("MCP", {
       timeout: 20_000,
     });
@@ -195,7 +206,7 @@ test.describe("Skill detail page", () => {
       "false",
     );
     const viewerBody = page.getByTestId("viewer-body");
-    // The rendered SKILL.md has several h1s; any one being visible proves the
+    // The rendered markdown file has an h1; it being visible proves the
     // markdown was rendered rather than shown as raw source.
     await expect(
       viewerBody.getByRole("heading", { level: 1 }).first(),
@@ -280,7 +291,9 @@ test.describe("Skill detail page on mobile", () => {
   test("picking a file from the dropdown updates the preview", async ({
     page,
   }) => {
-    await expect(page.getByTestId("viewer-path")).toHaveText("SKILL.md");
+    await expect(page.getByTestId("viewer-path")).toHaveText(
+      "reference/evaluation.md",
+    );
     await page
       .getByLabel("Choose a file")
       .selectOption("reference/mcp_best_practices.md");

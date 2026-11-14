@@ -1,5 +1,5 @@
 // @ts-check
-const {buildAuthorPages, skillPageTitle} = require('./skillsPlugin');
+const {buildAuthorPages, skillPageTitle, skillPageProps} = require('./skillsPlugin');
 
 const catalog = {
   sources: [
@@ -20,6 +20,40 @@ test('one author page per source with skills, sorted by name and without file li
   expect(page.source).toEqual(catalog.sources[0]);
   expect(page.skills.map((s) => s.name)).toEqual(['chief-of-staff', 'wizard']);
   expect(page.skills.every((s) => !('files' in s))).toBeTruthy();
+});
+
+describe('skillPageProps', () => {
+  const mit = {...catalog.skills[0], license: 'MIT', path: 'skills/engineering/wizard'};
+  const pages = {
+    [mit.id]: {body: '# Wizard', licenseUrl: 'https://github.com/mattpocock/skills/blob/main/LICENSE', manualOnly: true},
+  };
+
+  test('passes the SKILL.md body, author and generated content for a redistributable license', () => {
+    const props = skillPageProps(mit, {...catalog, skills: [mit, catalog.skills[1]]}, pages);
+    expect(props.title).toBe('wizard skill by Matt Pocock');
+    expect(props.author).toBe('Matt Pocock');
+    expect(props.authorRoute).toBe('/skills/mattpocock');
+    expect(props.body).toBe('# Wizard');
+    expect(props.licenseUrl).toBe('https://github.com/mattpocock/skills/blob/main/LICENSE');
+    expect(props.manualOnly).toBe(true);
+    expect(props.install?.folder).toBe('wizard');
+    expect(props.related.map((s) => s.name)).toEqual(['chief-of-staff']);
+    expect(props.metaDescription).toBe('Wizard.');
+    expect(props.skill.files).toEqual(mit.files);
+  });
+
+  test('withholds the body when the license does not permit redistribution', () => {
+    expect(skillPageProps({...mit, license: 'Custom'}, catalog, pages).body).toBeNull();
+  });
+
+  test('writes a meta description when the skill has none', () => {
+    const props = skillPageProps(catalog.skills[1], catalog, {});
+    expect(props.metaDescription).toBe(
+      'chief-of-staff is an agent skill by Matt Pocock. Install it in Claude Code, Codex or Treq.',
+    );
+    expect(props.body).toBeNull();
+    expect(props.manualOnly).toBe(false);
+  });
 });
 
 test('skill page title names the author', () => {
