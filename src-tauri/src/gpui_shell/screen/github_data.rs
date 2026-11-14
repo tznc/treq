@@ -332,8 +332,7 @@ impl GithubHost for Backend {
   }
 
   fn logs_enabled(&self) -> bool {
-    use core::feature_preview::{is_enabled, PreviewFeature};
-    self.with_db(|db| is_enabled(db, PreviewFeature::Logs))
+    true
   }
 
   fn treq_checks(&self, repo_path: &str, workspace_id: i64) -> TreqChecks {

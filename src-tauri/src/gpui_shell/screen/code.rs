@@ -823,7 +823,7 @@ impl CodeView {
   fn pr_footer(&self, p: &Palette) -> Option<AnyElement> {
     let sync = self.pr_sync()?;
     let note = |id: &'static str, text: String| {
-      ui::text(div(), TextSize::Xs)
+      ui::text(div(), TextSize::Sm)
         .id(id)
         .debug_selector(move || id.into())
         .role(Role::Label)
@@ -1143,6 +1143,8 @@ pub(super) fn scrolling_markdown(
 
 fn markdown_text_size(size: f32) -> TextSize {
   match size {
+    // Short label (["maps the user's font-size setting onto the scale"]): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     s if s <= 11. => TextSize::Xs,
     s if s <= 12. => TextSize::Code,
     s if s <= 14. => TextSize::Sm,
@@ -1856,6 +1858,8 @@ impl CodeView {
       .child(help)
       .children(self.stack_button(p, cx))
       .child(
+        // Short label (['position count']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .ml_auto()
           .font_weight(FontWeight::NORMAL)
@@ -2045,6 +2049,8 @@ impl CodeView {
       format!("stack-time-{}", row.workspace.id),
       Side::Top,
       Some(TooltipContent::Text(time::full(&created).into())),
+      // Short label (['timestamp']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .text_color(p.muted_foreground)
         .child(time::relative(&created)),
@@ -2321,6 +2327,8 @@ impl CodeView {
             this.child(
               ui::text(
                 ui::Checkbox::new(format!("submodule-sync-{path}"), p),
+                // Short label (['checkbox label']): 11px is fine.
+                // ast-grep-ignore: gpui-text-xs-short-label-only
                 TextSize::Xs,
               )
               .checked(synced)
@@ -2386,6 +2394,8 @@ impl CodeView {
     } else {
       format!("Show {count} unchanged files")
     };
+    // Short label (['toggle label']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .id("code-unchanged-toggle")
       .debug_selector(|| "code-unchanged-toggle".into())
@@ -2764,6 +2774,8 @@ impl CodeView {
       format!("commit-time-{}", commit.commit_id),
       Side::Top,
       Some(TooltipContent::Text(time::full(&ts).into())),
+      // Short label (['timestamp']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .text_color(p.muted_foreground)
         .child(time::relative(&ts)),
@@ -2826,6 +2838,8 @@ impl CodeView {
           .child(time)
           .when(commit.insertions > 0 || commit.deletions > 0, |this| {
             this.child(
+              // Short label (['timestamp and diff counts']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .ml_auto()
                 .flex()
@@ -2886,6 +2900,8 @@ enum Kind {
 }
 
 fn day_label(label: &str, p: &Palette) -> impl IntoElement {
+  // Short label (['section heading']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .mb_1()
     .pl_7()
@@ -2912,6 +2928,8 @@ fn separator(label: Div, p: &Palette) -> impl IntoElement {
       .gap_2()
       .child(dashes())
       .child(
+        // Short label (['divider label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(label, TextSize::Xs)
           .whitespace_nowrap()
           .px_2()
@@ -2959,6 +2977,8 @@ fn loc_indicator(
   let (added, removed) = (ui::Tone::DiffAdded, ui::Tone::DiffRemoved);
   let (green, red) = (added.color(p), removed.color(p));
   let count = |text: String, color: Hsla, ch: usize| {
+    // Short label (['diff count']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .flex_none()
       .whitespace_nowrap()

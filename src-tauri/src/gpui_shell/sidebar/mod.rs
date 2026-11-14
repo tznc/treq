@@ -832,6 +832,8 @@ impl Render for Sidebar {
           .pt_3()
           .pb_1()
           .child(
+            // Short label (['section heading']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .font_weight(gpui::FontWeight::MEDIUM)
               .text_color(palette.sidebar_foreground.opacity(0.7))
@@ -931,6 +933,8 @@ impl Sidebar {
   }
 
   fn open_workspaces_button(&self, palette: &Palette) -> impl IntoElement {
+    // Short label (['button label']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .id("open-workspaces")
       .debug_selector(|| "open-workspaces".into())
@@ -1136,7 +1140,7 @@ impl Sidebar {
           repo.home_ref.clone().filter(|_| !repo.missing),
           |this, home_ref| {
             this.child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .min_w_0()
                 .truncate()
                 .font_family(theme::MONO_FONT)
@@ -1188,6 +1192,8 @@ impl Sidebar {
       .child(title)
       .when(repo.missing, |this| {
         this.child(
+          // Short label (['tag']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .flex_none()
             .text_color(palette.muted_foreground)
@@ -1272,10 +1278,12 @@ impl Sidebar {
                   .border_color(palette.muted_foreground)
                   .text_color(palette.muted_foreground)
               })
+              // Short label (['avatar initial']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               .child(ui::text(div(), TextSize::Xs).child(initial)),
           )
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .min_w_0()
               .truncate()
               .font_weight(gpui::FontWeight::MEDIUM)

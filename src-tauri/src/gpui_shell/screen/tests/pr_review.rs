@@ -502,6 +502,23 @@ fn the_finish_popover_verdicts_are_named_radio_buttons(cx: &mut TestAppContext) 
   );
 }
 
+/// A file with review threads or drafts shows how many beside its status.
+#[gpui::test]
+fn pr_review_file_list_counts_each_files_comments(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let mut host = pr_host();
+  host.threads = vec![gh_thread("t1", 2, false)];
+  *host.agent.lock().unwrap() = vec![draft_row("d1", 3, None)];
+  let (mut h, _) = workspace_harness(cx, host, pr_route());
+  assert!(h.drawn("pr-file-comments-a.rs"));
+  assert!(!h.drawn("pr-file-comments-b.rs"));
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(Role::Label).name("2 review comments"))).to_be_visible();
+}
+
 /// A hunk in the middle of a file, with hidden lines on both sides.
 const MID_DIFF: &str = "diff --git a/a.rs b/a.rs
 --- a/a.rs

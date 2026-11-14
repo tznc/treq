@@ -1568,6 +1568,8 @@ fn pane(
         )
         .when(picked > 0, |this| {
           this.child(
+            // Short label (['count']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(format!("{picked} selected")),

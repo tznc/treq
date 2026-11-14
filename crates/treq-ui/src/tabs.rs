@@ -261,6 +261,8 @@ impl RenderOnce for Tabs {
           fg
         };
         let on_fill = active && selected_fill.is_some();
+        // Short label (['tab-bar tab label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         text(div(), if bar { TextSize::Xs } else { TextSize::Sm })
           .id(tab.id)
           .debug_selector(move || selector)

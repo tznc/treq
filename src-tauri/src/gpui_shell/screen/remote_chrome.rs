@@ -93,7 +93,7 @@ fn link(
 /// and the capability notice.
 pub fn strip(chrome: &RemoteChrome, _dark: bool, p: &Palette, press: &Press) -> Div {
   let enabled = !chrome.cut_off;
-  let top = ui::text(div(), TextSize::Xs)
+  let top = ui::text(div(), TextSize::Sm)
     .flex()
     .items_center()
     .justify_between()
@@ -166,7 +166,7 @@ pub fn strip(chrome: &RemoteChrome, _dark: bool, p: &Palette, press: &Press) -> 
       )
   });
   let notice = (!chrome.notices.is_empty()).then(|| {
-    ui::text(div(), TextSize::Xs)
+    ui::text(div(), TextSize::Sm)
       .debug_selector(|| "remote-capability-notice".into())
       .border_b_1()
       .border_color(p.border)
