@@ -7,7 +7,7 @@
  * path uses). The authorize step is checked against GitHub.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { it, expect, afterEach } from "vitest";
+import { it, expect, afterEach } from "@jest/globals";
 import { getAnonKey, getServiceClient, resolveLocalKeys } from "../clients";
 import { createTestUser, deleteTestUser } from "../seed";
 import { recordOutcome } from "../record";

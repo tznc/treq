@@ -216,6 +216,8 @@ pub fn review_event(
       .flex_none()
       .rounded_full()
       .into_any_element(),
+    // Short label (['avatar initial']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     None => ui::text(div(), TextSize::Xs)
       .size(zpx(20.))
       .flex_none()

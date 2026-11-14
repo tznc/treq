@@ -448,6 +448,12 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+  /// Committed on the branch with no working-copy change: the card shows
+  /// only committed work.
+  pub fn purely_committed(&self, path: &str) -> bool {
+    self.committed.iter().any(|f| f.path == path) && !self.files.iter().any(|f| f.path == path)
+  }
+
   /// What `loadChangedFiles` keeps of a workspace's diff.
   pub fn from_workspace_diff(diff: JjRevisionDiff, show_committed: bool) -> Self {
     let files = ChangedFile::parse(&diff.uncommitted_files);
@@ -1557,6 +1563,33 @@ mod tests {
       .map(|&ix| snap.committed[ix].path.as_str())
       .collect();
     assert_eq!(visible, ["clash.rs"]);
+  }
+
+  /// A file committed on the branch with no working-copy change is purely
+  /// committed; one that is also dirty, or only dirty, is not.
+  #[test]
+  fn purely_committed_needs_committed_and_no_working_copy_change() {
+    let change = |path: &str| JjFileChange {
+      path: path.into(),
+      status: "M".into(),
+      previous_path: None,
+      changed_line_count: 1,
+      diff_deferred: false,
+      content_id: None,
+    };
+    let diff = JjRevisionDiff {
+      committed_files: vec![change("done.rs"), change("both.rs")],
+      hunks_by_file: Vec::new(),
+      uncommitted_files: vec![change("both.rs"), change("dirty.rs")],
+      conflicted_files: Vec::new(),
+      too_large_to_render: false,
+      render_block_reason: None,
+      working_copy_token: None,
+    };
+    let snap = Snapshot::from_workspace_diff(diff, false);
+    assert!(snap.purely_committed("done.rs"));
+    assert!(!snap.purely_committed("both.rs"));
+    assert!(!snap.purely_committed("dirty.rs"));
   }
 
   /// With Committed on, a file both committed and dirty shows the branch

@@ -1478,7 +1478,16 @@ impl ChangesView {
           .flex()
           .items_start()
           .gap_2()
-          .child(self.comment_body(id, text, p, cx))
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .flex()
+              .flex_col()
+              .gap_1p5()
+              .children(self.agent_tag(id, p))
+              .child(self.comment_body(id, text, p, cx)),
+          )
           .child(
             self.tip(
               format!("delete-comment-tip-{id}"),
@@ -1509,6 +1518,29 @@ impl ChangesView {
     self
       .tip(format!("edit-comment-tip-{id}"), "Click to edit", card, cx)
       .into_any_element()
+  }
+
+  /// The bot tag on a draft the review agent wrote, as its local cards have.
+  fn agent_tag(&self, id: &str, p: &Palette) -> Option<Div> {
+    let by_agent = self.review.comments.iter().any(|c| {
+      c.id == id && c.source.as_deref() == Some(crate::review_aggregate::SOURCE_LOCAL_AGENT)
+    });
+    by_agent.then(|| {
+      div()
+        .debug_selector(|| "agent-comment-tag".into())
+        .flex()
+        .items_center()
+        .gap_1p5()
+        .child(ui::icon(theme::ICON_BOT, 12., Tone::GitMerged.color(p)))
+        .child(
+          // Short label (tag): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
+          ui::text(div(), TextSize::Xs)
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(Tone::GitMerged.text(p))
+            .child("Agent"),
+        )
+    })
   }
 
   /// A comment's text, with its suggestion drawn as a diff against the
@@ -1674,7 +1706,7 @@ impl ChangesView {
             .italic()
             .text_color(p.muted_foreground)
             .child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .font_weight(FontWeight::MEDIUM)
                 .not_italic()
                 .mb_0p5()
@@ -1765,6 +1797,8 @@ impl ChangesView {
         .flex_col()
         .gap_1p5()
         .child(
+          // Short label (['section heading']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .text_color(p.muted_foreground)
             .child("Suggested change"),
@@ -1779,6 +1813,8 @@ impl ChangesView {
             .child(ui::text(Textarea::new(&input.state), TextSize::Code)),
         )
         .child(
+          // Short label (['section heading']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .text_color(p.muted_foreground)
             .child("Preview"),
@@ -1884,6 +1920,8 @@ impl ChangesView {
                   .items_center()
                   .gap_2()
                   .child(
+                    // Short label (['badge']): 11px is fine.
+                    // ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .px_1p5()
                       .py_0p5()
@@ -1894,6 +1932,8 @@ impl ChangesView {
                       .child("Outdated"),
                   )
                   .child(
+                    // Short label (['status label']): 11px is fine.
+                    // ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .text_color(p.muted_foreground)
                       .child(outdated_label(c)),
@@ -1914,7 +1954,7 @@ impl ChangesView {
           )
           .when(!c.line_content.is_empty(), |this| {
             this.child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .bg(p.muted.opacity(0.6))
                 .rounded(radius::SM)
                 .px_2()
@@ -2250,7 +2290,7 @@ impl ChangesView {
             }),
         )
         .child(
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .text_color(p.muted_foreground)
             .child("Send to idle agent if one is available"),
         )
@@ -2394,6 +2434,7 @@ impl ChangesView {
         .description("They are deleted from this machine. This can't be undone.")
         .on_close(ui::handler(cx, move |view, _, cx| close(view, cx)))
         .on_primary(ui::handler(cx, |view, _, cx| view.discard_review(cx)))
+        .confirm()
         .footer([
           Button::new("keep-reviewing", p)
             .variant(Variant::Outline)
@@ -2468,10 +2509,7 @@ mod row_paint_tests {
   fn a_commented_row_is_tinted_over_its_diff_colour() {
     let p = theme::palette(true);
     for kind in [LineKind::Added, LineKind::Removed, LineKind::Context] {
-      assert_eq!(
-        row_fill(false, true, kind, &p),
-        Some(Tone::Warning.tint(&p))
-      );
+      assert_eq!(row_fill(false, true, kind, &p), Some(p.commented()));
     }
   }
 

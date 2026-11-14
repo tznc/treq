@@ -368,9 +368,14 @@ if (group === "pr" && command === "checks") {
 }
 if (group === "pr" && command === "diff") {
   // A test can give a PR a diff, and change it mid-run, by writing
-  // pr-diff-<n>.diff next to this script; read on every call.
-  const file = join(dirname(fileURLToPath(import.meta.url)), `pr-diff-${args[2]}.diff`);
-  if (existsSync(file)) process.stdout.write(readFileSync(file, "utf8"));
+  // pr-diff-<n>.diff next to this script, or fake-gh-pr-diff-<n>.diff in
+  // HOME on a host where the script's folder isn't writable; read on every call.
+  const name = `pr-diff-${args[2]}.diff`;
+  const file = [
+    join(dirname(fileURLToPath(import.meta.url)), name),
+    join(process.env.HOME ?? "", `fake-gh-${name}`),
+  ].find((f) => existsSync(f));
+  if (file) process.stdout.write(readFileSync(file, "utf8"));
   process.exit(0);
 }
 if (group === "api" && /^repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews$/.test(command ?? "")) {

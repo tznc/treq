@@ -1022,6 +1022,25 @@ pub fn gh_pr_diff_impl(
   Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// `path` at the head of PR `pr_number`, raw. `refs/pull/N/head` also
+/// reads a head on a fork.
+pub fn gh_pr_file_impl(
+  gh_path: &str,
+  repo_full_name: &str,
+  pr_number: u64,
+  path: &str,
+  extended_path: &str,
+) -> Result<String, String> {
+  let endpoint = format!("repos/{repo_full_name}/contents/{path}?ref=refs/pull/{pr_number}/head");
+  let out = run_gh(
+    gh_path,
+    &["api", "-H", "Accept: application/vnd.github.raw", &endpoint],
+    extended_path,
+  )?;
+  let bytes = check_gh_output(out)?;
+  Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 const REPLY_THREAD_MUTATION: &str = "mutation($threadId: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) { comment { id } } }";
 
 /// `gh api` exits 0 on GraphQL-level errors, so check the `errors` field.

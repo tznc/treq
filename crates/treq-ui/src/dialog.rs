@@ -55,9 +55,8 @@ pub fn handler<V: 'static>(
 
 /// A dialog on the scrim. It fills its parent, as at the root of a modal
 /// window, or with [`Dialog::overlay`] covers the whole window from
-/// anywhere in a view. With an action pair the
-/// footer holds `[Cancel] [Verb]` and there is no X; without one, an X
-/// sits top-right. Escape and a click on the scrim close it; Enter, or
+/// anywhere in a view. An X sits top-right and the footer holds only the
+/// verb; a yes/no [`Dialog::confirm`] keeps `[Cancel] [Verb]` instead. Escape and a click on the scrim close it; Enter, or
 /// Ctrl/Cmd+Enter from a multi-line field, runs the primary action.
 #[derive(IntoElement)]
 pub struct Dialog {
@@ -73,6 +72,8 @@ pub struct Dialog {
   header: Option<AnyElement>,
   children: Vec<AnyElement>,
   footer: Vec<AnyElement>,
+  /// A yes/no question: Cancel in the footer stands in for the X.
+  confirm: bool,
   focus: Option<FocusHandle>,
   on_close: Option<Handler>,
   on_primary: Option<Handler>,
@@ -95,6 +96,7 @@ impl Dialog {
       header: None,
       children: Vec::new(),
       footer: Vec::new(),
+      confirm: false,
       focus: None,
       on_close: None,
       on_primary: None,
@@ -171,7 +173,15 @@ impl Dialog {
     self
   }
 
-  /// The footer's buttons, Cancel first and the verb last.
+  /// A yes/no question ([`ConfirmDialog`]): its footer's Cancel closes
+  /// it, so there is no X.
+  pub fn confirm(mut self) -> Self {
+    self.confirm = true;
+    self
+  }
+
+  /// The footer's actions, the verb last. Cancel belongs only to a
+  /// [`Self::confirm`] dialog; any other closes from its X.
   pub fn footer(mut self, buttons: impl IntoIterator<Item = AnyElement>) -> Self {
     self.footer.extend(buttons);
     self
@@ -185,7 +195,7 @@ impl Dialog {
     self
   }
 
-  /// Closes it: Escape, the scrim, and the X when there is no footer.
+  /// Closes it: Escape, the scrim, and the X.
   pub fn on_close(mut self, f: impl Fn(&mut Window, &mut App) + 'static) -> Self {
     self.on_close = Some(Rc::new(f));
     self
@@ -241,7 +251,7 @@ impl RenderOnce for Dialog {
     let x = self
       .on_close
       .clone()
-      .filter(|_| self.footer.is_empty())
+      .filter(|_| !self.confirm)
       .map(|close| {
         IconButton::new(format!("{}-close", self.id), theme::ICON_X, "Close", &p)
           .on_click(move |_, window, cx| close(window, cx))
@@ -806,6 +816,7 @@ impl RenderOnce for ConfirmDialog {
       })
       .when_some(confirm.clone(), |b, f| b.on_click(move |_, w, cx| f(w, cx)));
     Dialog::new(self.id, &p)
+      .confirm()
       .when_some(self.viewport, |d, viewport| d.overlay(viewport))
       .when_some(sheet, |d, inset| d.sheet(inset))
       .width(400.)
@@ -915,6 +926,7 @@ mod tests {
     }
 
     fn mount(cx: &mut TestAppContext, busy: bool) -> (VisualTestContext, Rc<Log>) {
+      cx.update(theme::init);
       let log = Rc::new(Log::default());
       let window = cx.add_window({
         let log = log.clone();
@@ -946,6 +958,40 @@ mod tests {
       cx.simulate_keystrokes("shift-enter");
       cx.simulate_keystrokes("ctrl-escape");
       assert_eq!(*log.0.borrow(), ["primary"]);
+    }
+
+    /// Every dialog closes from a top-right X, footer or not.
+    #[gpui::test]
+    fn a_dialog_with_a_footer_has_a_close_x(cx: &mut TestAppContext) {
+      let (mut cx, log) = mount(cx, false);
+      let x = cx.debug_bounds("keys-close").expect("X drawn");
+      cx.simulate_click(x.center(), gpui::Modifiers::none());
+      assert_eq!(*log.0.borrow(), ["close"]);
+    }
+
+    struct Confirm;
+
+    impl Render for Confirm {
+      fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        let p = theme::palette(false);
+        div().size_full().child(
+          ConfirmDialog::new("ask", "Delete it?", "Delete", &p)
+            .on_confirm(|_, _| {})
+            .on_cancel(|_, _| {}),
+        )
+      }
+    }
+
+    /// A yes/no question keeps Cancel beside its verb, so it needs no X.
+    #[gpui::test]
+    fn a_confirm_dialog_keeps_cancel_and_has_no_x(cx: &mut TestAppContext) {
+      cx.update(theme::init);
+      let window = cx.add_window(|_, _| Confirm);
+      let mut cx = VisualTestContext::from_window(*window, cx);
+      cx.update(|window, cx| window.draw(cx).clear(cx));
+      cx.run_until_parked();
+      assert!(cx.debug_bounds("ask-cancel").is_some());
+      assert!(cx.debug_bounds("ask-close").is_none());
     }
 
     /// While the verb is busy or disabled, Enter does nothing.
@@ -992,14 +1038,9 @@ mod tests {
             cx.notify();
           }))
           .child(crate::input(&self.input))
-          .footer([
-            Button::new("trap-cancel", &p)
-              .label("Cancel")
-              .into_any_element(),
-            Button::new("trap-ok", &p)
-              .label("Rename")
-              .into_any_element(),
-          ]);
+          .footer([Button::new("trap-ok", &p)
+            .label("Rename")
+            .into_any_element()]);
         div()
           .size_full()
           .child(div().id("opener").track_focus(&self.opener).child("Open"))
@@ -1075,16 +1116,23 @@ mod tests {
     fn tab_wraps(cx: &mut TestAppContext, kind: Kind) {
       let (mut cx, host) = mount(cx, kind);
       focus_input(&mut cx, &host);
-      // The field, Cancel, Rename: Tab from Rename wraps to the field.
+      // The X, the field, Rename: Tab from Rename wraps to the X, then on
+      // to the field.
       press_inside(&mut cx, &host, "tab");
       assert!(!input_focused(&mut cx, &host), "Tab reaches the buttons");
-      press_inside(&mut cx, &host, "tab tab");
+      // A sheet drags closed, so it has no X to pass.
+      let rest = if kind == Kind::Sheet {
+        "tab"
+      } else {
+        "tab tab"
+      };
+      press_inside(&mut cx, &host, rest);
       assert!(input_focused(&mut cx, &host), "Tab from the last wraps");
-      // Shift+Tab from the field wraps to Rename, the last control.
+      // Shift+Tab from the field goes back: to the X, or a sheet's Rename.
       press_inside(&mut cx, &host, "shift-tab");
       assert!(!input_focused(&mut cx, &host));
       press_inside(&mut cx, &host, "tab");
-      assert!(input_focused(&mut cx, &host), "Shift+Tab went to the last");
+      assert!(input_focused(&mut cx, &host), "Shift+Tab went back");
       press_inside(
         &mut cx,
         &host,

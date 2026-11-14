@@ -8,7 +8,7 @@
  * Entitlement comes from signed webhook events posted with ../stripe.ts.
  */
 import { randomBytes } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, it } from "@jest/globals";
 import { billingStoreFor } from "../../../supabase/functions/_shared/billing/store";
 import type {
   StripeClient,

@@ -761,7 +761,6 @@ impl RemoteView {
         )
       }
     };
-    // The own-VM form ends in an action pair, so it has no X.
     let dialog = Self::layer(
       "remote-setup-dialog",
       576.,
@@ -1106,7 +1105,7 @@ impl RemoteView {
           ))
           .when(!form.resolve_error.is_empty(), |this| {
             this.child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .text_color(p.destructive)
                 .child(form.resolve_error.clone()),
             )
@@ -1213,20 +1212,19 @@ impl RemoteView {
     } else {
       "Couldn't reach the host"
     };
-    let back = if direct {
-      Button::new("remote-setup-cancel", p)
-        .variant(Variant::Outline)
-        .label("Cancel")
-        .on_click(cx.listener(|view, _, _, cx| view.press_react("remote.setup.close", cx)))
-    } else {
+    // Opened straight on the form, there is nothing to go back to: the X
+    // closes it.
+    let back = (!direct).then(|| {
       Button::new("remote-setup-back", p)
         .variant(Variant::Outline)
         .disabled(busy)
         .label("Back")
         .on_click(cx.listener(|view, _, window, cx| view.set_mode(Mode::Choice, window, cx)))
-    };
+        .into_any_element()
+    });
     let can_continue = show_continue && valid && !busy && !probing;
-    let footer = std::iter::once(back.into_any_element())
+    let footer = back
+      .into_iter()
       .chain(show_continue.then(|| {
         Button::new("remote-continue", p)
           .disabled(!valid || busy || probing)
@@ -1304,6 +1302,8 @@ impl RemoteView {
         .flex_col()
         .gap_2()
         .child(
+          // Short label (['section heading']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .font_weight(FontWeight::MEDIUM)
             .text_color(p.muted_foreground)
@@ -1336,7 +1336,7 @@ impl RemoteView {
                     .child(title.clone().unwrap_or_else(|| label.clone())),
                 )
                 .child(
-                  ui::text(div(), TextSize::Xs)
+                  ui::text(div(), TextSize::Sm)
                     .text_color(p.muted_foreground)
                     .truncate()
                     .child(match &title {

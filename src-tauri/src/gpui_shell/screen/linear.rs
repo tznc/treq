@@ -1083,7 +1083,7 @@ fn issue_meta(identifier: impl IntoElement, issue: &LinearIssue, p: &Palette) ->
     })
     .when_some(issue.assignee.as_ref(), |this, assignee| {
       this.child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .text_color(p.muted_foreground)
           .child(assignee.name.clone()),
       )
@@ -1296,6 +1296,8 @@ impl LinearView {
         let key = group.key;
         let clear = format!("linear-filter-clear-{key}");
         let chip = format!("linear-filter-chip-{key}");
+        // Short label (['chip']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .debug_selector(move || chip)
           .flex()
@@ -1693,6 +1695,7 @@ impl LinearView {
         )
       })
       .when_some(fetch.error.clone(), |this, error| {
+        let pro = error == crate::linear::PRO_REQUIRED;
         this.child(
           div()
             .size_full()
@@ -1704,12 +1707,24 @@ impl LinearView {
                 .error(true)
                 .icon(theme::ICON_CIRCLE_ALERT)
                 .message(error)
-                .action(
+                .action(if pro {
+                  Button::new("linear-issues-manage-account", p)
+                    .size(Size::Sm)
+                    .label("Manage account")
+                    .on_click(cx.listener(|view, _, _, cx| {
+                      view.send_react(
+                        ScreenAction::Press {
+                          id: "account.manage".into(),
+                        },
+                        cx,
+                      )
+                    }))
+                } else {
                   Button::new("linear-issues-retry", p)
                     .size(Size::Sm)
                     .label("Retry")
-                    .on_click(cx.listener(|view, _, _, cx| view.load_issues(cx))),
-                ),
+                    .on_click(cx.listener(|view, _, _, cx| view.load_issues(cx)))
+                }),
             ),
         )
       });
@@ -2132,6 +2147,8 @@ impl LinearView {
           .flex_col()
           .gap_1()
           .child(
+            // Short label (['field label']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child("Team"),
@@ -2223,6 +2240,7 @@ impl LinearView {
         .on_close(ui::handler(cx, |view, _, cx| view.cancel_delete(cx)))
         .on_primary(ui::handler(cx, |view, _, cx| view.delete_issue(cx)))
         .primary_disabled(pending)
+        .confirm()
         .footer([
           Button::new("linear-delete-cancel", p)
             .variant(Variant::Outline)
@@ -2359,6 +2377,8 @@ impl LinearView {
         .mt_1p5()
         .flex_wrap()
         .children(issue.labels.iter().take(2).map(|label| {
+          // Short label (['tag']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .px_1()
             .py_0p5()
@@ -2369,6 +2389,8 @@ impl LinearView {
         }))
         .when(issue.labels.len() > 2, |this| {
           this.child(
+            // Short label (['count']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .px_1()
               .py_0p5()
@@ -2402,6 +2424,8 @@ impl LinearView {
           .justify_between()
           .gap_2()
           .child(
+            // Short label (['issue identifier']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .font_family(theme::MONO_FONT)
               .font_weight(FontWeight::MEDIUM)
@@ -2411,7 +2435,7 @@ impl LinearView {
           .child(self.agent_button(format!("linear-kanban-kickoff-{id}"), &id, p, cx)),
       )
       .child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .font_weight(FontWeight::MEDIUM)
           .mt_1()
           .line_clamp(2)
@@ -2420,7 +2444,7 @@ impl LinearView {
       )
       .when_some(parent, |this, parent| {
         this.child(
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .mt_1()
             .text_color(p.muted_foreground)
             .child(format!("Sub-issue of {parent}")),
@@ -2567,6 +2591,8 @@ impl LinearView {
                   .gap_2()
                   .mt_1()
                   .child(
+                    // Short label (['pill']): 11px is fine.
+                    // ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .px_1p5()
                       .py_0p5()
@@ -2576,6 +2602,8 @@ impl LinearView {
                       .child(capitalize(&project.state)),
                   )
                   .child(
+                    // Short label (['percentage']): 11px is fine.
+                    // ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .text_color(p.muted_foreground)
                       .child(format!("{}%", data::percent(project.progress))),
@@ -2732,7 +2760,7 @@ impl LinearView {
               p.primary,
               cx,
             ),
-            TextSize::Xs,
+            TextSize::Sm,
           )),
       )
       .child(meta)
@@ -2849,6 +2877,8 @@ impl LinearView {
       let fg = p.foreground;
       ui::text(
         Button::new(SharedString::from(format!("linear-start-review-{key}")), p),
+        // Short label (['button label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         TextSize::Xs,
       )
       .variant(Variant::Outline)
@@ -2873,6 +2903,8 @@ impl LinearView {
       .gap_2()
       .when(!open.is_empty(), |this| {
         this.child(
+          // Short label (['count']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .text_color(p.muted_foreground)
             .child(agent_count_label(open.len())),
@@ -2919,6 +2951,8 @@ impl LinearView {
       }));
 
     let heading = |text: &'static str| {
+      // Short label (['section heading']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .font_weight(FontWeight::MEDIUM)
         .text_color(p.muted_foreground)
@@ -3053,7 +3087,7 @@ impl LinearView {
         comment.quoted_text.clone().filter(|_| quote),
         |this, quote| {
           this.child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .text_color(p.muted_foreground)
               .italic()
               .border_l_2()
@@ -3064,6 +3098,8 @@ impl LinearView {
         },
       )
       .child(
+        // Short label (['author and timestamp']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .flex()
           .items_center()
