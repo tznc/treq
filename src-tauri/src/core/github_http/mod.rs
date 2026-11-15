@@ -3,7 +3,7 @@
 //! [`crate::core::remote::github_read`], which goes through `gh`, so a
 //! screen cannot tell which one answered.
 
-use crate::core::remote::GithubQuery;
+use crate::core::remote::{GithubContext, GithubQuery};
 use reqwest::Method;
 use serde_json::{json, Value};
 
@@ -123,6 +123,16 @@ pub async fn github_read(
   query: GithubQuery,
 ) -> Result<Value, String> {
   match query {
+    GithubQuery::Context => {
+      let user = gh.rest(Method::GET, "/user", None).await?;
+      let login = user["login"]
+        .as_str()
+        .ok_or("GitHub sent no login for the signed-in user")?;
+      to_json(GithubContext {
+        full_name: full_name.to_string(),
+        login: login.to_string(),
+      })
+    }
     // Answered by the host's `gh` until it is read over HTTPS here.
     other => Err(format!(
       "unsupported_query: {other:?} is not read over HTTPS yet"
