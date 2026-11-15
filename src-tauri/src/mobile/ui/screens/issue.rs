@@ -2,6 +2,7 @@
 //! editing, closing, reopening and deleting it.
 
 use crate::mobile::ui::widgets::TouchButton as _;
+use gpui_kit::component::Selectable as _;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -484,16 +485,11 @@ impl IssueScreen {
           group.content
         )))
         .small()
-        .h(px(36.))
+        .h(px(44.))
         .min_w(px(44.))
         .label(format!("{} {}", issues::emoji(&group.content), group.count))
-        .map(|b| {
-          if group.viewer_has_reacted {
-            b.primary()
-          } else {
-            b.outline()
-          }
-        })
+        .outline()
+        .selected(group.viewer_has_reacted)
         .on_click(cx.listener(move |this, _, _, cx| this.react(id.clone(), content.clone(), cx)))
         .touch()
       }))
@@ -501,7 +497,7 @@ impl IssueScreen {
         Button::new(SharedString::from(format!("reaction-add-{id}")))
           .ghost()
           .small()
-          .h(px(36.))
+          .h(px(44.))
           .min_w(px(44.))
           .icon(IconName::Plus)
           .accessibility_label("Add reaction")

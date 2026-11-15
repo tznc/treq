@@ -5,6 +5,7 @@
 //! [`PrAction`].
 
 use crate::mobile::ui::widgets::{Caption as _, TouchButton as _};
+use gpui_kit::component::Selectable as _;
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
@@ -704,13 +705,12 @@ impl PrDetailScreen {
     let theme = cx.theme();
     let picker_open = self.picker.as_deref() == Some(comment.id.as_str());
     let chip = |id: SharedString, label: String, on: bool| {
-      Button::new(id).h(px(44.)).small().label(label).map(|b| {
-        if on {
-          b.primary()
-        } else {
-          b.outline()
-        }
-      })
+      Button::new(id)
+        .h(px(44.))
+        .small()
+        .label(label)
+        .outline()
+        .selected(on)
     };
     let id = comment.id.clone();
     let reactions = h_flex()
