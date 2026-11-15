@@ -43,6 +43,7 @@ ignores:
   - "src-tauri/src/gpui_shell/screen/tests/skills_screen.rs"
   - "src-tauri/src/gpui_shell/screen/tests/stack_panel.rs"
   - "src-tauri/src/gpui_shell/screen/tests/tab_badges.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/team_screen.rs"
   - "src-tauri/src/gpui_shell/screen/tests/terminal_screen.rs"
   - "src-tauri/src/gpui_shell/screen/tests/testing_library.rs"
   - "src-tauri/src/gpui_shell/screen/tests/virtual_lists.rs"
