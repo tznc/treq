@@ -354,11 +354,86 @@ fn signed_in_with_cloud(
   h
 }
 
+/// Shows the Machines tab, where the cloud card lives.
+fn show_machines(h: &mut Harness) {
+  h.update(|s| {
+    if let View::Settings(route) = &mut s.view {
+      route.tab = settings::Tab::Machines;
+    }
+  });
+}
+
 fn cloud_card(h: &mut Harness) -> settings::CloudCard {
-  match drawn_settings(h).account {
-    Some(settings::AccountTab::SignedIn(signed_in)) => signed_in.cloud.expect("cloud card"),
+  show_machines(h);
+  match drawn_settings(h).machines {
+    Some(settings::MachinesTab::SignedIn(card)) => *card,
     other => panic!("signed in: {other:?}"),
   }
+}
+
+#[gpui::test]
+fn the_cloud_card_moved_from_account_to_machines(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(cx, host, cloud(serde_json::json!({})));
+  assert!(drawn_settings(&mut h)
+    .tabs
+    .contains(&settings::Tab::Machines));
+  assert!(!h.drawn("cloud-workspace-card"));
+  show_machines(&mut h);
+  assert!(h.drawn("cloud-workspace-card"));
+}
+
+#[gpui::test]
+fn machines_asks_to_sign_in_when_signed_out(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, account_route("machines"), host.clone());
+  h.set_account(account_state(serde_json::json!({})));
+  assert_eq!(
+    drawn_settings(&mut h).machines,
+    Some(settings::MachinesTab::SignedOut)
+  );
+  h.click("machines-sign-in");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    ["open http://localhost:3001/sign-in?source=desktop"]
+  );
+}
+
+/// A machine that failed before the provider made it has no resource, but
+/// its row stays and Retry keeps its old type: Delete clears the way.
+#[gpui::test]
+fn machines_deletes_a_machine_that_failed_to_create(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let failed = cloud(serde_json::json!({
+    "instance": { "status": "failed", "providerResourceId": null, "diskQuotaGb": 10 },
+  }));
+  let mut h = signed_in_with_cloud(cx, host.clone(), failed);
+  let card = cloud_card(&mut h);
+  assert!(card.deletable);
+  assert_eq!(
+    card.create.map(|c| c.label),
+    Some("Retry cloud workspace creation".into())
+  );
+  h.click("cloud-delete");
+  h.click("cloud-delete-dialog-confirm");
+  assert_eq!(host.writes(), ["cloud Delete"]);
+}
+
+#[gpui::test]
+fn machines_names_the_size_and_region(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let instance = serde_json::json!({
+    "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 20,
+    "tierId": "m", "region": "us_east"
+  });
+  let mut h = signed_in_with_cloud(
+    cx,
+    host,
+    cloud(serde_json::json!({ "instance": instance, "tiers": tiers() })),
+  );
+  let instance = cloud_card(&mut h).instance.expect("instance");
+  assert_eq!(instance.detail.as_deref(), Some("Medium · US East"));
 }
 
 #[gpui::test]
@@ -951,6 +1026,7 @@ fn the_cloud_delete_confirmation_cancels_on_escape_and_deletes_on_enter(cx: &mut
   let mut h = signed_in_with_cloud(cx, host.clone(), ready);
   h.cx
     .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(1200.)));
+  show_machines(&mut h);
   h.click("cloud-delete");
   assert!(h.drawn("cloud-delete-dialog"));
   h.cx.simulate_keystrokes("escape");
@@ -1006,6 +1082,11 @@ fn set_cloud(h: &mut Harness, patch: serde_json::Value) {
 }
 
 fn signed_in_tab(h: &mut Harness) -> settings::SignedIn {
+  h.update(|s| {
+    if let View::Settings(route) = &mut s.view {
+      route.tab = settings::Tab::Account;
+    }
+  });
   match drawn_settings(h).account {
     Some(settings::AccountTab::SignedIn(signed_in)) => *signed_in,
     other => panic!("signed in: {other:?}"),

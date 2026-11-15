@@ -25,14 +25,14 @@ On the Free plan, **Create cloud workspace** returns a **PRO** badge, the server
 
 ## Create the workspace
 
-1. Open Settings and choose **Account**.
+1. Open Settings and choose **Machines**.
 2. In the **Cloud workspace** card, select **Create cloud workspace**.
 3. Wait while the card reports each stage: **Creating cloud workspace...**, **Installing Treq, JJ, Git, and agents...**, **Configuring access...**, and **Verifying readiness...**.
 4. When the card shows **Ready**, the workspace accepts connections.
 
 You can also start from **Open cloud workspace** on the start screen or **File → Open via SSH...**. Both open the cloud workspace setup directly. With the Remote SSH preview turned on, the start screen button reads **Open via SSH** and the **Connect a remote repository** dialog lets you choose **Treq-managed cloud workspace** or **Your own VM**.
 
-If creation fails before a machine exists, the button reads **Retry cloud workspace creation**.
+If creation fails before a machine exists, the button reads **Retry cloud workspace creation**. A retry keeps the size the workspace was created with; to start over at another size, delete it with the trash icon and create it again.
 
 ## Open or clone a repository
 
@@ -76,7 +76,7 @@ With Pro, you can run the cloud workspace on your own Boat, Daytona, E2B, or Clo
 1. Open Settings and choose **Account**.
 2. Under **Provider keys**, select **Add Boat key**, **Add Daytona key**, **Add E2B key**, or **Add Cloudflare key**.
 3. Paste the key into **API key** and save it. Treq checks the key with the provider before it saves it.
-4. Pick a size in the **Cloud workspace** card, then select **Create workspace on this account** on the saved key's row.
+4. Pick a size in the **Cloud workspace** card under **Machines**, then select **Create workspace on this account** on the saved key's row.
 
 ### Cloudflare
 

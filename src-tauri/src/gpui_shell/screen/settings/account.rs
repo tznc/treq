@@ -258,6 +258,14 @@ pub enum AccountTab {
   SignedIn(Box<SignedIn>),
 }
 
+/// The Machines tab, as drawn: the Treq Cloud machine's card.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MachinesTab {
+  Loading,
+  SignedOut,
+  SignedIn(Box<CloudCard>),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DevCallback {
   pub url: String,
@@ -275,7 +283,6 @@ pub struct SignedIn {
   /// What the period end means, and the date.
   pub period: Option<(String, String)>,
   pub manage_label: String,
-  pub cloud: Option<CloudCard>,
   /// The spend cap row, once the spend status is read.
   pub spend_cap: Option<SpendCapEditor>,
   /// "Provider keys", for Pro.
@@ -326,6 +333,9 @@ pub struct CloudCard {
   pub sign_in: bool,
   pub submitting: bool,
   pub confirming_delete: bool,
+  /// The account has a machine to delete, in any state: one that failed
+  /// before the provider made it too, which `instance` leaves out.
+  pub deletable: bool,
   /// The size picker, one option per tier.
   pub sizes: Vec<SizeOption>,
   /// "Resize" shows: a tier other than the instance's is picked.
@@ -467,6 +477,8 @@ pub struct SizeOption {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CloudInstanceView {
   pub label: String,
+  /// Its size and region: `Medium · US East`.
+  pub detail: Option<String>,
   pub endpoint: Option<String>,
   pub repairable: bool,
   pub usage: Option<CloudUsage>,
@@ -704,6 +716,18 @@ fn stage_label(status: &str) -> String {
   .to_string()
 }
 
+/// A region code (`_shared/remote/catalog.ts` `REGION_CODES`) as people
+/// read it.
+fn region_label(code: &str) -> &str {
+  match code {
+    "us_east" => "US East",
+    "us_west" => "US West",
+    "eu_west" => "EU West",
+    "ap_southeast" => "Asia Pacific (Southeast)",
+    other => other,
+  }
+}
+
 /// How `remoteFunctionError` stores a refusal for want of Pro.
 const PRO_REQUIRED_PREFIX: &str = "[pro_required] ";
 /// How a spend cap refusal reads in `provisioning_error`.
@@ -883,8 +907,21 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
     instance: instance.map(|instance| {
       let ready = instance.status == "ready";
       let endpoint = cloud.endpoint.as_ref();
+      let size = instance.tier_id.as_deref().map(|id| {
+        cloud
+          .tiers
+          .iter()
+          .find(|t| t.id == id)
+          .map_or(id, |t| t.label.as_str())
+      });
+      let detail = [size, instance.region.as_deref().map(region_label)]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
       CloudInstanceView {
         label: stage_label(&instance.status),
+        detail: (!detail.is_empty()).then_some(detail),
         endpoint: endpoint.map(|e| format!("{}@{}:{}", e.username, e.hostname, e.port)),
         repairable: ["degraded", "failed"].contains(&instance.status.as_str()),
         usage: ready.then(|| match (&cloud.usage_error, &cloud.usage) {
@@ -932,6 +969,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
     credential_invalid,
     submitting: cloud.submitting,
     confirming_delete,
+    deletable: record.is_some_and(|i| !["deleting", "deleted"].contains(&i.status.as_str())),
   }
 }
 
@@ -1171,9 +1209,6 @@ impl SettingsView {
         "Upgrade to Pro"
       }
       .into(),
-      cloud: cloud_route
-        .as_ref()
-        .map(|cloud| cloud_card(cloud, state.confirming_delete)),
       spend_cap: account
         .cloud
         .as_ref()
@@ -1192,6 +1227,17 @@ impl SettingsView {
         ..d.clone()
       }),
     }))
+  }
+
+  pub(super) fn machines_tab(&self) -> MachinesTab {
+    let Some(account) = self.account_route().filter(|a| !a.loading) else {
+      return MachinesTab::Loading;
+    };
+    if account.user.is_none() {
+      return MachinesTab::SignedOut;
+    }
+    let cloud = account.cloud.unwrap_or_default();
+    MachinesTab::SignedIn(Box::new(cloud_card(&cloud, self.account.confirming_delete)))
   }
 
   pub(super) fn integrations_tab(&self) -> IntegrationsTab {
@@ -1413,7 +1459,7 @@ impl SettingsView {
       return;
     }
     // `AccountSettings` reads the cloud workspace once per sign-in.
-    if self.route.tab == Tab::Account && !self.account.cloud_read {
+    if matches!(self.route.tab, Tab::Account | Tab::Machines) && !self.account.cloud_read {
       self.account.cloud_read = true;
       self.host.cloud_action(CloudAction::Refresh);
     }
@@ -1992,8 +2038,8 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   cx: &mut Context<V>,
 ) -> impl IntoElement {
   let red = red(p);
-  let actions = c.instance.as_ref().map(|instance| {
-    let repair = instance.repairable.then(|| {
+  let actions = c.deletable.then(|| {
+    let repair = c.instance.as_ref().filter(|i| i.repairable).map(|_| {
       let button = Button::new("cloud-repair", p)
         .variant(Variant::Outline)
         .size(Size::Sm)
@@ -3141,7 +3187,6 @@ impl SettingsView {
             .on_click(self.press("account.manage")),
         ),
       );
-    let cloud = s.cloud.as_ref().map(|c| self.cloud_card(c, p, cx));
     let spend_cap = s
       .spend_cap
       .as_ref()
@@ -3166,7 +3211,6 @@ impl SettingsView {
       .gap_6()
       .child(user)
       .child(subscription)
-      .children(cloud)
       .children(spend_cap)
       .children(team_profile)
       .children(org_cloud)
@@ -3306,6 +3350,36 @@ impl SettingsView {
               .into_any_element(),
           ]),
     )
+  }
+
+  /// The Machines tab: the Treq Cloud machine, or sign-in to reach it.
+  pub(super) fn machines(
+    &mut self,
+    tab: &MachinesTab,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> AnyElement {
+    match tab {
+      MachinesTab::Loading => centered(0.)
+        .child(ui::Loading::new("machines-loading", p).label("Loading machines…"))
+        .into_any_element(),
+      MachinesTab::SignedOut => centered(16.)
+        .child(
+          div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .child(heading("Sign in to Treq"))
+            .child(help(
+              "Sign in to create and manage your cloud machine",
+              p,
+              4.,
+            )),
+        )
+        .child(sign_in_button("machines-sign-in", self, p))
+        .into_any_element(),
+      MachinesTab::SignedIn(card) => self.cloud_card(card, p, cx).into_any_element(),
+    }
   }
 
   /// `CloudWorkspaceCard`.
