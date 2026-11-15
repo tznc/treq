@@ -296,12 +296,13 @@ pub fn set_owner(conn: &Connection, id: &str, org_id: Option<&str>) -> Result<()
     .map(drop)
 }
 
-/// Writes a team project pulled from the organization under its shared id,
-/// replacing any local copy. Keeps the local `last_opened_at`.
-pub fn put_team_project(
+/// Writes a project pulled from sync (a team one, or the user's personal one
+/// from another device) under its shared id, replacing any local copy.
+/// Keeps the local `last_opened_at`.
+pub fn put_synced_project(
   conn: &Connection,
   id: &str,
-  org_id: &str,
+  org_id: Option<&str>,
   name: &str,
   repos: &[String],
   prompt: &str,
@@ -740,13 +741,13 @@ mod tests {
   }
 
   #[test]
-  fn put_team_project_inserts_then_replaces_by_id() {
+  fn put_synced_project_inserts_then_replaces_by_id() {
     let conn = conn();
-    put_team_project(&conn, "t1", "o1", "Team", &repos(&["/r/a"]), "p", &[]).unwrap();
-    put_team_project(
+    put_synced_project(&conn, "t1", Some("o1"), "Team", &repos(&["/r/a"]), "p", &[]).unwrap();
+    put_synced_project(
       &conn,
       "t1",
-      "o1",
+      Some("o1"),
       "Team 2",
       &repos(&["/r/b", "/r/a"]),
       "q",

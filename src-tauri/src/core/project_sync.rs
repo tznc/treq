@@ -1,10 +1,10 @@
-//! Team project sync: projects owned by a Team organization are shared with
-//! its members through `public.organization_projects`. Personal projects
-//! never leave the machine.
+//! Project sync through `public.organization_projects`: a team project is
+//! shared with the organization's members, a personal one reaches only its
+//! owner's other devices (desktop and mobile).
 //!
-//! One pass: push every local team project, then pull every remote one the
-//! user can see, then drop local team projects of organizations the user
-//! has left. Repos travel as remote references (`owner/name` or a clone
+//! One pass: push every local project, then pull every remote one the user
+//! can see, then drop local team projects of organizations the user has
+//! left. Repos travel as remote references (`owner/name` or a clone
 //! URL); each machine maps them to its own clone folder.
 
 use crate::core::projects;
@@ -76,7 +76,8 @@ pub async fn wait(period: std::time::Duration) {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteProject {
   pub id: String,
-  pub org_id: String,
+  /// `None`: a personal project of the signed-in user.
+  pub org_id: Option<String>,
   pub name: String,
   pub repos: Vec<String>,
   #[serde(default)]
@@ -119,9 +120,13 @@ pub async fn sync(
   let local = projects::list(conn)?;
 
   for project in &local {
-    let Some(org_id) = project.org_id.as_ref().filter(|o| org_ids.contains(o)) else {
+    if project
+      .org_id
+      .as_ref()
+      .is_some_and(|o| !org_ids.contains(o))
+    {
       continue;
-    };
+    }
     let repos: Vec<String> = project
       .repos
       .iter()
@@ -133,7 +138,7 @@ pub async fn sync(
     transport
       .upsert(&RemoteProject {
         id: project.id.clone(),
-        org_id: org_id.clone(),
+        org_id: project.org_id.clone(),
         name: project.name.clone(),
         repos,
         prompt: project.prompt.clone(),
@@ -144,7 +149,7 @@ pub async fn sync(
   }
 
   for remote in transport.list().await? {
-    if !org_ids.contains(&remote.org_id) {
+    if remote.org_id.as_ref().is_some_and(|o| !org_ids.contains(o)) {
       continue;
     }
     let repos: Vec<String> = remote
@@ -155,10 +160,10 @@ pub async fn sync(
     if repos.is_empty() {
       continue;
     }
-    projects::put_team_project(
+    projects::put_synced_project(
       conn,
       &remote.id,
-      &remote.org_id,
+      remote.org_id.as_deref(),
       &remote.name,
       &repos,
       &remote.prompt,
@@ -287,7 +292,7 @@ mod tests {
   fn remote(id: &str, org: &str, repos: &[&str]) -> RemoteProject {
     RemoteProject {
       id: id.into(),
-      org_id: org.into(),
+      org_id: Some(org.into()),
       name: format!("R {id}"),
       repos: repos.iter().map(|s| s.to_string()).collect(),
       prompt: "p".into(),
@@ -332,24 +337,40 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn pushes_team_projects_as_remote_refs_and_keeps_personal_local() {
+  async fn pushes_personal_and_team_projects_as_remote_refs() {
     let conn = conn();
     let fake = Fake::default();
-    projects::save(&conn, "Mine", &["/local/solo".into()]).unwrap();
+    let mine = projects::save(&conn, "Mine", &["/local/solo".into()]).unwrap();
     let team = projects::save(&conn, "Team", &["/local/web".into(), "/tmp/x".into()]).unwrap();
     projects::set_owner(&conn, &team.id, Some("o1")).unwrap();
 
     let report = sync(&conn, &fake, &Map, &orgs(&["o1"])).await.unwrap();
 
     let rows = fake.list().await.unwrap();
-    assert_eq!(rows.len(), 1, "personal project never pushed");
-    assert_eq!(rows[0].id, team.id);
+    let by_id = |id: &str| rows.iter().find(|r| r.id == id).cloned().unwrap();
+    assert_eq!(by_id(&mine.id).org_id, None, "personal pushed as personal");
+    assert_eq!(by_id(&team.id).org_id.as_deref(), Some("o1"));
     assert_eq!(
-      rows[0].repos,
+      by_id(&team.id).repos,
       vec!["acme/web".to_string()],
       "unmappable repo dropped"
     );
-    assert_eq!(report.pushed, 1);
+    assert_eq!(report.pushed, 2);
+  }
+
+  #[tokio::test]
+  async fn pulls_a_personal_project_from_another_device() {
+    let conn = conn();
+    let fake = Fake::default();
+    let mut side = remote("p1", "", &["acme/side"]);
+    side.org_id = None;
+    fake.upsert(&side).await.unwrap();
+
+    sync(&conn, &fake, &Map, &orgs(&[])).await.unwrap();
+
+    let got = projects::get(&conn, "p1").unwrap().expect("pulled");
+    assert_eq!(got.org_id, None);
+    assert_eq!(got.repos, vec!["/local/side".to_string()]);
   }
 
   #[tokio::test]
