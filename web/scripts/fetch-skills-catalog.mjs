@@ -24,6 +24,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const webRoot = join(__dirname, '..');
 const outPath = join(webRoot, 'src', 'data', 'skills.json');
 const pagesOutPath = join(webRoot, 'src', 'data', 'skill-pages.json');
+const indexOutPath = join(webRoot, 'src', 'data', 'skills-index.json');
 
 // Reads star counts from the previously-generated catalog so a regen in an
 // environment that can't reach api.github.com (e.g. behind a restrictive
@@ -135,6 +136,161 @@ const SOURCES = [
     branch: 'main',
     // Prisma keeps each skill folder at the repo root, not under skills/.
     skillsRoot: '',
+    excludeCategories: [],
+  },
+  {
+    id: 'mvanhorn',
+    name: 'Matt Van Horn',
+    org: 'mvanhorn',
+    repo: 'last30days-skill',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'palkan',
+    name: 'Vladimir Dementyev',
+    org: 'palkan',
+    repo: 'layered-rails-skills',
+    branch: 'master',
+    skillsRoot: 'layered-rails/skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'addyosmani',
+    name: 'Addy Osmani',
+    org: 'addyosmani',
+    repo: 'agent-skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'coreyhaines',
+    name: 'Corey Haines',
+    org: 'coreyhaines31',
+    repo: 'marketingskills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'k-dense',
+    name: 'K-Dense AI',
+    org: 'K-Dense-AI',
+    repo: 'scientific-agent-skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'impeccable',
+    name: 'Impeccable',
+    org: 'pbakaus',
+    repo: 'impeccable',
+    branch: 'main',
+    // Impeccable ships the same skill to many agent folders. plugin/skills holds one copy.
+    skillsRoot: 'plugin/skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'taste-skill',
+    name: 'Taste Skill',
+    org: 'Leonxlnx',
+    repo: 'taste-skill',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'emilkowalski',
+    name: 'Emil Kowalski',
+    org: 'emilkowalski',
+    repo: 'skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'cathrynlavery',
+    name: 'Cathryn Lavery',
+    org: 'cathrynlavery',
+    repo: 'diagram-design',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'ponytail',
+    name: 'Ponytail',
+    org: 'DietrichGebert',
+    repo: 'ponytail',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'payload',
+    name: 'Payload',
+    org: 'payloadcms',
+    repo: 'skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'huggingface',
+    name: 'Hugging Face',
+    org: 'huggingface',
+    repo: 'skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'cloudflare',
+    name: 'Cloudflare',
+    org: 'cloudflare',
+    repo: 'skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'supabase',
+    name: 'Supabase',
+    org: 'supabase',
+    repo: 'agent-skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'expo',
+    name: 'Expo',
+    org: 'expo',
+    repo: 'skills',
+    branch: 'main',
+    // Expo's stable skills. plugins/expo-experiments is left out.
+    skillsRoot: 'plugins/expo/skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'gemini',
+    name: 'Google Gemini',
+    org: 'google-gemini',
+    repo: 'gemini-skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'sentry',
+    name: 'Sentry',
+    org: 'getsentry',
+    repo: 'skills',
+    branch: 'main',
+    skillsRoot: 'skills',
     excludeCategories: [],
   },
 ];
@@ -379,6 +535,10 @@ async function main() {
   };
 
   writeFileSync(outPath, JSON.stringify(catalog, null, 2) + '\n');
+  // The /skills/ page bundles its data into client JS, so it gets a copy
+  // without the file manifests, which only the skill pages and the app use.
+  const index = { sources: sourceMeta, skills: allSkills.map(({ files, checksum, ...rest }) => rest) };
+  writeFileSync(indexOutPath, JSON.stringify(index, null, 2) + '\n');
   const sortedPages = Object.fromEntries(allSkills.map((skill) => [skill.id, pages[skill.id]]));
   writeFileSync(pagesOutPath, JSON.stringify(sortedPages, null, 2) + '\n');
   console.log(`\nWrote ${allSkills.length} skills from ${sourceMeta.length} sources to ${relative(webRoot, outPath)}`);
