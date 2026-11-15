@@ -12,6 +12,7 @@ const config: Config = {
   plugins: [
     require.resolve('./plugins/rawMarkdownPlugin'),
     require.resolve('./plugins/latestReleasePlugin'),
+    require.resolve('./plugins/releasesJsonPlugin'),
     require.resolve('./plugins/jsonLdPlugin'),
     require.resolve('./plugins/skillsPlugin'),
     require.resolve('./plugins/landingScreenshotsPlugin'),
