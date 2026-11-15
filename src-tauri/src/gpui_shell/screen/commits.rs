@@ -1719,7 +1719,10 @@ impl Render for CommitsView {
     self.scroll_to_commit(cx);
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
+      .id("workspace-commits")
       .debug_selector(|| "workspace-commits".into())
+      .role(gpui::Role::Group)
+      .aria_label("Commits")
       .relative()
       .size_full()
       .bg(p.background)
@@ -1743,45 +1746,51 @@ impl Render for CommitsView {
         cx.listener(|view, _, _, cx| view.end_drag(cx)),
       );
     if let (None, Some(err)) = (&self.history, self.history_error.clone()) {
-      return root.child(
-        div()
-          .size_full()
-          .flex()
-          .items_center()
-          .justify_center()
-          .child(
-            ui::EmptyState::failed("commits-error", "Couldn't load commits", err.clone(), &p)
-              .action(ui::error_actions(
-                "commits",
-                err,
-                Some(Box::new(cx.listener(|view, _, _, cx| {
-                  view.history_error = None;
-                  view.load(cx);
-                  cx.notify();
-                }))),
-                &p,
-              )),
-          ),
-      );
+      return root
+        .child(
+          div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+              ui::EmptyState::failed("commits-error", "Couldn't load commits", err.clone(), &p)
+                .action(ui::error_actions(
+                  "commits",
+                  err,
+                  Some(Box::new(cx.listener(|view, _, _, cx| {
+                    view.history_error = None;
+                    view.load(cx);
+                    cx.notify();
+                  }))),
+                  &p,
+                )),
+            ),
+        )
+        .test_support();
     }
     if self.history.is_none() {
-      return root.child(ui::delayed(
-        "commits-loading-row",
-        div()
-          .size_full()
-          .flex()
-          .items_center()
-          .justify_center()
-          .p_4()
-          .child(ui::Loading::new("commits-loading", &p).label("Loading commits…")),
-      ));
+      return root
+        .child(ui::delayed(
+          "commits-loading-row",
+          div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .p_4()
+            .child(ui::Loading::new("commits-loading", &p).label("Loading commits…")),
+        ))
+        .test_support();
     }
     if self.feed_is_empty() {
-      return root.child(
-        ui::EmptyState::new("commits-empty", "No commits yet", &p)
-          .icon(theme::ICON_COMMIT)
-          .message("Changes you commit will appear here."),
-      );
+      return root
+        .child(
+          ui::EmptyState::new("commits-empty", "No commits yet", &p)
+            .icon(theme::ICON_COMMIT)
+            .message("Changes you commit will appear here."),
+        )
+        .test_support();
     }
     let dialog = self.dialog_view(window, &p, cx);
     let confirm = confirm::render(Self::confirm_slot, self, window, &p, cx);
@@ -1790,6 +1799,7 @@ impl Render for CommitsView {
       .children(self.find_bar(&p, cx))
       .children(dialog)
       .children(confirm)
+      .test_support()
   }
 }
 
