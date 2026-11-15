@@ -215,7 +215,7 @@ fn review_comment(
   serde_json::from_value(serde_json::json!({
     "id": id, "repo_path": "/repo", "target_type": target.0, "target_id": target.1,
     "file_path": file, "hunk_id": null, "start_line": 1, "end_line": 1, "side": null,
-    "comment_text": "Say which API", "suggested_replacement": "Ship the REST API.",
+    "comment_text": format!("Say which API ({id})"), "suggested_replacement": "Ship the REST API.",
     "status": "open", "source": "local-agent", "created_at": "", "resolved_at": null,
     "quoted_text": "Ship the API."
   }))
@@ -270,7 +270,7 @@ fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
 fn linear_harness(cx: &mut TestAppContext, host: FakeHost) -> (Harness, Arc<FakeHost>) {
   let host = Arc::new(host);
   let mut h = Harness::with_host(cx, linear_route(), host.clone());
-  assert!(h.drawn("linear-panel"));
+  assert!(h.shows(Role::Group, "Linear"));
   (h, host)
 }
 
@@ -346,8 +346,8 @@ fn linear_lists_issues_and_kicks_one_off(cx: &mut TestAppContext) {
     .calls()
     .contains(&"read linear issues None".to_string()));
   assert!(host.calls().contains(&"read linear teams".to_string()));
-  assert!(h.drawn("linear-issue-1"));
-  assert!(h.drawn("linear-issue-2"));
+  assert!(h.shows(Role::ListItem, "Issue 1"));
+  assert!(h.shows(Role::ListItem, "Issue 2"));
   h.click("linear-kickoff-1");
   h.cx.run_until_parked();
   assert_eq!(
@@ -369,15 +369,15 @@ fn linear_lists_issues_and_kicks_one_off(cx: &mut TestAppContext) {
 
   // The row opens the page, which opens the issue in Linear and goes back.
   h.click("linear-issue-1");
-  assert!(h.drawn("linear-issue-page-1"));
-  assert!(!h.drawn("linear-issue-2"));
+  assert!(h.shows(Role::Article, "ENG-1 Issue 1"));
+  assert!(!h.shows(Role::ListItem, "Issue 2"));
   h.click("linear-issue-open");
   assert!(host
     .calls()
     .contains(&"open https://linear.app/x/ENG-1".to_string()));
   h.click("linear-issue-back");
-  assert!(!h.drawn("linear-issue-page-1"));
-  assert!(h.drawn("linear-issue-2"));
+  assert!(!h.shows(Role::Article, "ENG-1 Issue 1"));
+  assert!(h.shows(Role::ListItem, "Issue 2"));
 }
 
 /// One segmented control per toolbar row: List / Kanban is the toolbar's;
@@ -385,26 +385,29 @@ fn linear_lists_issues_and_kicks_one_off(cx: &mut TestAppContext) {
 #[gpui::test]
 fn linear_toolbar_has_one_segmented_control_and_a_view_picker(cx: &mut TestAppContext) {
   let (mut h, _) = linear_harness(cx, linear_host());
-  assert!(h.drawn("linear-modes"));
-  assert!(!h.drawn("linear-views"), "the views are not a tab strip");
-  assert!(h.drawn("linear-view-picker"));
+  assert!(h.shows(Role::TabList, "Layout"));
+  assert!(
+    !h.shows(Role::Tab, "Backlog"),
+    "the views are not a tab strip"
+  );
+  assert!(h.shows(Role::Button, "View: All issues"));
   pick_view(&mut h, "linear-view-picker", "Backlog");
   assert!(view(&mut h, |v| v.issue_view
     == crate::gpui_shell::screen::linear_data::IssueView::Backlog));
   h.click("linear-section-projects");
-  assert!(!h.drawn("linear-project-views"));
-  assert!(h.drawn("linear-project-view-picker"));
+  assert!(!h.shows(Role::Tab, "Active"));
+  assert!(h.shows(Role::Button, "View: All"));
 }
 
 #[gpui::test]
 fn linear_standard_views_and_filters_narrow_the_list(cx: &mut TestAppContext) {
   let (mut h, _) = linear_harness(cx, linear_host());
   pick_view(&mut h, "linear-view-picker", "My issues");
-  assert!(h.drawn("linear-issue-1"));
-  assert!(!h.drawn("linear-issue-2"));
+  assert!(h.shows(Role::ListItem, "Issue 1"));
+  assert!(!h.shows(Role::ListItem, "Issue 2"));
   pick_view(&mut h, "linear-view-picker", "Backlog");
-  assert!(!h.drawn("linear-issue-1"));
-  assert!(h.drawn("linear-issue-2"));
+  assert!(!h.shows(Role::ListItem, "Issue 1"));
+  assert!(h.shows(Role::ListItem, "Issue 2"));
   pick_view(&mut h, "linear-view-picker", "All issues");
 
   h.click("linear-issues-filter-trigger");
@@ -424,9 +427,9 @@ fn linear_standard_views_and_filters_narrow_the_list(cx: &mut TestAppContext) {
     .collect();
   assert_eq!(submenus, ["Assignee", "Priority", "Label", "Project"]);
   pick_in(&mut h, "Assignee", "Bo");
-  assert!(h.drawn("linear-filter-chip-assignee"));
-  assert!(!h.drawn("linear-issue-1"));
-  assert!(h.drawn("linear-issue-2"));
+  assert!(h.shows(Role::Group, "Assignee: Bo"));
+  assert!(!h.shows(Role::ListItem, "Issue 1"));
+  assert!(h.shows(Role::ListItem, "Issue 2"));
 
   // The menu shows what is picked.
   h.click("linear-issues-filter-trigger");
@@ -437,14 +440,14 @@ fn linear_standard_views_and_filters_narrow_the_list(cx: &mut TestAppContext) {
   assert_eq!(detail.as_deref(), Some("Bo"));
 
   h.click("linear-filter-clear-assignee");
-  assert!(!h.drawn("linear-filter-chip-assignee"));
-  assert!(h.drawn("linear-issue-1"));
+  assert!(!h.shows(Role::Group, "Assignee: Bo"));
+  assert!(h.shows(Role::ListItem, "Issue 1"));
 
   // A filter that matches nothing.
   pick_view(&mut h, "linear-view-picker", "My issues");
   h.click("linear-issues-filter-trigger");
   pick_in(&mut h, "Label", "bug");
-  assert!(h.drawn("linear-issue-1"));
+  assert!(h.shows(Role::ListItem, "Issue 1"));
 }
 
 #[gpui::test]
@@ -473,9 +476,20 @@ fn linear_team_selector_reads_that_teams_issues(cx: &mut TestAppContext) {
 fn linear_kanban_groups_issues_by_state(cx: &mut TestAppContext) {
   let (mut h, _) = linear_harness(cx, linear_host());
   h.click("linear-mode-kanban");
-  assert!(h.drawn("linear-kanban-column-Backlog"));
-  assert!(h.drawn("linear-kanban-column-Todo"));
-  assert!(!h.drawn("linear-issue-1"));
+  assert!(h.shows(Role::Group, "Backlog"));
+  assert!(h.shows(Role::Group, "Todo"));
+  // Issue 1 shows once: as a card in its column, not as a list row.
+  let page = h.rendered();
+  assert_eq!(
+    page
+      .query_all_by_role(by::role(Role::ListItem).name("Issue 1"))
+      .len(),
+    1
+  );
+  let todo = page.get_by_role(by::role(Role::Group).name("Todo"));
+  assert!(within(&todo)
+    .query_by_role(by::role(Role::ListItem).name("Issue 1"))
+    .is_some());
   h.click("linear-kanban-kickoff-2");
   h.cx.run_until_parked();
   assert!(matches!(
@@ -485,8 +499,8 @@ fn linear_kanban_groups_issues_by_state(cx: &mut TestAppContext) {
   assert!(view(&mut h, |v| v.open_issue.is_none()));
   // A card opens the issue's page.
   h.click("linear-kanban-card-2");
-  assert!(h.drawn("linear-issue-page-2"));
-  assert!(!h.drawn("linear-kanban-column-Todo"));
+  assert!(h.shows(Role::Article, "ENG-2 Issue 2"));
+  assert!(!h.shows(Role::Group, "Todo"));
 }
 
 #[gpui::test]
@@ -499,9 +513,9 @@ fn linear_issue_shows_its_comments_and_starts_a_review(cx: &mut TestAppContext) 
   );
   let (mut h, host) = linear_harness(cx, host);
   h.click("linear-issue-1");
-  assert!(h.drawn("linear-issue-page-1"));
+  assert!(h.shows(Role::Article, "ENG-1 Issue 1"));
   assert!(host.calls().contains(&"read linear comments 1".to_string()));
-  assert!(h.drawn("linear-comment-c1"));
+  assert!(h.shows(Role::Article, "Bo: Why the API?"));
   h.click("linear-start-review-linear_issue-1");
   h.cx.run_until_parked();
   assert!(
@@ -529,7 +543,7 @@ fn linear_issue_shows_its_comments_and_starts_a_review(cx: &mut TestAppContext) 
     .contains(&linear_data::Commented::Issue("1".into()))));
   // Back to the list closes the comments.
   h.click("linear-issue-back");
-  assert!(!h.drawn("linear-comment-c1"));
+  assert!(!h.shows(Role::Article, "Bo: Why the API?"));
 }
 
 #[gpui::test]
@@ -541,12 +555,21 @@ fn linear_agent_review_cards_apply_and_resolve(cx: &mut TestAppContext) {
   ];
   let (mut h, host) = linear_harness(cx, host);
   h.click("linear-issue-1");
-  assert!(h.drawn("linear-agent-review-body"));
-  assert!(h.drawn("linear-agent-apply-r1"));
-  assert!(h.drawn("linear-agent-apply-r2"));
+  assert!(h.shows(Role::Group, "Agent review"));
+  // One Apply on each card.
+  assert_eq!(
+    h.rendered()
+      .query_all_by_role(by::role(Role::Button).name("Apply"))
+      .len(),
+    2
+  );
   // The same card as Settings' prompt edits, plus Resolve.
-  assert!(h.drawn("linear-agent-header"));
-  assert!(h.drawn("linear-agent-dismiss-r1"));
+  assert!(h.shows(Role::Heading, "Local Description"));
+  let page = h.rendered();
+  let r1 = page.get_by_role(by::role(Role::Article).name("Say which API (r1)"));
+  assert!(within(&r1)
+    .query_by_role(by::role(Role::Button).name("Dismiss"))
+    .is_some());
   let resolve = h
     .cx
     .debug_bounds("linear-agent-resolve-r1")
@@ -570,17 +593,17 @@ fn linear_agent_review_cards_apply_and_resolve(cx: &mut TestAppContext) {
   assert!(host
     .calls()
     .contains(&"resolve agent comment r2".to_string()));
-  assert!(!h.drawn("linear-agent-resolve-r2"));
+  assert!(!h.shows(Role::Heading, "Local Comment by Bo"));
 }
 
 #[gpui::test]
 fn linear_projects_show_details_and_documents(cx: &mut TestAppContext) {
   let (mut h, host) = linear_harness(cx, linear_host());
   h.click("linear-section-projects");
-  assert!(h.drawn("linear-projects-section"));
+  assert!(h.shows(Role::Group, "Projects"));
   assert!(host.calls().contains(&"read linear projects".to_string()));
   // The first project shows until another is picked.
-  assert!(h.drawn("linear-project-detail"));
+  assert!(h.shows(Role::Article, "Project p1"));
   assert!(host
     .calls()
     .contains(&"read linear documents p1".to_string()));
@@ -594,16 +617,16 @@ fn linear_projects_show_details_and_documents(cx: &mut TestAppContext) {
     .contains(&"read linear documents p2".to_string()));
 
   pick_view(&mut h, "linear-project-view-picker", "Active");
-  assert!(h.drawn("linear-project-item-p1"));
-  assert!(!h.drawn("linear-project-item-p2"));
+  assert!(h.shows(Role::Button, "Project p1"));
+  assert!(!h.shows(Role::Button, "Project p2"));
 
   h.click("linear-document-item-d1");
-  assert!(h.drawn("linear-document-dialog"));
+  assert!(h.shows(Role::Dialog, "Spec"));
   assert!(host
     .calls()
     .contains(&"read linear comments d1".to_string()));
   h.click_backdrop();
-  assert!(!h.drawn("linear-document-dialog"));
+  assert!(!h.shows(Role::Dialog, "Spec"));
 
   h.click("linear-project-open");
   assert!(host
@@ -616,7 +639,7 @@ fn linear_without_a_key_says_how_to_connect(cx: &mut TestAppContext) {
   let mut host = linear_host();
   host.linear.failing = true;
   let (mut h, _) = linear_harness(cx, host);
-  assert!(!h.drawn("linear-no-issues"));
+  assert!(!h.shows(Role::Status, "No issues"));
   let page = screen(&mut h);
   expect(page.get_by_text(crate::linear::NOT_CONNECTED)).to_be_visible();
   page
@@ -630,9 +653,9 @@ fn linear_without_a_key_says_how_to_connect(cx: &mut TestAppContext) {
     }]
   );
   // The whole view says it: no tabs to switch to, no team to pick.
-  assert!(h.drawn("linear-connection-state"));
-  assert!(!h.drawn("linear-section-projects"));
-  assert!(!h.drawn("linear-team-selector"));
+  assert!(h.shows(Role::Status, "Connect Linear"));
+  assert!(!h.shows(Role::Tab, "Projects"));
+  assert!(!h.shows(Role::Button, "All teams"));
 }
 
 #[gpui::test]
@@ -640,14 +663,14 @@ fn linear_shows_when_no_issues_match(cx: &mut TestAppContext) {
   let mut host = linear_host();
   host.linear.issues.clear();
   let (mut h, _) = linear_harness(cx, host);
-  assert!(h.drawn("linear-no-issues"));
+  assert!(h.shows(Role::Status, "No issues"));
 }
 
 #[gpui::test]
 fn linear_creates_an_issue_in_the_shown_team(cx: &mut TestAppContext) {
   let (mut h, host) = linear_harness(cx, linear_host());
   h.click("linear-new-issue");
-  assert!(h.drawn("linear-new-issue-form"));
+  assert!(h.shows(Role::Form, "New issue"));
   // No title, no create.
   h.click("linear-new-issue-submit");
   h.cx.run_until_parked();
@@ -662,7 +685,7 @@ fn linear_creates_an_issue_in_the_shown_team(cx: &mut TestAppContext) {
     .unwrap_or_else(|| panic!("{calls:?}"));
   // The list is read again and the new issue is the one inspected.
   assert!(calls[created..].contains(&"read linear issues None".to_string()));
-  assert!(!h.drawn("linear-new-issue-form"));
+  assert!(!h.shows(Role::Form, "New issue"));
   assert_eq!(view(&mut h, |v| v.open_issue.clone()), Some("9".into()));
 }
 
@@ -672,7 +695,7 @@ fn linear_new_issue_cancel_closes_the_form(cx: &mut TestAppContext) {
   h.click("linear-new-issue");
   type_into(&mut h, "linear-new-issue-title", "Never mind");
   h.click("linear-new-issue-cancel");
-  assert!(!h.drawn("linear-new-issue-form"));
+  assert!(!h.shows(Role::Form, "New issue"));
   assert!(!host.calls().iter().any(|c| c.starts_with("create")));
 }
 
@@ -681,7 +704,7 @@ fn linear_edits_the_inspected_issue(cx: &mut TestAppContext) {
   let (mut h, host) = linear_harness(cx, linear_host());
   h.click("linear-issue-1");
   h.click("linear-issue-edit");
-  assert!(h.drawn("linear-issue-edit-form"));
+  assert!(h.shows(Role::Form, "Edit issue"));
   type_into(&mut h, "linear-issue-edit-title", " v2");
   h.click("linear-issue-edit-save");
   h.cx.run_until_parked();
@@ -691,13 +714,13 @@ fn linear_edits_the_inspected_issue(cx: &mut TestAppContext) {
     .position(|c| c == "update linear issue 1 \"Issue 1 v2\" \"Ship the API.\"")
     .unwrap_or_else(|| panic!("{calls:?}"));
   assert!(calls[updated..].contains(&"read linear issues None".to_string()));
-  assert!(!h.drawn("linear-issue-edit-form"));
-  assert!(h.drawn("linear-issue-page-1"));
+  assert!(!h.shows(Role::Form, "Edit issue"));
+  assert!(h.shows(Role::Article, "ENG-1 Issue 1"));
 
   // Cancel leaves Linear alone.
   h.click("linear-issue-edit");
   h.click("linear-issue-edit-cancel");
-  assert!(!h.drawn("linear-issue-edit-form"));
+  assert!(!h.shows(Role::Form, "Edit issue"));
   assert_eq!(
     host
       .calls()
@@ -713,9 +736,9 @@ fn linear_deletes_the_inspected_issue_after_confirming(cx: &mut TestAppContext) 
   let (mut h, host) = linear_harness(cx, linear_host());
   h.click("linear-issue-1");
   h.click("linear-issue-delete");
-  assert!(h.drawn("linear-delete-dialog"));
+  assert!(h.shows(Role::Dialog, "Delete ENG-1?"));
   h.click("linear-delete-cancel");
-  assert!(!h.drawn("linear-delete-dialog"));
+  assert!(!h.shows(Role::Dialog, "Delete ENG-1?"));
   assert!(!host.calls().iter().any(|c| c.starts_with("delete")));
 
   h.click("linear-issue-delete");
@@ -727,9 +750,9 @@ fn linear_deletes_the_inspected_issue_after_confirming(cx: &mut TestAppContext) 
     .position(|c| c == "delete linear issue 1")
     .unwrap_or_else(|| panic!("{calls:?}"));
   assert!(calls[deleted..].contains(&"read linear issues None".to_string()));
-  assert!(!h.drawn("linear-delete-dialog"));
+  assert!(!h.shows(Role::Dialog, "Delete ENG-1?"));
   assert_eq!(view(&mut h, |v| v.open_issue.clone()), None);
-  assert!(h.drawn("linear-issue-1"));
+  assert!(h.shows(Role::ListItem, "Issue 1"));
 }
 
 #[test]
@@ -747,19 +770,22 @@ fn linear_document_comments_show_at_the_paragraph_they_quote(cx: &mut TestAppCon
     .linear
     .comments
     .push(("d1".into(), comment("c2", Some("Second part"))));
-  host
-    .linear
-    .comments
-    .push(("d1".into(), comment("c3", None)));
+  host.linear.comments.push((
+    "d1".into(),
+    LinearComment {
+      body: "Looks good.".into(),
+      ..comment("c3", None)
+    },
+  ));
   let (mut h, _) = linear_harness(cx, host);
   h.click("linear-section-projects");
   // A project without comments shows only its text.
-  assert!(h.drawn("linear-project-detail"));
-  assert!(!h.drawn("linear-comments-column"));
+  assert!(h.shows(Role::Article, "Project p1"));
+  assert!(!h.shows(Role::Group, "Comments"));
 
   h.click("linear-document-item-d1");
-  assert!(h.drawn("linear-comment-c2"));
-  assert!(h.drawn("linear-comment-c3"));
+  assert!(h.shows(Role::Article, "Bo: Why the API?"));
+  assert!(h.shows(Role::Article, "Bo: Looks good."));
   let bounds = |h: &mut Harness, selector| h.cx.debug_bounds(selector).expect(selector);
   let quoted = bounds(&mut h, "linear-comment-c2");
   let column = bounds(&mut h, "linear-comments-column");
@@ -773,23 +799,32 @@ fn linear_document_comments_show_at_the_paragraph_they_quote(cx: &mut TestAppCon
 fn linear_long_comment_thread_folds_the_middle_and_expands_in_place(cx: &mut TestAppContext) {
   let mut host = linear_host();
   host.linear.comments = (0..8)
-    .map(|i| ("1".to_string(), comment(&format!("c{i}"), None)))
+    .map(|i| {
+      let body = format!("Point {i}");
+      (
+        "1".to_string(),
+        LinearComment {
+          body,
+          ..comment(&format!("c{i}"), None)
+        },
+      )
+    })
     .collect();
   let (mut h, _) = linear_harness(cx, host);
   h.click("linear-issue-1");
   h.cx.run_until_parked();
   let shown = |h: &mut Harness| -> Vec<usize> {
     (0..8)
-      .filter(|i| h.drawn(super::changes_large::leak(format!("linear-comment-c{i}"))))
+      .filter(|i| h.shows(Role::Article, &format!("Bo: Point {i}")))
       .collect()
   };
   // The first comment and the newest three; four are behind the fold.
   assert_eq!(shown(&mut h), [0, 5, 6, 7]);
-  assert!(h.drawn("linear-comments-show-earlier"));
+  assert!(h.shows(Role::Button, "Show 4 earlier comments"));
   h.click("linear-comments-show-earlier");
   h.cx.run_until_parked();
   assert_eq!(shown(&mut h), (0..8).collect::<Vec<_>>());
-  assert!(!h.drawn("linear-comments-show-earlier"));
+  assert!(!h.shows(Role::Button, "Show 4 earlier comments"));
 }
 
 /// Round 7 `integrations-scale` measurements. Run with `cargo test
@@ -892,9 +927,9 @@ fn linear_delete_dialog_cancels_on_escape_and_deletes_on_enter(cx: &mut TestAppC
   let (mut h, host) = linear_harness(cx, linear_host());
   h.click("linear-issue-1");
   h.click("linear-issue-delete");
-  assert!(h.drawn("linear-delete-dialog"));
+  assert!(h.shows(Role::Dialog, "Delete ENG-1?"));
   h.cx.simulate_keystrokes("escape");
-  assert!(!h.drawn("linear-delete-dialog"));
+  assert!(!h.shows(Role::Dialog, "Delete ENG-1?"));
   h.click("linear-issue-delete");
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
@@ -906,12 +941,12 @@ fn linear_document_dialog_closes_on_escape_and_from_its_x(cx: &mut TestAppContex
   let (mut h, _) = linear_harness(cx, linear_host());
   h.click("linear-section-projects");
   h.click("linear-document-item-d1");
-  assert!(h.drawn("linear-document-dialog"));
+  assert!(h.shows(Role::Dialog, "Spec"));
   h.cx.simulate_keystrokes("escape");
-  assert!(!h.drawn("linear-document-dialog"));
+  assert!(!h.shows(Role::Dialog, "Spec"));
   h.click("linear-document-item-d1");
   h.click("linear-document-dialog-close");
-  assert!(!h.drawn("linear-document-dialog"));
+  assert!(!h.shows(Role::Dialog, "Spec"));
 }
 
 #[gpui::test]

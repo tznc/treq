@@ -11,7 +11,6 @@ ignores:
   - "src-tauri/src/gpui_shell/screen/tests/changes_screen.rs"
   - "src-tauri/src/gpui_shell/screen/tests/code_screen.rs"
   - "src-tauri/src/gpui_shell/screen/tests/dialogs.rs"
-  - "src-tauri/src/gpui_shell/screen/tests/linear_view.rs"
   - "src-tauri/src/gpui_shell/screen/tests/terminal_screen.rs"
 rule:
   kind: macro_invocation
