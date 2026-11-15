@@ -52,6 +52,6 @@ Treq can open a [workspace](/docs/concepts/workspaces) from an existing pull req
 
 ## Related
 
-- [Fix "fatal: branch is already used by worktree"](./branch-already-used-by-worktree)
-- [Should Git worktrees go inside the repo or next to it?](./nested-or-sibling-worktrees)
+- [Fix "fatal: branch is already used by worktree"](./branch-already-used-by-worktree.md)
+- [Should Git worktrees go inside the repo or next to it?](./nested-or-sibling-worktrees.md)
 - [Git Worktree vs Clone](/learn/concepts/git/git-worktrees-vs-clones)

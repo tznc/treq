@@ -59,6 +59,6 @@ Treq nests [workspaces](/docs/concepts/workspaces) under `.treq/workspaces/`. It
 
 ## Related
 
-- [Worktree or clone to review a pull request?](./worktree-or-clone-to-review-a-pr)
-- [Remove a locked git worktree](./remove-locked-worktree)
+- [Worktree or clone to review a pull request?](./worktree-or-clone-to-review-a-pr.md)
+- [Remove a locked git worktree](./remove-locked-worktree.md)
 - [What are Git Worktrees?](/learn/concepts/git/git-worktrees)
