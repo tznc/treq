@@ -29,5 +29,5 @@ A worktree checks out tracked files only. `node_modules`, `.env` files and build
 
 ## Related
 
-- [Stop two coding agents from overwriting each other](./agents-overwriting-each-other)
+- [Stop two coding agents from overwriting each other](./agents-overwriting-each-other.md)
 - [Git Worktrees vs Clones for Agents](/learn/how-to/git-worktrees-vs-clones-for-agents)

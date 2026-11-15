@@ -37,5 +37,5 @@ Each [Treq workspace](/docs/concepts/workspaces) gets its own branch when you cr
 
 ## Related
 
-- [Remove a locked git worktree](./remove-locked-worktree)
+- [Remove a locked git worktree](./remove-locked-worktree.md)
 - [Git Worktrees vs Clones](/learn/concepts/git/git-worktrees-vs-clones)
