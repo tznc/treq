@@ -16,6 +16,9 @@ const JSON_MEDIA_TYPE: &str = "application/vnd.github+json";
 /// token it cached and try once more with a fresh one.
 pub const UNAUTHORIZED: &str = "github_unauthorized";
 
+/// Pages of comments read for one issue or pull request, 100 each.
+const MAX_COMMENT_PAGES: usize = 10;
+
 /// A GitHub API client authenticated as one user.
 pub struct GithubHttp {
   client: reqwest::Client,
@@ -154,6 +157,8 @@ pub async fn github_read(
     GithubQuery::SearchOpenPrs { mine, query, limit } => {
       to_json(search_open_prs(gh, full_name, mine, &query, limit).await?)
     }
+    GithubQuery::Issue { number } => to_json(issue(gh, full_name, number).await?),
+    GithubQuery::Pr { number } => to_json(pr(gh, full_name, number).await?),
     // Answered by the host's `gh` until it is read over HTTPS here.
     other => Err(format!(
       "unsupported_query: {other:?} is not read over HTTPS yet"
@@ -321,6 +326,88 @@ fn gh_shape(mut node: Value) -> Value {
   }
   fix_author(&mut node);
   node
+}
+
+/// The fields of a comment `gh ... view --json comments` reads, with the
+/// reactions `fill_comment_reactions` adds.
+const COMMENT_FIELDS: &str = "id body createdAt author { login } \
+  reactionGroups { content viewerHasReacted reactors { totalCount } }";
+
+/// The issue or pull request (`kind`) `number` with all its comments, read
+/// with `fields`.
+async fn view(
+  gh: &GithubHttp,
+  full_name: &str,
+  kind: &str,
+  number: u64,
+  fields: &str,
+) -> Result<Value, String> {
+  let (owner, name) = owner_and_name(full_name)?;
+  let query = format!(
+    "query($owner: String!, $name: String!, $number: Int!, $after: String) {{ \
+       repository(owner: $owner, name: $name) {{ {kind}(number: $number) {{ {fields} \
+         comments(first: 100, after: $after) {{ nodes {{ {COMMENT_FIELDS} }} \
+           pageInfo {{ hasNextPage endCursor }} }} }} }} }}"
+  );
+  let mut item: Option<Value> = None;
+  let mut comments = Vec::new();
+  let mut after: Option<String> = None;
+  for _ in 0..MAX_COMMENT_PAGES {
+    let variables = json!({ "owner": owner, "name": name, "number": number, "after": after });
+    let mut response = gh.graphql(&query, variables).await?;
+    let mut node = response
+      .pointer_mut(&format!("/data/repository/{kind}"))
+      .map(Value::take)
+      .unwrap_or_default();
+    if node.is_null() {
+      return Err(format!("GitHub has no {kind} #{number} in {full_name}"));
+    }
+    let page = node
+      .get_mut("comments")
+      .map(Value::take)
+      .unwrap_or_default();
+    comments.extend(page["nodes"].as_array().cloned().unwrap_or_default());
+    item.get_or_insert(node);
+    match page["pageInfo"]["endCursor"].as_str() {
+      Some(cursor) if page["pageInfo"]["hasNextPage"].as_bool() == Some(true) => {
+        after = Some(cursor.to_string());
+      }
+      _ => break,
+    }
+  }
+  let mut item = item.ok_or_else(|| format!("GitHub has no {kind} #{number} in {full_name}"))?;
+  if let Some(object) = item.as_object_mut() {
+    object.insert("comments".into(), Value::Array(comments));
+  }
+  Ok(gh_shape(item))
+}
+
+/// Keeps the reactions someone is on, as `fill_comment_reactions` does.
+fn shown_comment_reactions(comments: Option<&mut Vec<github::GhIssueComment>>) {
+  for comment in comments.into_iter().flatten() {
+    comment.reactions = github::shown_reactions(std::mem::take(&mut comment.reactions));
+  }
+}
+
+/// `github_cli::issue`: `gh issue view --json ...` with reactions filled in.
+async fn issue(gh: &GithubHttp, full_name: &str, number: u64) -> Result<GhIssue, String> {
+  let fields = "number title state url body createdAt updatedAt author { login } \
+    labels(first: 100) { nodes { name color } }";
+  let mut issue: GhIssue = parse(view(gh, full_name, "issue", number, fields).await?)?;
+  shown_comment_reactions(issue.comments.as_mut());
+  Ok(issue)
+}
+
+/// `github_cli::pr`: `gh pr view --json ...` with reactions filled in.
+async fn pr(gh: &GithubHttp, full_name: &str, number: u64) -> Result<GhPullRequest, String> {
+  let fields = format!(
+    "{LISTED_PR_FIELDS} body reviewDecision \
+     latestReviews(first: 100) {{ nodes {{ author {{ login }} state }} }} \
+     reviews(first: 100) {{ nodes {{ author {{ login }} state submittedAt }} }}"
+  );
+  let mut pr: GhPullRequest = parse(view(gh, full_name, "pullRequest", number, &fields).await?)?;
+  shown_comment_reactions(pr.comments.as_mut());
+  Ok(pr)
 }
 
 #[cfg(test)]
