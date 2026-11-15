@@ -95,6 +95,8 @@ pub struct SheetAction {
   pub id: SharedString,
   pub label: SharedString,
   pub danger: bool,
+  /// The current value, in a sheet that picks one (a state filter).
+  pub selected: bool,
   pub action: Action,
 }
 
@@ -108,8 +110,15 @@ impl SheetAction {
       id: id.into(),
       label: label.into(),
       danger: false,
+      selected: false,
       action: Rc::new(action),
     }
+  }
+
+  /// Marks the current value, in the one selected style.
+  pub fn selected(mut self, selected: bool) -> Self {
+    self.selected = selected;
+    self
   }
 
   /// Red, for an action that destroys. Put it last.
@@ -164,6 +173,7 @@ impl RenderOnce for ActionSheet {
           .role(Role::MenuItem)
           .label(entry.label.clone())
           .min_h(zpx(ACTION_ROW_HEIGHT))
+          .selected(entry.selected)
           .when(entry.danger, |row| row.text_color(p.destructive))
           .child(entry.label.clone())
           .on_click(move |_, window, cx| {
@@ -228,6 +238,16 @@ mod tests {
     assert_eq!(cta.size.width, px(390. - 24.));
     cx.simulate_click(rename.center(), gpui::Modifiers::none());
     assert_eq!(*log.borrow(), vec!["dismiss", "rename"]);
+  }
+
+  #[test]
+  fn a_current_choice_is_selected() {
+    assert!(!SheetAction::new("o", "Open", |_, _| {}).selected);
+    assert!(
+      SheetAction::new("o", "Open", |_, _| {})
+        .selected(true)
+        .selected
+    );
   }
 
   #[test]
