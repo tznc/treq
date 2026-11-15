@@ -36,6 +36,9 @@ use crate::gpui_shell::{
   ui::{self, Button, Size, TextSize, Tone, Variant},
 };
 
+mod team;
+pub use team::{InviteRow, MemberRow, OrgCard, TeamSection};
+
 /// The repository setting the Linear API key is stored under.
 const LINEAR_API_KEY: &str = "linear_api_key";
 /// Where Linear users create a personal API key.
@@ -282,6 +285,8 @@ pub struct SignedIn {
   pub cloud_profile: Option<CloudProfileSection>,
   /// The cloud settings of each Team organization the user owns.
   pub org_cloud: Vec<OrgCloudSection>,
+  /// "Teams": the user's organizations, their members and invites.
+  pub team: Option<TeamSection>,
   /// The delete-account confirmation, while it is open.
   pub delete_account: Option<DeleteAccountDialog>,
 }
@@ -548,6 +553,10 @@ pub(super) struct State {
   linear_oauth_loading: bool,
   /// The cloud workspace was read for this sign-in.
   cloud_read: bool,
+  /// The user's organizations, once read for this sign-in, and whether a
+  /// read runs.
+  team: Option<Result<crate::core::teams::TeamData, String>>,
+  team_loading: bool,
   callback_url: String,
   /// "No token found in URL", from the last Go.
   callback_error: Option<String>,
@@ -1138,6 +1147,7 @@ impl SettingsView {
       provider_keys,
       cloud_profile,
       org_cloud,
+      team: Some(team::section(state.team.as_ref())),
       name: user.name.clone(),
       email: user.email.clone(),
       pro,
@@ -1396,6 +1406,7 @@ impl SettingsView {
       self.account.github = None;
       LAST_GITHUB.with(|last| *last.borrow_mut() = None);
       self.account.cloud_read = false;
+      self.account.team = None;
     }
     self.sync_avatar(cx);
     if !signed_in || self.account.rust.loading {
@@ -1408,6 +1419,9 @@ impl SettingsView {
     }
     if self.route.tab == Tab::Integrations && self.account.github.is_none() {
       self.load_github(cx);
+    }
+    if self.route.tab == Tab::Account && self.account.team.is_none() && !self.account.team_loading {
+      self.load_team(cx);
     }
   }
 
@@ -3145,6 +3159,7 @@ impl SettingsView {
       .iter()
       .map(|org| self.org_cloud(org, p, window, cx))
       .collect();
+    let teams = s.team.as_ref().and_then(|t| Self::teams(t, p));
     div()
       .flex()
       .flex_col()
@@ -3156,6 +3171,7 @@ impl SettingsView {
       .children(team_profile)
       .children(org_cloud)
       .children(provider_keys)
+      .children(teams)
       .child(
         div().flex().child(
           Button::new("account-sign-out", p)
