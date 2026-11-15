@@ -313,6 +313,25 @@ pub async fn is_stale() -> bool {
   }
 }
 
+/// Deletes the account's Treq Cloud machine (`remote-instance` "delete"),
+/// then drops this device's connection to it and its terminals.
+pub async fn delete(instance_id: String) -> Result<(), String> {
+  let backend = backend::get();
+  let key = format!("delete-{instance_id}-{}", uuid::Uuid::new_v4());
+  control_plane::delete(&backend.supabase, &instance_id, &key)
+    .await
+    .map_err(|e| e.to_string())?;
+  stop();
+  if let Some(connection) = backend.remove_connection(backend::MANAGED_MACHINE) {
+    backend.pool.mark_dead(&connection.endpoint).await;
+    backend
+      .ptys
+      .close_all_for_endpoint(&connection.endpoint.id)
+      .await;
+  }
+  Ok(())
+}
+
 /// Stops renewal and relay-token sync for the current managed connection.
 pub fn stop() {
   let mut tasks = TASKS.lock_or_recover();

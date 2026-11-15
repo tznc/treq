@@ -19,6 +19,7 @@ use treq_ui::{Dot, Tone};
 
 use super::{model, screens, widgets, Machine, MachineState, MachineStatus};
 use crate::core::auth::OAuthProvider;
+use crate::core::control_plane::ManagedInstance;
 use crate::core::pty_remote_supervisor::PtyBackend;
 use crate::mobile::{
   backend::MANAGED_MACHINE,
@@ -69,6 +70,12 @@ fn status(state: &MachineState) -> (Option<Tone>, Option<String>) {
 fn status_word(state: &MachineState) -> Option<String> {
   let shown = state.status.is_connecting() || state.status == MachineStatus::Ready;
   status(state).1.filter(|_| shown)
+}
+
+/// Whether the cloud card offers Delete: the account has a machine, in any
+/// state (a failed one above all) but one already going away.
+fn can_delete(instance: Option<&ManagedInstance>) -> bool {
+  instance.is_some_and(|i| !matches!(i.status.as_str(), "deleting" | "deleted"))
 }
 
 /// Whether machine `id` is the one open beside the list (`beside`), as
@@ -277,9 +284,32 @@ impl HomeScreen {
         .map(|detail| detail.trim().to_string()),
       _ => None,
     };
+    let deletable = can_delete(model.cloud_instance.as_ref());
+    let busy = model.machine(MANAGED_MACHINE).status.is_connecting();
     let row = self.machine_row(Machine::Managed, "Cloud machine".into(), None, None, cx);
     section
       .child(widgets::card(cx).child(row))
+      .when(deletable, |section| {
+        section.child(
+          h_flex().child(
+            Button::new("delete-cloud-machine")
+              .danger()
+              .label("Delete machine…")
+              .disabled(busy)
+              .on_click(|_, _, cx| {
+                screens::ask_then(
+                  screens::Op::DeleteMachine,
+                  "Delete the cloud machine?",
+                  "Permanently deletes the machine and everything on it: cloned repositories, uncommitted changes and agent sessions. You can create a new one afterwards.",
+                  "Delete machine",
+                  super::delete_cloud_machine,
+                  cx,
+                )
+              })
+              .touch(),
+          ),
+        )
+      })
       .when_some(secure_storage, |section, detail| {
         section.child(
           Alert::warning("secure-storage", detail)
@@ -667,6 +697,22 @@ mod tests {
     assert!(overview_layout(px(1024.), false));
     assert!(!overview_layout(px(1024.), true));
     assert!(!overview_layout(px(390.), false));
+  }
+
+  fn instance(status: &str) -> ManagedInstance {
+    serde_json::from_value(serde_json::json!({"instance_id": "i1", "status": status})).unwrap()
+  }
+
+  /// A machine in any state can be deleted, a failed one above all; one
+  /// already going away cannot.
+  #[core::prelude::v1::test]
+  fn offers_delete_whenever_a_cloud_machine_exists() {
+    assert!(!can_delete(None));
+    assert!(can_delete(Some(&instance("failed"))));
+    assert!(can_delete(Some(&instance("ready"))));
+    assert!(can_delete(Some(&instance("suspended"))));
+    assert!(!can_delete(Some(&instance("deleting"))));
+    assert!(!can_delete(Some(&instance("deleted"))));
   }
 
   #[core::prelude::v1::test]

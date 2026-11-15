@@ -34,6 +34,7 @@ use gpui_kit::{
 use std::collections::HashMap;
 
 use crate::core::auth::OAuthProvider;
+use crate::core::control_plane::{self, ManagedInstance};
 use crate::core::remote::RemoteHostCheck;
 
 use crate::mobile::{
@@ -64,6 +65,9 @@ pub struct AppModel {
   pub auth_notice: Option<String>,
   /// The machine the screens act on, if any.
   pub connection: Option<Connection>,
+  /// The account's Treq Cloud machine as the control plane last reported
+  /// it, in any state; `None` when there is none (or before it is read).
+  pub cloud_instance: Option<ManagedInstance>,
   /// Each machine's state this session, by machine id
   /// ([`MANAGED_MACHINE`] or an SSH host's record id).
   pub machines: HashMap<String, MachineState>,
@@ -89,6 +93,21 @@ impl AppModel {
 
   fn set_status(&mut self, id: &str, status: MachineStatus) {
     self.machines.entry(id.to_string()).or_default().status = status;
+  }
+
+  /// Forgets the Treq Cloud machine once it is deleted, so the card offers
+  /// a new one. Returns whether it was the machine the screens acted on.
+  fn forget_cloud_machine(&mut self) -> bool {
+    self.cloud_instance = None;
+    self.machines.remove(MANAGED_MACHINE);
+    let was_active = self
+      .connection
+      .as_ref()
+      .is_some_and(|c| c.kind == ConnectionKind::Managed);
+    if was_active {
+      self.connection = None;
+    }
+    was_active
   }
 }
 
@@ -400,13 +419,22 @@ impl Root {
 
   fn handle(&mut self, event: AppEvent, _window: &mut Window, cx: &mut Context<Self>) {
     match event {
-      AppEvent::Auth(user) => self.model.update(cx, |m, cx| {
-        if user.is_some() {
-          m.auth_notice = None;
+      AppEvent::Auth(user) => {
+        let signed_in = self.model.update(cx, |m, cx| {
+          let changed = m.user != user;
+          if user.is_some() {
+            m.auth_notice = None;
+          } else {
+            m.cloud_instance = None;
+          }
+          m.user = user;
+          cx.notify();
+          changed && m.user.is_some()
+        });
+        if signed_in {
+          refresh_cloud(cx);
         }
-        m.user = user;
-        cx.notify();
-      }),
+      }
       AppEvent::AuthToken(token) => {
         self.model.update(cx, |m, cx| {
           m.auth_busy = true;
@@ -905,6 +933,66 @@ pub fn connect(machine: Machine, open: bool, cx: &mut App) {
         cx.notify();
       }),
     }
+    // A connect can create the machine, or find it failed.
+    if id == MANAGED_MACHINE {
+      cx.update(refresh_cloud);
+    }
+  })
+  .detach();
+}
+
+/// Reads the account's Treq Cloud machine, for the card's Delete.
+pub fn refresh_cloud(cx: &mut App) {
+  let model = model(cx);
+  let status =
+    backend::spawn(async { control_plane::instance_status(&backend::get().supabase).await });
+  cx.spawn(async move |cx| {
+    if let Ok(Ok(status)) = status.await {
+      model.update(cx, |m, cx| {
+        m.cloud_instance = status.instance;
+        cx.notify();
+      });
+    }
+  })
+  .detach();
+}
+
+/// Deletes the account's Treq Cloud machine; the card then offers a new one.
+pub fn delete_cloud_machine(cx: &mut App) {
+  let model = model(cx);
+  let Some(instance_id) = model
+    .read(cx)
+    .cloud_instance
+    .as_ref()
+    .map(|i| i.instance_id.clone())
+  else {
+    return;
+  };
+  model.update(cx, |m, cx| {
+    m.set_status(
+      MANAGED_MACHINE,
+      MachineStatus::Connecting("Deleting the machine"),
+    );
+    cx.notify();
+  });
+  let result = backend::spawn(managed::delete(instance_id));
+  cx.spawn(async move |cx| {
+    let Ok(result) = result.await else { return };
+    let was_active = model.update(cx, |m, cx| {
+      let was_active = match result {
+        Ok(()) => m.forget_cloud_machine(),
+        Err(error) => {
+          m.set_status(MANAGED_MACHINE, MachineStatus::Failed(error));
+          false
+        }
+      };
+      cx.notify();
+      was_active
+    });
+    if was_active {
+      cx.update(nav::home);
+    }
+    cx.update(refresh_cloud);
   })
   .detach();
 }
@@ -1149,8 +1237,27 @@ impl Root {
 
 #[cfg(test)]
 mod tests {
-  use super::{is_landing, panes, split_backs};
+  use super::{is_landing, panes, split_backs, AppModel, MachineStatus, MANAGED_MACHINE};
   use gpui_kit::px;
+
+  /// After a delete the card offers a fresh machine: no instance, no
+  /// leftover error, and an SSH host's state untouched.
+  #[test]
+  fn forgets_the_deleted_cloud_machine() {
+    let mut model = AppModel {
+      cloud_instance: serde_json::from_value(
+        serde_json::json!({"instance_id": "i1", "status": "failed"}),
+      )
+      .unwrap(),
+      ..AppModel::default()
+    };
+    model.set_status(MANAGED_MACHINE, MachineStatus::Failed("x".into()));
+    model.set_status("host-1", MachineStatus::Ready);
+    assert!(!model.forget_cloud_machine());
+    assert!(model.cloud_instance.is_none());
+    assert!(!model.machines.contains_key(MANAGED_MACHINE));
+    assert!(model.machine("host-1").status == MachineStatus::Ready);
+  }
 
   #[test]
   fn phones_show_one_page() {
