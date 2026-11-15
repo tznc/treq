@@ -1,6 +1,7 @@
 //! The Account tab's Teams section (the web dashboard's `TeamTab`).
 
 use gpui::TestAppContext;
+use gpui_testing_library::prelude::*;
 
 use super::*;
 use crate::core::{supabase::ApiError, teams::TeamData};
@@ -91,8 +92,9 @@ fn an_owner_sees_the_team_its_members_seats_and_invites(cx: &mut TestAppContext)
       error: None,
     }])
   );
-  assert!(h.drawn("team-org-o1"));
-  assert!(h.drawn("team-invite-i1"));
+  let screen = h.rendered();
+  let org = screen.get_by_role(by::role(gpui::Role::Group).name("Acme"));
+  within(&org).get_by_role(by::role(gpui::Role::ListItem).name("cy@example.com"));
 }
 
 #[gpui::test]
@@ -163,7 +165,10 @@ fn a_user_without_team_is_offered_it(cx: &mut TestAppContext) {
 fn a_member_of_a_team_with_team_is_not_offered_it(cx: &mut TestAppContext) {
   let (mut h, _) = team_section(cx, Ok(acme("member")));
   assert!(!signed_in(&mut h).team_upsell);
-  assert!(!h.drawn("team-upsell"));
+  assert!(h
+    .rendered()
+    .query_by_role(by::role(gpui::Role::Group).name("Team plan"))
+    .is_none());
 }
 
 #[gpui::test]
@@ -273,10 +278,11 @@ fn an_owner_revokes_an_invite_and_toggles_admin(cx: &mut TestAppContext) {
 fn removing_a_member_asks_first(cx: &mut TestAppContext) {
   let (mut h, host) = acting_as(cx, "owner", Ok(serde_json::json!({})));
   settings_act(&mut h, press("teams.remove.o1.u2"));
-  assert!(h.drawn("teams-confirm-dialog"));
+  let remove_bob = || by::role(gpui::Role::Dialog).name("Remove bob@example.com?");
+  assert!(h.rendered().query_by_role(remove_bob()).is_some());
   assert!(host.writes().is_empty());
   h.click("teams-confirm-dialog-cancel");
-  assert!(!h.drawn("teams-confirm-dialog"));
+  assert!(h.rendered().query_by_role(remove_bob()).is_none());
   settings_act(&mut h, press("teams.remove.o1.u2"));
   h.click("teams-confirm-dialog-confirm");
   assert_eq!(

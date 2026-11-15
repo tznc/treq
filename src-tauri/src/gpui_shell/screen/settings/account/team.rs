@@ -265,7 +265,10 @@ impl SettingsView {
     let included =
       format!("{TEAM_INCLUDED_SEATS} members included, US${TEAM_EXTRA_SEAT_USD} per extra member");
     ui::text(div(), TextSize::Sm)
+      .id("team-upsell")
       .debug_selector(|| "team-upsell".into())
+      .role(gpui::Role::Group)
+      .aria_label("Team plan")
       .flex()
       .flex_col()
       .gap_2()
@@ -317,6 +320,7 @@ impl SettingsView {
               .on_click(self.press("team.start")),
           ),
       )
+      .test_support()
       .into_any_element()
   }
 
@@ -651,6 +655,9 @@ impl SettingsView {
                 revoke.into_any_element(),
               ];
               div()
+                .id(SharedString::from(format!("team-invite-row-{id}")))
+                .role(gpui::Role::ListItem)
+                .aria_label(invite.email.clone())
                 .child(
                   person(invite.email.clone(), None, trailing)
                     .debug_selector(move || format!("team-invite-{id}")),
@@ -662,6 +669,7 @@ impl SettingsView {
                     .text_color(p.muted_foreground)
                     .child(link)
                 }))
+                .test_support()
                 .into_any_element()
             })
             .collect()
@@ -694,7 +702,10 @@ impl SettingsView {
       });
       let selector = format!("team-org-{id}");
       ui::text(div(), TextSize::Sm)
+        .id(SharedString::from(selector.clone()))
         .debug_selector(move || selector)
+        .role(gpui::Role::Group)
+        .aria_label(org.name.clone())
         .border_1()
         .border_color(p.border)
         .rounded(radius::MD)
@@ -748,6 +759,7 @@ impl SettingsView {
               .on_click(self.press(&format!("teams.leave.{id}"))),
           ),
         )
+        .test_support()
         .into_any_element()
     });
     Some(
