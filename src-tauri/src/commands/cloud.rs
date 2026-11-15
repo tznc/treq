@@ -98,6 +98,11 @@ impl CloudEffects for AppEffects {
   }
 
   fn access_token(&self, supabase_url: &str, token: Option<&str>) {
+    // Project sync runs only while signed in.
+    match (token, crate::commands::cloud::owned_cloud(&self.app)) {
+      (Some(_), Some(cloud)) => PROJECT_SYNC.signed_in(move || sync_projects(cloud)),
+      _ => PROJECT_SYNC.signed_out(),
+    }
     if let Some(state) = self.app.try_state::<RemoteExecState>() {
       state.0.set_relay_access_token(token.map(str::to_string));
     }
@@ -180,6 +185,52 @@ pub fn start(app: &AppHandle) {
     cloud.keep_fresh().await;
   });
   tauri::async_runtime::spawn(sync_config(sync_cloud));
+}
+
+/// The project sync loop, started on sign-in and stopped on sign-out.
+static PROJECT_SYNC: std::sync::LazyLock<crate::core::project_sync::Runner> =
+  std::sync::LazyLock::new(Default::default);
+
+/// Team project sync: a pass now, then hourly (`core::project_sync`). Runs
+/// only while signed in ([`PROJECT_SYNC`]).
+async fn sync_projects(cloud: Arc<Cloud>) {
+  use crate::core::{cloud_catalog, project_sync, projects};
+  loop {
+    {
+      if let Ok(orgs) = cloud_catalog::fetch_cloud_organizations(&cloud.supabase).await {
+        let org_ids: Vec<String> = orgs.into_iter().map(|o| o.org_id).collect();
+        let supabase = cloud.supabase.clone();
+        // rusqlite's Connection is not Sync, so the pass runs on its own thread.
+        let pass = tauri::async_runtime::spawn_blocking(move || {
+          let app_dir = crate::core::app_data_dir()?;
+          let db = crate::db::Database::new(app_dir.join("treq.db")).ok()?;
+          let known = projects::list(db.conn())
+            .ok()?
+            .into_iter()
+            .flat_map(|p| p.repos)
+            .collect();
+          let mapper = project_sync::GitMapper {
+            known,
+            clones_root: projects::clones_root(),
+          };
+          let transport = project_sync::SupabaseTransport(supabase);
+          tauri::async_runtime::block_on(project_sync::sync(
+            db.conn(),
+            &transport,
+            &mapper,
+            &org_ids,
+          ))
+          .map_err(|e| log::warn!("project sync: {e}"))
+          .ok()
+        })
+        .await;
+        if let Err(error) = pass {
+          log::warn!("project sync stopped: {error}");
+        }
+      }
+    }
+    tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+  }
 }
 
 /// Config sync, once signed in: pulls a missing local copy, then pushes

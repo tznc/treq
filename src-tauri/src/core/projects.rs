@@ -296,6 +296,35 @@ pub fn set_owner(conn: &Connection, id: &str, org_id: Option<&str>) -> Result<()
     .map(drop)
 }
 
+/// Writes a team project pulled from the organization under its shared id,
+/// replacing any local copy. Keeps the local `last_opened_at`.
+pub fn put_team_project(
+  conn: &Connection,
+  id: &str,
+  org_id: &str,
+  name: &str,
+  repos: &[String],
+  prompt: &str,
+  context_paths: &[String],
+) -> Result<(), String> {
+  let name = clean_name(name)?;
+  let at = now();
+  conn
+    .execute(
+      "INSERT INTO projects (id, name, created_at, last_opened_at, org_id) VALUES (?1, ?2, ?3, ?3, ?4)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, org_id = excluded.org_id",
+      params![id, name, at, org_id],
+    )
+    .map_err(err)?;
+  conn
+    .execute("DELETE FROM project_repos WHERE project_id = ?1", [id])
+    .map_err(err)?;
+  for repo in repos {
+    add_repo(conn, id, repo)?;
+  }
+  set_context(conn, id, prompt, context_paths)
+}
+
 pub fn rename(conn: &Connection, id: &str, name: &str) -> Result<(), String> {
   let name = clean_name(name)?;
   exists(conn, id)?;
@@ -708,6 +737,27 @@ mod tests {
 
   fn repos(paths: &[&str]) -> Vec<String> {
     paths.iter().map(|p| p.to_string()).collect()
+  }
+
+  #[test]
+  fn put_team_project_inserts_then_replaces_by_id() {
+    let conn = conn();
+    put_team_project(&conn, "t1", "o1", "Team", &repos(&["/r/a"]), "p", &[]).unwrap();
+    put_team_project(
+      &conn,
+      "t1",
+      "o1",
+      "Team 2",
+      &repos(&["/r/b", "/r/a"]),
+      "q",
+      &repos(&["/d"]),
+    )
+    .unwrap();
+    let got = get(&conn, "t1").unwrap().unwrap();
+    assert_eq!((got.name.as_str(), got.prompt.as_str()), ("Team 2", "q"));
+    assert_eq!(got.repos, repos(&["/r/b", "/r/a"]));
+    assert_eq!(got.context_paths, repos(&["/d"]));
+    assert_eq!(got.org_id.as_deref(), Some("o1"));
   }
 
   #[test]
