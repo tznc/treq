@@ -218,7 +218,7 @@ impl SettingsView {
       .border_color(p.border)
       .rounded(radius::MD)
       .p_4()
-      .child(div().font_weight(FontWeight::MEDIUM).child("Get Team"))
+      .child(div().font_weight(FontWeight::MEDIUM).child("Team plan"))
       .child(
         div()
           .flex()
