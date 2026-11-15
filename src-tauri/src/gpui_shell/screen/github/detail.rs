@@ -4,6 +4,7 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
   self, deferred, div, prelude::*, Context, Div, FontWeight, KeyDownEvent, MouseButton,
   SharedString, Window,
@@ -1009,11 +1010,15 @@ impl GithubView {
             )
             .child(toggle),
         )
-        .child(
+        .child({
+          let summary = crate::core::pr_view::checks_summary(&c.checks);
           ui::text(named(div(), "github-checks-summary"), TextSize::Sm)
+            .role(gpui::Role::Label)
+            .aria_label(summary.clone())
             .text_color(p.muted_foreground)
-            .child(crate::core::pr_view::checks_summary(&c.checks)),
-        )
+            .child(summary)
+            .test_support()
+        })
         .when(!shown.is_empty(), |d| {
           d.child(
             div()
@@ -1674,6 +1679,8 @@ impl GithubView {
       }
     };
     named(div(), format!("run-job-logs-{run_id}-{}", job.job_id))
+      .role(gpui::Role::Group)
+      .aria_label(format!("{} logs", job.job_id))
       .child(
         ui::text(div(), TextSize::Sm)
           .mb_1()
@@ -1690,6 +1697,7 @@ impl GithubView {
           .child(job.job_id.clone()),
       )
       .child(body)
+      .test_support()
   }
 }
 
