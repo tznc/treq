@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: "Long-form guides that tie Treq concepts and workflows together, end to end: plan, isolate, stack, review and merge agent work."
 ---
 
 # Guides

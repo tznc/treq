@@ -35,5 +35,5 @@ Treq rebases dependent workspaces whenever a lower one changes, without a comman
 
 ## Related
 
-- [Rebase a stacked branch after a squash merge](./rebase-stack-after-squash-merge)
+- [Rebase a stacked branch after a squash merge](./rebase-stack-after-squash-merge.md)
 - [Merge vs Rebase](/learn/concepts/git/merge-vs-rebase)
