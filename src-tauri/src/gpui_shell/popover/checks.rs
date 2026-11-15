@@ -9,6 +9,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, AnyElement, Context, Div, FontWeight, Hsla, SharedString,
 };
@@ -182,6 +183,7 @@ impl Popover {
           .hover(|s| s.underline())
           .child("View logs")
           .on_click(cx.listener(|this, _, _, cx| this.view_logs(cx)))
+          .test_support()
       });
       let mut section = div()
         .child(
@@ -377,10 +379,14 @@ impl Popover {
           let selector = format!("ci-inactive-{i}");
           row.child(
             div()
+              .id(SharedString::from(selector.clone()))
               .debug_selector(move || selector)
+              .role(gpui::Role::Label)
+              .aria_label(format!("{} inactive", check.name))
               .flex_none()
               .text_color(p.muted_foreground)
-              .child("inactive"),
+              .child("inactive")
+              .test_support(),
           )
         })
         .children(check.duration_secs.filter(|_| !inactive).map(|secs| {
@@ -405,11 +411,15 @@ impl Popover {
         // Short label (['section heading with count']): 11px is fine.
         // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
+          .id("checks-github-heading")
+          .role(gpui::Role::Heading)
+          .aria_label(format!("GitHub checks · {}/{}", ci.passed, ci.total))
           .px_2()
           .pb_1()
           .font_weight(FontWeight::MEDIUM)
           .text_color(p.muted_foreground)
-          .child(format!("GitHub checks · {}/{}", ci.passed, ci.total)),
+          .child(format!("GitHub checks · {}/{}", ci.passed, ci.total))
+          .test_support(),
       )
       .child(
         div()

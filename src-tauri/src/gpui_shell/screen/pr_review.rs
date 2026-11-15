@@ -405,7 +405,11 @@ impl Render for PrReviewView {
     self.ensure_summary_input(window, cx);
     let p = theme::palette(self.dark);
     let page = div()
+      .id("pr-review-page")
       .debug_selector(|| "pr-review-page".into())
+      .role(gpui::Role::Main)
+      .aria_label("Pull request review")
+      .test_support()
       .size_full()
       .bg(p.background)
       .text_color(p.foreground);
@@ -446,7 +450,17 @@ impl PrReviewView {
     let mono = |text: String| div().font_family(theme::MONO_FONT).child(text);
     let subtitle = self.pr.as_ref().map(|pr| {
       ui::text(div(), TextSize::Sm)
+        .id("pr-review-subtitle")
         .debug_selector(|| "pr-review-subtitle".into())
+        .role(gpui::Role::Label)
+        .aria_label(format!(
+          "{} wants to merge {} into {} · {}",
+          pr.author.login,
+          pr.head_ref_name,
+          pr.base_ref_name,
+          files_label(files)
+        ))
+        .test_support()
         .flex()
         .gap_1()
         .overflow_hidden()
@@ -520,7 +534,11 @@ impl PrReviewView {
           .flex_1()
           .child(
             ui::text(div(), TextSize::Sm)
+              .id("pr-review-title")
               .debug_selector(|| "pr-review-title".into())
+              .role(gpui::Role::Heading)
+              .aria_label(format!("{title} #{number}"))
+              .test_support()
               .flex()
               .gap_1()
               .overflow_hidden()

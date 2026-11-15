@@ -785,13 +785,17 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
   // Short label (['section heading']): 11px is fine.
   // ast-grep-ignore: gpui-text-xs-short-label-only
   let header = ui::text(div(), TextSize::Xs)
+    .id("suggested-change")
+    .role(gpui::Role::Heading)
+    .aria_label("Suggested change")
     .px_2()
     .py_1()
     .text_color(p.muted_foreground)
     .bg(p.muted.opacity(0.6))
     .border_b_1()
     .border_color(p.border.opacity(0.6))
-    .child("Suggested change");
+    .child("Suggested change")
+    .test_support();
   let body = match suggestion_diff(original, suggested) {
     Some(rows) => {
       let mut el = ui::text(div(), TextSize::Sm)

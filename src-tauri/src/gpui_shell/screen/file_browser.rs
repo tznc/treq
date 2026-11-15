@@ -1236,7 +1236,11 @@ impl Render for FileBrowserView {
     let finish = self.finish_popover(&p, cx);
     let dialog = self.discard_dialog(window, &p, cx);
     ui::text(div(), TextSize::Sm)
+      .id("file-browser")
       .debug_selector(|| "file-browser".into())
+      .role(gpui::Role::Group)
+      .aria_label("File browser")
+      .test_support()
       .size_full()
       .flex()
       .flex_col()
@@ -1320,7 +1324,11 @@ impl FileBrowserView {
             .gap_2()
             .child(
               ui::text(div(), TextSize::Sm)
+                .id("file-browser-pending")
                 .debug_selector(|| "file-browser-pending".into())
+                .role(gpui::Role::Status)
+                .aria_label(format!("{} pending", count_label(n, "comment")))
+                .test_support()
                 .flex()
                 .items_center()
                 .gap_1p5()
@@ -1543,7 +1551,11 @@ impl FileBrowserView {
     };
     if is_binary(&path) {
       return Self::centered(p)
+        .id("file-browser-binary")
         .debug_selector(|| "file-browser-binary".into())
+        .role(gpui::Role::Status)
+        .aria_label("Binary file - cannot display")
+        .test_support()
         .flex_col()
         .gap_2()
         .child(ui::icon(theme::ICON_CIRCLE_ALERT, 32., p.muted_foreground))
@@ -1648,7 +1660,11 @@ impl FileBrowserView {
       .min_w_0()
       .child(
         ui::text(div(), TextSize::Sm)
+          .id("file-content-path")
           .debug_selector(|| "file-content-path".into())
+          .role(gpui::Role::Heading)
+          .aria_label(rel.clone())
+          .test_support()
           .font_family(theme::MONO_FONT)
           .text_color(muted)
           .child(rel),
@@ -1674,7 +1690,11 @@ impl FileBrowserView {
           time::full(modified),
           Side::Top,
           ui::text(div(), TextSize::Sm)
+            .id("file-modified-label")
             .debug_selector(|| "file-modified".into())
+            .role(gpui::Role::Label)
+            .aria_label(format!("Modified {}", time::relative(modified)))
+            .test_support()
             .text_color(muted.opacity(0.9))
             .hover(move |s| s.text_color(muted))
             .child(format!("Modified {}", time::relative(modified))),

@@ -2943,7 +2943,11 @@ impl ChangesView {
     if let Some(err) = self.pr.as_ref().and_then(|pr| pr.error.clone()) {
       return area.child(
         ui::text(div(), TextSize::Sm)
+          .id("pr-diff-error")
           .debug_selector(|| "pr-diff-error".into())
+          .role(gpui::Role::Alert)
+          .aria_label(format!("Failed to load the PR diff: {err}"))
+          .test_support()
           .p_6()
           .text_color(p.destructive)
           .child(format!("Failed to load the PR diff: {err}")),
@@ -3309,7 +3313,7 @@ impl ChangesView {
           div()
             .id(SharedString::from(format!("add-file-comment-{path}")))
             .role(gpui::Role::Button)
-            .aria_label("Add file comment")
+            .aria_label(format!("Add file comment on {path}"))
             .debug_selector(|| "add-file-comment-button".into())
             .p_1()
             .rounded(radius::SM)
@@ -3319,7 +3323,8 @@ impl ChangesView {
             .on_click({
               let path = path.to_string();
               cx.listener(move |view, _, _, cx| view.add_file_comment(&path, cx))
-            }),
+            })
+            .test_support(),
           cx,
         ),
       );
@@ -3523,7 +3528,10 @@ impl ChangesView {
       );
       let deleted_notice = |side: &'static str, tone: Tone| {
         div()
+          .id("conflict-deleted-side")
           .debug_selector(|| "conflict-deleted-side".into())
+          .role(gpui::Role::Label)
+          .aria_label(format!("{side} deleted this file"))
           .my_1()
           .rounded(radius::MD)
           .border_1()
@@ -3534,6 +3542,7 @@ impl ChangesView {
           .font_family(theme::SANS_FONT)
           .text_color(tone.text(p))
           .child(format!("{side} deleted this file"))
+          .test_support()
       };
       if kind == ConflictLineKind::Marker && role == ConflictLineRole::Start && left_deleted {
         pre = pre.child(deleted_notice("Side #1", Tone::DiffRemoved));
@@ -3547,11 +3556,12 @@ impl ChangesView {
     } else {
       format!("Conflict {}", conflict.number)
     };
+    let card = format!("conflict-card-{}", conflict.id);
     div()
-      .debug_selector({
-        let id = format!("conflict-card-{}", conflict.id);
-        move || id
-      })
+      .id(SharedString::from(card.clone()))
+      .debug_selector(move || card)
+      .role(gpui::Role::Group)
+      .aria_label(number.clone())
       .bg(p.destructive.opacity(0.1))
       .border_y_1()
       .border_color(p.destructive.opacity(0.4))
@@ -3579,6 +3589,7 @@ impl ChangesView {
       )
       .child(pre)
       .children(self.note_section(conflict, p, cx))
+      .test_support()
   }
 
   fn discard_all_dialog(

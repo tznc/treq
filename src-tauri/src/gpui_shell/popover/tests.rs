@@ -7,6 +7,7 @@ use std::{
 };
 
 use gpui::{point, size, Bounds, Entity, Modifiers, TestAppContext, VisualTestContext};
+use gpui_testing_library::Queries as _;
 
 use super::{
   checks::{check_duration, ci_state},
@@ -183,9 +184,33 @@ impl Harness {
     }
   }
 
-  fn drawn(&mut self, selector: &'static str) -> bool {
+  /// The window as the user sees it, once everything pending has run.
+  fn rendered(&mut self) -> gpui_testing_library::Screen {
     self.cx.run_until_parked();
-    self.cx.debug_bounds(selector).is_some()
+    let window = self.cx.update(|window, _| window.window_handle());
+    let screen = gpui_testing_library::Screen::new(&self.cx, window);
+    screen.redraw();
+    screen
+  }
+
+  /// Whether the user sees an element of `role` named `name`.
+  fn shows(&mut self, role: gpui::Role, name: &str) -> bool {
+    !self
+      .rendered()
+      .query_all_by_role(
+        gpui_testing_library::by::role(role).name(gpui_testing_library::normalize(name)),
+      )
+      .is_empty()
+  }
+
+  /// The names of the branches the user can pick.
+  fn branches(&mut self) -> Vec<String> {
+    self
+      .rendered()
+      .query_all_by_role(gpui_testing_library::by::role(gpui::Role::ListBoxOption))
+      .iter()
+      .filter_map(|option| option.name())
+      .collect()
   }
 
   fn click(&mut self, selector: &'static str) {
@@ -337,10 +362,13 @@ fn setup_holds_checks_back_until_it_finishes() {
 #[gpui::test]
 fn details_list_the_workspace_and_its_starting_prompt(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, details(), prompt_host());
-  assert!(h.drawn("workspace-details-popover"));
-  assert!(h.drawn("details-prompt"));
-  assert!(h.drawn("details-view-full"));
-  assert!(!h.drawn("details-no-prompt"));
+  assert!(h
+    .rendered()
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Dialog))
+    .is_some());
+  assert!(h.shows(gpui::Role::Paragraph, "Add a login form"));
+  assert!(h.shows(gpui::Role::Button, "View full prompt"));
+  assert!(!h.shows(gpui::Role::Status, "No prompt recorded"));
   let shown = h.popover.read_with(&h.cx, |p, _| match &p.content {
     Content::Details(state) => state.prompt().cloned(),
     _ => None,
@@ -351,8 +379,8 @@ fn details_list_the_workspace_and_its_starting_prompt(cx: &mut TestAppContext) {
 #[gpui::test]
 fn details_say_when_no_prompt_was_recorded(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, details(), FakeHost::default());
-  assert!(h.drawn("details-no-prompt"));
-  assert!(!h.drawn("details-copy"));
+  assert!(h.shows(gpui::Role::Status, "No prompt recorded"));
+  assert!(!h.shows(gpui::Role::Button, "Copy"));
 }
 
 #[gpui::test]
@@ -468,10 +496,7 @@ fn a_press_inside_the_popover_keeps_it_open(cx: &mut TestAppContext) {
 fn target_lists_the_repository_branches(cx: &mut TestAppContext) {
   let (kind, host) = target(vec!["main", "develop", "release"]);
   let mut h = Harness::new(cx, kind, host);
-  assert!(h.drawn("target-branch-popover"));
-  assert!(h.drawn("branch-option-0"));
-  assert!(h.drawn("branch-option-2"));
-  assert!(!h.drawn("branch-option-3"));
+  assert_eq!(h.branches(), ["main", "develop", "release"]);
   assert!(h.host.calls().contains(&"branches /repo".to_string()));
 }
 
@@ -490,7 +515,7 @@ fn target_lists_branches_read_ahead_at_once(cx: &mut TestAppContext) {
   });
   assert!(h.cx.debug_bounds("branch-option-1").is_some());
   assert!(h.cx.debug_bounds("target-loading").is_none());
-  assert!(h.drawn("branch-option-1"));
+  assert!(h.shows(gpui::Role::ListBoxOption, "develop"));
   assert!(h.host.calls().contains(&"branches /repo".to_string()));
 }
 
@@ -501,9 +526,7 @@ fn target_filters_with_the_search_field(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   h.cx.simulate_input("rel");
   h.cx.run_until_parked();
-  assert!(h.drawn("branch-option-2"));
-  assert!(!h.drawn("branch-option-0"));
-  assert!(!h.drawn("branch-option-1"));
+  assert_eq!(h.branches(), ["release"]);
   assert_eq!(
     h.popover.read_with(&h.cx, |p, _| match &p.content {
       Content::Target(state) => state.selected().map(str::to_string),
@@ -520,7 +543,7 @@ fn target_says_when_no_branch_matches(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   h.cx.simulate_input("zzz");
   h.cx.run_until_parked();
-  assert!(h.drawn("target-empty"));
+  assert!(h.shows(gpui::Role::Status, "No branches match"));
 }
 
 #[gpui::test]
@@ -562,7 +585,7 @@ fn target_picks_with_a_click(cx: &mut TestAppContext) {
 #[gpui::test]
 fn checks_run_one_workflow_or_all(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, checks(checks_input()), FakeHost::default());
-  assert!(h.drawn("checks-popover"));
+  assert!(h.shows(gpui::Role::Button, "Run all checks"));
   h.click("checks-run-1");
   h.click("checks-run-all");
   assert_eq!(
@@ -620,7 +643,7 @@ fn checks_close_to_show_the_logs(cx: &mut TestAppContext) {
   let mut input = checks_input();
   input.logs = false;
   let mut h = Harness::new(cx, checks(input), FakeHost::default());
-  assert!(!h.drawn("checks-view-logs"));
+  assert!(!h.shows(gpui::Role::Button, "View logs"));
 }
 
 #[gpui::test]
@@ -644,7 +667,7 @@ fn checks_list_pull_request_checks_failed_first(cx: &mut TestAppContext) {
     ],
   });
   let mut h = Harness::new(cx, checks(input), FakeHost::default());
-  assert!(h.drawn("checks-github"));
+  assert!(h.shows(gpui::Role::Heading, "GitHub checks · 1/2"));
   let first = h.cx.debug_bounds("ci-check-0").expect("first");
   let second = h.cx.debug_bounds("ci-check-1").expect("second");
   assert!(first.top() < second.top());
@@ -677,17 +700,23 @@ fn checks_list_the_wip_status_last_as_inactive(cx: &mut TestAppContext) {
   });
   let mut h = Harness::new(cx, checks(input), FakeHost::default());
   // Below the counted checks, labelled instead of spinning.
-  assert!(h.drawn("ci-inactive-1"));
-  assert!(!h.drawn("ci-inactive-0"));
+  let screen = h.rendered();
+  let inactive =
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Label).name("WIP inactive"));
+  let first = h.cx.debug_bounds("ci-check-0").expect("first");
+  assert!(first.top() < inactive.bounds().top());
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Label).name("build inactive"))
+    .is_none());
 }
 
 #[gpui::test]
 fn checks_follow_the_workspace_view(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, checks(checks_input()), FakeHost::default());
-  assert!(!h.drawn("checks-workflow-2"));
+  assert!(!h.shows(gpui::Role::Button, "Run deploy"));
   let mut input = checks_input();
   input.data.workflows.push(workflow("deploy.yml", None));
   h.popover
     .update(&mut h.cx, |popover, cx| popover.set_checks(input, cx));
-  assert!(h.drawn("checks-workflow-2"));
+  assert!(h.shows(gpui::Role::Button, "Run deploy"));
 }

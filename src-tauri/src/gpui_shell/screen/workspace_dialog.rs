@@ -1055,7 +1055,11 @@ impl WorkspaceDialog {
         };
         // A disabled `<Input className="text-xs text-muted-foreground h-8">`.
         ui::text(div(), TextSize::Sm)
+          .id("workspace-dialog-stacking-on")
           .debug_selector(|| "workspace-dialog-stacking-on".into())
+          .role(gpui::Role::Label)
+          .aria_label(format!("Stacking on {shown}"))
+          .test_support()
           .h(zpx(32.))
           .px_3()
           .flex()
@@ -1421,7 +1425,7 @@ impl WorkspaceDialog {
   }
 
   /// `NewWorkspaceStackCard`.
-  fn stack_card(&self, branch: &Entity<InputState>, base: &str, p: &Palette) -> Div {
+  fn stack_card(&self, branch: &Entity<InputState>, base: &str, p: &Palette) -> impl IntoElement {
     let p = *p;
     let chain = self
       .parent_branch()
@@ -1504,7 +1508,11 @@ impl WorkspaceDialog {
             .when_some(hint, |this, (text, color, id)| {
               this.child(
                 ui::text(div(), TextSize::Sm)
+                  .id(id)
                   .debug_selector(move || id.into())
+                  .role(gpui::Role::Status)
+                  .aria_label(text.clone())
+                  .test_support()
                   .text_color(color)
                   .child(text),
               )
@@ -1540,7 +1548,11 @@ impl WorkspaceDialog {
     });
     let rows: Vec<_> = rows.collect();
     div()
+      .id("new-workspace-stack-card")
       .debug_selector(|| "new-workspace-stack-card".into())
+      .role(gpui::Role::Group)
+      .aria_label("New workspace stack")
+      .test_support()
       .border_1()
       .border_color(p.border)
       .rounded(radius::MD)
@@ -1689,6 +1701,7 @@ impl WorkspaceDialog {
             .role(gpui::Role::CheckBox)
             .aria_label(message.clone())
             .debug_selector(move || selector)
+            .test_support()
             .flex()
             .items_center()
             .gap_2()
@@ -1946,6 +1959,7 @@ impl WorkspaceDialog {
             .role(gpui::Role::CheckBox)
             .aria_label(hunk.header.clone())
             .debug_selector(move || selector)
+            .test_support()
             .flex()
             .items_start()
             .gap_2()

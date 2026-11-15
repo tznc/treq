@@ -4,6 +4,7 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{sync::Arc, time::Duration};
 
 use gpui_kit::component::input::{InputEvent, InputState};
@@ -313,7 +314,11 @@ impl Render for RenameDialog {
               .when_some(invalid, |this, v| {
                 this.child(
                   ui::text(div(), TextSize::Sm)
+                    .id("rename-invalid")
                     .debug_selector(|| "rename-invalid".into())
+                    .role(tauri_plugin_gpui::gpui::Role::Alert)
+                    .aria_label(v.message.clone())
+                    .test_support()
                     .flex()
                     .items_center()
                     .gap_2()

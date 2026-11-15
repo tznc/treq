@@ -2460,7 +2460,11 @@ impl CodeView {
     let readme = overview.readme.clone();
     Some(
       section(p)
+        .id("code-readme")
         .debug_selector(|| "code-readme".into())
+        .role(gpui::Role::Group)
+        .aria_label("README")
+        .test_support()
         .p_6()
         .child(match readme {
           Some(text) => div()

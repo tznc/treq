@@ -729,7 +729,7 @@ impl ChangesView {
     ui::text(div(), TextSize::Xs)
       .id(SharedString::from(id.clone()))
       .role(gpui::Role::Button)
-      .aria_label("Show more lines")
+      .aria_label(format!("Expand all ({count} lines)"))
       .debug_selector(move || id)
       .ml_3()
       .flex_none()
@@ -742,6 +742,7 @@ impl ChangesView {
         view.expand_context(&file, h, dir, true, cx);
       }))
       .child(format!("Expand all ({count} lines)"))
+      .test_support()
   }
 
   /// Added and removed lines of a card, for its header.

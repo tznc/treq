@@ -4,6 +4,7 @@
 use super::*;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::TestSupportExt as _;
 
 impl FileBrowserView {
   /// `FileCommentSection`.
@@ -63,6 +64,9 @@ impl FileBrowserView {
     box_()
       .id(SharedString::from(format!("comment-{}", c.id)))
       .debug_selector(|| "file-comment-card".into())
+      .role(gpui::Role::Button)
+      .aria_label("Edit comment")
+      .test_support()
       .group("comment-card")
       .cursor_pointer()
       .hover(|s| s.bg(p.hover()))
