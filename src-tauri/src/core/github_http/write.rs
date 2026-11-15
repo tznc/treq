@@ -9,6 +9,8 @@ use serde_json::{json, Value};
 
 const DELETE_ISSUE_MUTATION: &str =
   "mutation($id: ID!) { deleteIssue(input: {issueId: $id}) { clientMutationId } }";
+const CONVERT_TO_DRAFT_MUTATION: &str = "mutation($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { clientMutationId } }";
+const MARK_READY_MUTATION: &str = "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { clientMutationId } }";
 
 /// [`GithubAction`] carried out over HTTPS on the repository `full_name`
 /// (`owner/name`), as the host's `github_write` carries it out.
@@ -74,10 +76,58 @@ pub async fn github_write(
       let id = node_id(gh, &format!("{repo}/issues/{number}")).await?;
       done(gh.graphql(DELETE_ISSUE_MUTATION, json!({ "id": id })).await)
     }
-    // Carried out by the host's `gh` until it is done over HTTPS here.
-    other => Err(format!(
-      "unsupported_action: {other:?} is not done over HTTPS yet"
-    )),
+    GithubAction::ClosePr { number } => {
+      patch(
+        gh,
+        &format!("{repo}/pulls/{number}"),
+        &json!({ "state": "closed" }),
+      )
+      .await
+    }
+    GithubAction::ReopenPr { number } => {
+      patch(
+        gh,
+        &format!("{repo}/pulls/{number}"),
+        &json!({ "state": "open" }),
+      )
+      .await
+    }
+    GithubAction::SetPrDraft { number, draft } => {
+      let id = node_id(gh, &format!("{repo}/pulls/{number}")).await?;
+      let mutation = if draft {
+        CONVERT_TO_DRAFT_MUTATION
+      } else {
+        MARK_READY_MUTATION
+      };
+      done(gh.graphql(mutation, json!({ "id": id })).await)
+    }
+    GithubAction::ReplyToReviewThread { thread_id, body } => {
+      let variables = json!({ "threadId": thread_id, "body": body });
+      done(gh.graphql(github::REPLY_THREAD_MUTATION, variables).await)
+    }
+    GithubAction::SubmitPrReview {
+      number,
+      event,
+      body,
+      comments,
+    } => {
+      let body = github::review_request_body(&event, &body, &comments)?;
+      let path = format!("{repo}/pulls/{number}/reviews");
+      done(gh.rest(Method::POST, &path, Some(&body)).await)
+    }
+    GithubAction::SetReaction {
+      comment_id,
+      content,
+      on,
+    } => {
+      let mutation = if on {
+        github::ADD_REACTION_MUTATION
+      } else {
+        github::REMOVE_REACTION_MUTATION
+      };
+      let variables = json!({ "id": comment_id, "content": content });
+      done(gh.graphql(mutation, variables).await)
+    }
   }
 }
 
