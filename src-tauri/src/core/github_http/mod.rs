@@ -250,7 +250,24 @@ async fn list_prs(
   let limit = GH_LIST_PAGE_SIZE.max(1);
   let page = page.max(1);
   let fetched = search_prs(gh, &q, limit * page).await?;
-  Ok(github::take_list_page(fetched, limit, page))
+  let mut list = github::take_list_page(fetched, limit, page);
+  if page == 1 {
+    // As on the host: the search API's count, closed meaning unmerged.
+    let count_filter = match state {
+      "closed" => "is:closed is:unmerged",
+      _ => filter,
+    };
+    list.total_count = count_prs(gh, &search_terms(&[&repo, "is:pr", count_filter])).await;
+  }
+  Ok(list)
+}
+
+/// How many pull requests the search `q` matches; `None` when GitHub
+/// cannot say, which the host also reads as no total.
+async fn count_prs(gh: &GithubHttp, q: &str) -> Option<u64> {
+  let query = "query($q: String!) { search(query: $q, type: ISSUE, first: 0) { issueCount } }";
+  let response = gh.graphql(query, json!({ "q": q })).await.ok()?;
+  response["data"]["search"]["issueCount"].as_u64()
 }
 
 /// `gh_search_open_prs_impl`.
