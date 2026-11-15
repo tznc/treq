@@ -4,6 +4,25 @@
 
 use super::*;
 use crate::core::teams::{Membership, TeamData, TEAM_EXTRA_SEAT_USD, TEAM_INCLUDED_SEATS};
+use std::collections::BTreeMap;
+
+/// What the Teams section's actions keep between draws.
+#[derive(Default)]
+pub(super) struct TeamActions {
+  /// Why an organization's last action was refused.
+  errors: BTreeMap<String, String>,
+  pending: bool,
+  /// A removal or leave waiting for the user to confirm it.
+  confirm: Option<Confirm>,
+}
+
+struct Confirm {
+  title: String,
+  message: String,
+  label: &'static str,
+  org_id: String,
+  body: serde_json::Value,
+}
 
 /// The Teams section, as drawn.
 #[derive(Debug, Clone, PartialEq)]
@@ -29,14 +48,23 @@ pub struct OrgCard {
   pub members: Vec<MemberRow>,
   /// Pending invites, which only owners and admins see.
   pub invites: Option<Vec<InviteRow>>,
+  /// An action on any team runs.
+  pub pending: bool,
+  /// Why this team's last action was refused.
+  pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemberRow {
+  pub user_id: String,
   /// The member's name (or email), with ` (you)` for the user.
   pub name: String,
   pub email: Option<String>,
   pub role: &'static str,
+  /// "Make admin" or "Remove admin", for owners and admins on others.
+  pub admin_toggle: Option<&'static str>,
+  /// Owners remove anyone but themselves.
+  pub removable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -68,13 +96,16 @@ fn short_date(at: &str) -> String {
 }
 
 /// The section for what the account read: `None` while it reads.
-pub(super) fn section(team: Option<&Result<TeamData, String>>) -> TeamSection {
+pub(super) fn section(
+  team: Option<&Result<TeamData, String>>,
+  actions: &TeamActions,
+) -> TeamSection {
   match team {
     None => TeamSection::Loading,
     Some(Err(_)) => {
       TeamSection::Failed("Couldn't load your teams. Reopen Settings to try again.".into())
     }
-    Some(Ok(data)) => TeamSection::Loaded(org_cards(data)),
+    Some(Ok(data)) => TeamSection::Loaded(org_cards(data, actions)),
   }
 }
 
@@ -98,7 +129,7 @@ pub(super) fn upsell(team: Option<&Result<TeamData, String>>) -> bool {
     .any(|m| m.user_id == data.user_id && data.subscriptions.iter().any(|s| s.owner_id == m.org_id))
 }
 
-fn org_cards(data: &TeamData) -> Vec<OrgCard> {
+fn org_cards(data: &TeamData, actions: &TeamActions) -> Vec<OrgCard> {
   data
     .memberships
     .iter()
@@ -115,6 +146,7 @@ fn org_cards(data: &TeamData) -> Vec<OrgCard> {
         .find(|m| m.user_id == data.user_id)
         .map(|m| m.role.as_str());
       let manager = matches!(mine, Some("owner" | "admin"));
+      let owner = mine == Some("owner");
       let subscription = data.subscriptions.iter().find(|s| s.owner_id == org.id);
       let count = members.len();
       let extra = count.saturating_sub(TEAM_INCLUDED_SEATS);
@@ -157,8 +189,18 @@ fn org_cards(data: &TeamData) -> Vec<OrgCard> {
               .and_then(|p| p.full_name.clone().filter(|n| !n.is_empty()))
               .or_else(|| email.clone())
               .unwrap_or_else(|| "Unknown member".into());
+            let me = m.user_id == data.user_id;
             MemberRow {
-              name: if m.user_id == data.user_id {
+              user_id: m.user_id.clone(),
+              admin_toggle: (manager && !me && m.role != "owner").then_some(
+                if m.role == "admin" {
+                  "Remove admin"
+                } else {
+                  "Make admin"
+                },
+              ),
+              removable: owner && !me,
+              name: if me {
                 format!("{name} (you)")
               } else {
                 name
@@ -180,6 +222,8 @@ fn org_cards(data: &TeamData) -> Vec<OrgCard> {
             })
             .collect()
         }),
+        pending: actions.pending,
+        error: actions.errors.get(&org.id).cloned(),
         id: org.id,
         name: org.name,
       }
@@ -265,8 +309,133 @@ impl SettingsView {
       .into_any_element()
   }
 
+  /// A Teams button press (`teams.*`).
+  pub(super) fn press_team(&mut self, id: &str, cx: &mut Context<Self>) {
+    let Some(Ok(data)) = &self.account.team else {
+      return;
+    };
+    let (verb, arg) = id
+      .strip_prefix("teams.")
+      .and_then(|rest| rest.split_once('.'))
+      .unwrap_or((id, ""));
+    let (org, user) = arg.split_once('.').unwrap_or((arg, ""));
+    let name = data
+      .profiles
+      .iter()
+      .find(|p| p.id == user)
+      .and_then(|p| p.full_name.clone().or_else(|| p.email.clone()))
+      .unwrap_or_else(|| "this member".into());
+    let org_name = data
+      .memberships
+      .iter()
+      .find(|m| m.org_id == org)
+      .and_then(|m| m.organizations.as_ref())
+      .map_or_else(|| "this team".into(), |o| o.name.clone());
+    let admin = data
+      .memberships
+      .iter()
+      .any(|m| m.org_id == org && m.user_id == user && m.role == "admin");
+    let actions = &mut self.account.team_actions;
+    match (verb, id) {
+      (_, "teams.confirm") => {
+        if let Some(confirm) = actions.confirm.take() {
+          self.run_team(confirm.org_id, confirm.body, |_, _| {}, cx);
+        }
+      }
+      (_, "teams.confirm.cancel") => actions.confirm = None,
+      ("role", _) => {
+        let body = serde_json::json!({
+          "action": "set_role", "organization_id": org, "user_id": user,
+          "role": if admin { "member" } else { "admin" },
+        });
+        self.run_team(org.to_string(), body, |_, _| {}, cx);
+      }
+      ("remove", _) => {
+        actions.confirm = Some(Confirm {
+          title: format!("Remove {name}?"),
+          message: format!("They leave {org_name} and lose its Team at once."),
+          label: "Remove member",
+          org_id: org.to_string(),
+          body: serde_json::json!({
+            "action": "remove_member", "organization_id": org, "user_id": user,
+          }),
+        });
+      }
+      ("leave", _) => {
+        actions.confirm = Some(Confirm {
+          title: format!("Leave {org_name}?"),
+          message: "You lose its Team at once.".into(),
+          label: "Leave team",
+          org_id: org.to_string(),
+          body: serde_json::json!({ "action": "leave", "organization_id": org }),
+        });
+      }
+      _ => {}
+    }
+  }
+
+  /// Sends one `organizations` action for `org`, then reads the teams
+  /// again; a refusal shows on that team's card.
+  fn run_team(
+    &mut self,
+    org: String,
+    body: serde_json::Value,
+    done: impl FnOnce(&mut TeamActions, &serde_json::Value) + 'static,
+    cx: &mut Context<Self>,
+  ) {
+    let actions = &mut self.account.team_actions;
+    if actions.pending {
+      return;
+    }
+    actions.pending = true;
+    actions.errors.remove(&org);
+    self.spawn(
+      cx,
+      move |host| host.organization_action(&body),
+      move |view, result, cx| {
+        let actions = &mut view.account.team_actions;
+        actions.pending = false;
+        match result {
+          Ok(reply) => {
+            done(actions, &reply);
+            view.load_team(cx);
+          }
+          Err(error) => {
+            actions.errors.insert(org, error.message);
+          }
+        }
+      },
+    );
+  }
+
+  /// The removal or leave confirmation, while one waits.
+  pub(in crate::gpui_shell::screen) fn team_confirm_dialog(
+    &self,
+    p: &Palette,
+  ) -> Option<AnyElement> {
+    let confirm = self.account.team_actions.confirm.as_ref()?;
+    Some(
+      div()
+        .absolute()
+        .inset_0()
+        .child(
+          ui::ConfirmDialog::new(
+            "teams-confirm-dialog",
+            confirm.title.clone(),
+            confirm.label,
+            p,
+          )
+          .message(confirm.message.clone())
+          .destructive()
+          .on_cancel(handler(Box::new(self.press("teams.confirm.cancel"))))
+          .on_confirm(handler(Box::new(self.press("teams.confirm")))),
+        )
+        .into_any_element(),
+    )
+  }
+
   /// "Teams": one card per organization, or nothing without one.
-  pub(super) fn teams(section: &TeamSection, p: &Palette) -> Option<AnyElement> {
+  pub(super) fn teams(&self, section: &TeamSection, p: &Palette) -> Option<AnyElement> {
     let orgs = match section {
       TeamSection::Loading => {
         return Some(
@@ -302,7 +471,7 @@ impl SettingsView {
         .font_weight(FontWeight::MEDIUM)
         .child(text)
     };
-    let person = |name: String, detail: Option<String>, trailing: String| {
+    let person = |name: String, detail: Option<String>, trailing: Vec<AnyElement>| {
       div()
         .flex()
         .items_center()
@@ -320,33 +489,80 @@ impl SettingsView {
         .child(
           div()
             .flex_none()
-            .text_color(p.muted_foreground)
-            .child(trailing),
+            .flex()
+            .items_center()
+            .gap_2()
+            .children(trailing),
         )
+    };
+    let muted = |text: String| {
+      div()
+        .text_color(p.muted_foreground)
+        .child(text)
+        .into_any_element()
     };
     let cards = orgs.iter().map(|org| {
       let id = org.id.clone();
+      let pending = org.pending;
+      let link_button = |id: String, label: &'static str, press: &str, pending: bool| {
+        Button::new(id, p)
+          .variant(Variant::Ghost)
+          .size(Size::Sm)
+          .disabled(pending)
+          .label(label)
+          .on_click(self.press(press))
+          .into_any_element()
+      };
+      let members: Vec<_> = org
+        .members
+        .iter()
+        .map(|m| {
+          let user = &m.user_id;
+          let mut trailing = vec![muted(m.role.into())];
+          if let Some(label) = m.admin_toggle {
+            let press = format!("teams.role.{id}.{user}");
+            trailing.push(link_button(
+              format!("teams-role-{user}"),
+              label,
+              &press,
+              pending,
+            ));
+          }
+          if m.removable {
+            let press = format!("teams.remove.{id}.{user}");
+            trailing.push(link_button(
+              format!("teams-remove-{user}"),
+              "Remove",
+              &press,
+              pending,
+            ));
+          }
+          person(m.name.clone(), m.email.clone(), trailing)
+        })
+        .collect();
       let invites = org.invites.as_ref().map(|invites| {
         let rows: Vec<AnyElement> = if invites.is_empty() {
-          vec![div()
-            .text_color(p.muted_foreground)
-            .child("No pending invites.")
-            .into_any_element()]
+          vec![muted("No pending invites.".into())]
         } else {
           invites
             .iter()
             .map(|invite| {
               let id = invite.id.clone();
-              person(invite.email.clone(), None, invite.expires.clone())
-                .debug_selector(move || format!("team-invite-{id}"))
-                .into_any_element()
+              person(
+                invite.email.clone(),
+                None,
+                vec![muted(invite.expires.clone())],
+              )
+              .debug_selector(move || format!("team-invite-{id}"))
+              .into_any_element()
             })
             .collect()
         };
         div().child(subheading("Pending invites")).children(rows)
       });
+      let selector = format!("team-org-{id}");
       ui::text(div(), TextSize::Sm)
-        .debug_selector(move || format!("team-org-{id}"))
+        .debug_selector(move || selector)
         .border_1()
         .border_color(p.border)
         .rounded(radius::MD)
@@ -383,13 +599,23 @@ impl SettingsView {
             )),
         )
         .child(subheading("Members"))
-        .children(
-          org
-            .members
-            .iter()
-            .map(|m| person(m.name.clone(), m.email.clone(), m.role.into())),
-        )
+        .children(members)
         .children(invites)
+        .when_some(org.error.clone(), |this, error| {
+          this.child(div().mt_2().text_color(Tone::Danger.color(p)).child(error))
+        })
+        .child(
+          div().mt_4().flex().child(
+            Button::new(format!("teams-leave-{id}"), p)
+              .variant(Variant::Outline)
+              .size(Size::Sm)
+              .text_color(p.destructive)
+              .disabled(pending)
+              .label("Leave team")
+              .on_click(self.press(&format!("teams.leave.{id}"))),
+          ),
+        )
+        .into_any_element()
     });
     Some(
       div()

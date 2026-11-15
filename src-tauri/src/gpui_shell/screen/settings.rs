@@ -2161,6 +2161,7 @@ impl Render for SettingsView {
       }),
       _ => None,
     };
+    let delete_dialog = delete_dialog.or_else(|| self.team_confirm_dialog(&p));
 
     if !std::mem::replace(&mut self.focused_once, true) {
       window.focus(&self.focus, cx);

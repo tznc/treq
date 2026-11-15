@@ -64,14 +64,20 @@ fn an_owner_sees_the_team_its_members_seats_and_invites(cx: &mut TestAppContext)
       seats: "2 of 5 included".into(),
       members: vec![
         MemberRow {
+          user_id: "u1".into(),
           name: "Ada (you)".into(),
           email: Some("ada@example.com".into()),
           role: "Owner",
+          admin_toggle: None,
+          removable: false,
         },
         MemberRow {
+          user_id: "u2".into(),
           name: "bob@example.com".into(),
           email: Some("bob@example.com".into()),
           role: "Admin",
+          admin_toggle: Some("Remove admin"),
+          removable: true,
         },
       ],
       invites: Some(vec![InviteRow {
@@ -79,6 +85,8 @@ fn an_owner_sees_the_team_its_members_seats_and_invites(cx: &mut TestAppContext)
         email: "cy@example.com".into(),
         expires: "Expires Nov 16, 2026".into(),
       }]),
+      pending: false,
+      error: None,
     }])
   );
   assert!(h.drawn("team-org-o1"));
@@ -184,5 +192,96 @@ fn the_subscription_explains_a_failed_payment_and_a_cancellation(cx: &mut TestAp
   assert_eq!(
     signed_in(&mut h).billing_note.as_deref(),
     Some("Your subscription is set to cancel. Pro stays on until 11/1/2026.")
+  );
+}
+
+/// Ada's team as `role`, with the organizations function answering
+/// `reply`.
+fn acting_as(
+  cx: &mut TestAppContext,
+  role: &str,
+  reply: Result<serde_json::Value, ApiError>,
+) -> (Harness, Arc<FakeHost>) {
+  let host = Arc::new(FakeHost {
+    team: Some(Ok(acme(role))),
+    organization_reply: Some(reply),
+    ..FakeHost::default()
+  });
+  let h = signed_in_as_ada(cx, host.clone());
+  (h, host)
+}
+
+fn org(h: &mut Harness) -> OrgCard {
+  match signed_in(h).team {
+    Some(TeamSection::Loaded(mut orgs)) => orgs.remove(0),
+    other => panic!("loaded: {other:?}"),
+  }
+}
+
+fn sent(body: serde_json::Value) -> String {
+  format!("organizations {body}")
+}
+
+#[gpui::test]
+fn an_owner_toggles_admin(cx: &mut TestAppContext) {
+  let (mut h, host) = acting_as(cx, "owner", Ok(serde_json::json!({})));
+  settings_act(&mut h, press("teams.role.o1.u2"));
+  assert_eq!(
+    host.writes(),
+    [sent(serde_json::json!({
+      "action": "set_role", "organization_id": "o1", "user_id": "u2", "role": "member",
+    }))]
+  );
+}
+
+/// Removing a member and leaving lose Team at once, so both confirm first.
+#[gpui::test]
+fn removing_a_member_asks_first(cx: &mut TestAppContext) {
+  let (mut h, host) = acting_as(cx, "owner", Ok(serde_json::json!({})));
+  settings_act(&mut h, press("teams.remove.o1.u2"));
+  assert!(h.drawn("teams-confirm-dialog"));
+  assert!(host.writes().is_empty());
+  h.click("teams-confirm-dialog-cancel");
+  assert!(!h.drawn("teams-confirm-dialog"));
+  settings_act(&mut h, press("teams.remove.o1.u2"));
+  h.click("teams-confirm-dialog-confirm");
+  assert_eq!(
+    host.writes(),
+    [sent(serde_json::json!({
+      "action": "remove_member", "organization_id": "o1", "user_id": "u2",
+    }))]
+  );
+}
+
+#[gpui::test]
+fn a_member_can_leave_but_not_manage(cx: &mut TestAppContext) {
+  let (mut h, host) = acting_as(cx, "member", Ok(serde_json::json!({})));
+  let card = org(&mut h);
+  assert_eq!(card.invites, None);
+  assert!(card
+    .members
+    .iter()
+    .all(|m| m.admin_toggle.is_none() && !m.removable));
+  settings_act(&mut h, press("teams.leave.o1"));
+  h.click("teams-confirm-dialog-confirm");
+  assert_eq!(
+    host.writes(),
+    [sent(
+      serde_json::json!({ "action": "leave", "organization_id": "o1" })
+    )]
+  );
+}
+
+#[gpui::test]
+fn a_refused_action_shows_why_on_its_team(cx: &mut TestAppContext) {
+  let (mut h, _) = acting_as(
+    cx,
+    "owner",
+    Err(ApiError::new("http_400", "Only owners can change roles.")),
+  );
+  settings_act(&mut h, press("teams.role.o1.u2"));
+  assert_eq!(
+    org(&mut h).error.as_deref(),
+    Some("Only owners can change roles.")
   );
 }
