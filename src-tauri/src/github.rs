@@ -531,6 +531,9 @@ pub struct GhListPage<T> {
   /// (issues) set it; offset-paged lists (PRs) leave it `None`.
   #[serde(default)]
   pub end_cursor: Option<String>,
+  /// How many items match the filter across all pages, when known.
+  #[serde(default)]
+  pub total_count: Option<u64>,
 }
 
 /// Given items fetched with `--limit (limit * page)`, return the requested page slice.
@@ -548,6 +551,7 @@ pub fn take_list_page<T>(fetched: Vec<T>, limit: u32, page: u32) -> GhListPage<T
     items,
     has_more,
     end_cursor: None,
+    total_count: None,
   }
 }
 
@@ -564,6 +568,7 @@ const ISSUES_PAGE_QUERY: &str = r#"query($owner: String!, $name: String!, $first
         labels(first: 20) { nodes { name color } }
       }
       pageInfo { hasNextPage endCursor }
+      totalCount
     }
   }
 }"#;
@@ -588,6 +593,8 @@ struct IssuesPageRepository {
 struct IssuesPageConnection {
   nodes: Vec<IssuesPageNode>,
   page_info: IssuesPageInfo,
+  #[serde(default)]
+  total_count: Option<u64>,
 }
 
 #[derive(serde::Deserialize)]
@@ -676,6 +683,7 @@ pub fn gh_list_issues_impl(
     items: issues.nodes.into_iter().map(GhIssue::from).collect(),
     has_more: issues.page_info.has_next_page,
     end_cursor: issues.page_info.end_cursor,
+    total_count: issues.total_count,
   })
 }
 
@@ -897,7 +905,35 @@ pub fn gh_list_prs_impl(
   let bytes = check_gh_output(out)?;
   let fetched: Vec<GhPullRequest> =
     serde_json::from_slice(&bytes).map_err(|e| format!("Failed to parse gh output: {e}"))?;
-  Ok(take_list_page(fetched, limit, page))
+  let mut list = take_list_page(fetched, limit, page);
+  if page == 1 {
+    // `gh pr list` gives no total, so the search API counts the filter.
+    let filter = match state {
+      "open" => "is:open draft:false",
+      "draft" => "is:open draft:true",
+      "closed" => "is:closed is:unmerged",
+      "merged" => "is:merged",
+      _ => "",
+    };
+    let q = format!("q=repo:{repo_full_name} is:pr {filter}");
+    let args = [
+      "api",
+      "-X",
+      "GET",
+      "search/issues",
+      "-f",
+      &q,
+      "-f",
+      "per_page=1",
+      "--jq",
+      ".total_count",
+    ];
+    list.total_count = run_gh(gh_path, &args, extended_path)
+      .and_then(check_gh_output)
+      .ok()
+      .and_then(|b| String::from_utf8_lossy(&b).trim().parse().ok());
+  }
+  Ok(list)
 }
 
 /// Open pull requests, newest first, drafts included: the viewer's own
@@ -2524,6 +2560,7 @@ mod tests {
       }],
       has_more: true,
       end_cursor: Some("x".into()),
+      total_count: Some(1),
     });
     round_trip(&vec![GhReviewThread {
       id: "t1".into(),
