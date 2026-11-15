@@ -73,6 +73,7 @@ pub mod submodules;
 pub mod supabase;
 pub mod supporting_repos;
 pub mod system_logs;
+pub mod teams;
 pub mod terminal_screen;
 pub mod toast_queue;
 pub mod workspace_activity;
