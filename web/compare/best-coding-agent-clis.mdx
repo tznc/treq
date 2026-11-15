@@ -61,11 +61,11 @@ Start from the models you want, then check the safety defaults.
 - **You want one vendor's models.** Claude Code for Claude, Codex CLI for OpenAI, Antigravity CLI for Gemini.
 - **You want to switch models.** OpenCode, Aider and Goose run nearly any provider, including local models.
 - **You already pay for a tool.** A ChatGPT plan includes Codex. Every Copilot plan includes Copilot CLI. A Cursor plan includes Cursor CLI.
-- **You run agents unattended.** Prefer a tool with an OS sandbox, or run the agent in a container or a [cloud sandbox](./sandbox-providers-for-coding-agents). OpenCode, Amp and Goose run actions without asking by default.
+- **You run agents unattended.** Prefer a tool with an OS sandbox, or run the agent in a container or a [cloud sandbox](./sandbox-providers-for-coding-agents.mdx). OpenCode, Amp and Goose run actions without asking by default.
 
 ## Claude Code
 
-Anthropic's agent runs in the terminal, VS Code, JetBrains, a desktop app and the browser. Its permission system has six modes and allow and deny rules your team can commit. The OS sandbox is optional. It suits teams that standardize on Claude. See [Claude Code vs Codex CLI](./claude-code-vs-codex-cli) and [Setting Up Claude Code](/learn/tutorials/setting-up-claude-code).
+Anthropic's agent runs in the terminal, VS Code, JetBrains, a desktop app and the browser. Its permission system has six modes and allow and deny rules your team can commit. The OS sandbox is optional. It suits teams that standardize on Claude. See [Claude Code vs Codex CLI](./claude-code-vs-codex-cli.mdx) and [Setting Up Claude Code](/learn/tutorials/setting-up-claude-code).
 
 ## Codex CLI
 
@@ -73,11 +73,11 @@ OpenAI's Apache 2.0 agent sandboxes commands by default on macOS, Linux and Wind
 
 ## Antigravity CLI and Gemini CLI
 
-Antigravity CLI is Google's agent for individuals, built on the same core as the Antigravity desktop app. Gemini CLI remains for enterprise Code Assist and API customers. See [Claude Code vs Gemini CLI and Antigravity CLI](./claude-code-vs-gemini-cli) for the details of the move.
+Antigravity CLI is Google's agent for individuals, built on the same core as the Antigravity desktop app. Gemini CLI remains for enterprise Code Assist and API customers. See [Claude Code vs Gemini CLI and Antigravity CLI](./claude-code-vs-gemini-cli.mdx) for the details of the move.
 
 ## OpenCode
 
-OpenCode is an MIT-licensed agent with a terminal UI, a desktop app and a web app. It connects to almost any provider and loads skills from `.claude/skills`. It allows every action by default and has no OS sandbox, so set deny rules or isolate it. See [OpenCode vs Claude Code](./opencode-vs-claude-code).
+OpenCode is an MIT-licensed agent with a terminal UI, a desktop app and a web app. It connects to almost any provider and loads skills from `.claude/skills`. It allows every action by default and has no OS sandbox, so set deny rules or isolate it. See [OpenCode vs Claude Code](./opencode-vs-claude-code.mdx).
 
 ## Aider
 
@@ -89,7 +89,7 @@ Amp runs threads on your machine, in cloud machines it calls orbs, or on runners
 
 ## Cursor CLI
 
-Cursor's terminal agent is called `agent`. It shares rules, skills and MCP configuration with the Cursor editor, and reads `AGENTS.md` and `CLAUDE.md`. Prepending `&` to a message hands the task to a cloud agent. See [Cursor vs Claude Code](./cursor-vs-claude-code).
+Cursor's terminal agent is called `agent`. It shares rules, skills and MCP configuration with the Cursor editor, and reads `AGENTS.md` and `CLAUDE.md`. Prepending `&` to a message hands the task to a cloud agent. See [Cursor vs Claude Code](./cursor-vs-claude-code.mdx).
 
 ## GitHub Copilot CLI
 
@@ -109,7 +109,7 @@ Running several of these agents at once needs one checkout per agent, so their e
 
 ## Next Steps
 
-- [Best Tools for Running AI Coding Agents in Parallel](./best-parallel-agent-tools): apps that manage several agents at once
-- [Sandbox Providers for Coding Agents](./sandbox-providers-for-coding-agents): cloud machines for unattended agents
+- [Best Tools for Running AI Coding Agents in Parallel](./best-parallel-agent-tools.mdx): apps that manage several agents at once
+- [Sandbox Providers for Coding Agents](./sandbox-providers-for-coding-agents.mdx): cloud machines for unattended agents
 - [Quality Gates for Agent Output](/learn/concepts/ai-engineering/quality-gates-for-agent-output): checks before agent code merges
 - [Parallel Coding Agents](/learn/parallel-coding-agents): why agents need isolation
