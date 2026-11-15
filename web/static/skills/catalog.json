@@ -1,61 +1,61 @@
 {
-  "generatedAt": "2026-10-05T13:22:12.673Z",
+  "generatedAt": "2026-09-21T11:46:29.582Z",
   "sources": [
     {
       "id": "anthropic",
       "name": "Anthropic",
       "url": "https://github.com/anthropics/skills",
       "skillCount": 19,
-      "stars": 179724
+      "stars": 177407
     },
     {
       "id": "openai",
       "name": "OpenAI",
       "url": "https://github.com/openai/skills",
       "skillCount": 44,
-      "stars": 27882
+      "stars": 27520
     },
     {
       "id": "mattpocock",
       "name": "Matt Pocock",
       "url": "https://github.com/mattpocock/skills",
       "skillCount": 38,
-      "stars": 276685
+      "stars": 266822
     },
     {
       "id": "vercel",
       "name": "Vercel",
       "url": "https://github.com/vercel-labs/agent-browser",
       "skillCount": 1,
-      "stars": 43528
+      "stars": 42980
     },
     {
       "id": "microsoft",
       "name": "Microsoft",
       "url": "https://github.com/microsoft/azure-skills",
       "skillCount": 35,
-      "stars": 1538
+      "stars": 1489
     },
     {
       "id": "superpowers",
       "name": "Superpowers",
       "url": "https://github.com/obra/superpowers",
       "skillCount": 15,
-      "stars": 295472
+      "stars": 289533
     },
     {
       "id": "caveman",
       "name": "Caveman",
       "url": "https://github.com/JuliusBrussee/caveman",
-      "skillCount": 22,
-      "stars": 109924
+      "skillCount": 20,
+      "stars": 107085
     },
     {
       "id": "prisma",
       "name": "Prisma",
       "url": "https://github.com/prisma/skills",
-      "skillCount": 10,
-      "stars": 67
+      "skillCount": 9,
+      "stars": 58
     }
   ],
   "skills": [
@@ -767,7 +767,7 @@
       "path": "skills/claude-api",
       "url": "https://github.com/anthropics/skills/tree/main/skills/claude-api",
       "route": "/skills/anthropic/claude-api",
-      "checksum": "560b2cafafd76a69991cff18e9d2f06bb0bea254c5abae55af28659264fe1b82",
+      "checksum": "945ba6c7c351390f47b961eaf9d836af6bdab35e2b9e718703360fad6cd75eba",
       "files": [
         {
           "path": "LICENSE.txt",
@@ -778,21 +778,21 @@
         },
         {
           "path": "SKILL.md",
-          "size": 101724,
+          "size": 86198,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/SKILL.md"
         },
         {
           "path": "csharp/claude-api/README.md",
-          "size": 18915,
+          "size": 18417,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/csharp/claude-api/README.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/csharp/claude-api/README.md"
         },
         {
           "path": "csharp/claude-api/batches.md",
-          "size": 413,
+          "size": 411,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/csharp/claude-api/batches.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/csharp/claude-api/batches.md"
@@ -806,35 +806,35 @@
         },
         {
           "path": "csharp/claude-api/streaming.md",
-          "size": 787,
+          "size": 789,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/csharp/claude-api/streaming.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/csharp/claude-api/streaming.md"
         },
         {
           "path": "csharp/claude-api/tool-use.md",
-          "size": 5998,
+          "size": 6002,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/csharp/claude-api/tool-use.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/csharp/claude-api/tool-use.md"
         },
         {
           "path": "curl/examples.md",
-          "size": 9714,
+          "size": 9193,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/curl/examples.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/curl/examples.md"
         },
         {
           "path": "curl/managed-agents.md",
-          "size": 8618,
+          "size": 8749,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/curl/managed-agents.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/curl/managed-agents.md"
         },
         {
           "path": "go/claude-api/README.md",
-          "size": 8477,
+          "size": 7760,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/go/claude-api/README.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/go/claude-api/README.md"
@@ -848,28 +848,28 @@
         },
         {
           "path": "go/claude-api/streaming.md",
-          "size": 1026,
+          "size": 1037,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/go/claude-api/streaming.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/go/claude-api/streaming.md"
         },
         {
           "path": "go/claude-api/tool-use.md",
-          "size": 8393,
+          "size": 8416,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/go/claude-api/tool-use.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/go/claude-api/tool-use.md"
         },
         {
           "path": "go/managed-agents/README.md",
-          "size": 18939,
+          "size": 18937,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/go/managed-agents/README.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/go/managed-agents/README.md"
         },
         {
           "path": "java/claude-api/README.md",
-          "size": 11946,
+          "size": 11308,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/java/claude-api/README.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/java/claude-api/README.md"
@@ -883,35 +883,35 @@
         },
         {
           "path": "java/claude-api/streaming.md",
-          "size": 655,
+          "size": 659,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/java/claude-api/streaming.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/java/claude-api/streaming.md"
         },
         {
           "path": "java/claude-api/tool-use.md",
-          "size": 9509,
+          "size": 9521,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/java/claude-api/tool-use.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/java/claude-api/tool-use.md"
         },
         {
           "path": "java/managed-agents/README.md",
-          "size": 16944,
+          "size": 16942,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/java/managed-agents/README.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/java/managed-agents/README.md"
         },
         {
           "path": "php/claude-api/README.md",
-          "size": 6554,
+          "size": 6113,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/php/claude-api/README.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/php/claude-api/README.md"
         },
         {
           "path": "php/claude-api/batches.md",
-          "size": 447,
+          "size": 445,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/php/claude-api/batches.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/php/claude-api/batches.md"
@@ -925,105 +925,105 @@
         },
         {
           "path": "php/claude-api/streaming.md",
-          "size": 682,
+          "size": 680,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/php/claude-api/streaming.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/php/claude-api/streaming.md"
         },
         {
           "path": "php/claude-api/tool-use.md",
-          "size": 8097,
+          "size": 8081,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/php/claude-api/tool-use.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/php/claude-api/tool-use.md"
         },
         {
           "path": "php/managed-agents/README.md",
-          "size": 13513,
+          "size": 13511,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/php/managed-agents/README.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/php/managed-agents/README.md"
         },
         {
           "path": "python/claude-api/README.md",
-          "size": 20491,
+          "size": 19875,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/python/claude-api/README.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/python/claude-api/README.md"
         },
         {
           "path": "python/claude-api/batches.md",
-          "size": 5588,
+          "size": 5582,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/python/claude-api/batches.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/python/claude-api/batches.md"
         },
         {
           "path": "python/claude-api/files-api.md",
-          "size": 4499,
+          "size": 4493,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/python/claude-api/files-api.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/python/claude-api/files-api.md"
         },
         {
           "path": "python/claude-api/sdk-upgrade.md",
-          "size": 28741,
+          "size": 28716,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/python/claude-api/sdk-upgrade.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/python/claude-api/sdk-upgrade.md"
         },
         {
           "path": "python/claude-api/streaming.md",
-          "size": 11940,
+          "size": 6531,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/python/claude-api/streaming.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/python/claude-api/streaming.md"
         },
         {
           "path": "python/claude-api/tool-use.md",
-          "size": 19786,
+          "size": 19264,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/python/claude-api/tool-use.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/python/claude-api/tool-use.md"
         },
         {
           "path": "python/managed-agents/README.md",
-          "size": 11518,
+          "size": 10341,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/python/managed-agents/README.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/python/managed-agents/README.md"
         },
         {
           "path": "ruby/claude-api/README.md",
-          "size": 4843,
+          "size": 4471,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/ruby/claude-api/README.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/ruby/claude-api/README.md"
         },
         {
           "path": "ruby/claude-api/streaming.md",
-          "size": 235,
+          "size": 233,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/ruby/claude-api/streaming.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/ruby/claude-api/streaming.md"
         },
         {
           "path": "ruby/claude-api/tool-use.md",
-          "size": 1063,
+          "size": 1061,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/ruby/claude-api/tool-use.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/ruby/claude-api/tool-use.md"
         },
         {
           "path": "ruby/managed-agents/README.md",
-          "size": 10452,
+          "size": 10450,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/ruby/managed-agents/README.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/ruby/managed-agents/README.md"
         },
         {
           "path": "shared/admin-api.md",
-          "size": 11606,
+          "size": 11604,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/admin-api.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/admin-api.md"
@@ -1037,91 +1037,42 @@
         },
         {
           "path": "shared/anthropic-cli.md",
-          "size": 22235,
+          "size": 18162,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/anthropic-cli.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/anthropic-cli.md"
         },
         {
           "path": "shared/claude-platform-on-aws.md",
-          "size": 4420,
+          "size": 4412,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/claude-platform-on-aws.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/claude-platform-on-aws.md"
         },
         {
           "path": "shared/cost-optimization.md",
-          "size": 57453,
+          "size": 44959,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/cost-optimization.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/cost-optimization.md"
         },
         {
           "path": "shared/error-codes.md",
-          "size": 19845,
+          "size": 15474,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/error-codes.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/error-codes.md"
         },
         {
-          "path": "shared/evals/build-eval.md",
-          "size": 54819,
-          "binary": false,
-          "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/evals/build-eval.md",
-          "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/evals/build-eval.md"
-        },
-        {
-          "path": "shared/evals/cost-hillclimb.md",
-          "size": 31574,
-          "binary": false,
-          "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/evals/cost-hillclimb.md",
-          "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/evals/cost-hillclimb.md"
-        },
-        {
-          "path": "shared/evals/eval-audit.md",
-          "size": 27892,
-          "binary": false,
-          "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/evals/eval-audit.md",
-          "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/evals/eval-audit.md"
-        },
-        {
-          "path": "shared/evals/eval-hillclimb.md",
-          "size": 68773,
-          "binary": false,
-          "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/evals/eval-hillclimb.md",
-          "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/evals/eval-hillclimb.md"
-        },
-        {
-          "path": "shared/evals/report/SCHEMA.md",
-          "size": 16121,
-          "binary": false,
-          "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/evals/report/SCHEMA.md",
-          "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/evals/report/SCHEMA.md"
-        },
-        {
-          "path": "shared/evals/report/build-report-lite.mjs",
-          "size": 27329,
-          "binary": false,
-          "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/evals/report/build-report-lite.mjs",
-          "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/evals/report/build-report-lite.mjs"
-        },
-        {
-          "path": "shared/evals/report/runner-scaffold.mjs",
-          "size": 33142,
-          "binary": false,
-          "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/evals/report/runner-scaffold.mjs",
-          "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/evals/report/runner-scaffold.mjs"
-        },
-        {
           "path": "shared/live-sources.md",
-          "size": 22989,
+          "size": 22559,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/live-sources.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/live-sources.md"
         },
         {
           "path": "shared/managed-agents-api-reference.md",
-          "size": 34401,
+          "size": 33958,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/managed-agents-api-reference.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/managed-agents-api-reference.md"
@@ -1135,63 +1086,63 @@
         },
         {
           "path": "shared/managed-agents-core.md",
-          "size": 32852,
+          "size": 32573,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/managed-agents-core.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/managed-agents-core.md"
         },
         {
           "path": "shared/managed-agents-environments.md",
-          "size": 12823,
+          "size": 12653,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/managed-agents-environments.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/managed-agents-environments.md"
         },
         {
           "path": "shared/managed-agents-events.md",
-          "size": 25029,
+          "size": 24955,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/managed-agents-events.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/managed-agents-events.md"
         },
         {
           "path": "shared/managed-agents-memory.md",
-          "size": 11362,
+          "size": 11154,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/managed-agents-memory.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/managed-agents-memory.md"
         },
         {
           "path": "shared/managed-agents-multiagent.md",
-          "size": 26250,
+          "size": 26194,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/managed-agents-multiagent.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/managed-agents-multiagent.md"
         },
         {
           "path": "shared/managed-agents-onboarding.md",
-          "size": 13154,
+          "size": 10454,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/managed-agents-onboarding.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/managed-agents-onboarding.md"
         },
         {
           "path": "shared/managed-agents-outcomes.md",
-          "size": 7918,
+          "size": 7244,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/managed-agents-outcomes.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/managed-agents-outcomes.md"
         },
         {
           "path": "shared/managed-agents-overview.md",
-          "size": 13341,
+          "size": 13165,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/managed-agents-overview.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/managed-agents-overview.md"
         },
         {
           "path": "shared/managed-agents-scheduled-deployments.md",
-          "size": 9068,
+          "size": 8734,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/managed-agents-scheduled-deployments.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/managed-agents-scheduled-deployments.md"
@@ -1205,7 +1156,7 @@
         },
         {
           "path": "shared/managed-agents-tools.md",
-          "size": 35673,
+          "size": 35652,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/managed-agents-tools.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/managed-agents-tools.md"
@@ -1219,119 +1170,91 @@
         },
         {
           "path": "shared/model-migration.md",
-          "size": 316954,
+          "size": 244863,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/model-migration.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/model-migration.md"
         },
         {
           "path": "shared/models.md",
-          "size": 15969,
+          "size": 13936,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/models.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/models.md"
         },
         {
           "path": "shared/platform-availability.md",
-          "size": 7415,
+          "size": 5537,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/platform-availability.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/platform-availability.md"
         },
         {
-          "path": "shared/preserved-thinking-migration.md",
-          "size": 63994,
-          "binary": false,
-          "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/preserved-thinking-migration.md",
-          "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/preserved-thinking-migration.md"
-        },
-        {
-          "path": "shared/preserved-thinking-migration/causes.md",
-          "size": 37879,
-          "binary": false,
-          "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/preserved-thinking-migration/causes.md",
-          "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/preserved-thinking-migration/causes.md"
-        },
-        {
-          "path": "shared/preserved-thinking-migration/drop_block_probe.py",
-          "size": 64338,
-          "binary": false,
-          "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/preserved-thinking-migration/drop_block_probe.py",
-          "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/preserved-thinking-migration/drop_block_probe.py"
-        },
-        {
-          "path": "shared/preserved-thinking-migration/prefix_diff.py",
-          "size": 94008,
-          "binary": false,
-          "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/preserved-thinking-migration/prefix_diff.py",
-          "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/preserved-thinking-migration/prefix_diff.py"
-        },
-        {
           "path": "shared/prompt-audit.md",
-          "size": 48983,
+          "size": 34966,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/prompt-audit.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/prompt-audit.md"
         },
         {
           "path": "shared/prompt-caching.md",
-          "size": 33021,
+          "size": 31084,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/prompt-caching.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/prompt-caching.md"
         },
         {
           "path": "shared/token-counting.md",
-          "size": 1603,
+          "size": 1597,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/token-counting.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/token-counting.md"
         },
         {
           "path": "shared/tool-use-concepts.md",
-          "size": 44242,
+          "size": 35290,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/tool-use-concepts.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/shared/tool-use-concepts.md"
         },
         {
           "path": "typescript/claude-api/README.md",
-          "size": 15739,
+          "size": 15131,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/typescript/claude-api/README.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/typescript/claude-api/README.md"
         },
         {
           "path": "typescript/claude-api/batches.md",
-          "size": 2594,
+          "size": 2590,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/typescript/claude-api/batches.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/typescript/claude-api/batches.md"
         },
         {
           "path": "typescript/claude-api/files-api.md",
-          "size": 2384,
+          "size": 2382,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/typescript/claude-api/files-api.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/typescript/claude-api/files-api.md"
         },
         {
           "path": "typescript/claude-api/streaming.md",
-          "size": 9514,
+          "size": 5825,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/typescript/claude-api/streaming.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/typescript/claude-api/streaming.md"
         },
         {
           "path": "typescript/claude-api/tool-use.md",
-          "size": 22670,
+          "size": 18877,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/typescript/claude-api/tool-use.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/typescript/claude-api/tool-use.md"
         },
         {
           "path": "typescript/managed-agents/README.md",
-          "size": 10989,
+          "size": 9828,
           "binary": false,
           "githubUrl": "https://github.com/anthropics/skills/blob/main/skills/claude-api/typescript/managed-agents/README.md",
           "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/claude-api/typescript/managed-agents/README.md"
@@ -2040,12 +1963,12 @@
       "description": "When to delegate to `cavecrew-investigator` (locate code), `cavecrew-builder` (1-2 file edit) or `cavecrew-reviewer` (diff review) instead of working inline or using `Explore`. Their output is compressed, so main context lasts longer.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/cavecrew",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/cavecrew",
       "route": "/skills/caveman/cavecrew",
-      "checksum": "83554ce99a2e589332904c08ff8d3e6a4dec7a21087c8d18fc4ffcd52021158e",
+      "checksum": "f59431a04f73c6d8f557a74b6e2e34f3ddddc16fb83b9b19d4a4960616e15cb5",
       "files": [
         {
           "path": "README.md",
@@ -2056,7 +1979,7 @@
         },
         {
           "path": "SKILL.md",
-          "size": 3744,
+          "size": 3606,
           "binary": false,
           "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/cavecrew/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/cavecrew/SKILL.md"
@@ -2066,26 +1989,26 @@
     {
       "id": "caveman/caveman",
       "name": "caveman",
-      "description": "Terse caveman voice: answer first, fluff gone, every technical fact kept. Use for /caveman, \"caveman mode\", \"talk like caveman\", \"be brief\", \"less tokens\". Stays on until \"stop caveman\" or \"normal mode\".",
+      "description": "Ultra-compressed communication mode that cuts output tokens while keeping technical accuracy. Levels: lite, full, ultra and the wenyan variants. Use for /caveman, \"caveman mode\", \"talk like caveman\", \"be brief\" or \"less tokens\".",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/caveman",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman",
       "route": "/skills/caveman/caveman",
-      "checksum": "9adb083c934deeb6b9ee62e1f2a3fd3f0f44fc60d7173e9211d33ab318821e09",
+      "checksum": "b1ec227602b9f4d12f53edb377a317efb13ef388ea0b07933cecc36c7634e627",
       "files": [
         {
           "path": "README.md",
-          "size": 3009,
+          "size": 1896,
           "binary": false,
           "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/caveman/README.md",
           "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/caveman/README.md"
         },
         {
           "path": "SKILL.md",
-          "size": 4043,
+          "size": 7061,
           "binary": false,
           "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/caveman/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/caveman/SKILL.md"
@@ -2098,7 +2021,7 @@
       "description": "Write a Conventional Commits message compressed to intent only. Use for \"write a commit\", \"commit message\", /commit or /caveman-commit.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/caveman-commit",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman-commit",
@@ -2127,12 +2050,12 @@
       "description": "Compress a memory file such as CLAUDE.md or a todo list into caveman format to save input tokens, keeping a readable backup. Trigger: /caveman-compress.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/caveman-compress",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman-compress",
       "route": "/skills/caveman/caveman-compress",
-      "checksum": "2b6e3ed6e2a08eaf0c80e2fa5a5ca3b6b50f4572132b2b982fd75b4456d64e40",
+      "checksum": "468f26c8bcdd13ff67249424d391e19d03c2b513e5e91b931af3d6f29f075e70",
       "files": [
         {
           "path": "README.md",
@@ -2185,7 +2108,7 @@
         },
         {
           "path": "scripts/compress.py",
-          "size": 35982,
+          "size": 33727,
           "binary": false,
           "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/caveman-compress/scripts/compress.py",
           "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/caveman-compress/scripts/compress.py"
@@ -2199,7 +2122,7 @@
         },
         {
           "path": "scripts/validate.py",
-          "size": 15979,
+          "size": 15236,
           "binary": false,
           "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/caveman-compress/scripts/validate.py",
           "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/caveman-compress/scripts/validate.py"
@@ -2212,7 +2135,7 @@
       "description": "Find and label every LLM workflow in the repository so Caveman Cloud groups spend by workflow instead of one bucket. Use for \"discover workflows\" or breaking LLM spend down by workflow.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/caveman-discover",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman-discover",
@@ -2234,7 +2157,7 @@
       "description": "Read-only review of Caveman Cloud evidence: cost, Cave Score, workflows, traces, latency, errors, routing, savings. Use when asked what Caveman found or where LLM spend goes.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/caveman-evidence-review",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman-evidence-review",
@@ -2256,12 +2179,12 @@
       "description": "Read-only repository explorer for cold-start orientation, broad cross-file localization, or when a direct search failed. Skip it when the exact file or symbol is already named. Returns path:line citations only; its reads stay out of main context.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/caveman-explore",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman-explore",
       "route": "/skills/caveman/caveman-explore",
-      "checksum": "3dc83f2d6ab87d8894cef8ed9d996b5b0b617e66b4d7e8e6e4e52887d10e6945",
+      "checksum": "9aac9de6121dd945378320fde8f76c7ea45e26adc73bd5e01cb679a652eea55d",
       "files": [
         {
           "path": "SKILL.md",
@@ -2272,7 +2195,7 @@
         },
         {
           "path": "package.json",
-          "size": 354,
+          "size": 347,
           "binary": false,
           "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/caveman-explore/package.json",
           "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/caveman-explore/package.json"
@@ -2289,26 +2212,26 @@
     {
       "id": "caveman/caveman-help",
       "name": "caveman-help",
-      "description": "Quick-reference card for the three caveman skills and their commands. Trigger: /caveman-help or \"caveman help\".",
+      "description": "Quick-reference card for caveman modes, skills and commands. Trigger: /caveman-help or \"caveman help\".",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/caveman-help",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman-help",
       "route": "/skills/caveman/caveman-help",
-      "checksum": "0f7d31bbf0799b983cd00693279ad53efea91903dbcddaf33496f4a8114a15e7",
+      "checksum": "0c3a5853079ac3998b2da6ea7bf2f2d0088e1605f89171ee09a7df1443d2537e",
       "files": [
         {
           "path": "README.md",
-          "size": 1085,
+          "size": 976,
           "binary": false,
           "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/caveman-help/README.md",
           "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/caveman-help/README.md"
         },
         {
           "path": "SKILL.md",
-          "size": 2742,
+          "size": 2266,
           "binary": false,
           "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/caveman-help/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/caveman-help/SKILL.md"
@@ -2321,37 +2244,37 @@
       "description": "Act on a Caveman learn report - review the ranked token sinks, apply cost-lowering fixes with per-edit consent, and report what those fixes returned. Use when asked to lower an agent's token cost, what caveman has saved, to trim a heavy CLAUDE.md, or to offload re-pasted context into cavemem.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/caveman-learn",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman-learn",
       "route": "/skills/caveman/caveman-learn",
-      "checksum": "0f72869207b6b4b1442002f31db735162b94bd9a352010c47fbaa103d2eb3605",
+      "checksum": "cf152a01e79b8ea2014325c0c30458eaf8184ed97407af0cd09aecaee53f59fb",
       "files": [
         {
           "path": "CLAUDE.md",
-          "size": 1886,
+          "size": 1879,
           "binary": false,
           "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/caveman-learn/CLAUDE.md",
           "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/caveman-learn/CLAUDE.md"
         },
         {
           "path": "README.md",
-          "size": 1829,
+          "size": 1712,
           "binary": false,
           "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/caveman-learn/README.md",
           "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/caveman-learn/README.md"
         },
         {
           "path": "SKILL.md",
-          "size": 11370,
+          "size": 9205,
           "binary": false,
           "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/caveman-learn/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/caveman-learn/SKILL.md"
         },
         {
           "path": "package.json",
-          "size": 530,
+          "size": 523,
           "binary": false,
           "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/caveman-learn/package.json",
           "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/caveman-learn/package.json"
@@ -2378,7 +2301,7 @@
       "description": "Inspect Caveman Cloud's experiment lifecycle and block unsafe execution. Use when asked to start, approve, cancel, promote or roll back a Caveman experiment.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/caveman-manage",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman-manage",
@@ -2400,7 +2323,7 @@
       "description": "Turn a Caveman optimization observation into an operator-chosen candidate with a paired baseline evaluation. Use when asked to inspect or evaluate a Caveman optimization report. Needs explicit approval.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/caveman-optimize",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman-optimize",
@@ -2422,7 +2345,7 @@
       "description": "Compressed code review - one line per finding with location, problem and fix. Use for /caveman-review, \"review this PR\", or \"review the diff\".",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/caveman-review",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman-review",
@@ -2451,7 +2374,7 @@
       "description": "Wire a repository through the Caveman Cloud gateway so every LLM request is measured, with no behavior change. Use for \"set up caveman\" or adding LLM spend observability.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/caveman-setup",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman-setup",
@@ -2473,7 +2396,7 @@
       "description": "Show recorded output and cache-read token usage and mode attribution for the current Claude Code session, or locate the host's native usage report. Trigger: /caveman-stats.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/caveman-stats",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman-stats",
@@ -2502,7 +2425,7 @@
       "description": "Diagnose ambiguous failures before editing. Use for unknown causes, intermittent behavior, performance regressions, or investigations needing evidence-ranked hypotheses.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/investigate-first",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/investigate-first",
@@ -2531,7 +2454,7 @@
       "description": "Build feature work with high overbuilding risk. Use for new behavior, product slices, or integrations where repository reuse, strict scope, and an explicit stop condition matter.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/lean-build",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/lean-build",
@@ -2555,41 +2478,12 @@
       ]
     },
     {
-      "id": "caveman/megacave",
-      "name": "megacave",
-      "description": "Caveman in Classical Chinese: 文言文 register, far fewer characters, technical terms verbatim. Invoke only with /megacave or /caveman wenyan. Stays on until \"stop caveman\" or \"normal mode\".",
-      "source": "caveman",
-      "category": null,
-      "license": "Apache-2.0",
-      "proprietary": false,
-      "path": "skills/megacave",
-      "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/megacave",
-      "route": "/skills/caveman/megacave",
-      "checksum": "31032e822dfe2d114d0c36354f7313e8138b91e0d3e3b6ed03e2708d3cfe2d14",
-      "files": [
-        {
-          "path": "README.md",
-          "size": 785,
-          "binary": false,
-          "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/megacave/README.md",
-          "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/megacave/README.md"
-        },
-        {
-          "path": "SKILL.md",
-          "size": 2631,
-          "binary": false,
-          "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/megacave/SKILL.md",
-          "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/megacave/SKILL.md"
-        }
-      ]
-    },
-    {
       "id": "caveman/migration",
       "name": "migration",
       "description": "Implement reversible compatibility-safe transitions. Use for schema, data, API, protocol, configuration, or dependency migrations requiring rollback and preservation proof.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/migration",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/migration",
@@ -2618,7 +2512,7 @@
       "description": "Restructure code while preserving behavior. Use for extraction, consolidation, ownership moves, or cleanup where verification must bracket structural edits.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/safe-refactor",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/safe-refactor",
@@ -2647,7 +2541,7 @@
       "description": "Fix bugs and small behavior changes at the narrowest responsible layer. Use when regression proof, preserved surrounding behavior, and task-relevant tests matter.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/surgical-patch",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/surgical-patch",
@@ -2671,41 +2565,12 @@
       ]
     },
     {
-      "id": "caveman/ultracave",
-      "name": "ultracave",
-      "description": "Caveman at maximum compression: fragments, one word when one word is enough, each fact once. Invoke only with /ultracave or /caveman ultra. Stays on until \"stop caveman\" or \"normal mode\".",
-      "source": "caveman",
-      "category": null,
-      "license": "Apache-2.0",
-      "proprietary": false,
-      "path": "skills/ultracave",
-      "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/ultracave",
-      "route": "/skills/caveman/ultracave",
-      "checksum": "985992ac4376668c6e63e260820e943a70198bdc79083ec33bdc902c610e658e",
-      "files": [
-        {
-          "path": "README.md",
-          "size": 861,
-          "binary": false,
-          "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/ultracave/README.md",
-          "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/ultracave/README.md"
-        },
-        {
-          "path": "SKILL.md",
-          "size": 2287,
-          "binary": false,
-          "githubUrl": "https://github.com/JuliusBrussee/caveman/blob/main/skills/ultracave/SKILL.md",
-          "rawUrl": "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/ultracave/SKILL.md"
-        }
-      ]
-    },
-    {
       "id": "caveman/verify-and-stop",
       "name": "verify-and-stop",
       "description": "Prove existing work meets acceptance conditions without expanding scope. Use for validation-only tasks, completion checks, focused gate runs, and last-mile proof.",
       "source": "caveman",
       "category": null,
-      "license": "Apache-2.0",
+      "license": "MIT",
       "proprietary": false,
       "path": "skills/verify-and-stop",
       "url": "https://github.com/JuliusBrussee/caveman/tree/main/skills/verify-and-stop",
@@ -2739,7 +2604,7 @@
       "path": "skills/engineering/ask-matt",
       "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/ask-matt",
       "route": "/skills/mattpocock/engineering/ask-matt",
-      "checksum": "8410fc79755107824c85747b8c6c4a2b5dc5efe56d1c6f4d664eada2e0e145df",
+      "checksum": "fb2d3f0da189b858f2daa3fff4a0e504045e4aa81cf2de3b887a0428c5449125",
       "files": [
         {
           "path": "PHASE-BOUNDARIES.md",
@@ -2750,7 +2615,7 @@
         },
         {
           "path": "SKILL.md",
-          "size": 12452,
+          "size": 11417,
           "binary": false,
           "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/ask-matt/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/ask-matt/SKILL.md"
@@ -2804,7 +2669,7 @@
       "path": "skills/engineering/codebase-design",
       "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/codebase-design",
       "route": "/skills/mattpocock/engineering/codebase-design",
-      "checksum": "ac8b4fb9e2fe3ecc3f2b1ec96d51d0b66c309ee2bb852e27993cd4270769f9b0",
+      "checksum": "e36311054b7ff646392a73159d4c797b80b71529db5e90f8df87f292c22d6989",
       "files": [
         {
           "path": "DEEPENING.md",
@@ -2815,7 +2680,7 @@
         },
         {
           "path": "DESIGN-IT-TWICE.md",
-          "size": 2665,
+          "size": 2664,
           "binary": false,
           "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/codebase-design/DESIGN-IT-TWICE.md",
           "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/codebase-design/DESIGN-IT-TWICE.md"
@@ -2847,11 +2712,11 @@
       "path": "skills/engineering/diagnosing-bugs",
       "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/diagnosing-bugs",
       "route": "/skills/mattpocock/engineering/diagnosing-bugs",
-      "checksum": "feda4c53b6d2b475522ce195642b303c69cbe27ec1b8f9fa46f477c47c6727dc",
+      "checksum": "055b702edc5fda499dc8dedebfe29cc0cafce37707c44da8ab5104351c2fbc00",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 8530,
+          "size": 8529,
           "binary": false,
           "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/diagnosing-bugs/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/diagnosing-bugs/SKILL.md"
@@ -2875,7 +2740,7 @@
     {
       "id": "mattpocock/engineering/domain-modeling",
       "name": "domain-modeling",
-      "description": "Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a GLOSSARY.md, or recording or editing an ADR.",
+      "description": "Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a CONTEXT.md, or recording or editing an ADR.",
       "source": "mattpocock",
       "category": "Engineering",
       "license": "MIT",
@@ -2883,7 +2748,7 @@
       "path": "skills/engineering/domain-modeling",
       "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/domain-modeling",
       "route": "/skills/mattpocock/engineering/domain-modeling",
-      "checksum": "f4c97d65fe6d6ac069a6e5565bba1405f6097431d8fd942573ec03d297c1d5e6",
+      "checksum": "874db49ea86e5bffe6d4d1521e2482f0271786b4dbb6abf81e46ff8c06f4c8ed",
       "files": [
         {
           "path": "ADR-FORMAT.md",
@@ -2893,15 +2758,15 @@
           "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/domain-modeling/ADR-FORMAT.md"
         },
         {
-          "path": "GLOSSARY-FORMAT.md",
-          "size": 2300,
+          "path": "CONTEXT-FORMAT.md",
+          "size": 2290,
           "binary": false,
-          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/domain-modeling/GLOSSARY-FORMAT.md",
-          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/domain-modeling/GLOSSARY-FORMAT.md"
+          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/domain-modeling/CONTEXT-FORMAT.md",
+          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/domain-modeling/CONTEXT-FORMAT.md"
         },
         {
           "path": "SKILL.md",
-          "size": 3346,
+          "size": 3331,
           "binary": false,
           "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/domain-modeling/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/domain-modeling/SKILL.md"
@@ -2974,35 +2839,6 @@
       ]
     },
     {
-      "id": "mattpocock/engineering/implement-spec",
-      "name": "implement-spec",
-      "description": "Implement the result of /to-spec and /to-tickets in code.",
-      "source": "mattpocock",
-      "category": "Engineering",
-      "license": "MIT",
-      "proprietary": false,
-      "path": "skills/engineering/implement-spec",
-      "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/implement-spec",
-      "route": "/skills/mattpocock/engineering/implement-spec",
-      "checksum": "aa494fac9eff42d9ce7a54a391b1589ce403c7d13fa6442102b4703c13efc5df",
-      "files": [
-        {
-          "path": "SKILL.md",
-          "size": 2780,
-          "binary": false,
-          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/implement-spec/SKILL.md",
-          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/implement-spec/SKILL.md"
-        },
-        {
-          "path": "agents/openai.yaml",
-          "size": 168,
-          "binary": false,
-          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/implement-spec/agents/openai.yaml",
-          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/implement-spec/agents/openai.yaml"
-        }
-      ]
-    },
-    {
       "id": "mattpocock/engineering/improve-codebase-architecture",
       "name": "improve-codebase-architecture",
       "description": "Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.",
@@ -3013,7 +2849,7 @@
       "path": "skills/engineering/improve-codebase-architecture",
       "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/improve-codebase-architecture",
       "route": "/skills/mattpocock/engineering/improve-codebase-architecture",
-      "checksum": "14958b093df65db52eff1cf0e3b099a2e7ed24e69177e64cd80c88cafc02ea15",
+      "checksum": "a0fc787f75c8d3725767d34556668b30de35c994f557e2dcab514596b99358d1",
       "files": [
         {
           "path": "HTML-REPORT.md",
@@ -3024,7 +2860,7 @@
         },
         {
           "path": "SKILL.md",
-          "size": 6000,
+          "size": 5993,
           "binary": false,
           "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/improve-codebase-architecture/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/improve-codebase-architecture/SKILL.md"
@@ -3035,42 +2871,6 @@
           "binary": false,
           "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/improve-codebase-architecture/agents/openai.yaml",
           "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/improve-codebase-architecture/agents/openai.yaml"
-        }
-      ]
-    },
-    {
-      "id": "mattpocock/engineering/pr",
-      "name": "pr",
-      "description": "Use when writing a PR body.",
-      "source": "mattpocock",
-      "category": "Engineering",
-      "license": "MIT",
-      "proprietary": false,
-      "path": "skills/engineering/pr",
-      "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/pr",
-      "route": "/skills/mattpocock/engineering/pr",
-      "checksum": "32af6253042d201d11c687949c27d4fda15bcf8825a16a37283236d5aef3cdaa",
-      "files": [
-        {
-          "path": "CREDITS.md",
-          "size": 604,
-          "binary": false,
-          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/pr/CREDITS.md",
-          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/pr/CREDITS.md"
-        },
-        {
-          "path": "SKILL.md",
-          "size": 4169,
-          "binary": false,
-          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/pr/SKILL.md",
-          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/pr/SKILL.md"
-        },
-        {
-          "path": "agents/openai.yaml",
-          "size": 93,
-          "binary": false,
-          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/pr/agents/openai.yaml",
-          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/pr/agents/openai.yaml"
         }
       ]
     },
@@ -3147,31 +2947,31 @@
       ]
     },
     {
-      "id": "mattpocock/engineering/retro",
-      "name": "retro",
-      "description": "Conduct a retrospective on a coding session.",
+      "id": "mattpocock/engineering/resolving-merge-conflicts",
+      "name": "resolving-merge-conflicts",
+      "description": "Use when you need to resolve an in-progress git merge/rebase conflict.",
       "source": "mattpocock",
       "category": "Engineering",
       "license": "MIT",
       "proprietary": false,
-      "path": "skills/engineering/retro",
-      "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/retro",
-      "route": "/skills/mattpocock/engineering/retro",
-      "checksum": "2cc20fb7b97769cf01146572f349480f4c1045f38dde31175ab85fb5961896e0",
+      "path": "skills/engineering/resolving-merge-conflicts",
+      "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/resolving-merge-conflicts",
+      "route": "/skills/mattpocock/engineering/resolving-merge-conflicts",
+      "checksum": "79eb7b89da74b05ccee219fba1127dcaeee143243326955af3da76e45df90233",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 4369,
+          "size": 918,
           "binary": false,
-          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/retro/SKILL.md",
-          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/retro/SKILL.md"
+          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/resolving-merge-conflicts/SKILL.md",
+          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/resolving-merge-conflicts/SKILL.md"
         },
         {
           "path": "agents/openai.yaml",
-          "size": 146,
+          "size": 113,
           "binary": false,
-          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/retro/agents/openai.yaml",
-          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/retro/agents/openai.yaml"
+          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/resolving-merge-conflicts/agents/openai.yaml",
+          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/resolving-merge-conflicts/agents/openai.yaml"
         }
       ]
     },
@@ -3186,11 +2986,11 @@
       "path": "skills/engineering/setup-matt-pocock-skills",
       "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/setup-matt-pocock-skills",
       "route": "/skills/mattpocock/engineering/setup-matt-pocock-skills",
-      "checksum": "0552e0395a8a7c009655d6698b24fa69522ab3aa7bbdb1246c4556b9dd6c21c0",
+      "checksum": "ea2d0d29f69d7eb985c23dd2b607339d4c47b10ca7df73faa1ab68c22d98bd83",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 6847,
+          "size": 6841,
           "binary": false,
           "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/setup-matt-pocock-skills/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/setup-matt-pocock-skills/SKILL.md"
@@ -3204,7 +3004,7 @@
         },
         {
           "path": "domain.md",
-          "size": 2042,
+          "size": 2033,
           "binary": false,
           "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/setup-matt-pocock-skills/domain.md",
           "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/setup-matt-pocock-skills/domain.md"
@@ -3250,11 +3050,11 @@
       "path": "skills/engineering/tdd",
       "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/tdd",
       "route": "/skills/mattpocock/engineering/tdd",
-      "checksum": "5ba62612b7450104a915e89bf533ed2f74cba8b9a0e58a936e6581a0c6c4db03",
+      "checksum": "c4cbdbeb7955bec00c0d5778aa7b6c9104b8201702153c04fe2e93c529e78be6",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 3550,
+          "size": 3549,
           "binary": false,
           "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/tdd/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/tdd/SKILL.md"
@@ -3351,7 +3151,7 @@
       "path": "skills/engineering/triage",
       "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/triage",
       "route": "/skills/mattpocock/engineering/triage",
-      "checksum": "a3a01b8f8aefed23435ac55cf87e22af0c0c42a9e670fec6ef1d74f9455e1bac",
+      "checksum": "0554c9b02c5b72ccb14a8d83c227a373b0f26021d272caf728619f64cce1a1d5",
       "files": [
         {
           "path": "AGENT-BRIEF.md",
@@ -3369,7 +3169,7 @@
         },
         {
           "path": "SKILL.md",
-          "size": 6558,
+          "size": 6557,
           "binary": false,
           "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/engineering/triage/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/triage/SKILL.md"
@@ -3449,35 +3249,6 @@
       ]
     },
     {
-      "id": "mattpocock/in-progress/chief-of-staff",
-      "name": "chief-of-staff",
-      "description": "Pursue a long-running goal in a single session by co-ordinating subagents.",
-      "source": "mattpocock",
-      "category": "In Progress",
-      "license": "MIT",
-      "proprietary": false,
-      "path": "skills/in-progress/chief-of-staff",
-      "url": "https://github.com/mattpocock/skills/tree/main/skills/in-progress/chief-of-staff",
-      "route": "/skills/mattpocock/in-progress/chief-of-staff",
-      "checksum": "4dbcfbbc97993a8297d7e5d5c1ef51205f49704a6efd776b2b6bf8e9e425f05b",
-      "files": [
-        {
-          "path": "SKILL.md",
-          "size": 1141,
-          "binary": false,
-          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/in-progress/chief-of-staff/SKILL.md",
-          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/in-progress/chief-of-staff/SKILL.md"
-        },
-        {
-          "path": "agents/openai.yaml",
-          "size": 184,
-          "binary": false,
-          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/in-progress/chief-of-staff/agents/openai.yaml",
-          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/in-progress/chief-of-staff/agents/openai.yaml"
-        }
-      ]
-    },
-    {
       "id": "mattpocock/in-progress/claude-handoff",
       "name": "claude-handoff",
       "description": "Hand the current conversation off to a fresh background agent that picks up the work immediately.",
@@ -3507,6 +3278,35 @@
       ]
     },
     {
+      "id": "mattpocock/in-progress/implement-spec",
+      "name": "implement-spec",
+      "description": "Implement a specification in code.",
+      "source": "mattpocock",
+      "category": "In Progress",
+      "license": "MIT",
+      "proprietary": false,
+      "path": "skills/in-progress/implement-spec",
+      "url": "https://github.com/mattpocock/skills/tree/main/skills/in-progress/implement-spec",
+      "route": "/skills/mattpocock/in-progress/implement-spec",
+      "checksum": "c639860d1af0ee597a7955d2c4325f9341391feaa2a77e37c35268110432f294",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "size": 2043,
+          "binary": false,
+          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/in-progress/implement-spec/SKILL.md",
+          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/in-progress/implement-spec/SKILL.md"
+        },
+        {
+          "path": "agents/openai.yaml",
+          "size": 143,
+          "binary": false,
+          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/in-progress/implement-spec/agents/openai.yaml",
+          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/in-progress/implement-spec/agents/openai.yaml"
+        }
+      ]
+    },
+    {
       "id": "mattpocock/in-progress/loop-me",
       "name": "loop-me",
       "description": "Grill me about specs for the workflows I want to build, within this workspace.",
@@ -3532,6 +3332,71 @@
           "binary": false,
           "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/in-progress/loop-me/agents/openai.yaml",
           "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/in-progress/loop-me/agents/openai.yaml"
+        }
+      ]
+    },
+    {
+      "id": "mattpocock/in-progress/pr",
+      "name": "pr",
+      "description": "Use when writing a PR body.",
+      "source": "mattpocock",
+      "category": "In Progress",
+      "license": "MIT",
+      "proprietary": false,
+      "path": "skills/in-progress/pr",
+      "url": "https://github.com/mattpocock/skills/tree/main/skills/in-progress/pr",
+      "route": "/skills/mattpocock/in-progress/pr",
+      "checksum": "4eb8fbd1b661e8db63850ab512e12f09d7a86507582a540722e99349c0f06c31",
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "size": 489,
+          "binary": false,
+          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/in-progress/pr/CREDITS.md",
+          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/in-progress/pr/CREDITS.md"
+        },
+        {
+          "path": "SKILL.md",
+          "size": 4171,
+          "binary": false,
+          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/in-progress/pr/SKILL.md",
+          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/in-progress/pr/SKILL.md"
+        },
+        {
+          "path": "agents/openai.yaml",
+          "size": 93,
+          "binary": false,
+          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/in-progress/pr/agents/openai.yaml",
+          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/in-progress/pr/agents/openai.yaml"
+        }
+      ]
+    },
+    {
+      "id": "mattpocock/in-progress/retro",
+      "name": "retro",
+      "description": "Conduct a retrospective on a coding session.",
+      "source": "mattpocock",
+      "category": "In Progress",
+      "license": "MIT",
+      "proprietary": false,
+      "path": "skills/in-progress/retro",
+      "url": "https://github.com/mattpocock/skills/tree/main/skills/in-progress/retro",
+      "route": "/skills/mattpocock/in-progress/retro",
+      "checksum": "2cc20fb7b97769cf01146572f349480f4c1045f38dde31175ab85fb5961896e0",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "size": 4369,
+          "binary": false,
+          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/in-progress/retro/SKILL.md",
+          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/in-progress/retro/SKILL.md"
+        },
+        {
+          "path": "agents/openai.yaml",
+          "size": 146,
+          "binary": false,
+          "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/in-progress/retro/agents/openai.yaml",
+          "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/in-progress/retro/agents/openai.yaml"
         }
       ]
     },
@@ -3965,11 +3830,11 @@
       "path": "skills/productivity/wait-what",
       "url": "https://github.com/mattpocock/skills/tree/main/skills/productivity/wait-what",
       "route": "/skills/mattpocock/productivity/wait-what",
-      "checksum": "f047390b8026a34d617a0c7eb65de5f7c270d3b7b0da6523be371395c6ff2543",
+      "checksum": "f78854b883b66399c5dafa2fe5bdf4d8a008361a7e5bc1b39c758cd01e66d10a",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 396,
+          "size": 394,
           "binary": false,
           "githubUrl": "https://github.com/mattpocock/skills/blob/main/skills/productivity/wait-what/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/mattpocock/skills/main/skills/productivity/wait-what/SKILL.md"
@@ -4425,7 +4290,7 @@
     {
       "id": "microsoft/azure-app-onboard",
       "name": "azure-app-onboard",
-      "description": "End-to-end orchestrator: from a business idea, app idea, or existing app to running Azure deployment with cost estimates and pre-deploy approval. Analyzes your app, auto-detects the right Azure services, scaffolds infrastructure code, and deploys — tailored to your app, not a template. Handles moving existing apps to Azure without rewriting or with minimal changes. WHEN: bring your app to Azure, plan my app, cost to run, is my code ready to deploy, deploy my app to the cloud, deploy all my services, what Azure services do I need, plan my Azure deployment, deploy my new app to Azure, one-click deploy, I have an app and want it on Azure, migrate my app to Azure, help me get started, build an app, no code yet, starter project. DO NOT USE FOR: use azd for deployment(use azure-deploy), optimizing existing costs (use cost-optimization), code readiness checks only (use azure-app-onboard-prereq).",
+      "description": "End-to-end orchestrator: from a business idea, app idea, or existing app to running Azure deployment with cost estimates and pre-deploy approval. Analyzes your app, auto-detects the right Azure services, scaffolds infrastructure code, and deploys — tailored to your app, not a template. Handles moving existing apps to Azure without rewriting or with minimal changes. WHEN: bring your app to Azure, plan my app, cost to run, is my code ready to deploy, deploy my app to the cloud, deploy all my services, what Azure services do I need, plan my Azure deployment, deploy my new app to Azure, one-click deploy, I have an app and want it on Azure, migrate my app to Azure, help me get started, build an app, no code yet, starter project. DO NOT USE FOR: use azd for deployment(use azure-deploy), optimizing existing costs (use azure-cost), code readiness checks only (use azure-app-onboard-prereq).",
       "source": "microsoft",
       "category": null,
       "license": "MIT",
@@ -4433,11 +4298,11 @@
       "path": "skills/azure-app-onboard",
       "url": "https://github.com/microsoft/azure-skills/tree/main/skills/azure-app-onboard",
       "route": "/skills/microsoft/azure-app-onboard",
-      "checksum": "12ed8be882b84d3ea47a0cf0165616ba998fc172d81ada4f269b73feaafa7c20",
+      "checksum": "d7898b974956e039c1800b8ebc7389a27172abe08452eafe543ddb135cc79d18",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 6809,
+          "size": 6543,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-app-onboard/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-app-onboard/SKILL.md"
@@ -4458,7 +4323,7 @@
         },
         {
           "path": "references/handoff-protocol.md",
-          "size": 8013,
+          "size": 7843,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-app-onboard/references/handoff-protocol.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-app-onboard/references/handoff-protocol.md"
@@ -4507,7 +4372,7 @@
         },
         {
           "path": "references/session-schemas.ts",
-          "size": 5298,
+          "size": 5444,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-app-onboard/references/session-schemas.ts",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-app-onboard/references/session-schemas.ts"
@@ -4532,7 +4397,7 @@
       "path": "skills/azure-app-onboard-prereq",
       "url": "https://github.com/microsoft/azure-skills/tree/main/skills/azure-app-onboard-prereq",
       "route": "/skills/microsoft/azure-app-onboard-prereq",
-      "checksum": "3c2d69c1953c6ceb257210e0206b200dfe462ac7689d54ec60898699ec67fb7a",
+      "checksum": "ef238526be3c98773bd0d4015dcd583df79c5c34a913ce8e13145b3d19b22aad",
       "files": [
         {
           "path": "SKILL.md",
@@ -4592,7 +4457,7 @@
         },
         {
           "path": "references/prereq-schemas.ts",
-          "size": 4188,
+          "size": 4268,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-app-onboard-prereq/references/prereq-schemas.ts",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-app-onboard-prereq/references/prereq-schemas.ts"
@@ -4891,7 +4756,7 @@
       "path": "skills/azure-compliance",
       "url": "https://github.com/microsoft/azure-skills/tree/main/skills/azure-compliance",
       "route": "/skills/microsoft/azure-compliance",
-      "checksum": "9ca33923d515b1547fd6e4ffc73a9cfa8188028932bf64b536ecf0d9dcb6cb62",
+      "checksum": "399fb7e913af4bc66ccda33c2e102709afc7887465a718198cdefdb712967453",
       "files": [
         {
           "path": "SKILL.md",
@@ -4937,7 +4802,7 @@
         },
         {
           "path": "references/azure-resource-graph.md",
-          "size": 2697,
+          "size": 2794,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-compliance/references/azure-resource-graph.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-compliance/references/azure-resource-graph.md"
@@ -5310,6 +5175,182 @@
       ]
     },
     {
+      "id": "microsoft/azure-cost",
+      "name": "azure-cost",
+      "description": "Azure cost management: query costs, forecast spending, optimize to reduce waste. WHEN: \"Azure costs\", \"Azure bill\", \"cost breakdown\", \"how much am I spending\", \"forecast spending\", \"optimize costs\", \"reduce spending\", \"orphaned resources\", \"rightsize VMs\", \"cost spike\", \"reduce storage costs\", \"AKS cost\". DO NOT USE FOR: deploying resources, provisioning, diagnostics, or security audits.",
+      "source": "microsoft",
+      "category": null,
+      "license": "MIT",
+      "proprietary": false,
+      "path": "skills/azure-cost",
+      "url": "https://github.com/microsoft/azure-skills/tree/main/skills/azure-cost",
+      "route": "/skills/microsoft/azure-cost",
+      "checksum": "2dbc9f9c5348be0d782f29019884217a9f1870ff94b7c8331c4e9df97da71287",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "size": 1886,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/SKILL.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/SKILL.md"
+        },
+        {
+          "path": "cost-forecast/error-handling.md",
+          "size": 4417,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-forecast/error-handling.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-forecast/error-handling.md"
+        },
+        {
+          "path": "cost-forecast/examples.md",
+          "size": 3066,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-forecast/examples.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-forecast/examples.md"
+        },
+        {
+          "path": "cost-forecast/guardrails.md",
+          "size": 5187,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-forecast/guardrails.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-forecast/guardrails.md"
+        },
+        {
+          "path": "cost-forecast/request-body-schema.md",
+          "size": 4347,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-forecast/request-body-schema.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-forecast/request-body-schema.md"
+        },
+        {
+          "path": "cost-forecast/workflow.md",
+          "size": 4844,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-forecast/workflow.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-forecast/workflow.md"
+        },
+        {
+          "path": "cost-optimization/auth-best-practices.md",
+          "size": 6207,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-optimization/auth-best-practices.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-optimization/auth-best-practices.md"
+        },
+        {
+          "path": "cost-optimization/azure-aks-anomalies.md",
+          "size": 2523,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-optimization/azure-aks-anomalies.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-optimization/azure-aks-anomalies.md"
+        },
+        {
+          "path": "cost-optimization/azure-aks-cost-addon.md",
+          "size": 1505,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-optimization/azure-aks-cost-addon.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-optimization/azure-aks-cost-addon.md"
+        },
+        {
+          "path": "cost-optimization/azure-quick-review.md",
+          "size": 1600,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-optimization/azure-quick-review.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-optimization/azure-quick-review.md"
+        },
+        {
+          "path": "cost-optimization/azure-resource-graph.md",
+          "size": 2794,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-optimization/azure-resource-graph.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-optimization/azure-resource-graph.md"
+        },
+        {
+          "path": "cost-optimization/report-template.md",
+          "size": 1860,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-optimization/report-template.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-optimization/report-template.md"
+        },
+        {
+          "path": "cost-optimization/sdk/azure-resource-manager-redis-dotnet.md",
+          "size": 1519,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-optimization/sdk/azure-resource-manager-redis-dotnet.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-optimization/sdk/azure-resource-manager-redis-dotnet.md"
+        },
+        {
+          "path": "cost-optimization/services/redis/azure-cache-for-redis.md",
+          "size": 2748,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-optimization/services/redis/azure-cache-for-redis.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-optimization/services/redis/azure-cache-for-redis.md"
+        },
+        {
+          "path": "cost-optimization/services/storage/azure-storage.md",
+          "size": 7856,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-optimization/services/storage/azure-storage.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-optimization/services/storage/azure-storage.md"
+        },
+        {
+          "path": "cost-optimization/workflow.md",
+          "size": 7897,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-optimization/workflow.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-optimization/workflow.md"
+        },
+        {
+          "path": "cost-query/dimensions-by-scope.md",
+          "size": 7639,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-query/dimensions-by-scope.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-query/dimensions-by-scope.md"
+        },
+        {
+          "path": "cost-query/error-handling.md",
+          "size": 5163,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-query/error-handling.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-query/error-handling.md"
+        },
+        {
+          "path": "cost-query/examples.md",
+          "size": 2554,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-query/examples.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-query/examples.md"
+        },
+        {
+          "path": "cost-query/guardrails.md",
+          "size": 7694,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-query/guardrails.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-query/guardrails.md"
+        },
+        {
+          "path": "cost-query/request-body-schema.md",
+          "size": 5514,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-query/request-body-schema.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-query/request-body-schema.md"
+        },
+        {
+          "path": "cost-query/workflow.md",
+          "size": 5246,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/cost-query/workflow.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/cost-query/workflow.md"
+        },
+        {
+          "path": "references/tools-and-best-practices.md",
+          "size": 3020,
+          "binary": false,
+          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-cost/references/tools-and-best-practices.md",
+          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-cost/references/tools-and-best-practices.md"
+        }
+      ]
+    },
+    {
       "id": "microsoft/azure-deploy",
       "name": "azure-deploy",
       "description": "Execute Azure deployments for ALREADY-PREPARED applications that have existing .azure/deployment-plan.md and infrastructure files. DO NOT use this skill when the user asks to CREATE a new application — use azure-prepare instead. This skill runs azd up, azd deploy, terraform apply, and az deployment commands with built-in error recovery. Requires .azure/deployment-plan.md from azure-prepare and validated status from azure-validate. WHEN: \"run azd up\", \"run azd deploy\", \"execute deployment\", \"push to production\", \"push to cloud\", \"go live\", \"ship it\", \"bicep deploy\", \"terraform apply\", \"publish to Azure\", \"launch on Azure\". DO NOT USE WHEN: \"create and deploy\", \"build and deploy\", \"create a new app\", \"set up infrastructure\", \"create and deploy to Azure using Terraform\" — use azure-prepare for these.",
@@ -5320,7 +5361,7 @@
       "path": "skills/azure-deploy",
       "url": "https://github.com/microsoft/azure-skills/tree/main/skills/azure-deploy",
       "route": "/skills/microsoft/azure-deploy",
-      "checksum": "406449b7ecc93a046b7fd0f03d2f6e27e1d31aa6a3bc4ea46d9a9922902c3982",
+      "checksum": "97096dfd6c4b0754ba31ac34ea20b4f409529294548460ef7ea879c8af7c9455",
       "files": [
         {
           "path": "SKILL.md",
@@ -5359,35 +5400,35 @@
         },
         {
           "path": "references/recipes/README.md",
-          "size": 431,
+          "size": 442,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/README.md"
         },
         {
           "path": "references/recipes/azcli/README.md",
-          "size": 1721,
+          "size": 1794,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/azcli/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/azcli/README.md"
         },
         {
           "path": "references/recipes/azcli/errors.md",
-          "size": 492,
+          "size": 510,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/azcli/errors.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/azcli/errors.md"
         },
         {
           "path": "references/recipes/azcli/verify.md",
-          "size": 2059,
+          "size": 2128,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/azcli/verify.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/azcli/verify.md"
         },
         {
           "path": "references/recipes/azd/README.md",
-          "size": 3746,
+          "size": 3827,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/azd/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/azd/README.md"
@@ -5401,7 +5442,7 @@
         },
         {
           "path": "references/recipes/azd/errors.md",
-          "size": 15752,
+          "size": 16065,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/azd/errors.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/azd/errors.md"
@@ -5464,98 +5505,98 @@
         },
         {
           "path": "references/recipes/azd/verify.md",
-          "size": 4985,
+          "size": 5154,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/azd/verify.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/azd/verify.md"
         },
         {
           "path": "references/recipes/bicep/README.md",
-          "size": 2412,
+          "size": 2509,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/bicep/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/bicep/README.md"
         },
         {
           "path": "references/recipes/bicep/errors.md",
-          "size": 511,
+          "size": 529,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/bicep/errors.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/bicep/errors.md"
         },
         {
           "path": "references/recipes/bicep/verify.md",
-          "size": 763,
+          "size": 794,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/bicep/verify.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/bicep/verify.md"
         },
         {
           "path": "references/recipes/cicd/README.md",
-          "size": 1232,
+          "size": 1275,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/cicd/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/cicd/README.md"
         },
         {
           "path": "references/recipes/cicd/errors.md",
-          "size": 542,
+          "size": 559,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/cicd/errors.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/cicd/errors.md"
         },
         {
           "path": "references/recipes/cicd/examples/azdo-azd.yml",
-          "size": 487,
+          "size": 509,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/cicd/examples/azdo-azd.yml",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/cicd/examples/azdo-azd.yml"
         },
         {
           "path": "references/recipes/cicd/examples/azdo-multistage.yml",
-          "size": 831,
+          "size": 860,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/cicd/examples/azdo-multistage.yml",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/cicd/examples/azdo-multistage.yml"
         },
         {
           "path": "references/recipes/cicd/examples/github-azd.yml",
-          "size": 782,
+          "size": 817,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/cicd/examples/github-azd.yml",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/cicd/examples/github-azd.yml"
         },
         {
           "path": "references/recipes/cicd/examples/github-bicep.yml",
-          "size": 660,
+          "size": 687,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/cicd/examples/github-bicep.yml",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/cicd/examples/github-bicep.yml"
         },
         {
           "path": "references/recipes/cicd/verify.md",
-          "size": 754,
+          "size": 777,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/cicd/verify.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/cicd/verify.md"
         },
         {
           "path": "references/recipes/terraform/README.md",
-          "size": 3235,
+          "size": 3354,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/terraform/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/terraform/README.md"
         },
         {
           "path": "references/recipes/terraform/errors.md",
-          "size": 858,
+          "size": 881,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/terraform/errors.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/terraform/errors.md"
         },
         {
           "path": "references/recipes/terraform/verify.md",
-          "size": 752,
+          "size": 782,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-deploy/references/recipes/terraform/verify.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-deploy/references/recipes/terraform/verify.md"
@@ -5622,7 +5663,7 @@
       "path": "skills/azure-diagnostics",
       "url": "https://github.com/microsoft/azure-skills/tree/main/skills/azure-diagnostics",
       "route": "/skills/microsoft/azure-diagnostics",
-      "checksum": "4e960f03a2197ea688c10568dc0f9ecdb977ee2269f74866cf2d06aea3df5acb",
+      "checksum": "a87410533853159255be0d91ce55859074b16f601549f9dc126c11065520bf56",
       "files": [
         {
           "path": "SKILL.md",
@@ -5640,7 +5681,7 @@
         },
         {
           "path": "references/azure-resource-graph.md",
-          "size": 2909,
+          "size": 3002,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-diagnostics/references/azure-resource-graph.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-diagnostics/references/azure-resource-graph.md"
@@ -5994,7 +6035,7 @@
       "path": "skills/azure-enterprise-infra-planner",
       "url": "https://github.com/microsoft/azure-skills/tree/main/skills/azure-enterprise-infra-planner",
       "route": "/skills/microsoft/azure-enterprise-infra-planner",
-      "checksum": "edffb66e098117aec179e4b9593d1ad16709ce1ddd36b5d35d5bf218345a0757",
+      "checksum": "8aba0775f1593844f19ba7509789af26d8c29e01c1c1cb7aee787033764d03f0",
       "files": [
         {
           "path": "SKILL.md",
@@ -6005,63 +6046,63 @@
         },
         {
           "path": "references/bicep-generation.md",
-          "size": 5246,
+          "size": 5339,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/bicep-generation.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/bicep-generation.md"
         },
         {
           "path": "references/constraints/README.md",
-          "size": 1249,
+          "size": 1264,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/constraints/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/constraints/README.md"
         },
         {
           "path": "references/constraints/ai-ml.md",
-          "size": 3292,
+          "size": 3328,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/constraints/ai-ml.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/constraints/ai-ml.md"
         },
         {
           "path": "references/constraints/compute-apps.md",
-          "size": 8000,
+          "size": 8089,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/constraints/compute-apps.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/constraints/compute-apps.md"
         },
         {
           "path": "references/constraints/compute-infra.md",
-          "size": 4564,
+          "size": 4621,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/constraints/compute-infra.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/constraints/compute-infra.md"
         },
         {
           "path": "references/constraints/data-analytics.md",
-          "size": 6489,
+          "size": 6552,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/constraints/data-analytics.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/constraints/data-analytics.md"
         },
         {
           "path": "references/constraints/data-relational.md",
-          "size": 5044,
+          "size": 5092,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/constraints/data-relational.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/constraints/data-relational.md"
         },
         {
           "path": "references/constraints/messaging.md",
-          "size": 2573,
+          "size": 2609,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/constraints/messaging.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/constraints/messaging.md"
         },
         {
           "path": "references/constraints/monitoring.md",
-          "size": 1776,
+          "size": 1798,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/constraints/monitoring.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/constraints/monitoring.md"
@@ -6075,7 +6116,7 @@
         },
         {
           "path": "references/constraints/networking-core.md",
-          "size": 7166,
+          "size": 7251,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/constraints/networking-core.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/constraints/networking-core.md"
@@ -6089,7 +6130,7 @@
         },
         {
           "path": "references/constraints/security.md",
-          "size": 2409,
+          "size": 2435,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/constraints/security.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/constraints/security.md"
@@ -6166,56 +6207,56 @@
         },
         {
           "path": "references/resources/README.md",
-          "size": 1647,
+          "size": 1674,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/resources/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/resources/README.md"
         },
         {
           "path": "references/resources/ai-ml.md",
-          "size": 2162,
+          "size": 2177,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/resources/ai-ml.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/resources/ai-ml.md"
         },
         {
           "path": "references/resources/compute-apps.md",
-          "size": 4118,
+          "size": 4141,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/resources/compute-apps.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/resources/compute-apps.md"
         },
         {
           "path": "references/resources/compute-infra.md",
-          "size": 2897,
+          "size": 2916,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/resources/compute-infra.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/resources/compute-infra.md"
         },
         {
           "path": "references/resources/data-analytics.md",
-          "size": 3078,
+          "size": 3097,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/resources/data-analytics.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/resources/data-analytics.md"
         },
         {
           "path": "references/resources/data-relational.md",
-          "size": 2695,
+          "size": 2712,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/resources/data-relational.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/resources/data-relational.md"
         },
         {
           "path": "references/resources/messaging.md",
-          "size": 2001,
+          "size": 2016,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/resources/messaging.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/resources/messaging.md"
         },
         {
           "path": "references/resources/monitoring.md",
-          "size": 1515,
+          "size": 1528,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/resources/monitoring.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/resources/monitoring.md"
@@ -6229,7 +6270,7 @@
         },
         {
           "path": "references/resources/networking-core.md",
-          "size": 4406,
+          "size": 4429,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/resources/networking-core.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/resources/networking-core.md"
@@ -6243,7 +6284,7 @@
         },
         {
           "path": "references/resources/security.md",
-          "size": 1510,
+          "size": 1523,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-enterprise-infra-planner/references/resources/security.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-enterprise-infra-planner/references/resources/security.md"
@@ -6397,7 +6438,7 @@
       "path": "skills/azure-prepare",
       "url": "https://github.com/microsoft/azure-skills/tree/main/skills/azure-prepare",
       "route": "/skills/microsoft/azure-prepare",
-      "checksum": "ca0f2d90f11fcd53977acd6551b141c61c58e6283417f0163ba87d9828780ec6",
+      "checksum": "5a560276385ba66430e97258e35c9c511af546c7147f7adae5f08e5bd17abd68",
       "files": [
         {
           "path": "SKILL.md",
@@ -6422,7 +6463,7 @@
         },
         {
           "path": "references/architecture.md",
-          "size": 6433,
+          "size": 6540,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/architecture.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/architecture.md"
@@ -6443,7 +6484,7 @@
         },
         {
           "path": "references/azure-context.md",
-          "size": 5880,
+          "size": 6065,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/azure-context.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/azure-context.md"
@@ -6457,7 +6498,7 @@
         },
         {
           "path": "references/generate.md",
-          "size": 5444,
+          "size": 5572,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/generate.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/generate.md"
@@ -6478,35 +6519,35 @@
         },
         {
           "path": "references/recipe-selection.md",
-          "size": 3249,
+          "size": 3334,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/recipe-selection.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/recipe-selection.md"
         },
         {
           "path": "references/recipes/azcli/README.md",
-          "size": 1893,
+          "size": 1971,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/recipes/azcli/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/recipes/azcli/README.md"
         },
         {
           "path": "references/recipes/azcli/commands.md",
-          "size": 1608,
+          "size": 1699,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/recipes/azcli/commands.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/recipes/azcli/commands.md"
         },
         {
           "path": "references/recipes/azcli/scripts.md",
-          "size": 2285,
+          "size": 2376,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/recipes/azcli/scripts.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/recipes/azcli/scripts.md"
         },
         {
           "path": "references/recipes/azd/README.md",
-          "size": 3894,
+          "size": 3998,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/recipes/azd/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/recipes/azd/README.md"
@@ -6520,14 +6561,14 @@
         },
         {
           "path": "references/recipes/azd/azure-yaml.md",
-          "size": 6821,
+          "size": 7062,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/recipes/azd/azure-yaml.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/recipes/azd/azure-yaml.md"
         },
         {
           "path": "references/recipes/azd/docker.md",
-          "size": 2071,
+          "size": 2187,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/recipes/azd/docker.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/recipes/azd/docker.md"
@@ -6548,28 +6589,28 @@
         },
         {
           "path": "references/recipes/bicep/README.md",
-          "size": 1396,
+          "size": 1457,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/recipes/bicep/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/recipes/bicep/README.md"
         },
         {
           "path": "references/recipes/bicep/patterns.md",
-          "size": 3103,
+          "size": 3241,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/recipes/bicep/patterns.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/recipes/bicep/patterns.md"
         },
         {
           "path": "references/recipes/terraform/README.md",
-          "size": 2594,
+          "size": 2686,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/recipes/terraform/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/recipes/terraform/README.md"
         },
         {
           "path": "references/recipes/terraform/patterns.md",
-          "size": 3631,
+          "size": 3794,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/recipes/terraform/patterns.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/recipes/terraform/patterns.md"
@@ -6583,14 +6624,14 @@
         },
         {
           "path": "references/requirements.md",
-          "size": 2590,
+          "size": 2663,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/requirements.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/requirements.md"
         },
         {
           "path": "references/research.md",
-          "size": 8798,
+          "size": 8874,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/research.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/research.md"
@@ -6611,7 +6652,7 @@
         },
         {
           "path": "references/scan.md",
-          "size": 3080,
+          "size": 3169,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/scan.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/scan.md"
@@ -6681,49 +6722,49 @@
         },
         {
           "path": "references/services/aks/README.md",
-          "size": 1072,
+          "size": 1119,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/aks/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/aks/README.md"
         },
         {
           "path": "references/services/aks/addons.md",
-          "size": 957,
+          "size": 1015,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/aks/addons.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/aks/addons.md"
         },
         {
           "path": "references/services/aks/bicep.md",
-          "size": 1688,
+          "size": 1780,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/aks/bicep.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/aks/bicep.md"
         },
         {
           "path": "references/services/aks/manifests.md",
-          "size": 1388,
+          "size": 1469,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/aks/manifests.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/aks/manifests.md"
         },
         {
           "path": "references/services/app-insights/README.md",
-          "size": 848,
+          "size": 880,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/app-insights/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/app-insights/README.md"
         },
         {
           "path": "references/services/app-service/README.md",
-          "size": 2365,
+          "size": 2457,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/app-service/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/app-service/README.md"
         },
         {
           "path": "references/services/app-service/bicep.md",
-          "size": 4267,
+          "size": 4405,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/app-service/bicep.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/app-service/bicep.md"
@@ -6737,7 +6778,7 @@
         },
         {
           "path": "references/services/app-service/deployment-slots.md",
-          "size": 4635,
+          "size": 4761,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/app-service/deployment-slots.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/app-service/deployment-slots.md"
@@ -6751,7 +6792,7 @@
         },
         {
           "path": "references/services/app-service/scaling.md",
-          "size": 1517,
+          "size": 1582,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/app-service/scaling.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/app-service/scaling.md"
@@ -6919,7 +6960,7 @@
         },
         {
           "path": "references/services/container-apps/bicep.md",
-          "size": 4873,
+          "size": 5007,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/container-apps/bicep.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/container-apps/bicep.md"
@@ -6933,14 +6974,14 @@
         },
         {
           "path": "references/services/container-apps/environment.md",
-          "size": 1227,
+          "size": 1288,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/container-apps/environment.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/container-apps/environment.md"
         },
         {
           "path": "references/services/container-apps/health-probes.md",
-          "size": 1141,
+          "size": 1209,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/container-apps/health-probes.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/container-apps/health-probes.md"
@@ -6961,7 +7002,7 @@
         },
         {
           "path": "references/services/container-apps/scaling.md",
-          "size": 1397,
+          "size": 1481,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/container-apps/scaling.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/container-apps/scaling.md"
@@ -6975,28 +7016,28 @@
         },
         {
           "path": "references/services/cosmos-db/README.md",
-          "size": 1462,
+          "size": 1514,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/cosmos-db/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/cosmos-db/README.md"
         },
         {
           "path": "references/services/cosmos-db/bicep.md",
-          "size": 1893,
+          "size": 2001,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/cosmos-db/bicep.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/cosmos-db/bicep.md"
         },
         {
           "path": "references/services/cosmos-db/partitioning.md",
-          "size": 1103,
+          "size": 1144,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/cosmos-db/partitioning.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/cosmos-db/partitioning.md"
         },
         {
           "path": "references/services/cosmos-db/sdk.md",
-          "size": 1604,
+          "size": 1663,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/cosmos-db/sdk.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/cosmos-db/sdk.md"
@@ -7045,35 +7086,35 @@
         },
         {
           "path": "references/services/event-grid/README.md",
-          "size": 1052,
+          "size": 1097,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/event-grid/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/event-grid/README.md"
         },
         {
           "path": "references/services/event-grid/bicep.md",
-          "size": 1698,
+          "size": 1777,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/event-grid/bicep.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/event-grid/bicep.md"
         },
         {
           "path": "references/services/event-grid/subscriptions.md",
-          "size": 1596,
+          "size": 1706,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/event-grid/subscriptions.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/event-grid/subscriptions.md"
         },
         {
           "path": "references/services/foundry/README.md",
-          "size": 1368,
+          "size": 1413,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/foundry/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/foundry/README.md"
         },
         {
           "path": "references/services/foundry/region-availability.md",
-          "size": 826,
+          "size": 849,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/foundry/region-availability.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/foundry/region-availability.md"
@@ -7388,70 +7429,70 @@
         },
         {
           "path": "references/services/key-vault/README.md",
-          "size": 1344,
+          "size": 1399,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/key-vault/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/key-vault/README.md"
         },
         {
           "path": "references/services/key-vault/bicep.md",
-          "size": 1789,
+          "size": 1874,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/key-vault/bicep.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/key-vault/bicep.md"
         },
         {
           "path": "references/services/key-vault/sdk.md",
-          "size": 1933,
+          "size": 2005,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/key-vault/sdk.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/key-vault/sdk.md"
         },
         {
           "path": "references/services/logic-apps/README.md",
-          "size": 1072,
+          "size": 1115,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/logic-apps/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/logic-apps/README.md"
         },
         {
           "path": "references/services/logic-apps/bicep.md",
-          "size": 1889,
+          "size": 1976,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/logic-apps/bicep.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/logic-apps/bicep.md"
         },
         {
           "path": "references/services/logic-apps/triggers.md",
-          "size": 1725,
+          "size": 1830,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/logic-apps/triggers.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/logic-apps/triggers.md"
         },
         {
           "path": "references/services/service-bus/README.md",
-          "size": 1481,
+          "size": 1535,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/service-bus/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/service-bus/README.md"
         },
         {
           "path": "references/services/service-bus/bicep.md",
-          "size": 3768,
+          "size": 3912,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/service-bus/bicep.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/service-bus/bicep.md"
         },
         {
           "path": "references/services/service-bus/patterns.md",
-          "size": 4349,
+          "size": 4504,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/service-bus/patterns.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/service-bus/patterns.md"
         },
         {
           "path": "references/services/sql-database/README.md",
-          "size": 1922,
+          "size": 1980,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/sql-database/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/sql-database/README.md"
@@ -7486,42 +7527,42 @@
         },
         {
           "path": "references/services/sql-database/sdk.md",
-          "size": 1889,
+          "size": 1966,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/sql-database/sdk.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/sql-database/sdk.md"
         },
         {
           "path": "references/services/static-web-apps/README.md",
-          "size": 1357,
+          "size": 1421,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/static-web-apps/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/static-web-apps/README.md"
         },
         {
           "path": "references/services/static-web-apps/bicep.md",
-          "size": 1036,
+          "size": 1087,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/static-web-apps/bicep.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/static-web-apps/bicep.md"
         },
         {
           "path": "references/services/static-web-apps/deployment.md",
-          "size": 1887,
+          "size": 1955,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/static-web-apps/deployment.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/static-web-apps/deployment.md"
         },
         {
           "path": "references/services/static-web-apps/region-availability.md",
-          "size": 674,
+          "size": 695,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/static-web-apps/region-availability.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/static-web-apps/region-availability.md"
         },
         {
           "path": "references/services/static-web-apps/routing.md",
-          "size": 1212,
+          "size": 1282,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/static-web-apps/routing.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/static-web-apps/routing.md"
@@ -7535,21 +7576,21 @@
         },
         {
           "path": "references/services/storage/README.md",
-          "size": 1476,
+          "size": 1534,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/storage/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/storage/README.md"
         },
         {
           "path": "references/services/storage/access.md",
-          "size": 3666,
+          "size": 3762,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/storage/access.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/storage/access.md"
         },
         {
           "path": "references/services/storage/bicep.md",
-          "size": 1746,
+          "size": 1834,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-prepare/references/services/storage/bicep.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-prepare/references/services/storage/bicep.md"
@@ -7624,11 +7665,11 @@
       "path": "skills/azure-reliability",
       "url": "https://github.com/microsoft/azure-skills/tree/main/skills/azure-reliability",
       "route": "/skills/microsoft/azure-reliability",
-      "checksum": "cd6fa84603cf34fb74cb8f7055526da6caefcdb4b9c5feaf3263c4930f1a924a",
+      "checksum": "37a90f0b8734ecda03d511d2c01a4e4ef2ee5567fb0337982d0200401251556b",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 24910,
+          "size": 25045,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-reliability/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-reliability/SKILL.md"
@@ -7722,7 +7763,7 @@
     {
       "id": "microsoft/azure-resource-lookup",
       "name": "azure-resource-lookup",
-      "description": "List, find, and show Azure resources across subscriptions or resource groups. Handles prompts like \"list the websites in my subscription\", \"list my web apps\", \"show my app services\", \"list virtual machines\", \"list my VMs\", \"show storage accounts\", \"find container apps\", and \"what resources do I have\". USE FOR: list websites, list web apps, list app services, show websites in subscription, resource inventory, find resources by tag, tag analysis, orphaned resource discovery (not for cost analysis), unattached disks, count resources by type, cross-subscription lookup, and Azure Resource Graph queries. DO NOT USE FOR: deploying/changing resources (use azure-deploy), cost optimization (use cost-optimization from the optional azure-cost plugin), or non-Azure clouds.",
+      "description": "List, find, and show Azure resources across subscriptions or resource groups. Handles prompts like \"list the websites in my subscription\", \"list my web apps\", \"show my app services\", \"list virtual machines\", \"list my VMs\", \"show storage accounts\", \"find container apps\", and \"what resources do I have\". USE FOR: list websites, list web apps, list app services, show websites in subscription, resource inventory, find resources by tag, tag analysis, orphaned resource discovery (not for cost analysis), unattached disks, count resources by type, cross-subscription lookup, and Azure Resource Graph queries. DO NOT USE FOR: deploying/changing resources (use azure-deploy), cost optimization (use azure-cost), or non-Azure clouds.",
       "source": "microsoft",
       "category": null,
       "license": "MIT",
@@ -7730,18 +7771,18 @@
       "path": "skills/azure-resource-lookup",
       "url": "https://github.com/microsoft/azure-skills/tree/main/skills/azure-resource-lookup",
       "route": "/skills/microsoft/azure-resource-lookup",
-      "checksum": "bbe200e54ff64b851623565d5e6c32f6d7296e660afbd1fdc46f7b331ff70046",
+      "checksum": "4b28e485752487a12d1ceb99372e30428e001d1991a28fdaccd21e51ee6138c0",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 5569,
+          "size": 5526,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-resource-lookup/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-resource-lookup/SKILL.md"
         },
         {
           "path": "references/azure-resource-graph.md",
-          "size": 5048,
+          "size": 5232,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-resource-lookup/references/azure-resource-graph.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-resource-lookup/references/azure-resource-graph.md"
@@ -7759,7 +7800,7 @@
       "path": "skills/azure-resource-visualizer",
       "url": "https://github.com/microsoft/azure-skills/tree/main/skills/azure-resource-visualizer",
       "route": "/skills/microsoft/azure-resource-visualizer",
-      "checksum": "778d42308efae30948ee65eecc11160602f681dc0e15a801410ec1e08082922a",
+      "checksum": "dd015d40320eda94d844e7be0bb78a7ba37f918d2ad83e54a3a254d72796d289",
       "files": [
         {
           "path": "SKILL.md",
@@ -7784,7 +7825,7 @@
         },
         {
           "path": "references/azure-resource-graph.md",
-          "size": 2390,
+          "size": 2477,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-resource-visualizer/references/azure-resource-graph.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-resource-visualizer/references/azure-resource-graph.md"
@@ -8147,11 +8188,11 @@
       "path": "skills/azure-validate",
       "url": "https://github.com/microsoft/azure-skills/tree/main/skills/azure-validate",
       "route": "/skills/microsoft/azure-validate",
-      "checksum": "5d1fd6736ae90804ef33d65c949094e78feee8aa73485b189bb15aa471e6ccc1",
+      "checksum": "48f36351f37e001f0de215415f9518a3ddbaff2c39f5c8ba9623971d873e6fad",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 3535,
+          "size": 3602,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-validate/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-validate/SKILL.md"
@@ -8179,28 +8220,28 @@
         },
         {
           "path": "references/recipes/README.md",
-          "size": 374,
+          "size": 384,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-validate/references/recipes/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-validate/references/recipes/README.md"
         },
         {
           "path": "references/recipes/azcli/README.md",
-          "size": 2786,
+          "size": 2874,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-validate/references/recipes/azcli/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-validate/references/recipes/azcli/README.md"
         },
         {
           "path": "references/recipes/azcli/errors.md",
-          "size": 505,
+          "size": 521,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-validate/references/recipes/azcli/errors.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-validate/references/recipes/azcli/errors.md"
         },
         {
           "path": "references/recipes/azd/README.md",
-          "size": 5410,
+          "size": 5576,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-validate/references/recipes/azd/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-validate/references/recipes/azd/README.md"
@@ -8214,14 +8255,14 @@
         },
         {
           "path": "references/recipes/azd/environment.md",
-          "size": 1979,
+          "size": 2083,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-validate/references/recipes/azd/environment.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-validate/references/recipes/azd/environment.md"
         },
         {
           "path": "references/recipes/azd/errors.md",
-          "size": 2680,
+          "size": 2723,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-validate/references/recipes/azd/errors.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-validate/references/recipes/azd/errors.md"
@@ -8242,14 +8283,14 @@
         },
         {
           "path": "references/recipes/bicep/README.md",
-          "size": 2562,
+          "size": 2645,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-validate/references/recipes/bicep/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-validate/references/recipes/bicep/README.md"
         },
         {
           "path": "references/recipes/bicep/errors.md",
-          "size": 374,
+          "size": 389,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-validate/references/recipes/bicep/errors.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-validate/references/recipes/bicep/errors.md"
@@ -8270,14 +8311,14 @@
         },
         {
           "path": "references/recipes/terraform/README.md",
-          "size": 4040,
+          "size": 4156,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-validate/references/recipes/terraform/README.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-validate/references/recipes/terraform/README.md"
         },
         {
           "path": "references/recipes/terraform/errors.md",
-          "size": 2889,
+          "size": 2969,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-validate/references/recipes/terraform/errors.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-validate/references/recipes/terraform/errors.md"
@@ -8337,49 +8378,6 @@
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/azure-validate/references/scripts/workflow.sh",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/azure-validate/references/scripts/workflow.sh"
-        }
-      ]
-    },
-    {
-      "id": "microsoft/discover-azure-skills",
-      "name": "discover-azure-skills",
-      "description": "Searches the Azure skills catalog and recommends installable agent skills by matching an Azure task to skill metadata and plugin installation guidance. WHEN: before starting any task that involves an Azure or Microsoft-cloud service, product, or data source, when no currently loaded skill or tool already covers it.",
-      "source": "microsoft",
-      "category": null,
-      "license": "MIT",
-      "proprietary": false,
-      "path": "skills/discover-azure-skills",
-      "url": "https://github.com/microsoft/azure-skills/tree/main/skills/discover-azure-skills",
-      "route": "/skills/microsoft/discover-azure-skills",
-      "checksum": "f4f830e7b4a1c2ee5330cce94c000bd933eb341e9b5b6fcfc6214b284a7aab5c",
-      "files": [
-        {
-          "path": "SKILL.md",
-          "size": 2316,
-          "binary": false,
-          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/discover-azure-skills/SKILL.md",
-          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/discover-azure-skills/SKILL.md"
-        },
-        {
-          "path": "references/install/claude-code.md",
-          "size": 339,
-          "binary": false,
-          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/discover-azure-skills/references/install/claude-code.md",
-          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/discover-azure-skills/references/install/claude-code.md"
-        },
-        {
-          "path": "references/install/copilot-cli.md",
-          "size": 339,
-          "binary": false,
-          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/discover-azure-skills/references/install/copilot-cli.md",
-          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/discover-azure-skills/references/install/copilot-cli.md"
-        },
-        {
-          "path": "references/install/other.md",
-          "size": 322,
-          "binary": false,
-          "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/discover-azure-skills/references/install/other.md",
-          "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/discover-azure-skills/references/install/other.md"
         }
       ]
     },
@@ -8592,7 +8590,7 @@
       "path": "skills/microsoft-foundry",
       "url": "https://github.com/microsoft/azure-skills/tree/main/skills/microsoft-foundry",
       "route": "/skills/microsoft/microsoft-foundry",
-      "checksum": "334cc898aba8cfc85460e642291413de0d82183ab0c528f9db76fd029f401719",
+      "checksum": "1406efe8f8fd94aa962982a51ae411a991e30a17f7c0384566059907cca96187",
       "files": [
         {
           "path": ".gitignore",
@@ -8610,7 +8608,7 @@
         },
         {
           "path": "foundry-agent/agent-optimizer/agent-optimizer.md",
-          "size": 3372,
+          "size": 3423,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/microsoft-foundry/foundry-agent/agent-optimizer/agent-optimizer.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/microsoft-foundry/foundry-agent/agent-optimizer/agent-optimizer.md"
@@ -8673,7 +8671,7 @@
         },
         {
           "path": "foundry-agent/create/create-hosted.md",
-          "size": 33705,
+          "size": 33580,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/microsoft-foundry/foundry-agent/create/create-hosted.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/microsoft-foundry/foundry-agent/create/create-hosted.md"
@@ -8687,7 +8685,7 @@
         },
         {
           "path": "foundry-agent/create/quick-start-hosted.md",
-          "size": 23948,
+          "size": 22895,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/microsoft-foundry/foundry-agent/create/quick-start-hosted.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/microsoft-foundry/foundry-agent/create/quick-start-hosted.md"
@@ -8743,7 +8741,7 @@
         },
         {
           "path": "foundry-agent/create/references/local-run.md",
-          "size": 10600,
+          "size": 10294,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/microsoft-foundry/foundry-agent/create/references/local-run.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/microsoft-foundry/foundry-agent/create/references/local-run.md"
@@ -9366,7 +9364,7 @@
         },
         {
           "path": "foundry-agent/validate/references/default-rules.yaml",
-          "size": 18540,
+          "size": 15793,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/microsoft-foundry/foundry-agent/validate/references/default-rules.yaml",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/microsoft-foundry/foundry-agent/validate/references/default-rules.yaml"
@@ -10469,7 +10467,7 @@
       "path": "skills/microsoft-foundry/models/deploy-model/preset",
       "url": "https://github.com/microsoft/azure-skills/tree/main/skills/microsoft-foundry/models/deploy-model/preset",
       "route": "/skills/microsoft/microsoft-foundry/models/deploy-model/preset",
-      "checksum": "85496e973bcaa7dba3f690718cb6b00c35011cc701e2b8be4c7b80d681471aed",
+      "checksum": "bc52e13244c4624fa18d643107d3104022e7408d76f260d5c1832a76c45c3fb8",
       "files": [
         {
           "path": "EXAMPLES.md",
@@ -10480,7 +10478,7 @@
         },
         {
           "path": "SKILL.md",
-          "size": 4960,
+          "size": 4935,
           "binary": false,
           "githubUrl": "https://github.com/microsoft/azure-skills/blob/main/skills/microsoft-foundry/models/deploy-model/preset/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/microsoft/azure-skills/main/skills/microsoft-foundry/models/deploy-model/preset/SKILL.md"
@@ -16624,7 +16622,7 @@
     {
       "id": "prisma/prisma-cli",
       "name": "prisma-cli",
-      "description": "Prisma ORM 7 CLI reference for existing Prisma 7 applications or explicitly selected Prisma 7 workflows. Covers prisma init, generate, migrate, db, dev, studio, and mcp. For setup, connection repair, or Prisma 8, use prisma-orm-setup; not the Prisma Platform CLI.",
+      "description": "Prisma ORM CLI commands reference covering init, generate, migrate, db, dev, complete, studio, validate, format, debug, and mcp. Use for ORM/database CLI workflows, not the Prisma Platform CLI. Triggers on \"prisma init\", \"prisma generate\", \"prisma migrate\", \"prisma db\", \"prisma complete\", \"prisma studio\", \"prisma mcp\".",
       "source": "prisma",
       "category": null,
       "license": "MIT",
@@ -16632,11 +16630,11 @@
       "path": "prisma-cli",
       "url": "https://github.com/prisma/skills/tree/main/prisma-cli",
       "route": "/skills/prisma/prisma-cli",
-      "checksum": "a07d1387af5bfb763fa710ae3f18df50af648dff3497957a2c7e383ca581666b",
+      "checksum": "f24365ba55d736e5c80aef59c49623fef72ffbbef66ac68236421348607c678e",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 7508,
+          "size": 7404,
           "binary": false,
           "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-cli/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-cli/SKILL.md"
@@ -16928,7 +16926,7 @@
     {
       "id": "prisma/prisma-database-setup",
       "name": "prisma-database-setup",
-      "description": "Deprecated compatibility name for prisma-orm-setup. Use only when a user or existing integration explicitly invokes prisma-database-setup; otherwise select prisma-orm-setup.",
+      "description": "Guides for configuring Prisma with different database providers (PostgreSQL, MySQL, SQLite, MongoDB, etc.). Use when setting up a new project, changing databases, or troubleshooting connection issues. Triggers on \"configure postgres\", \"connect to mysql\", \"setup mongodb\", \"sqlite setup\".",
       "source": "prisma",
       "category": null,
       "license": "MIT",
@@ -16936,14 +16934,70 @@
       "path": "prisma-database-setup",
       "url": "https://github.com/prisma/skills/tree/main/prisma-database-setup",
       "route": "/skills/prisma/prisma-database-setup",
-      "checksum": "879df421e21353d5ecdc848106042e51bccf441bec0ae21a978538d04abf19e3",
+      "checksum": "848bd697deda6eb93e8c9c25e412a7936cb7711311856f6703c9e3a28556c363",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 704,
+          "size": 5834,
           "binary": false,
           "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-database-setup/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-database-setup/SKILL.md"
+        },
+        {
+          "path": "references/cockroachdb.md",
+          "size": 1837,
+          "binary": false,
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-database-setup/references/cockroachdb.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-database-setup/references/cockroachdb.md"
+        },
+        {
+          "path": "references/mongodb.md",
+          "size": 2722,
+          "binary": false,
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-database-setup/references/mongodb.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-database-setup/references/mongodb.md"
+        },
+        {
+          "path": "references/mysql.md",
+          "size": 2669,
+          "binary": false,
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-database-setup/references/mysql.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-database-setup/references/mysql.md"
+        },
+        {
+          "path": "references/postgresql.md",
+          "size": 1840,
+          "binary": false,
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-database-setup/references/postgresql.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-database-setup/references/postgresql.md"
+        },
+        {
+          "path": "references/prisma-client-setup.md",
+          "size": 1325,
+          "binary": false,
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-database-setup/references/prisma-client-setup.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-database-setup/references/prisma-client-setup.md"
+        },
+        {
+          "path": "references/prisma-postgres.md",
+          "size": 3201,
+          "binary": false,
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-database-setup/references/prisma-postgres.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-database-setup/references/prisma-postgres.md"
+        },
+        {
+          "path": "references/sqlite.md",
+          "size": 2210,
+          "binary": false,
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-database-setup/references/sqlite.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-database-setup/references/sqlite.md"
+        },
+        {
+          "path": "references/sqlserver.md",
+          "size": 2114,
+          "binary": false,
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-database-setup/references/sqlserver.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-database-setup/references/sqlserver.md"
         }
       ]
     },
@@ -16972,7 +17026,7 @@
     {
       "id": "prisma/prisma-mongodb-upgrade",
       "name": "prisma-mongodb-upgrade",
-      "description": "Decision and migration guide for Prisma ORM MongoDB projects on v6, which have no upgrade path to v7. Use when a MongoDB project asks about upgrading Prisma, when \"upgrade to prisma 7\" comes up in a project with provider = \"mongodb\", or when evaluating a move to Prisma 8. Triggers on \"upgrade prisma mongodb\", \"prisma 7 mongodb\", \"mongodb prisma migration\", \"prisma 8 mongodb\".",
+      "description": "Decision and migration guide for Prisma ORM MongoDB projects on v6, which have no upgrade path to v7. Use when a MongoDB project asks about upgrading Prisma, when \"upgrade to prisma 7\" comes up in a project with provider = \"mongodb\", or when evaluating a move to Prisma Next. Triggers on \"upgrade prisma mongodb\", \"prisma 7 mongodb\", \"mongodb prisma migration\", \"prisma next mongodb\".",
       "source": "prisma",
       "category": null,
       "license": "MIT",
@@ -16980,46 +17034,46 @@
       "path": "prisma-mongodb-upgrade",
       "url": "https://github.com/prisma/skills/tree/main/prisma-mongodb-upgrade",
       "route": "/skills/prisma/prisma-mongodb-upgrade",
-      "checksum": "c46eb3b283c654ac7e68f88868baecee414757b6e15a7b002beeb0862c07d9a2",
+      "checksum": "a6bde83ba4ac73098efbbe3d20db6ff020017152cec0f8203f729f250632b4cc",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 5844,
+          "size": 5386,
           "binary": false,
           "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-mongodb-upgrade/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-mongodb-upgrade/SKILL.md"
         },
         {
           "path": "references/client-api-mapping.md",
-          "size": 4161,
+          "size": 4085,
           "binary": false,
           "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-mongodb-upgrade/references/client-api-mapping.md",
           "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-mongodb-upgrade/references/client-api-mapping.md"
         },
         {
           "path": "references/decision-stay-or-migrate.md",
-          "size": 4112,
+          "size": 4196,
           "binary": false,
           "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-mongodb-upgrade/references/decision-stay-or-migrate.md",
           "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-mongodb-upgrade/references/decision-stay-or-migrate.md"
         },
         {
           "path": "references/migrations-mapping.md",
-          "size": 3628,
+          "size": 3194,
           "binary": false,
           "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-mongodb-upgrade/references/migrations-mapping.md",
           "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-mongodb-upgrade/references/migrations-mapping.md"
         },
         {
           "path": "references/schema-contract-mapping.md",
-          "size": 4396,
+          "size": 3416,
           "binary": false,
           "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-mongodb-upgrade/references/schema-contract-mapping.md",
           "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-mongodb-upgrade/references/schema-contract-mapping.md"
         },
         {
           "path": "references/verify-cutover-checklist.md",
-          "size": 3285,
+          "size": 3241,
           "binary": false,
           "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-mongodb-upgrade/references/verify-cutover-checklist.md",
           "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-mongodb-upgrade/references/verify-cutover-checklist.md"
@@ -17027,87 +17081,9 @@
       ]
     },
     {
-      "id": "prisma/prisma-orm-setup",
-      "name": "prisma-orm-setup",
-      "description": "Set up Prisma ORM in an application, connect its database, or troubleshoot the connection of an existing Prisma 6, 7, or 8 app. Defaults new applications to Prisma ORM 8 and loads the package-owned prisma-8 skill; keeps existing Prisma 6/7 apps on their version with provider references for PostgreSQL, MySQL, SQLite, SQL Server, CockroachDB, MongoDB, and Prisma Postgres.",
-      "source": "prisma",
-      "category": null,
-      "license": "MIT",
-      "proprietary": false,
-      "path": "prisma-orm-setup",
-      "url": "https://github.com/prisma/skills/tree/main/prisma-orm-setup",
-      "route": "/skills/prisma/prisma-orm-setup",
-      "checksum": "db5661123d7a48b3845753756e7fb0f91393d310ca04cb214973fa66370e4d97",
-      "files": [
-        {
-          "path": "SKILL.md",
-          "size": 6810,
-          "binary": false,
-          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-orm-setup/SKILL.md",
-          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-orm-setup/SKILL.md"
-        },
-        {
-          "path": "references/v6-mongodb.md",
-          "size": 2770,
-          "binary": false,
-          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-orm-setup/references/v6-mongodb.md",
-          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-orm-setup/references/v6-mongodb.md"
-        },
-        {
-          "path": "references/v7-client-setup.md",
-          "size": 1632,
-          "binary": false,
-          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-orm-setup/references/v7-client-setup.md",
-          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-orm-setup/references/v7-client-setup.md"
-        },
-        {
-          "path": "references/v7-cockroachdb.md",
-          "size": 2181,
-          "binary": false,
-          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-orm-setup/references/v7-cockroachdb.md",
-          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-orm-setup/references/v7-cockroachdb.md"
-        },
-        {
-          "path": "references/v7-mysql.md",
-          "size": 3581,
-          "binary": false,
-          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-orm-setup/references/v7-mysql.md",
-          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-orm-setup/references/v7-mysql.md"
-        },
-        {
-          "path": "references/v7-postgresql.md",
-          "size": 2182,
-          "binary": false,
-          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-orm-setup/references/v7-postgresql.md",
-          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-orm-setup/references/v7-postgresql.md"
-        },
-        {
-          "path": "references/v7-prisma-postgres.md",
-          "size": 1564,
-          "binary": false,
-          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-orm-setup/references/v7-prisma-postgres.md",
-          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-orm-setup/references/v7-prisma-postgres.md"
-        },
-        {
-          "path": "references/v7-sqlite.md",
-          "size": 2654,
-          "binary": false,
-          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-orm-setup/references/v7-sqlite.md",
-          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-orm-setup/references/v7-sqlite.md"
-        },
-        {
-          "path": "references/v7-sqlserver.md",
-          "size": 2743,
-          "binary": false,
-          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-orm-setup/references/v7-sqlserver.md",
-          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-orm-setup/references/v7-sqlserver.md"
-        }
-      ]
-    },
-    {
       "id": "prisma/prisma-postgres",
       "name": "prisma-postgres",
-      "description": "Deprecated compatibility name for prisma-postgres-setup. Use only when a user or existing integration explicitly invokes prisma-postgres; otherwise select prisma-postgres-setup.",
+      "description": "Prisma Postgres setup and operations guidance across Console, create-db CLI, Management API, and Management API SDK. Use when creating Prisma Postgres databases, working in Prisma Console, provisioning with create-db/create-pg/create-postgres, or integrating programmatic provisioning with service tokens or OAuth.",
       "source": "prisma",
       "category": null,
       "license": "MIT",
@@ -17115,21 +17091,49 @@
       "path": "prisma-postgres",
       "url": "https://github.com/prisma/skills/tree/main/prisma-postgres",
       "route": "/skills/prisma/prisma-postgres",
-      "checksum": "ea0aeb84f5d1f0af826a3b90a25afc00cbd517152ea39813569aa30956ea1564",
+      "checksum": "3124eec6493cfd2f70fed12b0b073b2a815d1ca94ee1c6241b4f4272162fe1b2",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 648,
+          "size": 4713,
           "binary": false,
           "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-postgres/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-postgres/SKILL.md"
+        },
+        {
+          "path": "references/console-and-connections.md",
+          "size": 2398,
+          "binary": false,
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-postgres/references/console-and-connections.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-postgres/references/console-and-connections.md"
+        },
+        {
+          "path": "references/create-db-cli.md",
+          "size": 3192,
+          "binary": false,
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-postgres/references/create-db-cli.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-postgres/references/create-db-cli.md"
+        },
+        {
+          "path": "references/management-api-sdk.md",
+          "size": 2405,
+          "binary": false,
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-postgres/references/management-api-sdk.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-postgres/references/management-api-sdk.md"
+        },
+        {
+          "path": "references/management-api.md",
+          "size": 3298,
+          "binary": false,
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-postgres/references/management-api.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-postgres/references/management-api.md"
         }
       ]
     },
     {
       "id": "prisma/prisma-postgres-setup",
       "name": "prisma-postgres-setup",
-      "description": "Obtain or reuse a Prisma Postgres database and connect an application. Use for \"set up Prisma Postgres\", \"connect my app to Prisma Postgres\", or Prisma Postgres setup in v0 and Vercel Marketplace. Hands Prisma ORM configuration to prisma-orm-setup; honors an explicit driver, alternative ORM, or database-only choice.",
+      "description": "Set up a new Prisma Postgres database and connect it to a local project using the Management API. Use when asked to \"set up a database\", \"create a Prisma Postgres project\", \"get a connection string\", \"connect my app to Prisma Postgres\", or \"provision a database\".",
       "source": "prisma",
       "category": null,
       "license": "MIT",
@@ -17137,35 +17141,42 @@
       "path": "prisma-postgres-setup",
       "url": "https://github.com/prisma/skills/tree/main/prisma-postgres-setup",
       "route": "/skills/prisma/prisma-postgres-setup",
-      "checksum": "45cbc8b1e60e14accacc227c4cb1116380fe3b0463c9b7b9afeb72cb013a23c2",
+      "checksum": "b60d26cf3dff1a168577c877a4af00287e463fe8b6d91c7afd0bf16e8056f448",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 3812,
+          "size": 10824,
           "binary": false,
           "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-postgres-setup/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-postgres-setup/SKILL.md"
         },
         {
-          "path": "references/operations.md",
-          "size": 1759,
+          "path": "references/api-basics.md",
+          "size": 2582,
           "binary": false,
-          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-postgres-setup/references/operations.md",
-          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-postgres-setup/references/operations.md"
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-postgres-setup/references/api-basics.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-postgres-setup/references/api-basics.md"
         },
         {
-          "path": "references/provisioning.md",
-          "size": 4722,
+          "path": "references/auth.md",
+          "size": 1521,
           "binary": false,
-          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-postgres-setup/references/provisioning.md",
-          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-postgres-setup/references/provisioning.md"
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-postgres-setup/references/auth.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-postgres-setup/references/auth.md"
         },
         {
-          "path": "references/vercel-marketplace.md",
-          "size": 1773,
+          "path": "references/endpoints.md",
+          "size": 4927,
           "binary": false,
-          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-postgres-setup/references/vercel-marketplace.md",
-          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-postgres-setup/references/vercel-marketplace.md"
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-postgres-setup/references/endpoints.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-postgres-setup/references/endpoints.md"
+        },
+        {
+          "path": "references/prisma7-client.md",
+          "size": 2690,
+          "binary": false,
+          "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-postgres-setup/references/prisma7-client.md",
+          "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-postgres-setup/references/prisma7-client.md"
         }
       ]
     },
@@ -17180,11 +17191,11 @@
       "path": "prisma-upgrade-v7",
       "url": "https://github.com/prisma/skills/tree/main/prisma-upgrade-v7",
       "route": "/skills/prisma/prisma-upgrade-v7",
-      "checksum": "71e0cdba4f9f723ce6d806e9d15becb4e4307888174b982dacc10347e333ba73",
+      "checksum": "618b03a482bfb07587902cbcfc792bd9d21276f1d3f8c27cbf97d25dea1c8115",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 8072,
+          "size": 8078,
           "binary": false,
           "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-upgrade-v7/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-upgrade-v7/SKILL.md"
@@ -17198,7 +17209,7 @@
         },
         {
           "path": "references/driver-adapters.md",
-          "size": 6104,
+          "size": 6049,
           "binary": false,
           "githubUrl": "https://github.com/prisma/skills/blob/main/prisma-upgrade-v7/references/driver-adapters.md",
           "rawUrl": "https://raw.githubusercontent.com/prisma/skills/main/prisma-upgrade-v7/references/driver-adapters.md"
@@ -17908,14 +17919,21 @@
       "path": "skills/writing-plans",
       "url": "https://github.com/obra/superpowers/tree/main/skills/writing-plans",
       "route": "/skills/superpowers/writing-plans",
-      "checksum": "ab553d52be1fccac41c376f1c724e71caa06e48bd4ccb36b7139d9379b8f35a8",
+      "checksum": "75eeb17d99d87c1d48b90e87c7302f32dd9e24205a84fa0e98d6bfb60770b6bb",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 10335,
+          "size": 9092,
           "binary": false,
           "githubUrl": "https://github.com/obra/superpowers/blob/main/skills/writing-plans/SKILL.md",
           "rawUrl": "https://raw.githubusercontent.com/obra/superpowers/main/skills/writing-plans/SKILL.md"
+        },
+        {
+          "path": "plan-document-reviewer-prompt.md",
+          "size": 1713,
+          "binary": false,
+          "githubUrl": "https://github.com/obra/superpowers/blob/main/skills/writing-plans/plan-document-reviewer-prompt.md",
+          "rawUrl": "https://raw.githubusercontent.com/obra/superpowers/main/skills/writing-plans/plan-document-reviewer-prompt.md"
         }
       ]
     },
