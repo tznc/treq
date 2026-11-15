@@ -8,6 +8,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::Cell,
   collections::{HashMap, HashSet},
