@@ -54,6 +54,25 @@ impl Runner {
   }
 }
 
+static WAKE: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
+
+fn wake() -> &'static tokio::sync::Notify {
+  WAKE.get_or_init(tokio::sync::Notify::new)
+}
+
+/// Asks the sync loop to run a pass now, as after a project moves to a team.
+pub fn request() {
+  wake().notify_one();
+}
+
+/// Waits `period`, or less when [`request`] is called.
+pub async fn wait(period: std::time::Duration) {
+  tokio::select! {
+    _ = tokio::time::sleep(period) => {}
+    _ = wake().notified() => {}
+  }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteProject {
   pub id: String,
@@ -301,6 +320,15 @@ mod tests {
     assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1);
     runner.signed_out();
     assert!(!runner.is_running(), "signing out stops it");
+  }
+
+  #[tokio::test]
+  async fn request_wakes_a_waiting_sync_early() {
+    let waiter = tokio::spawn(wait(std::time::Duration::from_secs(3600)));
+    tokio::task::yield_now().await;
+    request();
+    let woke = tokio::time::timeout(std::time::Duration::from_secs(2), waiter).await;
+    assert!(woke.is_ok(), "a request ends the wait");
   }
 
   #[tokio::test]
