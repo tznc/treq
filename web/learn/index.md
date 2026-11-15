@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: "Guides to Git workflows and coding agents: worktrees, stacked PRs, rebasing, and reviewing AI-generated code."
 ---
 
 # Learn
@@ -8,6 +9,7 @@ AI agents move quickly. The Git workflows around them change just as fast. This 
 
 These guides define the category:
 
+- [The Complete Guide to Running AI Coding Agents in Parallel](/learn/guides/parallel-ai-coding-agents)
 - [Parallel Coding Agents](/learn/parallel-coding-agents)
 - [Human in the Loop AI Code Review](/learn/ai-code-review)
 - [Git Worktrees for AI](/learn/git-worktrees-for-ai)

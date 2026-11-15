@@ -978,6 +978,8 @@ impl Overlay {
   fn item(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
     let p = theme::palette(self.dark);
     match self.items.get(ix).copied() {
+      // Short label (['group heading']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       Some(Item::Heading(g)) => ui::text(div(), TextSize::Xs)
         .px_3()
         .py_2()
@@ -988,7 +990,11 @@ impl Overlay {
         .into_any_element(),
       Some(Item::Entry(index)) => {
         let selected = self.selected == Some(index);
-        self.row(&p, index, selected, cx).into_any_element()
+        // A `list` item sizes to its content; stretch it like the column rows.
+        self
+          .row(&p, index, selected, cx)
+          .w_full()
+          .into_any_element()
       }
       None => div().into_any_element(),
     }

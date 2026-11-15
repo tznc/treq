@@ -1145,6 +1145,8 @@ impl OnboardingView {
                 ))
                 // A name the user gave: kept as typed.
                 .child(
+                  // Short label (['machine name label']): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(p.muted_foreground)
@@ -1152,7 +1154,7 @@ impl OnboardingView {
                 )
                 .when(!machine.detail.is_empty(), |d| {
                   d.child(
-                    ui::text(div(), TextSize::Xs)
+                    ui::text(div(), TextSize::Sm)
                       .min_w_0()
                       .truncate()
                       .text_color(p.muted_foreground)

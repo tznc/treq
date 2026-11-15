@@ -1,0 +1,57 @@
+---
+sidebar_position: 12
+description: Compare Herdr, the terminal runtime for coding agents, with Treq's isolated, stacked and reviewed agent workspaces.
+---
+
+# Treq vs Herdr
+
+_Herdr keeps your agents running and tells you which one needs you. Treq keeps their code apart, stacked and reviewed._
+
+Herdr calls itself "the runtime your coding agents live on." It is a terminal multiplexer built for agents, with one pane per agent. Herdr shows which agents are working, blocked or done. Sessions survive a closed laptop or a dropped SSH connection. Treq is a Stacking ADE: each agent gets an isolated workspace, dependent workspaces form a stack, and you review every change before it merges. Facts about Herdr were checked on herdr.dev and its GitHub repository in November 2026.
+
+## At a Glance
+
+| | Treq | Herdr |
+| --- | --- | --- |
+| Positioning | Stacking ADE for coding agents | Terminal runtime and multiplexer for coding agents |
+| What it isolates | Code: one Jujutsu workspace per agent | Sessions: one terminal pane per agent |
+| Stacked changes | Core workflow, with automatic rebase | Not offered |
+| Review surface | PR-style diffs, comments sent back to the agent | Not offered |
+| Agent status | Per-workspace sessions in the app | Working, blocked and done states across all panes |
+| Agents | Claude, Codex, Cursor | Any terminal agent, including Claude Code, Codex, Cursor, OpenCode and Grok |
+| Remote | [Pro](/pricing) cloud workspaces | Saved SSH machines, phone apps |
+| Platforms | macOS, Windows, Linux desktop app | Terminal app for macOS and Linux, Windows in beta, plus desktop and phone apps |
+| License | Apache 2.0 | Apache 2.0 |
+| Pricing | Free desktop, Pro at $15 per user per month | Free |
+
+## What Each Product Does
+
+**Herdr** manages attention. With a dozen agents running, the hard part is knowing which one is waiting on you. Herdr marks each pane's state, keeps sessions alive in a background server, and lets agents start, prompt and wait on other agents through its CLI. It does not create worktrees, and it has no diff or review features.
+
+**Treq** manages the code. Two agents in panes still share one checkout unless something separates them. Treq gives each agent its own [workspace](/docs/concepts/workspaces) with its own files. When one task builds on another, Treq stacks the workspaces and rebases the upper ones whenever a lower one changes. You review each workspace as a pull-request-style diff and send comments back to the agent.
+
+## They Solve Different Halves
+
+Herdr answers "which agent needs me right now?" Treq answers "is this agent's change correct, and does it still fit the work below it?" A setup with many long-running terminal agents across machines benefits from Herdr. A setup where agents write dependent code that must be reviewed and merged in order benefits from Treq.
+
+Both start agent sessions, so you would normally pick one to own them. Neither project documents an integration with the other.
+
+## Who Should Choose Which
+
+Choose **Treq** if you:
+
+- Need agents' file changes kept apart.
+- Split features into dependent tasks and want stacks rebased for you.
+- Review every change before it reaches a pull request.
+
+Choose **Herdr** if you:
+
+- Live in the terminal and want a multiplexer built for agents.
+- Run many agents across local and SSH machines and need to see which are blocked.
+- Want agents to start and coordinate other agents.
+
+## Next Steps
+
+- [Treq vs Claude Squad](./treq-vs-claude-squad): another terminal-first agent manager
+- [Best Tools for Running AI Coding Agents in Parallel](./best-parallel-agent-tools): the wider field
+- [Git Worktrees for AI](/learn/git-worktrees-for-ai): why agents need separate working copies

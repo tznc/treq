@@ -587,6 +587,8 @@ impl ChangesView {
             )
             .when(expandable, |this| {
               this.child(
+                // Short label (['expander button label']): 11px is fine.
+                // ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .ml_2()
                   .flex_none()
@@ -678,6 +680,8 @@ impl ChangesView {
             })),
         )
         .child(
+          // Short label (['expander button label']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .flex_1()
             .flex()
@@ -718,6 +722,8 @@ impl ChangesView {
     };
     let file = path.to_string();
     let hover = p.foreground;
+    // Short label (['expander button label']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .id(SharedString::from(id.clone()))
       .role(gpui::Role::Button)

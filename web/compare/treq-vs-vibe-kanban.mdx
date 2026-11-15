@@ -1,0 +1,49 @@
+---
+sidebar_position: 9
+description: Vibe Kanban's company shut down in April 2026. Compare it with Treq if you are looking for a maintained place to run coding agents.
+---
+
+# Treq vs Vibe Kanban
+
+_Vibe Kanban lives on as a community project after its company closed. Treq is an actively developed alternative with stacking and review._
+
+Vibe Kanban gave each coding agent its own workspace with a branch, terminal and dev server, plus diff review with comments sent back to the agent. On April 10, 2026, its company, bloop, [announced it was closing](https://vibekanban.com/blog/shutdown). Remote services ended 30 days later and paid subscriptions were refunded. Local workspaces keep working, and the project continues as open source maintained by the community. Facts were checked on the Vibe Kanban repository and blog in November 2026.
+
+## At a Glance
+
+| | Treq | Vibe Kanban |
+| --- | --- | --- |
+| Status | Actively developed | Community maintained after the company closed |
+| Isolation model | One Jujutsu workspace per agent | Git worktree per workspace |
+| Review surface | PR-style diffs, comments sent back to the agent | Diff review, comments sent back to the agent |
+| Stacked changes | Core workflow | Not offered |
+| Auto-rebase | Core workflow | Not offered |
+| Agents | Claude, Codex, Cursor | Claude Code, Codex, Gemini CLI, Copilot, Amp, Cursor, OpenCode and more |
+| Cloud features | [Pro](/pricing) cloud workspaces | Removed with the shutdown |
+| License | Apache 2.0 | Apache 2.0 |
+| Pricing | Free desktop, Pro at $15 per user per month | Free |
+
+## Moving From Vibe Kanban
+
+The day-to-day loop carries over. In both tools, each agent works in its own workspace, and you review its diff and send comments back. What Treq adds is the link between workspaces. When one task depends on another, you create the second workspace on top of the first. Treq rebases it whenever the first one changes, and opens the pair as stacked pull requests when you are done.
+
+Vibe Kanban supports more agent CLIs. If you rely on Gemini CLI, Amp or Qwen Code, check Treq's current [agent support](/docs/concepts/agent-sessions) before you switch.
+
+## Who Should Choose Which
+
+Choose **Treq** if you:
+
+- Want a tool with an active team behind it.
+- Split features into dependent tasks and want stacks kept current.
+- Want optional cloud workspaces.
+
+Stay on **Vibe Kanban** if you:
+
+- Depend on an agent CLI Treq does not support.
+- Only run independent tasks and the local workflow still works for you.
+
+## Next Steps
+
+- [Best Tools for Running AI Coding Agents in Parallel](./best-parallel-agent-tools): other options for former Vibe Kanban users
+- [Treq vs T3 Code](./treq-vs-t3-code): another open source agent interface
+- [Git Worktrees for AI](/learn/git-worktrees-for-ai): the isolation model both tools build on

@@ -13,6 +13,21 @@ const sidebars: SidebarsConfig = {
     'treq-vs-claude-squad',
     'treq-vs-graphite-for-ai-teams',
     'treq-vs-orca',
+    'treq-vs-t3-code',
+    'treq-vs-vibe-kanban',
+    'treq-vs-github-stacked-prs',
+    'treq-vs-gitbutler',
+    'treq-vs-herdr',
+    {
+      type: 'category',
+      label: 'Best Tools',
+      items: [
+        'best-parallel-agent-tools',
+        'best-graphite-alternatives',
+        'best-git-worktree-managers',
+        'sandbox-providers-for-coding-agents',
+      ],
+    },
   ],
 };
 

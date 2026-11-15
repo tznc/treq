@@ -58,11 +58,10 @@ const APP_SETTING_KEYS: &[&str] = &[
   super::app_setup_script::ALWAYS_RUN_KEY,
 ];
 
-const PREVIEW_FEATURES: [PreviewFeature; 5] = [
+const PREVIEW_FEATURES: [PreviewFeature; 4] = [
   PreviewFeature::SkillsInstallation,
   PreviewFeature::RemoteSsh,
   PreviewFeature::LinearIntegration,
-  PreviewFeature::Logs,
   PreviewFeature::Devcontainers,
 ];
 
@@ -728,7 +727,7 @@ mod tests {
       ("supabase_session", "{\"accessToken\":\"t\"}"),
       ("last_opened_repo_path", "/home/me/repo"),
       ("app_setup_script", "brew install jq"),
-      ("feature_preview.logs", "true"),
+      ("feature_preview.remoteSsh", "true"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -745,7 +744,7 @@ mod tests {
     let synced = settings_of(&files);
     assert_eq!(synced["theme"], "dark");
     assert_eq!(synced["app_setup_script"], "brew install jq");
-    assert_eq!(synced["feature_preview.logs"], "true");
+    assert_eq!(synced["feature_preview.remoteSsh"], "true");
     assert_eq!(synced.len(), 3);
   }
 

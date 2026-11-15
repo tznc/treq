@@ -950,6 +950,8 @@ impl AgentPromptView {
       .px_3()
       .pt_3()
       .child(
+        // Short label (['chip']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .debug_selector(|| "issue-chip".into())
           .flex()
@@ -1086,6 +1088,8 @@ impl AgentPromptView {
       .bg(p.muted.opacity(0.5))
       .overflow_hidden()
       .child(
+        // Short label (['section heading']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .px_3()
           .py_1()
@@ -1107,7 +1111,7 @@ impl AgentPromptView {
           .rounded_none()
           .leading(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .font_family(theme::MONO_FONT)
               .min_w_0()
               .truncate()
@@ -1138,6 +1142,8 @@ impl AgentPromptView {
           .px_2()
           .gap_1()
           .child(
+            // Short label (['button label']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .flex()
               .items_center()
@@ -1162,7 +1168,7 @@ impl AgentPromptView {
     if self.show_save_default && agent != configured {
       let checked = self.save_default;
       right = right.child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .id("task-save-default")
           .role(gpui::Role::CheckBox)
           .aria_label("Set as default for this repo")

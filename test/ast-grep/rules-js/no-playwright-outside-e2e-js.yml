@@ -1,0 +1,20 @@
+id: no-playwright-outside-e2e-js
+language: javascript
+severity: error
+message: >
+  Playwright test cases belong in web/e2e or e2e/. Write unit tests with Jest instead.
+files: ["**/*.js", "**/*.mjs", "**/*.cjs"]
+ignores: ["web/e2e/**", "e2e/**", "**/playwright.config.*"]
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: "^['\"]@playwright/test['\"]$"
+    - all:
+        - pattern: require($MOD)
+        - has:
+            kind: arguments
+            has:
+              kind: string
+              regex: "^['\"]@playwright/test['\"]$"

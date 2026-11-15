@@ -1070,6 +1070,8 @@ impl TerminalView {
         .size(ui::Size::Xs)
         .h_6()
         .px_2(),
+      // Short label (['button label']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       TextSize::Xs,
     )
     .label("Deliver")
@@ -3222,7 +3224,7 @@ impl TerminalPane {
             .rounded(radius::MD),
         )
       } else {
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .size_full()
           .px_1()
           .flex()
@@ -3668,6 +3670,8 @@ impl TerminalPane {
             ui::Tone::DiffRemoved.text(tones),
           ))
       });
+      // Short label (['workspace label']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .id(SharedString::from(format!("terminal-workspace-label-{id}")))
         .role(gpui::Role::Button)
@@ -3841,6 +3845,8 @@ impl TerminalPane {
             .disabled(stopping)
             .h_6()
             .px_2(),
+          // Short label (['button label']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           TextSize::Xs,
         )
         .label("Stop")
@@ -3896,6 +3902,8 @@ impl TerminalPane {
                 )
                 .child(self.title(&column.id, column_title(&column.kind), muted, cx))
                 .children(ended.map(|status| {
+                  // Short label (['status label']): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .debug_selector(|| "remote-terminal-ended".into())
                     .text_color(ui::Tone::Warning.text(p))
@@ -4135,7 +4143,7 @@ pub(super) fn send_asset_icon(asset: &SendAsset) -> &'static str {
 impl Render for SendAssetDrag {
   fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
     let d = theme::palette(true);
-    ui::text(div(), TextSize::Xs)
+    ui::text(div(), TextSize::Sm)
       .px_2()
       .py_1()
       .rounded(radius::MD)

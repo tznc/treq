@@ -330,13 +330,21 @@ impl GithubView {
       .child(body)
   }
 
-  /// The scrolling `px-4 py-3 space-y-4` column of a detail.
-  fn content() -> gpui::Stateful<Div> {
+  /// The scrolling detail page around its `px-4 py-3 space-y-4` column,
+  /// capped at `CONTENT_MAX_WIDTH`.
+  fn scroll(column: Div) -> gpui::Stateful<Div> {
     div()
       .id("github-detail-scroll")
       .flex_1()
       .min_h_0()
       .overflow_y_scroll()
+      .child(column)
+  }
+
+  fn content() -> Div {
+    div()
+      .w_full()
+      .max_w(zpx(theme::CONTENT_MAX_WIDTH))
       .px_4()
       .py_3()
       .flex()
@@ -725,13 +733,15 @@ impl GithubView {
       .into_any_element()
     };
     let add = self.add_comment(true, vec![actions], p, window, cx);
-    Self::content()
-      .child(head)
-      .when(!editing, |d| {
-        d.children(self.body("github-issue-body", &issue.body, p))
-      })
-      .children(self.comments(&issue.comments, &[], p, cx))
-      .child(add)
+    Self::scroll(
+      Self::content()
+        .child(head)
+        .when(!editing, |d| {
+          d.children(self.body("github-issue-body", &issue.body, p))
+        })
+        .children(self.comments(&issue.comments, &[], p, cx))
+        .child(add),
+    )
   }
 
   /// `IssueEditForm`.
@@ -1096,13 +1106,15 @@ impl GithubView {
       );
     }
     let add = self.add_comment(false, actions, p, window, cx);
-    Self::content()
-      .child(head)
-      .children(checks_list)
-      .children(treq)
-      .children(self.body("github-pr-body", &pr.body, p))
-      .children(self.comments(&pr.comments, &pr.reviews, p, cx))
-      .child(add)
+    Self::scroll(
+      Self::content()
+        .child(head)
+        .children(checks_list)
+        .children(treq)
+        .children(self.body("github-pr-body", &pr.body, p))
+        .children(self.comments(&pr.comments, &pr.reviews, p, cx))
+        .child(add),
+    )
   }
 
   /// `CiStatusButton`: the passed/total pill and its checks popover.
@@ -1179,6 +1191,8 @@ impl GithubView {
               view.close_popover(Popover::CiChecks, cx)
             })
             .child(
+              // Short label (['section heading']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .px_2()
                 .pb_1()
@@ -1391,6 +1405,8 @@ impl GithubView {
                     .child(wf.name.clone()),
                 )
                 .child(
+                  // Short label (['short status']): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .font_family(theme::MONO_FONT)
                     .text_color(p.muted_foreground)
@@ -1488,6 +1504,8 @@ impl GithubView {
   ) -> impl IntoElement {
     let open = self.detail.history_open.contains(filename);
     let file = filename.to_string();
+    // Short label (['toggle label']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     let toggle = ui::text(named(div(), format!("github-history-{w}")), TextSize::Xs)
       .role(gpui::Role::Button)
       .aria_label("Run history")
@@ -1556,11 +1574,15 @@ impl GithubView {
                 p,
               ))
               .child(
+                // Short label (['run number']): 11px is fine.
+                // ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .font_family(theme::MONO_FONT)
                   .child(format!("#{run_id}")),
               )
               .child(
+                // Short label (['timestamp']): 11px is fine.
+                // ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .text_color(p.muted_foreground)
                   .child(time::run_time(&run.started_at)),
@@ -1623,7 +1645,7 @@ impl GithubView {
           p.muted_foreground,
         )
         .into_any_element(),
-        Some(Err(err)) => ui::text(div(), TextSize::Xs)
+        Some(Err(err)) => ui::text(div(), TextSize::Sm)
           .text_color(p.destructive)
           .child(err.clone())
           .into_any_element(),
@@ -1638,7 +1660,7 @@ impl GithubView {
               "github-logs-{run_id}-{}",
               job.job_id
             ))),
-            TextSize::Xs,
+            TextSize::Sm,
           )
           .max_h(zpx(256.))
           .overflow_y_scroll()
@@ -1653,7 +1675,7 @@ impl GithubView {
     };
     named(div(), format!("run-job-logs-{run_id}-{}", job.job_id))
       .child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .mb_1()
           .flex()
           .items_center()

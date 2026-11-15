@@ -39,7 +39,8 @@ fn large_diff() -> crate::jj::JjRevisionDiff {
 /// Scrolls the wheel over `selector` until `target` is drawn, or panics.
 fn scroll_until(h: &mut Harness, selector: &'static str, target: &'static str) {
   let at = h.cx.debug_bounds(selector).expect(selector).center();
-  for _ in 0..200 {
+  // 400 wheel steps of 800px: room for 2,000 rows up to 160px tall.
+  for _ in 0..400 {
     if h.drawn(target) {
       return;
     }

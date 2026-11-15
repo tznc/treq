@@ -29,10 +29,18 @@ function pickDefaultFile(files: SkillFile[]): SkillFile | null {
   return files.find((f) => f.path === 'SKILL.md') ?? files.find((f) => !f.binary) ?? null;
 }
 
-export default function SkillDetailPage({ skill }: { skill: Skill }) {
+export default function SkillDetailPage({
+  skill,
+  title,
+  authorRoute,
+}: {
+  skill: Skill;
+  title: string;
+  authorRoute: string | null;
+}) {
   return (
-    <Layout title={skill.name} description={skill.description ?? undefined}>
-      <SkillDetailContent skill={skill} />
+    <Layout title={title} description={skill.description ?? undefined}>
+      <SkillDetailContent skill={skill} authorRoute={authorRoute} />
     </Layout>
   );
 }
@@ -40,7 +48,7 @@ export default function SkillDetailPage({ skill }: { skill: Skill }) {
 // useColorMode() needs a ColorModeProvider ancestor, which <Layout> only
 // establishes for its *children* — so this must be a component Layout
 // renders, not the component that renders Layout.
-function SkillDetailContent({ skill }: { skill: Skill }) {
+function SkillDetailContent({ skill, authorRoute }: { skill: Skill; authorRoute: string | null }) {
   const [selected, setSelected] = useState<SkillFile | null>(() => pickDefaultFile(skill.files));
   const [content, setContent] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
@@ -87,7 +95,7 @@ function SkillDetailContent({ skill }: { skill: Skill }) {
       <div className={styles.breadcrumbs}>
         <Link to="/skills">Skills Library</Link>
         <span className={styles.sep}>/</span>
-        <span>{sourceLabel}</span>
+        {authorRoute ? <Link to={authorRoute}>{sourceLabel}</Link> : <span>{sourceLabel}</span>}
         <span className={styles.sep}>/</span>
         <span>{skill.name}</span>
       </div>

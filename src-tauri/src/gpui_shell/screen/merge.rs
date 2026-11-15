@@ -976,7 +976,7 @@ impl MergeView {
             )
             .when(rebase, |this| {
               this.child(
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
                   .mt_2()
                   .text_color(p.muted_foreground)
                   .child("Rebase keeps the original commit messages."),
@@ -1283,7 +1283,7 @@ impl MergeView {
                     .child(title),
                 )
                 .child(
-                  ui::text(div(), TextSize::Xs)
+                  ui::text(div(), TextSize::Sm)
                     .mt_1()
                     .pl_6()
                     .text_color(p.muted_foreground)
@@ -1379,7 +1379,7 @@ impl MergeView {
           .map(|h| h.header.clone())
           .unwrap_or_default();
         let id = format!("merge-hunk-{i}-{h}");
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .debug_selector(move || id)
           .when(h == 0, |this| this.border_t_1().border_color(p.border))
           .bg(p.muted.opacity(0.3))
@@ -1468,7 +1468,7 @@ fn hunk_line(line: &str, p: &Palette) -> impl IntoElement {
   };
   // An empty line still takes its height, as in a `<pre>`.
   let text = if line.is_empty() { " " } else { line };
-  ui::text(div(), TextSize::Xs)
+  ui::text(div(), TextSize::Sm)
     .font_family(theme::MONO_FONT)
     .whitespace_nowrap()
     .overflow_hidden()
@@ -1493,6 +1493,8 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
           .items_start()
           .gap_3()
           .child(
+            // Short label (['short commit id']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .flex_none()
               .bg(p.muted)
@@ -1513,7 +1515,7 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
                   .child(description),
               )
               .child(
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
                   .flex()
                   .flex_wrap()
                   .items_center()

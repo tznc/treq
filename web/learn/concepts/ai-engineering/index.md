@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: "AI engineering concepts: AI-assisted development, coding agents, human review, agent orchestration, and AI code review."
 ---
 
 import DocCardList from '@theme/DocCardList';

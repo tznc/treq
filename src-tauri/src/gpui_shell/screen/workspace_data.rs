@@ -256,12 +256,9 @@ impl WorkspaceHost for Backend {
           .find(|w| w.id == id)
       });
       let (review_count, uncommitted_count) = changed_counts(repo, route, workspace.as_ref());
-      let (linear_enabled, logs_enabled) = self.with_db(|db| {
-        (
-          feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
-          feature_preview::is_enabled(db, PreviewFeature::Logs),
-        )
-      });
+      let linear_enabled =
+        self.with_db(|db| feature_preview::is_enabled(db, PreviewFeature::LinearIntegration));
+      let logs_enabled = true;
       let (home_ahead, home_dry_run) = super::joined(home);
       Loaded {
         workspace,
@@ -496,12 +493,9 @@ fn read_remote_header(remote: &Remote, route: &Route) -> RemoteHeader {
 /// local-only (`assertLocalOperation`), so they stay empty.
 fn load_remote(backend: &Backend, remote: &Remote, route: &Route) -> Loaded {
   let header = read_remote_header(remote, route);
-  let (linear_enabled, logs_enabled) = backend.with_db(|db| {
-    (
-      feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
-      feature_preview::is_enabled(db, PreviewFeature::Logs),
-    )
-  });
+  let linear_enabled =
+    backend.with_db(|db| feature_preview::is_enabled(db, PreviewFeature::LinearIntegration));
+  let logs_enabled = true;
   Loaded {
     workspace: header.workspace,
     status: header.status,

@@ -6,7 +6,7 @@ sidebar_position: 8
 
 _How the Logs tab collects check, agent chat, and app setup output in one place._
 
-The Logs tab shows output that Treq records while it works on a repository. It is on by default. You can turn it off under **Settings > Feature Preview**, which hides the tab.
+The Logs tab shows output that Treq records while it works on a repository..
 
 ## Sources
 

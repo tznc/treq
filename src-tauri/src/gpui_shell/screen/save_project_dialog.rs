@@ -255,7 +255,7 @@ impl Render for SaveProjectDialog {
               .child(Styled::h(ui::input(&input).disabled(pending), zpx(40.))),
           )
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .text_color(p.muted_foreground)
               .child(format!("Repositories: {repos}")),
           )

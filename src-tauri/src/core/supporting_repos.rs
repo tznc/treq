@@ -1,7 +1,7 @@
-//! Supporting repositories: other local repositories linked to a main
-//! repository so one Treq window can work on all of them. The list lives in
-//! the main repository's `.treq/local.db`. The link is one-way; a supporting
-//! repository keeps its own `.treq/local.db` for its workspaces and sessions.
+//! Repositories alongside one another in a window. A project
+//! (`core::projects`) holds the list; this module checks a repository can
+//! join one, and resolves `treq -r`. The list a repository's `.treq/local.db`
+//! kept before projects is still read, to seed an unsaved window's draft.
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -40,10 +40,9 @@ pub fn list(main_repo: &str) -> Result<Vec<SupportingRepo>, String> {
   )
 }
 
-/// Validates `candidate` and links it to `main_repo`. Returns the stored
-/// (canonical) path.
-pub fn add(main_repo: &str, candidate: &str) -> Result<String, String> {
-  let main = canonical(Path::new(main_repo))?;
+/// Checks `candidate` can join a window on `main_repo` (empty: a project
+/// with no repository yet). Returns its canonical path.
+pub fn validate(main_repo: &str, candidate: &str) -> Result<String, String> {
   let path = canonical(Path::new(candidate))?;
   if !path.is_dir() {
     return Err(format!("'{}' is not a directory", path.display()));
@@ -57,32 +56,25 @@ pub fn add(main_repo: &str, candidate: &str) -> Result<String, String> {
       path.display()
     ));
   }
-  if path == main {
-    return Err("This is the main repository".to_string());
+  if !main_repo.is_empty() {
+    let main = canonical(Path::new(main_repo))?;
+    if path == main {
+      return Err("This is the main repository".to_string());
+    }
+    if path.starts_with(&main) {
+      return Err("A repository inside the main repository cannot be added".to_string());
+    }
+    if main.starts_with(&path) {
+      return Err("A repository that contains the main repository cannot be added".to_string());
+    }
   }
-  if path.starts_with(&main) {
-    return Err("A repository inside the main repository cannot be added".to_string());
-  }
-  if main.starts_with(&path) {
-    return Err("A repository that contains the main repository cannot be added".to_string());
-  }
-  let path_str = path.to_string_lossy().to_string();
-  if local_db::list_supporting_repo_paths(main_repo)?.contains(&path_str) {
-    return Err("This repository is already added".to_string());
-  }
-  local_db::add_supporting_repo_path(main_repo, &path_str)?;
-  Ok(path_str)
+  Ok(path.to_string_lossy().to_string())
 }
 
-pub fn remove(main_repo: &str, path: &str) -> Result<(), String> {
-  local_db::remove_supporting_repo_path(main_repo, path)
-}
-
-/// Resolves a CLI `-r` value to one of `main_repo`'s supporting repositories.
-/// Accepts a path (absolute, or relative to `cwd`), a directory name, or a
-/// trailing path such as `org/app`.
-pub fn resolve(main_repo: &str, spec: &str, cwd: &Path) -> Result<String, String> {
-  let paths = local_db::list_supporting_repo_paths(main_repo)?;
+/// Resolves a CLI `-r` value to one of `paths`, the repositories alongside
+/// the current one. Accepts a path (absolute, or relative to `cwd`), a
+/// directory name, or a trailing path such as `org/app`.
+pub fn resolve(paths: &[String], spec: &str, cwd: &Path) -> Result<String, String> {
   let unknown = || {
     let available = paths
       .iter()
@@ -147,24 +139,28 @@ mod tests {
       .to_string()
   }
 
+  fn link(main: &str, repo: &str) {
+    local_db::add_supporting_repo_path(main, repo).unwrap();
+  }
+
   #[test]
-  fn adds_and_lists_supporting_repo() {
+  fn lists_linked_repos_and_marks_missing_paths() {
     let temp = TempDir::new().unwrap();
     let main = make_repo(temp.path(), "main");
-    let svc = make_repo(temp.path(), "svc");
-
-    assert_eq!(add(&main, &svc).unwrap(), svc);
+    let a = make_repo(temp.path(), "a");
+    link(&main, &a);
+    std::fs::remove_dir_all(&a).unwrap();
     assert_eq!(
       list(&main).unwrap(),
       vec![SupportingRepo {
-        path: svc,
-        exists: true
+        path: a,
+        exists: false
       }]
     );
   }
 
   #[test]
-  fn rejects_main_duplicate_nested_containing_and_non_repo() {
+  fn validates_a_repo_to_add() {
     let temp = TempDir::new().unwrap();
     let outer = make_repo(temp.path(), "outer");
     let main = make_repo(temp.path(), "outer/main");
@@ -173,14 +169,22 @@ mod tests {
     let plain = temp.path().join("plain");
     std::fs::create_dir_all(&plain).unwrap();
 
-    assert!(add(&main, &main).unwrap_err().contains("main repository"));
-    assert!(add(&main, &nested).unwrap_err().contains("inside"));
-    assert!(add(&main, &outer).unwrap_err().contains("contains"));
-    assert!(add(&main, plain.to_str().unwrap())
+    assert_eq!(validate(&main, &svc).unwrap(), svc);
+    assert!(validate(&main, &main)
+      .unwrap_err()
+      .contains("main repository"));
+    assert!(validate(&main, &nested).unwrap_err().contains("inside"));
+    assert!(validate(&main, &outer).unwrap_err().contains("contains"));
+    assert!(validate(&main, plain.to_str().unwrap())
       .unwrap_err()
       .contains("not a repository"));
-    add(&main, &svc).unwrap();
-    assert!(add(&main, &svc).unwrap_err().contains("already"));
+  }
+
+  #[test]
+  fn an_empty_project_takes_any_repo() {
+    let temp = TempDir::new().unwrap();
+    let svc = make_repo(temp.path(), "svc");
+    assert_eq!(validate("", &svc).unwrap(), svc);
   }
 
   #[test]
@@ -190,30 +194,9 @@ mod tests {
     let ws = temp.path().join("other/.treq/workspaces/feat");
     std::fs::create_dir_all(ws.join(".jj")).unwrap();
 
-    assert!(add(&main, ws.to_str().unwrap())
+    assert!(validate(&main, ws.to_str().unwrap())
       .unwrap_err()
       .contains("workspace"));
-  }
-
-  #[test]
-  fn remove_unlinks_repo_and_marks_missing_paths() {
-    let temp = TempDir::new().unwrap();
-    let main = make_repo(temp.path(), "main");
-    let a = make_repo(temp.path(), "a");
-    let b = make_repo(temp.path(), "b");
-    add(&main, &a).unwrap();
-    add(&main, &b).unwrap();
-
-    remove(&main, &a).unwrap();
-    std::fs::remove_dir_all(&b).unwrap();
-
-    assert_eq!(
-      list(&main).unwrap(),
-      vec![SupportingRepo {
-        path: b,
-        exists: false
-      }]
-    );
   }
 
   #[test]
@@ -223,17 +206,15 @@ mod tests {
     let svc = make_repo(temp.path(), "svc");
     let org_app = make_repo(temp.path(), "org/app");
     let other_app = make_repo(temp.path(), "other/app");
-    for repo in [&svc, &org_app, &other_app] {
-      add(&main, repo).unwrap();
-    }
+    let paths = vec![svc.clone(), org_app.clone(), other_app];
     let cwd = Path::new(&main);
 
-    assert_eq!(resolve(&main, "svc", cwd).unwrap(), svc);
-    assert_eq!(resolve(&main, "../svc", cwd).unwrap(), svc);
-    assert_eq!(resolve(&main, &svc, cwd).unwrap(), svc);
-    assert_eq!(resolve(&main, "org/app", cwd).unwrap(), org_app);
-    assert!(resolve(&main, "app", cwd).unwrap_err().contains("several"));
-    assert!(resolve(&main, "nope", cwd)
+    assert_eq!(resolve(&paths, "svc", cwd).unwrap(), svc);
+    assert_eq!(resolve(&paths, "../svc", cwd).unwrap(), svc);
+    assert_eq!(resolve(&paths, &svc, cwd).unwrap(), svc);
+    assert_eq!(resolve(&paths, "org/app", cwd).unwrap(), org_app);
+    assert!(resolve(&paths, "app", cwd).unwrap_err().contains("several"));
+    assert!(resolve(&paths, "nope", cwd)
       .unwrap_err()
       .contains("not a supporting repository"));
   }
@@ -243,11 +224,10 @@ mod tests {
     let temp = TempDir::new().unwrap();
     let main = make_repo(temp.path(), "main");
     let org_app = make_repo(temp.path(), "org/app");
-    add(&main, &org_app).unwrap();
     std::fs::create_dir_all(Path::new(&main).join("org/app")).unwrap();
 
     assert_eq!(
-      resolve(&main, "org/app", Path::new(&main)).unwrap(),
+      resolve(std::slice::from_ref(&org_app), "org/app", Path::new(&main)).unwrap(),
       org_app
     );
   }
@@ -258,7 +238,7 @@ mod tests {
     let main = make_repo(temp.path(), "main");
     let stranger = make_repo(temp.path(), "stranger");
 
-    assert!(resolve(&main, &stranger, Path::new(&main))
+    assert!(resolve(&[], &stranger, Path::new(&main))
       .unwrap_err()
       .contains("none are added"));
   }

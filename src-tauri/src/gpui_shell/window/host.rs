@@ -115,6 +115,12 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn open_in_new_window(&self, path: &str);
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String>;
   fn remove_supporting(&self, main_repo: &str, path: &str) -> Result<(), String>;
+  /// The name of the project the window keeps its repositories in.
+  fn project_name(&self) -> Option<String> {
+    None
+  }
+  /// Forgets the window's repository but keeps its project.
+  fn clear_repo(&self) {}
   fn launch(&self, request: &LaunchRequest, select: bool) -> Result<(), String>;
   /// Shows `toast` in the window.
   fn show_toast(&self, toast: Toast);
@@ -405,9 +411,10 @@ impl WindowHost for Backend {
     if Backend::remote(self, main_repo).is_some() {
       return Vec::new();
     }
-    // A saved project lists its repositories; an unsaved one keeps the
-    // main repository's supporting list, as before projects.
-    if let Some(project) = crate::gpui_shell::projects::window_project(self.app(), self.label()) {
+    // The window's project, saved or draft, lists its repositories.
+    if let Some(project) =
+      crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+    {
       return project
         .repos
         .into_iter()
@@ -418,7 +425,7 @@ impl WindowHost for Backend {
         })
         .collect();
     }
-    supporting_repos::list(main_repo).unwrap_or_default()
+    Vec::new()
   }
 
   fn project(&self) -> Option<crate::core::projects::Project> {
@@ -432,7 +439,7 @@ impl WindowHost for Backend {
   fn flags(&self) -> Flags {
     self.with_db(|db| Flags {
       linear: feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
-      logs: feature_preview::is_enabled(db, PreviewFeature::Logs),
+      logs: true,
       remote_ssh: feature_preview::is_enabled(db, PreviewFeature::RemoteSsh),
     })
   }
@@ -523,25 +530,39 @@ impl WindowHost for Backend {
   }
 
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String> {
-    if let Some(project) = self.project() {
-      let added = std::fs::canonicalize(path)
-        .map_err(|e| format!("Cannot open '{path}': {e}"))?
-        .to_string_lossy()
-        .to_string();
-      core::init(&added).map_err(|err| err.to_string())?;
-      self.with_db(|db| crate::core::projects::add_repo(db.conn(), &project.id, &added))?;
-      return Ok(added);
-    }
-    let added = supporting_repos::add(main_repo, path)?;
+    let project = crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+      .ok_or("This window has no project to add a repository to")?;
+    let added = supporting_repos::validate(main_repo, path)?;
     core::init(&added).map_err(|err| err.to_string())?;
+    let inserted =
+      self.with_db(|db| crate::core::projects::add_repo(db.conn(), &project.id, &added))?;
+    if !inserted {
+      return Err("This repository is already added".to_string());
+    }
     Ok(added)
   }
 
-  fn remove_supporting(&self, main_repo: &str, path: &str) -> Result<(), String> {
-    if let Some(project) = self.project() {
-      return self.with_db(|db| crate::core::projects::remove_repo(db.conn(), &project.id, path));
-    }
-    supporting_repos::remove(main_repo, path)
+  fn remove_supporting(&self, _main_repo: &str, path: &str) -> Result<(), String> {
+    let project = crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+      .ok_or("This window has no project to remove a repository from")?;
+    self.with_db(|db| crate::core::projects::remove_repo(db.conn(), &project.id, path))
+  }
+
+  fn project_name(&self) -> Option<String> {
+    crate::gpui_shell::projects::window_repos_project(self.app(), self.label()).map(|p| p.name)
+  }
+
+  fn clear_repo(&self) {
+    let state = self.app().state::<AppState>();
+    state
+      .window_repo_paths
+      .lock_or_recover()
+      .remove(self.label());
+    state
+      .window_supporting_repo_paths
+      .lock_or_recover()
+      .remove(self.label());
+    crate::unwatch_unshown_repos(self.app());
   }
 
   fn launch(&self, request: &LaunchRequest, select: bool) -> Result<(), String> {

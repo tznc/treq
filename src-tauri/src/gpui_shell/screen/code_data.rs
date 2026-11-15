@@ -451,7 +451,7 @@ impl CodeHost for Backend {
   }
 
   fn logs_enabled(&self) -> bool {
-    self.with_db(|db| feature_preview::is_enabled(db, PreviewFeature::Logs))
+    true
   }
 
   fn run_setup(
@@ -571,6 +571,41 @@ pub fn looks_like_markdown(text: &str) -> bool {
     .expect("markdown regexes")
   });
   PATTERNS.is_match(text)
+}
+
+/// GitHub media links on a line of their own, as `MarkdownContent` draws
+/// them: an image URL shows inline, and an attachment URL (GitHub's videos)
+/// shows as a card that opens it in the browser, since GPUI cannot play it.
+pub fn embed_media(text: &str) -> String {
+  #[expect(clippy::expect_used, reason = "constant pattern")]
+  static ATTACHMENT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^https://github\.com/user-attachments/assets/[0-9a-fA-F-]+$").expect("regex")
+  });
+  #[expect(clippy::expect_used, reason = "constant pattern")]
+  static IMAGE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^https?://\S+\.(png|jpe?g|gif|webp|svg)(\?\S*)?$").expect("regex")
+  });
+  let mut fenced = false;
+  text
+    .split_inclusive('\n')
+    .map(|line| {
+      let trimmed = line.trim();
+      if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+        fenced = !fenced;
+      }
+      if fenced {
+        return line.to_string();
+      }
+      let end = line.get(line.trim_end().len()..).unwrap_or_default();
+      if ATTACHMENT.is_match(trimmed) {
+        format!("\n> ▶ **[Video attachment, open in browser]({trimmed})**\n{end}")
+      } else if IMAGE.is_match(trimmed) {
+        format!("![]({trimmed}){end}")
+      } else {
+        line.to_string()
+      }
+    })
+    .collect()
 }
 
 /// GitHub emoji shortcodes (`:robot:`) as emoji, outside code. Unknown
@@ -1076,6 +1111,22 @@ mod tests {
     assert_eq!(insert_at("fix", 3, "@a.rs "), ("fix @a.rs ".into(), 10));
     assert_eq!(insert_at("fix ", 4, "@a.rs "), ("fix @a.rs ".into(), 10));
     assert_eq!(insert_at("", 0, "x"), ("x".into(), 1));
+  }
+
+  #[test]
+  fn embeds_bare_media_links() {
+    let video = "https://github.com/user-attachments/assets/0f1e2d3c-aaaa-bbbb-cccc-123456789abc";
+    assert_eq!(
+      embed_media(&format!("Demo:\n{video}\nend")),
+      format!("Demo:\n\n> ▶ **[Video attachment, open in browser]({video})**\n\nend")
+    );
+    assert_eq!(
+      embed_media("https://example.com/shot.png\n"),
+      "![](https://example.com/shot.png)\n"
+    );
+    // Inline links, code and other URLs stay as typed.
+    let kept = format!("see {video}\n```\n{video}\n```\nhttps://example.com/page\n");
+    assert_eq!(embed_media(&kept), kept);
   }
 
   #[test]

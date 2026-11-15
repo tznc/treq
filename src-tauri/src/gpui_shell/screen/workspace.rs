@@ -1348,6 +1348,8 @@ impl WorkspaceView {
       let url = linear.url.clone();
       let sink = self.sink.clone();
       right = right.child(
+        // Short label (['issue key']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .id("workspace-linear")
           .role(gpui::Role::Link)
@@ -1764,6 +1766,8 @@ async fn in_front(this: &WeakEntity<WorkspaceView>, cx: &mut gpui::AsyncWindowCo
 
 /// One of `LocDiffMarker`'s counts, `+N` or `-N`, in its tone's color.
 pub(super) fn loc_count(text: String, color: Hsla) -> Div {
+  // Short label (['line count']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .font_family(theme::MONO_FONT)
     .text_color(color)

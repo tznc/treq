@@ -39,6 +39,17 @@ pub fn screen(model: &Model, data: &Data) -> Option<ScreenSnapshot> {
     value["modal"] = modal;
   }
   value["remote"] = remote_dialogs(model, data);
+  if model.has_repo() {
+    // The terminal pane shows at the bottom of every screen.
+    value["globalTerminal"] = json!({
+      "repoPath": model.repo(),
+      "activeSessionId": model.active_session,
+      "sessionsRevision": data.sessions_revision,
+      "commands": model.commands,
+      "remoteShell": model.is_remote(),
+      "mainRepoPath": model.main_repo,
+    });
+  }
   if let Some(repository) = &model.remote.repository {
     value["repository"] = serde_json::to_value(repository).unwrap_or_default();
   }
@@ -111,6 +122,9 @@ fn remote_chrome(model: &Model) -> Value {
 
 /// Which page shows, as `GpuiScreenView`.
 fn view(model: &Model, data: &Data) -> Value {
+  if !model.has_repo() && model.empty_project.is_some() {
+    return project_home(model, data);
+  }
   if !model.has_repo() {
     // A skill link still asks to install app-wide, which needs no repository.
     if let (Page::Settings { tab }, Some(skill)) = (&model.page, &model.skill_install) {
@@ -164,7 +178,10 @@ fn view(model: &Model, data: &Data) -> Value {
 
 /// The window's repositories as project home cards.
 fn project_home(model: &Model, data: &Data) -> Value {
-  let order = super::sidebar::order(model, data);
+  let order = match model.has_repo() {
+    true => super::sidebar::order(model, data),
+    false => Vec::new(),
+  };
   let labels = super::sidebar::display_labels(&order);
   // A remote window's repository names the machine it is on.
   let host = |path: &str| {
@@ -202,7 +219,10 @@ fn project_home(model: &Model, data: &Data) -> Value {
     .collect();
   json!({
     "kind": "projectHome",
-    "name": data.project().map(|p| p.name.clone()),
+    "name": data
+      .project()
+      .map(|p| p.name.clone())
+      .or_else(|| model.empty_project.clone()),
     "repos": repos,
     "revision": data.revision,
   })
