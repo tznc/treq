@@ -25,6 +25,13 @@ test.afterAll(async () => {
   m?.app.kill("SIGTERM");
 });
 
+/** Taps a sheet's entry and waits for that sheet to close: the app guards
+ * taps for a moment as a sheet closes, as a person's next tap would wait. */
+async function pick(name: string): Promise<void> {
+  await page.getByRole("menuitem", { name, exact: true }).click();
+  await page.waitForTimeout(800);
+}
+
 async function shot(name: string, title: string, expectations: string[]): Promise<void> {
   await page.waitForTimeout(1500);
   if (process.env.QA_DEBUG) console.log(`--- ${name}\n${await page.ariaSnapshot()}`);
@@ -36,7 +43,28 @@ test("issues list", async () => {
   await shot("01-issues", "Issues tab", [
     "The Issues tab is selected and lists the host's open issues, newest first",
     "One filled button only: New issue at the bottom",
+    "The filter row: an outline 'Open' with a caret, then Filters",
   ]);
+});
+
+test("issue filters", async () => {
+  await page.getByRole("button", { name: "State: Open" }).click();
+  await expect(page.getByRole("menuitem", { name: "All" })).toBeVisible();
+  await shot("01a-issues-state", "Issues: State menu", [
+    "A State sheet lists Open, Closed and All; Open has the light selected tint",
+  ]);
+  await pick("Open");
+  await page.getByRole("button", { name: "Filters" }).click();
+  await pick("Author: Any");
+  await pick("alice");
+  await expect(page.getByRole("button", { name: "Filters · 1" })).toBeVisible();
+  await expect(page.getByText("Document retry/backoff for ingest")).toHaveCount(0);
+  await shot("01b-issues-author", "Issues: Author = alice", [
+    "The Filters button reads 'Filters · 1'",
+    "Only alice's issues (#77 and #58) are listed",
+  ]);
+  await page.getByRole("button", { name: "Filters · 1" }).click();
+  await pick("Clear filters");
 });
 
 test("issue detail", async () => {
@@ -50,8 +78,17 @@ test("pull requests list", async () => {
   await page.getByRole("tab", { name: "Pull requests" }).click();
   await expect(page.getByText("feat: handle empty event messages")).toBeVisible();
   await shot("03-prs", "Pull requests tab", [
+    "The filter row (State: Open, Filters) sits above the search box",
     "Open pull requests with their head → base branches and state tags",
   ]);
+  await page.getByRole("button", { name: "Filters" }).click();
+  await expect(page.getByRole("menuitem", { name: "Only mine: Off" })).toBeVisible();
+  await shot("03a-prs-filters", "Pull requests: Filters sheet", [
+    "Only mine, Author, Label, Base and Conflicts, each showing its value",
+  ]);
+  // A tap on the dimmed page above a sheet closes it.
+  await page.mouse.click(210, 60);
+  await page.waitForTimeout(800);
 });
 
 test("pull request detail and review", async () => {
