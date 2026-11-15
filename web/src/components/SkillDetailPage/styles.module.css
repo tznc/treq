@@ -340,6 +340,45 @@
   white-space: nowrap;
 }
 
+.section {
+  max-width: 900px;
+  margin-top: 2.5rem;
+}
+
+.credit {
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+.bodyPanel {
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 12px;
+  background: var(--ifm-background-surface-color);
+}
+
+.related {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.relatedName {
+  font-family: var(--ifm-font-family-monospace);
+  font-weight: 600;
+}
+
+.relatedAuthor {
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-600);
+}
+
+.relatedDesc {
+  margin: 0.2rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
 /* Below this width the two-pane tree/viewer layout doesn't fit — swap the
    sidebar tree for a dropdown above the file preview. */
 @media (max-width: 768px) {
