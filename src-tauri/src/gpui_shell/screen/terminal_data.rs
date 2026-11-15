@@ -586,12 +586,7 @@ impl TerminalHost for Backend {
     {
       return crate::gpui_shell::projects::supporting_repos(&project, repo_path);
     }
-    crate::core::supporting_repos::list(repo_path)
-      .unwrap_or_default()
-      .into_iter()
-      .filter(|repo| repo.exists)
-      .map(|repo| repo.path)
-      .collect()
+    Vec::new()
   }
 
   fn shell_command(&self) -> Option<String> {

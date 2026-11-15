@@ -4,6 +4,7 @@ import Link from '@docusaurus/Link';
 import Head from '@docusaurus/Head';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
+import {trackEvent} from '@site/src/lib/analytics';
 import {DOWNLOAD_HREF} from '@site/src/lib/downloads';
 import {FAQ_ITEMS, FAQ_SCHEMA, PRICING_SCHEMA} from '@site/src/lib/pricing';
 
@@ -121,6 +122,7 @@ function PlansSection(): ReactNode {
         <Link
           className={clsx('button', styles.planButton, styles.planButtonSecondary)}
           href={DOWNLOAD_HREF}
+          onClick={() => trackEvent('download_click', {location: 'pricing', platform: 'release-page'})}
         >
           Download Treq
         </Link>

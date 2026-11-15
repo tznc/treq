@@ -142,13 +142,14 @@ fn repos_of(
 enum OpenTarget {
   /// Focus the window with this label, which already shows it.
   Focus(String),
-  /// Open a new window on `main`, titled `title`.
+  /// Open a new window on `main` (`None`: the project has no repository),
+  /// titled `title`.
   Open {
     project: String,
-    main: String,
+    main: Option<String>,
     title: String,
   },
-  /// Nothing to show: no such project, or it has no repositories.
+  /// Nothing to show: no such project.
   Nothing,
 }
 
@@ -172,9 +173,7 @@ fn open_target(
     log::warn!("no project with id {id}");
     return OpenTarget::Nothing;
   };
-  let Some(main) = project.repos.first().cloned() else {
-    return OpenTarget::Nothing;
-  };
+  let main = project.repos.first().cloned();
   OpenTarget::Open {
     title: format!("Treq - {}", project.name),
     project: project.id,
@@ -208,7 +207,7 @@ pub fn open_project(app: &AppHandle, id: &str) {
         .window_projects
         .lock_or_recover()
         .insert(label.clone(), project);
-      if let Err(err) = super::open_window(app, &label, Some(main), &title) {
+      if let Err(err) = super::open_window(app, &label, main, &title) {
         log::error!("failed to open project window: {err}");
       }
     }
@@ -415,7 +414,22 @@ mod tests {
       open_target(&conn, &windows, &p.id, |_| true),
       OpenTarget::Open {
         project: p.id,
-        main: "/r/web".into(),
+        main: Some("/r/web".into()),
+        title: "Treq - Checkout".into(),
+      }
+    );
+  }
+
+  #[test]
+  fn open_target_opens_an_empty_project_on_no_repository() {
+    let conn = conn();
+    let p = projects::save(&conn, "Checkout", &strings(&["/r/web"])).unwrap();
+    projects::remove_repo(&conn, &p.id, "/r/web").unwrap();
+    assert_eq!(
+      open_target(&conn, &HashMap::new(), &p.id, |_| true),
+      OpenTarget::Open {
+        project: p.id,
+        main: None,
         title: "Treq - Checkout".into(),
       }
     );

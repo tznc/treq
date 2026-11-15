@@ -595,6 +595,31 @@ pub fn projects_with_repo(conn: &Connection, repo: &str) -> Result<Vec<Project>,
   )
 }
 
+/// The repositories that share a project, saved or draft, with `repo`:
+/// oldest project first, each in its sidebar order.
+pub fn repos_alongside(conn: &Connection, repo: &str) -> Result<Vec<String>, String> {
+  let mut stmt = conn
+    .prepare(
+      "SELECT r.project_id FROM project_repos r JOIN projects p ON p.id = r.project_id
+       WHERE r.repo_path = ?1 ORDER BY p.created_at, p.id",
+    )
+    .map_err(err)?;
+  let ids: Vec<String> = stmt
+    .query_map([repo], |r| r.get(0))
+    .map_err(err)?
+    .collect::<Result<_, _>>()
+    .map_err(err)?;
+  let mut out: Vec<String> = Vec::new();
+  for id in ids {
+    for other in repos_of(conn, &id)? {
+      if other != repo && !out.contains(&other) {
+        out.push(other);
+      }
+    }
+  }
+  Ok(out)
+}
+
 /// The name offered when saving an unsaved project: its repository folder
 /// names joined with " + ".
 pub fn suggested_name(repos: &[String]) -> String {
@@ -789,6 +814,19 @@ mod tests {
     assert_ne!(d.id, saved.id);
     assert_ne!(d.id, other.id);
     assert_eq!(d.repos, repos(&["/r/a"]));
+  }
+
+  #[test]
+  fn repos_alongside_come_from_saved_and_draft_projects() {
+    let conn = conn();
+    save(&conn, "P", &repos(&["/r/a", "/r/b"])).expect("save");
+    draft(&conn, &repos(&["/r/c", "/r/a", "/r/b"])).expect("draft");
+    save(&conn, "Other", &repos(&["/r/x"])).expect("other");
+    assert_eq!(
+      repos_alongside(&conn, "/r/a").unwrap(),
+      repos(&["/r/b", "/r/c"])
+    );
+    assert!(repos_alongside(&conn, "/r/none").unwrap().is_empty());
   }
 
   #[test]

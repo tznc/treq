@@ -1222,7 +1222,7 @@ impl LogsView {
         let body: gpui::AnyElement = if query.is_empty() {
           record.body.clone().into_any_element()
         } else {
-          let marks: Vec<_> = super::changes::search::match_ranges(&record.body, &query)
+          let marks: Vec<_> = super::find::match_ranges(&record.body, &query)
             .into_iter()
             .map(|r| (r, mark))
             .collect();

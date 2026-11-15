@@ -18,11 +18,11 @@ use tauri_plugin_gpui::gpui::{
   MouseButton, MouseMoveEvent, Pixels, SharedString, Window,
 };
 
-use super::{CommitsView, Kind};
+use super::{search, CommitsView, Kind};
 use crate::{
   gpui_shell::{
     screen::{
-      commits_data::{line_kind, line_numbers, History, LineKind},
+      commits_data::{headline, line_kind, line_numbers, History, LineKind},
       highlight,
     },
     theme::{self, Palette},
@@ -410,6 +410,55 @@ impl CommitsView {
     feed.list = self.feed.list.clone();
     feed.rem = self.feed.rem;
     self.feed = feed;
+    self.hits.stale = true;
+  }
+
+  /// Each row's searchable text, in the list's order: commit headlines and
+  /// open diff lines.
+  pub(super) fn searchable(&self, mut f: impl FnMut(usize, search::Hit, &str)) {
+    for (ix, (row, _)) in self.feed.rows.iter().enumerate() {
+      match *row {
+        Row::Commit(e) => {
+          let commit = &self.feed.entries[e].commit;
+          f(
+            ix,
+            search::Hit::Message(commit.commit_id.clone()),
+            &headline(commit),
+          );
+        }
+        Row::Line(e, fi, h, l) => {
+          let commit = &self.feed.entries[e].commit;
+          let Some(diff) = self
+            .diffs
+            .get(&commit.commit_id)
+            .and_then(|s| s.diff.as_ref())
+          else {
+            continue;
+          };
+          let Some(file) = diff.committed_files.get(fi) else {
+            continue;
+          };
+          let Some(line) = self
+            .file_diff(&commit.commit_id, &file.path)
+            .and_then(|d| d.hunks.get(h))
+            .and_then(|hunk| hunk.lines.get(l))
+          else {
+            continue;
+          };
+          let hit = search::Hit::Line(commit.commit_id.clone(), file.path.clone(), (h, l));
+          f(ix, hit, line.get(1..).unwrap_or(""));
+        }
+        _ => {}
+      }
+    }
+  }
+
+  /// A commit's headline with its find matches marked.
+  pub(super) fn marked_headline(&self, commit: &JjLogCommit, p: &Palette) -> gpui::StyledText {
+    let text = headline(commit);
+    let hit = search::Hit::Message(commit.commit_id.clone());
+    let marks = self.find_marks(&hit, &text, p);
+    highlight::styled_marked(&text, None, p.dark, &marks)
   }
 
   /// Nothing to list: no commits, or none read yet.
@@ -762,6 +811,11 @@ impl CommitsView {
       .filter(|r| !r.is_empty())
       .map(|r| (r, p.selected()))
       .into_iter()
+      .chain(self.find_marks(
+        &search::Hit::Line(commit.commit_id.clone(), path.to_string(), at),
+        line.get(1..).unwrap_or(""),
+        p,
+      ))
       .collect();
     let styled = highlight::styled_marked(
       line.get(1..).unwrap_or(""),

@@ -149,7 +149,10 @@ fn streaming_by_branch(
 /// repository open.
 pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
   if !model.has_repo() {
-    return None;
+    return model
+      .empty_project
+      .as_ref()
+      .map(|name| without_repos(model, data, name));
   }
   let on_screen = model.repo().to_string();
   let multi = !data.supporting().is_empty();
@@ -261,6 +264,29 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
     repos,
     modal: None,
   })
+}
+
+/// The sidebar of a project with no repository: its name, its Home and the
+/// pages that need none; the list says it is empty.
+fn without_repos(model: &Model, data: &Data, name: &str) -> SidebarSnapshot {
+  SidebarSnapshot {
+    repo_name: name.to_string(),
+    settings_open: matches!(model.page, Page::Settings { .. }),
+    github: matches!(model.page, Page::Github(_)),
+    linear: data
+      .flags
+      .linear
+      .then_some(matches!(model.page, Page::Linear)),
+    dark: model.prefs.dark(),
+    width: model.prefs.sidebar_width,
+    agent_unavailable: None,
+    shell_unavailable: None,
+    bulk_archive: None,
+    project: Some(name.to_string()),
+    project_home: Some(matches!(model.page, Page::ProjectHome)),
+    repos: Vec::new(),
+    modal: None,
+  }
 }
 
 #[cfg(test)]

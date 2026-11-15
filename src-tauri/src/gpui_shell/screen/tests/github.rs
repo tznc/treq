@@ -403,6 +403,42 @@ fn issues() -> Fake {
 }
 
 #[gpui::test]
+fn github_detail_markdown_links_open_in_the_browser(cx: &mut TestAppContext) {
+  let mut linked = issue(1, "Crash on start");
+  let label = "the docs ".repeat(20);
+  linked.body = Some(format!("[{label}](https://example.com/docs)"));
+  let (mut h, host) = harness(
+    cx,
+    Fake {
+      issue: Some(linked),
+      ..issues()
+    },
+    route("issues", Some(1), false),
+  );
+  assert!(h.drawn("github-detail"));
+  // The body, a link across its width, sits just above the comments.
+  let detail = h.cx.debug_bounds("github-detail").expect("detail");
+  let heading = h
+    .cx
+    .debug_bounds("github-comments-heading")
+    .expect("heading");
+  let opened = || {
+    host
+      .calls()
+      .contains(&"open https://example.com/docs".to_string())
+  };
+  let x = detail.left() + gpui::px(60.);
+  let mut y = heading.top() - gpui::px(8.);
+  while !opened() && y > heading.top() - gpui::px(160.) {
+    h.cx
+      .simulate_click(gpui::point(x, y), gpui::Modifiers::none());
+    h.cx.run_until_parked();
+    y -= gpui::px(4.);
+  }
+  assert!(opened(), "{:?}", host.calls());
+}
+
+#[gpui::test]
 fn github_lists_issues_and_hands_moves_to_react(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, issues(), route("issues", None, false));
   assert!(h.drawn("github-issue-1"));
