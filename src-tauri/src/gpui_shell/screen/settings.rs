@@ -25,9 +25,9 @@ pub(super) mod account;
 )]
 pub use account::{
   AccountRoute, AccountTab, CloudCard, CloudEndpoint, CloudInstance, CloudRoute, CloudUsage,
-  DeleteAccountDialog, GithubSection, IntegrationsTab, InviteRow, LinearSection, MemberRow,
-  OrgCard, ProcessRow, ProviderKeyRow, ProviderKeysSection, SignedIn, SizeOption, StatusTone,
-  Subscription, TeamSection, UsageReport, User,
+  DeleteAccountDialog, GithubSection, IntegrationsTab, InviteRow, LinearSection, MachinesTab,
+  MemberRow, OrgCard, ProcessRow, ProviderKeyRow, ProviderKeysSection, SignedIn, SizeOption,
+  StatusTone, Subscription, TeamSection, UsageReport, User,
 };
 
 use super::{
@@ -66,6 +66,7 @@ pub enum Tab {
   Repository,
   Application,
   Account,
+  Machines,
   Integrations,
   Skills,
   Preview,
@@ -77,6 +78,7 @@ impl Tab {
       Tab::Repository => "Repository",
       Tab::Application => "Application",
       Tab::Account => "Account",
+      Tab::Machines => "Machines",
       Tab::Integrations => "Integrations",
       Tab::Skills => "Skills",
       Tab::Preview => "Feature preview",
@@ -88,6 +90,7 @@ impl Tab {
       Tab::Repository => theme::ICON_FOLDER_GIT,
       Tab::Application => theme::ICON_SETTINGS,
       Tab::Account => theme::ICON_USER,
+      Tab::Machines => theme::ICON_SERVER,
       Tab::Integrations => theme::ICON_PLUG,
       Tab::Skills => theme::ICON_BOOK_OPEN,
       Tab::Preview => theme::ICON_FLASK,
@@ -99,6 +102,7 @@ impl Tab {
       Tab::Repository => "repository",
       Tab::Application => "application",
       Tab::Account => "account",
+      Tab::Machines => "machines",
       Tab::Integrations => "integrations",
       Tab::Skills => "skills",
       Tab::Preview => "preview",
@@ -129,6 +133,7 @@ pub struct Settings {
   pub preview: Option<Preview>,
   pub skills: Option<SkillsTab>,
   pub account: Option<AccountTab>,
+  pub machines: Option<MachinesTab>,
   pub integrations: Option<IntegrationsTab>,
 }
 
@@ -1624,6 +1629,7 @@ impl SettingsView {
       Tab::Repository,
       Tab::Application,
       Tab::Account,
+      Tab::Machines,
       Tab::Integrations,
     ];
     if self.preview_on(PreviewFeature::SkillsInstallation) {
@@ -1884,6 +1890,7 @@ impl SettingsView {
       preview,
       skills,
       account: (tab == Tab::Account).then(|| self.account_tab()),
+      machines: (tab == Tab::Machines).then(|| self.machines_tab()),
       integrations: (tab == Tab::Integrations).then(|| self.integrations_tab()),
     }
   }
@@ -2127,6 +2134,10 @@ impl Render for SettingsView {
         Some(account) => self.account(account, &p, window, cx),
         None => div().into_any_element(),
       },
+      Tab::Machines => match &s.machines {
+        Some(machines) => self.machines(machines, &p, cx),
+        None => div().into_any_element(),
+      },
       Tab::Integrations => match &s.integrations {
         Some(integrations) => self
           .integrations(integrations, &p, window, cx)
@@ -2144,21 +2155,18 @@ impl Render for SettingsView {
       .as_ref()
       .and_then(|skills| skills.confirm.clone())
       .map(|confirm| self.skill_confirm_dialog(&confirm, &p));
-    let delete_dialog = match &s.account {
-      Some(AccountTab::SignedIn(signed_in))
-        if signed_in
-          .cloud
-          .as_ref()
-          .is_some_and(|c| c.confirming_delete) =>
-      {
+    let delete_dialog = match (&s.account, &s.machines) {
+      (_, Some(MachinesTab::SignedIn(card))) if card.confirming_delete => {
         Some(self.cloud_delete_dialog(&p).into_any_element())
       }
-      Some(AccountTab::SignedIn(signed_in)) => signed_in.delete_account.as_ref().map(|dialog| {
-        let email = signed_in.email.clone().unwrap_or_default();
-        self
-          .delete_account_dialog(dialog, &email, &p, window, cx)
-          .into_any_element()
-      }),
+      (Some(AccountTab::SignedIn(signed_in)), _) => {
+        signed_in.delete_account.as_ref().map(|dialog| {
+          let email = signed_in.email.clone().unwrap_or_default();
+          self
+            .delete_account_dialog(dialog, &email, &p, window, cx)
+            .into_any_element()
+        })
+      }
       _ => None,
     };
 
