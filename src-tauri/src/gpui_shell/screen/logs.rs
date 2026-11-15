@@ -98,6 +98,8 @@ impl Column {
 struct FeedSpec {
   output: &'static str,
   line: &'static str,
+  /// What the feed is called, for assistive tech.
+  name: &'static str,
   columns: &'static [Column],
   /// Whose lines, in the prompt (`promptLabel`).
   prompt: &'static str,
@@ -107,30 +109,35 @@ fn feed_spec(source: Source) -> FeedSpec {
   match source {
     Source::Checks => FeedSpec {
       output: "repo-logs-output",
+      name: "Check logs",
       line: "repo-log-line",
       columns: &[Column::Run, Column::Job],
       prompt: "my check logs",
     },
     Source::Agent => FeedSpec {
       output: "agent-chat-output",
+      name: "Agent chat",
       line: "agent-chat-line",
       columns: &[Column::Role],
       prompt: "an agent chat",
     },
     Source::AppSetup => FeedSpec {
       output: "app-setup-logs-output",
+      name: "App setup logs",
       line: "app-setup-log-line",
       columns: &[Column::Run],
       prompt: "my app setup script logs",
     },
     Source::System => FeedSpec {
       output: "system-logs-output",
+      name: "System logs",
       line: "system-log-line",
       columns: &[Column::Source],
       prompt: "the Treq app's system logs",
     },
     Source::Reviews => FeedSpec {
       output: "review-history-output",
+      name: "Review history",
       line: "review-history-line",
       columns: &[Column::Outcome, Column::File],
       prompt: "my code review history",
@@ -1131,9 +1138,13 @@ impl LogsView {
         this
           .child(
             div()
+              .id("selection-count")
               .debug_selector(|| "selection-count".into())
+              .role(gpui::Role::Status)
+              .aria_label(format!("{selected} selected"))
               .text_color(p.muted_foreground)
-              .child(format!("{selected} selected")),
+              .child(format!("{selected} selected"))
+              .test_support(),
           )
           .child(
             Button::new("clear-selection", p)
@@ -1188,13 +1199,17 @@ impl LogsView {
           .min_h_0()
           .child(
             ui::text(div(), TextSize::Sm)
+              .id(spec.output)
               .debug_selector(move || spec.output.into())
+              .role(gpui::Role::List)
+              .aria_label(spec.name)
               .size_full()
               .flex()
               .flex_col()
               .font_family(theme::MONO_FONT)
               .child(header)
-              .child(list),
+              .child(list)
+              .test_support(),
           )
           .children(self.find_bar(p, cx)),
       )
@@ -1564,14 +1579,18 @@ impl LogsView {
         .border_color(p.border)
         .child(
           div()
+            .id("logs-timeseries-chart")
             .debug_selector(|| "logs-timeseries-chart".into())
+            .role(gpui::Role::Figure)
+            .aria_label("Log lines over time")
             .relative()
             .h(zpx(CHART_HEIGHT))
             .child(self.anchor("logs-chart"))
             .child(legend)
             .child(grid)
             .child(y_labels)
-            .child(x_labels),
+            .child(x_labels)
+            .test_support(),
         ),
     )
   }
@@ -1627,7 +1646,9 @@ impl LogsView {
           .font_family(theme::MONO_FONT)
           .children(self.explorer.input.as_ref().map(|input| {
             ui::text(
-              Textarea::new(input).font_family(theme::MONO_FONT),
+              Textarea::new(input)
+                .aria_label("SQL query")
+                .font_family(theme::MONO_FONT),
               TextSize::Code,
             )
           })),
@@ -1676,7 +1697,10 @@ impl LogsView {
     if let Some(error) = &self.explorer.error {
       results = results.child(
         ui::text(div(), TextSize::Sm)
+          .id("sql-error")
           .debug_selector(|| "sql-error".into())
+          .role(gpui::Role::Alert)
+          .aria_label(error.clone())
           .m_3()
           .p_3()
           .flex()
@@ -1692,7 +1716,8 @@ impl LogsView {
             16.,
             ui::Tone::Danger.text(p),
           ))
-          .child(div().font_family(theme::MONO_FONT).child(error.clone())),
+          .child(div().font_family(theme::MONO_FONT).child(error.clone()))
+          .test_support(),
       );
     } else if let Some(result) = &self.explorer.result {
       results = results.child(
@@ -1737,7 +1762,7 @@ impl LogsView {
       .child(results)
   }
 
-  fn result_table(&self, result: &SqlResult, p: &Palette) -> Div {
+  fn result_table(&self, result: &SqlResult, p: &Palette) -> impl IntoElement {
     // As wide as each column's longest cell, like an auto table.
     let widths: Vec<f32> = (0..result.columns.len())
       .map(|i| {
@@ -1760,7 +1785,10 @@ impl LogsView {
       })
       .collect();
     ui::text(div(), TextSize::Sm)
+      .id("sql-results")
       .debug_selector(|| "sql-results".into())
+      .role(gpui::Role::Table)
+      .aria_label(format!("{} rows", result.row_count))
       .font_family(theme::MONO_FONT)
       .flex()
       .flex_col()
@@ -1802,6 +1830,7 @@ impl LogsView {
             }
           }))
       }))
+      .test_support()
   }
 
   /// The open filter's or template list's popover, below its button.
@@ -1911,7 +1940,8 @@ impl LogsView {
                 }
                 view.open = None;
                 cx.notify();
-              })),
+              }))
+              .test_support(),
           );
         }
       }

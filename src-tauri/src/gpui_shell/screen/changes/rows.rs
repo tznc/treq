@@ -7,6 +7,7 @@
 //! and the character-level marks are kept between frames, per file, until
 //! its diff changes.
 
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   collections::{BTreeSet, HashMap, HashSet},
   ops::Range,
@@ -655,7 +656,8 @@ impl ChangesView {
               .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|view, e: &gpui::MouseDownEvent, _, cx| view.line_menu(e.position, cx)),
-              ),
+              )
+              .test_support(),
           )
           .children(self.line_extras(path, hunks, h, l, numbers, p, cx))
           .into_any_element()

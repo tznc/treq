@@ -2,7 +2,7 @@
 //! issue, project or document, and the review prompt.
 
 use tauri_plugin_gpui::gpui::{
-  div, prelude::*, App, ClickEvent, Div, FontWeight, SharedString, Window,
+  self as gpui, div, prelude::*, App, ClickEvent, FontWeight, SharedString, Window,
 };
 
 use super::changes::threads::suggestion_box;
@@ -13,6 +13,7 @@ use crate::{
   },
   local_db::AgentReviewComment,
 };
+use gpui_kit::base::TestSupportExt as _;
 
 /// What a card's buttons do.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -43,7 +44,7 @@ pub fn agent_comment_card(
   spec: CardSpec<'_>,
   p: &Palette,
   mut on: impl FnMut(CardAction) -> ClickHandler,
-) -> Div {
+) -> gpui::AnyElement {
   let (id, prefix, busy) = (&comment.id, spec.id_prefix, spec.busy);
   let button = |name: &str, icon: &'static str, label: &'static str| {
     Button::new(SharedString::from(format!("{prefix}-{name}-{id}")), p)
@@ -71,8 +72,12 @@ pub fn agent_comment_card(
       actions.child(button("apply", theme::ICON_CHECK, "Apply").on_click(on(CardAction::Apply)));
   }
   let (card, header) = (format!("{prefix}-card"), format!("{prefix}-header"));
+  let heading = format!("Local {}", spec.location);
   div()
+    .id(SharedString::from(format!("{card}-{id}")))
     .debug_selector(move || card)
+    .role(gpui::Role::Article)
+    .aria_label(comment.comment_text.clone())
     .rounded(radius::MD)
     .border_1()
     .border_color(ui::Tone::GitMerged.border(p))
@@ -83,7 +88,10 @@ pub fn agent_comment_card(
     .gap_1p5()
     .child(
       div()
+        .id(SharedString::from(format!("{header}-{id}")))
         .debug_selector(move || header)
+        .role(gpui::Role::Heading)
+        .aria_label(heading)
         .flex()
         .items_center()
         .gap_1p5()
@@ -100,7 +108,8 @@ pub fn agent_comment_card(
           ui::text(div(), TextSize::Sm)
             .text_color(p.muted_foreground)
             .child(spec.location),
-        ),
+        )
+        .test_support(),
     )
     .child(
       ui::text(div(), TextSize::Sm)
@@ -115,4 +124,6 @@ pub fn agent_comment_card(
       ))
     })
     .child(actions)
+    .test_support()
+    .into_any_element()
 }

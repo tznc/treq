@@ -28,7 +28,7 @@ fn settings_saves_the_repository_itself(cx: &mut TestAppContext) {
       "notify repoSettingsChanged",
     ]
   );
-  assert!(h.drawn("settings-saved-repo.autoPush"), "the Saved tick");
+  assert!(h.shows(gpui::Role::Status, "Saved"), "the Saved tick");
   h.click("settings-tab-application");
   h.click("settings-back");
   // React still owns the tab and closing the page.
@@ -47,21 +47,24 @@ fn settings_names_the_repository_it_configures(cx: &mut TestAppContext) {
   let repo = drawn_settings(&mut h).repository.expect("repository tab");
   assert_eq!(repo.name, "repo");
   assert_eq!(repo.path, "/repo");
-  assert!(h.drawn("settings-repo-name"));
+  assert!(h.shows(gpui::Role::Heading, "repo"));
 }
 
 #[gpui::test]
 fn settings_groups_the_repository_overrides(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, settings());
-  assert!(h.drawn("settings-repo-overrides"));
+  assert!(
+    h.shows(gpui::Role::ComboBox, "Default agent"),
+    "the overrides"
+  );
 }
 
 #[gpui::test]
 fn settings_has_a_back_arrow_instead_of_save_and_close(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, settings());
-  assert!(h.drawn("settings-back"));
-  assert!(!h.drawn("settings-save"));
-  assert!(!h.drawn("settings-close"));
+  assert!(h.shows(gpui::Role::Button, "Back"));
+  assert!(!h.shows(gpui::Role::Button, "Save"));
+  assert!(!h.shows(gpui::Role::Button, "Close"));
 }
 
 #[gpui::test]
@@ -81,13 +84,13 @@ fn settings_saves_a_typed_field_after_a_pause(cx: &mut TestAppContext) {
     writes[0].starts_with("set repo /repo branch_name_pattern=") && writes[0].contains('x'),
     "{writes:?}"
   );
-  assert!(h.drawn("settings-saved-repo.branchNamePattern"));
+  assert!(h.shows(gpui::Role::Status, "Saved"));
   // The tick fades after a moment.
   h.cx
     .executor()
     .advance_clock(std::time::Duration::from_millis(2000));
   h.cx.run_until_parked();
-  assert!(!h.drawn("settings-saved-repo.branchNamePattern"));
+  assert!(!h.shows(gpui::Role::Status, "Saved"));
 }
 
 #[gpui::test]
@@ -103,8 +106,11 @@ fn settings_keeps_a_typed_value_and_shows_why_it_did_not_save(cx: &mut TestAppCo
     .executor()
     .advance_clock(std::time::Duration::from_millis(600));
   h.cx.run_until_parked();
-  assert!(h.drawn("settings-error-repo.branchNamePattern"));
-  assert!(!h.drawn("settings-saved-repo.branchNamePattern"));
+  assert!(!h
+    .rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Alert))
+    .is_empty());
+  assert!(!h.shows(gpui::Role::Status, "Saved"));
   let fields = drawn_settings(&mut h).repository.expect("drawn").fields;
   assert!(fields.branch_name_pattern.contains('x'), "{fields:?}");
 }
@@ -299,9 +305,9 @@ fn settings_reviews_proposed_prompt_edits_with_the_review_cards(cx: &mut TestApp
   let mut h = code_review_settings(cx, host.clone());
   // The shared agent card: its header row, then Dismiss and Apply only,
   // Apply as the primary on the right, at the condensed size.
-  assert!(h.drawn("prompt-edit-card"));
-  assert!(h.drawn("prompt-edit-header"));
-  assert!(!h.drawn("prompt-edit-resolve-e1"));
+  assert!(h.shows(gpui::Role::Article, "You dismiss style comments"));
+  assert!(h.shows(gpui::Role::Heading, "Local Line 2"));
+  assert!(!h.shows(gpui::Role::Button, "Resolve"));
   let dismiss = h
     .cx
     .debug_bounds("prompt-edit-dismiss-e1")
@@ -333,15 +339,18 @@ fn settings_reviews_proposed_prompt_edits_with_the_review_cards(cx: &mut TestApp
   assert!(host.calls().contains(&"apply prompt edit e1".to_string()));
   let fields = drawn_settings(&mut h).repository.expect("drawn").fields;
   assert_eq!(fields.review_prompt, "applied e1");
-  assert!(
-    !h.drawn("prompt-edit-apply-e1"),
+  assert_eq!(
+    h.rendered()
+      .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Apply"))
+      .len(),
+    1,
     "an applied edit leaves the list"
   );
 
   h.click("prompt-edit-dismiss-e2");
   h.cx.run_until_parked();
   assert!(host.calls().contains(&"delete prompt edit e2".to_string()));
-  assert!(!h.drawn("prompt-edit-card"));
+  assert!(!h.shows(gpui::Role::Article, "You dismiss style comments"));
 }
 
 #[gpui::test]
@@ -378,8 +387,8 @@ fn settings_dismisses_every_proposed_prompt_edit_at_once(cx: &mut TestAppContext
     calls.contains(&"delete prompt edit e2".to_string()),
     "{calls:?}"
   );
-  assert!(!h.drawn("prompt-edit-card"));
-  assert!(!h.drawn("prompt-edits-dismiss-all"));
+  assert!(!h.shows(gpui::Role::Article, "You dismiss style comments"));
+  assert!(!h.shows(gpui::Role::Button, "Dismiss all"));
 }
 
 #[gpui::test]

@@ -131,6 +131,21 @@ pub(super) fn expanded_with(cx: &mut TestAppContext, host: FakeHost) -> Harness 
   h
 }
 
+/// What row `l` of file `f`'s hunk reads, its sign first.
+fn code(f: usize, l: usize) -> String {
+  let (chunk, r) = (l / 21, l % 21);
+  match r {
+    0..10 => format!("-{}", line(f, chunk * 10 + r, false)),
+    10..20 => format!("+{}", line(f, chunk * 10 + r - 10, true)),
+    _ => format!(" // context {chunk}"),
+  }
+}
+
+/// Whether the user sees row `l` of file `f`.
+fn shows_line(h: &mut Harness, f: usize, l: usize) -> bool {
+  h.shows(gpui::Role::Row, &code(f, l))
+}
+
 fn gutter(f: usize, l: usize) -> &'static str {
   leak(format!("gutter-src/module_{f}.rs-0-{l}"))
 }
@@ -138,10 +153,10 @@ fn gutter(f: usize, l: usize) -> &'static str {
 #[gpui::test]
 fn a_large_diff_draws_only_the_rows_on_screen(cx: &mut TestAppContext) {
   let mut h = expanded(cx);
-  assert!(h.drawn("file-card-src/module_0.rs"));
-  assert!(h.drawn(gutter(0, 0)));
-  assert!(!h.drawn(gutter(0, 400)), "far below the window");
-  assert!(!h.drawn("file-card-src/module_5.rs"));
+  assert!(h.shows(gpui::Role::Heading, "src/module_0.rs"));
+  assert!(shows_line(&mut h, 0, 0));
+  assert!(!shows_line(&mut h, 0, 400), "far below the window");
+  assert!(!h.shows(gpui::Role::Heading, "src/module_5.rs"));
 }
 
 #[gpui::test]
@@ -149,9 +164,12 @@ fn a_large_diff_scrolls_to_a_file_picked_in_the_list(cx: &mut TestAppContext) {
   let mut h = expanded(cx);
   h.click("file-row-src/module_4.rs");
   h.cx.run_until_parked();
-  assert!(h.drawn("file-card-src/module_4.rs"));
-  assert!(h.drawn(gutter(4, 0)));
-  assert!(!h.drawn(gutter(0, 0)), "scrolled away from the first file");
+  assert!(h.shows(gpui::Role::Heading, "src/module_4.rs"));
+  assert!(shows_line(&mut h, 4, 0));
+  assert!(
+    !shows_line(&mut h, 0, 0),
+    "scrolled away from the first file"
+  );
   let card = h
     .cx
     .debug_bounds("file-card-src/module_4.rs")
@@ -171,8 +189,8 @@ fn a_large_diff_follows_the_cursor_line_off_screen(cx: &mut TestAppContext) {
     h.cx.simulate_keystrokes("down");
   }
   h.cx.run_until_parked();
-  assert!(h.drawn(gutter(0, 120)), "the cursor's line is drawn");
-  assert!(!h.drawn(gutter(0, 0)));
+  assert!(shows_line(&mut h, 0, 120), "the cursor's line is drawn");
+  assert!(!shows_line(&mut h, 0, 0));
   let line = h.cx.debug_bounds(gutter(0, 120)).expect("line");
   let list = h.cx.debug_bounds("changes-diff-list").expect("list");
   assert!(
@@ -186,7 +204,7 @@ fn a_large_diff_finds_text_on_rows_not_drawn(cx: &mut TestAppContext) {
   let mut h = expanded(cx);
   h.click("file-card-src/module_0.rs");
   h.cx.simulate_keystrokes("cmd-f");
-  assert!(h.drawn("diff-search"));
+  assert!(h.shows(gpui::Role::TextInput, "Find"));
   // Only module 5's last pair has `value_249 = compute_5`.
   h.cx.simulate_input("value_249 = compute_5");
   h.cx
@@ -199,10 +217,10 @@ fn a_large_diff_finds_text_on_rows_not_drawn(cx: &mut TestAppContext) {
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
   assert!(
-    h.drawn(gutter(5, 24 * 21 + 19)),
+    shows_line(&mut h, 5, 24 * 21 + 19),
     "the match's line is drawn"
   );
-  assert!(!h.drawn(gutter(0, 0)));
+  assert!(!shows_line(&mut h, 0, 0));
 }
 
 /// `large_host` under review: a kept review of `COMMENTS` line comments and
@@ -258,7 +276,9 @@ fn changes_perf(cx: &mut TestAppContext) {
 #[ignore = "benchmark; run with --ignored --nocapture"]
 fn changes_review_perf(cx: &mut TestAppContext) {
   let mut h = expanded_with(cx, reviewed_host());
-  assert!(h.drawn("inline-comment-card") || h.drawn("github-comment-card"));
+  assert!(
+    h.shows(gpui::Role::Button, "Edit comment") || h.shows(gpui::Role::Button, "Add reaction")
+  );
   println!("-- with comments and threads");
   measure(&mut h);
   search(&mut h, "value_1");
@@ -268,7 +288,7 @@ fn changes_review_perf(cx: &mut TestAppContext) {
 }
 
 fn measure(h: &mut Harness) {
-  assert!(h.drawn(gutter(0, 0)));
+  assert!(shows_line(h, 0, 0));
   let mut full: Vec<_> = (0..10).map(|_| frame(h)).collect();
   report("full frame", &mut full);
 
@@ -420,14 +440,17 @@ fn listed_host(count: usize, extra: &[(&str, &str)]) -> FakeHost {
 #[gpui::test]
 fn a_long_file_list_draws_only_the_rows_on_screen(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, listed_host(3_000, &[]), changes_route());
-  assert!(h.drawn("file-row-src/f0.rs"));
-  assert!(!h.drawn("file-row-src/f2999.rs"), "far below the window");
-  assert!(h.drawn("changes-section-toggle"));
+  assert!(h.shows(gpui::Role::Button, "src/f0.rs"));
+  assert!(
+    !h.shows(gpui::Role::Button, "src/f2999.rs"),
+    "far below the window"
+  );
+  assert!(h.shows(gpui::Role::Button, "Collapse Changes"));
   // Scrolling the list brings the last rows in.
   let toggle = h.cx.debug_bounds("changes-section-toggle").expect("header");
   // Each wheel step moves the list as far as the rows measured so far reach.
   for _ in 0..200 {
-    if h.drawn("file-row-src/f2999.rs") {
+    if h.shows(gpui::Role::Button, "src/f2999.rs") {
       break;
     }
     h.cx.simulate_event(gpui::ScrollWheelEvent {
@@ -452,7 +475,7 @@ fn a_long_file_list_draws_only_the_rows_on_screen(cx: &mut TestAppContext) {
     shown.first(),
     shown.last()
   );
-  assert!(!h.drawn("file-row-src/f0.rs"));
+  assert!(!h.shows(gpui::Role::Button, "src/f0.rs"));
   // A row picked after scrolling selects that file.
   h.click("file-row-src/f2999.rs");
   assert!(h.cx.debug_bounds("file-row-src/f2999.rs").is_some());
@@ -462,8 +485,8 @@ fn a_long_file_list_draws_only_the_rows_on_screen(cx: &mut TestAppContext) {
 fn hunks_of_binary_and_deleted_files_are_not_read(cx: &mut TestAppContext) {
   let host = listed_host(2, &[("logo.png", "M"), ("old.rs", "D")]);
   let (mut h, host) = workspace_harness(cx, host, changes_route());
-  assert!(h.drawn("file-row-logo.png"));
-  assert!(h.drawn("file-row-old.rs"));
+  assert!(h.shows(gpui::Role::Button, "logo.png"));
+  assert!(h.shows(gpui::Role::Button, "old.rs"));
   let reads: Vec<String> = host
     .calls()
     .into_iter()

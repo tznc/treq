@@ -533,16 +533,23 @@ impl CommitsView {
           .commit(&commit, kind, label.as_ref(), &p, cx)
           .into_any_element()
       }
-      Row::OwnEmpty => div()
-        .debug_selector(|| "own-commits-empty".into())
-        .pl_7()
-        .text_color(p.muted_foreground)
-        .child(if self.home() {
+      Row::OwnEmpty => {
+        let message = if self.home() {
           "There are no commits on this branch yet."
         } else {
           "There are no commits within this workspace branch yet."
-        })
-        .into_any_element(),
+        };
+        div()
+          .id("own-commits-empty")
+          .debug_selector(|| "own-commits-empty".into())
+          .role(gpui::Role::Status)
+          .aria_label(message)
+          .pl_7()
+          .text_color(p.muted_foreground)
+          .child(message)
+          .test_support()
+          .into_any_element()
+      }
       Row::LoadMore(target) => self.load_more_row(target, &p, cx).into_any_element(),
       Row::Divider => {
         let branch = self
@@ -831,6 +838,8 @@ impl CommitsView {
     div()
       .id(SharedString::from(format!("diff-line-{h}-{l}")))
       .debug_selector(move || selector)
+      .role(gpui::Role::Row)
+      .aria_label(line.to_string())
       .group("diff-line")
       .flex()
       .when_some(bg, |this, bg| this.bg(bg))
@@ -879,5 +888,6 @@ impl CommitsView {
             .size_0(),
           ),
       )
+      .test_support()
   }
 }

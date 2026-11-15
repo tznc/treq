@@ -135,7 +135,7 @@ fn skills_list_labels_every_skill_by_install_status(cx: &mut TestAppContext) {
     Some("deploy by hand")
   );
   assert!(
-    !h.drawn("skill-filter-all"),
+    !h.shows(gpui::Role::Button, "All"),
     "no filter selected shows every skill"
   );
 }
@@ -198,12 +198,12 @@ fn skill_filter_chips_narrow_the_list(cx: &mut TestAppContext) {
 #[gpui::test]
 fn hand_written_skill_edits_with_an_agent_and_cannot_uninstall(cx: &mut TestAppContext) {
   let (mut h, host) = skills_status_harness(cx);
-  assert!(!h.drawn("skill-uninstall-custom-global/notes"));
+  assert!(!h.shows(gpui::Role::Button, "Uninstall notes"));
   assert!(
-    !h.drawn("skill-customize-old/gone"),
+    !h.shows(gpui::Role::Button, "Customise gone"),
     "no catalog copy to customize from"
   );
-  assert!(h.drawn("skill-uninstall-old/gone"));
+  assert!(h.shows(gpui::Role::Button, "Uninstall gone"));
   h.click("skill-filter-custom");
   h.click("skill-customize-custom-global/notes");
   h.cx.run_until_parked();
@@ -267,7 +267,13 @@ fn skill_link_without_a_repository_installs_app_wide(cx: &mut TestAppContext) {
   let mut h = Harness::with_host(cx, route, host.clone());
   h.cx
     .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
-  assert!(h.drawn("skill-confirm-dialog"));
+  assert!(!h
+    .rendered()
+    .query_all_by_role(
+      gpui_testing_library::by::role(gpui::Role::Dialog)
+        .name(gpui_testing_library::TextMatch::regex("^Install .+\\?$"))
+    )
+    .is_empty());
   h.click("skill-confirm-install");
   h.cx.run_until_parked();
   assert_eq!(
@@ -281,7 +287,7 @@ fn skill_link_without_a_repository_installs_app_wide(cx: &mut TestAppContext) {
 fn skills_install_asks_where_then_toasts_a_failure(cx: &mut TestAppContext) {
   let (mut h, host) = skills_harness(cx);
   h.click("skill-install-docx");
-  assert!(h.drawn("skill-install-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Install Word"));
   assert_eq!(
     drawn_settings(&mut h)
       .skills
@@ -292,7 +298,7 @@ fn skills_install_asks_where_then_toasts_a_failure(cx: &mut TestAppContext) {
   );
   h.click("skill-dialog-repository");
   h.cx.run_until_parked();
-  assert!(!h.drawn("skill-install-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Install Word"));
   assert_eq!(
     host.writes(),
     [
@@ -328,7 +334,7 @@ fn skills_dialog_cancels(cx: &mut TestAppContext) {
   let (mut h, host) = skills_harness(cx);
   h.click("skill-install-docx");
   h.click("skill-install-dialog-close");
-  assert!(!h.drawn("skill-install-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Install Word"));
   assert!(host.writes().is_empty());
 }
 
@@ -366,7 +372,13 @@ fn skills_link_harness(cx: &mut TestAppContext, request: &str) -> (Harness, Arc<
 #[gpui::test]
 fn skill_link_shows_catalog_details_before_installing(cx: &mut TestAppContext) {
   let (mut h, host) = skills_link_harness(cx, "docx");
-  assert!(h.drawn("skill-confirm-dialog"));
+  assert!(!h
+    .rendered()
+    .query_all_by_role(
+      gpui_testing_library::by::role(gpui::Role::Dialog)
+        .name(gpui_testing_library::TextMatch::regex("^Install .+\\?$"))
+    )
+    .is_empty());
   let confirm = drawn_settings(&mut h)
     .skills
     .expect("skills tab")
@@ -423,7 +435,7 @@ fn skill_link_for_unknown_skill_offers_no_install(cx: &mut TestAppContext) {
     .notice
     .as_deref()
     .is_some_and(|n| n.contains("not in the Treq skill catalog")));
-  assert!(!h.drawn("skill-confirm-install"));
+  assert!(!h.shows(gpui::Role::Button, "Install"));
   h.click("skill-confirm-cancel");
   h.cx.run_until_parked();
   assert!(host.writes().is_empty());
@@ -449,7 +461,7 @@ fn skill_link_for_installed_skill_says_so(cx: &mut TestAppContext) {
 fn customize_writes_a_copy_and_asks_for_an_agent(cx: &mut TestAppContext) {
   let (mut h, host) = skills_harness(cx);
   assert!(
-    h.drawn("skill-customize-docx"),
+    h.shows(gpui::Role::Button, "Customise Word"),
     "not-installed skills customise from the registry"
   );
   h.click("skill-customize-pdf");
@@ -494,10 +506,10 @@ fn skills_dialog_cancels_on_escape_and_installs_for_the_repository_on_enter(
 ) {
   let (mut h, host) = skills_harness(cx);
   h.click("skill-install-docx");
-  assert!(h.drawn("skill-install-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Install Word"));
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
-  assert!(!h.drawn("skill-install-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Install Word"));
   assert!(host.writes().is_empty());
   h.click("skill-install-docx");
   h.cx.simulate_keystrokes("enter");
@@ -508,14 +520,26 @@ fn skills_dialog_cancels_on_escape_and_installs_for_the_repository_on_enter(
 #[gpui::test]
 fn skill_link_confirmation_cancels_on_escape_and_installs_on_enter(cx: &mut TestAppContext) {
   let (mut h, host) = skills_link_harness(cx, "docx");
-  assert!(h.drawn("skill-confirm-dialog"));
+  assert!(!h
+    .rendered()
+    .query_all_by_role(
+      gpui_testing_library::by::role(gpui::Role::Dialog)
+        .name(gpui_testing_library::TextMatch::regex("^Install .+\\?$"))
+    )
+    .is_empty());
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
   assert!(host.writes().is_empty());
   assert_eq!(h.sent(), vec![press("skills.installRequest.close")]);
 
   let (mut h, host) = skills_link_harness(cx, "docx");
-  assert!(h.drawn("skill-confirm-dialog"));
+  assert!(!h
+    .rendered()
+    .query_all_by_role(
+      gpui_testing_library::by::role(gpui::Role::Dialog)
+        .name(gpui_testing_library::TextMatch::regex("^Install .+\\?$"))
+    )
+    .is_empty());
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
   assert!(
@@ -536,6 +560,6 @@ fn skill_cards_draw_a_filled_install_button(cx: &mut TestAppContext) {
     .iter()
     .find(|r| r.name == "Word")
     .expect("Word not installed");
-  assert!(h.drawn("skill-install-docx"));
+  assert!(h.shows(gpui::Role::Button, "Install Word…"));
   assert!(settings::install_button(word, &p).filled());
 }

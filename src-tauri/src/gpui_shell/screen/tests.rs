@@ -1908,6 +1908,16 @@ impl Harness {
     screen
   }
 
+  /// Whether the user sees an element of `role` named `name`.
+  fn shows(&mut self, role: gpui::Role, name: &str) -> bool {
+    !self
+      .rendered()
+      .query_all_by_role(
+        gpui_testing_library::by::role(role).name(gpui_testing_library::normalize(name)),
+      )
+      .is_empty()
+  }
+
   /// Clicks `button` in the confirmation on screen, found by role and
   /// name, as the user would.
   fn answer(&mut self, button: &str) {

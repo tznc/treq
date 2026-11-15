@@ -17,6 +17,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet, VecDeque},
@@ -2447,7 +2448,8 @@ impl CommitsView {
               .when(busy, |this| {
                 this.child(ui::Loading::new(spin, p).label("Loading diff…"))
               })
-              .when(!busy, |this| this.child("Load diff")),
+              .when(!busy, |this| this.child("Load diff"))
+              .test_support(),
           ),
       )
       .into_any_element()
