@@ -122,3 +122,67 @@ fn a_team_that_fails_to_load_says_so(cx: &mut TestAppContext) {
     TeamSection::Failed("Couldn't load your teams. Reopen Settings to try again.".into())
   );
 }
+
+fn signed_in(h: &mut Harness) -> settings::SignedIn {
+  match drawn_settings(h).account {
+    Some(settings::AccountTab::SignedIn(signed_in)) => *signed_in,
+    other => panic!("signed in: {other:?}"),
+  }
+}
+
+/// Without a team that has Team, the page offers it (`GetTeamCard`); the
+/// website creates the team and takes the payment.
+#[gpui::test]
+fn a_user_without_team_is_offered_it(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host.clone());
+  assert!(signed_in(&mut h).team_upsell);
+  h.click("team-start");
+  h.click("team-compare");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "open http://localhost:3001/dashboard",
+      "open http://localhost:3001/pricing#feature-comparison",
+    ]
+  );
+}
+
+#[gpui::test]
+fn a_member_of_a_team_with_team_is_not_offered_it(cx: &mut TestAppContext) {
+  let (mut h, _) = team_section(cx, Ok(acme("member")));
+  assert!(!signed_in(&mut h).team_upsell);
+  assert!(!h.drawn("team-upsell"));
+}
+
+#[gpui::test]
+fn a_team_without_a_subscription_still_gets_the_offer(cx: &mut TestAppContext) {
+  let mut team = acme("owner");
+  team.subscriptions.clear();
+  let (mut h, _) = team_section(cx, Ok(team));
+  assert!(signed_in(&mut h).team_upsell);
+}
+
+/// `SubscriptionTab`'s notes for a failed payment and a cancellation.
+#[gpui::test]
+fn the_subscription_explains_a_failed_payment_and_a_cancellation(cx: &mut TestAppContext) {
+  let mut h = signed_in_as_ada(cx, Arc::new(FakeHost::default()));
+  assert_eq!(signed_in(&mut h).billing_note, None);
+  h.set_account(account_state(serde_json::json!({
+    "user": ada(),
+    "subscription": { "plan": "pro", "status": "past_due", "currentPeriodEnd": "2026-11-01T12:00:00Z" },
+  })));
+  assert_eq!(
+    signed_in(&mut h).billing_note.as_deref(),
+    Some("Your last payment failed. Update your payment method to keep Pro.")
+  );
+  h.set_account(account_state(serde_json::json!({
+    "user": ada(),
+    "subscription": { "plan": "pro", "status": "canceled", "currentPeriodEnd": "2026-11-01T12:00:00Z" },
+  })));
+  assert_eq!(
+    signed_in(&mut h).billing_note.as_deref(),
+    Some("Your subscription is set to cancel. Pro stays on until 11/1/2026.")
+  );
+}

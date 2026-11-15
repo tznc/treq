@@ -294,6 +294,10 @@ pub struct SignedIn {
   pub org_cloud: Vec<OrgCloudSection>,
   /// "Teams": the user's organizations, their members and invites.
   pub team: Option<TeamSection>,
+  /// "Get Team": no team the user belongs to has Team.
+  pub team_upsell: bool,
+  /// What a failed payment or a cancellation means for Pro.
+  pub billing_note: Option<String>,
   /// The delete-account confirmation, while it is open.
   pub delete_account: Option<DeleteAccountDialog>,
 }
@@ -1186,6 +1190,21 @@ impl SettingsView {
       cloud_profile,
       org_cloud,
       team: Some(team::section(state.team.as_ref())),
+      team_upsell: team::upsell(state.team.as_ref()),
+      billing_note: subscription
+        .filter(|_| pro)
+        .and_then(|s| match s.status.as_str() {
+          "past_due" => {
+            Some("Your last payment failed. Update your payment method to keep Pro.".into())
+          }
+          "canceled" => s.current_period_end.as_deref().map(|end| {
+            format!(
+              "Your subscription is set to cancel. Pro stays on until {}.",
+              local_date(end)
+            )
+          }),
+          _ => None,
+        }),
       name: user.name.clone(),
       email: user.email.clone(),
       pro,
@@ -1633,7 +1652,13 @@ impl SettingsView {
           .host
           .open_url(&format!("{web}/dashboard?tab=subscription"))
       }
-      "account.manage" | "cloud.upgrade" => self.host.open_url(&format!("{web}/dashboard")),
+      // The website creates the team and takes the payment.
+      "account.manage" | "cloud.upgrade" | "team.start" => {
+        self.host.open_url(&format!("{web}/dashboard"));
+      }
+      "team.compare" => self
+        .host
+        .open_url(&format!("{web}/pricing#feature-comparison")),
       "github.manage" => self
         .host
         .open_url(&format!("{web}/dashboard?tab=integrations")),
@@ -3175,6 +3200,13 @@ impl SettingsView {
           })
           .when_some(s.period.clone(), |this, (label, date)| {
             this.child(row(label, div().child(date).into_any_element()))
+          })
+          .when_some(s.billing_note.clone(), |this, note| {
+            this.child(
+              ui::text(div(), TextSize::Sm)
+                .text_color(p.muted_foreground)
+                .child(note),
+            )
           }),
       )
       .child(
@@ -3205,6 +3237,7 @@ impl SettingsView {
       .map(|org| self.org_cloud(org, p, window, cx))
       .collect();
     let teams = s.team.as_ref().and_then(|t| Self::teams(t, p));
+    let upsell = s.team_upsell.then(|| self.team_upsell(p));
     div()
       .flex()
       .flex_col()
@@ -3216,6 +3249,7 @@ impl SettingsView {
       .children(org_cloud)
       .children(provider_keys)
       .children(teams)
+      .children(upsell)
       .child(
         div().flex().child(
           Button::new("account-sign-out", p)

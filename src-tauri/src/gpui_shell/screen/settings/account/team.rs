@@ -78,6 +78,26 @@ pub(super) fn section(team: Option<&Result<TeamData, String>>) -> TeamSection {
   }
 }
 
+/// The Team plan's features, as the pricing page lists them (`TEAM_PERKS`).
+const TEAM_PERKS: [&str; 4] = [
+  "Everything in Pro for every member",
+  "Manage team-wide integrations",
+  "Sandbox usage management",
+  "One bill for the whole team",
+];
+
+/// Whether to offer Team (`GetTeamCard`): the teams are read and none the
+/// user belongs to has a Team subscription.
+pub(super) fn upsell(team: Option<&Result<TeamData, String>>) -> bool {
+  let Some(Ok(data)) = team else {
+    return false;
+  };
+  !data
+    .memberships
+    .iter()
+    .any(|m| m.user_id == data.user_id && data.subscriptions.iter().any(|s| s.owner_id == m.org_id))
+}
+
 fn org_cards(data: &TeamData) -> Vec<OrgCard> {
   data
     .memberships
@@ -182,6 +202,67 @@ impl SettingsView {
         }));
       },
     );
+  }
+
+  /// "Get Team": the plan's price and perks. The website creates the team
+  /// and takes the payment, so Start a team opens the dashboard.
+  pub(super) fn team_upsell(&self, p: &Palette) -> AnyElement {
+    let included =
+      format!("{TEAM_INCLUDED_SEATS} members included, US${TEAM_EXTRA_SEAT_USD} per extra member");
+    ui::text(div(), TextSize::Sm)
+      .debug_selector(|| "team-upsell".into())
+      .flex()
+      .flex_col()
+      .gap_2()
+      .border_1()
+      .border_color(p.border)
+      .rounded(radius::MD)
+      .p_4()
+      .child(div().font_weight(FontWeight::MEDIUM).child("Team plan"))
+      .child(
+        div()
+          .flex()
+          .items_baseline()
+          .gap_1()
+          .child(
+            ui::text(div(), TextSize::Lg)
+              .font_weight(FontWeight::SEMIBOLD)
+              .child("US$199"),
+          )
+          .child(div().text_color(p.muted_foreground).child("per month")),
+      )
+      .child(div().text_color(p.muted_foreground).child(included))
+      .children(TEAM_PERKS.iter().map(|perk| {
+        div()
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(ui::icon(theme::ICON_CHECK, 14., Tone::Success.color(p)))
+          .child(*perk)
+      }))
+      .child(
+        ui::card_actions()
+          .mt_2()
+          .child(
+            Button::new("team-compare", p)
+              .variant(Variant::Ghost)
+              .size(Size::Sm)
+              .label("View full comparison")
+              .on_click(self.press("team.compare")),
+          )
+          .child(
+            Button::new("team-start", p)
+              .size(Size::Sm)
+              .child(ui::icon(
+                theme::ICON_EXTERNAL_LINK,
+                12.,
+                p.primary_foreground,
+              ))
+              .label("Start a team")
+              .on_click(self.press("team.start")),
+          ),
+      )
+      .into_any_element()
   }
 
   /// "Teams": one card per organization, or nothing without one.
