@@ -4,7 +4,9 @@
 //! screen cannot tell which one answered.
 
 use crate::core::remote::{GithubContext, GithubQuery};
+use crate::github::{self, GhIssue, GhListPage, GhPullRequest, GH_LIST_PAGE_SIZE};
 use reqwest::Method;
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
 const API_BASE: &str = "https://api.github.com";
@@ -111,8 +113,20 @@ impl GithubHttp {
   }
 }
 
+fn parse<T: DeserializeOwned>(value: Value) -> Result<T, String> {
+  serde_json::from_value(value).map_err(|error| format!("Failed to parse GitHub response: {error}"))
+}
+
 fn to_json<T: serde::Serialize>(value: T) -> Result<Value, String> {
   serde_json::to_value(value).map_err(|error| error.to_string())
+}
+
+/// `full_name`'s owner and name.
+fn owner_and_name(full_name: &str) -> Result<(&str, &str), String> {
+  full_name
+    .split_once('/')
+    .filter(|(owner, name)| !owner.is_empty() && !name.is_empty() && !name.contains('/'))
+    .ok_or_else(|| format!("Expected an OWNER/REPO name, got: {full_name}"))
 }
 
 /// [`GithubQuery`] answered over HTTPS for the repository `full_name`
@@ -133,11 +147,163 @@ pub async fn github_read(
         login: login.to_string(),
       })
     }
+    GithubQuery::ListIssues { state, after } => {
+      to_json(list_issues(gh, full_name, &state, after.as_deref()).await?)
+    }
+    GithubQuery::ListPrs { state, page } => to_json(list_prs(gh, full_name, &state, page).await?),
+    GithubQuery::SearchOpenPrs { mine, query, limit } => {
+      to_json(search_open_prs(gh, full_name, mine, &query, limit).await?)
+    }
     // Answered by the host's `gh` until it is read over HTTPS here.
     other => Err(format!(
       "unsupported_query: {other:?} is not read over HTTPS yet"
     )),
   }
+}
+
+/// `gh_list_issues_impl`: one page of [`github::issues_page_query`].
+async fn list_issues(
+  gh: &GithubHttp,
+  full_name: &str,
+  state: &str,
+  after: Option<&str>,
+) -> Result<GhListPage<GhIssue>, String> {
+  let (owner, name) = owner_and_name(full_name)?;
+  let query = github::issues_page_query(state)?;
+  let variables = json!({
+    "owner": owner,
+    "name": name,
+    "first": GH_LIST_PAGE_SIZE.clamp(1, 100),
+    "after": after,
+  });
+  let response = gh.graphql(&query, variables).await?;
+  Ok(parse::<github::IssuesPageResponse>(response)?.into_page())
+}
+
+/// The fields `gh pr list --json ...` reads, as GraphQL.
+const LISTED_PR_FIELDS: &str = "number title state url author { login } \
+  labels(first: 100) { nodes { name color } } headRefName baseRefName \
+  mergeStateStatus createdAt updatedAt isDraft";
+
+/// Search terms in one string, with single spaces.
+fn search_terms(terms: &[&str]) -> String {
+  terms
+    .iter()
+    .flat_map(|term| term.split_whitespace())
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
+/// Pull requests matching the search `q`, in its order, up to `want`.
+async fn search_prs(gh: &GithubHttp, q: &str, want: u32) -> Result<Vec<GhPullRequest>, String> {
+  let query = format!(
+    "query($q: String!, $first: Int!, $after: String) {{ \
+       search(query: $q, type: ISSUE, first: $first, after: $after) {{ \
+         nodes {{ ... on PullRequest {{ {LISTED_PR_FIELDS} }} }} \
+         pageInfo {{ hasNextPage endCursor }} }} }}"
+  );
+  let want = want as usize;
+  let mut prs = Vec::new();
+  let mut after: Option<String> = None;
+  while prs.len() < want {
+    let first = (want - prs.len()).min(100);
+    let response = gh
+      .graphql(&query, json!({ "q": q, "first": first, "after": after }))
+      .await?;
+    let search = &response["data"]["search"];
+    for node in search["nodes"].as_array().into_iter().flatten() {
+      // An issue among the results comes back as an empty node.
+      if node.get("number").is_some() {
+        prs.push(parse(gh_shape(node.clone()))?);
+      }
+    }
+    let page = &search["pageInfo"];
+    match page["endCursor"].as_str() {
+      Some(cursor) if page["hasNextPage"].as_bool() == Some(true) => {
+        after = Some(cursor.to_string());
+      }
+      _ => break,
+    }
+  }
+  prs.truncate(want);
+  Ok(prs)
+}
+
+/// `gh_list_prs_impl`: `gh pr list --state` searches GitHub the same way.
+async fn list_prs(
+  gh: &GithubHttp,
+  full_name: &str,
+  state: &str,
+  page: u32,
+) -> Result<GhListPage<GhPullRequest>, String> {
+  let filter = match state {
+    // `--state open` includes drafts, which have their own filter.
+    "open" => "is:open draft:false",
+    "draft" => "is:open draft:true",
+    "closed" => "is:closed",
+    "merged" => "is:merged",
+    "all" => "",
+    other => return Err(format!("Unknown pull request state: {other}")),
+  };
+  let repo = format!("repo:{full_name}");
+  let q = search_terms(&[&repo, "is:pr", filter, "sort:created-desc"]);
+  let limit = GH_LIST_PAGE_SIZE.max(1);
+  let page = page.max(1);
+  let fetched = search_prs(gh, &q, limit * page).await?;
+  Ok(github::take_list_page(fetched, limit, page))
+}
+
+/// `gh_search_open_prs_impl`.
+async fn search_open_prs(
+  gh: &GithubHttp,
+  full_name: &str,
+  mine: bool,
+  query: &str,
+  limit: u32,
+) -> Result<Vec<GhPullRequest>, String> {
+  let repo = format!("repo:{full_name}");
+  let author = if mine { "author:@me" } else { "" };
+  let q = search_terms(&[
+    &repo,
+    "is:pr",
+    "is:open",
+    query,
+    "sort:created-desc",
+    author,
+  ]);
+  search_prs(gh, &q, limit.max(1)).await
+}
+
+/// A GraphQL node in the shape `gh ... --json` prints it: connections as
+/// plain lists, a deleted account as an empty login, and a missing review
+/// decision or submission time as an empty string.
+fn gh_shape(mut node: Value) -> Value {
+  fn fix_author(node: &mut Value) {
+    if let Some(author) = node.get_mut("author").filter(|author| author.is_null()) {
+      *author = json!({ "login": "" });
+    }
+  }
+  let Some(object) = node.as_object_mut() else {
+    return node;
+  };
+  for key in ["labels", "comments", "latestReviews", "reviews"] {
+    if let Some(field) = object.get_mut(key) {
+      if let Some(nodes) = field.get_mut("nodes").map(Value::take) {
+        *field = nodes;
+      }
+      for item in field.as_array_mut().into_iter().flatten() {
+        fix_author(item);
+        if let Some(at) = item.get_mut("submittedAt").filter(|at| at.is_null()) {
+          *at = json!("");
+        }
+      }
+    }
+  }
+  if let Some(decision) = object.get_mut("reviewDecision").filter(|d| d.is_null()) {
+    *decision = json!("");
+  }
+  fix_author(&mut node);
+  node
 }
 
 #[cfg(test)]
