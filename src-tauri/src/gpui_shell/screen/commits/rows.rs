@@ -789,7 +789,10 @@ impl CommitsView {
           div()
             .id(SharedString::from(format!("add-comment-{h}-{l}")))
             .role(gpui::Role::Button)
-            .aria_label("Add comment")
+            .aria_label(format!(
+              "Add comment on {path} line {}",
+              new.or(old).unwrap_or_default()
+            ))
             .debug_selector(move || format!("add-comment-{h}-{l}"))
             .p_px()
             .rounded(radius::SM)
@@ -802,7 +805,8 @@ impl CommitsView {
             .on_click(cx.listener(move |view, _, _, cx| {
               cx.stop_propagation();
               view.add_comment(&c, &file, at, cx);
-            })),
+            }))
+            .test_support(),
         )
     };
     let (id, file) = (commit.commit_id.clone(), path.to_string());

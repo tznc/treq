@@ -1,41 +1,63 @@
 use gpui::TestAppContext;
 
+use gpui_testing_library::Queries as _;
+
 use super::*;
+
+/// How many commits the list shows: every fixture commit reads "work".
+fn commit_rows(h: &mut Harness) -> usize {
+  h.rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .len()
+}
+
+/// How many Refresh buttons the remote strip and its banner show.
+fn refresh_buttons(h: &mut Harness) -> usize {
+  h.rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Refresh"))
+    .len()
+}
+
+/// Whether diff line `name` offers its hover-only comment button.
+fn offers_comment(h: &mut Harness, name: &str) -> bool {
+  h.rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(name)
+        .hidden(true),
+    )
+    .is_some()
+}
 
 #[gpui::test]
 fn commits_tab_lists_commits_and_opens_their_diffs(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
-  for selector in [
-    "workspace-commits",
-    "commit-row-a",
-    "commit-row-b",
-    "shift-commits-to-now",
-  ] {
-    assert!(h.drawn(selector), "{selector}");
-  }
-  assert!(!h.drawn("workspace-code"));
+  assert!(h.shows(gpui::Role::Tab, "Commits"));
+  assert_eq!(commit_rows(&mut h), 2);
+  assert!(h.shows(gpui::Role::Button, "Shift to now"));
+  assert!(!h.shows(gpui::Role::Button, "Go to file"));
   assert!(host
     .calls()
     .contains(&"read log Some(7) None None".to_string()));
   h.click("commit-row-a");
-  assert!(h.drawn("commit-file-row"));
+  assert!(h.shows(gpui::Role::Button, "src/a.rs"));
   assert!(host.calls().contains(&"read diff a".to_string()));
   // The newest commit can be undone; every own commit edited and moved.
-  for selector in [
-    "edit-description-a",
-    "undo-commit-a",
-    "revert-commit-a",
-    "edit-timestamp-a",
-    "move-commit-a",
-    "stash-commit-button",
-    "delete-commit-a",
+  for name in [
+    "Edit description",
+    "Undo commit",
+    "Revert commit",
+    "Edit timestamp",
+    "Move commit",
+    "Stash commit",
+    "Delete commit",
   ] {
-    assert!(h.drawn(selector), "{selector}");
+    assert!(h.shows(gpui::Role::Button, name), "{name}");
   }
   h.click("commit-file-row");
-  assert!(!h.drawn("add-comment-0-1"));
+  assert!(!offers_comment(&mut h, "Add comment on src/a.rs line 2"));
   h.click("commit-row-a");
-  assert!(!h.drawn("commit-file-row"));
+  assert!(!h.shows(gpui::Role::Button, "src/a.rs"));
 }
 
 #[gpui::test]
@@ -46,14 +68,14 @@ fn commits_tab_rewrites_commits_in_the_home_repo(cx: &mut TestAppContext) {
   let route = serde_json::from_value(route).expect("home commits route");
   let (mut h, host) = workspace_harness(cx, commits_host(), route);
   h.click("commit-row-a");
-  for selector in ["edit-description-a", "revert-commit-a", "delete-commit-a"] {
-    assert!(h.drawn(selector), "{selector}");
+  for name in ["Edit description", "Revert commit", "Delete commit"] {
+    assert!(h.shows(gpui::Role::Button, name), "{name}");
   }
   h.click("revert-commit-a");
   h.answer("Revert commit");
   assert!(host.writes().contains(&"revert a".to_string()));
   h.click("edit-description-a");
-  assert!(h.drawn("edit-description-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Edit commit description"));
   assert!(host.calls().contains(&"read description a".to_string()));
 }
 
@@ -64,7 +86,10 @@ fn commits_tab_abandons_once_confirmed(cx: &mut TestAppContext) {
   h.click("delete-commit-a");
   h.answer("Cancel");
   assert!(!host.writes().iter().any(|w| w.starts_with("abandon")));
-  assert!(!h.drawn("confirm"));
+  assert!(h
+    .rendered()
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Dialog))
+    .is_none());
 }
 
 #[gpui::test]
@@ -78,8 +103,7 @@ fn commits_tab_removes_an_abandoned_commit(cx: &mut TestAppContext) {
   h.cx
     .executor()
     .advance_clock(std::time::Duration::from_millis(300));
-  assert!(!h.drawn("commit-row-a"));
-  assert!(h.drawn("commit-row-b"));
+  assert_eq!(commit_rows(&mut h), 1, "only b is left");
 }
 
 #[gpui::test]
@@ -94,8 +118,8 @@ fn commits_tab_keeps_a_commit_it_failed_to_abandon(cx: &mut TestAppContext) {
   h.cx
     .executor()
     .advance_clock(std::time::Duration::from_millis(300));
-  assert!(h.drawn("commit-row-a"), "put back");
-  assert!(h.drawn("delete-commit-a"));
+  assert_eq!(commit_rows(&mut h), 2, "put back");
+  assert!(h.shows(gpui::Role::Button, "Delete commit"));
 }
 
 #[gpui::test]
@@ -105,7 +129,7 @@ fn commits_tab_opens_the_commit_react_asked_for(cx: &mut TestAppContext) {
     r.scroll_to_commit = Some("b".into());
   }
   let (mut h, host) = workspace_harness(cx, commits_host(), route);
-  assert!(h.drawn("commit-file-row"));
+  assert!(h.shows(gpui::Role::Button, "src/a.rs"));
   assert!(host.calls().contains(&"read diff b".to_string()));
   assert_eq!(fields(&h, "commits.scrolled").len(), 1);
 }
@@ -143,7 +167,7 @@ fn commits_tab_sends_a_line_comment_to_an_agent(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
   h.click("commit-row-a");
   h.click("add-comment-0-1");
-  assert!(h.drawn("comment-input"));
+  assert!(h.shows(gpui::Role::MultilineTextInput, "Add a comment…"));
   h.cx.simulate_input("why?");
   h.click("comment-edit");
   h.cx.run_until_parked();
@@ -160,7 +184,7 @@ fn commits_tab_sends_a_line_comment_to_an_agent(cx: &mut TestAppContext) {
     "src/a.rs:2 (commit a)\n```\n+b\n```\n> why?\n"
   );
   assert_eq!(created[0]["permissionMode"], "acceptEdits");
-  assert!(!h.drawn("comment-input"));
+  assert!(!h.shows(gpui::Role::MultilineTextInput, "Add a comment…"));
 }
 
 #[gpui::test]
@@ -168,7 +192,7 @@ fn commits_tab_edits_a_description(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
   h.click("commit-row-a");
   h.click("edit-description-a");
-  assert!(h.drawn("edit-description-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Edit commit description"));
   assert!(host.calls().contains(&"read description a".to_string()));
   h.cx.simulate_input("!");
   h.click("description-save");
@@ -181,7 +205,7 @@ fn commits_tab_edits_a_description(cx: &mut TestAppContext) {
     "{:?}",
     host.writes()
   );
-  assert!(!h.drawn("edit-description-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Edit commit description"));
 }
 
 #[gpui::test]
@@ -189,7 +213,7 @@ fn commits_tab_shifts_the_stack_from_the_timestamp_dialog(cx: &mut TestAppContex
   let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
   h.click("commit-row-a");
   h.click("edit-timestamp-a");
-  assert!(h.drawn("edit-timestamp-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Edit commit timestamp"));
   // Nothing to apply until a duration is entered.
   h.click("timestamp-apply");
   h.cx.run_until_parked();
@@ -197,7 +221,7 @@ fn commits_tab_shifts_the_stack_from_the_timestamp_dialog(cx: &mut TestAppContex
   h.click("shift-stack-to-now");
   h.cx.run_until_parked();
   assert!(host.writes().contains(&"shift to now 7".to_string()));
-  assert!(!h.drawn("edit-timestamp-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Edit commit timestamp"));
 }
 
 #[gpui::test]
@@ -207,9 +231,9 @@ fn commits_tab_resolves_conflicts_with_an_agent(cx: &mut TestAppContext) {
     log.commits[0].has_conflicts = true;
   }
   let (mut h, host) = workspace_harness(cx, host, commits_route());
-  assert!(h.drawn("resolve-conflicts-banner"));
+  assert!(h.shows(gpui::Role::Alert, "1 commit has conflicts"));
   h.click("resolve-conflicts-button");
-  assert!(h.drawn("resolve-conflicts-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Resolve commit conflicts in place"));
   assert!(host
     .calls()
     .contains(&r#"start resolve Some(7) Some(["a"])"#.to_string()));
@@ -226,7 +250,7 @@ fn commits_tab_resolves_conflicts_with_an_agent(cx: &mut TestAppContext) {
   let created = host.started_sessions();
   assert_eq!(created[0]["workspacePath"], "/r/cwd");
   assert_eq!(created[0]["pendingPrompt"], "resolve: keep both sides");
-  assert!(!h.drawn("resolve-conflicts-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Resolve commit conflicts in place"));
 }
 
 #[gpui::test]
@@ -239,12 +263,12 @@ fn commits_tab_resolve_dialog_shows_why_it_cannot_resolve(cx: &mut TestAppContex
   let (mut h, host) = workspace_harness(cx, host, commits_route());
   h.click("resolve-conflicts-button");
   h.cx.run_until_parked();
-  assert!(h.drawn("resolve-conflicts-error"));
+  assert!(h.shows(gpui::Role::Alert, "No conflicted commits found to resolve."));
   type_into(&mut h, "resolve-conflicts-prompt", "keep both sides");
   h.click("resolve-conflicts-submit");
   h.cx.run_until_parked();
   assert!(host.started_sessions().is_empty());
-  assert!(h.drawn("resolve-conflicts-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Resolve commit conflicts in place"));
 }
 
 #[gpui::test]
@@ -270,7 +294,7 @@ fn commits_tab_discards_the_tentative_working_copy(cx: &mut TestAppContext) {
     writes.iter().any(|w| w.starts_with("discard ")),
     "{writes:?}"
   );
-  assert!(!h.drawn("commit-row-wc"));
+  assert_eq!(commit_rows(&mut h), 2, "only a and b are left");
 }
 
 #[gpui::test]
@@ -281,7 +305,7 @@ fn commits_tab_hands_moves_to_react(cx: &mut TestAppContext) {
   h.click("move-commit-existing");
   h.cx.run_until_parked();
   assert_eq!(fields(&h, "commits.moveToExisting")[0]["change_id"], "a");
-  assert!(!h.drawn("move-commit-menu"));
+  assert!(!h.shows(gpui::Role::MenuItem, "Move to existing workspace"));
 }
 
 fn remote_chrome(state: &str, cut_off: bool) -> serde_json::Value {
@@ -297,15 +321,15 @@ fn remote_chrome(state: &str, cut_off: bool) -> serde_json::Value {
 #[gpui::test]
 fn a_remote_repository_hides_stash_all(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
-  assert!(h.drawn("stash-all-changes"));
+  assert!(h.shows(gpui::Role::Button, "Stash all changes"));
   h.update(|s| {
     if let View::Workspace(route) = &mut s.view {
       route.remote_chrome = serde_json::from_value(remote_chrome("online", false)).ok();
     }
   });
   h.cx.run_until_parked();
-  assert!(!h.drawn("stash-all-changes"));
-  assert!(h.drawn("discard-all-changes"));
+  assert!(!h.shows(gpui::Role::Button, "Stash all changes"));
+  assert!(h.shows(gpui::Role::Button, "Discard all changes…"));
 }
 
 #[gpui::test]
@@ -314,20 +338,22 @@ fn a_remote_repository_draws_dashboards_strip(cx: &mut TestAppContext) {
   route["remoteChrome"] = remote_chrome("offline", false);
   let snapshot = serde_json::from_value(route).expect("remote route");
   let (mut h, _) = workspace_harness(cx, code_host(), snapshot);
-  for selector in [
-    "remote-strip",
-    "remote-terminal-link",
-    "remote-refresh-link",
-    "remote-status-banner",
-    "remote-banner-reconnect",
-    "remote-banner-refresh",
-    "remote-capability-notice",
-    "workspace-header",
+  for (role, name) in [
+    (gpui::Role::Group, "Remote repository app"),
+    (gpui::Role::Button, "Terminal"),
+    (gpui::Role::Status, "Offline"),
+    (gpui::Role::Button, "Reconnect"),
+    (
+      gpui::Role::Status,
+      "Merging a remote workspace is not available yet.",
+    ),
+    (gpui::Role::Button, "Workspace details"),
   ] {
-    assert!(h.drawn(selector), "{selector}");
+    assert!(h.shows(role, name), "{name}");
   }
-  assert!(!h.drawn("remote-banner-wake"));
-  assert!(!h.drawn("remote-cutoff-overlay"));
+  assert_eq!(refresh_buttons(&mut h), 2, "the strip's and the banner's");
+  assert!(!h.shows(gpui::Role::Button, "Wake now"));
+  assert!(!h.shows(gpui::Role::Group, "Access blocked"));
   h.click("remote-terminal-link");
   h.click("remote-banner-reconnect");
   h.click("remote-refresh-link");
@@ -347,11 +373,15 @@ fn a_cut_off_remote_repository_dims_the_window(cx: &mut TestAppContext) {
   route["remoteChrome"] = remote_chrome("cutoff", true);
   let snapshot = serde_json::from_value(route).expect("remote route");
   let (mut h, _) = workspace_harness(cx, code_host(), snapshot);
-  assert!(h.drawn("remote-cutoff-overlay"));
-  assert!(h.drawn("remote-status-banner"));
-  assert!(
-    !h.drawn("remote-banner-refresh"),
-    "no Refresh while cut off"
+  assert!(h.shows(gpui::Role::Group, "Access blocked"));
+  assert!(h.shows(
+    gpui::Role::Status,
+    "Credential cutoff - reauthenticate to continue"
+  ));
+  assert_eq!(
+    refresh_buttons(&mut h),
+    1,
+    "no banner Refresh while cut off"
   );
   // The strip's links take no clicks.
   h.click("remote-terminal-link");
@@ -370,12 +400,12 @@ fn commits_tab_description_dialog_saves_on_secondary_enter_and_closes_on_escape(
   h.cx.simulate_keystrokes("secondary-enter");
   h.cx.run_until_parked();
   assert!(host.writes().iter().any(|w| w.starts_with("describe a ")));
-  assert!(!h.drawn("edit-description-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Edit commit description"));
 
   h.click("edit-description-a");
-  assert!(h.drawn("edit-description-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Edit commit description"));
   h.cx.simulate_keystrokes("escape");
-  assert!(!h.drawn("edit-description-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Edit commit description"));
 }
 
 #[gpui::test]
@@ -383,9 +413,9 @@ fn commits_tab_timestamp_dialog_closes_on_escape(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, commits_host(), commits_route());
   h.click("commit-row-a");
   h.click("edit-timestamp-a");
-  assert!(h.drawn("edit-timestamp-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Edit commit timestamp"));
   h.cx.simulate_keystrokes("escape");
-  assert!(!h.drawn("edit-timestamp-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Edit commit timestamp"));
 }
 
 #[gpui::test]
@@ -404,9 +434,9 @@ fn commits_tab_resolve_dialog_submits_on_secondary_enter_and_closes_on_escape(
   assert_eq!(host.started_sessions().len(), 1);
 
   h.click("resolve-conflicts-button");
-  assert!(h.drawn("resolve-conflicts-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Resolve commit conflicts in place"));
   h.cx.simulate_keystrokes("escape");
-  assert!(!h.drawn("resolve-conflicts-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Resolve commit conflicts in place"));
 }
 
 fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
@@ -479,7 +509,7 @@ fn commits_tab_finds_text_in_messages_and_open_diffs(cx: &mut TestAppContext) {
     })
   };
   h.cx.simulate_keystrokes("cmd-f");
-  assert!(h.drawn("commits-search"));
+  assert!(h.shows(gpui::Role::Button, "Close search"));
   // Both messages read "work".
   h.cx.simulate_input("work");
   assert_eq!(count(&mut h), (0, 2));
@@ -495,5 +525,5 @@ fn commits_tab_finds_text_in_messages_and_open_diffs(cx: &mut TestAppContext) {
   h.click("commit-row-a");
   assert_eq!(count(&mut h), (0, 1));
   h.click("commits-search-close");
-  assert!(!h.drawn("commits-search"));
+  assert!(!h.shows(gpui::Role::Button, "Close search"));
 }
