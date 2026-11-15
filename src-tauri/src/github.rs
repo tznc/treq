@@ -574,7 +574,7 @@ const ISSUES_PAGE_QUERY: &str = r#"query($owner: String!, $name: String!, $first
 }"#;
 
 #[derive(serde::Deserialize)]
-struct IssuesPageResponse {
+pub(crate) struct IssuesPageResponse {
   data: IssuesPageData,
 }
 
@@ -644,6 +644,30 @@ impl From<IssuesPageNode> for GhIssue {
   }
 }
 
+impl IssuesPageResponse {
+  pub(crate) fn into_page(self) -> GhListPage<GhIssue> {
+    let issues = self.data.repository.issues;
+    GhListPage {
+      items: issues.nodes.into_iter().map(GhIssue::from).collect(),
+      has_more: issues.page_info.has_next_page,
+      end_cursor: issues.page_info.end_cursor,
+      total_count: issues.total_count,
+    }
+  }
+}
+
+/// [`ISSUES_PAGE_QUERY`] for issues in `state`: `open`, `closed` or `all`.
+pub(crate) fn issues_page_query(state: &str) -> Result<String, String> {
+  // The state becomes GraphQL text, so only these fixed values reach it.
+  let states = match state {
+    "open" => "states: [OPEN],",
+    "closed" => "states: [CLOSED],",
+    "all" => "",
+    other => return Err(format!("Unknown issue state: {other}")),
+  };
+  Ok(ISSUES_PAGE_QUERY.replace("STATES ", states))
+}
+
 pub fn gh_list_issues_impl(
   gh_path: &str,
   repo_full_name: &str,
@@ -656,14 +680,7 @@ pub fn gh_list_issues_impl(
     .split_once('/')
     .filter(|(owner, name)| !owner.is_empty() && !name.is_empty() && !name.contains('/'))
     .ok_or_else(|| format!("Expected an OWNER/REPO name, got: {repo_full_name}"))?;
-  // The state becomes GraphQL text, so only these fixed values reach it.
-  let states = match state {
-    "open" => "states: [OPEN],",
-    "closed" => "states: [CLOSED],",
-    "all" => "",
-    other => return Err(format!("Unknown issue state: {other}")),
-  };
-  let query = format!("query={}", ISSUES_PAGE_QUERY.replace("STATES ", states));
+  let query = format!("query={}", issues_page_query(state)?);
   let owner = format!("owner={owner}");
   let name = format!("name={name}");
   let first = format!("first={}", limit.clamp(1, 100));
@@ -678,13 +695,7 @@ pub fn gh_list_issues_impl(
   let bytes = check_gh_output(out)?;
   let response: IssuesPageResponse =
     serde_json::from_slice(&bytes).map_err(|e| format!("Failed to parse gh output: {e}"))?;
-  let issues = response.data.repository.issues;
-  Ok(GhListPage {
-    items: issues.nodes.into_iter().map(GhIssue::from).collect(),
-    has_more: issues.page_info.has_next_page,
-    end_cursor: issues.page_info.end_cursor,
-    total_count: issues.total_count,
-  })
+  Ok(response.into_page())
 }
 
 pub fn gh_view_issue_impl(
@@ -769,7 +780,7 @@ pub fn gh_create_issue_comment_impl(
 }
 
 /// Close reasons `gh issue close --reason` accepts.
-const ISSUE_CLOSE_REASONS: [&str; 2] = ["completed", "not planned"];
+pub(crate) const ISSUE_CLOSE_REASONS: [&str; 2] = ["completed", "not planned"];
 
 pub fn gh_close_issue_impl(
   gh_path: &str,
@@ -1066,7 +1077,7 @@ pub fn gh_pr_file_impl(
   Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-const REPLY_THREAD_MUTATION: &str = "mutation($threadId: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) { comment { id } } }";
+pub(crate) const REPLY_THREAD_MUTATION: &str = "mutation($threadId: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) { comment { id } } }";
 
 /// `gh api` exits 0 on GraphQL-level errors, so check the `errors` field.
 fn check_graphql_errors(bytes: &[u8]) -> Result<(), String> {
@@ -1104,7 +1115,7 @@ pub fn gh_reply_pr_review_thread_impl(
 }
 
 /// GraphQL lists all eight reactions, most with no one on them.
-fn shown_reactions(groups: Vec<GhReactionGroup>) -> Vec<GhReactionGroup> {
+pub(crate) fn shown_reactions(groups: Vec<GhReactionGroup>) -> Vec<GhReactionGroup> {
   groups.into_iter().filter(|g| g.count > 0).collect()
 }
 
@@ -1181,8 +1192,8 @@ pub fn fill_comment_reactions(
   }
 }
 
-const ADD_REACTION_MUTATION: &str = "mutation($id: ID!, $content: ReactionContent!) { addReaction(input: {subjectId: $id, content: $content}) { clientMutationId } }";
-const REMOVE_REACTION_MUTATION: &str = "mutation($id: ID!, $content: ReactionContent!) { removeReaction(input: {subjectId: $id, content: $content}) { clientMutationId } }";
+pub(crate) const ADD_REACTION_MUTATION: &str = "mutation($id: ID!, $content: ReactionContent!) { addReaction(input: {subjectId: $id, content: $content}) { clientMutationId } }";
+pub(crate) const REMOVE_REACTION_MUTATION: &str = "mutation($id: ID!, $content: ReactionContent!) { removeReaction(input: {subjectId: $id, content: $content}) { clientMutationId } }";
 
 /// Adds or removes the viewer's `content` reaction (`THUMBS_UP`, ...) on a
 /// comment by its GraphQL node id.
@@ -1228,6 +1239,24 @@ pub fn gh_submit_pr_review_impl(
   comments: &[GhDraftReviewComment],
   extended_path: &str,
 ) -> Result<(), String> {
+  let input = review_request_body(event, body, comments)?;
+  let endpoint = format!("repos/{repo_full_name}/pulls/{pr_number}/reviews");
+  let out = run_gh_with_stdin(
+    gh_path,
+    &["api", &endpoint, "--method", "POST", "--input", "-"],
+    &input.to_string(),
+    extended_path,
+  )?;
+  check_gh_output(out).map(|_| ())
+}
+
+/// The body of `POST /repos/{repo}/pulls/{number}/reviews` for a review
+/// with `event` (`APPROVE`, `REQUEST_CHANGES` or `COMMENT`).
+pub(crate) fn review_request_body(
+  event: &str,
+  body: &str,
+  comments: &[GhDraftReviewComment],
+) -> Result<serde_json::Value, String> {
   if !matches!(event, "APPROVE" | "REQUEST_CHANGES" | "COMMENT") {
     return Err(format!("Invalid review event: {event}"));
   }
@@ -1247,15 +1276,7 @@ pub fn gh_submit_pr_review_impl(
       v
     })
     .collect();
-  let input = serde_json::json!({ "event": event, "body": body, "comments": comments });
-  let endpoint = format!("repos/{repo_full_name}/pulls/{pr_number}/reviews");
-  let out = run_gh_with_stdin(
-    gh_path,
-    &["api", &endpoint, "--method", "POST", "--input", "-"],
-    &input.to_string(),
-    extended_path,
-  )?;
-  check_gh_output(out).map(|_| ())
+  Ok(serde_json::json!({ "event": event, "body": body, "comments": comments }))
 }
 
 pub fn gh_close_pr_impl(
@@ -1837,7 +1858,7 @@ const PR_LIST_JSON_FIELDS: &str = "number,title,state,url,headRefName,baseRefNam
 /// One `statusCheckRollup` entry: a check run or a commit status.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct GhRollupEntry {
+pub(crate) struct GhRollupEntry {
   #[serde(default)]
   name: Option<String>,
   #[serde(default)]
@@ -1887,6 +1908,11 @@ impl GhRollupEntry {
       completed_at: self.completed_at,
     }
   }
+}
+
+/// The checks `gh pr checks` reports for a `statusCheckRollup`'s entries.
+pub(crate) fn rollup_check_entries(entries: Vec<GhRollupEntry>) -> Option<PrCiStatus> {
+  rollup_pr_checks(entries.into_iter().map(GhRollupEntry::into_check).collect())
 }
 
 #[derive(serde::Deserialize)]
@@ -2070,7 +2096,7 @@ pub struct GhReviewThread {
   pub comments: Vec<GhReviewComment>,
 }
 
-const REVIEW_THREADS_QUERY: &str = r#"query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+pub(crate) const REVIEW_THREADS_QUERY: &str = r#"query($owner: String!, $repo: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       reviewThreads(first: 50, after: $after) {
@@ -2101,10 +2127,10 @@ const REVIEW_THREADS_QUERY: &str = r#"query($owner: String!, $repo: String!, $nu
 
 /// Maximum pages of review threads to fetch (50 threads/page) -- generous for
 /// any real PR while bounding worst-case `gh` invocations.
-const MAX_REVIEW_THREAD_PAGES: usize = 10;
+pub(crate) const MAX_REVIEW_THREAD_PAGES: usize = 10;
 
 #[derive(serde::Deserialize)]
-struct GqlResponse {
+pub(crate) struct GqlResponse {
   data: Option<GqlData>,
 }
 
@@ -2180,6 +2206,59 @@ struct GqlAuthor {
   avatar_url: Option<String>,
 }
 
+impl GqlResponse {
+  /// One page of [`REVIEW_THREADS_QUERY`]: its threads and the cursor of the
+  /// next page, if there is one; `None` when GitHub has no such pull request.
+  pub(crate) fn into_threads_page(self) -> Option<(Vec<GhReviewThread>, Option<String>)> {
+    let connection = self
+      .data
+      .and_then(|d| d.repository)
+      .and_then(|r| r.pull_request)?
+      .review_threads;
+    let mut threads = Vec::new();
+    for node in connection.nodes {
+      threads.push(GhReviewThread {
+        id: node.id,
+        is_resolved: node.is_resolved,
+        is_outdated: node.is_outdated,
+        path: node.path,
+        line: node.line,
+        diff_side: node.diff_side,
+        comments: node
+          .comments
+          .nodes
+          .into_iter()
+          .map(|c| GhReviewComment {
+            id: c.id,
+            body: c.body,
+            author: c
+              .author
+              .map(|a| GhAuthor {
+                login: a.login,
+                avatar_url: a.avatar_url,
+              })
+              .unwrap_or_else(|| GhAuthor {
+                login: "ghost".to_string(),
+                avatar_url: None,
+              }),
+            created_at: c.created_at,
+            diff_hunk: c.diff_hunk,
+            url: c.url,
+            reactions: shown_reactions(c.reaction_groups),
+          })
+          .collect(),
+      });
+    }
+
+    let next = connection
+      .page_info
+      .has_next_page
+      .then_some(connection.page_info.end_cursor)
+      .flatten();
+    Some((threads, next))
+  }
+}
+
 /// Fetch every review-comment thread (with resolved/outdated state) on a PR via
 /// `gh api graphql`, the only way to get thread-grouped comments with a
 /// `isResolved` flag -- the REST/`gh pr view` helpers above don't expose it.
@@ -2224,57 +2303,14 @@ pub fn gh_list_pr_review_threads_impl(
     let parsed: GqlResponse = serde_json::from_slice(&bytes)
       .map_err(|e| format!("Failed to parse gh graphql output: {e}"))?;
 
-    let connection = parsed
-      .data
-      .and_then(|d| d.repository)
-      .and_then(|r| r.pull_request)
-      .map(|pr| pr.review_threads);
-
-    let Some(connection) = connection else {
+    let Some((page, next)) = parsed.into_threads_page() else {
       break;
     };
-
-    for node in connection.nodes {
-      threads.push(GhReviewThread {
-        id: node.id,
-        is_resolved: node.is_resolved,
-        is_outdated: node.is_outdated,
-        path: node.path,
-        line: node.line,
-        diff_side: node.diff_side,
-        comments: node
-          .comments
-          .nodes
-          .into_iter()
-          .map(|c| GhReviewComment {
-            id: c.id,
-            body: c.body,
-            author: c
-              .author
-              .map(|a| GhAuthor {
-                login: a.login,
-                avatar_url: a.avatar_url,
-              })
-              .unwrap_or_else(|| GhAuthor {
-                login: "ghost".to_string(),
-                avatar_url: None,
-              }),
-            created_at: c.created_at,
-            diff_hunk: c.diff_hunk,
-            url: c.url,
-            reactions: shown_reactions(c.reaction_groups),
-          })
-          .collect(),
-      });
-    }
-
-    if !connection.page_info.has_next_page {
+    threads.extend(page);
+    let Some(next) = next else {
       break;
-    }
-    after = connection.page_info.end_cursor;
-    if after.is_none() {
-      break;
-    }
+    };
+    after = Some(next);
   }
 
   Ok(threads)
