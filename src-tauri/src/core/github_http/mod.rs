@@ -430,6 +430,7 @@ mod tests {
           },
         ],
         "pageInfo": { "hasNextPage": true, "endCursor": "c2" },
+        "totalCount": 41,
       }}})))
       .expect(1)
       .mount(&server)
@@ -467,6 +468,7 @@ mod tests {
         ],
         "hasMore": true,
         "endCursor": "c2",
+        "totalCount": 41,
       })
     );
   }
@@ -496,6 +498,18 @@ mod tests {
       .expect(1)
       .mount(&server)
       .await;
+    // `gh pr list` gives no total, so the host counts the filter with the
+    // search API on the first page.
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_string_contains("issueCount"))
+      .and(body_partial_json(json!({ "variables": {
+        "q": "repo:o/r is:pr is:open draft:false",
+      }})))
+      .respond_with(data(json!({ "search": { "issueCount": 7 } })))
+      .expect(1)
+      .mount(&server)
+      .await;
     let query = GithubQuery::ListPrs {
       state: "open".into(),
       page: 1,
@@ -504,8 +518,37 @@ mod tests {
     let expected = via_gh::<Vec<GhPullRequest>>(json!([gh_listed_pr(5)]));
     assert_eq!(
       value,
-      json!({ "items": expected, "hasMore": false, "endCursor": null })
+      json!({ "items": expected, "hasMore": false, "endCursor": null, "totalCount": 7 })
     );
+  }
+
+  #[tokio::test]
+  async fn list_prs_counts_closed_prs_without_the_merged_ones_like_gh() {
+    let (server, gh) = start().await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_partial_json(json!({ "variables": {
+        "q": "repo:o/r is:pr is:closed sort:created-desc",
+      }})))
+      .respond_with(search_page(vec![], None))
+      .mount(&server)
+      .await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_string_contains("issueCount"))
+      .and(body_partial_json(json!({ "variables": {
+        "q": "repo:o/r is:pr is:closed is:unmerged",
+      }})))
+      .respond_with(data(json!({ "search": { "issueCount": 3 } })))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let query = GithubQuery::ListPrs {
+      state: "closed".into(),
+      page: 1,
+    };
+    let value = github_read(&gh, "o/r", query).await.unwrap();
+    assert_eq!(value["totalCount"], 3);
   }
 
   #[tokio::test]
