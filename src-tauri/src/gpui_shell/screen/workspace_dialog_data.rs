@@ -44,7 +44,14 @@ pub trait WorkspaceDialogHost: ChangesHost {
   fn gitignore_suggestions(&self, repo_path: &str) -> Vec<String>;
   /// Saves this window's project as `name` (`core::projects`): renames a
   /// saved one, or saves the window's repositories as a new project.
-  fn save_project(&self, _name: &str) -> Result<(), String> {
+  /// The user's Team organizations as (id, name), offered as owners of a
+  /// new project.
+  fn project_teams(&self) -> Vec<(String, String)> {
+    Vec::new()
+  }
+  /// `org_id` assigns a new project to a Team organization; ignored on
+  /// rename.
+  fn save_project(&self, _name: &str, _org_id: Option<&str>) -> Result<(), String> {
     Err("Projects are not available here".into())
   }
   /// Closes this window without asking to save again.
@@ -108,8 +115,27 @@ pub trait WorkspaceDialogHost: ChangesHost {
 }
 
 impl WorkspaceDialogHost for Backend {
-  fn save_project(&self, name: &str) -> Result<(), String> {
-    crate::gpui_shell::projects::save_window_project(self.app(), self.label(), name).map(drop)
+  fn project_teams(&self) -> Vec<(String, String)> {
+    crate::commands::cloud::owned_cloud(self.app())
+      .map(|c| {
+        c.snapshot()
+          .cloud
+          .organizations
+          .iter()
+          .map(|o| (o.org_id.clone(), o.name.clone()))
+          .collect()
+      })
+      .unwrap_or_default()
+  }
+
+  fn save_project(&self, name: &str, org_id: Option<&str>) -> Result<(), String> {
+    crate::gpui_shell::projects::save_window_project(self.app(), self.label(), name)?;
+    match org_id {
+      Some(org) => {
+        crate::gpui_shell::projects::set_window_owner(self.app(), self.label(), Some(org))
+      }
+      None => Ok(()),
+    }
   }
 
   fn pick_context_files(&self) -> Option<Vec<String>> {
