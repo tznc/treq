@@ -57,14 +57,27 @@ pub fn handle(
   match action {
     SidebarAction::ProjectMenu => {
       let current = super::projects::window_project(app, label).map(|p| p.id);
+      let teams = super::projects::teams(app);
       let entries: Vec<context_menu::ProjectEntry> = super::projects::list(app)
         .into_iter()
         .map(|p| context_menu::ProjectEntry {
+          team: p.org_id.as_ref().map(|o| {
+            teams
+              .iter()
+              .find(|(id, _)| id == o)
+              .map_or_else(|| "Team".to_string(), |(_, n)| n.clone())
+          }),
           id: p.id,
           name: p.name,
         })
         .collect();
-      let items = context_menu::project_items(&entries, current.as_deref());
+      let mut items = context_menu::project_items(&entries, current.as_deref());
+      if let Some(project) = super::projects::window_project(app, label) {
+        if let Some(owner) = context_menu::project_owner_item(&teams, project.org_id.as_deref()) {
+          // Before "New Window…", the last item.
+          items.insert(items.len() - 1, owner);
+        }
+      }
       show(app, label, backend, items);
       true
     }
@@ -312,6 +325,11 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
     MenuAction::OpenBranchSwitcher => open(OpenRequest::BranchSwitcher),
     MenuAction::SaveProject => open(OpenRequest::SaveProject { closing: false }),
     MenuAction::ProjectContext => open(OpenRequest::ProjectContext),
+    MenuAction::SetProjectOwner(org_id) => {
+      if let Err(e) = super::projects::set_window_owner(app, backend.label(), org_id.as_deref()) {
+        log::warn!("moving project: {e}");
+      }
+    }
     MenuAction::SwitchProject(id) => {
       let main = app.clone();
       main
