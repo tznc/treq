@@ -1,4 +1,4 @@
--- Newsletter sign-ups (079_newsletter_subscribers.sql): visitors can only
+-- Newsletter sign-ups (082_newsletter_subscribers.sql): visitors can only
 -- call subscribe_newsletter(). Nobody but service_role can read the list.
 begin;
 select plan(11);
