@@ -3019,7 +3019,6 @@ fn agent_comment(suggested: Option<&str>) -> crate::local_db::AgentReviewComment
 }
 
 mod account_screen;
-mod team_screen;
 mod allocs;
 mod changes_large;
 mod changes_screen;
@@ -3054,6 +3053,7 @@ mod settings_screen;
 mod skills_screen;
 mod stack_panel;
 mod tab_badges;
+mod team_screen;
 mod terminal_perf;
 mod terminal_screen;
 mod testing_library;
