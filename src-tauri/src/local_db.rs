@@ -1,7 +1,7 @@
 use crate::lock_ext::LockExt;
 use crate::result_ext::ResultExt;
 use chrono::Utc;
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -710,6 +710,14 @@ fn insert_workspace_targeting(
   Ok(workspace)
 }
 
+/// A transaction that takes the write lock when it starts, for one that
+/// reads before it writes. A deferred one can't upgrade to a writer once
+/// another connection has committed since its read: SQLite fails it at once
+/// with "database is locked", without waiting out the busy timeout.
+fn write_transaction(conn: &Connection) -> rusqlite::Result<Transaction<'_>> {
+  Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+}
+
 /// Prepares a freshly created workspace to show: sets its `title` when given,
 /// and clears the last rebased target commit, which makes its first view
 /// rebase. One transaction, and the row back.
@@ -719,9 +727,8 @@ pub fn init_new_workspace_state(
   title: Option<&str>,
 ) -> Result<Option<Workspace>, String> {
   let conn = get_connection(repo_path)?;
-  let tx = conn
-    .unchecked_transaction()
-    .map_err(|e| format!("Failed to start workspace update: {}", e))?;
+  let tx =
+    write_transaction(&conn).map_err(|e| format!("Failed to start workspace update: {}", e))?;
   if let Some(title) = title {
     tx.execute(
       "UPDATE workspaces SET title = ?1 WHERE id = ?2",
@@ -1339,9 +1346,8 @@ pub fn update_workspaces_last_rebased_commit(
     return Ok(());
   }
   let conn = get_connection(repo_path)?;
-  let tx = conn
-    .unchecked_transaction()
-    .map_err(|e| format!("Failed to start rebase bookkeeping: {}", e))?;
+  let tx =
+    write_transaction(&conn).map_err(|e| format!("Failed to start rebase bookkeeping: {}", e))?;
   for id in ids {
     set_last_rebased_commit(&tx, *id, commit_id)?;
   }
@@ -3614,6 +3620,49 @@ mod tests {
       .expect("init state")
       .expect("row");
     assert_eq!(untitled.title, "A title", "no title leaves the title alone");
+  }
+
+  /// Another writer commits between the read and the write of a new
+  /// workspace's state. A deferred transaction can't take the write lock on
+  /// a stale snapshot, so SQLite fails it at once with "database is locked"
+  /// instead of waiting out the busy timeout.
+  #[test]
+  fn init_new_workspace_state_waits_for_a_concurrent_writer() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path").to_string();
+    init_local_db(&repo_path).expect("initialize database");
+    let id = add_workspace(
+      &repo_path,
+      "feat-z".to_string(),
+      "feat-z".to_string(),
+      "feat/z".to_string(),
+      None,
+      None,
+      None,
+    )
+    .expect("register workspace");
+    let other = Connection::open(resolve_db_path(&repo_path).expect("db path")).expect("open");
+    other
+      .execute_batch("BEGIN IMMEDIATE")
+      .expect("hold the write lock");
+
+    let init = std::thread::spawn(move || init_new_workspace_state(&repo_path, id, None));
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    other
+      .execute("UPDATE workspaces SET title = 'other' WHERE id = ?1", [id])
+      .expect("other write");
+    other
+      .execute_batch("COMMIT")
+      .expect("release the write lock");
+
+    let workspace = init
+      .join()
+      .expect("init thread")
+      .expect("init state waits instead of failing")
+      .expect("row");
+    let metadata: serde_json::Value =
+      serde_json::from_str(workspace.metadata.as_deref().expect("metadata")).expect("json");
+    assert_eq!(metadata["last_rebased_target_commit"], "");
   }
 
   #[test]
