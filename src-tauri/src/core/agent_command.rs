@@ -624,6 +624,7 @@ mod tests {
       prompt: "Use npm".into(),
       context_paths: vec!["/docs/a.md".into()],
       draft: false,
+      org_id: None,
     };
     assert_eq!(
       ProjectContext::from(saved),
