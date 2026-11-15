@@ -1825,6 +1825,9 @@ impl SettingsView {
       "cloud.spendCap" => self.account.spend_cap_draft = text,
       "byos.key" => self.account.byos_key_draft = text,
       "team.key" => self.account.team_key_draft = text,
+      _ if field.starts_with("teams.inviteEmail.") => {
+        self.set_team_field(field, text);
+      }
       _ if field.starts_with("team.cap.org.") => {
         let org_id = field.strip_prefix("team.cap.org.").unwrap_or_default();
         self
@@ -3194,7 +3197,7 @@ impl SettingsView {
       .iter()
       .map(|org| self.org_cloud(org, p, window, cx))
       .collect();
-    let teams = s.team.as_ref().and_then(|t| self.teams(t, p));
+    let teams = s.team.as_ref().and_then(|t| self.teams(t, p, window, cx));
     let upsell = s.team_upsell.then(|| self.team_upsell(p));
     div()
       .flex()

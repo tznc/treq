@@ -5,10 +5,15 @@
 use super::*;
 use crate::core::teams::{Membership, TeamData, TEAM_EXTRA_SEAT_USD, TEAM_INCLUDED_SEATS};
 use std::collections::BTreeMap;
+use tauri_plugin_gpui::gpui::ClipboardItem;
 
 /// What the Teams section's actions keep between draws.
 #[derive(Default)]
 pub(super) struct TeamActions {
+  /// Each organization's invite email field.
+  drafts: BTreeMap<String, String>,
+  /// Accept links by invite, shown once: the server keeps only a hash.
+  links: BTreeMap<String, String>,
   /// Why an organization's last action was refused.
   errors: BTreeMap<String, String>,
   pending: bool,
@@ -48,6 +53,8 @@ pub struct OrgCard {
   pub members: Vec<MemberRow>,
   /// Pending invites, which only owners and admins see.
   pub invites: Option<Vec<InviteRow>>,
+  /// The invite email field, for owners and admins.
+  pub invite_draft: Option<String>,
   /// An action on any team runs.
   pub pending: bool,
   /// Why this team's last action was refused.
@@ -73,6 +80,8 @@ pub struct InviteRow {
   pub email: String,
   /// `Expires Nov 16, 2026`.
   pub expires: String,
+  /// The accept link, once generated here.
+  pub link: Option<String>,
 }
 
 /// `roleLabel`.
@@ -219,9 +228,11 @@ fn org_cards(data: &TeamData, actions: &TeamActions) -> Vec<OrgCard> {
               id: i.id.clone(),
               email: i.email.clone(),
               expires: format!("Expires {}", short_date(&i.expires_at)),
+              link: actions.links.get(&i.id).cloned(),
             })
             .collect()
         }),
+        invite_draft: manager.then(|| actions.drafts.get(&org.id).cloned().unwrap_or_default()),
         pending: actions.pending,
         error: actions.errors.get(&org.id).cloned(),
         id: org.id,
@@ -331,6 +342,7 @@ impl SettingsView {
       .find(|m| m.org_id == org)
       .and_then(|m| m.organizations.as_ref())
       .map_or_else(|| "this team".into(), |o| o.name.clone());
+    let invite = data.invites.iter().find(|i| i.id == arg).cloned();
     let admin = data
       .memberships
       .iter()
@@ -343,6 +355,28 @@ impl SettingsView {
         }
       }
       (_, "teams.confirm.cancel") => actions.confirm = None,
+      ("invite", _) => {
+        let email = actions.drafts.get(org).map(|e| e.trim().to_string());
+        if let Some(email) = email.filter(|e| !e.is_empty()) {
+          self.send_invite(org.to_string(), email, cx);
+        }
+      }
+      ("renew", _) => {
+        if let Some(i) = invite {
+          self.send_invite(i.org_id, i.email, cx);
+        }
+      }
+      ("copy", _) => {
+        if let Some(link) = actions.links.get(arg) {
+          cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
+        }
+      }
+      ("revoke", _) => {
+        if let Some(i) = invite {
+          let body = serde_json::json!({ "action": "revoke_invite", "invite_id": i.id });
+          self.run_team(i.org_id, body, |_, _| {}, cx);
+        }
+      }
       ("role", _) => {
         let body = serde_json::json!({
           "action": "set_role", "organization_id": org, "user_id": user,
@@ -372,6 +406,37 @@ impl SettingsView {
       }
       _ => {}
     }
+  }
+
+  /// The invite email field, `teams.inviteEmail.<org>`.
+  pub(super) fn set_team_field(&mut self, field: &str, text: String) -> bool {
+    let Some(org) = field.strip_prefix("teams.inviteEmail.") else {
+      return false;
+    };
+    self
+      .account
+      .team_actions
+      .drafts
+      .insert(org.to_string(), text);
+    true
+  }
+
+  fn send_invite(&mut self, org: String, email: String, cx: &mut Context<Self>) {
+    let body = serde_json::json!({ "action": "invite", "organization_id": org, "email": email });
+    let done_org = org.clone();
+    self.run_team(
+      org,
+      body,
+      move |actions, reply| {
+        if let (Some(id), Some(url)) =
+          (reply["invite"]["id"].as_str(), reply["accept_url"].as_str())
+        {
+          actions.links.insert(id.to_string(), url.to_string());
+        }
+        actions.drafts.remove(&done_org);
+      },
+      cx,
+    );
   }
 
   /// Sends one `organizations` action for `org`, then reads the teams
@@ -435,7 +500,13 @@ impl SettingsView {
   }
 
   /// "Teams": one card per organization, or nothing without one.
-  pub(super) fn teams(&self, section: &TeamSection, p: &Palette) -> Option<AnyElement> {
+  pub(super) fn teams(
+    &mut self,
+    section: &TeamSection,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Option<AnyElement> {
     let orgs = match section {
       TeamSection::Loading => {
         return Some(
@@ -501,7 +572,19 @@ impl SettingsView {
         .child(text)
         .into_any_element()
     };
-    let cards = orgs.iter().map(|org| {
+    let inputs: Vec<_> = orgs
+      .iter()
+      .map(|org| {
+        let field = format!("teams.inviteEmail.{}", org.id);
+        let draft = org.invite_draft.as_ref()?;
+        Some(
+          self
+            .controls
+            .input(&field, draft, "teammate@example.com", window, cx),
+        )
+      })
+      .collect();
+    let cards = orgs.iter().zip(inputs).map(|(org, input)| {
       let id = org.id.clone();
       let pending = org.pending;
       let link_button = |id: String, label: &'static str, press: &str, pending: bool| {
@@ -548,17 +631,66 @@ impl SettingsView {
             .iter()
             .map(|invite| {
               let id = invite.id.clone();
-              person(
-                invite.email.clone(),
-                None,
-                vec![muted(invite.expires.clone())],
-              )
-              .debug_selector(move || format!("team-invite-{id}"))
-              .into_any_element()
+              let link = if invite.link.is_some() {
+                let press = format!("teams.copy.{id}");
+                link_button(format!("teams-copy-{id}"), "Copy link", &press, false)
+              } else {
+                let press = format!("teams.renew.{id}");
+                link_button(format!("teams-renew-{id}"), "New link", &press, pending)
+              };
+              let revoke = Button::new(format!("teams-revoke-{id}"), p)
+                .aria_label(format!("Revoke invite for {}", invite.email))
+                .variant(Variant::Ghost)
+                .size(Size::Icon)
+                .disabled(pending)
+                .child(ui::icon(theme::ICON_TRASH, 14., p.muted_foreground))
+                .on_click(self.press(&format!("teams.revoke.{id}")));
+              let trailing = vec![
+                muted(invite.expires.clone()),
+                link,
+                revoke.into_any_element(),
+              ];
+              div()
+                .child(
+                  person(invite.email.clone(), None, trailing)
+                    .debug_selector(move || format!("team-invite-{id}")),
+                )
+                .children(invite.link.clone().map(|link| {
+                  div()
+                    .truncate()
+                    .font_family(theme::MONO_FONT)
+                    .text_color(p.muted_foreground)
+                    .child(link)
+                }))
+                .into_any_element()
             })
             .collect()
         };
         div().child(subheading("Pending invites")).children(rows)
+      });
+      let invite_form = input.map(|input| {
+        let blank = org
+          .invite_draft
+          .as_deref()
+          .is_none_or(|d| d.trim().is_empty());
+        div()
+          .mt_2()
+          .flex()
+          .gap_2()
+          .child(div().flex_1().child(form::input_field(
+            format!("teams-invite-email-{id}"),
+            &input,
+            false,
+            pending,
+          )))
+          .child(
+            Button::new(format!("teams-invite-{id}"), p)
+              .variant(Variant::Outline)
+              .size(Size::Sm)
+              .disabled(pending || blank)
+              .label("Generate invite link")
+              .on_click(self.press(&format!("teams.invite.{id}"))),
+          )
       });
       let selector = format!("team-org-{id}");
       ui::text(div(), TextSize::Sm)
@@ -601,6 +733,7 @@ impl SettingsView {
         .child(subheading("Members"))
         .children(members)
         .children(invites)
+        .children(invite_form)
         .when_some(org.error.clone(), |this, error| {
           this.child(div().mt_2().text_color(Tone::Danger.color(p)).child(error))
         })
