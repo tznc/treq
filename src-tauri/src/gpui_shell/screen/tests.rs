@@ -2186,6 +2186,15 @@ fn feature_host() -> FakeHost {
 }
 
 /// The workspace screen in a window as wide as the app's default.
+/// The window's accessibility tree, as the e2e suite's Playwright sees it.
+fn a11y_screen(h: &mut Harness) -> gpui_testing_library::Screen {
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  screen
+}
+
 fn workspace_harness(
   cx: &mut TestAppContext,
   host: FakeHost,

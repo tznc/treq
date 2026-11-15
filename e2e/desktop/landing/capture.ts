@@ -76,10 +76,6 @@ async function shot(page: Page, name: string, clip?: Clip): Promise<void> {
 
 /** The shell pane under the tabs, where `treq send` shows its thumbnail. */
 const SHELL: Clip = { x: 280, y: 603, width: 1120, height: 297 };
-/** The middle of the window, which the `treq send` lightbox covers. */
-const LIGHTBOX: Clip = { x: 500, y: 250, width: 400, height: 300 };
-/** Inside the first `treq send` thumbnail in the shell pane. */
-const THUMB: Clip = { x: 300, y: 660, width: 130, height: 65 };
 
 /**
  * Retries screenshots of `clip` until it differs from `before` (when given)
@@ -314,20 +310,17 @@ async function capture(page: Page): Promise<void> {
   await page.mouse.click(900, 760); // focus the terminal
   // A short prompt, and no "Sent <absolute path>" line, keep the fixture's
   // temp dir out of the shot. The shell runs the two lines in order.
-  const blank = await page.screenshot({ clip: THUMB });
   await page.keyboard.type("PS1='event-bus $ '; clear\n");
   await page.keyboard.type("treq send ~/research-draft.svg >/dev/null\n");
-  // The thumbnail is drawn in the terminal, not exposed as an element.
-  await settle(page, THUMB, blank);
+  const preview = page.getByRole("button", { name: "Open preview" });
+  await expect(preview).toBeVisible();
   await shot(page, "send-thumb.png", SHELL);
-  // The lightbox is drawn over the window, not exposed as an element.
-  const closed = await page.screenshot({ clip: LIGHTBOX });
-  await page.mouse.click(364, 690); // the thumbnail
-  await settle(page, LIGHTBOX, closed);
+  const lightbox = page.getByRole("dialog", { name: "Preview" });
+  await preview.click();
+  await expect(lightbox).toBeVisible();
   await shot(page, "send-lightbox.png");
-  const open = await page.screenshot({ clip: LIGHTBOX });
   await page.keyboard.press("Escape");
-  await settle(page, LIGHTBOX, open);
+  await expect(lightbox).toHaveCount(0);
 
   // The Commits tab with a commit open and an agent in the terminal pane.
   await row(page, MARKETING).hover();

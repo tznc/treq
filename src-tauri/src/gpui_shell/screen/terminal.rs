@@ -3268,6 +3268,7 @@ impl TerminalPane {
           let id = id.clone();
           move || format!("terminal-send-preview-{id}")
         })
+        .test_support()
         .relative()
         .flex_none()
         .h_20()
