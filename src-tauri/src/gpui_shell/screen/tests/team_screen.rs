@@ -84,7 +84,9 @@ fn an_owner_sees_the_team_its_members_seats_and_invites(cx: &mut TestAppContext)
         id: "i1".into(),
         email: "cy@example.com".into(),
         expires: "Expires Nov 16, 2026".into(),
+        link: None,
       }]),
+      invite_draft: Some(String::new()),
       pending: false,
       error: None,
     }])
@@ -222,15 +224,47 @@ fn sent(body: serde_json::Value) -> String {
   format!("organizations {body}")
 }
 
+/// An invite answers with its accept link once (the server keeps only a
+/// hash): it shows on the invite's row until copied.
 #[gpui::test]
-fn an_owner_toggles_admin(cx: &mut TestAppContext) {
-  let (mut h, host) = acting_as(cx, "owner", Ok(serde_json::json!({})));
-  settings_act(&mut h, press("teams.role.o1.u2"));
+fn an_owner_invites_by_email_and_copies_the_link(cx: &mut TestAppContext) {
+  let url = "https://treq.dev/invite#invite=abc";
+  let (mut h, host) = acting_as(
+    cx,
+    "owner",
+    Ok(serde_json::json!({ "invite": { "id": "i1" }, "accept_url": url })),
+  );
+  settings_act(
+    &mut h,
+    field("teams.inviteEmail.o1", "cy@example.com".into()),
+  );
+  settings_act(&mut h, press("teams.invite.o1"));
   assert_eq!(
     host.writes(),
     [sent(serde_json::json!({
-      "action": "set_role", "organization_id": "o1", "user_id": "u2", "role": "member",
+      "action": "invite", "organization_id": "o1", "email": "cy@example.com",
     }))]
+  );
+  let card = org(&mut h);
+  assert_eq!(card.invite_draft.as_deref(), Some(""));
+  assert_eq!(card.invites.unwrap()[0].link.as_deref(), Some(url));
+  settings_act(&mut h, press("teams.copy.i1"));
+  assert_eq!(h.clipboard().as_deref(), Some(url));
+}
+
+#[gpui::test]
+fn an_owner_revokes_an_invite_and_toggles_admin(cx: &mut TestAppContext) {
+  let (mut h, host) = acting_as(cx, "owner", Ok(serde_json::json!({})));
+  settings_act(&mut h, press("teams.revoke.i1"));
+  settings_act(&mut h, press("teams.role.o1.u2"));
+  assert_eq!(
+    host.writes(),
+    [
+      sent(serde_json::json!({ "action": "revoke_invite", "invite_id": "i1" })),
+      sent(serde_json::json!({
+        "action": "set_role", "organization_id": "o1", "user_id": "u2", "role": "member",
+      })),
+    ]
   );
 }
 
@@ -257,7 +291,7 @@ fn removing_a_member_asks_first(cx: &mut TestAppContext) {
 fn a_member_can_leave_but_not_manage(cx: &mut TestAppContext) {
   let (mut h, host) = acting_as(cx, "member", Ok(serde_json::json!({})));
   let card = org(&mut h);
-  assert_eq!(card.invites, None);
+  assert_eq!(card.invite_draft, None);
   assert!(card
     .members
     .iter()
@@ -277,11 +311,17 @@ fn a_refused_action_shows_why_on_its_team(cx: &mut TestAppContext) {
   let (mut h, _) = acting_as(
     cx,
     "owner",
-    Err(ApiError::new("http_400", "Only owners can change roles.")),
+    Err(ApiError::new("http_400", "That email is already a member.")),
   );
-  settings_act(&mut h, press("teams.role.o1.u2"));
+  settings_act(
+    &mut h,
+    field("teams.inviteEmail.o1", "bob@example.com".into()),
+  );
+  settings_act(&mut h, press("teams.invite.o1"));
+  let card = org(&mut h);
   assert_eq!(
-    org(&mut h).error.as_deref(),
-    Some("Only owners can change roles.")
+    card.error.as_deref(),
+    Some("That email is already a member.")
   );
+  assert_eq!(card.invite_draft.as_deref(), Some("bob@example.com"));
 }
