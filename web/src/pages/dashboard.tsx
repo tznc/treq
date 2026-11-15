@@ -36,6 +36,7 @@ import {
   type OrganizationAction,
 } from "../lib/teams";
 import type { User, Session } from "@supabase/supabase-js";
+import MachinesTab from "../components/MachinesTab";
 
 interface GithubRepo {
   id: number;
@@ -47,14 +48,13 @@ interface GithubRepo {
   installation_id: number;
 }
 
-type Tab = "account" | "integrations";
+type Tab = "account" | "integrations" | "machines";
 
 // Older links (pricing, invite emails, GitHub callback) still say
 // ?tab=subscription or ?tab=team. Both now live on Account.
 function tabFromSearch(search: string): Tab {
-  return new URLSearchParams(search).get("tab") === "integrations"
-    ? "integrations"
-    : "account";
+  const tab = new URLSearchParams(search).get("tab");
+  return tab === "integrations" || tab === "machines" ? tab : "account";
 }
 
 // ── Repo row ─────────────────────────────────────────────────────────────────
@@ -1758,6 +1758,7 @@ function DashboardContent() {
             [
               ["account", "Account"],
               ["integrations", "Integrations"],
+              ["machines", "Machines"],
             ] as const
           ).map(([tab, label]) => (
             <button
@@ -1803,6 +1804,14 @@ function DashboardContent() {
 
         {activeTab === "integrations" && (
           <IntegrationsTab onUpgrade={() => setActiveTab("account")} />
+        )}
+
+        {activeTab === "machines" && (
+          <MachinesTab
+            isPro={isProSubscription(subscription)}
+            onUpgrade={() => setActiveTab("account")}
+            styles={styles}
+          />
         )}
       </div>
     </div>
