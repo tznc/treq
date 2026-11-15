@@ -6,6 +6,7 @@ import BrowserOnly from "@docusaurus/BrowserOnly";
 import Link from "@docusaurus/Link";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import { supabase } from "../lib/supabase";
+import { checkoutReturnPlan } from "../lib/checkoutReturn";
 import { proRequiredMessage } from "../lib/pro-required";
 import { confirmsAccountDeletion, deleteAccount } from "../lib/account";
 import {
@@ -334,9 +335,7 @@ function SubscriptionTab({
   const [checkoutReturn, setCheckoutReturn] = useState<
     "waiting" | "timed_out" | null
   >(() =>
-    new URLSearchParams(window.location.search).has("session_id")
-      ? "waiting"
-      : null,
+    checkoutReturnPlan(window.location.search) === "pro" ? "waiting" : null,
   );
   const [portalPending, setPortalPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1254,7 +1253,7 @@ function TeamTab({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checkoutReturn, setCheckoutReturn] = useState<"waiting" | "timed_out" | null>(
-    () => (new URLSearchParams(window.location.search).has("session_id") ? "waiting" : null),
+    () => (checkoutReturnPlan(window.location.search) === "team" ? "waiting" : null),
   );
 
   const reload = useCallback(async () => {
