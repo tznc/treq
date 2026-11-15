@@ -177,6 +177,8 @@ struct FakeHost {
   oauth: Option<Result<String, crate::core::supabase::ApiError>>,
   /// Why deleting the account fails; `None` deletes it.
   account_deletion: Option<crate::core::supabase::ApiError>,
+  /// What the Teams section reads; none by default.
+  team: Option<Result<crate::core::teams::TeamData, crate::core::supabase::ApiError>>,
   /// What the agent launches read and did: each new session's start data
   /// by pane id, the `treq send` attachments, the prompt dialog's tasks
   /// (and whether starting fails), and the sessions started.
@@ -1757,6 +1759,10 @@ impl account_data::AccountHost for FakeHost {
     self.account_deletion.clone().map_or(Ok(()), Err)
   }
 
+  fn team(&self) -> Result<crate::core::teams::TeamData, crate::core::supabase::ApiError> {
+    self.team.clone().unwrap_or_else(|| Ok(Default::default()))
+  }
+
   fn cloud_action(&self, action: account_data::CloudAction) {
     match action {
       account_data::CloudAction::Refresh => self.record("read cloud workspace".into()),
@@ -3047,6 +3053,7 @@ mod settings_screen;
 mod skills_screen;
 mod stack_panel;
 mod tab_badges;
+mod team_screen;
 mod terminal_perf;
 mod terminal_screen;
 mod testing_library;
