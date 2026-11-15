@@ -9,6 +9,14 @@ mod home;
 mod load;
 #[cfg(test)]
 mod perf;
+#[cfg_attr(
+  not(test),
+  expect(
+    dead_code,
+    reason = "the projects home page uses it in the next change"
+  )
+)]
+mod projects_list;
 mod review;
 mod screens;
 pub mod sheet;
