@@ -1617,13 +1617,12 @@ impl ChangesView {
           view.save_edit(cx);
         }
       }))
-      .children(
-        self
-          .review
-          .edit_input
-          .as_ref()
-          .map(|i| ui::text(Textarea::new(&i.state), TextSize::Code)),
-      )
+      .children(self.review.edit_input.as_ref().map(|i| {
+        ui::text(
+          Textarea::new(&i.state).aria_label("Comment"),
+          TextSize::Code,
+        )
+      }))
       .child(
         div()
           .flex()

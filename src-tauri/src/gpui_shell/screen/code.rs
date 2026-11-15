@@ -2466,9 +2466,13 @@ impl CodeView {
           Some(text) => div()
             .child(
               ui::text(div(), TextSize::Lg)
+                .id("code-readme-title")
+                .role(gpui::Role::Heading)
+                .aria_label("README.md")
                 .font_weight(FontWeight::SEMIBOLD)
                 .mb_4()
-                .child("README.md"),
+                .child("README.md")
+                .test_support(),
             )
             .child(markdown("code-readme-md", &text, 16., self.dark))
             .into_any_element(),

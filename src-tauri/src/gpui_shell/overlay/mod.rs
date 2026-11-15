@@ -783,7 +783,12 @@ impl Overlay {
         let command = &commands[index];
         let keys = (!command.keys.is_empty()).then(|| {
           let id = SharedString::from(format!("overlay-item-{index}-keys"));
-          shortcuts::keys(p, command.keys).debug_selector(move || id.to_string())
+          shortcuts::keys(p, command.keys)
+            .id(id.clone())
+            .debug_selector(move || id.to_string())
+            .role(gpui::Role::Label)
+            .aria_label(command.keys.join(" "))
+            .test_support()
         });
         base
           .py_1p5()
@@ -845,9 +850,13 @@ impl Overlay {
           .child(two_lines(&row.branch.name, None, row.group == 0))
           .children(tag.map(|tag| {
             ui::text(div(), TextSize::Sm)
+              .id(SharedString::from(tag_id.clone()))
+              .role(gpui::Role::Label)
+              .aria_label(tag.clone())
               .text_color(p.muted_foreground)
               .when(in_workspace, |this| this.debug_selector(move || tag_id))
               .child(tag)
+              .test_support()
           }))
       }
       _ => base,

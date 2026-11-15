@@ -1852,7 +1852,8 @@ impl FileBrowserView {
                   ),
                 )
               }),
-          ),
+          )
+          .test_support(),
       )
       .child(div().flex_1().min_w_0().child(self.marked_line(ix, text)));
     let under: Vec<&LineComment> = comments.iter().filter(|c| c.end_line == n).collect();

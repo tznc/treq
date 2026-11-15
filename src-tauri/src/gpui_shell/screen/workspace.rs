@@ -13,6 +13,7 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -1775,7 +1776,7 @@ pub(super) fn loc_count(text: String, color: Hsla) -> Div {
 }
 
 /// `LocDiffMarker`: green `+N`, a centered insertion/deletion bar, red `-N`.
-fn loc_marker(loc: &Loc, p: &Palette) -> Div {
+fn loc_marker(loc: &Loc, p: &Palette) -> impl IntoElement {
   const HALF: f32 = 14.;
   let scale = loc.insertions.max(loc.deletions) as f32;
   let width = |n: u32| {
@@ -1789,7 +1790,13 @@ fn loc_marker(loc: &Loc, p: &Palette) -> Div {
   let (green, red) = (added.color(p), removed.color(p));
   let count = loc_count;
   div()
+    .id("loc-diff-marker")
     .debug_selector(|| "loc-diff-marker".into())
+    .role(gpui::Role::Image)
+    .aria_label(format!(
+      "{} lines added, {} lines removed",
+      loc.insertions, loc.deletions
+    ))
     .flex()
     .items_center()
     .gap_1p5()
@@ -1818,6 +1825,7 @@ fn loc_marker(loc: &Loc, p: &Palette) -> Div {
         ),
     )
     .child(count(format!("-{}", loc.deletions), removed.text(p)))
+    .test_support()
 }
 
 /// The tabs' actions that start an agent session, which the view handles
@@ -2384,11 +2392,14 @@ impl Body {
         .child(
           div()
             .id("workspace-tab-stand-in-cover")
+            .role(gpui::Role::ProgressIndicator)
+            .aria_label("Loading workspace")
             .absolute()
             .top_0()
             .left_0()
             .size_full()
-            .occlude(),
+            .occlude()
+            .test_support(),
         )
         .into_any_element(),
     }

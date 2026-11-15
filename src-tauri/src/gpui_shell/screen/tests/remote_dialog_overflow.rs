@@ -38,7 +38,11 @@ fn own_vm_actions_stay_on_screen_under_a_huge_error(cx: &mut TestAppContext) {
   type_into(&mut h, "remote-hostname", "10.0.0.4");
   type_into(&mut h, "remote-username", "me");
   h.click("remote-continue");
-  assert!(h.drawn("remote-probe-error"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::Alert).name("Couldn't reach the host"),
+  ))
+  .to_be_visible();
   for size in [(1280., 800.), (320., 240.)] {
     h.cx
       .simulate_resize(gpui::size(gpui::px(size.0), gpui::px(size.1)));
@@ -72,7 +76,11 @@ fn a_hostname_longer_than_253_chars_disables_continue(cx: &mut TestAppContext) {
   let (mut h, host) = own_vm(cx, Ok("SHA256:abc123".into()));
   type_into(&mut h, "remote-hostname", &"a".repeat(254));
   type_into(&mut h, "remote-username", "me");
-  assert!(h.drawn("remote-hostname-too-long"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::Alert).name("Hostnames are at most 253 characters."),
+  ))
+  .to_be_visible();
   h.click("remote-continue");
   h.cx.run_until_parked();
   assert!(host.writes().is_empty(), "{:?}", host.writes());
@@ -84,7 +92,16 @@ fn editing_a_field_clears_a_stale_error(cx: &mut TestAppContext) {
   type_into(&mut h, "remote-hostname", "10.0.0.4");
   type_into(&mut h, "remote-username", "me");
   h.click("remote-continue");
-  assert!(h.drawn("remote-probe-error"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::Alert).name("Couldn't reach the host"),
+  ))
+  .to_be_visible();
   type_into(&mut h, "remote-username", "x");
-  assert!(!h.drawn("remote-probe-error"));
+  let screen = h.rendered();
+  assert!(screen
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Alert).name("Couldn't reach the host")
+    )
+    .is_none());
 }

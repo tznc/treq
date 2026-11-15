@@ -8,6 +8,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::Cell,
   collections::{HashMap, HashSet},
@@ -1191,6 +1192,8 @@ impl Lightbox {
           .id(SharedString::from(format!("treq-send-text-line-{n}")))
           .cursor_text()
           .debug_selector(move || format!("treq-send-text-line-{n}"))
+          .role(gpui::Role::Row)
+          .aria_label(format!("Line {n}"))
           .flex()
           .w_full()
           .items_start()
@@ -1226,7 +1229,8 @@ impl Lightbox {
               } else {
                 line.to_string()
               }),
-          );
+          )
+          .test_support();
         self.annotated(row.into_any_element(), |c| c.start == n, None, &palette)
       }
       TextRow::Composer => self.composer_box(&palette, true, cx),

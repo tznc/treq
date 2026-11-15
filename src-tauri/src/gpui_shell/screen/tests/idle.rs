@@ -115,7 +115,11 @@ fn settle(h: &mut Harness, host: &FakeHost, frames: &Cell<usize>) {
 /// dot pulses.
 fn changes(cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>, Rc<Cell<usize>>) {
   let (mut h, host, frames) = counted(cx, changes_host(), changes_route());
-  assert!(h.drawn("file-card-a.rs"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Heading).name("a.rs")),
+  )
+  .to_be_visible();
   settle(&mut h, &host, &frames);
   (h, host, frames)
 }

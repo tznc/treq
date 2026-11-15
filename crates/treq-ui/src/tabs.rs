@@ -326,10 +326,9 @@ impl RenderOnce for Tabs {
             el.child(
               div()
                 .id(SharedString::from(id.clone()))
-                .role(gpui::Role::Label)
-                .aria_label(count.to_string())
-                .test_support()
                 .debug_selector(move || id)
+                .role(gpui::Role::Image)
+                .aria_label(count.to_string())
                 .when(bar, |el| {
                   el.absolute().top(zpx(4.)).left(gpui::relative(0.55))
                 })
@@ -337,7 +336,8 @@ impl RenderOnce for Tabs {
                   Count::new(count, &p).on_selected(fg)
                 } else {
                   Count::new(count, &p)
-                }),
+                })
+                .test_support(),
             )
           })
           .when_some(tab.dot, |el, (tone, label)| {

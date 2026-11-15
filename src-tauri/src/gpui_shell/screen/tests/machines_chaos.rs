@@ -194,7 +194,11 @@ fn extreme_error_text_stays_inside_the_dialog(cx: &mut TestAppContext) {
       "card {card:?} outside dialog {dialog:?} for {:?}",
       error.chars().take(30).collect::<String>()
     );
-    assert!(h.drawn("cloud-create"));
+    let screen = h.rendered();
+    gpui_testing_library::expect(screen.get_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button).name("Create cloud workspace"),
+    ))
+    .to_be_visible();
   }
 }
 
@@ -210,11 +214,20 @@ fn escape_closes_the_delete_confirmation_before_the_dialog(cx: &mut TestAppConte
   let (mut h, host) = managed(cx);
   h.set_account(failed());
   h.click("cloud-delete");
-  assert!(h.drawn("cloud-delete-dialog"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::Dialog).name("Delete cloud workspace?"),
+  ))
+  .to_be_visible();
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
+  let screen = h.rendered();
   assert!(
-    !h.drawn("cloud-delete-dialog"),
+    screen
+      .query_by_role(
+        gpui_testing_library::by::role(gpui::Role::Dialog).name("Delete cloud workspace?")
+      )
+      .is_none(),
     "Escape left the confirmation open"
   );
   assert!(
@@ -243,7 +256,12 @@ fn reopening_mid_provision_still_shows_it_running(cx: &mut TestAppContext) {
     .screen
     .read_with(&h.cx, |s, _| s.snapshot().remote.setup.clone());
   h.update(|s| s.remote.setup = None);
-  assert!(!h.drawn("remote-setup-dialog"));
+  let screen = h.rendered();
+  assert!(screen
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Dialog).name("Connect a remote repository")
+    )
+    .is_none());
   h.update(|s| s.remote.setup = setup);
   assert!(creating(&mut h));
   h.click("cloud-create");
