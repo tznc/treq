@@ -4,13 +4,14 @@
 //! screen cannot tell which one answered.
 
 use crate::core::remote::{GithubContext, GithubQuery};
-use crate::github::{self, GhIssue, GhListPage, GhPullRequest, GH_LIST_PAGE_SIZE};
+use crate::github::{self, GhIssue, GhListPage, GhPullRequest, GhReviewThread, GH_LIST_PAGE_SIZE};
 use reqwest::Method;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
 const API_BASE: &str = "https://api.github.com";
 const JSON_MEDIA_TYPE: &str = "application/vnd.github+json";
+const DIFF_MEDIA_TYPE: &str = "application/vnd.github.diff";
 
 /// How an error from a rejected token starts, so the caller can drop the
 /// token it cached and try once more with a fresh one.
@@ -159,10 +160,14 @@ pub async fn github_read(
     }
     GithubQuery::Issue { number } => to_json(issue(gh, full_name, number).await?),
     GithubQuery::Pr { number } => to_json(pr(gh, full_name, number).await?),
-    // Answered by the host's `gh` until it is read over HTTPS here.
-    other => Err(format!(
-      "unsupported_query: {other:?} is not read over HTTPS yet"
-    )),
+    GithubQuery::PrDiff { number } => {
+      let path = format!("/repos/{full_name}/pulls/{number}");
+      to_json(gh.rest_text(&path, DIFF_MEDIA_TYPE).await?)
+    }
+    GithubQuery::PrChecks { number } => to_json(pr_checks(gh, full_name, number).await?),
+    GithubQuery::PrReviewThreads { number } => {
+      to_json(pr_review_threads(gh, full_name, number).await?)
+    }
   }
 }
 
@@ -391,6 +396,74 @@ async fn pr(gh: &GithubHttp, full_name: &str, number: u64) -> Result<GhPullReque
   let mut pr: GhPullRequest = parse(view(gh, full_name, "pullRequest", number, &fields).await?)?;
   shown_comment_reactions(pr.comments.as_mut());
   Ok(pr)
+}
+
+const PR_CHECKS_QUERY: &str =
+  "query($owner: String!, $name: String!, $number: Int!, $after: String) { \
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
+    commits(last: 1) { nodes { commit { statusCheckRollup { \
+      contexts(first: 100, after: $after) { \
+        nodes { __typename \
+          ... on CheckRun { name status conclusion detailsUrl startedAt completedAt } \
+          ... on StatusContext { context state targetUrl } } \
+        pageInfo { hasNextPage endCursor } } } } } } } } }";
+
+/// Pages of checks read for one pull request, 100 each.
+const MAX_CHECK_PAGES: usize = 10;
+
+/// `get_pr_checks_for_pr_impl`: the head commit's checks rolled up as
+/// `gh pr checks` reports them; `None` when none are reported.
+async fn pr_checks(
+  gh: &GithubHttp,
+  full_name: &str,
+  number: u64,
+) -> Result<Option<github::PrCiStatus>, String> {
+  let (owner, name) = owner_and_name(full_name)?;
+  let mut entries = Vec::new();
+  let mut after: Option<String> = None;
+  for _ in 0..MAX_CHECK_PAGES {
+    let variables = json!({ "owner": owner, "name": name, "number": number, "after": after });
+    let mut response = gh.graphql(PR_CHECKS_QUERY, variables).await?;
+    let contexts = response
+      .pointer_mut("/data/repository/pullRequest/commits/nodes/0/commit/statusCheckRollup/contexts")
+      .map(Value::take)
+      .unwrap_or_default();
+    let nodes = contexts["nodes"].as_array().cloned().unwrap_or_default();
+    entries.extend(parse::<Vec<github::GhRollupEntry>>(Value::Array(nodes))?);
+    match contexts["pageInfo"]["endCursor"].as_str() {
+      Some(cursor) if contexts["pageInfo"]["hasNextPage"].as_bool() == Some(true) => {
+        after = Some(cursor.to_string());
+      }
+      _ => break,
+    }
+  }
+  Ok(github::rollup_check_entries(entries))
+}
+
+/// `gh_list_pr_review_threads_impl`; none when the name is not `owner/name`.
+async fn pr_review_threads(
+  gh: &GithubHttp,
+  full_name: &str,
+  number: u64,
+) -> Result<Vec<GhReviewThread>, String> {
+  let Some((owner, repo)) = full_name.split_once('/') else {
+    return Ok(Vec::new());
+  };
+  let mut threads = Vec::new();
+  let mut after: Option<String> = None;
+  for _ in 0..github::MAX_REVIEW_THREAD_PAGES {
+    let variables = json!({ "owner": owner, "repo": repo, "number": number, "after": after });
+    let response = gh.graphql(github::REVIEW_THREADS_QUERY, variables).await?;
+    let Some((page, next)) = parse::<github::GqlResponse>(response)?.into_threads_page() else {
+      break;
+    };
+    threads.extend(page);
+    let Some(next) = next else {
+      break;
+    };
+    after = Some(next);
+  }
+  Ok(threads)
 }
 
 #[cfg(test)]
