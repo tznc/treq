@@ -573,6 +573,7 @@ pub(super) struct State {
   /// read runs.
   team: Option<Result<crate::core::teams::TeamData, String>>,
   team_loading: bool,
+  team_actions: team::TeamActions,
   callback_url: String,
   /// "No token found in URL", from the last Go.
   callback_error: Option<String>,
@@ -1189,7 +1190,7 @@ impl SettingsView {
       provider_keys,
       cloud_profile,
       org_cloud,
-      team: Some(team::section(state.team.as_ref())),
+      team: Some(team::section(state.team.as_ref(), &state.team_actions)),
       team_upsell: team::upsell(state.team.as_ref()),
       billing_note: subscription
         .filter(|_| pro)
@@ -1472,6 +1473,7 @@ impl SettingsView {
       LAST_GITHUB.with(|last| *last.borrow_mut() = None);
       self.account.cloud_read = false;
       self.account.team = None;
+      self.account.team_actions = team::TeamActions::default();
     }
     self.sync_avatar(cx);
     if !signed_in || self.account.rust.loading {
@@ -1656,6 +1658,7 @@ impl SettingsView {
       "account.manage" | "cloud.upgrade" | "team.start" => {
         self.host.open_url(&format!("{web}/dashboard"));
       }
+      _ if id.starts_with("teams.") => self.press_team(id, cx),
       "team.compare" => self
         .host
         .open_url(&format!("{web}/pricing#feature-comparison")),
@@ -3236,7 +3239,7 @@ impl SettingsView {
       .iter()
       .map(|org| self.org_cloud(org, p, window, cx))
       .collect();
-    let teams = s.team.as_ref().and_then(|t| Self::teams(t, p));
+    let teams = s.team.as_ref().and_then(|t| self.teams(t, p));
     let upsell = s.team_upsell.then(|| self.team_upsell(p));
     div()
       .flex()

@@ -55,6 +55,8 @@ pub trait AccountHost: Send + Sync {
   fn delete_account(&self) -> Result<(), ApiError>;
   /// The user's organizations, their members, invites and Team.
   fn team(&self) -> Result<TeamData, ApiError>;
+  /// One `organizations` action, as in `{"action": "leave", ...}`.
+  fn organization_action(&self, body: &serde_json::Value) -> Result<serde_json::Value, ApiError>;
   /// Starts a cloud workspace action; it reports through the account.
   fn cloud_action(&self, action: CloudAction);
 }
@@ -236,6 +238,11 @@ impl AccountHost for Backend {
       .map(|s| s.user.id)
       .ok_or_else(|| ApiError::new("unauthorized", "Sign in first."))?;
     crate::gpui_shell::block_on(teams::load(&cloud.supabase, &user_id))
+  }
+
+  fn organization_action(&self, body: &serde_json::Value) -> Result<serde_json::Value, ApiError> {
+    let cloud = self.cloud().map_err(|e| ApiError::new("unavailable", e))?;
+    crate::gpui_shell::block_on(teams::organization_action(&cloud.supabase, body))
   }
 
   fn cloud_action(&self, action: CloudAction) {

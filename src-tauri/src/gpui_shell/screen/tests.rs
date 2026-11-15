@@ -179,6 +179,8 @@ struct FakeHost {
   account_deletion: Option<crate::core::supabase::ApiError>,
   /// What the Teams section reads; none by default.
   team: Option<Result<crate::core::teams::TeamData, crate::core::supabase::ApiError>>,
+  /// What the organizations function answers; `{}` by default.
+  organization_reply: Option<Result<serde_json::Value, crate::core::supabase::ApiError>>,
   /// What the agent launches read and did: each new session's start data
   /// by pane id, the `treq send` attachments, the prompt dialog's tasks
   /// (and whether starting fails), and the sessions started.
@@ -1761,6 +1763,17 @@ impl account_data::AccountHost for FakeHost {
 
   fn team(&self) -> Result<crate::core::teams::TeamData, crate::core::supabase::ApiError> {
     self.team.clone().unwrap_or_else(|| Ok(Default::default()))
+  }
+
+  fn organization_action(
+    &self,
+    body: &serde_json::Value,
+  ) -> Result<serde_json::Value, crate::core::supabase::ApiError> {
+    self.record(format!("organizations {body}"));
+    self
+      .organization_reply
+      .clone()
+      .unwrap_or_else(|| Ok(serde_json::json!({})))
   }
 
   fn cloud_action(&self, action: account_data::CloudAction) {
