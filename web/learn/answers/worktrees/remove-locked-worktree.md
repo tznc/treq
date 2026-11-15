@@ -38,5 +38,5 @@ When you delete a workspace, Treq removes the workspace, its directory and its l
 
 ## Related
 
-- [Fix "branch is already used by worktree"](./branch-already-used-by-worktree)
+- [Fix "branch is already used by worktree"](./branch-already-used-by-worktree.md)
 - [Git Worktrees](/learn/concepts/git/git-worktrees)

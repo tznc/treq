@@ -28,6 +28,6 @@ When a workspace's pull request merges on GitHub, Treq moves the workspace above
 
 ## Related
 
-- [Rebase a whole stack with --update-refs](./git-rebase-update-refs)
+- [Rebase a whole stack with --update-refs](./git-rebase-update-refs.md)
 - [Force Push with Lease](/learn/concepts/git/force-with-lease)
 - [What are Stacked PRs?](/learn/concepts/git/stacked-prs)
