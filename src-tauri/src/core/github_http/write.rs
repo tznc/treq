@@ -28,6 +28,52 @@ pub async fn github_write(
   }
   let repo = format!("/repos/{full_name}");
   match action {
+    GithubAction::CreateIssue { title, body } => {
+      let body = json!({ "title": title, "body": body });
+      let created = gh
+        .rest(Method::POST, &format!("{repo}/issues"), Some(&body))
+        .await?;
+      let number = created["number"]
+        .as_u64()
+        .ok_or_else(|| format!("Could not parse issue number from output: {created}"))?;
+      Ok(json!({ "number": number }))
+    }
+    GithubAction::EditIssue {
+      number,
+      title,
+      body,
+    } => {
+      let body = json!({ "title": title, "body": body });
+      patch(gh, &format!("{repo}/issues/{number}"), &body).await
+    }
+    // A pull request's conversation comments are its issue's comments.
+    GithubAction::CommentOnIssue { number, body } | GithubAction::CommentOnPr { number, body } => {
+      let path = format!("{repo}/issues/{number}/comments");
+      done(
+        gh.rest(Method::POST, &path, Some(&json!({ "body": body })))
+          .await,
+      )
+    }
+    GithubAction::CloseIssue { number, reason } => {
+      if !github::ISSUE_CLOSE_REASONS.contains(&reason.as_str()) {
+        return Err(format!("Unknown issue close reason: {reason}"));
+      }
+      // `gh issue close --reason "not planned"` sends `not_planned`.
+      let body = json!({ "state": "closed", "state_reason": reason.replace(' ', "_") });
+      patch(gh, &format!("{repo}/issues/{number}"), &body).await
+    }
+    GithubAction::ReopenIssue { number } => {
+      patch(
+        gh,
+        &format!("{repo}/issues/{number}"),
+        &json!({ "state": "open" }),
+      )
+      .await
+    }
+    GithubAction::DeleteIssue { number } => {
+      let id = node_id(gh, &format!("{repo}/issues/{number}")).await?;
+      done(gh.graphql(DELETE_ISSUE_MUTATION, json!({ "id": id })).await)
+    }
     // Carried out by the host's `gh` until it is done over HTTPS here.
     other => Err(format!(
       "unsupported_action: {other:?} is not done over HTTPS yet"
