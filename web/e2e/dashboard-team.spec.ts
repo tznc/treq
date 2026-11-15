@@ -635,10 +635,10 @@ test.describe('Dashboard team tab', () => {
 });
 
 test.describe('Dashboard account tab', () => {
-  test('the sidebar offers Account and Integrations only', async ({ browser }) => {
+  test('the sidebar offers Account, Integrations and Machines', async ({ browser }) => {
     const { page, close } = await openTeamTab(browser, emptyTeam());
     const nav = page.getByRole('navigation', { name: 'Dashboard' });
-    await expect(nav.getByRole('button')).toHaveText(['Account', 'Integrations']);
+    await expect(nav.getByRole('button')).toHaveText(['Account', 'Integrations', 'Machines']);
     await close();
   });
 
