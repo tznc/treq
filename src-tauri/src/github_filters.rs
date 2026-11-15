@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::github::GhPullRequest;
+use crate::github::{GhIssue, GhPullRequest};
 
 /// `PrFilters`: every set field must match.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -199,6 +199,71 @@ pub fn filter_options(prs: &[GhPullRequest]) -> FilterOptions {
   }
 }
 
+/// The Issues list's filters: every set field must match.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct IssueFilters {
+  /// Free text matched against the title and number.
+  pub query: String,
+  pub author: Option<String>,
+  pub label: Option<String>,
+}
+
+impl IssueFilters {
+  /// Set filters, without the search text.
+  pub fn active_count(&self) -> usize {
+    usize::from(self.author.is_some()) + usize::from(self.label.is_some())
+  }
+
+  /// "Clear filters": everything but the search text.
+  pub fn cleared(&self) -> Self {
+    Self {
+      query: self.query.clone(),
+      ..Self::default()
+    }
+  }
+}
+
+/// The indices of the issues `filters` keeps.
+pub fn filter_issue_indices(issues: &[GhIssue], filters: &IssueFilters) -> Vec<usize> {
+  let query = filters.query.trim().to_lowercase();
+  issues
+    .iter()
+    .enumerate()
+    .filter(|(_, issue)| {
+      (query.is_empty()
+        || issue.title.to_lowercase().contains(&query)
+        || format!("#{}", issue.number).contains(&query))
+        && filters
+          .author
+          .as_deref()
+          .is_none_or(|a| a == issue.author.login)
+        && filters
+          .label
+          .as_deref()
+          .is_none_or(|label| issue.labels.iter().any(|l| l.name == label))
+    })
+    .map(|(ix, _)| ix)
+    .collect()
+}
+
+/// What the Issues list's Filters offer: the loaded issues' values.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct IssueFilterOptions {
+  pub authors: Vec<String>,
+  pub labels: Vec<String>,
+}
+
+pub fn issue_filter_options(issues: &[GhIssue]) -> IssueFilterOptions {
+  IssueFilterOptions {
+    authors: sorted(issues.iter().map(|i| i.author.login.as_str())),
+    labels: sorted(
+      issues
+        .iter()
+        .flat_map(|i| i.labels.iter().map(|l| l.name.as_str())),
+    ),
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -343,5 +408,66 @@ mod tests {
     assert_eq!(options.heads, ["alpha", "beta", "Zeta"]);
     assert_eq!(options.bases, ["alpha", "main"]);
     assert_eq!(options.stack_levels, [1, 2]);
+  }
+
+  fn issue(number: u64, title: &str, who: &str, labels: &[&str]) -> crate::github::GhIssue {
+    crate::github::GhIssue {
+      number,
+      title: title.into(),
+      state: "OPEN".into(),
+      url: String::new(),
+      body: None,
+      author: GhAuthor {
+        login: who.into(),
+        avatar_url: None,
+      },
+      labels: labels
+        .iter()
+        .map(|l| GhLabel {
+          name: (*l).into(),
+          color: String::new(),
+        })
+        .collect(),
+      created_at: String::new(),
+      updated_at: String::new(),
+      comments: None,
+    }
+  }
+
+  #[test]
+  fn issue_filters_match_search_author_and_label() {
+    let issues = [
+      issue(1, "Crash on launch", "ada", &["bug"]),
+      issue(2, "Dark mode", "bob", &["enhancement"]),
+      issue(3, "Crash in terminal", "bob", &["bug", "mobile"]),
+    ];
+    let by = |f: IssueFilters| -> Vec<u64> {
+      filter_issue_indices(&issues, &f)
+        .into_iter()
+        .map(|i| issues[i].number)
+        .collect()
+    };
+    assert_eq!(by(IssueFilters::default()), [1, 2, 3]);
+    let f = |query: &str, author: Option<&str>, label: Option<&str>| IssueFilters {
+      query: query.into(),
+      author: author.map(Into::into),
+      label: label.map(Into::into),
+    };
+    assert_eq!(by(f(" CRASH ", None, None)), [1, 3]);
+    assert_eq!(by(f("#2", None, None)), [2]);
+    assert_eq!(by(f("", Some("bob"), None)), [2, 3]);
+    assert_eq!(by(f("", Some("bob"), Some("bug"))), [3]);
+    assert_eq!(f("x", Some("bob"), Some("bug")).active_count(), 2);
+    assert_eq!(f("x", Some("bob"), None).cleared(), f("x", None, None));
+  }
+
+  #[test]
+  fn issue_options_are_distinct_and_sorted() {
+    let options = issue_filter_options(&[
+      issue(1, "a", "zed", &["bug"]),
+      issue(2, "b", "Ada", &["Docs", "bug"]),
+    ]);
+    assert_eq!(options.authors, ["Ada", "zed"]);
+    assert_eq!(options.labels, ["bug", "Docs"]);
   }
 }
