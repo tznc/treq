@@ -158,6 +158,55 @@ mod tests {
     ResponseTemplate::new(200).set_body_json(json!({ "data": value }))
   }
 
+  /// What the host returns for `gh_json`, the output of `gh ... --json`:
+  /// parsed into the host's type `T` and serialized again.
+  fn via_gh<T: serde::de::DeserializeOwned + serde::Serialize>(gh_json: Value) -> Value {
+    serde_json::to_value(serde_json::from_value::<T>(gh_json).unwrap()).unwrap()
+  }
+
+  /// A `gh pr list --json ...` entry.
+  fn gh_listed_pr(number: u64) -> Value {
+    json!({
+      "author": { "id": "U_1", "is_bot": false, "login": "octo", "name": "Octo" },
+      "baseRefName": "main",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "headRefName": format!("fix-{number}"),
+      "isDraft": false,
+      "labels": [{ "color": "d73a4a", "description": "", "id": "LA_1", "name": "bug" }],
+      "mergeStateStatus": "CLEAN",
+      "number": number,
+      "state": "OPEN",
+      "title": format!("Fix {number}"),
+      "updatedAt": "2026-01-02T00:00:00Z",
+      "url": format!("https://github.com/o/r/pull/{number}"),
+    })
+  }
+
+  /// The same pull request as a GraphQL `search` node.
+  fn gql_listed_pr(number: u64) -> Value {
+    json!({
+      "number": number,
+      "title": format!("Fix {number}"),
+      "state": "OPEN",
+      "url": format!("https://github.com/o/r/pull/{number}"),
+      "author": { "login": "octo" },
+      "labels": { "nodes": [{ "name": "bug", "color": "d73a4a" }] },
+      "headRefName": format!("fix-{number}"),
+      "baseRefName": "main",
+      "mergeStateStatus": "CLEAN",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-02T00:00:00Z",
+      "isDraft": false,
+    })
+  }
+
+  fn search_page(nodes: Vec<Value>, next: Option<&str>) -> ResponseTemplate {
+    data(json!({ "search": {
+      "nodes": nodes,
+      "pageInfo": { "hasNextPage": next.is_some(), "endCursor": next },
+    }}))
+  }
+
   #[tokio::test]
   async fn context_reads_the_login_with_the_users_token() {
     let (server, gh) = start().await;
@@ -187,5 +236,215 @@ mod tests {
       .await
       .unwrap_err();
     assert!(error.starts_with("github_unauthorized:"), "{error}");
+  }
+
+  #[tokio::test]
+  async fn list_issues_reads_one_cursor_page() {
+    let (server, gh) = start().await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_string_contains("states: [OPEN]"))
+      .and(body_partial_json(json!({
+        "variables": { "owner": "o", "name": "r", "first": 30, "after": "c1" }
+      })))
+      .respond_with(data(json!({ "repository": { "issues": {
+        "nodes": [
+          {
+            "number": 2, "title": "Crash", "state": "OPEN",
+            "url": "https://github.com/o/r/issues/2",
+            "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+            "author": { "login": "octo" },
+            "labels": { "nodes": [{ "name": "bug", "color": "d73a4a" }] },
+          },
+          {
+            "number": 1, "title": "Old", "state": "OPEN",
+            "url": "https://github.com/o/r/issues/1",
+            "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-02T00:00:00Z",
+            "author": null,
+            "labels": { "nodes": [] },
+          },
+        ],
+        "pageInfo": { "hasNextPage": true, "endCursor": "c2" },
+      }}})))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let value = github_read(
+      &gh,
+      "o/r",
+      GithubQuery::ListIssues {
+        state: "open".into(),
+        after: Some("c1".into()),
+      },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+      value,
+      json!({
+        "items": [
+          {
+            "number": 2, "title": "Crash", "state": "OPEN",
+            "url": "https://github.com/o/r/issues/2", "body": null,
+            "author": { "login": "octo", "avatar_url": null },
+            "labels": [{ "name": "bug", "color": "d73a4a" }],
+            "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z",
+            "comments": null,
+          },
+          {
+            "number": 1, "title": "Old", "state": "OPEN",
+            "url": "https://github.com/o/r/issues/1", "body": null,
+            "author": { "login": "ghost", "avatar_url": null },
+            "labels": [],
+            "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-02T00:00:00Z",
+            "comments": null,
+          },
+        ],
+        "hasMore": true,
+        "endCursor": "c2",
+      })
+    );
+  }
+
+  #[tokio::test]
+  async fn list_issues_rejects_an_unknown_state_without_a_request() {
+    let (server, gh) = start().await;
+    let query = GithubQuery::ListIssues {
+      state: "weird".into(),
+      after: None,
+    };
+    let error = github_read(&gh, "o/r", query).await.unwrap_err();
+    assert_eq!(error, "Unknown issue state: weird");
+    assert!(server.received_requests().await.unwrap().is_empty());
+  }
+
+  #[tokio::test]
+  async fn list_prs_searches_open_non_draft_prs_like_gh() {
+    let (server, gh) = start().await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_partial_json(json!({ "variables": {
+        "q": "repo:o/r is:pr is:open draft:false sort:created-desc",
+        "first": 30,
+      }})))
+      .respond_with(search_page(vec![gql_listed_pr(5)], None))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let query = GithubQuery::ListPrs {
+      state: "open".into(),
+      page: 1,
+    };
+    let value = github_read(&gh, "o/r", query).await.unwrap();
+    let expected = via_gh::<Vec<GhPullRequest>>(json!([gh_listed_pr(5)]));
+    assert_eq!(
+      value,
+      json!({ "items": expected, "hasMore": false, "endCursor": null })
+    );
+  }
+
+  #[tokio::test]
+  async fn list_prs_later_page_fetches_up_to_it_and_slices() {
+    let (server, gh) = start().await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_partial_json(json!({ "variables": {
+        "q": "repo:o/r is:pr is:open draft:true sort:created-desc",
+        "first": 60,
+        "after": null,
+      }})))
+      .respond_with(search_page(
+        (1..=60).map(gql_listed_pr).collect(),
+        Some("c60"),
+      ))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let query = GithubQuery::ListPrs {
+      state: "draft".into(),
+      page: 2,
+    };
+    let value = github_read(&gh, "o/r", query).await.unwrap();
+    let fetched: Vec<GhPullRequest> =
+      serde_json::from_value(json!((1..=60).map(gh_listed_pr).collect::<Vec<_>>())).unwrap();
+    let expected = crate::github::take_list_page(fetched, 30, 2);
+    assert_eq!(value, serde_json::to_value(expected).unwrap());
+    assert_eq!(value["items"][0]["number"], 31);
+    assert_eq!(value["hasMore"], true);
+  }
+
+  #[tokio::test]
+  async fn list_prs_pages_through_search_results_past_one_hundred() {
+    let (server, gh) = start().await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_partial_json(json!({ "variables": {
+        "q": "repo:o/r is:pr is:merged sort:created-desc",
+        "first": 100,
+        "after": null,
+      }})))
+      .respond_with(search_page(
+        (1..=100).map(gql_listed_pr).collect(),
+        Some("c100"),
+      ))
+      .expect(1)
+      .mount(&server)
+      .await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_partial_json(json!({ "variables": {
+        "first": 20,
+        "after": "c100",
+      }})))
+      .respond_with(search_page((101..=105).map(gql_listed_pr).collect(), None))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let query = GithubQuery::ListPrs {
+      state: "merged".into(),
+      page: 4,
+    };
+    let value = github_read(&gh, "o/r", query).await.unwrap();
+    let page: GhListPage<GhPullRequest> = serde_json::from_value(value).unwrap();
+    let numbers: Vec<u64> = page.items.iter().map(|pr| pr.number).collect();
+    assert_eq!(numbers, (91..=105).collect::<Vec<_>>());
+    assert!(!page.has_more);
+  }
+
+  #[tokio::test]
+  async fn list_prs_rejects_an_unknown_state_without_a_request() {
+    let (server, gh) = start().await;
+    let query = GithubQuery::ListPrs {
+      state: "weird".into(),
+      page: 1,
+    };
+    let error = github_read(&gh, "o/r", query).await.unwrap_err();
+    assert_eq!(error, "Unknown pull request state: weird");
+    assert!(server.received_requests().await.unwrap().is_empty());
+  }
+
+  #[tokio::test]
+  async fn search_open_prs_narrows_to_the_viewer() {
+    let (server, gh) = start().await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_partial_json(json!({ "variables": {
+        "q": "repo:o/r is:pr is:open fix sort:created-desc author:@me",
+        "first": 5,
+      }})))
+      .respond_with(search_page(vec![gql_listed_pr(7)], None))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let query = GithubQuery::SearchOpenPrs {
+      mine: true,
+      query: " fix ".into(),
+      limit: 5,
+    };
+    let value = github_read(&gh, "o/r", query).await.unwrap();
+    assert_eq!(
+      value,
+      via_gh::<Vec<GhPullRequest>>(json!([gh_listed_pr(7)]))
+    );
   }
 }
