@@ -1,3 +1,8 @@
 /*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: credentialless
+
+# The release history the cloud control plane reads (releasesJsonPlugin).
+/releases.json
+  Cache-Control: public, max-age=300
+  Access-Control-Allow-Origin: *
