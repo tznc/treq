@@ -418,7 +418,10 @@ fn cleanup_resolve_workspace(
       .warn_on_err("jj detach resolve workspace wc");
   }
 
-  jj::remove_workspace(repo_path, &full_path_str).warn_on_err("remove workspace");
+  // The jj name (`_resolve-…`) differs from the directory name, so forget by name.
+  jj::forget_workspace_by_name(repo_path, &workspace.workspace_name)
+    .warn_on_err("forget resolve workspace");
+  jj::remove_workspace_directory_only(&full_path_str).warn_on_err("remove resolve directory");
   if workspace.id >= 0 {
     local_db::delete_workspace(repo_path, workspace.id).warn_on_err("delete workspace");
   }
