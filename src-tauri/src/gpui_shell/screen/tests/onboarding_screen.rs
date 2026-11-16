@@ -997,8 +997,8 @@ fn onboarding_hides_the_owner_switcher_without_teams(cx: &mut TestAppContext) {
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, onboarding(), host);
-  assert!(h.drawn("project-p1"));
-  assert!(!h.drawn("projects-owner"));
+  assert!(h.shows(gpui::Role::ListItem, "Project p1"));
+  assert!(!h.shows(gpui::Role::Tab, "Personal"));
 }
 
 #[gpui::test]
@@ -1011,13 +1011,15 @@ fn onboarding_switches_projects_between_personal_and_a_team(cx: &mut TestAppCont
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, onboarding(), host);
-  assert!(h.drawn("projects-owner"));
+  assert!(h.shows(gpui::Role::Tab, "Acme"));
   assert!(
-    h.drawn("project-mine") && !h.drawn("project-team"),
+    h.shows(gpui::Role::ListItem, "Project mine") && !h.shows(gpui::Role::ListItem, "Project team"),
     "personal first"
   );
   h.click("projects-owner-o1");
-  assert!(h.drawn("project-team") && !h.drawn("project-mine"));
+  assert!(
+    h.shows(gpui::Role::ListItem, "Project team") && !h.shows(gpui::Role::ListItem, "Project mine")
+  );
 }
 
 #[gpui::test]
