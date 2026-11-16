@@ -9,6 +9,8 @@ use serde_json::{json, Value};
 
 const DELETE_ISSUE_MUTATION: &str =
   "mutation($id: ID!) { deleteIssue(input: {issueId: $id}) { clientMutationId } }";
+const CONVERT_TO_DRAFT_MUTATION: &str = "mutation($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { clientMutationId } }";
+const MARK_READY_MUTATION: &str = "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { clientMutationId } }";
 
 /// [`GithubAction`] carried out over HTTPS on the repository `full_name`
 /// (`owner/name`), as the host's `github_write` carries it out.
@@ -74,10 +76,58 @@ pub async fn github_write(
       let id = node_id(gh, &format!("{repo}/issues/{number}")).await?;
       done(gh.graphql(DELETE_ISSUE_MUTATION, json!({ "id": id })).await)
     }
-    // Carried out by the host's `gh` until it is done over HTTPS here.
-    other => Err(format!(
-      "unsupported_action: {other:?} is not done over HTTPS yet"
-    )),
+    GithubAction::ClosePr { number } => {
+      patch(
+        gh,
+        &format!("{repo}/pulls/{number}"),
+        &json!({ "state": "closed" }),
+      )
+      .await
+    }
+    GithubAction::ReopenPr { number } => {
+      patch(
+        gh,
+        &format!("{repo}/pulls/{number}"),
+        &json!({ "state": "open" }),
+      )
+      .await
+    }
+    GithubAction::SetPrDraft { number, draft } => {
+      let id = node_id(gh, &format!("{repo}/pulls/{number}")).await?;
+      let mutation = if draft {
+        CONVERT_TO_DRAFT_MUTATION
+      } else {
+        MARK_READY_MUTATION
+      };
+      done(gh.graphql(mutation, json!({ "id": id })).await)
+    }
+    GithubAction::ReplyToReviewThread { thread_id, body } => {
+      let variables = json!({ "threadId": thread_id, "body": body });
+      done(gh.graphql(github::REPLY_THREAD_MUTATION, variables).await)
+    }
+    GithubAction::SubmitPrReview {
+      number,
+      event,
+      body,
+      comments,
+    } => {
+      let body = github::review_request_body(&event, &body, &comments)?;
+      let path = format!("{repo}/pulls/{number}/reviews");
+      done(gh.rest(Method::POST, &path, Some(&body)).await)
+    }
+    GithubAction::SetReaction {
+      comment_id,
+      content,
+      on,
+    } => {
+      let mutation = if on {
+        github::ADD_REACTION_MUTATION
+      } else {
+        github::REMOVE_REACTION_MUTATION
+      };
+      let variables = json!({ "id": comment_id, "content": content });
+      done(gh.graphql(mutation, variables).await)
+    }
   }
 }
 
@@ -102,6 +152,7 @@ async fn node_id(gh: &GithubHttp, path: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::github::GhDraftReviewComment;
   use serde_json::json;
   use wiremock::matchers::{body_json, body_partial_json, body_string_contains, method, path};
   use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -301,5 +352,169 @@ mod tests {
     expect_graphql(&server, "deleteIssue", json!({ "id": "I_3" })).await;
     let action = GithubAction::DeleteIssue { number: 3 };
     assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+  }
+
+  #[tokio::test]
+  async fn close_and_reopen_pr_set_its_state() {
+    let (server, gh) = start().await;
+    let closed = json!({ "state": "closed" });
+    expect_rest(&server, "PATCH", "/repos/o/r/pulls/5", closed, json!({})).await;
+    let action = GithubAction::ClosePr { number: 5 };
+    assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+    server.verify().await;
+    server.reset().await;
+    let open = json!({ "state": "open" });
+    expect_rest(&server, "PATCH", "/repos/o/r/pulls/5", open, json!({})).await;
+    let action = GithubAction::ReopenPr { number: 5 };
+    assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+  }
+
+  async fn mount_pr_node(server: &MockServer) {
+    Mock::given(method("GET"))
+      .and(path("/repos/o/r/pulls/5"))
+      .respond_with(ok(json!({ "number": 5, "node_id": "PR_5" })))
+      .mount(server)
+      .await;
+  }
+
+  #[tokio::test]
+  async fn set_pr_draft_converts_to_draft() {
+    let (server, gh) = start().await;
+    mount_pr_node(&server).await;
+    expect_graphql(
+      &server,
+      "convertPullRequestToDraft",
+      json!({ "id": "PR_5" }),
+    )
+    .await;
+    let action = GithubAction::SetPrDraft {
+      number: 5,
+      draft: true,
+    };
+    assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+  }
+
+  #[tokio::test]
+  async fn set_pr_draft_off_marks_it_ready() {
+    let (server, gh) = start().await;
+    mount_pr_node(&server).await;
+    expect_graphql(
+      &server,
+      "markPullRequestReadyForReview",
+      json!({ "id": "PR_5" }),
+    )
+    .await;
+    let action = GithubAction::SetPrDraft {
+      number: 5,
+      draft: false,
+    };
+    assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+  }
+
+  #[tokio::test]
+  async fn reply_to_review_thread_posts_the_reply() {
+    let (server, gh) = start().await;
+    expect_graphql(
+      &server,
+      "addPullRequestReviewThreadReply",
+      json!({ "threadId": "T_1", "body": "Done" }),
+    )
+    .await;
+    let action = GithubAction::ReplyToReviewThread {
+      thread_id: "T_1".into(),
+      body: "Done".into(),
+    };
+    assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+  }
+
+  #[tokio::test]
+  async fn submit_pr_review_sends_its_inline_comments() {
+    let (server, gh) = start().await;
+    let body = json!({
+      "event": "REQUEST_CHANGES",
+      "body": "See inline",
+      "comments": [
+        { "path": "a.rs", "line": 4, "side": "RIGHT", "body": "one" },
+        {
+          "path": "b.rs", "line": 9, "side": "LEFT", "body": "range",
+          "start_line": 7, "start_side": "LEFT",
+        },
+      ],
+    });
+    expect_rest(
+      &server,
+      "POST",
+      "/repos/o/r/pulls/5/reviews",
+      body,
+      json!({ "id": 1 }),
+    )
+    .await;
+    let comment = |path: &str, line, side: &str, start_line, body: &str| GhDraftReviewComment {
+      path: path.into(),
+      line,
+      side: side.into(),
+      start_line,
+      body: body.into(),
+    };
+    let action = GithubAction::SubmitPrReview {
+      number: 5,
+      event: "REQUEST_CHANGES".into(),
+      body: "See inline".into(),
+      comments: vec![
+        // A start at the line itself is a one-line comment.
+        comment("a.rs", 4, "RIGHT", Some(4), "one"),
+        comment("b.rs", 9, "LEFT", Some(7), "range"),
+      ],
+    };
+    assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+  }
+
+  #[tokio::test]
+  async fn submit_pr_review_rejects_an_unknown_event_without_a_request() {
+    let (server, gh) = start().await;
+    let action = GithubAction::SubmitPrReview {
+      number: 5,
+      event: "MERGE".into(),
+      body: String::new(),
+      comments: Vec::new(),
+    };
+    let error = github_write(&gh, "o/r", action).await.unwrap_err();
+    assert_eq!(error, "Invalid review event: MERGE");
+    assert_no_requests(&server).await;
+  }
+
+  #[tokio::test]
+  async fn set_reaction_adds_or_removes_it() {
+    let (server, gh) = start().await;
+    let variables = json!({ "id": "IC_1", "content": "HEART" });
+    expect_graphql(&server, "addReaction", variables.clone()).await;
+    expect_graphql(&server, "removeReaction", variables).await;
+    for on in [true, false] {
+      let action = GithubAction::SetReaction {
+        comment_id: "IC_1".into(),
+        content: "HEART".into(),
+        on,
+      };
+      assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+    }
+  }
+
+  #[tokio::test]
+  async fn a_failed_mutation_reports_githubs_error() {
+    let (server, gh) = start().await;
+    Mock::given(path("/graphql"))
+      .respond_with(ok(json!({
+        "data": null,
+        "errors": [{ "message": "Could not resolve to a node" }],
+      })))
+      .mount(&server)
+      .await;
+    let action = GithubAction::SetReaction {
+      comment_id: "gone".into(),
+      content: "HEART".into(),
+      on: true,
+    };
+    let error = github_write(&gh, "o/r", action).await.unwrap_err();
+    assert!(error.contains("Could not resolve to a node"), "{error}");
   }
 }
