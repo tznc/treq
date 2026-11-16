@@ -65,6 +65,8 @@ struct FakeHost {
   /// The next branch read fails, as one before `prepare_repo`'s jj init
   /// does.
   no_branch_once: std::sync::atomic::AtomicBool,
+  /// The checkout's label, `main` unless set (a git-side checkout moves it).
+  branch_ref: Mutex<Option<String>>,
   /// The workspaces come from a database the window can list at once.
   from_db: bool,
   /// What `summaries` answers, when the host reads in one round trip.
@@ -159,9 +161,15 @@ impl WindowHost for FakeHost {
     {
       return None;
     }
+    let name = self
+      .branch_ref
+      .lock()
+      .unwrap()
+      .clone()
+      .unwrap_or_else(|| "main".into());
     Some(RepoBranch {
-      current_branch: Some("main".into()),
-      display_ref: "main".into(),
+      current_branch: Some(name.clone()),
+      display_ref: name,
       is_detached: false,
     })
   }
@@ -816,6 +824,22 @@ fn reads_the_branch_again_when_the_first_read_raced_the_repo_init(cx: &mut TestA
   let window = Window::open(cx, host, Some("/repo"));
   let repos = window.last().sidebar.unwrap().repos;
   assert_eq!(repos[0].home_ref.as_deref(), Some("main"));
+}
+
+#[gpui::test]
+fn a_checkout_outside_treq_relabels_the_home_row(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  cx.run_until_parked();
+  *host.branch_ref.lock().unwrap() = Some("pr4232".into());
+  {
+    let watches = host.watches.lock().unwrap();
+    let (_, tx) = watches.iter().rev().find(|(p, _)| p == "/repo").unwrap();
+    let _ = tx.unbounded_send(());
+  }
+  cx.run_until_parked();
+  let repos = window.last().sidebar.unwrap().repos;
+  assert_eq!(repos[0].home_ref.as_deref(), Some("pr4232"));
 }
 
 #[gpui::test]
