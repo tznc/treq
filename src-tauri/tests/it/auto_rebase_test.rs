@@ -485,7 +485,7 @@ fn rebase_skips_workspace_whose_pr_is_merged() {
       state: "MERGED".into(),
       url: String::new(),
       head_ref_name: "feat/merged".into(),
-      base_ref_name: target.clone(),
+      base_ref_name: target,
       merge_state_status: None,
       is_draft: false,
       body: String::new(),
