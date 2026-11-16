@@ -1858,7 +1858,7 @@ const PR_LIST_JSON_FIELDS: &str = "number,title,state,url,headRefName,baseRefNam
 /// One `statusCheckRollup` entry: a check run or a commit status.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct GhRollupEntry {
+pub struct GhRollupEntry {
   #[serde(default)]
   name: Option<String>,
   #[serde(default)]
@@ -1911,7 +1911,7 @@ impl GhRollupEntry {
 }
 
 /// The checks `gh pr checks` reports for a `statusCheckRollup`'s entries.
-pub(crate) fn rollup_check_entries(entries: Vec<GhRollupEntry>) -> Option<PrCiStatus> {
+pub fn rollup_check_entries(entries: Vec<GhRollupEntry>) -> Option<PrCiStatus> {
   rollup_pr_checks(entries.into_iter().map(GhRollupEntry::into_check).collect())
 }
 

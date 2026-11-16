@@ -143,19 +143,14 @@ pub async fn github_read(
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::github::{GhIssue, GhListPage, GhPullRequest};
   use serde_json::json;
-  use wiremock::matchers::{body_partial_json, body_string_contains, header, method, path};
+  use wiremock::matchers::{header, method, path};
   use wiremock::{Mock, MockServer, ResponseTemplate};
 
   async fn start() -> (MockServer, GithubHttp) {
     let server = MockServer::start().await;
     let gh = GithubHttp::with_base("tok".into(), server.uri());
     (server, gh)
-  }
-
-  fn data(value: Value) -> ResponseTemplate {
-    ResponseTemplate::new(200).set_body_json(json!({ "data": value }))
   }
 
   #[tokio::test]
