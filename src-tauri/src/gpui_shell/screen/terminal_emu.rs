@@ -175,7 +175,17 @@ impl Emulator {
 
   pub fn feed(&mut self, bytes: &[u8]) {
     self.changed = true;
+    let kept = self.term.selection.clone();
+    let history = self.history();
     self.parser.advance(&mut self.term, bytes);
+    // A program redrawing lines (an agent's prompt, a spinner) drops any
+    // selection over them; xterm keeps it, so put it back, moved up by
+    // the lines that scrolled into history.
+    if self.term.selection.is_none() && self.found.is_none() {
+      let scrolled = self.history().saturating_sub(history) as i32;
+      let range = Line(0)..Line(self.size.rows as i32);
+      self.term.selection = kept.and_then(|s| s.rotate(&self.term, &range, scrolled));
+    }
   }
 
   /// Takes what the terminal asked for since the last call.
@@ -986,6 +996,26 @@ mod tests {
     assert_eq!(emu.selection_text().as_deref(), Some("hello world\nnext"));
     emu.clear_selection();
     assert_eq!(emu.selection_text(), None);
+  }
+
+  #[test]
+  fn keeps_the_selection_while_a_program_redraws() {
+    let mut emu = Emulator::new(20, 3);
+    emu.feed(b"agent says hi\r\n> prompt");
+    emu.select_start(0, 0, false, SelectKind::Simple);
+    emu.select_extend(1, 7, true);
+    // An agent redraws its prompt line in place.
+    emu.feed(b"\r\x1b[K> typing");
+    assert_eq!(
+      emu.selection_text().as_deref(),
+      Some("agent says hi\n> typing")
+    );
+    // New output scrolls the screen; the selection follows its text.
+    emu.feed(b"\r\n1\r\n2\r\x1b[K3");
+    assert_eq!(
+      emu.selection_text().as_deref(),
+      Some("agent says hi\n> typing")
+    );
   }
 
   #[test]

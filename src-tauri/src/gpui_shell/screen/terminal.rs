@@ -237,6 +237,18 @@ pub fn resize_pair(left: f32, right: f32, delta: f32, min: f32) -> (f32, f32) {
   (next_left, next_right)
 }
 
+/// Lines a selection drag at `y` scrolls a view spanning `top..bottom`:
+/// up (positive) past the top, down past the bottom, as xterm does.
+pub fn edge_scroll(y: f32, top: f32, bottom: f32) -> i32 {
+  if y < top {
+    1
+  } else if y > bottom {
+    -1
+  } else {
+    0
+  }
+}
+
 /// The pane height for a drag to `y` in a view spanning `top..bottom`.
 pub fn drag_height(top: f32, bottom: f32, y: f32) -> f32 {
   let height = bottom - top;
@@ -1369,23 +1381,39 @@ impl TerminalView {
     }
   }
 
-  fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+  fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, _: &mut Context<Self>) {
     let button = match event.pressed_button {
       Some(pressed) => mouse_button(pressed),
       None => Some(terminal_emu::Button::None),
     };
-    if !self.selecting {
-      if let Some(button) = button {
-        if self.report(button, MouseAction::Move, event.position, event.modifiers) {
-          return;
-        }
-      }
+    if let (false, Some(button)) = (self.selecting, button) {
+      self.report(button, MouseAction::Move, event.position, event.modifiers);
     }
-    if !self.selecting || event.pressed_button != Some(MouseButton::Left) {
+  }
+
+  /// Extends the selection to the mouse anywhere in the window, scrolling
+  /// when it is dragged past the top or bottom edge.
+  fn drag_select(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+    if event.pressed_button != Some(MouseButton::Left) {
+      self.selecting = false;
       return;
     }
+    let Some(bounds) = self.bounds.get() else {
+      return;
+    };
+    let top = f32::from(bounds.origin.y);
+    let lines = edge_scroll(
+      f32::from(event.position.y),
+      top,
+      top + f32::from(bounds.size.height),
+    );
     if let Some((row, col, right)) = self.cell_at(event.position) {
-      self.with_emulator(|e| e.select_extend(row, col, right));
+      self.with_emulator(|e| {
+        if lines != 0 && !e.alt_screen() {
+          e.scroll(lines);
+        }
+        e.select_extend(row, col, right);
+      });
       cx.notify();
     }
   }
@@ -1883,6 +1911,26 @@ impl Render for TerminalView {
       .on_mouse_up(MouseButton::Right, cx.listener(Self::on_mouse_up))
       .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
       .on_scroll_wheel(cx.listener(Self::on_scroll))
+      // A selection drag follows the mouse out of the terminal.
+      .when(self.selecting, |d| {
+        let view = cx.entity().downgrade();
+        d.child(
+          gpui::canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+              window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
+                if phase == gpui::DispatchPhase::Bubble {
+                  view
+                    .update(cx, |view, cx| view.drag_select(e, cx))
+                    .ignore_closed();
+                }
+              });
+            },
+          )
+          .absolute()
+          .size_0(),
+        )
+      })
       .child(
         gpui::canvas(
           move |b, _, cx| {
@@ -4811,6 +4859,13 @@ mod tests {
     assert_eq!(resize_pair(400., 400., 50., 300.), (450., 350.));
     assert_eq!(resize_pair(400., 400., 150., 300.), (550., 300.));
     assert_eq!(resize_pair(400., 400., -200., 300.), (300., 500.));
+  }
+
+  #[test]
+  fn scrolls_a_selection_dragged_past_an_edge() {
+    assert_eq!(edge_scroll(50., 100., 400.), 1);
+    assert_eq!(edge_scroll(450., 100., 400.), -1);
+    assert_eq!(edge_scroll(200., 100., 400.), 0);
   }
 
   #[test]
