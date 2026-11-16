@@ -1890,6 +1890,7 @@ impl Render for ChangesView {
       .overflow_hidden()
       .bg(p.background)
       .text_color(p.foreground)
+      .test_support()
       .track_focus(&self.focus)
       .on_key_down(cx.listener(|view, e: &KeyDownEvent, window, cx| {
         let k = &e.keystroke;
@@ -1977,7 +1978,6 @@ impl Render for ChangesView {
       .children(dialog)
       .children(finish)
       .children(review_dialog)
-      .test_support()
   }
 }
 
