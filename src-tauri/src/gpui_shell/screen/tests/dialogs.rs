@@ -1180,7 +1180,7 @@ fn a_refused_login_shows_on_the_form(cx: &mut TestAppContext) {
 fn save_project_without_teams_shows_no_owner_picker(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
   let mut h = Harness::with_host(cx, save_project_screen(false), host);
-  assert!(!h.drawn("save-project-owner"));
+  assert!(!h.shows(gpui::Role::ComboBox, "Owner"));
 }
 
 #[gpui::test]
@@ -1190,15 +1190,22 @@ fn save_project_assigns_the_team_picked(cx: &mut TestAppContext) {
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, save_project_screen(false), host.clone());
-  assert!(h.drawn("save-project-owner"));
-  assert!(!h.drawn("save-project-owner-menu"), "closed until clicked");
-  h.click("save-project-owner");
-  assert!(h.drawn("save-project-owner-menu"));
-  h.click("save-project-owner-o1");
-  assert!(
-    !h.drawn("save-project-owner-menu"),
-    "picking closes the menu"
+  let owner = |h: &mut Harness| {
+    h.rendered()
+      .get_by_role(gpui_testing_library::by::role(gpui::Role::ComboBox).name("Owner"))
+      .snapshot()
+  };
+  assert_eq!(
+    owner(&mut h).expanded(),
+    Some(false),
+    "closed until clicked"
   );
+  h.click("save-project-owner");
+  assert_eq!(owner(&mut h).expanded(), Some(true));
+  h.click("save-project-owner-o1");
+  let picked = owner(&mut h);
+  assert_eq!(picked.expanded(), Some(false), "picking closes the menu");
+  assert_eq!(picked.value(), Some("Acme"));
   h.click("save-project-submit");
   h.cx.run_until_parked();
   assert_eq!(project_calls(&host), ["save project \"web + api\" to o1"]);
