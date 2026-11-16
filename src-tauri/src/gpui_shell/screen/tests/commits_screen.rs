@@ -1,6 +1,5 @@
 use gpui::TestAppContext;
 
-
 use super::*;
 
 /// How many commits the list shows: every fixture commit reads "work".
