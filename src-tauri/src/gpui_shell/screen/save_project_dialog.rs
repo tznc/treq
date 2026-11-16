@@ -6,10 +6,12 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::sync::Arc;
 
+use gpui_kit::base::TestSupportExt as _;
+
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  div, prelude::*, Context, Entity, FocusHandle, FontWeight, Subscription, Window,
+  deferred, div, prelude::*, Context, Entity, FocusHandle, FontWeight, Subscription, Window,
 };
 
 use super::{
@@ -45,6 +47,12 @@ pub struct SaveProjectDialog {
   focus: FocusHandle,
   input: Option<Entity<InputState>>,
   pub(super) name: String,
+  /// Team organizations offered as owners of a new project, as (id, name).
+  teams: Vec<(String, String)>,
+  /// The owner picked: `None` personal.
+  owner: Option<String>,
+  /// The Owner select's menu is open.
+  owner_open: bool,
   pub(super) pending: bool,
   pub(super) error: String,
   pub(super) dismissed: bool,
@@ -61,6 +69,13 @@ impl SaveProjectDialog {
   ) -> Self {
     Self {
       name: route.name.clone(),
+      teams: if route.saved {
+        Vec::new()
+      } else {
+        host.project_teams()
+      },
+      owner: None,
+      owner_open: false,
       route,
       host,
       sink,
@@ -106,11 +121,12 @@ impl SaveProjectDialog {
     cx.notify();
     let host = self.host.clone();
     let closing = self.route.closing;
+    let owner = self.owner.clone();
     cx.spawn(async move |this, cx| {
       let result = cx
         .background_spawn({
-          let (host, name) = (host.clone(), name.clone());
-          async move { host.save_project(&name) }
+          let (host, name, owner) = (host.clone(), name.clone(), owner.clone());
+          async move { host.save_project(&name, owner.as_deref()) }
         })
         .await;
       this
@@ -236,29 +252,125 @@ impl Render for SaveProjectDialog {
       .on_close(ui::handler(cx, |view, _, cx| view.close(cx)))
       .on_primary(ui::handler(cx, |view, _, cx| view.submit(cx)))
       .primary_disabled(!can_submit)
-      .child(
+      .child({
+        // A two-column form: labels on the left, controls on the right.
+        let row = |label: &'static str, control: tauri_plugin_gpui::gpui::AnyElement| {
+          div()
+            .flex()
+            .items_start()
+            .gap_4()
+            .child(
+              ui::text(div(), TextSize::Sm)
+                .w(zpx(96.))
+                .flex_none()
+                .h(zpx(32.))
+                .flex()
+                .items_center()
+                .font_weight(FontWeight::MEDIUM)
+                .child(label),
+            )
+            .child(div().flex_1().min_w_0().child(control))
+        };
+        let owner = (!self.teams.is_empty()).then(|| {
+          let current = self
+            .owner
+            .as_ref()
+            .and_then(|o| self.teams.iter().find(|(id, _)| id == o))
+            .map_or("Personal".to_string(), |(_, n)| n.clone());
+          let mut options: Vec<(Option<String>, String, String)> = vec![(
+            None,
+            "save-project-owner-personal".into(),
+            "Personal".into(),
+          )];
+          options.extend(self.teams.iter().map(|(id, n)| {
+            (
+              Some(id.clone()),
+              format!("save-project-owner-{id}"),
+              n.clone(),
+            )
+          }));
+          // The menu spans the select's full width.
+          let menu = self.owner_open.then(|| {
+            let panel = super::code::menu_panel("save-project-owner-menu", &p)
+              .top(zpx(36.))
+              .left_0()
+              .right_0()
+              .children(options.into_iter().map(|(owner, id, label)| {
+                let checked = owner == self.owner;
+                ui::MenuItem::new(id, label, &p)
+                  .checked(checked)
+                  .aria_selected(checked)
+                  .on_click(cx.listener(move |view, _, _, cx| {
+                    view.owner = owner.clone();
+                    view.owner_open = false;
+                    cx.notify();
+                  }))
+              }))
+              .on_mouse_down_out(cx.listener(|view, _, _, cx| {
+                if view.owner_open {
+                  view.owner_open = false;
+                  cx.notify();
+                }
+              }));
+            deferred(panel).with_priority(3)
+          });
+          row(
+            "Owner",
+            div()
+              .relative()
+              .w_full()
+              .child(
+                div()
+                  .id("save-project-owner")
+                  .debug_selector(|| "save-project-owner".into())
+                  .role(tauri_plugin_gpui::gpui::Role::ComboBox)
+                  .aria_label("Owner")
+                  .aria_value(current.clone())
+                  .aria_expanded(self.owner_open)
+                  .test_support()
+                  .w_full()
+                  .cursor_pointer()
+                  .child(
+                    ui::Picker::new("save-project-owner-picker", &p)
+                      .value(current)
+                      .open(self.owner_open),
+                  )
+                  .on_click(cx.listener(|view, _, _, cx| {
+                    view.owner_open = !view.owner_open;
+                    cx.notify();
+                  })),
+              )
+              .children(menu)
+              .into_any_element(),
+          )
+        });
+        let name = row(
+          "Project name",
+          div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+              div()
+                .id("save-project-name")
+                .debug_selector(|| "save-project-name".into())
+                .w_full()
+                .child(Styled::h(ui::input(&input).disabled(pending), zpx(32.))),
+            )
+            .child(
+              ui::text(div(), TextSize::Sm)
+                .text_color(p.muted_foreground)
+                .child(format!("Repositories: {repos}")),
+            )
+            .into_any_element(),
+        );
         div()
           .flex()
           .flex_col()
           .gap_3()
           .py_4()
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .font_weight(FontWeight::MEDIUM)
-              .child("Project name"),
-          )
-          .child(
-            div()
-              .id("save-project-name")
-              .debug_selector(|| "save-project-name".into())
-              .w_full()
-              .child(Styled::h(ui::input(&input).disabled(pending), zpx(40.))),
-          )
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child(format!("Repositories: {repos}")),
-          )
+          .children(owner)
+          .child(name)
           .when(!self.error.is_empty(), |this| {
             this.child(
               ui::text(div(), TextSize::Sm)
@@ -266,8 +378,8 @@ impl Render for SaveProjectDialog {
                 .text_color(p.destructive)
                 .child(self.error.clone()),
             )
-          }),
-      )
+          })
+      })
       .footer(footer)
       .into_any_element()
   }
