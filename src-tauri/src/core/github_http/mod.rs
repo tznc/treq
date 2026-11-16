@@ -16,6 +16,9 @@ const JSON_MEDIA_TYPE: &str = "application/vnd.github+json";
 /// token it cached and try once more with a fresh one.
 pub const UNAUTHORIZED: &str = "github_unauthorized";
 
+/// Pages of comments read for one issue or pull request, 100 each.
+const MAX_COMMENT_PAGES: usize = 10;
+
 /// A GitHub API client authenticated as one user.
 pub struct GithubHttp {
   client: reqwest::Client,
@@ -154,6 +157,8 @@ pub async fn github_read(
     GithubQuery::SearchOpenPrs { mine, query, limit } => {
       to_json(search_open_prs(gh, full_name, mine, &query, limit).await?)
     }
+    GithubQuery::Issue { number } => to_json(issue(gh, full_name, number).await?),
+    GithubQuery::Pr { number } => to_json(pr(gh, full_name, number).await?),
     // Answered by the host's `gh` until it is read over HTTPS here.
     other => Err(format!(
       "unsupported_query: {other:?} is not read over HTTPS yet"
@@ -321,6 +326,88 @@ fn gh_shape(mut node: Value) -> Value {
   }
   fix_author(&mut node);
   node
+}
+
+/// The fields of a comment `gh ... view --json comments` reads, with the
+/// reactions `fill_comment_reactions` adds.
+const COMMENT_FIELDS: &str = "id body createdAt author { login } \
+  reactionGroups { content viewerHasReacted reactors { totalCount } }";
+
+/// The issue or pull request (`kind`) `number` with all its comments, read
+/// with `fields`.
+async fn view(
+  gh: &GithubHttp,
+  full_name: &str,
+  kind: &str,
+  number: u64,
+  fields: &str,
+) -> Result<Value, String> {
+  let (owner, name) = owner_and_name(full_name)?;
+  let query = format!(
+    "query($owner: String!, $name: String!, $number: Int!, $after: String) {{ \
+       repository(owner: $owner, name: $name) {{ {kind}(number: $number) {{ {fields} \
+         comments(first: 100, after: $after) {{ nodes {{ {COMMENT_FIELDS} }} \
+           pageInfo {{ hasNextPage endCursor }} }} }} }} }}"
+  );
+  let mut item: Option<Value> = None;
+  let mut comments = Vec::new();
+  let mut after: Option<String> = None;
+  for _ in 0..MAX_COMMENT_PAGES {
+    let variables = json!({ "owner": owner, "name": name, "number": number, "after": after });
+    let mut response = gh.graphql(&query, variables).await?;
+    let mut node = response
+      .pointer_mut(&format!("/data/repository/{kind}"))
+      .map(Value::take)
+      .unwrap_or_default();
+    if node.is_null() {
+      return Err(format!("GitHub has no {kind} #{number} in {full_name}"));
+    }
+    let page = node
+      .get_mut("comments")
+      .map(Value::take)
+      .unwrap_or_default();
+    comments.extend(page["nodes"].as_array().cloned().unwrap_or_default());
+    item.get_or_insert(node);
+    match page["pageInfo"]["endCursor"].as_str() {
+      Some(cursor) if page["pageInfo"]["hasNextPage"].as_bool() == Some(true) => {
+        after = Some(cursor.to_string());
+      }
+      _ => break,
+    }
+  }
+  let mut item = item.ok_or_else(|| format!("GitHub has no {kind} #{number} in {full_name}"))?;
+  if let Some(object) = item.as_object_mut() {
+    object.insert("comments".into(), Value::Array(comments));
+  }
+  Ok(gh_shape(item))
+}
+
+/// Keeps the reactions someone is on, as `fill_comment_reactions` does.
+fn shown_comment_reactions(comments: Option<&mut Vec<github::GhIssueComment>>) {
+  for comment in comments.into_iter().flatten() {
+    comment.reactions = github::shown_reactions(std::mem::take(&mut comment.reactions));
+  }
+}
+
+/// `github_cli::issue`: `gh issue view --json ...` with reactions filled in.
+async fn issue(gh: &GithubHttp, full_name: &str, number: u64) -> Result<GhIssue, String> {
+  let fields = "number title state url body createdAt updatedAt author { login } \
+    labels(first: 100) { nodes { name color } }";
+  let mut issue: GhIssue = parse(view(gh, full_name, "issue", number, fields).await?)?;
+  shown_comment_reactions(issue.comments.as_mut());
+  Ok(issue)
+}
+
+/// `github_cli::pr`: `gh pr view --json ...` with reactions filled in.
+async fn pr(gh: &GithubHttp, full_name: &str, number: u64) -> Result<GhPullRequest, String> {
+  let fields = format!(
+    "{LISTED_PR_FIELDS} body reviewDecision \
+     latestReviews(first: 100) {{ nodes {{ author {{ login }} state }} }} \
+     reviews(first: 100) {{ nodes {{ author {{ login }} state submittedAt }} }}"
+  );
+  let mut pr: GhPullRequest = parse(view(gh, full_name, "pullRequest", number, &fields).await?)?;
+  shown_comment_reactions(pr.comments.as_mut());
+  Ok(pr)
 }
 
 #[cfg(test)]
@@ -672,5 +759,178 @@ mod tests {
       value,
       via_gh::<Vec<GhPullRequest>>(json!([gh_listed_pr(7)]))
     );
+  }
+
+  #[tokio::test]
+  async fn graphql_errors_are_surfaced() {
+    let (server, gh) = start().await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+        "data": null,
+        "errors": [{ "message": "Could not resolve to an Issue" }],
+      })))
+      .mount(&server)
+      .await;
+    let error = github_read(&gh, "o/r", GithubQuery::Issue { number: 1 })
+      .await
+      .unwrap_err();
+    assert!(error.contains("Could not resolve to an Issue"), "{error}");
+  }
+
+  fn gql_comment(id: &str, reactions: Value) -> Value {
+    json!({
+      "id": id,
+      "body": "Looks good",
+      "createdAt": "2026-01-03T00:00:00Z",
+      "author": { "login": "rev" },
+      "reactionGroups": reactions,
+    })
+  }
+
+  fn gh_comment(id: &str) -> Value {
+    json!({
+      "id": id,
+      "author": { "login": "rev" },
+      "authorAssociation": "MEMBER",
+      "body": "Looks good",
+      "createdAt": "2026-01-03T00:00:00Z",
+      "includesCreatedEdit": false,
+      "isMinimized": false,
+      "minimizedReason": "",
+      "reactionGroups": [{ "content": "HEART", "users": { "totalCount": 2 } }],
+      "url": "https://github.com/o/r/issues/3#issuecomment-1",
+      "viewerDidAuthor": false,
+    })
+  }
+
+  /// GraphQL lists all eight reactions; the host shows only those with
+  /// someone on them, with whether the viewer is one.
+  fn gql_reactions() -> Value {
+    json!([
+      { "content": "THUMBS_UP", "viewerHasReacted": false, "reactors": { "totalCount": 0 } },
+      { "content": "HEART", "viewerHasReacted": true, "reactors": { "totalCount": 2 } },
+    ])
+  }
+
+  fn gql_issue(comment: &str, next: Option<&str>) -> ResponseTemplate {
+    data(json!({ "repository": { "issue": {
+      "number": 3, "title": "Crash", "state": "CLOSED",
+      "url": "https://github.com/o/r/issues/3", "body": "It crashes",
+      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+      "author": { "login": "octo" },
+      "labels": { "nodes": [{ "name": "bug", "color": "d73a4a" }] },
+      "comments": {
+        "nodes": [gql_comment(comment, gql_reactions())],
+        "pageInfo": { "hasNextPage": next.is_some(), "endCursor": next },
+      },
+    }}}))
+  }
+
+  #[tokio::test]
+  async fn issue_reads_all_its_comments_with_reactions() {
+    let (server, gh) = start().await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_partial_json(json!({ "variables": {
+        "owner": "o", "name": "r", "number": 3, "after": null,
+      }})))
+      .respond_with(gql_issue("IC_1", Some("k1")))
+      .expect(1)
+      .mount(&server)
+      .await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_partial_json(json!({ "variables": { "after": "k1" } })))
+      .respond_with(gql_issue("IC_2", None))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let value = github_read(&gh, "o/r", GithubQuery::Issue { number: 3 })
+      .await
+      .unwrap();
+    let mut expected = via_gh::<GhIssue>(json!({
+      "author": { "id": "U_1", "is_bot": false, "login": "octo", "name": "Octo" },
+      "body": "It crashes",
+      "comments": [gh_comment("IC_1"), gh_comment("IC_2")],
+      "createdAt": "2026-01-01T00:00:00Z",
+      "labels": [{ "color": "d73a4a", "description": "", "id": "LA_1", "name": "bug" }],
+      "number": 3,
+      "state": "CLOSED",
+      "title": "Crash",
+      "updatedAt": "2026-01-02T00:00:00Z",
+      "url": "https://github.com/o/r/issues/3",
+    }));
+    // What `fill_comment_reactions` adds.
+    expected["comments"][0]["reactions"][0]["viewer_has_reacted"] = json!(true);
+    expected["comments"][1]["reactions"][0]["viewer_has_reacted"] = json!(true);
+    assert_eq!(value, expected);
+  }
+
+  #[tokio::test]
+  async fn pr_reads_reviews_and_comments_like_gh_pr_view() {
+    let (server, gh) = start().await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_partial_json(json!({ "variables": {
+        "owner": "o", "name": "r", "number": 5,
+      }})))
+      .respond_with(data(json!({ "repository": { "pullRequest": {
+        "number": 5, "title": "Fix 5", "state": "OPEN",
+        "url": "https://github.com/o/r/pull/5", "body": "",
+        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+        "author": { "login": "octo" },
+        "labels": { "nodes": [] },
+        "headRefName": "fix-5", "baseRefName": "main",
+        "mergeStateStatus": "BLOCKED", "isDraft": true, "reviewDecision": null,
+        "latestReviews": { "nodes": [{ "author": { "login": "rev" }, "state": "APPROVED" }] },
+        "reviews": { "nodes": [
+          { "author": { "login": "rev" }, "state": "COMMENTED", "submittedAt": "2026-01-03T00:00:00Z" },
+          { "author": null, "state": "APPROVED", "submittedAt": "2026-01-04T00:00:00Z" },
+        ]},
+        "comments": {
+          "nodes": [gql_comment("IC_1", gql_reactions())],
+          "pageInfo": { "hasNextPage": false, "endCursor": "k1" },
+        },
+      }}})))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let value = github_read(&gh, "o/r", GithubQuery::Pr { number: 5 })
+      .await
+      .unwrap();
+    let review = |id: &str, login: &str, state: &str, at: &str| {
+      json!({
+        "id": id, "author": { "login": login }, "authorAssociation": "MEMBER",
+        "body": "", "submittedAt": at, "includesCreatedEdit": false,
+        "reactionGroups": [], "state": state, "commit": { "oid": "abc" },
+      })
+    };
+    let mut expected = via_gh::<GhPullRequest>(json!({
+      "author": { "id": "U_1", "is_bot": false, "login": "octo", "name": "Octo" },
+      "baseRefName": "main",
+      "body": "",
+      "comments": [gh_comment("IC_1")],
+      "createdAt": "2026-01-01T00:00:00Z",
+      "headRefName": "fix-5",
+      "isDraft": true,
+      "labels": [],
+      "latestReviews": [review("PRR_1", "rev", "APPROVED", "2026-01-03T00:00:00Z")],
+      "mergeStateStatus": "BLOCKED",
+      "number": 5,
+      // gh prints a missing decision as an empty string.
+      "reviewDecision": "",
+      "reviews": [
+        review("PRR_1", "rev", "COMMENTED", "2026-01-03T00:00:00Z"),
+        // gh prints a deleted account as an empty login.
+        review("PRR_2", "", "APPROVED", "2026-01-04T00:00:00Z"),
+      ],
+      "state": "OPEN",
+      "title": "Fix 5",
+      "updatedAt": "2026-01-02T00:00:00Z",
+      "url": "https://github.com/o/r/pull/5",
+    }));
+    expected["comments"][0]["reactions"][0]["viewer_has_reacted"] = json!(true);
+    assert_eq!(value, expected);
   }
 }
