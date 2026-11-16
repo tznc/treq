@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 
 use gpui::TestAppContext;
-use gpui_testing_library::Queries as _;
 
 use super::{workspace_dialogs::workspace, *};
 use crate::{
