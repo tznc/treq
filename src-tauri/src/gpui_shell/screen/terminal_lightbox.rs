@@ -16,7 +16,6 @@ use std::{
   rc::Rc,
 };
 
-use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use tauri_plugin_gpui::gpui::{
   self, div, img, prelude::*, Bounds, ClipboardItem, Context, Div, Entity, EventEmitter,
