@@ -262,6 +262,29 @@ pub struct Application {
   pub checklist: checklist::Checklist,
   pub setup_script: SetupScript,
   pub agent_instructions: String,
+  pub profiles: Vec<ProfileRow>,
+  pub default_profiles: Vec<DefaultProfile>,
+  pub profile_agent_options: Vec<SelectOption>,
+  pub new_profile_agent: String,
+  pub new_profile_name: String,
+  pub profile_error: Option<String>,
+}
+
+/// An agent account profile in the Application tab.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProfileRow {
+  /// `agent/name`, what Remove names.
+  pub key: String,
+  pub label: String,
+}
+
+/// The default account of one agent that takes profiles.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DefaultProfile {
+  pub agent: String,
+  pub label: String,
+  pub value: String,
+  pub options: Vec<SelectOption>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -345,6 +368,14 @@ fn agent_options(default: &str) -> Vec<SelectOption> {
     ("devin", "Devin"),
     ("gemini", "Gemini"),
   ])
+}
+
+/// An agent's name as the user sees it.
+fn agent_label(agent: &str) -> &str {
+  crate::core::agent_launch::AGENTS
+    .iter()
+    .find(|(id, _)| *id == agent)
+    .map_or(agent, |(_, label)| label)
 }
 
 /// `CLAUDE_MODEL_OPTIONS`, after a first "default" option.
@@ -506,6 +537,9 @@ pub struct SettingsView {
   /// meanwhile, which save once it finishes.
   app_saving: bool,
   app_again: Vec<String>,
+  /// The account profile being added, and why the last add was refused.
+  new_profile: (String, String),
+  profile_error: Option<String>,
   /// Fields edited while a Repository save ran.
   repo_again: Vec<String>,
 }
@@ -567,6 +601,8 @@ impl SettingsView {
       focused_once: false,
       app_saving: false,
       app_again: Vec::new(),
+      new_profile: ("claude".into(), String::new()),
+      profile_error: None,
       repo_again: Vec::new(),
     };
     this.load_app(cx);
@@ -1482,6 +1518,10 @@ impl SettingsView {
           let skill = skill.to_string();
           self.press_skill(action, &skill, cx);
         }
+        Some(("app.removeProfile", key)) => {
+          let key = key.to_string();
+          self.remove_profile(&key, cx);
+        }
         Some(("preview.docs", feature)) => {
           if let Some((_, _, path)) = data::PREVIEW_FEATURES
             .iter()
@@ -1497,6 +1537,7 @@ impl SettingsView {
             (self.react)(ScreenAction::Press { id }, cx);
           }
           "app.setupScript.run" => self.run_setup(cx),
+          "app.addProfile" => self.add_profile(cx),
           "repo.reviewPrompt.tune" => self.tune_review_prompt(cx),
           "repo.promptEdits.dismissAll" => self.dismiss_all_prompt_edits(cx),
           "repo.yaml.reload" => self.load_repo(cx),
@@ -1597,7 +1638,18 @@ impl SettingsView {
           "app.conflictMarkerStyle" => app.conflict_marker_style = text,
           "app.notifyAgentFinished" => app.notify_agent_finished = value.as_bool().unwrap_or(true),
           "app.agentInstructions" => app.agent_instructions = text,
-          _ => {}
+          "app.newProfileAgent" => self.new_profile.0 = text,
+          "app.newProfileName" => {
+            self.new_profile.1 = text;
+            self.profile_error = None;
+          }
+          _ => {
+            if let Some(agent) = field.strip_prefix("app.defaultProfile.") {
+              if let Some((_, name)) = app.default_profiles.iter_mut().find(|(a, _)| a == agent) {
+                *name = text;
+              }
+            }
+          }
         }
       }
     }
@@ -1605,6 +1657,36 @@ impl SettingsView {
       self.marks.remove(&field);
       self.schedule_save(&field, cx);
     }
+  }
+
+  fn add_profile(&mut self, cx: &mut Context<Self>) {
+    let Some(app) = &mut self.app else {
+      return;
+    };
+    let (agent, name) = &self.new_profile;
+    match crate::core::agent_profiles::add(&app.profiles, agent, name) {
+      Ok(profiles) => {
+        app.profiles = profiles;
+        self.new_profile.1.clear();
+        self.profile_error = None;
+        self.save_fields(vec!["app.profiles".into()], cx);
+      }
+      Err(err) => self.profile_error = Some(err),
+    }
+  }
+
+  /// Removes `agent/name`, and clears it where it was the default.
+  fn remove_profile(&mut self, key: &str, cx: &mut Context<Self>) {
+    let (Some(app), Some((agent, name))) = (&mut self.app, key.split_once('/')) else {
+      return;
+    };
+    app.profiles = crate::core::agent_profiles::remove(&app.profiles, agent, name);
+    for (a, default) in &mut app.default_profiles {
+      if a == agent && default == name {
+        default.clear();
+      }
+    }
+    self.save_fields(vec!["app.profiles".into()], cx);
   }
 
   /// The tick or error `key`'s field shows.
@@ -1671,6 +1753,47 @@ impl SettingsView {
         ]),
         notify_agent_finished: app.notify_agent_finished,
         agent_instructions: app.agent_instructions,
+        profiles: app
+          .profiles
+          .iter()
+          .map(|p| ProfileRow {
+            key: format!("{}/{}", p.agent, p.name),
+            label: format!("{} · {}", agent_label(&p.agent), p.name),
+          })
+          .collect(),
+        default_profiles: app
+          .default_profiles
+          .iter()
+          .map(|(agent, value)| DefaultProfile {
+            agent: agent.clone(),
+            label: agent_label(agent).to_string(),
+            value: value.clone(),
+            options: std::iter::once(SelectOption {
+              value: String::new(),
+              label: format!("{}'s own sign-in", agent_label(agent)),
+            })
+            .chain(
+              app
+                .profiles
+                .iter()
+                .filter(|p| &p.agent == agent)
+                .map(|p| SelectOption {
+                  value: p.name.clone(),
+                  label: p.name.clone(),
+                }),
+            )
+            .collect(),
+          })
+          .collect(),
+        profile_agent_options: data::profile_agents()
+          .map(|agent| SelectOption {
+            value: agent.to_string(),
+            label: agent_label(agent).to_string(),
+          })
+          .collect(),
+        new_profile_agent: self.new_profile.0.clone(),
+        new_profile_name: self.new_profile.1.clone(),
+        profile_error: self.profile_error.clone(),
         checklist: checklist::from_statuses(
           "Command-line tools",
           self.statuses.as_deref(),
@@ -2231,6 +2354,105 @@ impl Render for SettingsView {
 }
 
 impl SettingsView {
+  /// Agent accounts: each agent's default account, the profiles, and a row
+  /// to add one.
+  fn agent_accounts(
+    &mut self,
+    app: &Application,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> gpui::Div {
+    let mut block = div().flex().flex_col().gap_3().child(label("Agent accounts")).child(help(
+      "Sign in to more than one account per agent, such as work and personal. Start a prompt with @name to use one.",
+      p,
+      0.,
+    ));
+    for default in &app.default_profiles {
+      let field = format!("app.defaultProfile.{}", default.agent);
+      let select = self
+        .controls
+        .select(&field, &default.options, &default.value, window, cx);
+      let name = format!("Default {} account", default.label);
+      block = block.child(saved_field_block(
+        &name,
+        form::select_field(
+          format!("settings-default-profile-{}", default.agent),
+          &name,
+          &select,
+          false,
+        ),
+        None,
+        self.mark_of(&field),
+        p,
+      ));
+    }
+    for profile in &app.profiles {
+      block = block.child(
+        div()
+          .flex()
+          .items_center()
+          .justify_between()
+          .child(ui::text(div(), TextSize::Sm).child(profile.label.clone()))
+          .child(
+            Button::new(
+              SharedString::from(format!("settings-profile-remove-{}", profile.key)),
+              p,
+            )
+            .variant(Variant::Ghost)
+            .size(Size::Sm)
+            .label("Remove")
+            .on_click(self.press(&format!("app.removeProfile:{}", profile.key))),
+          ),
+      );
+    }
+    let agent = self.controls.select(
+      "app.newProfileAgent",
+      &app.profile_agent_options,
+      &app.new_profile_agent,
+      window,
+      cx,
+    );
+    let name = self.controls.input(
+      "app.newProfileName",
+      &app.new_profile_name,
+      "work",
+      window,
+      cx,
+    );
+    block
+      .child(
+        div()
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(div().w(zpx(160.)).flex_none().child(form::select_field(
+            "settings-new-profile-agent",
+            "Agent",
+            &agent,
+            false,
+          )))
+          .child(div().flex_1().min_w_0().child(form::input_field(
+            "settings-new-profile-name",
+            &name,
+            false,
+            false,
+          )))
+          .child(
+            Button::new("settings-profile-add", p)
+              .variant(Variant::Outline)
+              .size(Size::Sm)
+              .label("Add")
+              .on_click(self.press("app.addProfile")),
+          ),
+      )
+      .children(app.profile_error.as_ref().map(|err| {
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.destructive)
+          .child(err.clone())
+      }))
+  }
+
   fn application(
     &mut self,
     app: &Application,
@@ -2295,6 +2517,7 @@ impl SettingsView {
       window,
       cx,
     );
+    let accounts = self.agent_accounts(app, p, window, cx);
     let ctx = super::Ctx {
       palette: *p,
       sink: &self.sink,
@@ -2380,6 +2603,7 @@ impl SettingsView {
         self.mark_of("app.conflictMarkerStyle"),
         p,
       ))
+      .child(accounts)
       .child(
         div()
           .flex()
