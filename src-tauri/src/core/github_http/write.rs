@@ -1,0 +1,305 @@
+//! The changes [`crate::core::remote::GithubAction`] names, made over HTTPS
+//! with the same checks and results as the host's `github_write`.
+
+use super::GithubHttp;
+use crate::core::remote::{require_text, GithubAction};
+use crate::github;
+use reqwest::Method;
+use serde_json::{json, Value};
+
+const DELETE_ISSUE_MUTATION: &str =
+  "mutation($id: ID!) { deleteIssue(input: {issueId: $id}) { clientMutationId } }";
+
+/// [`GithubAction`] carried out over HTTPS on the repository `full_name`
+/// (`owner/name`), as the host's `github_write` carries it out.
+pub async fn github_write(
+  gh: &GithubHttp,
+  full_name: &str,
+  action: GithubAction,
+) -> Result<Value, String> {
+  match &action {
+    GithubAction::CreateIssue { title, .. } | GithubAction::EditIssue { title, .. } => {
+      require_text(title, "the title")?;
+    }
+    GithubAction::CommentOnIssue { body, .. }
+    | GithubAction::CommentOnPr { body, .. }
+    | GithubAction::ReplyToReviewThread { body, .. } => require_text(body, "the comment")?,
+    _ => {}
+  }
+  let repo = format!("/repos/{full_name}");
+  match action {
+    GithubAction::CreateIssue { title, body } => {
+      let body = json!({ "title": title, "body": body });
+      let created = gh
+        .rest(Method::POST, &format!("{repo}/issues"), Some(&body))
+        .await?;
+      let number = created["number"]
+        .as_u64()
+        .ok_or_else(|| format!("Could not parse issue number from output: {created}"))?;
+      Ok(json!({ "number": number }))
+    }
+    GithubAction::EditIssue {
+      number,
+      title,
+      body,
+    } => {
+      let body = json!({ "title": title, "body": body });
+      patch(gh, &format!("{repo}/issues/{number}"), &body).await
+    }
+    // A pull request's conversation comments are its issue's comments.
+    GithubAction::CommentOnIssue { number, body } | GithubAction::CommentOnPr { number, body } => {
+      let path = format!("{repo}/issues/{number}/comments");
+      done(
+        gh.rest(Method::POST, &path, Some(&json!({ "body": body })))
+          .await,
+      )
+    }
+    GithubAction::CloseIssue { number, reason } => {
+      if !github::ISSUE_CLOSE_REASONS.contains(&reason.as_str()) {
+        return Err(format!("Unknown issue close reason: {reason}"));
+      }
+      // `gh issue close --reason "not planned"` sends `not_planned`.
+      let body = json!({ "state": "closed", "state_reason": reason.replace(' ', "_") });
+      patch(gh, &format!("{repo}/issues/{number}"), &body).await
+    }
+    GithubAction::ReopenIssue { number } => {
+      patch(
+        gh,
+        &format!("{repo}/issues/{number}"),
+        &json!({ "state": "open" }),
+      )
+      .await
+    }
+    GithubAction::DeleteIssue { number } => {
+      let id = node_id(gh, &format!("{repo}/issues/{number}")).await?;
+      done(gh.graphql(DELETE_ISSUE_MUTATION, json!({ "id": id })).await)
+    }
+    // Carried out by the host's `gh` until it is done over HTTPS here.
+    other => Err(format!(
+      "unsupported_action: {other:?} is not done over HTTPS yet"
+    )),
+  }
+}
+
+/// `null`, as the host returns for a change that succeeded.
+fn done(result: Result<Value, String>) -> Result<Value, String> {
+  result.map(|_| Value::Null)
+}
+
+async fn patch(gh: &GithubHttp, path: &str, body: &Value) -> Result<Value, String> {
+  done(gh.rest(Method::PATCH, path, Some(body)).await)
+}
+
+/// The GraphQL node id of the issue or pull request at the REST `path`.
+async fn node_id(gh: &GithubHttp, path: &str) -> Result<String, String> {
+  let item = gh.rest(Method::GET, path, None).await?;
+  item["node_id"]
+    .as_str()
+    .map(str::to_string)
+    .ok_or_else(|| format!("GitHub sent no node id for {path}"))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use serde_json::json;
+  use wiremock::matchers::{body_json, body_partial_json, body_string_contains, method, path};
+  use wiremock::{Mock, MockServer, ResponseTemplate};
+
+  async fn start() -> (MockServer, GithubHttp) {
+    let server = MockServer::start().await;
+    let gh = GithubHttp::with_base("tok".into(), server.uri());
+    (server, gh)
+  }
+
+  fn ok(body: Value) -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(body)
+  }
+
+  async fn expect_rest(server: &MockServer, verb: &str, at: &str, body: Value, reply: Value) {
+    Mock::given(method(verb))
+      .and(path(at))
+      .and(body_json(body))
+      .respond_with(ok(reply))
+      .expect(1)
+      .mount(server)
+      .await;
+  }
+
+  async fn expect_graphql(server: &MockServer, mutation: &str, variables: Value) {
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_string_contains(mutation))
+      .and(body_partial_json(json!({ "variables": variables })))
+      .respond_with(ok(
+        json!({ "data": { (mutation): { "clientMutationId": null } } }),
+      ))
+      .expect(1)
+      .mount(server)
+      .await;
+  }
+
+  async fn assert_no_requests(server: &MockServer) {
+    assert!(server.received_requests().await.unwrap().is_empty());
+  }
+  #[tokio::test]
+  async fn create_issue_returns_its_number() {
+    let (server, gh) = start().await;
+    let created = json!({ "number": 12, "html_url": "https://github.com/o/r/issues/12" });
+    let body = json!({ "title": "Crash", "body": "It crashes" });
+    expect_rest(&server, "POST", "/repos/o/r/issues", body, created).await;
+    let action = GithubAction::CreateIssue {
+      title: "Crash".into(),
+      body: "It crashes".into(),
+    };
+    let value = github_write(&gh, "o/r", action).await.unwrap();
+    assert_eq!(value, json!({ "number": 12 }));
+  }
+
+  #[tokio::test]
+  async fn blank_text_fails_before_any_request() {
+    let (server, gh) = start().await;
+    let cases = [
+      (
+        GithubAction::CreateIssue {
+          title: " ".into(),
+          body: "b".into(),
+        },
+        "invalid_arguments: the title is empty",
+      ),
+      (
+        GithubAction::EditIssue {
+          number: 1,
+          title: "".into(),
+          body: "b".into(),
+        },
+        "invalid_arguments: the title is empty",
+      ),
+      (
+        GithubAction::CommentOnIssue {
+          number: 1,
+          body: "\n".into(),
+        },
+        "invalid_arguments: the comment is empty",
+      ),
+      (
+        GithubAction::CommentOnPr {
+          number: 1,
+          body: "".into(),
+        },
+        "invalid_arguments: the comment is empty",
+      ),
+      (
+        GithubAction::ReplyToReviewThread {
+          thread_id: "T".into(),
+          body: " ".into(),
+        },
+        "invalid_arguments: the comment is empty",
+      ),
+    ];
+    for (action, expected) in cases {
+      assert_eq!(
+        github_write(&gh, "o/r", action).await.unwrap_err(),
+        expected
+      );
+    }
+    assert_no_requests(&server).await;
+  }
+
+  #[tokio::test]
+  async fn edit_issue_replaces_title_and_body() {
+    let (server, gh) = start().await;
+    let body = json!({ "title": "New", "body": "Text" });
+    expect_rest(
+      &server,
+      "PATCH",
+      "/repos/o/r/issues/3",
+      body,
+      json!({ "number": 3 }),
+    )
+    .await;
+    let action = GithubAction::EditIssue {
+      number: 3,
+      title: "New".into(),
+      body: "Text".into(),
+    };
+    assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+  }
+
+  #[tokio::test]
+  async fn comments_on_issues_and_prs_go_to_the_issue_comments() {
+    let (server, gh) = start().await;
+    let reply = json!({ "id": 1 });
+    let issue = json!({ "body": "On the issue" });
+    expect_rest(
+      &server,
+      "POST",
+      "/repos/o/r/issues/3/comments",
+      issue,
+      reply.clone(),
+    )
+    .await;
+    let pr = json!({ "body": "On the PR" });
+    expect_rest(&server, "POST", "/repos/o/r/issues/5/comments", pr, reply).await;
+    let on_issue = GithubAction::CommentOnIssue {
+      number: 3,
+      body: "On the issue".into(),
+    };
+    let on_pr = GithubAction::CommentOnPr {
+      number: 5,
+      body: "On the PR".into(),
+    };
+    assert_eq!(
+      github_write(&gh, "o/r", on_issue).await.unwrap(),
+      Value::Null
+    );
+    assert_eq!(github_write(&gh, "o/r", on_pr).await.unwrap(), Value::Null);
+  }
+
+  #[tokio::test]
+  async fn close_issue_sends_the_reason() {
+    let (server, gh) = start().await;
+    let body = json!({ "state": "closed", "state_reason": "not_planned" });
+    expect_rest(&server, "PATCH", "/repos/o/r/issues/3", body, json!({})).await;
+    let action = GithubAction::CloseIssue {
+      number: 3,
+      reason: "not planned".into(),
+    };
+    assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+  }
+
+  #[tokio::test]
+  async fn close_issue_rejects_an_unknown_reason_without_a_request() {
+    let (server, gh) = start().await;
+    let action = GithubAction::CloseIssue {
+      number: 3,
+      reason: "duplicate".into(),
+    };
+    let error = github_write(&gh, "o/r", action).await.unwrap_err();
+    assert_eq!(error, "Unknown issue close reason: duplicate");
+    assert_no_requests(&server).await;
+  }
+
+  #[tokio::test]
+  async fn reopen_issue_opens_it() {
+    let (server, gh) = start().await;
+    let body = json!({ "state": "open" });
+    expect_rest(&server, "PATCH", "/repos/o/r/issues/3", body, json!({})).await;
+    let action = GithubAction::ReopenIssue { number: 3 };
+    assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+  }
+
+  #[tokio::test]
+  async fn delete_issue_deletes_it_by_node_id() {
+    let (server, gh) = start().await;
+    Mock::given(method("GET"))
+      .and(path("/repos/o/r/issues/3"))
+      .respond_with(ok(json!({ "number": 3, "node_id": "I_3" })))
+      .expect(1)
+      .mount(&server)
+      .await;
+    expect_graphql(&server, "deleteIssue", json!({ "id": "I_3" })).await;
+    let action = GithubAction::DeleteIssue { number: 3 };
+    assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+  }
+}
