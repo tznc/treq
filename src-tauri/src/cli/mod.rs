@@ -1265,6 +1265,7 @@ pub(super) fn dispatch_agent_request(
   prompt: &str,
   mode: &str,
   agent: &str,
+  profile: Option<&str>,
   request_id: &str,
 ) -> Result<(), String> {
   let now = agent_dispatch::now_millis();
@@ -1286,6 +1287,7 @@ pub(super) fn dispatch_agent_request(
     prompt: prompt.to_string(),
     mode: mode.to_string(),
     agent: agent.to_string(),
+    profile: profile.map(str::to_string),
   };
   let response = agent_dispatch::send_dispatch_request(
     &instance.endpoint,

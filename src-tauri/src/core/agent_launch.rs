@@ -605,6 +605,7 @@ pub struct AgentDeepLinkRequest {
   pub mode: String,
   pub agent: String,
   pub request_id: String,
+  pub profile: Option<String>,
 }
 
 fn normalize_mode(value: &str) -> Option<&'static str> {
@@ -634,6 +635,7 @@ pub fn parse_agent_deep_link_url(url: &str) -> Option<AgentDeepLinkRequest> {
     mode: normalize_mode(&get("mode")?)?.to_string(),
     agent: agent_kind(get("agent").as_deref())?,
     request_id: get("request_id")?,
+    profile: get("profile"),
   })
 }
 
@@ -1437,8 +1439,13 @@ mod tests {
         mode: "acceptEdits".into(),
         agent: "codex".into(),
         request_id: "req-1".into(),
+        profile: None,
       })
     );
+    let with_profile = parse_agent_deep_link_url(
+      "treq://agent/start?repo=r&branch=b&prompt=p&mode=plan&agent=claude&request_id=1&profile=work",
+    );
+    assert_eq!(with_profile.unwrap().profile.as_deref(), Some("work"));
   }
 
   #[test]
@@ -1463,6 +1470,7 @@ mod tests {
       mode: "acceptEdits".into(),
       agent: "claude".into(),
       request_id: id.into(),
+      profile: None,
     }
   }
 
