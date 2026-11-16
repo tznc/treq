@@ -288,7 +288,16 @@ pub fn start_agent_task(
   store: &dyn LaunchStore,
   task: &TaskRequest,
 ) -> Result<Option<(SessionStart, Vec<Toast>)>, String> {
-  let trimmed = task.text.trim();
+  let profiles = super::agent_profiles::parse(
+    store
+      .app_setting(super::agent_profiles::PROFILES_SETTING)
+      .as_deref(),
+  );
+  let (agent, profile, trimmed) =
+    match super::agent_profiles::mention(&profiles, &task.agent, &task.text) {
+      Some((p, rest)) => (p.agent, Some(p.name), rest.trim()),
+      None => (task.agent.clone(), task.profile.clone(), task.text.trim()),
+    };
   if trimmed.is_empty() && task.issue.is_none() {
     return Ok(None);
   }
@@ -317,8 +326,8 @@ pub fn start_agent_task(
       repo_path: task.repo_path.clone(),
       pending_prompt: Some(prompt),
       permission_mode: Some(task.mode.clone()),
-      agent: Some(task.agent.clone()),
-      profile: task.profile.clone(),
+      agent: Some(agent),
+      profile,
     },
     toasts,
   )))
@@ -1070,6 +1079,39 @@ mod tests {
     };
     let launched = launch_session(&store, &request).unwrap();
     assert_eq!(launched.pending().profile.as_deref(), Some("personal"));
+  }
+
+  #[test]
+  fn start_agent_task_routes_an_at_mention_to_its_profile() {
+    let store = FakeStore {
+      settings: HashMap::from([(
+        "agent_profiles".to_string(),
+        r#"[{"agent":"codex","name":"work"}]"#.to_string(),
+      )]),
+      ..Default::default()
+    };
+    let task = TaskRequest {
+      repo_path: "/repo".into(),
+      text: "@work fix it".into(),
+      agent: "claude".into(),
+      save_as_repo_default: true,
+      ..Default::default()
+    };
+    let (start, _) = start_agent_task(&store, &task).unwrap().unwrap();
+    assert_eq!(start.pending_prompt.as_deref(), Some("fix it"));
+    assert_eq!(start.agent.as_deref(), Some("codex"));
+    assert_eq!(start.profile.as_deref(), Some("work"));
+    // The dialog's own choice is still what becomes the default.
+    assert!(store
+      .calls
+      .borrow()
+      .contains(&"set default_agent=claude".to_string()));
+    // A bare mention has nothing to send.
+    let bare = TaskRequest {
+      text: "@work".into(),
+      ..task
+    };
+    assert!(start_agent_task(&store, &bare).unwrap().is_none());
   }
 
   #[test]
