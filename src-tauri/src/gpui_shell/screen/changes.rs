@@ -2372,9 +2372,13 @@ impl ChangesView {
       .when_some(error, |this, err| {
         this.child(
           div()
+            .id("commit-message-error")
             .debug_selector(|| "commit-message-error".into())
+            .role(gpui::Role::Alert)
+            .aria_label(err)
             .text_color(p.destructive)
-            .child(err),
+            .child(err)
+            .test_support(),
         )
       })
       .child(div().flex().w_full().child(main).child(menu))
@@ -3249,10 +3253,14 @@ impl ChangesView {
           .gap_1p5()
           .child(
             ui::text(div(), TextSize::Code)
+              .id(SharedString::from(format!("file-path-{path}")))
+              .role(gpui::Role::Heading)
+              .aria_label(shown_path.clone())
               .truncate()
               .font_family(theme::MONO_FONT)
               .text_color(muted)
-              .child(shown_path),
+              .child(shown_path)
+              .test_support(),
           )
           .child(self.tip(
             format!("copy-path-tip-{path}"),

@@ -313,8 +313,11 @@ fn commit_does_nothing_until_a_message_is_typed(cx: &mut TestAppContext) {
   user.keyboard("   ");
   user.click(&commit());
   h.cx.run_until_parked();
+  let screen = h.rendered();
   assert!(
-    !h.drawn("commit-message-error"),
+    screen
+      .query_by_role(by::role(Role::Alert).name("Enter a commit message."))
+      .is_none(),
     "a disabled Commit asks nothing"
   );
   assert!(!host.writes().iter().any(|w| w.starts_with("commit")));
@@ -471,7 +474,8 @@ fn a_new_shell_takes_focus_fully_in_view(cx: &mut TestAppContext) {
   );
   let first = shown.get_by_role(by::role(Role::Group).name("Claude 1 terminal"));
   assert!(first.bounds().left() < shells[0].bounds().left());
-  assert!(h.drawn("terminal-row-scrollbar"), "the overflow shows");
+  let screen = h.rendered();
+  expect(screen.get_by_role(by::role(Role::ScrollBar).name("Scroll terminals"))).to_be_visible();
 
   // What is typed goes to the new shell.
   h.cx.simulate_input("x");
@@ -553,7 +557,11 @@ fn code_tab_alerts_on_a_failed_setup_script_and_opens_its_logs(cx: &mut TestAppC
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.click("code-status");
-  assert!(h.drawn("code-setup"));
+  let screen = h.rendered();
+  expect(screen.get_by_role(
+    by::role(Role::Alert).name(gpui_testing_library::TextMatch::regex("setup script")),
+  ))
+  .to_be_visible();
   h.click("code-setup-logs");
   h.cx.run_until_parked();
   assert!(
@@ -578,8 +586,14 @@ fn code_tab_offers_setup_logs_only_once_the_script_has_run(cx: &mut TestAppConte
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.click("code-status");
-  assert!(h.drawn("code-setup"));
-  assert!(!h.drawn("code-setup-logs"));
+  let screen = h.rendered();
+  expect(screen.get_by_role(
+    by::role(Role::Alert).name(gpui_testing_library::TextMatch::regex("setup script")),
+  ))
+  .to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::Button).name("View logs"))
+    .is_none());
 }
 
 #[gpui::test]
@@ -590,8 +604,14 @@ fn code_tab_offers_no_setup_logs_without_the_logs_preview(cx: &mut TestAppContex
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.click("code-status");
-  assert!(h.drawn("code-setup"));
-  assert!(!h.drawn("code-setup-logs"));
+  let screen = h.rendered();
+  expect(screen.get_by_role(
+    by::role(Role::Alert).name(gpui_testing_library::TextMatch::regex("setup script")),
+  ))
+  .to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::Button).name("View logs"))
+    .is_none());
 }
 
 #[gpui::test]
@@ -610,7 +630,12 @@ fn code_tab_reruns_the_setup_script(cx: &mut TestAppContext) {
 #[gpui::test]
 fn code_tab_draws_no_setup_alert_without_a_setup_script(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
-  assert!(!h.drawn("code-setup"));
+  let screen = h.rendered();
+  assert!(screen
+    .query_by_role(
+      by::role(Role::Alert).name(gpui_testing_library::TextMatch::regex("setup script"))
+    )
+    .is_none());
 }
 
 // Code tab file status
@@ -703,7 +728,8 @@ fn code_tab_hides_unchanged_files_again_in_another_workspace(cx: &mut TestAppCon
   ];
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.click("code-unchanged-toggle");
-  assert!(h.drawn("code-entry-.gitignore"));
+  let screen = h.rendered();
+  expect(screen.get_by_role(by::role(Role::Button).name(".gitignore"))).to_be_visible();
   // The workspace screen hands the tab another workspace.
   h.screen.update(&mut h.cx, |s, cx| {
     let code = s
@@ -722,8 +748,14 @@ fn code_tab_hides_unchanged_files_again_in_another_workspace(cx: &mut TestAppCon
     });
   });
   h.cx.run_until_parked();
-  assert!(h.drawn("code-unchanged-toggle"));
-  assert!(!h.drawn("code-entry-.gitignore"), "hidden again by default");
+  let screen = h.rendered();
+  expect(screen.get_by_role(by::role(Role::Button).name("Show 1 unchanged file"))).to_be_visible();
+  assert!(
+    screen
+      .query_by_role(by::role(Role::Button).name(".gitignore"))
+      .is_none(),
+    "hidden again by default"
+  );
 }
 
 // The project instructions dialog: Tab leaves the Instructions box.

@@ -14,6 +14,7 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use gpui_kit::component::{
@@ -1255,12 +1256,17 @@ impl RemoteView {
     let content = div()
       .child(grid(cells, two_columns))
       .when(too_long, |this| {
+        let message = format!("Hostnames are at most {MAX_HOSTNAME} characters.");
         this.child(
           ui::text(div(), TextSize::Sm)
+            .id("remote-hostname-too-long")
             .debug_selector(|| "remote-hostname-too-long".into())
+            .role(gpui::Role::Alert)
+            .aria_label(message.clone())
             .mt_2()
             .text_color(ui::Tone::Danger.text(p))
-            .child(format!("Hostnames are at most {MAX_HOSTNAME} characters.")),
+            .child(message)
+            .test_support(),
         )
       })
       .children(trust)

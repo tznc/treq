@@ -6,6 +6,7 @@ use std::{
 };
 
 use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext};
+use gpui_testing_library::Queries as _;
 
 use super::*;
 use code_data::Agent;
@@ -1898,19 +1899,29 @@ impl Harness {
     self.cx.debug_bounds(selector).is_some()
   }
 
+  /// The window as the user sees it, once everything pending has run.
+  fn rendered(&mut self) -> gpui_testing_library::Screen {
+    self.cx.run_until_parked();
+    let window = self.cx.update(|window, _| window.window_handle());
+    let screen = gpui_testing_library::Screen::new(&self.cx, window);
+    screen.redraw();
+    screen
+  }
+
   /// Clicks `button` in the confirmation on screen, found by role and
   /// name, as the user would.
   fn answer(&mut self, button: &str) {
     use gpui_testing_library::prelude::*;
-    assert!(
-      self.drawn(crate::gpui_shell::confirm::ID),
-      "no confirmation"
-    );
-    let window = self.cx.update(|window, _| window.window_handle());
-    let screen = gpui_testing_library::Screen::new(&self.cx, window);
-    screen.redraw();
+    let screen = self.rendered();
     // The row behind it may hold a button of the same name.
     let panel = gpui::ElementId::from(format!("{}-panel", crate::gpui_shell::confirm::ID));
+    assert!(
+      screen
+        .query_all_by_role(by::role(gpui::Role::Dialog))
+        .iter()
+        .any(|d| d.path().contains(&panel)),
+      "no confirmation"
+    );
     let target = screen
       .get_all_by_role(by::role(gpui::Role::Button).name(button))
       .into_iter()
@@ -2341,7 +2352,11 @@ fn merge_plan(retargeted: &[&str], can_rollup: bool) -> crate::core::MergeLandin
 fn merge_harness(cx: &mut TestAppContext, host: FakeHost) -> (Harness, Arc<FakeHost>) {
   let host = Arc::new(host);
   let mut h = Harness::with_host(cx, merge_route(), host.clone());
-  assert!(h.drawn("merge-confirm"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Confirm merge")),
+  )
+  .to_be_visible();
   (h, host)
 }
 
@@ -2481,7 +2496,11 @@ fn selected_lines(h: &mut Harness) -> Option<(String, Vec<(usize, usize)>)> {
 /// Comments line `+b` of a.rs with `text`.
 fn comment_line(h: &mut Harness, text: &str) {
   h.click("add-comment-a.rs-0-1");
-  assert!(h.drawn("comment-input"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::MultilineTextInput).name("Add a comment…"),
+  ))
+  .to_be_visible();
   h.click("comment-input");
   h.cx.simulate_input(text);
   h.click("comment-submit");

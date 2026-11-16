@@ -65,8 +65,17 @@ fn a_large_merge_preview_draws_only_the_rows_on_screen(cx: &mut TestAppContext) 
       ..FakeHost::default()
     },
   );
-  assert!(h.drawn("merge-file-src/f0.rs"));
-  assert!(!h.drawn("merge-file-src/f5.rs"), "far below the window");
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("src/f0.rs")),
+  )
+  .to_be_visible();
+  assert!(
+    screen
+      .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("src/f5.rs"))
+      .is_none(),
+    "far below the window"
+  );
   // The message card spans the page, as it did before the list.
   let page = h.cx.debug_bounds("merge-scroll").expect("page");
   let message = h.cx.debug_bounds("merge-message").expect("message");
@@ -75,10 +84,19 @@ fn a_large_merge_preview_draws_only_the_rows_on_screen(cx: &mut TestAppContext) 
     "{message:?} in {page:?}"
   );
   scroll_until(&mut h, "merge-scroll", "merge-file-src/f5.rs");
-  assert!(!h.drawn("merge-file-src/f0.rs"));
+  let screen = h.rendered();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("src/f0.rs"))
+    .is_none());
   // A folded file takes its lines with it.
   h.click("merge-file-src/f5.rs");
-  assert!(!h.drawn("merge-hunk-5-0"));
+  let screen = h.rendered();
+  assert!(screen
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Heading)
+        .name(gpui_testing_library::TextMatch::regex(r"^src/f5\.rs @@")),
+    )
+    .is_none());
 }
 
 #[gpui::test]
@@ -88,12 +106,22 @@ fn a_large_stash_diff_draws_only_the_rows_on_screen(cx: &mut TestAppContext) {
     ..stash_host()
   };
   let (mut h, _) = modal_harness(cx, host, stash_modal());
-  assert!(h.drawn("stash-diff-file-0"));
-  assert!(!h.drawn("stash-diff-file-5"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Heading).name("src/f0.rs")),
+  )
+  .to_be_visible();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Heading).name("src/f5.rs"))
+    .is_none());
   scroll_until(&mut h, "stash-diff-pane", "stash-diff-file-5");
   // Another stash starts from its top.
   h.click("stash-list-item-1");
-  assert!(h.drawn("stash-diff-file-0"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Heading).name("src/f0.rs")),
+  )
+  .to_be_visible();
 }
 
 #[gpui::test]
@@ -110,8 +138,11 @@ fn a_long_prompt_history_draws_only_the_rows_on_screen(cx: &mut TestAppContext) 
     ..FakeHost::default()
   };
   let (mut h, _) = modal_harness(cx, host, history_modal());
-  assert!(h.drawn("prompt-history-item-0"));
-  assert!(!h.drawn("prompt-history-item-1999"));
+  let screen = h.rendered();
+  let rows = screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("login"))
+    .len();
+  assert!((1..2000).contains(&rows), "{rows} of 2000 rows drawn");
   scroll_until(&mut h, "prompt-history-list", "prompt-history-item-1999");
   h.click("prompt-history-item-1999");
   let selected = h.screen.read_with(&h.cx, |s, cx| {
@@ -130,12 +161,22 @@ fn a_long_text_attachment_draws_only_the_lines_on_screen(cx: &mut TestAppContext
   .expect("assets");
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   h.click("terminal-send-preview-t1");
-  assert!(h.drawn("treq-send-text-line-1"));
-  assert!(!h.drawn("treq-send-text-line-2000"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Row).name("Line 1")),
+  )
+  .to_be_visible();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Row).name("Line 2000"))
+    .is_none());
   scroll_until(&mut h, "treq-send-text-preview", "treq-send-text-line-2000");
   // A comment on a line far down sits under it.
   h.click("treq-send-text-line-2000");
-  assert!(h.drawn("treq-send-line-comment-composer"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::MultilineTextInput).name("Comment on these lines"),
+  ))
+  .to_be_visible();
   let line = h.cx.debug_bounds("treq-send-text-line-2000").expect("line");
   let composer = h
     .cx

@@ -163,7 +163,10 @@ fn a_file_opening_shows_its_spinner_only_after_a_moment(cx: &mut TestAppContext)
 fn a_workspace_read_ahead_draws_its_header_and_tab_at_once(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, two_workspaces(commits_host()), commits_route());
   set_workspace(&mut h, 7);
-  assert!(h.drawn("commit-row-a"));
+  let screen = h.rendered();
+  assert!(!screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .is_empty());
   prefetch(&mut h, 8);
   assert_eq!(reads(&host, "read log Some(8)"), 1);
   let header_reads = reads(&host, "read workspace");
@@ -187,7 +190,10 @@ fn a_workspace_read_ahead_draws_its_header_and_tab_at_once(cx: &mut TestAppConte
 fn a_workspace_not_read_ahead_stands_the_last_one_in(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, two_workspaces(commits_host()), commits_route());
   set_workspace(&mut h, 7);
-  assert!(h.drawn("commit-row-a"));
+  let screen = h.rendered();
+  assert!(!screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .is_empty());
   let view = workspace_view(&mut h);
   set_workspace(&mut h, 8);
   first_frame(&mut h);
@@ -201,13 +207,21 @@ fn a_workspace_not_read_ahead_stands_the_last_one_in(cx: &mut TestAppContext) {
 fn reading_a_workspace_ahead_leaves_the_screen_alone(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, two_workspaces(commits_host()), commits_route());
   set_workspace(&mut h, 7);
-  assert!(h.drawn("commit-row-a"));
+  let screen = h.rendered();
+  assert!(!screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .is_empty());
   let view = workspace_view(&mut h);
   let before = view.read_with(&h.cx, |w, _| w.branch().map(str::to_string));
   prefetch(&mut h, 8);
   let after = view.read_with(&h.cx, |w, _| w.branch().map(str::to_string));
   assert_eq!(before, after);
-  assert!(!h.drawn("workspace-tab-stand-in"));
+  let screen = h.rendered();
+  assert!(screen
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::ProgressIndicator).name("Loading workspace")
+    )
+    .is_none());
   let shown = view.read_with(&h.cx, |w, cx| {
     w.commits().map(|c| c.read(cx).parent.workspace_id())
   });
@@ -218,7 +232,11 @@ fn reading_a_workspace_ahead_leaves_the_screen_alone(cx: &mut TestAppContext) {
 fn the_code_tab_draws_a_workspace_read_ahead_at_once(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, two_workspaces(code_host()), code_route());
   set_workspace(&mut h, 7);
-  assert!(h.drawn("workspace-code"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Go to file")),
+  )
+  .to_be_visible();
   prefetch(&mut h, 8);
   assert_eq!(reads(&host, "read overview Some(8)"), 1);
   set_workspace(&mut h, 8);
@@ -248,7 +266,11 @@ fn notifies<T: 'static>(h: &mut Harness, entity: &Entity<T>) -> Rc<Cell<usize>> 
 #[gpui::test]
 fn the_code_tab_read_again_unchanged_redraws_nothing(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
-  assert!(h.drawn("workspace-code"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Go to file")),
+  )
+  .to_be_visible();
   let code = code_view(&mut h);
   let redraws = notifies(&mut h, &code);
   let before = reads(&host, "read overview");
@@ -311,7 +333,10 @@ fn a_workspace_shown_again_draws_its_header_at_once(cx: &mut TestAppContext) {
 fn an_idle_window_makes_the_other_tabs_ahead(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, two_workspaces(changes_host()), commits_route());
   set_workspace(&mut h, 7);
-  assert!(h.drawn("workspace-commits"));
+  let screen = h.rendered();
+  assert!(!screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .is_empty());
   assert_eq!(reads(&host, "read workspace diff"), 0);
   h.cx.update(|window, _| window.activate_window());
   idle(&mut h, Duration::from_secs(2));
@@ -330,7 +355,10 @@ fn an_idle_window_makes_the_other_tabs_ahead(cx: &mut TestAppContext) {
 fn a_window_in_the_background_reads_nothing_ahead(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, two_workspaces(changes_host()), commits_route());
   set_workspace(&mut h, 7);
-  assert!(h.drawn("workspace-commits"));
+  let screen = h.rendered();
+  assert!(!screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .is_empty());
   // Test windows start in the background.
   idle(&mut h, Duration::from_secs(10));
   assert_eq!(reads(&host, "read workspace diff"), 0);

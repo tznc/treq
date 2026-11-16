@@ -3423,7 +3423,8 @@ impl TerminalPane {
             cx.stop_propagation();
             cx.notify();
           }),
-        ),
+        )
+        .test_support(),
     )
   }
 

@@ -5,6 +5,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
@@ -883,7 +884,10 @@ impl StashView {
     let text = ui::text(div(), TextSize::Sm).font_family(theme::MONO_FONT);
     match row {
       Row::File(f) => text
+        .id(("stash-diff-file", f))
         .debug_selector(move || format!("stash-diff-file-{f}"))
+        .role(gpui::Role::Heading)
+        .aria_label(files.get(f).map(|f| f.path.clone()).unwrap_or_default())
         .when(f > 0, |this| this.pt_4())
         .child(
           div()
@@ -895,6 +899,7 @@ impl StashView {
             .font_weight(FontWeight::MEDIUM)
             .child(files.get(f).map(|f| f.path.clone()).unwrap_or_default()),
         )
+        .test_support()
         .into_any_element(),
       Row::HunkHeader(f, h) => text
         .px_2()

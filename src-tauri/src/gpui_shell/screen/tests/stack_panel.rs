@@ -14,6 +14,7 @@ fn stack_host(rows: &[(i64, &str, &str)]) -> FakeHost {
       row["id"] = (*id).into();
       row["target_branch"] = (*target).into();
       row["workspace_path"] = format!("/repo/.treq/workspaces/{id}").into();
+      row["title"] = (*branch).into();
       serde_json::from_value(row).expect("workspace")
     })
     .collect();
@@ -27,6 +28,19 @@ fn item(id: i64) -> &'static str {
   Box::leak(format!("workspace-stack-item-{id}").into_boxed_str())
 }
 
+/// Whether the stack card lists the workspace titled `branch`.
+fn lists(screen: &gpui_testing_library::Screen, branch: &str) -> bool {
+  screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::ListItem).name(branch))
+    .is_some()
+}
+
+fn panel_shown(screen: &gpui_testing_library::Screen) -> bool {
+  screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Stack new workspace"))
+    .is_some()
+}
+
 #[gpui::test]
 fn the_home_view_draws_no_stack_panel(cx: &mut TestAppContext) {
   let mut host = stack_host(&[(7, "feat/alpha", "main"), (8, "feat/beta", "feat/alpha")]);
@@ -34,17 +48,27 @@ fn the_home_view_draws_no_stack_panel(cx: &mut TestAppContext) {
   let mut route = route_json(None, "main");
   route["code"] = true.into();
   let (mut h, _) = workspace_harness(cx, host, serde_json::from_value(route).expect("route"));
-  assert!(h.drawn("code-action-row"), "the home Code tab");
-  assert!(!h.drawn("workspace-stack-panel"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Start an agent")),
+  )
+  .to_be_visible();
+  assert!(!panel_shown(&screen));
 }
 
 #[gpui::test]
 fn a_lone_workspace_draws_a_one_row_stack_panel(cx: &mut TestAppContext) {
   let host = stack_host(&[(7, "feat/alpha", "main"), (8, "feat/other", "main")]);
   let (mut h, _) = workspace_harness(cx, host, code_route());
-  assert!(h.drawn("workspace-stack-panel"));
-  assert!(h.drawn(item(7)));
-  assert!(!h.drawn(item(8)), "not in its stack");
+  let screen = h.rendered();
+  assert!(panel_shown(&screen));
+  // The workspace on screen is its one, selected row.
+  let rows = screen.query_all_by_role(gpui_testing_library::by::role(gpui::Role::ListItem));
+  assert_eq!(rows.len(), 1);
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::ListItem).selected(true))
+    .is_some());
+  assert!(!lists(&screen, "feat/other"), "not in its stack");
 }
 
 /// The branch, its target picker and Stack on this… sit at the top of the
@@ -72,8 +96,11 @@ fn the_stack_panel_target_picker_opens_the_target_popover(cx: &mut TestAppContex
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.click("workspace-target");
   h.cx.run_until_parked();
+  let screen = h.rendered();
   assert!(
-    h.drawn("header-popover-backdrop"),
+    screen
+      .query_by_role(gpui_testing_library::by::role(gpui::Role::Dialog))
+      .is_some(),
     "the target popover opens over the window"
   );
 }
@@ -95,8 +122,9 @@ fn the_stack_panel_stack_button_stacks_on_the_workspace(cx: &mut TestAppContext)
 fn a_stacked_workspace_lists_its_chain_and_opens_a_row(cx: &mut TestAppContext) {
   let host = stack_host(&[(6, "feat/alpha", "main"), (7, "feat/beta", "feat/alpha")]);
   let (mut h, _) = workspace_harness(cx, host, code_route());
-  assert!(h.drawn("workspace-stack-panel"));
-  assert!(h.drawn(item(6)) && h.drawn(item(7)));
+  let screen = h.rendered();
+  assert!(panel_shown(&screen));
+  assert!(lists(&screen, "feat/alpha") && lists(&screen, "feat/beta"));
   h.click(item(6));
   let opened = fields(&h, "code.stack");
   assert_eq!(opened.len(), 1);
@@ -107,8 +135,9 @@ fn a_stacked_workspace_lists_its_chain_and_opens_a_row(cx: &mut TestAppContext) 
 fn the_first_workspace_of_a_stack_lists_the_ones_above(cx: &mut TestAppContext) {
   let host = stack_host(&[(7, "feat/alpha", "main"), (8, "feat/beta", "feat/alpha")]);
   let (mut h, _) = workspace_harness(cx, host, code_route());
-  assert!(h.drawn("workspace-stack-panel"));
-  assert!(h.drawn(item(7)) && h.drawn(item(8)));
+  let screen = h.rendered();
+  assert!(panel_shown(&screen));
+  assert!(lists(&screen, "feat/alpha") && lists(&screen, "feat/beta"));
 }
 
 #[gpui::test]
@@ -119,6 +148,7 @@ fn the_stack_panel_leaves_out_sibling_workspaces(cx: &mut TestAppContext) {
     (8, "feat/gamma", "feat/alpha"),
   ]);
   let (mut h, _) = workspace_harness(cx, host, code_route());
-  assert!(h.drawn(item(6)) && h.drawn(item(7)));
-  assert!(!h.drawn(item(8)), "a sibling");
+  let screen = h.rendered();
+  assert!(lists(&screen, "feat/alpha") && lists(&screen, "feat/beta"));
+  assert!(!lists(&screen, "feat/gamma"), "a sibling");
 }

@@ -4,7 +4,7 @@
 //! GPUI's keyboard dispatch, so a handler that swallows them fails here.
 
 use gpui::{Role, TestAppContext};
-use gpui_testing_library::{prelude::*, Node};
+use gpui_testing_library::Node;
 
 use super::*;
 

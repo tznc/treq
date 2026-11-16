@@ -8,6 +8,7 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   collections::HashSet,
   rc::Rc,
@@ -1378,9 +1379,13 @@ impl MergeView {
           .and_then(|f| f.hunks.get(h))
           .map(|h| h.header.clone())
           .unwrap_or_default();
+        let path = files.get(i).map(|f| f.path.clone()).unwrap_or_default();
         let id = format!("merge-hunk-{i}-{h}");
         ui::text(div(), TextSize::Sm)
+          .id(SharedString::from(id.clone()))
           .debug_selector(move || id)
+          .role(gpui::Role::Heading)
+          .aria_label(format!("{path} {header}"))
           .when(h == 0, |this| this.border_t_1().border_color(p.border))
           .bg(p.muted.opacity(0.3))
           .px_2()
@@ -1389,6 +1394,7 @@ impl MergeView {
           .font_family(theme::MONO_FONT)
           .text_color(p.muted_foreground)
           .child(header)
+          .test_support()
           .into_any_element()
       }
       Row::Line(i, h, l) => {
@@ -1430,6 +1436,7 @@ impl MergeView {
       .child(
         ui::Row::new(id, p)
           .label(path.to_string())
+          .aria_expanded(expanded)
           .w_full()
           .p_3()
           .rounded_none()
