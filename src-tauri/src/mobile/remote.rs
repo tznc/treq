@@ -4,10 +4,13 @@
 //! `retry_after_reconnect`, which verifies state before any retry and never
 //! blindly resends (see `core::remote`).
 
-use crate::result_ext::ResultExt as _;
+use crate::{lock_ext::LockExt as _, result_ext::ResultExt as _};
 use std::{collections::HashMap, future::Future, sync::LazyLock};
 
 use crate::core::{
+  github_direct,
+  github_http::GithubHttp,
+  github_user_token::GithubTokenError,
   remote::{
     execute_remote_read, retry_after_reconnect, verification_for, MutationRetryOutcome,
     MutationVerificationOutcome, RemoteHostCheck, TreqCommandRequest,
@@ -23,6 +26,56 @@ use crate::mobile::{
 };
 
 static READS: LazyLock<Reads> = LazyLock::new(Reads::default);
+
+/// GitHub `owner/name` by machine and repository path, as the host's git
+/// remote names it (`None`: no GitHub remote).
+static FULL_NAMES: LazyLock<std::sync::Mutex<HashMap<String, Option<String>>>> =
+  LazyLock::new(Default::default);
+
+/// [`github_direct`]'s view of a connected machine and the signed-in user.
+struct HostDirect {
+  endpoint: SshEndpoint,
+}
+
+#[async_trait::async_trait]
+impl github_direct::DirectDeps for HostDirect {
+  async fn full_name(&self, repo: &str) -> Result<Option<String>, String> {
+    let key = read_key(
+      &self.endpoint,
+      &TreqCommandRequest::GitRemoteInfo {
+        repo: repo.to_string(),
+      },
+    );
+    if let Some(known) = FULL_NAMES.lock_or_recover().get(&key) {
+      return Ok(known.clone());
+    }
+    let remote: Option<crate::github::GitRemoteInfo> = read_on_host(
+      &self.endpoint,
+      TreqCommandRequest::GitRemoteInfo {
+        repo: repo.to_string(),
+      },
+    )
+    .await?;
+    let full_name = remote.map(|remote| remote.full_name);
+    FULL_NAMES.lock_or_recover().insert(key, full_name.clone());
+    Ok(full_name)
+  }
+
+  async fn token(&self) -> Result<String, GithubTokenError> {
+    backend::get()
+      .github_tokens
+      .token(chrono::Utc::now().timestamp())
+      .await
+  }
+
+  async fn forget_token(&self) {
+    backend::get().github_tokens.forget().await;
+  }
+
+  fn client(&self, token: String) -> GithubHttp {
+    GithubHttp::new(token)
+  }
+}
 
 /// Outcome of a mutation, as the UI reports it.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,8 +104,25 @@ pub async fn read<T: DeserializeOwned>(request: TreqCommandRequest) -> Result<T,
   read_on(&endpoint, request).await
 }
 
-/// [`read`] on a given machine's endpoint, active or not.
+/// [`read`] on a given machine's endpoint, active or not. A GitHub read
+/// goes straight to GitHub as the signed-in user when it can
+/// ([`crate::core::github_direct`]), and to the host's `gh` otherwise.
 pub async fn read_on<T: DeserializeOwned>(
+  endpoint: &SshEndpoint,
+  request: TreqCommandRequest,
+) -> Result<T, String> {
+  if let TreqCommandRequest::GithubRead { repo, query } = &request {
+    let deps = HostDirect {
+      endpoint: endpoint.clone(),
+    };
+    if let Some(result) = github_direct::read(&deps, repo, query.clone()).await {
+      return result.and_then(|value| serde_json::from_value(value).map_err(|e| e.to_string()));
+    }
+  }
+  read_on_host(endpoint, request).await
+}
+
+async fn read_on_host<T: DeserializeOwned>(
   endpoint: &SshEndpoint,
   request: TreqCommandRequest,
 ) -> Result<T, String> {
@@ -155,6 +225,14 @@ pub async fn host_check(endpoint: &SshEndpoint) -> Result<Option<RemoteHostCheck
 pub async fn mutate(request: TreqCommandRequest) -> Result<Mutation, String> {
   let backend = backend::get();
   let endpoint = backend.endpoint()?;
+  if let TreqCommandRequest::GithubWrite { repo, action, .. } = &request {
+    let deps = HostDirect {
+      endpoint: endpoint.clone(),
+    };
+    if let Some(result) = github_direct::write(&deps, repo, action.clone()).await {
+      return result.map(Mutation::Applied);
+    }
+  }
   let pool = backend.pool.clone();
   let result = retry_after_reconnect::<serde_json::Value, _>(
     &pool,

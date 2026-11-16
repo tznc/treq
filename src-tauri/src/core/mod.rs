@@ -27,6 +27,7 @@ pub mod feature_preview;
 pub mod files;
 pub mod generated;
 pub mod github_cli;
+pub mod github_direct;
 pub mod github_http;
 pub mod github_issues;
 pub mod github_user_token;
