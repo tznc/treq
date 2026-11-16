@@ -39,6 +39,7 @@ pub mod pr_stacks;
 pub mod pr_sync;
 pub mod pr_view;
 pub mod prerequisites;
+pub mod project_sync;
 pub mod projects;
 #[cfg(unix)]
 pub mod pty_daemon;
