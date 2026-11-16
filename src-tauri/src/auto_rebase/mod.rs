@@ -45,6 +45,15 @@ pub struct WorkspaceBookmarkConflict {
 /// Records what holds `workspace` back from rebasing onto `sync`'s target,
 /// and whether the rebase may run. A stale target only warns.
 pub(crate) fn passes_guard(repo_path: &str, workspace: &Workspace, sync: &TargetSync) -> bool {
+  if pr_is_merged(repo_path, &workspace.branch_name) {
+    // A squash-merged PR's commits land upstream under new hashes, so a rebase
+    // can't drop them and leaves every commit conflicted. Leave the stack alone.
+    tracing::info!(
+      "Skipping rebase of workspace '{}': its PR is merged",
+      workspace.workspace_name
+    );
+    return false;
+  }
   let hold = sync.hold();
   let blocked = hold.as_ref().is_some_and(|h| h.blocks());
   if let Some(hold) = &hold {
@@ -56,6 +65,13 @@ pub(crate) fn passes_guard(repo_path: &str, workspace: &Workspace, sync: &Target
   }
   rebase_guard::record(repo_path, workspace.id, hold);
   !blocked
+}
+
+fn pr_is_merged(repo_path: &str, branch: &str) -> bool {
+  matches!(
+    crate::pr_status::global().get_cached(repo_path, branch),
+    Some(Some(pr)) if pr.state.eq_ignore_ascii_case("merged")
+  )
 }
 
 /// Other workspaces' working-copy commits. A rebase leaves them out of the
