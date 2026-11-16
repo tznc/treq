@@ -8,6 +8,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::Cell,
   collections::{HashMap, HashSet},
@@ -15,7 +16,6 @@ use std::{
   rc::Rc,
 };
 
-use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use tauri_plugin_gpui::gpui::{
   self, div, img, prelude::*, Bounds, ClipboardItem, Context, Div, Entity, EventEmitter,

@@ -5,13 +5,12 @@ use super::*;
 #[gpui::test]
 fn logs_tab_lists_the_check_logs(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(None));
-  for selector in [
-    "logs-tab",
-    "repo-logs-output",
-    "repo-log-line",
-    "log-level-filter",
+  for (role, name) in [
+    (gpui::Role::List, "Check logs"),
+    (gpui::Role::ListItem, "test failed"),
+    (gpui::Role::Button, "All Levels"),
   ] {
-    assert!(h.drawn(selector), "{selector}");
+    assert!(h.shows(role, name), "{name}");
   }
   assert!(
     host
@@ -25,9 +24,9 @@ fn logs_tab_lists_the_check_logs(cx: &mut TestAppContext) {
 #[gpui::test]
 fn logs_tab_opens_on_the_setup_scripts_logs(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(Some("setup-script")));
-  assert!(h.drawn("repo-logs-output"));
+  assert!(h.shows(gpui::Role::List, "Check logs"));
   assert!(
-    h.drawn("check-workflow-filter"),
+    h.shows(gpui::Role::Button, "Setup script"),
     "the filter shows what is picked"
   );
   assert!(
@@ -42,10 +41,13 @@ fn logs_tab_opens_on_the_setup_scripts_logs(cx: &mut TestAppContext) {
 #[gpui::test]
 fn logs_tab_sends_a_picked_line_to_an_agent(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(None));
-  assert!(!h.drawn("log-inspect-panel"));
+  assert!(!h.shows(gpui::Role::Button, "Send to agent"));
   h.click("repo-log-line");
-  assert!(h.drawn("log-inspect-panel"));
-  assert!(h.drawn("selection-count"));
+  assert!(
+    h.shows(gpui::Role::Button, "Send to agent"),
+    "the inspect panel"
+  );
+  assert!(h.shows(gpui::Role::Status, "1 selected"));
   h.click("send-to-agent");
   h.cx.run_until_parked();
   let launches = host.launches.lock().unwrap().clone();
@@ -63,7 +65,7 @@ fn logs_tab_sends_a_picked_line_to_an_agent(cx: &mut TestAppContext) {
 #[gpui::test]
 fn logs_tab_opens_on_the_source_react_asks_for(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(Some("system")));
-  assert!(h.drawn("system-logs-output"));
+  assert!(h.shows(gpui::Role::List, "System logs"));
   h.click("open-log-folder");
   h.cx.run_until_parked();
   assert!(host.writes().contains(&"open log folder".to_string()));
@@ -72,17 +74,17 @@ fn logs_tab_opens_on_the_source_react_asks_for(cx: &mut TestAppContext) {
 #[gpui::test]
 fn logs_tab_switches_source_from_its_menu(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(None));
-  assert!(h.drawn("repo-logs-output"));
+  assert!(h.shows(gpui::Role::List, "Check logs"));
   h.click("log-source");
   h.pick("System");
-  assert!(h.drawn("system-logs-output"));
+  assert!(h.shows(gpui::Role::List, "System logs"));
   assert!(host.calls().contains(&"read system logs None".to_string()));
 }
 
 #[gpui::test]
 fn logs_tab_shows_review_history(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(Some("reviews")));
-  assert!(h.drawn("review-history-output"));
+  assert!(h.shows(gpui::Role::List, "Review history"));
   assert!(host
     .calls()
     .contains(&"read review history None".to_string()));
@@ -90,7 +92,7 @@ fn logs_tab_shows_review_history(cx: &mut TestAppContext) {
   h.pick("System");
   h.click("log-source");
   h.pick("Reviews");
-  assert!(h.drawn("review-history-output"));
+  assert!(h.shows(gpui::Role::List, "Review history"));
 }
 
 #[gpui::test]
@@ -113,8 +115,8 @@ fn logs_tab_shows_an_agent_chat(cx: &mut TestAppContext) {
     }],
   }];
   let (mut h, host) = workspace_harness(cx, host, logs_route(Some("agent-chats")));
-  assert!(h.drawn("agent-chat-output"));
-  assert!(h.drawn("agent-chat-line"));
+  assert!(h.shows(gpui::Role::List, "Agent chat"));
+  assert!(h.shows(gpui::Role::ListItem, "Why does login fail?"));
   assert!(host.calls().contains(&"read agent chat 4".to_string()));
 }
 
@@ -122,8 +124,8 @@ fn logs_tab_shows_an_agent_chat(cx: &mut TestAppContext) {
 fn logs_tab_runs_a_query_in_the_explorer(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(None));
   h.click("logs-explorer-view");
-  assert!(h.drawn("logs-sql-explorer"));
-  assert!(h.drawn("sql-editor"));
+  assert!(h.shows(gpui::Role::Button, "Run query"), "the explorer");
+  assert!(h.shows(gpui::Role::MultilineTextInput, "SQL query"));
   h.click("run-query");
   h.cx.run_until_parked();
   assert!(
@@ -134,8 +136,11 @@ fn logs_tab_runs_a_query_in_the_explorer(cx: &mut TestAppContext) {
     "{:?}",
     host.calls()
   );
-  assert!(h.drawn("sql-error"));
-  assert!(!h.drawn("send-resultset-to-agent"));
+  assert!(!h
+    .rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Alert))
+    .is_empty());
+  assert!(!h.shows(gpui::Role::Button, "Send results to agent"));
 }
 
 #[gpui::test]
@@ -150,7 +155,7 @@ fn logs_tab_sends_a_result_set_to_an_agent(cx: &mut TestAppContext) {
   h.click("logs-explorer-view");
   h.click("run-query");
   h.cx.run_until_parked();
-  assert!(h.drawn("sql-results"));
+  assert!(h.shows(gpui::Role::Table, "1 rows"));
   h.click("send-resultset-to-agent");
   h.cx.run_until_parked();
   let launches = host.launches.lock().unwrap().clone();

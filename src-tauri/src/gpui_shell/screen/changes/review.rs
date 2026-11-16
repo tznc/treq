@@ -1212,6 +1212,8 @@ impl ChangesView {
     let head_drawn = head.then(|| (self.review.head_drawn.clone(), path.to_string()));
     div()
       .id(SharedString::from(format!("diff-line-{path}-{h}-{l}")))
+      .role(gpui::Role::Row)
+      .aria_label(line.clone())
       .group("diff-line")
       .relative()
       .flex()

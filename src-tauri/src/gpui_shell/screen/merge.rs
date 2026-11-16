@@ -941,7 +941,10 @@ impl MergeView {
         .children(self.warnings().into_iter().enumerate().map(|(i, warning)| {
           let selector = format!("merge-warning-{i}");
           ui::text(div(), TextSize::Sm)
+            .id(SharedString::from(selector.clone()))
             .debug_selector(move || selector)
+            .role(gpui::Role::Alert)
+            .aria_label(warning.clone())
             .flex()
             .items_start()
             .gap_2()
@@ -956,6 +959,7 @@ impl MergeView {
               Tone::Warning.color(p),
             ))
             .child(warning)
+            .test_support()
         }))
         .child(
           div()
@@ -1291,6 +1295,7 @@ impl MergeView {
                     .child(detail),
                 )
                 .on_click(self.press(format!("merge.strategy:{}", strategy.value())))
+                .test_support()
             }),
         ),
     )

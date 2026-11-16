@@ -11,6 +11,7 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{collections::HashSet, rc::Rc, sync::Arc, time::Duration};
 
+use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, AnyElement, Context, FontWeight, Role, SharedString, Window,
@@ -1963,28 +1964,38 @@ struct Mark {
 
 impl Mark {
   /// "✓ Saved", muted, next to the label.
-  fn tick(&self, p: &Palette) -> Option<gpui::Div> {
+  fn tick(&self, p: &Palette) -> Option<gpui::AnyElement> {
     self.saved.then(|| {
       let id = format!("settings-saved-{}", self.key);
       ui::text(div(), TextSize::Sm)
+        .id(SharedString::from(id.clone()))
         .debug_selector(move || id)
+        .role(gpui::Role::Status)
+        .aria_label("Saved")
         .flex()
         .items_center()
         .gap_1()
         .text_color(p.muted_foreground)
         .child(ui::icon(theme::ICON_CHECK, 12., p.muted_foreground))
         .child("Saved")
+        .test_support()
+        .into_any_element()
     })
   }
 
   /// The save error, under the control.
-  fn error(&self, p: &Palette) -> Option<gpui::Div> {
+  fn error(&self, p: &Palette) -> Option<gpui::AnyElement> {
     self.error.clone().map(|text| {
       let id = format!("settings-error-{}", self.key);
       ui::text(div().mt_1(), TextSize::Sm)
+        .id(SharedString::from(id.clone()))
         .debug_selector(move || id)
+        .role(gpui::Role::Alert)
+        .aria_label(text.clone())
         .text_color(ui::Tone::Danger.text(p))
         .child(text)
+        .test_support()
+        .into_any_element()
     })
   }
 }
@@ -2776,8 +2787,12 @@ impl SettingsView {
       .debug_selector(|| "settings-repo-name".into())
       .child(
         ui::text(div(), TextSize::Xl)
+          .id("settings-repo-name")
+          .role(gpui::Role::Heading)
+          .aria_label(repo.name.clone())
           .font_weight(FontWeight::SEMIBOLD)
-          .child(repo.name.clone()),
+          .child(repo.name.clone())
+          .test_support(),
       )
       .child(
         ui::text(div().mt_1(), TextSize::Sm)
@@ -3117,7 +3132,7 @@ impl SettingsView {
           )))
           .child(
             Button::new(format!("skill-uninstall-{id}"), p)
-              .aria_label("Uninstall")
+              .aria_label(format!("Uninstall {}", row.name))
               .variant(Variant::DestructiveOutline)
               .size(Size::IconSm)
               .disabled(row.busy)
@@ -3325,6 +3340,7 @@ pub(super) fn install_button(row: &SkillRow, p: &Palette) -> Button {
     .variant(Variant::Default)
     .size(Size::Sm)
     .disabled(row.busy)
+    .aria_label(format!("Install {}…", row.name))
     .label("Install…")
 }
 
