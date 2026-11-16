@@ -1665,9 +1665,6 @@ impl Render for Lightbox {
     let vw = f32::from(viewport.width);
     div()
       .id("treq-send-preview-lightbox")
-      .role(gpui::Role::Dialog)
-      .aria_label("Attachment preview")
-      .test_support()
       .debug_selector(|| "treq-send-preview-lightbox".into())
       .role(gpui::Role::Dialog)
       .aria_label("Preview")

@@ -1278,14 +1278,14 @@ fn terminal_shows_its_send_attachments_and_dismisses_them(cx: &mut TestAppContex
   }));
   assert!(host.calls().contains(&"dismiss asset t1".to_string()));
   assert!(!h.shows(gpui::Role::Button, "Open notes.txt"));
-  assert!(!h.shows(gpui::Role::Dialog, "Attachment preview"));
+  assert!(!h.shows(gpui::Role::Dialog, "Preview"));
 }
 
 #[gpui::test]
 fn lightbox_sends_line_comments_on_a_text_attachment(cx: &mut TestAppContext) {
   let (mut h, host) = send_harness(cx);
   h.click("terminal-send-preview-t1");
-  assert!(h.shows(gpui::Role::Dialog, "Attachment preview"));
+  assert!(h.shows(gpui::Role::Dialog, "Preview"));
   assert!(host
     .calls()
     .contains(&"read asset /tmp/notes.txt".to_string()));
@@ -1313,7 +1313,7 @@ fn lightbox_sends_line_comments_on_a_text_attachment(cx: &mut TestAppContext) {
   // Sent: nothing is left to lose on close.
   assert!(!h.shows(gpui::Role::Group, "Comment on line 2"));
   h.click("treq-send-close");
-  assert!(!h.shows(gpui::Role::Dialog, "Attachment preview"));
+  assert!(!h.shows(gpui::Role::Dialog, "Preview"));
 }
 
 #[gpui::test]
@@ -1321,7 +1321,7 @@ fn lightbox_asks_before_dropping_unsent_comments(cx: &mut TestAppContext) {
   let (mut h, _) = send_harness(cx);
   h.click("terminal-send-preview-t1");
   h.click("treq-send-close");
-  assert!(!h.shows(gpui::Role::Dialog, "Attachment preview"));
+  assert!(!h.shows(gpui::Role::Dialog, "Preview"));
   h.click("terminal-send-preview-t1");
   h.click("treq-send-review-input");
   h.cx.simulate_input("hmm");
@@ -1329,10 +1329,10 @@ fn lightbox_asks_before_dropping_unsent_comments(cx: &mut TestAppContext) {
   assert!(h.shows(gpui::Role::Dialog, "Discard unsent comments?"));
   h.click("treq-send-unsaved-keep");
   assert!(!h.shows(gpui::Role::Dialog, "Discard unsent comments?"));
-  assert!(h.shows(gpui::Role::Dialog, "Attachment preview"));
+  assert!(h.shows(gpui::Role::Dialog, "Preview"));
   h.click("treq-send-close");
   h.click("treq-send-unsaved-discard");
-  assert!(!h.shows(gpui::Role::Dialog, "Attachment preview"));
+  assert!(!h.shows(gpui::Role::Dialog, "Preview"));
 }
 
 /// The e2e suite finds a `treq send` thumbnail and its lightbox by role.
@@ -1341,12 +1341,9 @@ fn send_thumbnail_and_lightbox_are_accessible(cx: &mut TestAppContext) {
   use gpui_testing_library::prelude::*;
   let (mut h, _) = send_harness(cx);
   let screen = a11y_screen(&mut h);
-  let previews = screen.query_all_by_role(by::role(gpui::Role::Button).name("Open preview"));
-  assert_eq!(
-    previews.len(),
-    2,
-    "text and image; browser previews are the panel's"
-  );
+  for name in ["Open notes.txt", "Open shot.png"] {
+    expect(screen.get_by_role(by::role(gpui::Role::Button).name(name))).to_be_visible();
+  }
   h.click("terminal-send-preview-t1");
   let screen = a11y_screen(&mut h);
   expect(screen.get_by_role(by::role(gpui::Role::Dialog).name("Preview"))).to_be_visible();
@@ -1590,12 +1587,12 @@ fn lightbox_unsent_comments_dialog_keeps_on_escape_and_discards_on_enter(cx: &mu
   assert!(h.shows(gpui::Role::Dialog, "Discard unsent comments?"));
   h.cx.simulate_keystrokes("escape");
   assert!(!h.shows(gpui::Role::Dialog, "Discard unsent comments?"));
-  assert!(h.shows(gpui::Role::Dialog, "Attachment preview"));
+  assert!(h.shows(gpui::Role::Dialog, "Preview"));
   h.click("treq-send-close");
   assert!(h.shows(gpui::Role::Dialog, "Discard unsent comments?"));
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
-  assert!(!h.shows(gpui::Role::Dialog, "Attachment preview"));
+  assert!(!h.shows(gpui::Role::Dialog, "Preview"));
 }
 
 #[gpui::test]
