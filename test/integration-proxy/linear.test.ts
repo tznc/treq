@@ -5,7 +5,7 @@ import {
   RECONNECT_MESSAGE,
   type ProxyDeps,
   type StoredToken,
-} from "../../supabase/functions/linear-proxy/lib.ts";
+} from "../../supabase/functions/integration-proxy/linear.ts";
 
 const NOW = Date.parse("2026-09-28T12:00:00Z");
 const QUERY = { query: "query { viewer { id } }" };
