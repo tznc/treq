@@ -326,8 +326,9 @@ fn gh_shape(mut node: Value) -> Value {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::github::{GhListPage, GhPullRequest};
   use serde_json::json;
-  use wiremock::matchers::{header, method, path};
+  use wiremock::matchers::{body_partial_json, body_string_contains, header, method, path};
   use wiremock::{Mock, MockServer, ResponseTemplate};
 
   async fn start() -> (MockServer, GithubHttp) {
