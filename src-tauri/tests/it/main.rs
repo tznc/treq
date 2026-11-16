@@ -63,6 +63,7 @@ mod core_workspaces_workspace_diff_test;
 mod file_indexer_test;
 mod fork_upstream_test;
 mod jj_bookmark_track_test;
+mod jj_concurrent_snapshot_test;
 mod jj_home_git_head_sync_test;
 mod jj_home_repo_target_test;
 mod jj_import_git_refs_test;

@@ -400,6 +400,21 @@ fn snapshot_fresh_working_copy(
   Ok(())
 }
 
+/// Moves `repo` to the operation head under the repo's op lock, so a
+/// snapshot commits on top of a sibling workspace's concurrent op instead of
+/// forking the shared operation log. Keeps `repo` when the head moved this
+/// workspace's working-copy commit (the caller's snapshot would be stale).
+fn reload_for_snapshot(
+  repo: &Arc<ReadonlyRepo>,
+  workspace_name: &jj_lib::ref_name::WorkspaceName,
+  wc_commit: &Commit,
+) -> Arc<ReadonlyRepo> {
+  match block_on(repo.loader().load_at_head()) {
+    Ok(head) if head.view().get_wc_commit_id(workspace_name) == Some(wc_commit.id()) => head,
+    _ => repo.clone(),
+  }
+}
+
 /// Snapshots a fresh, locked working copy into `wc_commit`, finishes the
 /// lock and returns the snapshotted tree. `repo` moves to the snapshot
 /// operation when the tree changed.
@@ -415,6 +430,9 @@ fn snapshot_locked_working_copy(
   let (new_tree, _) = block_on(locked_ws.locked_wc().snapshot(&opts))
     .map_err(|e| JjError::IoError(format!("Failed to snapshot working copy: {e}")))?;
   if new_tree.tree_ids() != wc_commit.tree_ids() {
+    let op_lock = remote::repo_op_lock(ignore_root);
+    let _op_guard = op_lock.lock().unwrap_or_else(|p| p.into_inner());
+    *repo = reload_for_snapshot(repo, &workspace_name, wc_commit);
     let mut tx = repo.start_transaction();
     let rewritten = block_on(
       tx.repo_mut()
@@ -789,6 +807,9 @@ fn snapshot_loaded_working_copy_inner(
     .map_err(|e| JjError::IoError(format!("Failed to snapshot working copy: {e}")))?;
 
   if new_tree.tree_ids_and_labels() != wc_commit.tree().tree_ids_and_labels() {
+    let op_lock = remote::repo_op_lock(workspace_path);
+    let _op_guard = op_lock.lock().unwrap_or_else(|p| p.into_inner());
+    loaded.repo = reload_for_snapshot(&loaded.repo, &workspace_name, &wc_commit);
     let mut tx = loaded.repo.start_transaction();
     let rewritten = block_on(
       tx.repo_mut()
