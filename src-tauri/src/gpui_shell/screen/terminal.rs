@@ -99,6 +99,7 @@ pub struct Pending {
   pub permission_mode: Option<String>,
   pub agent: Option<String>,
   pub workspace_path: Option<String>,
+  pub profile: Option<String>,
 }
 
 impl Pending {
@@ -108,6 +109,7 @@ impl Pending {
       permission_mode: self.permission_mode.clone(),
       agent: self.agent.clone(),
       workspace_path: self.workspace_path.clone(),
+      profile: self.profile.clone(),
     }
   }
 }
@@ -4382,6 +4384,12 @@ fn agent_session(
       session_id: session.id,
       pending_prompt: pending.and_then(|p| p.pending_prompt.clone()),
       permission_mode: pending.and_then(|p| p.permission_mode.clone()),
+      profile: agent_profile(
+        host,
+        &repo,
+        &agent,
+        pending.and_then(|p| p.profile.as_deref()),
+      ),
     };
     let kind = Kind::Agent {
       pane_id,
@@ -4427,6 +4435,24 @@ fn default_agent(host: &dyn terminal_data::TerminalHost, repo: &str) -> String {
   read(host.repo_settings(repo, &key))
     .or_else(|| read(host.settings(&key)))
     .unwrap_or_else(|| "claude".into())
+}
+
+/// The session's account profile: the chosen one, else the defaults.
+fn agent_profile(
+  host: &dyn terminal_data::TerminalHost,
+  repo: &str,
+  agent: &str,
+  chosen: Option<&str>,
+) -> Option<crate::core::agent_profiles::AgentProfile> {
+  let read = |v: Result<super::settings_data::Values, String>, key: &str| {
+    v.ok().and_then(|v| v.get(key).cloned().flatten())
+  };
+  crate::core::agent_profiles::session_profile(
+    |key| read(host.settings(&[key.to_string()]), key),
+    |key| read(host.repo_settings(repo, &[key.to_string()]), key),
+    agent,
+    chosen,
+  )
 }
 
 /// The emulator's name for a mouse button xterm reports.

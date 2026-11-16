@@ -1335,6 +1335,9 @@ impl terminal_data::TerminalHost for FakeHost {
       "prepare {} {:?}",
       start.agent, start.pending_prompt
     ));
+    if let Some(p) = &start.profile {
+      self.record(format!("prepare profile {} {}", p.agent, p.name));
+    }
     Ok(terminal_data::Prepared {
       command: format!("{} --start", start.agent),
       skill_write_warning: None,
