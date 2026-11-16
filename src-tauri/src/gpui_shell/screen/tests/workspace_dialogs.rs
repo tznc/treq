@@ -421,12 +421,12 @@ fn pause(h: &mut Harness) {
 #[gpui::test]
 fn the_dialog_opens_over_the_screen_and_closes_through_react(cx: &mut TestAppContext) {
   let mut h = Harness::with_host(cx, dialog(serde_json::json!({})), Arc::new(host()));
-  assert!(h.drawn("workspace-dialog"));
-  assert!(h.drawn("new-workspace-stack-card"));
+  assert!(h.shows(gpui::Role::Dialog, "Stack a new workspace"));
+  assert!(h.shows(gpui::Role::Group, "New workspace stack"));
   // A plain create has no move section.
-  assert!(!h.drawn("workspace-dialog-move-section"));
+  assert!(!h.shows(gpui::Role::Button, "Move to workspace"));
   h.click("workspace-dialog-close");
-  assert!(!h.drawn("workspace-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Stack a new workspace"));
   assert_eq!(h.sent(), vec![press("workspaceDialog.close")]);
 }
 
@@ -475,7 +475,7 @@ fn the_title_names_the_branch_and_creates(cx: &mut TestAppContext) {
   h.click("workspace-dialog-submit");
   h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![field("workspaceDialog.created", 100.into())]);
-  assert!(!h.drawn("workspace-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Stack a new workspace"));
   assert_eq!(
     changes(&host),
     [
@@ -496,7 +496,10 @@ fn a_taken_branch_cannot_be_created(cx: &mut TestAppContext) {
     dialog(serde_json::json!({ "branchName": "treq/login" })),
     host,
   );
-  assert!(h.drawn("branch-name-error"));
+  assert!(h.shows(
+    gpui::Role::Status,
+    "A workspace for treq/login already exists"
+  ));
   let view = dialog_view(&mut h);
   assert!(!h.cx.read(|cx| view.read(cx).can_submit()));
 
@@ -512,7 +515,7 @@ fn a_taken_branch_cannot_be_created(cx: &mut TestAppContext) {
     )
   });
   pause(&mut h);
-  assert!(h.drawn("branch-exists-local"));
+  assert!(h.shows(gpui::Role::Status, "Branch already exists locally"));
 }
 
 #[gpui::test]
@@ -523,10 +526,10 @@ fn the_branch_picker_sets_the_target(cx: &mut TestAppContext) {
   });
   let mut h = Harness::with_host(cx, dialog(serde_json::json!({})), host.clone());
   h.click("workspace-dialog-target");
-  assert!(h.drawn("branch-picker"));
+  assert!(h.shows(gpui::Role::TextInput, "Search branches…"));
   h.cx.simulate_input("rel");
   h.cx.simulate_keystrokes("enter");
-  assert!(!h.drawn("branch-picker"));
+  assert!(!h.shows(gpui::Role::TextInput, "Search branches…"));
   let view = dialog_view(&mut h);
   assert_eq!(
     h.cx.read(|cx| view.read(cx).target_branch.clone()),
@@ -565,8 +568,8 @@ fn moves_a_picked_commit_to_a_new_workspace(cx: &mut TestAppContext) {
     host.clone(),
   );
   // Opened to move something, so the move section shows it.
-  assert!(h.drawn("dialog-commit-0"));
-  assert!(h.drawn("workspace-dialog-stacking-on"));
+  assert!(h.shows(gpui::Role::CheckBox, "Fix login"));
+  assert!(h.shows(gpui::Role::Label, "Stacking on treq/login"));
   let view = dialog_view(&mut h);
   assert_eq!(h.cx.read(|cx| view.read(cx).submit_label()), "Split 1 item");
   h.click("dialog-commit-1");
@@ -625,10 +628,13 @@ fn moves_picked_hunks_to_an_existing_workspace(cx: &mut TestAppContext) {
     host.clone(),
   );
   h.click("move-to-existing");
-  assert!(h.drawn("target-workspace"));
-  assert!(!h.drawn("new-workspace-stack-card"));
+  assert!(h
+    .rendered()
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::ComboBox))
+    .is_some());
+  assert!(!h.shows(gpui::Role::Group, "New workspace stack"));
   h.click("dialog-file-path-0");
-  assert!(h.drawn("dialog-hunk-0-1"));
+  assert!(h.shows(gpui::Role::CheckBox, "@@ -9 +9 @@"));
   h.click("dialog-hunk-0-1");
   let view = dialog_view(&mut h);
   h.cx.read(|cx| {
@@ -665,12 +671,15 @@ fn renames_once_the_dry_run_passes(cx: &mut TestAppContext) {
     ..host()
   });
   let mut h = Harness::with_host(cx, rename(), host.clone());
-  assert!(h.drawn("rename-workspace-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Rename workspace"));
   // The input starts focused with the branch selected at its end.
   h.cx.simulate_keystrokes("secondary-a backspace");
   h.cx.simulate_input("taken");
   pause(&mut h);
-  assert!(h.drawn("rename-invalid"));
+  assert!(h
+    .rendered()
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Alert))
+    .is_some());
   h.click("rename-submit");
   assert!(!host.calls().iter().any(|c| c == "rename 7 -> taken"));
 
@@ -678,10 +687,13 @@ fn renames_once_the_dry_run_passes(cx: &mut TestAppContext) {
   h.cx.simulate_keystrokes("secondary-a backspace");
   h.cx.simulate_input("treq/signin");
   pause(&mut h);
-  assert!(!h.drawn("rename-invalid"));
+  assert!(h
+    .rendered()
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Alert))
+    .is_none());
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
-  assert!(!h.drawn("rename-workspace-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Rename workspace"));
   assert_eq!(h.sent(), vec![press("renameWorkspace.close")]);
   assert_eq!(
     changes(&host),
@@ -716,6 +728,15 @@ fn deletion(current: Option<i64>) -> ScreenSnapshot {
   }))
 }
 
+/// The workspaces the deletion list offers, top to bottom.
+fn deletable(h: &mut Harness) -> Vec<String> {
+  h.rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::ListBoxOption))
+    .iter()
+    .filter_map(|option| option.name())
+    .collect()
+}
+
 #[gpui::test]
 fn deletion_lists_what_can_be_deleted(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost {
@@ -723,19 +744,18 @@ fn deletion_lists_what_can_be_deleted(cx: &mut TestAppContext) {
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, deletion(Some(7)), host.clone());
-  assert!(h.drawn("workspace-deletion"));
+  assert!(h.shows(gpui::Role::TextInput, "Search workspaces to delete…"));
   // The current workspace's default row, then every workspace but home.
-  assert!(h.drawn("workspace-deletion-item-2"));
-  assert!(!h.drawn("workspace-deletion-item-3"));
-  assert!(!h.drawn("workspace-deletion-home"));
+  assert_eq!(deletable(&mut h).len(), 3);
+  assert!(!h.shows(gpui::Role::Status, "Home repository cannot be deleted"));
   // Enter deletes the highlighted row: the current workspace's own.
   h.cx.simulate_keystrokes("down enter");
   h.cx.run_until_parked();
   // GPUI deletes it itself, closing the dialog first as `handleDelete` does.
   assert_eq!(h.sent(), vec![press("workspaceDeletion.close")]);
-  assert!(!h.drawn("workspace-deletion"));
+  assert!(!h.shows(gpui::Role::TextInput, "Search workspaces to delete…"));
   // Then asks, and Enter confirms.
-  assert!(h.drawn("confirm"));
+  assert!(h.shows(gpui::Role::Dialog, "Delete treq/signup?"));
   assert!(!host.calls().iter().any(|c| c.starts_with("delete")));
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
@@ -772,8 +792,7 @@ fn deletion_of_a_remote_workspace_goes_to_react(cx: &mut TestAppContext) {
 fn deletion_searches_and_closes(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, deletion(None));
   h.cx.simulate_input("signup");
-  assert!(h.drawn("workspace-deletion-item-0"));
-  assert!(!h.drawn("workspace-deletion-item-1"));
+  assert_eq!(deletable(&mut h), ["treq/signup"]);
   h.cx.simulate_keystrokes("escape");
   assert_eq!(h.sent(), vec![press("workspaceDeletion.close")]);
 }
@@ -789,7 +808,7 @@ fn deletion_says_home_cannot_be_deleted(cx: &mut TestAppContext) {
       "currentWorkspace": null,
     })),
   );
-  assert!(h.drawn("workspace-deletion-home"));
+  assert!(h.shows(gpui::Role::Status, "Home repository cannot be deleted"));
 }
 
 fn change_move() -> ScreenSnapshot {
@@ -820,7 +839,7 @@ fn the_move_confirmation_counts_the_files() {
 fn confirms_and_moves_dropped_files(cx: &mut TestAppContext) {
   let host = Arc::new(host());
   let mut h = Harness::with_host(cx, change_move(), host.clone());
-  assert!(h.drawn("change-move-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Move 2 files to signup?"));
   h.click("change-move-confirm");
   h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![press("changeMove.done")]);
@@ -842,7 +861,7 @@ fn a_failed_move_keeps_the_confirmation_open(cx: &mut TestAppContext) {
   let mut h = Harness::with_host(cx, change_move(), host.clone());
   h.click("change-move-confirm");
   h.cx.run_until_parked();
-  assert!(h.drawn("change-move-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Move 2 files to signup?"));
   assert!(h.sent().is_empty());
   assert_eq!(
     changes(&host).last().map(String::as_str),
@@ -864,7 +883,7 @@ fn the_dialog_closes_on_escape_and_creates_on_enter(cx: &mut TestAppContext) {
   assert_eq!(h.sent(), vec![field("workspaceDialog.created", 100.into())]);
 
   let mut h = Harness::with_host(cx, dialog(serde_json::json!({})), host);
-  assert!(h.drawn("workspace-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Stack a new workspace"));
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![press("workspaceDialog.close")]);
@@ -873,7 +892,7 @@ fn the_dialog_closes_on_escape_and_creates_on_enter(cx: &mut TestAppContext) {
 #[gpui::test]
 fn rename_closes_on_escape(cx: &mut TestAppContext) {
   let mut h = Harness::with_host(cx, rename(), Arc::new(host()));
-  assert!(h.drawn("rename-workspace-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Rename workspace"));
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![press("renameWorkspace.close")]);
@@ -883,13 +902,13 @@ fn rename_closes_on_escape(cx: &mut TestAppContext) {
 fn the_move_confirmation_cancels_on_escape_and_moves_on_enter(cx: &mut TestAppContext) {
   let host = Arc::new(host());
   let mut h = Harness::with_host(cx, change_move(), host.clone());
-  assert!(h.drawn("change-move-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Move 2 files to signup?"));
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![press("changeMove.done")]);
 
   let mut h = Harness::with_host(cx, change_move(), host);
-  assert!(h.drawn("change-move-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Move 2 files to signup?"));
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![press("changeMove.cancel")]);

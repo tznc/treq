@@ -204,22 +204,37 @@ fn event(h: &mut Harness) -> Event {
 #[gpui::test]
 fn pr_review_draws_the_pr_and_its_diff(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, pr_host(), pr_route());
-  for selector in [
-    "pr-review-page",
-    "pr-review-title",
-    "pr-review-subtitle",
-    "pr-file-a.rs",
-    "pr-file-b.rs",
-    "file-card-a.rs",
-    "file-card-b.rs",
-    "pr-review-ai-review",
-    "pr-review-finish",
+  for (role, name) in [
+    (gpui::Role::Main, "Pull request review"),
+    (gpui::Role::Heading, "Fix login #5"),
+    (
+      gpui::Role::Label,
+      "octo wants to merge fix/login into main · 2 files",
+    ),
+    (gpui::Role::Button, "a.rs"),
+    (gpui::Role::Button, "b.rs"),
+    (gpui::Role::Heading, "a.rs"),
+    (gpui::Role::Heading, "b.rs"),
+    (gpui::Role::Button, "AI review"),
+    (gpui::Role::Button, "Finish review"),
   ] {
-    assert!(h.drawn(selector), "{selector}");
+    assert!(h.shows(role, name), "{role:?} {name}");
   }
   // Read-only: no file comments, no file menu, no commit sidebar.
-  assert!(!h.drawn("add-file-comment-button"));
-  assert!(!h.drawn("file-row-a.rs"));
+  assert!(h
+    .rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(gpui_testing_library::TextMatch::regex("^Add file comment"))
+    )
+    .is_none());
+  assert_eq!(
+    h.rendered()
+      .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("a.rs"))
+      .len(),
+    1,
+    "only the PR's file list names a.rs"
+  );
   let calls = host.calls();
   for call in [
     "read pr o/r 5",
@@ -238,8 +253,8 @@ fn pr_review_stays_empty_without_a_github_remote(cx: &mut TestAppContext) {
     ..pr_host()
   };
   let (mut h, host) = workspace_harness(cx, host, pr_route());
-  assert!(h.drawn("pr-review-page"));
-  assert!(!h.drawn("pr-review-title"));
+  assert!(h.shows(gpui::Role::Main, "Pull request review"));
+  assert!(!h.shows(gpui::Role::Heading, "Fix login #5"));
   assert!(!host.calls().iter().any(|c| c.starts_with("read pr diff")));
 }
 
@@ -250,8 +265,8 @@ fn pr_review_shows_why_the_diff_failed(cx: &mut TestAppContext) {
     ..pr_host()
   };
   let (mut h, _) = workspace_harness(cx, host, pr_route());
-  assert!(h.drawn("pr-diff-error"));
-  assert!(!h.drawn("file-card-a.rs"));
+  assert!(h.shows(gpui::Role::Alert, "Failed to load the PR diff: HTTP 404"));
+  assert!(!h.shows(gpui::Role::Heading, "a.rs"));
 }
 
 #[gpui::test]
@@ -265,7 +280,7 @@ fn pr_review_keeps_a_line_comment_as_a_draft(cx: &mut TestAppContext) {
     "{:?}",
     host.writes()
   );
-  assert!(h.drawn("inline-comment-card"));
+  assert!(h.shows(gpui::Role::Button, "Edit comment"));
   assert_eq!(counts(&mut h), (1, 0));
   // No pending review is kept for a PR.
   assert!(!host.writes().iter().any(|w| w.starts_with("save review")));
@@ -293,7 +308,7 @@ fn pr_review_edits_and_deletes_a_draft(cx: &mut TestAppContext) {
   assert!(host
     .writes()
     .contains(&"delete agent comment d1".to_string()));
-  assert!(!h.drawn("inline-comment-card"));
+  assert!(!h.shows(gpui::Role::Button, "Edit comment"));
 }
 
 #[gpui::test]
@@ -301,8 +316,8 @@ fn pr_review_lists_outdated_drafts_apart(cx: &mut TestAppContext) {
   let host = pr_host();
   *host.agent.lock().unwrap() = vec![draft_row("d1", 2, Some("deadbeef"))];
   let (mut h, _) = workspace_harness(cx, host, pr_route());
-  assert!(h.drawn("outdated-comments"));
-  assert!(!h.drawn("inline-comment-card"));
+  assert!(h.shows(gpui::Role::Group, "Outdated comments"));
+  assert!(!h.shows(gpui::Role::Button, "Edit comment"));
   assert_eq!(counts(&mut h), (0, 1));
 }
 
@@ -313,16 +328,16 @@ fn pr_review_tags_the_agents_suggestion_as_a_bot(cx: &mut TestAppContext) {
   row.suggested_replacement = Some("bb".into());
   *host.agent.lock().unwrap() = vec![row];
   let (mut h, _) = workspace_harness(cx, host, pr_route());
-  assert!(h.drawn("agent-review-suggestion"));
-  assert!(h.drawn("agent-comment-tag"));
+  assert!(h.shows(gpui::Role::Heading, "Suggested change"));
+  assert!(h.shows(gpui::Role::Label, "Agent"));
 }
 
 #[gpui::test]
 fn pr_review_does_not_tag_the_users_draft_as_a_bot(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, pr_host(), pr_route());
   comment_line(&mut h, "Nit");
-  assert!(h.drawn("inline-comment-card"));
-  assert!(!h.drawn("agent-comment-tag"));
+  assert!(h.shows(gpui::Role::Button, "Edit comment"));
+  assert!(!h.shows(gpui::Role::Label, "Agent"));
 }
 
 #[gpui::test]
@@ -331,7 +346,7 @@ fn pr_review_submits_the_drafts_to_github(cx: &mut TestAppContext) {
   *host.agent.lock().unwrap() = vec![draft_row("d1", 2, None)];
   let (mut h, host) = workspace_harness(cx, host, pr_route());
   h.click("pr-review-finish");
-  assert!(h.drawn("pr-review-popover"));
+  assert!(h.shows(gpui::Role::Button, "Submit review"));
   h.click("pr-review-event-APPROVE");
   h.click("pr-review-submit");
   h.cx.run_until_parked();
@@ -345,7 +360,7 @@ fn pr_review_submits_the_drafts_to_github(cx: &mut TestAppContext) {
     writes.contains(&"notify toast Review submitted".to_string()),
     "{writes:?}"
   );
-  assert!(!h.drawn("pr-review-popover"));
+  assert!(!h.shows(gpui::Role::Button, "Submit review"));
   assert_eq!(event(&mut h), Event::Comment);
   assert_eq!(counts(&mut h), (0, 0));
   assert!(h.sent().contains(&press("prReview.submitted")));
@@ -383,7 +398,7 @@ fn pr_review_keeps_the_review_when_submitting_fails(cx: &mut TestAppContext) {
     .writes()
     .contains(&"notify toast Failed to submit review".to_string()));
   assert!(!h.sent().contains(&press("prReview.submitted")));
-  assert!(h.drawn("pr-review-popover"));
+  assert!(h.shows(gpui::Role::Button, "Submit review"));
   assert_eq!(event(&mut h), Event::Approve);
   h.click("pr-review-submit");
   h.cx.run_until_parked();
@@ -449,12 +464,12 @@ fn pr_review_replies_to_a_thread(cx: &mut TestAppContext) {
   host.threads = vec![gh_thread("t1", 2, false)];
   let (mut h, host) = workspace_harness(cx, host, pr_route());
   h.click("github-thread-reply");
-  assert!(h.drawn("github-thread-reply-box"));
+  assert!(h.shows(gpui::Role::MultilineTextInput, "Reply on GitHub…"));
   h.cx.simulate_input("Done");
   h.click("github-thread-reply-send");
   h.cx.run_until_parked();
   assert!(host.writes().contains(&"reply t1 Done".to_string()));
-  assert!(!h.drawn("github-thread-reply-box"));
+  assert!(!h.shows(gpui::Role::MultilineTextInput, "Reply on GitHub…"));
 }
 
 #[gpui::test]
@@ -463,7 +478,7 @@ fn pr_review_marks_files_viewed_without_the_backend(cx: &mut TestAppContext) {
   h.click("viewed-a.rs");
   h.cx.run_until_parked();
   assert!(!host.writes().iter().any(|w| w.starts_with("mark viewed")));
-  assert!(!h.drawn("gutter-a.rs-0-1"));
+  assert!(!h.shows(gpui::Role::Row, "+b"));
 }
 
 #[gpui::test]
@@ -471,7 +486,7 @@ fn pr_review_file_list_scrolls_to_the_file(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, pr_host(), pr_route());
   h.click("pr-file-b.rs");
   h.cx.run_until_parked();
-  assert!(h.drawn("file-card-b.rs"));
+  assert!(h.shows(gpui::Role::Heading, "b.rs"));
 }
 
 /// The finish popover's verdicts are radio buttons named by their label,
@@ -511,11 +526,14 @@ fn pr_review_file_list_counts_each_files_comments(cx: &mut TestAppContext) {
   host.threads = vec![gh_thread("t1", 2, false)];
   *host.agent.lock().unwrap() = vec![draft_row("d1", 3, None)];
   let (mut h, _) = workspace_harness(cx, host, pr_route());
-  assert!(h.drawn("pr-file-comments-a.rs"));
-  assert!(!h.drawn("pr-file-comments-b.rs"));
-  let window = h.cx.update(|window, _| window.window_handle());
-  let screen = gpui_testing_library::Screen::new(&h.cx, window);
-  screen.redraw();
+  let screen = h.rendered();
+  let count = |file: &str| {
+    within(&screen.get_by_role(by::role(Role::Button).name(file)))
+      .query_by_role(by::role(Role::Label))
+      .and_then(|label| label.name())
+  };
+  assert_eq!(count("a.rs").as_deref(), Some("2 review comments"));
+  assert_eq!(count("b.rs"), None);
   expect(screen.get_by_role(by::role(Role::Label).name("2 review comments"))).to_be_visible();
 }
 
@@ -562,6 +580,7 @@ fn pr_review_expands_all_lines_above_a_hunk(cx: &mut TestAppContext) {
     ..pr_host()
   };
   let (mut h, host) = workspace_harness(cx, host, pr_route());
+  assert!(h.shows(gpui::Role::Button, "Expand all (9 lines)"));
   h.click("expand-all-above-a.rs-0");
   h.cx.run_until_parked();
   assert!(
@@ -571,5 +590,5 @@ fn pr_review_expands_all_lines_above_a_hunk(cx: &mut TestAppContext) {
     "{:?}",
     host.calls()
   );
-  assert!(!h.drawn("expand-all-above-a.rs-0"));
+  assert!(!h.shows(gpui::Role::Button, "Expand all (9 lines)"));
 }

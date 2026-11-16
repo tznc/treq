@@ -5,6 +5,7 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, ClipboardItem, Context, Div, FontWeight, SharedString,
 };
@@ -173,11 +174,14 @@ impl Popover {
           ui::text(div(), TextSize::Sm)
             .id("details-prompt")
             .debug_selector(|| "details-prompt".into())
+            .role(gpui::Role::Paragraph)
+            .aria_label(prompt.text.clone())
             .mt_1()
             .max_h(zpx(160.))
             .overflow_y_scroll()
             .text_color(p.muted_foreground)
-            .child(SharedString::from(prompt.text.clone())),
+            .child(SharedString::from(prompt.text.clone()))
+            .test_support(),
         )
         .child(
           // Short label (['link label']): 11px is fine.
@@ -192,7 +196,8 @@ impl Popover {
             .text_color(theme::palette(self.dark).primary)
             .hover(|s| s.underline())
             .child("View full prompt")
-            .on_click(cx.listener(|this, _, _, cx| this.view_full_prompt(cx))),
+            .on_click(cx.listener(|this, _, _, cx| this.view_full_prompt(cx)))
+            .test_support(),
         ),
       None => div().child(
         ui::EmptyState::new("details-no-prompt", "No prompt recorded", &p)

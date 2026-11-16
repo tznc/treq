@@ -7,6 +7,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{ops::Range, time::Duration};
 
 use super::*;
@@ -1523,13 +1524,17 @@ impl ChangesView {
   }
 
   /// The bot tag on a draft the review agent wrote, as its local cards have.
-  fn agent_tag(&self, id: &str, p: &Palette) -> Option<Div> {
+  fn agent_tag(&self, id: &str, p: &Palette) -> Option<impl IntoElement> {
     let by_agent = self.review.comments.iter().any(|c| {
       c.id == id && c.source.as_deref() == Some(crate::review_aggregate::SOURCE_LOCAL_AGENT)
     });
     by_agent.then(|| {
       div()
+        .id("agent-comment-tag")
         .debug_selector(|| "agent-comment-tag".into())
+        .role(gpui::Role::Label)
+        .aria_label("Agent")
+        .test_support()
         .flex()
         .items_center()
         .gap_1p5()
@@ -1890,7 +1895,11 @@ impl ChangesView {
     }
     let tone = Tone::Warning;
     let mut section = div()
+      .id("outdated-comments")
       .debug_selector(|| "outdated-comments".into())
+      .role(gpui::Role::Group)
+      .aria_label("Outdated comments")
+      .test_support()
       .border_b_1()
       .border_color(tone.border(p))
       .bg(tone.tint(p))
