@@ -680,7 +680,8 @@ impl WindowHost for Backend {
         Ok(events) => {
           let mut changed = false;
           for path in events.iter().flat_map(|e| e.paths.iter()) {
-            let op = ops.as_deref().is_some_and(|ops| path.starts_with(ops));
+            let op = ops.as_deref().is_some_and(|ops| path.starts_with(ops))
+              || path.ends_with(".git/HEAD");
             if !changes_matter(path, ops.as_deref()) || !op && gitignore.ignores(path) {
               continue;
             }
@@ -720,6 +721,16 @@ impl WindowHost for Backend {
         .watch(&ops, notify::RecursiveMode::NonRecursive)
       {
         log::warn!("Failed to watch {}: {err}", ops.display());
+      }
+    }
+    // `.git/HEAD` moves on a `git checkout` that bypasses jj.
+    let git_dir = Path::new(path).join(".git");
+    if git_dir.is_dir() {
+      if let Err(err) = checkout
+        .debouncer
+        .watch(&git_dir, notify::RecursiveMode::NonRecursive)
+      {
+        log::warn!("Failed to watch {}: {err}", git_dir.display());
       }
     }
     if checkout.watched.is_empty() {
@@ -986,7 +997,7 @@ fn op_heads_dir(checkout: &Path) -> Option<PathBuf> {
 /// Whether a write under the watch is one to read again for: a new jj
 /// operation, or a file nobody ignores.
 fn changes_matter(path: &Path, ops: Option<&Path>) -> bool {
-  ops.is_some_and(|ops| path.starts_with(ops)) || !is_ignored(path)
+  ops.is_some_and(|ops| path.starts_with(ops)) || path.ends_with(".git/HEAD") || !is_ignored(path)
 }
 
 /// Writes nobody reviews: jj's and git's own state (jj writes `.jj` on
@@ -1159,6 +1170,14 @@ mod watch_tests {
     ));
     assert!(changes_matter(&workspace.join("src.rs"), Some(&heads)));
     assert_eq!(op_heads_dir(tempfile::tempdir().unwrap().path()), None);
+  }
+
+  /// A `git checkout` outside treq writes only `.git/HEAD`.
+  #[test]
+  fn a_git_checkout_counts_as_a_change() {
+    let repo = Path::new("/repo");
+    assert!(changes_matter(&repo.join(".git/HEAD"), None));
+    assert!(!changes_matter(&repo.join(".git/index"), None));
   }
 
   #[test]
