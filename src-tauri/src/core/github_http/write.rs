@@ -102,7 +102,6 @@ async fn node_id(gh: &GithubHttp, path: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::github::GhDraftReviewComment;
   use serde_json::json;
   use wiremock::matchers::{body_json, body_partial_json, body_string_contains, method, path};
   use wiremock::{Mock, MockServer, ResponseTemplate};
