@@ -464,3 +464,47 @@ fn rebase_reports_failure_when_it_produces_conflicts() {
   );
   assert!(result.message.contains("conflicts"), "{}", result.message);
 }
+
+#[test]
+fn rebase_skips_workspace_whose_pr_is_merged() {
+  let repo = TestRepo::with_remote().unwrap();
+  let ws = repo
+    .create_workspace_with_commit("feat/merged", "shared.txt", "work", None)
+    .unwrap();
+  let target = repo.default_branch().to_string();
+  treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, &target).unwrap();
+  repo
+    .remote_commit_file("shared.txt", "upstream", "squash-merged upstream")
+    .unwrap();
+  treq_lib::pr_status::global().put_cached(
+    &repo.repo_path,
+    "feat/merged",
+    Some(treq_lib::github::PrInfo {
+      number: 1,
+      title: "merged".into(),
+      state: "MERGED".into(),
+      url: String::new(),
+      head_ref_name: "feat/merged".into(),
+      base_ref_name: target.clone(),
+      merge_state_status: None,
+      is_draft: false,
+      body: String::new(),
+    }),
+  );
+  let workspace_path = repo.workspace_full_path(&ws);
+  let before = jj::jj_get_commit_id(&workspace_path, "feat/merged").unwrap();
+
+  let result =
+    treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, None, "diff")
+      .unwrap();
+
+  assert!(
+    !result.rebased,
+    "merged PR stack was rebased: {}",
+    result.message
+  );
+  assert_eq!(
+    jj::jj_get_commit_id(&workspace_path, "feat/merged").unwrap(),
+    before
+  );
+}
