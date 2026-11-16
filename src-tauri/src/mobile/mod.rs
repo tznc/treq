@@ -10,13 +10,6 @@ mod backend;
 mod config;
 mod errors;
 mod managed;
-#[cfg_attr(
-  not(test),
-  expect(
-    dead_code,
-    reason = "the projects home page uses it in the next change"
-  )
-)]
 mod projects;
 mod reads;
 mod remote;
