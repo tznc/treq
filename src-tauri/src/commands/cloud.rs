@@ -229,7 +229,7 @@ async fn sync_projects(cloud: Arc<Cloud>) {
         }
       }
     }
-    tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+    project_sync::wait(std::time::Duration::from_secs(3600)).await;
   }
 }
 
