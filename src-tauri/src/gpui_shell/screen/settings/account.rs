@@ -2474,7 +2474,10 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   };
 
   div()
+    .id("cloud-workspace-card")
     .debug_selector(|| "cloud-workspace-card".into())
+    .role(gpui::Role::Group)
+    .aria_label("Cloud workspace")
     .rounded(radius::MD)
     .border_1()
     .border_color(p.border)
@@ -2561,6 +2564,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
         ),
       )
     })
+    .test_support()
 }
 
 /// The cloud workspace's delete confirmation (`AlertDialog`), pressing

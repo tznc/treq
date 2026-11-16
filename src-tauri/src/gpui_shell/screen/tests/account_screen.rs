@@ -421,9 +421,10 @@ fn the_cloud_card_moved_from_account_to_machines(cx: &mut TestAppContext) {
   assert!(drawn_settings(&mut h)
     .tabs
     .contains(&settings::Tab::Machines));
-  assert!(!h.drawn("cloud-workspace-card"));
+  let card = || gpui_testing_library::by::role(gpui::Role::Group).name("Cloud workspace");
+  assert!(h.rendered().query_by_role(card()).is_none());
   show_machines(&mut h);
-  assert!(h.drawn("cloud-workspace-card"));
+  assert!(h.rendered().query_by_role(card()).is_some());
 }
 
 #[gpui::test]
