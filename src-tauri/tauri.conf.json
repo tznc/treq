@@ -213,6 +213,12 @@
                   "short": "a",
                   "takesValue": true,
                   "description": "Agent to start: claude, codex, cursor or copilot (default: the repository's default agent)"
+                },
+                {
+                  "name": "profile",
+                  "short": "p",
+                  "takesValue": true,
+                  "description": "Account profile to start with, e.g. work (default: the agent's default profile)"
                 }
               ]
             },

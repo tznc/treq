@@ -15,6 +15,9 @@ pub struct AgentDispatchRequest {
   pub prompt: String,
   pub mode: String,
   pub agent: String,
+  /// Absent from older CLIs.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

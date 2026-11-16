@@ -400,6 +400,7 @@ fn dispatch_agent_request_selects_matching_instance_and_handles_ack() {
     let request: agent_dispatch::AgentDispatchRequest =
       serde_json::from_str(payload.trim()).expect("json");
     assert_eq!(request.branch, "feat/x");
+    assert_eq!(request.profile.as_deref(), Some("work"));
     let response =
       serde_json::to_string(&agent_dispatch::AgentDispatchResponse::handled()).expect("serialize");
     stream.write_all(response.as_bytes()).expect("write");
@@ -432,6 +433,7 @@ fn dispatch_agent_request_selects_matching_instance_and_handles_ack() {
     "hello",
     "plan",
     "codex",
+    Some("work"),
     "req-1",
   );
   assert!(result.is_ok());
@@ -451,6 +453,7 @@ fn dispatch_agent_request_returns_error_when_no_matching_instance() {
     "hello",
     "plan",
     "codex",
+    None,
     "req-1",
   );
   assert!(result.is_err());
@@ -496,6 +499,7 @@ fn dispatch_agent_request_surfaces_ack_timeout_error() {
     "hello",
     "plan",
     "codex",
+    None,
     "req-1",
   );
   assert!(result.is_err());
@@ -2045,6 +2049,35 @@ fn agent_start_takes_the_harness_to_start() {
   assert_eq!(
     super::workspace_handlers::start_agent_kind(&start.matches, "/no/repo"),
     Ok("codex".to_string())
+  );
+}
+
+#[test]
+fn agent_start_takes_the_profile_to_start() {
+  let profile = |argv: &[&str]| {
+    let sub = parsed_subcommand(argv);
+    let start = sub.matches.subcommand.expect("start subcommand");
+    super::workspace_handlers::start_profile(&start.matches)
+  };
+  assert_eq!(
+    profile(&[
+      "treq",
+      "agent",
+      "start",
+      "feat/x",
+      "do it",
+      "--profile",
+      "work"
+    ]),
+    Some("work".to_string())
+  );
+  assert_eq!(
+    profile(&["treq", "agent", "start", "feat/x", "do it", "-p", " "]),
+    None
+  );
+  assert_eq!(
+    profile(&["treq", "agent", "start", "feat/x", "do it"]),
+    None
   );
 }
 
