@@ -109,3 +109,54 @@ it("shares team projects with members only", async () => {
     await deleteTestUser(admin, outsider.user.id);
   }
 }, 60000);
+
+it("keeps personal projects to their owner", async () => {
+  const admin = getServiceClient();
+  const owner = await createTestUser();
+  const other = await createTestUser();
+  const projectId = randomUUID();
+  try {
+    const { client: o } = await signInWithEmailPassword(
+      owner.email,
+      owner.password,
+    );
+    const put = await o.rpc("put_organization_project", {
+      p_id: projectId,
+      p_org_id: null,
+      p_name: "Side",
+      p_repos: ["me/side"],
+      p_prompt: "",
+      p_context_paths: [],
+    });
+    expect(put.error).toBeNull();
+    const mine = await o
+      .from("organization_projects")
+      .select("id,org_id,owner_user_id,name");
+    expect(mine.data).toEqual([
+      {
+        id: projectId,
+        org_id: null,
+        owner_user_id: owner.user.id,
+        name: "Side",
+      },
+    ]);
+
+    const { client: x } = await signInWithEmailPassword(
+      other.email,
+      other.password,
+    );
+    const seen = await x.from("organization_projects").select("id");
+    expect(seen.data).toEqual([]);
+
+    await recordOutcome("organization-projects-03-personal", {
+      expectations: [
+        "put_organization_project with a null organization stores a project owned by the caller.",
+        "Another user lists none of it.",
+      ],
+      details: { mine: mine.data, seen: seen.data },
+    });
+  } finally {
+    await deleteTestUser(admin, owner.user.id);
+    await deleteTestUser(admin, other.user.id);
+  }
+}, 60000);
