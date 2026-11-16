@@ -4,13 +4,14 @@
 //! screen cannot tell which one answered.
 
 use crate::core::remote::{GithubContext, GithubQuery};
-use crate::github::{self, GhIssue, GhListPage, GhPullRequest, GH_LIST_PAGE_SIZE};
+use crate::github::{self, GhIssue, GhListPage, GhPullRequest, GhReviewThread, GH_LIST_PAGE_SIZE};
 use reqwest::Method;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
 const API_BASE: &str = "https://api.github.com";
 const JSON_MEDIA_TYPE: &str = "application/vnd.github+json";
+const DIFF_MEDIA_TYPE: &str = "application/vnd.github.diff";
 
 /// How an error from a rejected token starts, so the caller can drop the
 /// token it cached and try once more with a fresh one.
@@ -159,10 +160,14 @@ pub async fn github_read(
     }
     GithubQuery::Issue { number } => to_json(issue(gh, full_name, number).await?),
     GithubQuery::Pr { number } => to_json(pr(gh, full_name, number).await?),
-    // Answered by the host's `gh` until it is read over HTTPS here.
-    other => Err(format!(
-      "unsupported_query: {other:?} is not read over HTTPS yet"
-    )),
+    GithubQuery::PrDiff { number } => {
+      let path = format!("/repos/{full_name}/pulls/{number}");
+      to_json(gh.rest_text(&path, DIFF_MEDIA_TYPE).await?)
+    }
+    GithubQuery::PrChecks { number } => to_json(pr_checks(gh, full_name, number).await?),
+    GithubQuery::PrReviewThreads { number } => {
+      to_json(pr_review_threads(gh, full_name, number).await?)
+    }
   }
 }
 
@@ -408,6 +413,74 @@ async fn pr(gh: &GithubHttp, full_name: &str, number: u64) -> Result<GhPullReque
   let mut pr: GhPullRequest = parse(view(gh, full_name, "pullRequest", number, &fields).await?)?;
   shown_comment_reactions(pr.comments.as_mut());
   Ok(pr)
+}
+
+const PR_CHECKS_QUERY: &str =
+  "query($owner: String!, $name: String!, $number: Int!, $after: String) { \
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
+    commits(last: 1) { nodes { commit { statusCheckRollup { \
+      contexts(first: 100, after: $after) { \
+        nodes { __typename \
+          ... on CheckRun { name status conclusion detailsUrl startedAt completedAt } \
+          ... on StatusContext { context state targetUrl } } \
+        pageInfo { hasNextPage endCursor } } } } } } } } }";
+
+/// Pages of checks read for one pull request, 100 each.
+const MAX_CHECK_PAGES: usize = 10;
+
+/// `get_pr_checks_for_pr_impl`: the head commit's checks rolled up as
+/// `gh pr checks` reports them; `None` when none are reported.
+async fn pr_checks(
+  gh: &GithubHttp,
+  full_name: &str,
+  number: u64,
+) -> Result<Option<github::PrCiStatus>, String> {
+  let (owner, name) = owner_and_name(full_name)?;
+  let mut entries = Vec::new();
+  let mut after: Option<String> = None;
+  for _ in 0..MAX_CHECK_PAGES {
+    let variables = json!({ "owner": owner, "name": name, "number": number, "after": after });
+    let mut response = gh.graphql(PR_CHECKS_QUERY, variables).await?;
+    let contexts = response
+      .pointer_mut("/data/repository/pullRequest/commits/nodes/0/commit/statusCheckRollup/contexts")
+      .map(Value::take)
+      .unwrap_or_default();
+    let nodes = contexts["nodes"].as_array().cloned().unwrap_or_default();
+    entries.extend(parse::<Vec<github::GhRollupEntry>>(Value::Array(nodes))?);
+    match contexts["pageInfo"]["endCursor"].as_str() {
+      Some(cursor) if contexts["pageInfo"]["hasNextPage"].as_bool() == Some(true) => {
+        after = Some(cursor.to_string());
+      }
+      _ => break,
+    }
+  }
+  Ok(github::rollup_check_entries(entries))
+}
+
+/// `gh_list_pr_review_threads_impl`; none when the name is not `owner/name`.
+async fn pr_review_threads(
+  gh: &GithubHttp,
+  full_name: &str,
+  number: u64,
+) -> Result<Vec<GhReviewThread>, String> {
+  let Some((owner, repo)) = full_name.split_once('/') else {
+    return Ok(Vec::new());
+  };
+  let mut threads = Vec::new();
+  let mut after: Option<String> = None;
+  for _ in 0..github::MAX_REVIEW_THREAD_PAGES {
+    let variables = json!({ "owner": owner, "repo": repo, "number": number, "after": after });
+    let response = gh.graphql(github::REVIEW_THREADS_QUERY, variables).await?;
+    let Some((page, next)) = parse::<github::GqlResponse>(response)?.into_threads_page() else {
+      break;
+    };
+    threads.extend(page);
+    let Some(next) = next else {
+      break;
+    };
+    after = Some(next);
+  }
+  Ok(threads)
 }
 
 #[cfg(test)]
@@ -932,5 +1005,179 @@ mod tests {
     }));
     expected["comments"][0]["reactions"][0]["viewer_has_reacted"] = json!(true);
     assert_eq!(value, expected);
+  }
+
+  #[tokio::test]
+  async fn other_http_errors_carry_githubs_message() {
+    let (server, gh) = start().await;
+    Mock::given(path("/repos/o/r/pulls/9"))
+      .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "Not Found" })))
+      .mount(&server)
+      .await;
+    let error = github_read(&gh, "o/r", GithubQuery::PrDiff { number: 9 })
+      .await
+      .unwrap_err();
+    assert!(!error.starts_with("github_unauthorized"), "{error}");
+    assert!(error.contains("Not Found"), "{error}");
+  }
+
+  #[tokio::test]
+  async fn pr_diff_reads_the_diff_media_type() {
+    let (server, gh) = start().await;
+    let diff = "diff --git a/x b/x\n+new\n";
+    Mock::given(method("GET"))
+      .and(path("/repos/o/r/pulls/9"))
+      .and(header("accept", "application/vnd.github.diff"))
+      .respond_with(ResponseTemplate::new(200).set_body_string(diff))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let value = github_read(&gh, "o/r", GithubQuery::PrDiff { number: 9 })
+      .await
+      .unwrap();
+    assert_eq!(value, json!(diff));
+  }
+
+  #[tokio::test]
+  async fn pr_checks_rolls_up_like_gh_pr_checks() {
+    let (server, gh) = start().await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_string_contains("statusCheckRollup"))
+      .and(body_partial_json(json!({ "variables": {
+        "owner": "o", "name": "r", "number": 4,
+      }})))
+      .respond_with(data(
+        json!({ "repository": { "pullRequest": { "commits": { "nodes": [
+          { "commit": { "statusCheckRollup": { "contexts": { "nodes": [
+            {
+              "__typename": "CheckRun", "name": "build", "status": "COMPLETED",
+              "conclusion": "SUCCESS", "detailsUrl": "https://ci/build",
+              "startedAt": "2026-01-01T00:00:00Z", "completedAt": "2026-01-01T00:01:30Z",
+            },
+            {
+              "__typename": "CheckRun", "name": "test", "status": "IN_PROGRESS",
+              "conclusion": null, "detailsUrl": "https://ci/test",
+              "startedAt": "2026-01-01T00:00:00Z", "completedAt": null,
+            },
+            {
+              "__typename": "StatusContext", "context": "deploy", "state": "FAILURE",
+              "targetUrl": "https://ci/deploy",
+            },
+          ]}}}}
+        ]}}}}),
+      ))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let value = github_read(&gh, "o/r", GithubQuery::PrChecks { number: 4 })
+      .await
+      .unwrap();
+    assert_eq!(
+      value,
+      json!({
+        "state": "failure", "total": 3, "passed": 1, "failed": 1, "pending": 1,
+        "checks": [
+          { "name": "build", "bucket": "pass", "link": "https://ci/build", "duration_secs": 90 },
+          { "name": "test", "bucket": "pending", "link": "https://ci/test" },
+          { "name": "deploy", "bucket": "fail", "link": "https://ci/deploy" },
+        ],
+      })
+    );
+  }
+
+  #[tokio::test]
+  async fn pr_checks_with_none_reported_is_null() {
+    let (server, gh) = start().await;
+    Mock::given(path("/graphql"))
+      .respond_with(data(
+        json!({ "repository": { "pullRequest": { "commits": { "nodes": [
+          { "commit": { "statusCheckRollup": null } }
+        ]}}}}),
+      ))
+      .mount(&server)
+      .await;
+    let value = github_read(&gh, "o/r", GithubQuery::PrChecks { number: 4 })
+      .await
+      .unwrap();
+    assert_eq!(value, Value::Null);
+  }
+
+  fn gql_thread(id: &str, author: Value) -> Value {
+    json!({
+      "id": id, "isResolved": false, "isOutdated": true, "path": "src/a.rs",
+      "line": 12, "diffSide": "RIGHT",
+      "comments": { "nodes": [{
+        "id": format!("{id}-c"), "body": "nit", "createdAt": "2026-01-01T00:00:00Z",
+        "url": "https://github.com/o/r/pull/5#discussion_r1", "diffHunk": "@@ -1 +1 @@",
+        "author": author, "reactionGroups": gql_reactions(),
+      }]},
+    })
+  }
+
+  #[tokio::test]
+  async fn pr_review_threads_follows_the_cursor() {
+    let (server, gh) = start().await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_string_contains("reviewThreads"))
+      .and(body_partial_json(json!({ "variables": {
+        "owner": "o", "repo": "r", "number": 5, "after": null,
+      }})))
+      .respond_with(data(
+        json!({ "repository": { "pullRequest": { "reviewThreads": {
+          "pageInfo": { "hasNextPage": true, "endCursor": "t1" },
+          "nodes": [gql_thread("T1", json!({ "login": "rev", "avatarUrl": "https://a/rev" }))],
+        }}}}),
+      ))
+      .expect(1)
+      .mount(&server)
+      .await;
+    Mock::given(method("POST"))
+      .and(path("/graphql"))
+      .and(body_partial_json(json!({ "variables": { "after": "t1" } })))
+      .respond_with(data(
+        json!({ "repository": { "pullRequest": { "reviewThreads": {
+          "pageInfo": { "hasNextPage": false, "endCursor": "t2" },
+          "nodes": [gql_thread("T2", Value::Null)],
+        }}}}),
+      ))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let value = github_read(&gh, "o/r", GithubQuery::PrReviewThreads { number: 5 })
+      .await
+      .unwrap();
+    let thread = |id: &str, author: Value| {
+      json!({
+        "id": id, "is_resolved": false, "is_outdated": true, "path": "src/a.rs",
+        "line": 12, "diff_side": "RIGHT",
+        "comments": [{
+          "id": format!("{id}-c"), "body": "nit", "author": author,
+          "created_at": "2026-01-01T00:00:00Z", "diff_hunk": "@@ -1 +1 @@",
+          "url": "https://github.com/o/r/pull/5#discussion_r1",
+          "reactions": [{ "content": "HEART", "count": 2, "viewer_has_reacted": true }],
+        }],
+      })
+    };
+    assert_eq!(
+      value,
+      json!([
+        thread(
+          "T1",
+          json!({ "login": "rev", "avatar_url": "https://a/rev" })
+        ),
+        thread("T2", json!({ "login": "ghost", "avatar_url": null })),
+      ])
+    );
+  }
+
+  #[tokio::test]
+  async fn pr_review_threads_for_a_name_without_an_owner_is_empty() {
+    let (server, gh) = start().await;
+    let query = GithubQuery::PrReviewThreads { number: 5 };
+    let value = github_read(&gh, "no-slash", query).await.unwrap();
+    assert_eq!(value, json!([]));
+    assert!(server.received_requests().await.unwrap().is_empty());
   }
 }
