@@ -1889,6 +1889,7 @@ impl WorkspaceView {
         agent,
         session_name: Some(name.into()),
         link: None,
+        profile: None,
       }
     };
     let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();

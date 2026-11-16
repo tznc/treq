@@ -47,6 +47,8 @@ pub struct AgentStart {
   pub session_id: i64,
   pub pending_prompt: Option<String>,
   pub permission_mode: Option<String>,
+  /// The account profile the agent signs in with; `None` uses its own config.
+  pub profile: Option<crate::core::agent_profiles::AgentProfile>,
 }
 
 /// Where a persistent remote shell or agent runs (`RemoteTerminalTarget`).
@@ -599,6 +601,10 @@ impl TerminalHost for Backend {
       .ok()
       .flatten();
     let bin_dir = crate::commands::binary::get_treq_bin_dir().ok();
+    let env = match (&start.profile, crate::core::app_data_dir()) {
+      (Some(profile), Some(dir)) => crate::core::agent_profiles::env(&dir, profile),
+      _ => Vec::new(),
+    };
     let supporting = self.supporting_repos(&start.repo_path);
     let project = crate::gpui_shell::projects::window_project(self.app(), self.label())
       .map(agent_command::ProjectContext::from);
@@ -625,6 +631,7 @@ impl TerminalHost for Backend {
         session_model: model.as_deref(),
         pending_prompt: start.pending_prompt.as_deref(),
         treq_bin_dir: bin_dir.as_deref(),
+        env: &env,
       },
     )?;
     Ok(Prepared {
