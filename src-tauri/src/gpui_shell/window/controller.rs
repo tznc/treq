@@ -308,6 +308,15 @@ impl WindowController {
   /// The watched checkout changed on disk: the Changes tab reads again.
   pub fn files_changed(&mut self, cx: &mut Context<Self>) {
     self.model.view.changes_revision += 1;
+    // A checkout outside treq (`git checkout`, a new jj op) moves the home
+    // branch, which only the detail read picks up.
+    self.read(
+      Read {
+        detail: true,
+        ..Read::default()
+      },
+      cx,
+    );
     self.present(cx);
   }
 
