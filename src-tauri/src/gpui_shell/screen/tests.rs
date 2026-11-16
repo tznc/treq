@@ -25,6 +25,8 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
+  /// How many times a screen listed machines and projects.
+  listings: std::sync::atomic::AtomicUsize,
   /// Repositories whose folder is gone from disk (Home shows them missing).
   gone: Vec<&'static str>,
   /// Saving repository settings fails, as a full disk would.
@@ -316,6 +318,9 @@ impl FakeHost {
 
 impl machines::MachinesHost for FakeHost {
   fn listing(&self) -> machines::Listing {
+    self
+      .listings
+      .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     self.listing.clone()
   }
 
@@ -1996,6 +2001,7 @@ fn onboarding() -> ScreenSnapshot {
 fn listing() -> machines::Listing {
   use machines::{Machine, Place, Recent};
   machines::Listing {
+    teams: Vec::new(),
     machines: vec![
       Machine {
         id: "local".into(),

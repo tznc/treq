@@ -69,6 +69,9 @@ pub enum MenuAction {
   SaveProject,
   /// Edits the saved project's agent instructions and context.
   ProjectContext,
+  /// Moves this window's saved project to a Team organization, or back to
+  /// personal with `None`.
+  SetProjectOwner(Option<String>),
   /// A new window on the welcome page, to open another project or repository.
   NewWindow,
 }
@@ -423,22 +426,44 @@ pub fn create_pr_items() -> Vec<MenuItem> {
 pub struct ProjectEntry {
   pub id: String,
   pub name: String,
+  /// The owning Team organization's name; `None` for personal.
+  pub team: Option<String>,
 }
 
 /// The sidebar's project menu: every saved project (this window's one
 /// marked), then Save or Rename, then a new window.
 pub fn project_items(projects: &[ProjectEntry], current: Option<&str>) -> Vec<MenuItem> {
+  let row = |p: &ProjectEntry| {
+    let text = if current == Some(p.id.as_str()) {
+      format!("✓ {}", p.name)
+    } else {
+      p.name.clone()
+    };
+    MenuItem::item(&text, MenuAction::SwitchProject(p.id.clone())).icon(MenuIcon::FolderOpen)
+  };
+  // Personal projects inline, then one submenu per team, in first-seen order.
   let mut items: Vec<MenuItem> = projects
     .iter()
-    .map(|p| {
-      let text = if current == Some(p.id.as_str()) {
-        format!("✓ {}", p.name)
-      } else {
-        p.name.clone()
-      };
-      MenuItem::item(&text, MenuAction::SwitchProject(p.id.clone())).icon(MenuIcon::FolderOpen)
-    })
+    .filter(|p| p.team.is_none())
+    .map(row)
     .collect();
+  let mut teams: Vec<&str> = Vec::new();
+  for team in projects.iter().filter_map(|p| p.team.as_deref()) {
+    if !teams.contains(&team) {
+      teams.push(team);
+    }
+  }
+  for team in teams {
+    items.push(MenuItem::Submenu {
+      text: team.to_string(),
+      icon: Some(MenuIcon::FolderOpen),
+      items: projects
+        .iter()
+        .filter(|p| p.team.as_deref() == Some(team))
+        .map(row)
+        .collect(),
+    });
+  }
   if !items.is_empty() {
     items.push(MenuItem::Separator);
   }
@@ -457,15 +482,74 @@ pub fn project_items(projects: &[ProjectEntry], current: Option<&str>) -> Vec<Me
   items
 }
 
+/// "Move to" for this window's saved project: Personal, then each Team
+/// organization as (id, name), the current owner marked. `None` without teams.
+pub fn project_owner_item(teams: &[(String, String)], owner: Option<&str>) -> Option<MenuItem> {
+  if teams.is_empty() {
+    return None;
+  }
+  let mark = |on: bool, name: &str| {
+    if on {
+      format!("✓ {name}")
+    } else {
+      name.to_string()
+    }
+  };
+  let mut items = vec![MenuItem::item(
+    &mark(owner.is_none(), "Personal"),
+    MenuAction::SetProjectOwner(None),
+  )];
+  items.extend(teams.iter().map(|(id, name)| {
+    MenuItem::item(
+      &mark(owner == Some(id.as_str()), name),
+      MenuAction::SetProjectOwner(Some(id.clone())),
+    )
+  }));
+  Some(MenuItem::Submenu {
+    text: "Move to".into(),
+    icon: Some(MenuIcon::FolderOpen),
+    items,
+  })
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn project_owner_menu_marks_the_owner_and_lists_teams() {
+    let teams = vec![("o1".to_string(), "Acme".to_string())];
+    assert_eq!(project_owner_item(&[], None), None);
+    let item = project_owner_item(&teams, Some("o1")).unwrap();
+    assert_eq!(
+      labels(std::slice::from_ref(&item)),
+      ["Move to: [Personal, ✓ Acme]"]
+    );
+    let MenuItem::Submenu { items, .. } = item else {
+      panic!()
+    };
+    assert!(
+      matches!(&items[1], MenuItem::Item { action: MenuAction::SetProjectOwner(Some(id)), .. } if id == "o1")
+    );
+  }
 
   fn entry(id: &str, name: &str) -> ProjectEntry {
     ProjectEntry {
       id: id.into(),
       name: name.into(),
+      team: None,
     }
+  }
+
+  #[test]
+  fn project_menu_puts_each_teams_projects_in_a_submenu() {
+    let mut team = entry("t", "Billing");
+    team.team = Some("Acme".into());
+    let items = project_items(&[entry("a", "Checkout"), team], Some("t"));
+    assert_eq!(
+      labels(&items)[..3],
+      ["Checkout", "Acme: [✓ Billing]", "---"]
+    );
   }
 
   #[test]
@@ -535,7 +619,7 @@ mod tests {
         let projects: Vec<ProjectEntry> = names
           .iter()
           .enumerate()
-          .map(|(i, n)| ProjectEntry { id: format!("p{i}"), name: n.clone() })
+          .map(|(i, n)| ProjectEntry { id: format!("p{i}"), name: n.clone(), team: None })
           .collect();
         let current = current.map(|i| format!("p{i}"));
         let items = project_items(&projects, current.as_deref());
