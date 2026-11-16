@@ -1386,12 +1386,8 @@ impl TerminalView {
       Some(pressed) => mouse_button(pressed),
       None => Some(terminal_emu::Button::None),
     };
-    if !self.selecting {
-      if let Some(button) = button {
-        if self.report(button, MouseAction::Move, event.position, event.modifiers) {
-          return;
-        }
-      }
+    if let (false, Some(button)) = (self.selecting, button) {
+      self.report(button, MouseAction::Move, event.position, event.modifiers);
     }
   }
 
