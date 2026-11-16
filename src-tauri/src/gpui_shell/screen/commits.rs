@@ -2817,7 +2817,11 @@ impl CommitsView {
           .when_some(failed, |this, err| {
             this.child(
               ui::text(div(), TextSize::Sm)
+                .id("resolve-conflicts-error")
                 .debug_selector(|| "resolve-conflicts-error".into())
+                .role(tauri_plugin_gpui::gpui::Role::Alert)
+                .aria_label(err.clone())
+                .test_support()
                 .text_color(p.destructive)
                 .child(err),
             )

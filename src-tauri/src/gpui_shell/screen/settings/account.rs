@@ -2157,7 +2157,11 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   });
   let processes = (!c.processes.is_empty() || c.idle_stop.is_some()).then(|| {
     div()
+      .id("cloud-processes")
       .debug_selector(|| "cloud-processes".into())
+      .role(tauri_plugin_gpui::gpui::Role::Group)
+      .aria_label("Processes")
+      .test_support()
       .flex()
       .flex_col()
       .gap_1()
@@ -2225,7 +2229,11 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       _ => p.muted_foreground,
     };
     ui::text(div(), TextSize::Sm)
+      .id("cloud-billing")
       .debug_selector(|| "cloud-billing".into())
+      .role(tauri_plugin_gpui::gpui::Role::Status)
+      .aria_label(billing.clone())
+      .test_support()
       .flex()
       .flex_col()
       .gap_1()
@@ -2390,7 +2398,11 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       });
       let deletion = instance.deletion.clone().map(|notice| {
         div()
+          .id("cloud-deletion-warning")
           .debug_selector(|| "cloud-deletion-warning".into())
+          .role(tauri_plugin_gpui::gpui::Role::Alert)
+          .aria_label(notice.clone())
+          .test_support()
           .text_color(p.warning)
           .child(notice)
       });
@@ -2462,7 +2474,10 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   };
 
   div()
+    .id("cloud-workspace-card")
     .debug_selector(|| "cloud-workspace-card".into())
+    .role(gpui::Role::Group)
+    .aria_label("Cloud workspace")
     .rounded(radius::MD)
     .border_1()
     .border_color(p.border)
@@ -2549,6 +2564,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
         ),
       )
     })
+    .test_support()
 }
 
 /// The cloud workspace's delete confirmation (`AlertDialog`), pressing
@@ -2591,7 +2607,11 @@ impl SettingsView {
         .child(ui::Loading::new("account-loading", p).label("Loading account…"))
         .into_any_element(),
       AccountTab::SigningIn => centered(12.)
+        .id("account-signing-in")
         .debug_selector(|| "account-signing-in".into())
+        .role(tauri_plugin_gpui::gpui::Role::Status)
+        .aria_label("Signing you in…")
+        .test_support()
         .child(ui::spinner(
           "account-signing-in-spinner",
           24.,
@@ -2986,6 +3006,9 @@ impl SettingsView {
         let id = id.clone();
         move || format!("team-{id}")
       })
+      .role(tauri_plugin_gpui::gpui::Role::Group)
+      .aria_label(format!("{} cloud", org.name))
+      .test_support()
       .flex()
       .flex_col()
       .gap_2()
@@ -3524,13 +3547,21 @@ impl SettingsView {
       .meta(card.purpose)
       .trailing(if card.pro_required {
         div()
+          .id(SharedString::from(format!(
+            "integration-requires-pro-{}",
+            card.id
+          )))
           .debug_selector({
             let id = format!("integration-requires-pro-{}", card.id);
             move || id
           })
+          .role(tauri_plugin_gpui::gpui::Role::Label)
+          .aria_label("Requires Pro")
+          .test_support()
           .child(ui::Badge::new("Requires Pro", p))
+          .into_any_element()
       } else {
-        status
+        status.into_any_element()
       })
       .trailing(ui::icon(
         if card.open {
@@ -3751,7 +3782,11 @@ fn linear_paywall(p: &Palette, upgrade: Button) -> AnyElement {
     "Keep each workspace linked to its issue",
   ];
   div()
+    .id("linear-paywall")
     .debug_selector(|| "linear-paywall".into())
+    .role(tauri_plugin_gpui::gpui::Role::Group)
+    .aria_label("Linear is a Pro feature")
+    .test_support()
     .flex()
     .flex_col()
     .gap_3()

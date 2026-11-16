@@ -2,6 +2,49 @@ use gpui::TestAppContext;
 
 use super::*;
 
+/// How many `name` buttons the window shows.
+fn buttons(h: &mut Harness, name: &str) -> usize {
+  h.rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name(name))
+    .len()
+}
+
+/// Whether integration `card` shows a `role` element named `name`.
+fn card_shows(h: &mut Harness, card: &str, role: gpui::Role, name: &str) -> bool {
+  h.rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name(card))
+    .iter()
+    .any(|card| {
+      gpui_testing_library::within(card)
+        .query_by_role(gpui_testing_library::by::role(role).name(name))
+        .is_some()
+    })
+}
+
+/// Whether integration `card` shows whether it is connected.
+fn card_status(h: &mut Harness, card: &str) -> bool {
+  ["Connected", "Not connected"]
+    .into_iter()
+    .any(|status| card_shows(h, card, gpui::Role::Image, status))
+}
+
+/// Whether Acme's cloud section has a `role` control named `name`, on
+/// screen or below the fold.
+fn team_has(h: &mut Harness, role: gpui::Role, name: &str) -> bool {
+  h.rendered()
+    .query_all_by_role(
+      gpui_testing_library::by::role(gpui::Role::Group)
+        .name("Acme cloud")
+        .hidden(true),
+    )
+    .iter()
+    .any(|team| {
+      gpui_testing_library::within(team)
+        .query_by_role(gpui_testing_library::by::role(role).name(name).hidden(true))
+        .is_some()
+    })
+}
+
 #[gpui::test]
 fn account_signs_in_through_the_browser(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
@@ -38,7 +81,7 @@ fn account_shows_loading_and_signing_in(cx: &mut TestAppContext) {
     drawn_settings(&mut h).account,
     Some(settings::AccountTab::SigningIn)
   );
-  assert!(h.drawn("account-signing-in"));
+  assert!(h.shows(gpui::Role::Status, "Signing you in…"));
 }
 
 #[gpui::test]
@@ -170,7 +213,7 @@ fn account_deletes_only_after_the_email_is_typed(cx: &mut TestAppContext) {
   assert_eq!(delete_dialog(&mut h), None);
 
   h.click("account-delete");
-  assert!(h.drawn("account-delete-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Delete your Treq account?"));
   let dialog = delete_dialog(&mut h).expect("asked");
   assert!(!dialog.can_confirm);
 
@@ -258,11 +301,11 @@ fn account_deletion_toasts_and_says_goodbye_once_signed_out(cx: &mut TestAppCont
   // The core signs out after deleting; the tab follows the account.
   h.set_account(account_state(serde_json::json!({})));
   assert!(farewell(&mut h));
-  assert!(h.drawn("account-farewell"));
+  assert!(h.shows(gpui::Role::Alert, "Sorry to see you go"));
 
   h.click("account-farewell-dismiss");
   assert!(!farewell(&mut h));
-  assert!(!h.drawn("account-farewell"));
+  assert!(!h.shows(gpui::Role::Alert, "Sorry to see you go"));
 }
 
 #[gpui::test]
@@ -296,7 +339,7 @@ fn account_deletion_cancel_closes_without_deleting(cx: &mut TestAppContext) {
   h.click("account-delete-cancel");
   h.cx.run_until_parked();
   assert_eq!(delete_dialog(&mut h), None);
-  assert!(!h.drawn("account-delete-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Delete your Treq account?"));
   assert!(!host.writes().contains(&"delete account".to_string()));
 
   // Asking again starts from an empty field.
@@ -378,9 +421,10 @@ fn the_cloud_card_moved_from_account_to_machines(cx: &mut TestAppContext) {
   assert!(drawn_settings(&mut h)
     .tabs
     .contains(&settings::Tab::Machines));
-  assert!(!h.drawn("cloud-workspace-card"));
+  let card = || gpui_testing_library::by::role(gpui::Role::Group).name("Cloud workspace");
+  assert!(h.rendered().query_by_role(card()).is_none());
   show_machines(&mut h);
-  assert!(h.drawn("cloud-workspace-card"));
+  assert!(h.rendered().query_by_role(card()).is_some());
 }
 
 #[gpui::test]
@@ -483,15 +527,15 @@ fn cloud_workspace_shows_usage_and_deletes_after_confirming(cx: &mut TestAppCont
       percent: 36,
     })
   );
-  assert!(!h.drawn("cloud-repair"));
+  assert!(!h.shows(gpui::Role::Button, "Repair"));
   h.click("cloud-open-repositories");
   h.click("cloud-delete");
-  assert!(h.drawn("cloud-delete-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
   h.click("cloud-delete-dialog-cancel");
-  assert!(!h.drawn("cloud-delete-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
   h.click("cloud-delete");
   h.click("cloud-delete-dialog-confirm");
-  assert!(!h.drawn("cloud-delete-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
   assert_eq!(host.writes(), ["cloud OpenRepositories", "cloud Delete"]);
   assert_eq!(h.sent(), [press("settings.close")]);
 }
@@ -513,7 +557,10 @@ fn cloud_workspace_warns_when_a_lapse_will_delete_it(cx: &mut TestAppContext) {
     instance.deletion.as_deref(),
     Some("Pro ended, so this workspace will be deleted on 12/1/2026. Resubscribe to keep it.")
   );
-  assert!(h.drawn("cloud-deletion-warning"));
+  assert!(h.shows(
+    gpui::Role::Alert,
+    "Pro ended, so this workspace will be deleted on 12/1/2026. Resubscribe to keep it."
+  ));
 }
 
 #[gpui::test]
@@ -527,7 +574,10 @@ fn cloud_workspace_without_a_lapse_shows_no_deletion(cx: &mut TestAppContext) {
     cloud_card(&mut h).instance.expect("instance").deletion,
     None
   );
-  assert!(!h.drawn("cloud-deletion-warning"));
+  assert!(!h.shows(
+    gpui::Role::Alert,
+    "Pro ended, so this workspace will be deleted on 12/1/2026. Resubscribe to keep it."
+  ));
 }
 
 #[gpui::test]
@@ -620,9 +670,9 @@ fn cloud_workspace_lists_background_processes_to_kill_or_keep_alive(cx: &mut Tes
       },
     ]
   );
-  assert!(h.drawn("cloud-processes"));
-  assert!(!h.drawn("cloud-process-kill-100"));
-  assert!(!h.drawn("cloud-process-pin-100"));
+  assert!(h.shows(gpui::Role::Group, "Processes"));
+  assert_eq!(buttons(&mut h, "Kill"), 2, "500 and 410 only");
+  assert_eq!(buttons(&mut h, "Keep alive (billed)"), 1, "500 only");
   h.click("cloud-process-kill-500");
   h.click("cloud-process-pin-500");
   h.click("cloud-process-unpin-410");
@@ -646,7 +696,7 @@ fn cloud_workspace_without_a_probe_shows_no_processes(cx: &mut TestAppContext) {
   let card = cloud_card(&mut h);
   assert_eq!(card.idle_stop, None);
   assert!(card.processes.is_empty());
-  assert!(!h.drawn("cloud-processes"));
+  assert!(!h.shows(gpui::Role::Group, "Processes"));
 }
 
 fn tiers() -> serde_json::Value {
@@ -739,7 +789,7 @@ fn cloud_workspace_resizes_after_confirming_the_unpushed_work_it_loses(cx: &mut 
     card.resize_confirm,
     Some(vec!["acme/api: 2 unpushed commits".to_string()])
   );
-  assert!(h.drawn("cloud-resize-confirm-alert"));
+  assert!(h.shows(gpui::Role::Alert, "Resizing loses unpushed work"));
   h.click("cloud-resize-cancel");
   h.click("cloud-resize-confirm");
   assert_eq!(
@@ -775,7 +825,10 @@ fn cloud_card_shows_a_running_switch_and_a_stuck_one(cx: &mut TestAppContext) {
   );
   assert!(!migration.stuck);
   assert!(!card.resize, "no second resize while one runs");
-  assert!(h.drawn("cloud-migration-alert"));
+  assert!(h.shows(
+    gpui::Role::Alert,
+    "Moving to a new machine: checking the new machine"
+  ));
 
   set_cloud(
     &mut h,
@@ -810,10 +863,10 @@ fn integrations_sign_in_when_signed_out(cx: &mut TestAppContext) {
     "Linear shows without the preview"
   );
   // Collapsed, the card only says it isn't connected.
-  assert!(h.drawn("integration-card-github"));
-  assert!(!h.drawn("integrations-sign-in"));
+  assert!(h.shows(gpui::Role::Button, "GitHub integration"));
+  assert!(!h.shows(gpui::Role::Button, "Sign in with browser"));
   h.click("integration-card-github");
-  assert!(h.drawn("integrations-sign-in"));
+  assert!(h.shows(gpui::Role::Button, "Sign in with browser"));
   h.click("integrations-sign-in");
   h.cx.run_until_parked();
   assert_eq!(
@@ -852,7 +905,7 @@ fn integrations_list_public_repositories_on_the_free_plan(cx: &mut TestAppContex
       repositories: vec![("acme/public".into(), false)],
     }
   );
-  assert!(!h.drawn("github-manage"), "collapsed");
+  assert!(!h.shows(gpui::Role::Button, "Manage GitHub"), "collapsed");
   h.click("integration-card-github");
   h.click("github-manage");
   h.cx.run_until_parked();
@@ -869,18 +922,28 @@ fn integrations_cards_say_whether_each_is_connected(cx: &mut TestAppContext) {
   // Signed in with GitHub repositories still loading: connected.
   assert!(integrations.github_connected);
   assert!(integrations.linear.expect("linear").connected);
-  assert!(h.drawn("integration-status-github"));
-  assert!(h.drawn("integration-status-linear"));
+  assert!(card_shows(
+    &mut h,
+    "GitHub integration",
+    gpui::Role::Image,
+    "Connected"
+  ));
+  assert!(card_shows(
+    &mut h,
+    "Linear integration",
+    gpui::Role::Image,
+    "Connected"
+  ));
 }
 
 #[gpui::test]
 fn integrations_card_expands_and_collapses(cx: &mut TestAppContext) {
   let (mut h, _) = linear_harness(cx, true, None);
-  assert!(!h.drawn("linear-api-key-edit"));
+  assert!(!h.shows(gpui::Role::Button, "Add API key"));
   h.click("integration-card-linear");
-  assert!(h.drawn("linear-api-key-edit"));
+  assert!(h.shows(gpui::Role::Button, "Add API key"));
   h.click("integration-card-linear");
-  assert!(!h.drawn("linear-api-key-edit"));
+  assert!(!h.shows(gpui::Role::Button, "Add API key"));
 }
 
 #[gpui::test]
@@ -891,12 +954,17 @@ fn integrations_linear_card_shows_a_paywall_on_free(cx: &mut TestAppContext) {
   )]));
   let mut h = Harness::with_host(cx, account_route("integrations"), host.clone());
   h.set_account(account_state(serde_json::json!({ "user": ada() })));
-  assert!(h.drawn("integration-card-linear"));
-  assert!(h.drawn("integration-requires-pro-linear"));
-  assert!(!h.drawn("integration-status-linear"));
-  assert!(!h.drawn("linear-paywall"));
+  assert!(h.shows(gpui::Role::Button, "Linear integration"));
+  assert!(card_shows(
+    &mut h,
+    "Linear integration",
+    gpui::Role::Label,
+    "Requires Pro"
+  ));
+  assert!(!card_status(&mut h, "Linear integration"));
+  assert!(!h.shows(gpui::Role::Group, "Linear is a Pro feature"));
   h.click("integration-card-linear");
-  assert!(h.drawn("linear-paywall"));
+  assert!(h.shows(gpui::Role::Group, "Linear is a Pro feature"));
   h.click("linear-upgrade");
   h.cx.run_until_parked();
   assert_eq!(host.writes(), ["open http://localhost:3001/dashboard"]);
@@ -905,8 +973,13 @@ fn integrations_linear_card_shows_a_paywall_on_free(cx: &mut TestAppContext) {
 #[gpui::test]
 fn integrations_linear_card_shows_status_on_pro(cx: &mut TestAppContext) {
   let (mut h, _) = linear_harness(cx, true, None);
-  assert!(h.drawn("integration-status-linear"));
-  assert!(!h.drawn("integration-requires-pro-linear"));
+  assert!(card_status(&mut h, "Linear integration"));
+  assert!(!card_shows(
+    &mut h,
+    "Linear integration",
+    gpui::Role::Label,
+    "Requires Pro"
+  ));
 }
 
 fn linear_harness(
@@ -1028,13 +1101,13 @@ fn the_cloud_delete_confirmation_cancels_on_escape_and_deletes_on_enter(cx: &mut
     .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(1200.)));
   show_machines(&mut h);
   h.click("cloud-delete");
-  assert!(h.drawn("cloud-delete-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
   h.cx.simulate_keystrokes("escape");
-  assert!(!h.drawn("cloud-delete-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
   h.click("cloud-delete");
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
-  assert!(!h.drawn("cloud-delete-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
   assert_eq!(host.writes(), ["cloud Delete"]);
 }
 
@@ -1043,7 +1116,7 @@ fn the_account_delete_dialog_cancels_on_escape(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
   let mut h = signed_in_as_ada(cx, host);
   h.click("account-delete");
-  assert!(h.drawn("account-delete-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Delete your Treq account?"));
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
   assert_eq!(delete_dialog(&mut h), None);
@@ -1114,7 +1187,7 @@ fn cloud_card_shows_spend_against_the_cap(cx: &mut TestAppContext) {
     Some(crate::core::cloud_catalog::SpendState::Ok)
   );
   assert_eq!(card.spend_note, None);
-  assert!(h.drawn("cloud-billing"));
+  assert!(h.shows(gpui::Role::Status, "This month: $12.35 of $50.00"));
 }
 
 #[gpui::test]
@@ -1157,7 +1230,7 @@ fn cloud_card_warns_at_80_percent_and_explains_a_reached_cap(cx: &mut TestAppCon
     Some("You reached your monthly cloud spend cap of $50.00. Raise the cap to keep working.")
   );
   assert_eq!(card.error, None);
-  assert!(h.drawn("cloud-spend-capped"));
+  assert!(h.shows(gpui::Role::Alert, "Monthly spend cap reached"));
   // Raise cap opens the cap editor.
   h.click("cloud-spend-cap-raise");
   let editor = signed_in_tab(&mut h).spend_cap.expect("cap editor");
@@ -1252,7 +1325,7 @@ fn byos_shows_for_pro_without_a_feature_preview(cx: &mut TestAppContext) {
     cloud(serde_json::json!({ "providerKeys": boat_key() })),
   );
   assert!(provider_keys(&mut h).is_some());
-  assert!(h.drawn("byos-provider-keys"));
+  assert!(h.shows(gpui::Role::Heading, "Provider keys"));
 }
 
 #[gpui::test]
@@ -1263,7 +1336,7 @@ fn byos_is_hidden_without_pro(cx: &mut TestAppContext) {
     "cloud": cloud(serde_json::json!({ "providerKeys": boat_key(), "selectedProvider": "boat" })),
   })));
   assert_eq!(provider_keys(&mut h), None);
-  assert!(!h.drawn("byos-provider-keys"));
+  assert!(!h.shows(gpui::Role::Heading, "Provider keys"));
 }
 
 #[gpui::test]
@@ -1275,7 +1348,7 @@ fn byos_adds_and_removes_provider_keys(cx: &mut TestAppContext) {
     cloud(serde_json::json!({ "providerKeys": boat_key() })),
   );
   let keys = provider_keys(&mut h).expect("provider keys for Pro");
-  assert!(h.drawn("byos-provider-keys"));
+  assert!(h.shows(gpui::Role::Heading, "Provider keys"));
   assert_eq!(
     keys.rows,
     [settings::ProviderKeyRow {
@@ -1351,8 +1424,8 @@ fn the_cloud_card_never_names_a_provider(cx: &mut TestAppContext) {
   );
   let card = cloud_card(&mut h);
   assert!(!format!("{card:?}").contains("Boat"), "{card:?}");
-  assert!(!h.drawn("cloud-placement-boat"));
-  assert!(!h.drawn("cloud-placement-picker"));
+  assert!(!h.shows(gpui::Role::Button, "Boat"));
+  assert!(!h.shows(gpui::Role::RadioButton, "Boat"));
 }
 
 #[gpui::test]
@@ -1376,7 +1449,7 @@ fn byos_create_is_offered_only_without_a_workspace_and_with_a_valid_key(cx: &mut
   });
   let mut h = signed_in_with_cloud(cx, Arc::new(FakeHost::default()), cloud(ready));
   assert!(!provider_keys(&mut h).unwrap().rows[0].can_create);
-  assert!(!h.drawn("byos-key-create-boat"));
+  assert!(!h.shows(gpui::Role::Button, "Create workspace on this account"));
   set_cloud(
     &mut h,
     serde_json::json!({ "providerKeys": [{ "id": "c1", "provider_kind": "boat", "invalid_at": "2026-11-01T00:00:00Z" }] }),
@@ -1412,7 +1485,7 @@ fn team_cloud_is_hidden_without_a_team(cx: &mut TestAppContext) {
   let tab = signed_in_tab(&mut h);
   assert_eq!(tab.cloud_profile, None);
   assert!(tab.org_cloud.is_empty());
-  assert!(!h.drawn("team-profile"));
+  assert!(!h.shows(gpui::Role::Heading, "Cloud billing"));
 }
 
 #[gpui::test]
@@ -1426,7 +1499,7 @@ fn team_profile_switches_where_cloud_bills(cx: &mut TestAppContext) {
   let profile = signed_in_tab(&mut h)
     .cloud_profile
     .expect("a Team member gets the profile switcher");
-  assert!(h.drawn("team-profile"));
+  assert!(h.shows(gpui::Role::Heading, "Cloud billing"));
   assert_eq!(
     profile
       .options
@@ -1471,14 +1544,25 @@ fn team_owner_sets_what_members_may_run_and_both_caps(cx: &mut TestAppContext) {
     .org_cloud
     .pop()
     .expect("an owner gets the organization's cloud settings");
-  assert!(h.drawn("team-o1"));
+  assert!(h
+    .rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Group)
+        .name("Acme cloud")
+        .hidden(true)
+    )
+    .is_some());
   assert_eq!((org.allow_managed, org.allow_byos), (true, false));
   assert_eq!(
     (org.org_cap.as_str(), org.member_cap.as_str()),
     ("500", "50")
   );
-  for control in ["team-o1-managed", "team-o1-byos", "team-o1-save"] {
-    assert!(h.drawn(control), "{control} is drawn");
+  for (role, name) in [
+    (gpui::Role::Switch, "treq-managed sandboxes"),
+    (gpui::Role::Switch, "The organization's own keys"),
+    (gpui::Role::Button, "Save"),
+  ] {
+    assert!(team_has(&mut h, role, name), "{name} is drawn");
   }
   // Below the test window's fold a simulated click lands nowhere, so press by action.
   settings_act(&mut h, field("team.byos.o1", true.into()));
@@ -1518,7 +1602,10 @@ fn team_owner_adds_and_removes_organization_keys(cx: &mut TestAppContext) {
     org.keys.iter().map(|k| k.kind.as_str()).collect::<Vec<_>>(),
     ["boat"]
   );
-  assert!(h.drawn("team-o1-key-add-daytona") && h.drawn("team-o1-key-remove-boat"));
+  assert!(
+    team_has(&mut h, gpui::Role::Button, "Add Daytona key")
+      && team_has(&mut h, gpui::Role::Button, "Remove")
+  );
   settings_act(&mut h, press("team.key.add.o1.daytona"));
   assert_eq!(
     signed_in_tab(&mut h).org_cloud[0].editing.as_deref(),
@@ -1571,7 +1658,11 @@ fn an_organization_key_creates_only_while_its_profile_is_selected(cx: &mut TestA
   );
   let org = signed_in_tab(&mut h).org_cloud.pop().unwrap();
   assert!(!org.keys[0].can_create);
-  assert!(!h.drawn("team-o1-key-create-boat"));
+  assert!(!team_has(
+    &mut h,
+    gpui::Role::Button,
+    "Create workspace on this account"
+  ));
 }
 
 #[gpui::test]
@@ -1612,8 +1703,8 @@ fn linear_on_free_offers_upgrade_instead_of_api_key(cx: &mut TestAppContext) {
   assert!(linear.upgrade);
   assert!(!linear.oauth);
   h.click("integration-card-linear");
-  assert!(!h.drawn("linear-api-key-edit"));
-  assert!(h.drawn("linear-upgrade"));
+  assert!(!h.shows(gpui::Role::Button, "Update API key"));
+  assert!(h.shows(gpui::Role::Button, "Upgrade to Pro"));
   h.click("linear-upgrade");
   h.cx.run_until_parked();
   assert!(
