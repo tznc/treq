@@ -204,6 +204,9 @@ fn treq_resolve_side_two_clears_conflict_and_cleans_up_without_extra_commit() {
     !Path::new(&session.agent_cwd).exists(),
     "slug resolve root should be removed once no change-id dirs remain"
   );
+  let leaked =
+    treq_lib::jj::list_resolve_workspace_names(&repo.repo_path).expect("list resolve workspaces");
+  assert!(leaked.is_empty(), "resolve jj workspace leaked: {leaked:?}");
 
   let after =
     core::list_commits(&repo.repo_path, Some(workspace.id), false, None, None).expect("list after");
