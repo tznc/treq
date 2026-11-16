@@ -38,36 +38,76 @@ pub fn default_setting(agent: &str) -> String {
 
 /// A profile name: 1 to 32 lowercase letters, digits, `-` or `_`.
 pub fn validate_name(name: &str) -> Result<String, String> {
-  todo!()
+  let name = name.trim();
+  let valid = (1..=32).contains(&name.len())
+    && name
+      .chars()
+      .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
+  if valid {
+    Ok(name.to_string())
+  } else {
+    Err("Use 1 to 32 lowercase letters, digits, - or _".into())
+  }
 }
 
 /// The profiles stored in [`PROFILES_SETTING`]; nothing when unset or invalid.
 pub fn parse(json: Option<&str>) -> Vec<AgentProfile> {
-  todo!()
+  json
+    .and_then(|raw| serde_json::from_str(raw).ok())
+    .unwrap_or_default()
 }
 
 pub fn to_json(profiles: &[AgentProfile]) -> String {
-  todo!()
+  serde_json::to_string(profiles).unwrap_or_else(|_| "[]".into())
 }
 
 /// `profiles` with a new one added.
-pub fn add(profiles: &[AgentProfile], agent: &str, name: &str) -> Result<Vec<AgentProfile>, String> {
-  todo!()
+pub fn add(
+  profiles: &[AgentProfile],
+  agent: &str,
+  name: &str,
+) -> Result<Vec<AgentProfile>, String> {
+  if !supports_profiles(agent) {
+    return Err(format!("{agent} does not support profiles"));
+  }
+  let name = validate_name(name)?;
+  if profiles.iter().any(|p| p.agent == agent && p.name == name) {
+    return Err(format!("{agent} already has a profile named {name}"));
+  }
+  let mut added = profiles.to_vec();
+  added.push(AgentProfile {
+    agent: agent.into(),
+    name,
+  });
+  Ok(added)
 }
 
 /// `profiles` without `agent`'s `name`.
 pub fn remove(profiles: &[AgentProfile], agent: &str, name: &str) -> Vec<AgentProfile> {
-  todo!()
+  profiles
+    .iter()
+    .filter(|p| !(p.agent == agent && p.name == name))
+    .cloned()
+    .collect()
 }
 
 /// The profile's config directory under the app data directory.
 pub fn config_dir(app_data_dir: &Path, profile: &AgentProfile) -> PathBuf {
-  todo!()
+  app_data_dir
+    .join("agent-profiles")
+    .join(&profile.agent)
+    .join(&profile.name)
 }
 
 /// What the agent's command exports to use the profile.
 pub fn env(app_data_dir: &Path, profile: &AgentProfile) -> Vec<(String, String)> {
-  todo!()
+  config_dir_var(&profile.agent)
+    .map(|var| {
+      let dir = config_dir(app_data_dir, profile);
+      (var.to_string(), dir.to_string_lossy().into_owned())
+    })
+    .into_iter()
+    .collect()
 }
 
 /// The profile a session of `agent` starts with: the chosen one, else the
@@ -80,7 +120,16 @@ pub fn resolve(
   repo_default: Option<&str>,
   app_default: Option<&str>,
 ) -> Option<AgentProfile> {
-  todo!()
+  [chosen, repo_default, app_default]
+    .into_iter()
+    .flatten()
+    .filter(|name| !name.is_empty())
+    .find_map(|name| {
+      profiles
+        .iter()
+        .find(|p| p.agent == agent && p.name == name)
+        .cloned()
+    })
 }
 
 #[cfg(test)]
@@ -159,10 +208,7 @@ mod tests {
         "/data/agent-profiles/claude/work".to_string()
       )]
     );
-    assert_eq!(
-      env(data, &profile("codex", "personal"))[0].0,
-      "CODEX_HOME"
-    );
+    assert_eq!(env(data, &profile("codex", "personal"))[0].0, "CODEX_HOME");
   }
 
   #[test]
