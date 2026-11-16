@@ -4326,6 +4326,52 @@ pub fn jj_workspace_parent_descends_from_target(
     .map_err(|e| JjError::IoError(format!("Failed ancestry check: {}", e)))
 }
 
+/// Whether `workspace_branch`'s changes are already on `target_branch`:
+/// applying the stack's net diff (merge base -> branch tip) onto the target
+/// changes nothing. Catches squash merges, whose upstream commits carry the
+/// same changes under new hashes, without asking GitHub. `false` when the
+/// branch has no commits of its own.
+pub fn jj_branch_changes_landed_on_target(
+  workspace_path: &str,
+  workspace_branch: &str,
+  target_branch: &str,
+) -> Result<bool, JjError> {
+  validate_branch_name(workspace_branch, "workspace")?;
+  validate_branch_name(target_branch, "target")?;
+  let loaded = load_workspace_repo(workspace_path)?;
+  let target_symbol = resolve_target_branch_symbol(&loaded, workspace_path, target_branch)?;
+  let branch = resolve_commit_by_revision(&loaded, workspace_branch)?;
+  let target = resolve_commit_by_revision(&loaded, &target_symbol)?;
+  let base_ids: Vec<_> = evaluate_revset(
+    &loaded,
+    &format!("heads(::({workspace_branch}) & ::({target_symbol}))"),
+  )?
+  .iter()
+  .collect::<Result<_, _>>()
+  .map_err(|e| JjError::IoError(format!("Failed to find merge base: {e}")))?;
+  let [base_id] = base_ids.as_slice() else {
+    return Ok(false);
+  };
+  if base_id == branch.id() {
+    return Ok(false);
+  }
+  let base = loaded
+    .repo
+    .store()
+    .get_commit(base_id)
+    .map_err(|e| JjError::IoError(format!("Failed to load merge base: {e}")))?;
+  let stack_diff = Diff::new(
+    (base.tree(), base.conflict_label()),
+    (branch.tree(), branch.conflict_label()),
+  );
+  let applied = block_on(MergedTree::merge(Merge::from_diffs(
+    (target.tree(), target.conflict_label()),
+    vec![stack_diff],
+  )))
+  .map_err(|e| JjError::IoError(format!("Failed to apply stack diff: {e}")))?;
+  Ok(applied.tree_ids() == target.tree_ids())
+}
+
 /// Result of [`rebase_snapshot`].
 pub struct RebaseSnapshot {
   operation_id: String,

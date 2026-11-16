@@ -466,45 +466,77 @@ fn rebase_reports_failure_when_it_produces_conflicts() {
 }
 
 #[test]
-fn rebase_skips_workspace_whose_pr_is_merged() {
+fn rebase_skips_stack_whose_changes_already_landed_on_target() {
+  assert_landed_stack_is_left_alone(None);
+}
+
+#[test]
+fn forced_rebase_skips_stack_whose_changes_already_landed_on_target() {
+  assert_landed_stack_is_left_alone(Some(true));
+}
+
+fn assert_landed_stack_is_left_alone(force: Option<bool>) {
   let repo = TestRepo::with_remote().unwrap();
   let ws = repo
-    .create_workspace_with_commit("feat/merged", "shared.txt", "work", None)
+    .create_workspace_with_commit("feat/landed", "a.txt", "one", None)
     .unwrap();
+  let workspace_path = repo.workspace_full_path(&ws);
+  TestRepo::write_workspace_file(&workspace_path, "b.txt", "two").unwrap();
+  treq_lib::core::commit_workspace(&repo.repo_path, ws.id, "second").unwrap();
+  let target = repo.default_branch().to_string();
+  treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, &target).unwrap();
+  // Squash-merged upstream: the same changes under new hashes, then main moves on.
+  // No PR status is cached, so only the diffs can tell the stack landed.
+  repo
+    .remote_commit_file("a.txt", "one", "squash part 1")
+    .unwrap();
+  repo
+    .remote_commit_file("b.txt", "two", "squash part 2")
+    .unwrap();
+  repo
+    .remote_commit_file("later.txt", "later", "unrelated")
+    .unwrap();
+  let before = jj::jj_get_commit_id(&workspace_path, "feat/landed").unwrap();
+
+  let result =
+    treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, force, "diff")
+      .unwrap();
+
+  // A forced rebase always reports `rebased`; the stack must still be untouched.
+  assert!(result.success, "{}", result.message);
+  assert_eq!(
+    jj::jj_get_commit_id(&workspace_path, "feat/landed").unwrap(),
+    before,
+    "landed stack was rewritten: {}",
+    result.message
+  );
+}
+
+#[test]
+fn rebase_still_moves_stack_whose_changes_only_partly_landed() {
+  let repo = TestRepo::with_remote().unwrap();
+  let ws = repo
+    .create_workspace_with_commit("feat/partial", "a.txt", "one", None)
+    .unwrap();
+  let workspace_path = repo.workspace_full_path(&ws);
+  TestRepo::write_workspace_file(&workspace_path, "b.txt", "two").unwrap();
+  treq_lib::core::commit_workspace(&repo.repo_path, ws.id, "second").unwrap();
   let target = repo.default_branch().to_string();
   treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, &target).unwrap();
   repo
-    .remote_commit_file("shared.txt", "upstream", "squash-merged upstream")
+    .remote_commit_file("a.txt", "one", "lands a only")
     .unwrap();
-  treq_lib::pr_status::global().put_cached(
-    &repo.repo_path,
-    "feat/merged",
-    Some(treq_lib::github::PrInfo {
-      number: 1,
-      title: "merged".into(),
-      state: "MERGED".into(),
-      url: String::new(),
-      head_ref_name: "feat/merged".into(),
-      base_ref_name: target,
-      merge_state_status: None,
-      is_draft: false,
-      body: String::new(),
-    }),
-  );
-  let workspace_path = repo.workspace_full_path(&ws);
-  let before = jj::jj_get_commit_id(&workspace_path, "feat/merged").unwrap();
+  let before = jj::jj_get_commit_id(&workspace_path, "feat/partial").unwrap();
 
   let result =
     treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, None, "diff")
       .unwrap();
 
-  assert!(
-    !result.rebased,
-    "merged PR stack was rebased: {}",
+  assert!(result.success, "{}", result.message);
+  assert_ne!(
+    jj::jj_get_commit_id(&workspace_path, "feat/partial").unwrap(),
+    before,
+    "unlanded changes must still rebase: {}",
     result.message
-  );
-  assert_eq!(
-    jj::jj_get_commit_id(&workspace_path, "feat/merged").unwrap(),
-    before
   );
 }
