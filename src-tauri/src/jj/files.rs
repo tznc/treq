@@ -61,6 +61,9 @@ pub fn jj_get_changed_files(workspace_path: &str) -> Result<Vec<JjFileChange>, J
 
     // If tree changed, create a new WC commit and update op-store to expose the snapshotted state.
     if new_tree.tree_ids() != wc_commit.tree_ids() {
+      let op_lock = super::remote::repo_op_lock(workspace_path);
+      let _op_guard = op_lock.lock().unwrap_or_else(|p| p.into_inner());
+      let repo = super::reload_for_snapshot(&repo, &workspace_name, &wc_commit);
       let mut tx = repo.start_transaction();
       let mut builder = tx.repo_mut().rewrite_commit(&wc_commit).detach();
       builder.set_tree(new_tree.clone());
