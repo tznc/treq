@@ -1484,6 +1484,7 @@ pub fn forget_workspace(repo_path: &str, workspace_path: &str) -> Result<(), JjE
 
 /// Forget a jj workspace by its jj name. Use when the name differs from the
 /// directory name (e.g. `_resolve-{slug}-{change}` under `.treq/resolve/{slug}/{change}`).
+// home-head-test: delete_workspace, resolve_workspace_conflict
 pub fn forget_workspace_by_name(repo_path: &str, workspace_name: &str) -> Result<(), JjError> {
   // Always forget the jj workspace first so jj stops tracking even if directory is gone.
   if !workspace_name.is_empty() {
