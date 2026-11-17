@@ -10,15 +10,17 @@
 // Run manually with `npm run build:skills-catalog`, or automatically by the
 // "Update Skills Catalog" GitHub Action (see .github/workflows).
 import { execFileSync } from 'child_process';
-import { mkdtempSync, readdirSync, statSync, readFileSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, readdirSync, statSync, lstatSync, readFileSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { join, relative, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import matter from 'gray-matter';
 import skillPageContent from '../plugins/skillPageContent.js';
+import skillDiscovery from '../plugins/skillDiscovery.js';
 
 const { canRedistribute } = skillPageContent;
+const { sourceRoots, discoverSkills, licenseDirs, detectLicense } = skillDiscovery;
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const webRoot = join(__dirname, '..');
@@ -62,7 +64,11 @@ async function fetchStars(source) {
 // provider filter; `org`/`repo` locate the GitHub repo; `skillsRoot` is the
 // path within the repo that holds one `SKILL.md` per skill folder (per the
 // Agent Skills spec https://github.com/anthropics/skills) — use '' when skills
-// live at the repo root.
+// live at the repo root. A repo that keeps skills in several folders lists
+// them in `skillsRoots` instead, in priority order; a `*` segment matches one
+// folder (e.g. 'plugins/*/skills') and that folder becomes the category. When
+// two roots hold a skill at the same path, the first root wins (see
+// plugins/skillDiscovery.js). A SKILL.md at a root itself is never a skill.
 const SOURCES = [
   {
     id: 'anthropic',
@@ -293,6 +299,120 @@ const SOURCES = [
     skillsRoot: 'skills',
     excludeCategories: [],
   },
+  {
+    id: 'google',
+    name: 'Google',
+    org: 'google',
+    repo: 'skills',
+    branch: 'main',
+    // plugins/cloud holds plugin variants of skills that skills/ already lists.
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'claude-plugins',
+    name: 'Claude Plugins',
+    org: 'anthropics',
+    repo: 'claude-plugins-official',
+    branch: 'main',
+    skillsRoots: ['plugins/*/skills', 'external_plugins/*/skills'],
+    excludeCategories: [],
+  },
+  {
+    id: 'hashicorp',
+    name: 'HashiCorp',
+    org: 'hashicorp',
+    repo: 'agent-skills',
+    branch: 'main',
+    skillsRoot: 'plugins/*/skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'stitch',
+    name: 'Google Stitch',
+    org: 'google-labs-code',
+    repo: 'stitch-skills',
+    branch: 'main',
+    skillsRoot: 'plugins/*/skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'neon',
+    name: 'Neon',
+    org: 'neondatabase',
+    repo: 'agent-skills',
+    branch: 'main',
+    // plugins/neon-postgres/skills is a copy of skills/.
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'firebase',
+    name: 'Firebase',
+    org: 'firebase',
+    repo: 'agent-skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'obsidian',
+    name: 'Obsidian',
+    org: 'obsidianmd',
+    repo: 'obsidian-skills',
+    branch: 'main',
+    skillsRoot: 'plugins/obsidian/skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'cloudflare-security',
+    name: 'Cloudflare Security',
+    org: 'cloudflare',
+    repo: 'security-audit-skill',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'remotion',
+    name: 'Remotion',
+    org: 'remotion-dev',
+    repo: 'skills',
+    branch: 'main',
+    // No license file, so the catalog lists these without their SKILL.md text.
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'gstack',
+    name: 'gstack',
+    org: 'garrytan',
+    repo: 'gstack',
+    branch: 'main',
+    // Skills are top-level folders. The rest are test fixtures, ports for
+    // other hosts and browser scripts; the root SKILL.md is skipped.
+    skillsRoot: '',
+    excludeCategories: ['test', 'qm', 'capy', 'browser-skills', 'openclaw'],
+  },
+  {
+    id: 'planning-with-files',
+    name: 'Planning with Files',
+    org: 'OthmanAdi',
+    repo: 'planning-with-files',
+    branch: 'master',
+    // skills/i18n holds translations of the one skill.
+    skillsRoot: 'skills',
+    excludeCategories: ['i18n'],
+  },
+  {
+    id: 'hallmark',
+    name: 'Hallmark',
+    org: 'Nutlope',
+    repo: 'hallmark',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
 ];
 
 // Mirrors the isBinaryFile() extension list in src/components/FileBrowser.tsx
@@ -306,32 +426,6 @@ const BINARY_EXTENSIONS = [
 function isBinaryFile(path) {
   const lower = path.toLowerCase();
   return BINARY_EXTENSIONS.some((ext) => lower.endsWith(ext));
-}
-
-// Detects a short SPDX-ish label from license file text. Skill folders often
-// ship a LICENSE.txt whose SKILL.md frontmatter only says "see LICENSE.txt" —
-// this reads the actual text so the UI can show "Apache-2.0" / "MIT" /
-// "Proprietary" instead of that unhelpful pointer.
-function detectLicense(text) {
-  const head = text.slice(0, 3000);
-  if (/Apache License[\s\S]{0,60}Version 2\.0/i.test(head)) return 'Apache-2.0';
-  if (
-    /\bMIT License\b/i.test(head) ||
-    /Permission is hereby granted, free of charge, to any person obtaining a copy/i.test(head)
-  ) return 'MIT';
-  if (/BSD 3-Clause/i.test(head) || (/Redistribution and use in source and binary forms/i.test(head) && /neither the name/i.test(head))) {
-    return 'BSD-3-Clause';
-  }
-  if (/BSD 2-Clause/i.test(head)) return 'BSD-2-Clause';
-  if (/GNU GENERAL PUBLIC LICENSE[\s\S]{0,60}Version 3/i.test(head)) return 'GPL-3.0';
-  if (/GNU GENERAL PUBLIC LICENSE[\s\S]{0,60}Version 2/i.test(head)) return 'GPL-2.0';
-  if (/Mozilla Public License/i.test(head)) return 'MPL-2.0';
-  if (/\bISC License\b/i.test(head)) return 'ISC';
-  if (/\bThe Unlicense\b/i.test(head)) return 'Unlicense';
-  if (/all rights reserved/i.test(head) && /(commercial terms|consumer terms|additional restrictions|proprietary)/i.test(head)) {
-    return 'Proprietary';
-  }
-  return 'Custom';
 }
 
 function findLicenseFile(dir) {
@@ -357,10 +451,13 @@ function slugifySegment(segment) {
   return segment.replace(/^\./, '');
 }
 
+// Symlinked folders are not followed: repos link one skill folder under a
+// second name (gstack's connect-chrome), which would list it twice.
 function findSkillFiles(dir, results = []) {
   for (const entry of readdirSync(dir)) {
     if (entry === '.git') continue;
     const full = join(dir, entry);
+    if (lstatSync(full).isSymbolicLink()) continue;
     if (statSync(full).isDirectory()) {
       findSkillFiles(full, results);
     } else if (entry === 'SKILL.md') {
@@ -428,15 +525,28 @@ function buildFileManifest(source, skillDir, repoRelPath) {
     });
 }
 
-function extractSkills(source, cloneDir, rootLicense, pages) {
-  const skillsRoot = join(cloneDir, source.skillsRoot);
+// The nearest license file to a skill folder: its own, else a parent's.
+function findLicense(cloneDir, repoRelDir, cache) {
+  for (const dir of licenseDirs(repoRelDir)) {
+    if (!cache.has(dir)) cache.set(dir, detectDirLicense(join(cloneDir, dir)));
+    if (cache.get(dir)) return cache.get(dir);
+  }
+  return null;
+}
+
+function extractSkills(source, cloneDir, pages) {
   const skills = [];
+  const licenseCache = new Map();
   const blobUrl = (file) =>
     `https://github.com/${source.org}/${source.repo}/blob/${source.branch}/${relative(cloneDir, file).replace(/\\/g, '/')}`;
 
-  for (const skillFile of findSkillFiles(skillsRoot)) {
+  const skillFiles = findSkillFiles(cloneDir).map((file) => relative(cloneDir, file));
+  const found = discoverSkills(skillFiles, sourceRoots(source));
+  for (const { file, relDir } of found.skipped) console.warn(`  skipping ${file}: ${relDir} is already listed`);
+
+  for (const { file, relDir } of found.skills) {
+    const skillFile = join(cloneDir, file);
     const skillDir = dirname(skillFile);
-    const relDir = relative(skillsRoot, skillDir).replace(/\\/g, '/');
     const segments = relDir.split('/');
     const category = segments.length > 1 ? segments[0] : null;
 
@@ -456,7 +566,7 @@ function extractSkills(source, cloneDir, rootLicense, pages) {
 
     const repoRelPath = relative(cloneDir, skillDir).replace(/\\/g, '/');
     const routeSlug = segments.map(slugifySegment).join('/');
-    const licenseInfo = detectDirLicense(skillDir) ?? rootLicense;
+    const licenseInfo = findLicense(cloneDir, repoRelPath, licenseCache);
     const license = licenseInfo?.license ?? null;
 
     // Proprietary/source-available skills (e.g. Anthropic's docx/pdf/pptx/xlsx)
@@ -505,8 +615,7 @@ async function main() {
     for (const source of SOURCES) {
       console.log(`Fetching ${source.org}/${source.repo}...`);
       const cloneDir = cloneSource(source, scratchDir);
-      const rootLicense = detectDirLicense(cloneDir);
-      const skills = extractSkills(source, cloneDir, rootLicense, pages);
+      const skills = extractSkills(source, cloneDir, pages);
       allSkills.push(...skills);
       const stars = (await fetchStars(source)) ?? previousStars[source.id] ?? null;
       sourceMeta.push({
