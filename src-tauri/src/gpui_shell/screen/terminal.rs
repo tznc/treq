@@ -3711,11 +3711,30 @@ impl TerminalPane {
     let place = self.place.clone();
     let label = |name: String, main: bool, key: String, react: ActionSink| {
       let tones = if on_dark { &d } else { p };
+      let changes = (key.clone(), react.clone());
       let loc = place.workspace_loc(&key).map(|loc| {
+        let (key, react) = changes;
         div()
+          .id(SharedString::from(format!("terminal-workspace-loc-{id}")))
+          .role(gpui::Role::Button)
+          .aria_label("Open changes")
           .flex()
           .flex_none()
           .gap_1()
+          .rounded_sm()
+          .cursor_pointer()
+          .hover(|s| s.underline())
+          .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+          .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            react(
+              ScreenAction::Field {
+                field: "terminal.navigate".into(),
+                value: serde_json::json!({ "key": key, "isMainRepo": main, "tab": "changes" }),
+              },
+              cx,
+            )
+          })
           .debug_selector(|| "terminal-workspace-loc".into())
           .child(super::workspace::loc_count(
             format!("+{}", loc.insertions),
@@ -3731,7 +3750,7 @@ impl TerminalPane {
       ui::text(div(), TextSize::Xs)
         .id(SharedString::from(format!("terminal-workspace-label-{id}")))
         .role(gpui::Role::Button)
-        .aria_label(name.clone())
+        .aria_label(format!("Go to {name}"))
         .debug_selector(|| "terminal-workspace-label".into())
         .max_w(zpx(360.))
         .flex()
@@ -3761,7 +3780,8 @@ impl TerminalPane {
           )
         })
         .child(div().min_w_0().truncate().child(name))
-        .children(loc)
+        .children(loc.map(|loc| loc.test_support()))
+        .test_support()
     };
     let close_id = column.id.clone();
     let close = div()
@@ -3866,7 +3886,7 @@ impl TerminalPane {
                 Some(TooltipContent::Text(label_name.clone().into())),
                 label(
                   label_name,
-                  workspace_name.is_none(),
+                  workspace_path.is_none(),
                   key,
                   self.react.clone(),
                 ),

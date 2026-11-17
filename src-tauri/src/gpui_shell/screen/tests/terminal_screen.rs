@@ -1708,3 +1708,45 @@ fn terminal_pane_shows_on_the_github_view(cx: &mut TestAppContext) {
   });
   assert!(h.drawn("terminal-scroll-container"));
 }
+
+/// Clicking an agent header's workspace label navigates to that workspace.
+#[gpui::test]
+fn terminal_workspace_label_click_navigates(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-workspace-label");
+  let navigated = h
+    .sent()
+    .into_iter()
+    .any(|a| matches!(a, ScreenAction::Field { field, .. } if field == "terminal.navigate"));
+  assert!(navigated, "{:?}", h.sent());
+}
+
+/// A session whose workspace is known only by its path (the launch kept
+/// it, the workspace row isn't loaded) still navigates to that workspace,
+/// not to the main repository.
+#[gpui::test]
+fn terminal_workspace_label_click_navigates_by_path(cx: &mut TestAppContext) {
+  let mut host = terminal_host();
+  host.sessions[0].workspace_id = None;
+  host.pending.lock().unwrap().insert(
+    3,
+    launch_data::PendingSession {
+      pending_prompt: None,
+      permission_mode: None,
+      agent: None,
+      workspace_path: Some("/repo/.treq/workspaces/b".into()),
+    },
+  );
+  let (mut h, _) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-workspace-label");
+  let value = h.sent().into_iter().find_map(|a| match a {
+    ScreenAction::Field { field, value } if field == "terminal.navigate" => Some(value),
+    _ => None,
+  });
+  assert_eq!(
+    value,
+    Some(serde_json::json!({ "key": "/repo/.treq/workspaces/b", "isMainRepo": false }))
+  );
+}

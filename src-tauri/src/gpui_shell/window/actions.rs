@@ -781,6 +781,9 @@ impl Model {
           });
           if let Some(workspace) = workspace {
             self.select_workspace(Some(&workspace), data);
+            if value["tab"] == "changes" {
+              self.view.tab = Tab::Changes;
+            }
           }
         }
       }
@@ -1655,6 +1658,21 @@ mod tests {
     assert_eq!(model.selected, Some(1));
     model.screen_action(&field("terminal.shortcut", "k".into()), &data);
     assert!(model.dialogs.palette);
+  }
+
+  /// A terminal label's diff counts open that workspace's Changes tab.
+  #[test]
+  fn a_terminal_label_diff_click_opens_the_changes_tab() {
+    let (mut model, data) = (model(), data());
+    model.view.tab = Tab::Overview;
+    model.screen_action(
+      &field(
+        "terminal.navigate",
+        json!({"key": ".treq/workspaces/a", "isMainRepo": false, "tab": "changes"}),
+      ),
+      &data,
+    );
+    assert_eq!((model.selected, model.view.tab), (Some(1), Tab::Changes));
   }
 
   /// Clicking another workspace's terminal keeps the tab the user was on,
