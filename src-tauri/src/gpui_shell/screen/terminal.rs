@@ -3705,11 +3705,29 @@ impl TerminalPane {
     let place = self.place.clone();
     let label = |name: String, main: bool, key: String, react: ActionSink| {
       let tones = if on_dark { &d } else { p };
+      let changes = (key.clone(), react.clone());
       let loc = place.workspace_loc(&key).map(|loc| {
+        let (key, react) = changes;
         div()
+          .id(SharedString::from(format!("terminal-workspace-loc-{id}")))
+          .role(gpui::Role::Button)
+          .aria_label("Open Changes")
           .flex()
           .flex_none()
           .gap_1()
+          .rounded_sm()
+          .hover(|s| s.underline())
+          .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+          .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            react(
+              ScreenAction::Field {
+                field: "terminal.navigate".into(),
+                value: serde_json::json!({ "key": key, "isMainRepo": main, "tab": "changes" }),
+              },
+              cx,
+            )
+          })
           .debug_selector(|| "terminal-workspace-loc".into())
           .child(super::workspace::loc_count(
             format!("+{}", loc.insertions),
