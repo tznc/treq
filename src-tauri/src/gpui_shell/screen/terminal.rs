@@ -2554,9 +2554,15 @@ impl TerminalPane {
     let moved = self.place.working_directory != place.working_directory;
     self.adopt_due |= self.place.repo_path != place.repo_path;
     self.place = place;
-    // A newly selected workspace's first terminal becomes the active one.
-    if moved && !self.collapsed {
-      let dir = &self.place.working_directory;
+    // A newly selected workspace's first terminal becomes the active one,
+    // unless the active one is already there (a click on it switched
+    // workspace): the row then stays where the click left it.
+    let dir = &self.place.working_directory;
+    let active_here = self
+      .columns
+      .iter()
+      .any(|c| self.active.as_deref() == Some(c.id.as_str()) && self.column_key(c) == *dir);
+    if moved && !self.collapsed && !active_here {
       let id = self
         .columns
         .iter()

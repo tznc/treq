@@ -507,6 +507,43 @@ fn terminal_pane_activates_the_selected_workspaces_terminal(cx: &mut TestAppCont
   assert!(!host.calls().contains(&format!("close {}", agent_pty())));
 }
 
+/// Clicking a terminal in another workspace switches to that workspace: the
+/// clicked terminal stays active, rather than the row jumping to the
+/// workspace's first one.
+#[gpui::test]
+fn switching_to_the_active_terminals_workspace_keeps_it_active(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "activeSessionId": 3,
+      "commands": [
+        { "nonce": 1, "kind": "newShell", "dir": "/repo" },
+        { "nonce": 2, "kind": "newShell", "dir": "/repo" },
+      ],
+    }),
+  );
+  let shells: Vec<String> = host
+    .calls()
+    .iter()
+    .filter_map(|c| c.strip_prefix("spawn ").and_then(|c| c.split(' ').next()))
+    .filter(|id| id.starts_with("shell-"))
+    .map(str::to_string)
+    .collect();
+  assert_eq!(shells.len(), 2, "{:?}", host.calls());
+  // The newest shell is active, as a click on it would leave it.
+  h.update(|s| {
+    if let View::Workspace(route) = &mut s.view {
+      route.workspace_id = None;
+    }
+  });
+  h.cx.run_until_parked();
+  h.cx.simulate_keystrokes("cmd-w");
+  h.cx.run_until_parked();
+  let closed = format!("close {}", shells[1]);
+  assert!(host.calls().contains(&closed), "{:?}", host.calls());
+}
+
 /// The pane shows every workspace's terminals: the shown workspace's are
 /// highlighted, the others dimmed, and switching workspace swaps them.
 #[gpui::test]
