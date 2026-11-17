@@ -1553,3 +1553,14 @@ fn the_changes_section_header_is_a_heading(cx: &mut TestAppContext) {
   expect(screen.get_by_role(by::role(gpui::Role::Heading).name("Changes"))).to_be_visible();
   expect(screen.get_by_role(by::role(gpui::Role::Button).name("Collapse Changes"))).to_be_visible();
 }
+
+#[gpui::test]
+fn a_committed_file_takes_a_file_comment(cx: &mut TestAppContext) {
+  let (mut h, _) =
+    workspace_harness(cx, changes_host_committed_only(), committed_route(true));
+  h.click("add-file-comment-button");
+  h.click("comment-input");
+  h.cx.simulate_input("Split this");
+  h.click("comment-submit");
+  assert!(h.drawn("file-comment-card"));
+}
