@@ -22,7 +22,11 @@ pub fn workspace_comments(
   let id = workspace_id.to_string();
   let mut comments = list_comments(repo_path, crate::core::agent_launch::REVIEW_TARGET, &id)?;
   if let Some(pr) = local_db::get_workspace_pr_sync(repo_path, workspace_id)? {
-    comments.extend(list_comments(repo_path, "github_pr", &pr.pr_number.to_string())?);
+    comments.extend(list_comments(
+      repo_path,
+      "github_pr",
+      &pr.pr_number.to_string(),
+    )?);
     comments.sort_by(|a, b| {
       (&a.file_path, a.start_line, &a.created_at).cmp(&(&b.file_path, b.start_line, &b.created_at))
     });
@@ -229,7 +233,18 @@ mod tests {
 
   fn comment(repo: &str, target_type: &str, target_id: &str, file: &str) {
     local_db::create_agent_review_comment(
-      repo, target_type, target_id, file, None, 1, 1, Some("new"), "Note", None, "local-agent", None,
+      repo,
+      target_type,
+      target_id,
+      file,
+      None,
+      1,
+      1,
+      Some("new"),
+      "Note",
+      None,
+      "local-agent",
+      None,
     )
     .unwrap();
   }
@@ -238,14 +253,31 @@ mod tests {
   fn workspace_comments_include_its_pull_requests_review() {
     let root = tempfile::TempDir::new().unwrap();
     let repo = root.path().to_str().unwrap();
-    comment(repo, "workspace_diff", "3", "a.rs");
+    let ws = local_db::add_workspace(
+      repo,
+      "w".into(),
+      format!("{repo}/w"),
+      "b".into(),
+      None,
+      None,
+      None,
+    )
+    .unwrap();
+    comment(repo, "workspace_diff", &ws.to_string(), "a.rs");
     comment(repo, "github_pr", "42", "b.rs");
     comment(repo, "github_pr", "7", "c.rs");
-    let record = local_db::PrSyncRecord { pr_number: 42, title: None, description: None };
-    local_db::set_workspace_pr_sync(repo, 3, &record).unwrap();
+    let record = local_db::PrSyncRecord {
+      pr_number: 42,
+      title: None,
+      description: None,
+    };
+    local_db::set_workspace_pr_sync(repo, ws, &record).unwrap();
 
-    let files: Vec<String> =
-      workspace_comments(repo, 3).unwrap().into_iter().map(|c| c.file_path).collect();
+    let files: Vec<String> = workspace_comments(repo, ws)
+      .unwrap()
+      .into_iter()
+      .map(|c| c.file_path)
+      .collect();
     assert_eq!(files, ["a.rs", "b.rs"]);
   }
 
@@ -255,8 +287,11 @@ mod tests {
     let repo = root.path().to_str().unwrap();
     comment(repo, "workspace_diff", "3", "a.rs");
     comment(repo, "github_pr", "42", "b.rs");
-    let files: Vec<String> =
-      workspace_comments(repo, 3).unwrap().into_iter().map(|c| c.file_path).collect();
+    let files: Vec<String> = workspace_comments(repo, 3)
+      .unwrap()
+      .into_iter()
+      .map(|c| c.file_path)
+      .collect();
     assert_eq!(files, ["a.rs"]);
   }
 
