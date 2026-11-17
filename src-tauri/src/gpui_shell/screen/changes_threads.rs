@@ -12,6 +12,7 @@ use super::{
 use crate::{github::GhReviewThread, jj::JjDiffHunk, local_db::AgentReviewComment};
 
 /// `AGENT_REVIEW_TARGET_WORKSPACE_DIFF`.
+#[cfg(test)]
 pub const WORKSPACE_DIFF: &str = "workspace_diff";
 
 /// A thread's or comment's line: file, hunk id, number and side.
