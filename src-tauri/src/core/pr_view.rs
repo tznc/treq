@@ -25,6 +25,25 @@ pub fn timeline<'a>(
   items.into_iter().map(|(_, item)| item).collect()
 }
 
+/// Who `@query` can mention: the thread's participants, most recent first,
+/// those whose login starts with the query before those that contain it.
+pub fn mention_candidates<'a>(
+  participants: impl IntoIterator<Item = &'a GhAuthor>,
+  query: &str,
+  limit: usize,
+) -> Vec<String> {
+  let query = query.to_lowercase();
+  let mut seen = std::collections::HashSet::new();
+  let mut logins: Vec<&str> = participants
+    .into_iter()
+    .map(|a| a.login.as_str())
+    .filter(|login| !login.is_empty() && seen.insert(login.to_lowercase()))
+    .filter(|login| login.to_lowercase().contains(&query))
+    .collect();
+  logins.sort_by_key(|login| !login.to_lowercase().starts_with(&query));
+  logins.into_iter().take(limit).map(str::to_string).collect()
+}
+
 /// `author`'s avatar: the one GitHub reported, else their profile image.
 pub fn avatar_url(author: &GhAuthor) -> String {
   author
@@ -113,6 +132,33 @@ pub fn collapsed_checks(checks: &[PrCheckEntry]) -> Vec<&PrCheckEntry> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  fn who(login: &str) -> GhAuthor {
+    GhAuthor {
+      login: login.into(),
+      avatar_url: None,
+    }
+  }
+
+  #[test]
+  fn mention_candidates_dedupe_and_rank_prefix_matches_first() {
+    let people = [who("bob"), who("ziinc"), who("CodingFabian"), who("Ziinc")];
+    assert_eq!(
+      mention_candidates(&people, "", 5),
+      vec!["bob", "ziinc", "CodingFabian"]
+    );
+    assert_eq!(
+      mention_candidates(&people, "in", 5),
+      vec!["ziinc", "CodingFabian"]
+    );
+    assert_eq!(mention_candidates(&people, "co", 5), vec!["CodingFabian"]);
+    assert_eq!(
+      mention_candidates(&[who("ann_b"), who("bob")], "B", 5),
+      vec!["bob", "ann_b"]
+    );
+    assert_eq!(mention_candidates(&people, "", 1), vec!["bob"]);
+    assert!(mention_candidates(&people, "x", 5).is_empty());
+  }
 
   fn reviewed(draft: bool, decision: Option<&str>, reviews: &[&str]) -> GhPullRequest {
     serde_json::from_value(serde_json::json!({

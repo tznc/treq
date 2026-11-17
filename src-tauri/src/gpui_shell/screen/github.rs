@@ -52,6 +52,7 @@ use crate::{
 };
 
 mod detail;
+mod mention;
 mod new_pr;
 pub(super) mod parts;
 
@@ -259,6 +260,10 @@ pub struct GithubView {
   pub(super) detail: Detail,
   /// The comment being written, kept across items of the same kind.
   pub(super) comment: String,
+  /// The highlighted `@` suggestion under the comment box.
+  pub(super) mention_index: usize,
+  /// The `@` whose suggestions Escape closed.
+  pub(super) mention_dismissed: Option<usize>,
   /// Fields whose control must show their state again although focused.
   reset: HashSet<&'static str>,
   pub(super) new_issue: NewIssue,
@@ -323,6 +328,8 @@ impl GithubView {
       filters: PrFilters::default(),
       detail: Detail::default(),
       comment: String::new(),
+      mention_index: 0,
+      mention_dismissed: None,
       reset: HashSet::new(),
       new_issue: NewIssue::default(),
       new_pr: None,
@@ -1007,7 +1014,10 @@ impl GithubView {
       "github.filter.stackLevel" => self.filters.stack_level = text.parse().ok(),
       "github.filter.opened" => self.filters.opened_within_days = text.parse().ok(),
       "github.filter.conflict" => self.filters.conflict = some(&text),
-      "github.comment" => self.comment = text,
+      "github.comment" => {
+        self.comment = text;
+        self.mention_index = 0;
+      }
       "github.newIssue.title" => self.new_issue.title = text,
       "github.newIssue.body" => self.new_issue.body = text,
       "github.edit.title" => {
