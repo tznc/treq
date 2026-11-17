@@ -1604,9 +1604,10 @@ fn terminal_workspace_label_click_navigates(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   h.click("terminal-workspace-label");
-  let navigated = h.sent().into_iter().any(|a| {
-    matches!(a, ScreenAction::Field { field, .. } if field == "terminal.navigate")
-  });
+  let navigated = h
+    .sent()
+    .into_iter()
+    .any(|a| matches!(a, ScreenAction::Field { field, .. } if field == "terminal.navigate"));
   assert!(navigated, "{:?}", h.sent());
 }
 

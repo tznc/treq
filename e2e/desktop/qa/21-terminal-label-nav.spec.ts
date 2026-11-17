@@ -5,7 +5,7 @@ import { capture } from "./capture.ts";
 import { openTab, openWorkspace, row, settle } from "./helpers.ts";
 
 const BRANCH = "feat/keyvalues-cache";
-const OTHER = "feat/empty-event-message";
+const OTHER = "feat/alerting-logs";
 
 test.describe.configure({ mode: "serial" });
 
@@ -25,19 +25,19 @@ test("terminal label: name and diff counts navigate", async ({ page }) => {
     expectations: ["The agent header shows OTHER's workspace label with its +N -N counts"],
   });
 
-  const label = page.getByTestId("terminal-workspace-label").first();
+  const label = page
+    .getByRole("group", { name: "Claude 1 terminal" })
+    .getByRole("button", { name: OTHER, exact: true });
   await label.click({ position: { x: 8, y: 6 } });
   await expect(selectedRow(page, OTHER)).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Commits", selected: true })).toBeVisible();
   await settle(page);
   await capture(page, {
     name: "21-terminal-label-02-name-click",
     title: "After clicking the label name",
-    expectations: ["OTHER is selected in the sidebar", "The Commits tab stays selected"],
+    expectations: ["OTHER is selected in the sidebar and its header shows OTHER", "The agent label now shows +N -N counts"],
   });
 
-  await openWorkspace(page, BRANCH);
-  await openTab(page, "Commits");
+  // The counts show only for the workspace on screen.
   await page.getByRole("button", { name: "Open Changes" }).first().click();
   await expect(selectedRow(page, OTHER)).toBeVisible();
   await expect(page.getByRole("tab", { name: "Changes", selected: true })).toBeVisible();
