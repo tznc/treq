@@ -169,13 +169,13 @@ jobs:
       - name: Install uv
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-      - name: Lint e2e tests (ast-grep)
+      - name: Lint e2e tests and content (ast-grep)
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         working-directory: ${{ github.workspace }}
         # Matches the root lockfile's @ast-grep/cli, without a root npm ci.
         run: |
           uvx --from ast-grep-cli==0.38.7 ast-grep test --skip-snapshot-tests
-          uvx --from ast-grep-cli==0.38.7 ast-grep scan web/e2e
+          uvx --from ast-grep-cli==0.38.7 ast-grep scan web/e2e web/docs web/learn web/compare
       - name: Lint (Biome)
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         working-directory: ${{ github.workspace }}
