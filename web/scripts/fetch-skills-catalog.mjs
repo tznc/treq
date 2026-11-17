@@ -154,15 +154,6 @@ const SOURCES = [
     excludeCategories: [],
   },
   {
-    id: 'palkan',
-    name: 'Vladimir Dementyev',
-    org: 'palkan',
-    repo: 'layered-rails-skills',
-    branch: 'master',
-    skillsRoot: 'layered-rails/skills',
-    excludeCategories: [],
-  },
-  {
     id: 'addyosmani',
     name: 'Addy Osmani',
     org: 'addyosmani',
