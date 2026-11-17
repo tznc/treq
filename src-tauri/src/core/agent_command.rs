@@ -158,6 +158,9 @@ pub fn claude_filesystem_settings(paths: &AgentPaths<'_>) -> Value {
   }
 }
 
+/// Read-only commands Treq's prompts ask agents to run, allowed without a prompt.
+const CLAUDE_ALLOWED_TOOLS: &[&str] = &["Bash(gh pr diff:*)"];
+
 /// Overlay Treq filesystem restrictions onto `.claude/settings.local.json`, without sandbox.
 pub fn merge_claude_local_settings(
   existing: Option<Map<String, Value>>,
@@ -166,6 +169,19 @@ pub fn merge_claude_local_settings(
   let mut settings = existing.unwrap_or_default();
   settings.remove("sandbox");
   settings.insert("filesystem".into(), filesystem);
+  let permissions = settings
+    .entry("permissions")
+    .or_insert_with(|| json!({}));
+  if let Value::Object(permissions) = permissions {
+    let allow = permissions.entry("allow").or_insert_with(|| json!([]));
+    if let Value::Array(allow) = allow {
+      for rule in CLAUDE_ALLOWED_TOOLS {
+        if !allow.iter().any(|v| v == rule) {
+          allow.push(json!(rule));
+        }
+      }
+    }
+  }
   Value::Object(settings)
 }
 
@@ -702,11 +718,29 @@ mod tests {
     };
     assert_eq!(
       merge_claude_local_settings(Some(existing), json!({ "allowRead": ["/a"] })),
-      json!({ "extra": true, "filesystem": { "allowRead": ["/a"] } })
+      json!({
+        "extra": true,
+        "filesystem": { "allowRead": ["/a"] },
+        "permissions": { "allow": ["Bash(gh pr diff:*)"] },
+      })
     );
     assert_eq!(
       merge_claude_local_settings(None, json!({})),
-      json!({ "filesystem": {} })
+      json!({ "filesystem": {}, "permissions": { "allow": ["Bash(gh pr diff:*)"] } })
+    );
+  }
+
+  #[test]
+  fn keeps_local_permissions_when_allowing_gh_pr_diff() {
+    let existing = json!({
+      "permissions": { "allow": ["Bash(ls:*)", "Bash(gh pr diff:*)"], "deny": ["Read(.env)"] },
+    });
+    let Value::Object(existing) = existing else {
+      unreachable!()
+    };
+    assert_eq!(
+      merge_claude_local_settings(Some(existing), json!({}))["permissions"],
+      json!({ "allow": ["Bash(ls:*)", "Bash(gh pr diff:*)"], "deny": ["Read(.env)"] })
     );
     assert_eq!(
       claude_local_settings_path("/repos/treq/"),
