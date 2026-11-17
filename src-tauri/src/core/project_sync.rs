@@ -16,9 +16,11 @@ use std::sync::Arc;
 
 /// Runs the sync loop only while signed in: started by sign-in (a token
 /// refresh leaves the running loop alone), stopped by sign-out.
+#[cfg(feature = "gui")]
 #[derive(Default)]
 pub struct Runner(std::sync::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>);
 
+#[cfg(feature = "gui")]
 impl Runner {
   pub fn signed_in<F, Fut>(&self, start: F)
   where
@@ -300,6 +302,7 @@ mod tests {
     }
   }
 
+  #[cfg(feature = "gui")]
   #[tokio::test]
   async fn runner_runs_only_while_signed_in() {
     let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
