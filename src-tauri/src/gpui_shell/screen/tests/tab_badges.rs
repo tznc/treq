@@ -14,14 +14,17 @@ fn inside(h: &mut Harness, inner: &'static str, outer: &'static str) -> bool {
 }
 
 #[gpui::test]
-fn the_tab_row_shows_the_loc_marker_and_change_count(cx: &mut TestAppContext) {
+fn the_header_shows_the_loc_marker_and_the_tab_row_the_change_count(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
   let screen = h.rendered();
   gpui_testing_library::expect(
     screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Tab).name("Code")),
   )
   .to_be_visible();
-  assert!(inside(&mut h, "loc-diff-marker", "workspace-tab-row"));
+  assert!(inside(&mut h, "loc-diff-marker", "workspace-header"));
+  let details = h.cx.debug_bounds("workspace-details").expect("details");
+  let marker = h.cx.debug_bounds("loc-diff-marker").expect("marker");
+  assert!(marker.left() >= details.right(), "the marker follows the info icon");
   assert!(inside(
     &mut h,
     "workspace-tab-changes-count",

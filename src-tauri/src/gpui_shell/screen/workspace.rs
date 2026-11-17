@@ -1193,7 +1193,7 @@ impl WorkspaceView {
     }
   }
 
-  fn header(&self, h: &Header, p: &Palette, cx: &mut Context<Self>) -> Div {
+  fn header(&self, h: &Header, loc: Option<&Loc>, p: &Palette, cx: &mut Context<Self>) -> Div {
     let mono_title = |text: &str| {
       ui::text(div(), TextSize::Sm)
         .font_family(theme::MONO_FONT)
@@ -1239,6 +1239,9 @@ impl WorkspaceView {
             ))
             .child(self.record_bounds("workspace-details")),
         );
+      }
+      if let Some(loc) = loc {
+        left = left.child(loc_marker(loc, p));
       }
     } else {
       left = left.child(
@@ -1649,7 +1652,7 @@ impl WorkspaceView {
       .on_right_click(self.copy_link(self.pr_url().map(|url| format!("{url}/checks"))))
   }
 
-  /// The workspace's tab bar: the view tabs, then its busy and loc status.
+  /// The workspace's tab bar: the view tabs, then its busy status.
   fn tab_bar(&self, row: &TabRow, p: &Palette) -> Div {
     // Counts are neutral; a conflict shows once, as a danger dot.
     let commits = ui::Tab::new("workspace-tab-commits", "Commits").icon(theme::ICON_COMMIT);
@@ -1721,9 +1724,6 @@ impl WorkspaceView {
           .child(ui::spinner("workspace-busy-spin", 16., p.muted_foreground))
           .child(busy.clone()),
       );
-    }
-    if let Some(loc) = &row.loc {
-      status = status.child(loc_marker(loc, p));
     }
 
     div()
@@ -2417,7 +2417,10 @@ impl Render for WorkspaceView {
       self.sync_header_chrome(&snapshot.header, cx);
     }
     let header = match &snapshot {
-      Some(snapshot) => self.header(&snapshot.header, &p, cx),
+      Some(snapshot) => {
+        let loc = snapshot.tab_row.as_ref().and_then(|row| row.loc.as_ref());
+        self.header(&snapshot.header, loc, &p, cx)
+      }
       // Until the first load: the empty bar, as tall as a row of buttons.
       None => div()
         .flex_none()
