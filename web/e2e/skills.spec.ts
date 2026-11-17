@@ -55,12 +55,14 @@ test.describe("Skills Library (/skills)", () => {
     await expect(card).not.toHaveAttribute("target", "_blank");
   });
 
-  test("proprietary skills show a notice on their card instead of a description", async ({
+  // Anthropic relicensed pdf (with docx, pptx and xlsx) from proprietary to
+  // Apache-2.0 upstream, so its card now shows a description and its license.
+  test("licensed skills show their license on the card, not a proprietary notice", async ({
     page,
   }) => {
     const card = page.getByRole("link", { name: /^pdf/ }).first();
-    await expect(card).toContainText("Proprietary license");
-    await expect(card).toContainText("Proprietary");
+    await expect(card).toContainText("Apache-2.0");
+    await expect(card).not.toContainText("Proprietary license");
   });
 });
 
@@ -231,9 +233,9 @@ test.describe("Skill detail page", () => {
   });
 });
 
-// ── Proprietary skill detail page ───────────────────────────────────────────
+// ── Relicensed skill detail page ────────────────────────────────────────────
 
-test.describe("Proprietary skill detail page", () => {
+test.describe("Relicensed skill detail page", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
     await page
@@ -243,17 +245,15 @@ test.describe("Proprietary skill detail page", () => {
     await page.getByRole("link", { name: /^pdf/ }).first().click();
   });
 
-  test("shows a proprietary callout, no file browser, but keeps the GitHub link", async ({
+  test("shows the file browser and Open in Treq, with no proprietary callout", async ({
     page,
   }) => {
     await expect(
       page.getByRole("heading", { name: "pdf", level: 1 }),
     ).toBeVisible();
-    await expect(page.getByTestId("proprietary-callout")).toBeVisible();
-    await expect(page.getByTestId("skill-file-browser")).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Open in Treq" })).toHaveCount(
-      0,
-    );
+    await expect(page.getByTestId("proprietary-callout")).toHaveCount(0);
+    await expect(page.getByTestId("skill-file-browser")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open in Treq" })).toBeVisible();
     await expect(page.getByTestId("repo-github-link")).toHaveAttribute(
       "href",
       "https://github.com/anthropics/skills/tree/main/skills/pdf",
