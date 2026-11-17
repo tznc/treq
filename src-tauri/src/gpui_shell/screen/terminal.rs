@@ -1897,10 +1897,14 @@ impl Render for TerminalView {
       .on_key_down(cx.listener(Self::on_key))
       .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
       // A click anywhere else blurs the terminal, as it does xterm's
-      // textarea; its cursor turns to an outline.
+      // textarea; its cursor turns to an outline. It also drops the
+      // selection, so no stale highlight is left behind.
       .on_mouse_down_out(cx.listener(|view, _, window, cx| {
         if view.focus.is_focused(window) {
           window.blur(cx);
+        }
+        if view.with_emulator(|e| e.clear_selection()).is_some() {
+          cx.notify();
         }
       }))
       .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_mouse_down))
