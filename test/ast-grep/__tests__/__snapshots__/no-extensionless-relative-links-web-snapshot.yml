@@ -1,0 +1,29 @@
+id: no-extensionless-relative-links-web
+snapshots:
+  ? |
+    <DocCardList />
+
+    Next: [Worktrees vs clones](./git-worktrees-vs-clones).
+  : labels:
+    - source: 'Next: [Worktrees vs clones](./git-worktrees-vs-clones).'
+      style: primary
+      start: 17
+      end: 72
+  See [rebasing](./stacked-prs#rebasing).:
+    labels:
+    - source: See [rebasing](./stacked-prs#rebasing).
+      style: primary
+      start: 0
+      end: 39
+  See [stacked PRs](./stacked-prs) for more.:
+    labels:
+    - source: See [stacked PRs](./stacked-prs) for more.
+      style: primary
+      start: 0
+      end: 42
+  See [stacked PRs](./stacked-prs/) for more.:
+    labels:
+    - source: See [stacked PRs](./stacked-prs/) for more.
+      style: primary
+      start: 0
+      end: 43

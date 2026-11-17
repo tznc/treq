@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: "Short, task-focused guides for Treq: GitHub, pull requests, pushing, discarding changes, settings, skills, and remote workspaces."
 ---
 
 import DocCardList from '@theme/DocCardList';
@@ -17,4 +18,5 @@ Concise, task-focused guides for accomplishing specific things with Treq.
   {type: 'link', href: '/docs/how-to/creating-and-viewing-pull-requests', label: 'Creating and Viewing Pull Requests'},
   {type: 'link', href: '/docs/how-to/installing-skills', label: 'Installing Skills from the Library'},
   {type: 'link', href: '/docs/how-to/cloud-workspaces', label: 'Cloud Workspaces'},
+  {type: 'link', href: '/docs/how-to/sharing-projects-with-a-team', label: 'Sharing Projects with a Team'},
 ]} />

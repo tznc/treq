@@ -1,5 +1,6 @@
 ---
 sidebar_position: 4
+description: Create a Treq-managed cloud workspace, open or clone repositories on it, and see what happens when it suspends or your subscription lapses.
 ---
 
 # Cloud Workspaces
