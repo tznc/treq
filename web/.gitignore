@@ -8,6 +8,13 @@
 .docusaurus
 .cache-loader
 
+# Skills catalog, generated from skills.lock.json (scripts/fetch-skills-catalog.mjs)
+/src/data/skills.json
+/src/data/skills-index.json
+/src/data/skill-pages.json
+/src/data/skills-catalog.stamp
+/.cache/skills-catalog
+
 # TypeScript compiled output (tsc emits .js alongside .ts/.tsx sources)
 /src/**/*.js
 /src/**/*.d.ts

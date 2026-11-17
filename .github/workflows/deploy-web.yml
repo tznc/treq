@@ -22,6 +22,7 @@ on:
     paths:
       - "web/**"
       - ".github/workflows/deploy-web.yml"
+      - ".github/actions/skills-catalog/**"
       - ".github/scripts/check_readability.py"
       - "biome.json"
 
@@ -158,6 +159,12 @@ jobs:
           key: ${{ runner.os }}-docs-build-${{ hashFiles('web/package-lock.json') }}
       - name: Install dependencies
         run: npm ci
+      # Typecheck and the build read it. Main runs share it with later runs.
+      - name: Skills catalog
+        uses: ./.github/actions/skills-catalog
+        with:
+          github-token: ${{ github.token }}
+          upload: ${{ github.event_name != 'pull_request' }}
       # PR checks, formerly Web CI. They reuse this job's checkout and npm ci;
       # the build below covers what Web CI built.
       - name: Typecheck

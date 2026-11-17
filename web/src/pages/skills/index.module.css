@@ -313,6 +313,10 @@
   flex-shrink: 0;
   position: sticky;
   top: 1.5rem;
+  /* With many source repos the list is taller than the screen; a sticky
+     aside that tall can never scroll its lower items into view. */
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
   border: 1px solid var(--ifm-color-emphasis-200);
   border-radius: 12px;
   padding: 1rem 1.1rem 1.2rem;

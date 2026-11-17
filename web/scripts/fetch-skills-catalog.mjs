@@ -1,5 +1,6 @@
-// Regenerates web/src/data/skills.json by cloning curated Agent Skill repos
-// (shallow, to a scratch dir), parsing each SKILL.md's frontmatter, and
+// Generates web/src/data/skills.json by fetching curated Agent Skill repos at
+// the commits pinned in web/skills.lock.json (shallow, to a scratch dir),
+// parsing each SKILL.md's frontmatter, and
 // indexing each skill folder's files (path + size only). It also writes
 // web/src/data/skill-pages.json: the SKILL.md body of every skill whose
 // license permits redistribution, which the skill page renders into static
@@ -7,10 +8,15 @@
 // from GitHub when a user browses a skill. Neither is fed into the sitewide
 // search index.
 //
-// Run manually with `npm run build:skills-catalog`, or automatically by the
-// "Update Skills Catalog" GitHub Action (see .github/workflows).
+// The output is not committed. `npm run build` runs this first; it does
+// nothing when the output already matches the lock and generator code, and
+// reuses each source's extract from web/.cache/skills-catalog when its commit
+// is unchanged. In CI the output comes from an artifact or that cache (see
+// .github/actions/skills-catalog). `--update` pins every source to its branch
+// head and refreshes stars in the lock first; the "Update Skills Catalog"
+// workflow runs it weekly.
 import { execFileSync } from 'child_process';
-import { mkdtempSync, readdirSync, statSync, lstatSync, readFileSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, mkdirSync, readdirSync, statSync, lstatSync, readFileSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { join, relative, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -18,31 +24,37 @@ import { createHash } from 'crypto';
 import matter from 'gray-matter';
 import skillPageContent from '../plugins/skillPageContent.js';
 import skillDiscovery from '../plugins/skillDiscovery.js';
+import skillsLock from '../plugins/skillsLock.js';
 
 const { canRedistribute } = skillPageContent;
 const { sourceRoots, discoverSkills, licenseDirs, detectLicense } = skillDiscovery;
+const { lockProblems, nextLock, sourceCacheKey } = skillsLock;
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const webRoot = join(__dirname, '..');
 const outPath = join(webRoot, 'src', 'data', 'skills.json');
 const pagesOutPath = join(webRoot, 'src', 'data', 'skill-pages.json');
 const indexOutPath = join(webRoot, 'src', 'data', 'skills-index.json');
+// Records the hash of the lock and generator code the output was built from.
+const stampPath = join(webRoot, 'src', 'data', 'skills-catalog.stamp');
+const lockPath = join(webRoot, 'skills.lock.json');
+const cacheDir = join(webRoot, '.cache', 'skills-catalog');
+const codeFiles = [
+  fileURLToPath(import.meta.url),
+  join(webRoot, 'plugins', 'skillDiscovery.js'),
+  join(webRoot, 'plugins', 'skillPageContent.js'),
+  join(webRoot, 'plugins', 'skillsLock.js'),
+];
 
-// Reads star counts from the previously-generated catalog so a regen in an
-// environment that can't reach api.github.com (e.g. behind a restrictive
-// egress proxy) preserves them instead of wiping them to null.
-function readPreviousStars() {
-  if (!existsSync(outPath)) return {};
-  try {
-    const prev = JSON.parse(readFileSync(outPath, 'utf8'));
-    return Object.fromEntries((prev.sources ?? []).map((s) => [s.id, s.stars ?? null]));
-  } catch {
-    return {};
-  }
-}
+const sha256 = (...parts) => {
+  const hash = createHash('sha256');
+  for (const part of parts) hash.update(part);
+  return hash.digest('hex');
+};
 
-// Live GitHub star count for a repo. Returns null on any failure (rate limit,
-// network, blocked host) so the build never fails over stars. In CI, set
+// Live GitHub star count for a repo, read only by --update. Returns null on
+// any failure (rate limit, network, blocked host), and the lock keeps the
+// previous count. In CI, set
 // GITHUB_TOKEN to raise the unauthenticated rate limit.
 async function fetchStars(source) {
   const headers = {
@@ -477,13 +489,23 @@ function walkFiles(dir, base, results = []) {
   return results;
 }
 
-function cloneSource(source, scratchDir) {
+const repoUrl = (source) => `https://github.com/${source.org}/${source.repo}.git`;
+
+// The commit at the head of a source's branch.
+function branchHead(source) {
+  const out = execFileSync('git', ['ls-remote', repoUrl(source), `refs/heads/${source.branch}`], { encoding: 'utf8' });
+  const commit = out.split(/\s/)[0];
+  if (!commit) throw new Error(`${source.org}/${source.repo} has no branch ${source.branch}`);
+  return commit;
+}
+
+function cloneSource(source, commit, scratchDir) {
   const dest = join(scratchDir, source.id);
-  execFileSync(
-    'git',
-    ['clone', '--depth', '1', '--branch', source.branch, `https://github.com/${source.org}/${source.repo}.git`, dest],
-    { stdio: 'inherit' },
-  );
+  const git = (...args) => execFileSync('git', ['-C', dest, ...args], { stdio: 'inherit' });
+  mkdirSync(dest);
+  git('init', '--quiet');
+  git('fetch', '--quiet', '--depth', '1', repoUrl(source), commit);
+  git('checkout', '--quiet', 'FETCH_HEAD');
   return dest;
 }
 
@@ -595,31 +617,79 @@ function extractSkills(source, cloneDir, pages) {
   return skills;
 }
 
+async function updateLock(prev) {
+  const heads = {};
+  const stars = {};
+  for (const source of SOURCES) {
+    heads[source.id] = branchHead(source);
+    stars[source.id] = await fetchStars(source);
+  }
+  const lock = nextLock(SOURCES, prev, heads, stars);
+  writeFileSync(lockPath, JSON.stringify(lock, null, 2) + '\n');
+  return lock;
+}
+
+// One source's skills and pages: the cached extract for its pinned commit, or
+// a fresh fetch, which is then cached.
+function sourceSkills(source, commit, codeHash, scratchDir) {
+  const cachePath = join(cacheDir, `${sourceCacheKey(source, commit, codeHash)}.json`);
+  if (existsSync(cachePath)) {
+    console.log(`Using cached ${source.org}/${source.repo}@${commit.slice(0, 7)}`);
+    return { cachePath, ...JSON.parse(readFileSync(cachePath, 'utf8')) };
+  }
+  console.log(`Fetching ${source.org}/${source.repo}@${commit.slice(0, 7)}...`);
+  const pages = {};
+  const skills = extractSkills(source, cloneSource(source, commit, scratchDir), pages);
+  writeFileSync(cachePath, JSON.stringify({ skills, pages }));
+  return { cachePath, skills, pages };
+}
+
 async function main() {
+  const prev = existsSync(lockPath) ? JSON.parse(readFileSync(lockPath, 'utf8')) : {};
+  const lock = process.argv.includes('--update') ? await updateLock(prev) : prev;
+  const problems = lockProblems(SOURCES, lock);
+  if (problems.length > 0) {
+    throw new Error(`skills.lock.json is out of date; run \`npm run build:skills-catalog -- --update\`:\n  ${problems.join('\n  ')}`);
+  }
+
+  const codeHash = sha256(...codeFiles.map((file) => readFileSync(file)));
+  const stamp = sha256(JSON.stringify(lock), codeHash);
+  const outputs = [outPath, indexOutPath, pagesOutPath, stampPath];
+  if (outputs.every(existsSync) && readFileSync(stampPath, 'utf8').trim() === stamp) {
+    console.log('Skills catalog is up to date with skills.lock.json');
+    return;
+  }
+
+  mkdirSync(cacheDir, { recursive: true });
   const scratchDir = mkdtempSync(join(tmpdir(), 'skills-catalog-'));
-  const previousStars = readPreviousStars();
   const allSkills = [];
   const sourceMeta = [];
   const pages = {};
+  const used = new Set();
 
   try {
     for (const source of SOURCES) {
-      console.log(`Fetching ${source.org}/${source.repo}...`);
-      const cloneDir = cloneSource(source, scratchDir);
-      const skills = extractSkills(source, cloneDir, pages);
-      allSkills.push(...skills);
-      const stars = (await fetchStars(source)) ?? previousStars[source.id] ?? null;
+      const { commit, stars } = lock[source.id];
+      const found = sourceSkills(source, commit, codeHash, scratchDir);
+      used.add(found.cachePath);
+      allSkills.push(...found.skills);
+      Object.assign(pages, found.pages);
       sourceMeta.push({
         id: source.id,
         name: source.name,
         url: `https://github.com/${source.org}/${source.repo}`,
-        skillCount: skills.length,
+        skillCount: found.skills.length,
         stars,
       });
-      console.log(`  found ${skills.length} skills (${stars ?? '?'} stars)`);
+      console.log(`  found ${found.skills.length} skills (${stars ?? '?'} stars)`);
     }
   } finally {
     rmSync(scratchDir, { recursive: true, force: true });
+  }
+  // Drop extracts for commits the lock no longer pins, so the cache stays small.
+  for (const entry of readdirSync(cacheDir)) {
+    const file = join(cacheDir, entry);
+    if (!used.has(file)) rmSync(file);
   }
 
   allSkills.sort((a, b) =>
@@ -641,6 +711,7 @@ async function main() {
   writeFileSync(indexOutPath, JSON.stringify(index, null, 2) + '\n');
   const sortedPages = Object.fromEntries(allSkills.map((skill) => [skill.id, pages[skill.id]]));
   writeFileSync(pagesOutPath, JSON.stringify(sortedPages, null, 2) + '\n');
+  writeFileSync(stampPath, stamp + '\n');
   console.log(`\nWrote ${allSkills.length} skills from ${sourceMeta.length} sources to ${relative(webRoot, outPath)}`);
 }
 

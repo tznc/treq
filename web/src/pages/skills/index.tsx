@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Layout from '@theme/Layout';
 import Head from '@docusaurus/Head';
 import Link from '@docusaurus/Link';
-import catalog from '@site/src/data/skills.json';
+import catalog from '@site/src/data/skills-index.json';
 import { ProviderFilter } from './_ProviderFilter';
 import styles from './index.module.css';
 
