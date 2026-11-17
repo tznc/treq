@@ -1,5 +1,6 @@
 ---
 sidebar_position: 3
+description: Create, work in, configure, and troubleshoot Treq workspaces, so you can work on several branches at once, each in its own directory.
 ---
 
 # Managing Workspaces
