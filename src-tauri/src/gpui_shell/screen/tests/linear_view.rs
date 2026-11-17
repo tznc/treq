@@ -30,6 +30,11 @@ pub(super) struct Fixture {
 }
 
 impl linear_data::LinearHost for FakeHost {
+  fn linear_oauth_url(&self) -> Result<String, String> {
+    self.record("read linear oauth url".into());
+    Ok("https://linear.app/oauth/authorize".into())
+  }
+
   fn linear_teams(&self, _: &str) -> Result<Vec<LinearTeam>, String> {
     self.record("read linear teams".into());
     Ok(self.linear.teams.clone())
@@ -633,6 +638,21 @@ fn linear_without_a_key_says_how_to_connect(cx: &mut TestAppContext) {
   assert!(h.drawn("linear-connection-state"));
   assert!(!h.drawn("linear-section-projects"));
   assert!(!h.drawn("linear-team-selector"));
+}
+
+#[gpui::test]
+fn linear_not_connected_starts_oauth(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.linear.failing = true;
+  let (mut h, host) = linear_harness(cx, host);
+  let page = screen(&mut h);
+  page
+    .user()
+    .click(&page.get_by_role(by::role(Role::Button).name("Connect Linear")));
+  h.cx.run_until_parked();
+  assert!(host
+    .calls()
+    .contains(&"open https://linear.app/oauth/authorize".to_string()));
 }
 
 #[gpui::test]
