@@ -181,6 +181,15 @@ const SOURCES = [
     excludeCategories: [],
   },
   {
+    id: 'k-dense',
+    name: 'K-Dense AI',
+    org: 'K-Dense-AI',
+    repo: 'scientific-agent-skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
     id: 'impeccable',
     name: 'Impeccable',
     org: 'pbakaus',
