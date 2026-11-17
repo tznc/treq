@@ -275,6 +275,12 @@ impl WindowController {
     self.run(Vec::new(), cx);
   }
 
+  /// A `treq://pr/open` link: the GitHub page shows PR `number`.
+  pub fn open_pr(&mut self, number: u64, cx: &mut Context<Self>) {
+    self.model.open_github_pr(number, "all");
+    self.run(Vec::new(), cx);
+  }
+
   /// A folder the menu bar's "Open…" picked: opens it in this window.
   pub fn open_folder(&mut self, path: String, cx: &mut Context<Self>) {
     self.run(vec![Effect::OpenRepoAt(path)], cx);

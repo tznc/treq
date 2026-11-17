@@ -19,6 +19,7 @@ pub mod cloud_catalog;
 mod cloud_perf;
 pub mod commits;
 pub mod config_sync;
+pub mod pr_link;
 pub mod context_menu;
 pub mod control_plane;
 pub mod devcontainer;
