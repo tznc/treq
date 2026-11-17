@@ -37,7 +37,7 @@ end
     name: "20-diff-highlight-01-heredoc",
     title: "replica_check.ex diff: an @doc heredoc",
     expectations: [
-      "The @doc heredoc's body line is string colored, not Compares as a module",
+      "The @doc heredoc's body line is doc colored, not Compares as a module",
       "The closing \"\"\" has the same color as the body and opening \"\"\"",
       "@spec and def after the heredoc are colored as code again",
     ],
