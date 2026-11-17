@@ -1079,6 +1079,7 @@ impl WindowController {
 
   /// Builds what the window shows and hands it on if it changed.
   fn present(&mut self, cx: &mut Context<Self>) {
+    self.model.record_history();
     self.watch(cx);
     let presentation = Presentation {
       sidebar: sidebar::snapshot(&self.model, &self.data),

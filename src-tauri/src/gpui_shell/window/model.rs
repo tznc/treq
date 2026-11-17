@@ -488,6 +488,8 @@ pub struct Model {
   pub skill_install: Option<String>,
   /// The confirmation on screen, over everything else.
   pub confirm: Option<Confirm>,
+  /// Where back and forward go.
+  pub history: super::history::History,
 }
 
 /// A workspace to select once the window's data lists it.
