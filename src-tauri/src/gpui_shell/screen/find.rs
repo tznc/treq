@@ -178,7 +178,10 @@ pub(in crate::gpui_shell::screen) fn watch_key<V: Findable>(
         && !held.alt
       {
         open(view, cx);
-      } else if window.window_handle().window_id() == id && k.key == "escape" && view.find().open {
+      } else if window.window_handle().window_id() == id
+        && crate::gpui_shell::ui::is_escape(k)
+        && view.find().open
+      {
         // Esc closes the bar wherever focus is, not only inside it.
         close(view, cx);
       }
