@@ -1760,8 +1760,15 @@ mod tests {
   impl Render for IndicatorRow {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
       let palette = theme::palette(true);
-      let row = menu_row("row", "All teams", None, palette.popover_foreground, &palette, false)
-        .debug_selector(|| "row".into());
+      let row = menu_row(
+        "row",
+        "All teams",
+        None,
+        palette.popover_foreground,
+        &palette,
+        false,
+      )
+      .debug_selector(|| "row".into());
       div().w(px(240.)).child(menu_indicator(row, div().size_2()))
     }
   }
