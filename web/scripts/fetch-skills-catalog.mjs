@@ -1,8 +1,11 @@
 // Regenerates web/src/data/skills.json by cloning curated Agent Skill repos
 // (shallow, to a scratch dir), parsing each SKILL.md's frontmatter, and
-// indexing the rest of each skill folder's files (path + size only — file
-// *contents* are fetched live from GitHub when a user browses a skill, never
-// stored here or fed into the sitewide search index).
+// indexing each skill folder's files (path + size only). It also writes
+// web/src/data/skill-pages.json: the SKILL.md body of every skill whose
+// license permits redistribution, which the skill page renders into static
+// HTML with credit to the author. The contents of other files are fetched live
+// from GitHub when a user browses a skill. Neither is fed into the sitewide
+// search index.
 //
 // Run manually with `npm run build:skills-catalog`, or automatically by the
 // "Update Skills Catalog" GitHub Action (see .github/workflows).
@@ -13,10 +16,14 @@ import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import matter from 'gray-matter';
+import skillPageContent from '../plugins/skillPageContent.js';
+
+const { canRedistribute } = skillPageContent;
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const webRoot = join(__dirname, '..');
 const outPath = join(webRoot, 'src', 'data', 'skills.json');
+const pagesOutPath = join(webRoot, 'src', 'data', 'skill-pages.json');
 
 // Reads star counts from the previously-generated catalog so a regen in an
 // environment that can't reach api.github.com (e.g. behind a restrictive
@@ -176,10 +183,11 @@ function findLicenseFile(dir) {
   return match ? join(dir, match) : null;
 }
 
+// The detected license label and the license file's path, or null.
 function detectDirLicense(dir) {
   const file = findLicenseFile(dir);
   if (!file) return null;
-  return detectLicense(readFileSync(file, 'utf8'));
+  return { license: detectLicense(readFileSync(file, 'utf8')), file };
 }
 
 function humanize(segment) {
@@ -264,9 +272,11 @@ function buildFileManifest(source, skillDir, repoRelPath) {
     });
 }
 
-function extractSkills(source, cloneDir, rootLicense) {
+function extractSkills(source, cloneDir, rootLicense, pages) {
   const skillsRoot = join(cloneDir, source.skillsRoot);
   const skills = [];
+  const blobUrl = (file) =>
+    `https://github.com/${source.org}/${source.repo}/blob/${source.branch}/${relative(cloneDir, file).replace(/\\/g, '/')}`;
 
   for (const skillFile of findSkillFiles(skillsRoot)) {
     const skillDir = dirname(skillFile);
@@ -277,12 +287,21 @@ function extractSkills(source, cloneDir, rootLicense) {
     if (category && source.excludeCategories.includes(category)) continue;
 
     const raw = readFileSync(skillFile, 'utf8');
-    const { data: frontmatter } = matter(raw);
+    let parsed;
+    try {
+      parsed = matter(raw);
+    } catch (e) {
+      // One malformed SKILL.md upstream shouldn't fail the whole catalog.
+      console.warn(`  skipping ${relDir}: invalid frontmatter (${e.reason ?? e.message})`);
+      continue;
+    }
+    const { data: frontmatter, content: body } = parsed;
     if (!frontmatter.name || !frontmatter.description) continue;
 
     const repoRelPath = relative(cloneDir, skillDir).replace(/\\/g, '/');
     const routeSlug = segments.map(slugifySegment).join('/');
-    const license = detectDirLicense(skillDir) ?? rootLicense;
+    const licenseInfo = detectDirLicense(skillDir) ?? rootLicense;
+    const license = licenseInfo?.license ?? null;
 
     // Proprietary/source-available skills (e.g. Anthropic's docx/pdf/pptx/xlsx)
     // don't permit us to reproduce their contents, so we still list them but
@@ -293,8 +312,15 @@ function extractSkills(source, cloneDir, rootLicense) {
     const files = proprietary ? [] : buildFileManifest(source, skillDir, repoRelPath);
     const checksum = proprietary ? null : skillChecksum(skillDir, files.map((file) => file.path));
 
+    const id = `${source.id}/${relDir}`;
+    pages[id] = {
+      body: !proprietary && canRedistribute(license) ? body.trim() : null,
+      licenseUrl: licenseInfo ? blobUrl(licenseInfo.file) : null,
+      manualOnly: frontmatter['disable-model-invocation'] === true,
+    };
+
     skills.push({
-      id: `${source.id}/${relDir}`,
+      id,
       name: frontmatter.name,
       description: proprietary ? null : String(frontmatter.description).trim(),
       source: source.id,
@@ -317,13 +343,14 @@ async function main() {
   const previousStars = readPreviousStars();
   const allSkills = [];
   const sourceMeta = [];
+  const pages = {};
 
   try {
     for (const source of SOURCES) {
       console.log(`Fetching ${source.org}/${source.repo}...`);
       const cloneDir = cloneSource(source, scratchDir);
       const rootLicense = detectDirLicense(cloneDir);
-      const skills = extractSkills(source, cloneDir, rootLicense);
+      const skills = extractSkills(source, cloneDir, rootLicense, pages);
       allSkills.push(...skills);
       const stars = (await fetchStars(source)) ?? previousStars[source.id] ?? null;
       sourceMeta.push({
@@ -352,6 +379,8 @@ async function main() {
   };
 
   writeFileSync(outPath, JSON.stringify(catalog, null, 2) + '\n');
+  const sortedPages = Object.fromEntries(allSkills.map((skill) => [skill.id, pages[skill.id]]));
+  writeFileSync(pagesOutPath, JSON.stringify(sortedPages, null, 2) + '\n');
   console.log(`\nWrote ${allSkills.length} skills from ${sourceMeta.length} sources to ${relative(webRoot, outPath)}`);
 }
 
