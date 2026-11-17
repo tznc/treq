@@ -1441,9 +1441,9 @@ impl ChangesView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> gpui::AnyElement {
-    // Comment text reads at the diff's code size, so it follows zoom with it.
+    // Comment text reads at the body size: sans at the code size looks smaller than the mono diff.
     let box_ = || {
-      ui::text(div(), TextSize::Code)
+      ui::text(div(), TextSize::Sm)
         .max_w(zpx(super::threads::CARD_MAX_W))
         .rounded(radius::MD)
         .p_3()
