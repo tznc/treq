@@ -3,15 +3,13 @@
 // branch switcher.
 import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { home, popupBox, ready, row, settle, xPointer } from "./helpers.ts";
+import { home, popupBox, ready, settle, xPointer } from "./helpers.ts";
 
 test("switch-branch-supporting: unselected repo menu opens its switcher", async ({ page }) => {
   await ready(page);
   await home(page);
-  // The docs-site home row has no accessible name; it sits under event-bus.
-  const main = await row(page, "main").first().boundingBox();
-  if (!main) throw new Error("no main row");
-  await page.mouse.click(main.x + 60, main.y + main.height + 16, { button: "right" });
+  // The docs-site home row has no accessible name: below event-bus's four workspaces.
+  await page.mouse.click(90, 389, { button: "right" });
   await settle(page, 1000);
   await capture(page, {
     name: "26-01-unselected-repo-menu",
