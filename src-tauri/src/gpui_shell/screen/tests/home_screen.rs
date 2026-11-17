@@ -121,7 +121,10 @@ fn workspace_header_github_buttons_copy_their_link(cx: &mut TestAppContext) {
   h.right_click("workspace-view-pr");
   h.pick("Copy Treq link");
   let copied = h.cx.read_from_clipboard().and_then(|c| c.text());
-  assert_eq!(copied.as_deref(), Some("https://treq.dev/open/pr/tznc/treq/42"));
+  assert_eq!(
+    copied.as_deref(),
+    Some("https://treq.dev/open/pr/tznc/treq/42")
+  );
   assert!(h.sent().is_empty());
   assert_eq!(host.writes(), vec!["notify toast Link copied"; 4]);
 }
