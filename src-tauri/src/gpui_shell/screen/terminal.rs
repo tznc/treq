@@ -3733,7 +3733,7 @@ impl TerminalPane {
         .role(gpui::Role::Button)
         .aria_label(name.clone())
         .debug_selector(|| "terminal-workspace-label".into())
-        .max_w(zpx(200.))
+        .max_w(zpx(360.))
         .flex()
         .items_center()
         .gap_2()
