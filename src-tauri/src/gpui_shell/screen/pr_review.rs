@@ -659,6 +659,10 @@ impl PrReviewView {
                   .truncate()
                   .font_weight(FontWeight::MEDIUM)
                   .text_color(p.foreground)
+                  .id(SharedString::from(format!("pr-file-name-{}", file.path)))
+                  .role(gpui::Role::Label)
+                  .aria_label(name.clone())
+                  .test_support()
                   .child(name),
               )
               .when_some(dir, |this, dir| {
@@ -668,6 +672,10 @@ impl PrReviewView {
                     .flex_1()
                     .truncate()
                     .text_color(p.muted_foreground.opacity(0.6))
+                    .id(SharedString::from(format!("pr-file-dir-{}", file.path)))
+                    .role(gpui::Role::Label)
+                    .aria_label(dir.clone())
+                    .test_support()
                     .child(dir),
                 )
               }),
