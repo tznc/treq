@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: "Guides to using Treq with coding agents: isolated workspaces, automatic rebasing, review before merge, and GitHub pull requests."
 ---
 
 # Guides
