@@ -431,14 +431,14 @@ fn pr_review_author_can_only_comment(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn pr_review_starts_an_ai_review_in_the_home_repository(cx: &mut TestAppContext) {
+fn pr_review_starts_an_ai_review_in_the_home_repository_without_leaving_the_pr(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, pr_host(), pr_route());
   h.click("pr-review-ai-review");
   h.cx.run_until_parked();
   assert!(fields(&h, "prReview.startAgentReview").is_empty());
   let launches = host.launches.lock().unwrap().clone();
-  let [(request, true)] = &launches[..] else {
-    panic!("one selected launch: {launches:?}");
+  let [(request, false)] = &launches[..] else {
+    panic!("one unselected launch, so the PR stays on screen: {launches:?}");
   };
   assert_eq!(request.workspace_id, None);
   assert_eq!(request.session_name.as_deref(), Some("AI Review"));

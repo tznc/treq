@@ -276,7 +276,7 @@ impl PrReviewView {
         // A PR is usually not checked out, so its review runs in the home
         // repository and reads the diff through gh.
         host
-          .launch_session(&super::linear::review_launch(&repo, prompt, agent), true)
+          .launch_session(&super::linear::review_launch(&repo, prompt, agent), false)
           .map(|_| ())
       },
       |view, result, _cx| {
