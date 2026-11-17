@@ -908,10 +908,7 @@ impl PopupView {
           menu_row(format!("item-{index}"), text, *icon, color, &palette, false)
             .debug_selector(move || format!("menu-item-{id}"))
             .when_some(*radio, |row, checked| {
-              menu_indicator(
-                row,
-                div().when(checked, |this| this.size_2().rounded_full().bg(color)),
-              )
+              menu_indicator(row, checked.then(|| radio_dot(color)))
             })
             .when_some(*check, |row, checked| {
               let row = row
@@ -923,9 +920,7 @@ impl PopupView {
                 });
               menu_indicator(
                 row,
-                div().when(checked, |this| {
-                  this.child(super::ui::icon(theme::ICON_CHECK, 16., color))
-                }),
+                checked.then(|| super::ui::icon(theme::ICON_CHECK, 16., color).into_any_element()),
               )
             })
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
@@ -1085,7 +1080,7 @@ fn menu_row(
 /// Insets `row` to `pl-8` and draws `mark` (a radio dot, a check) in the
 /// `left-2 h-4 w-4` box before its text. An overlay, so the box is placed
 /// against the row rather than its text.
-fn menu_indicator(row: ui::Row, mark: impl IntoElement) -> ui::Row {
+fn menu_indicator(row: ui::Row, mark: Option<gpui::AnyElement>) -> ui::Row {
   row.pl(zpx(RADIO_INSET)).overlay(
     div()
       .debug_selector(|| "menu-indicator".into())
@@ -1097,8 +1092,13 @@ fn menu_indicator(row: ui::Row, mark: impl IntoElement) -> ui::Row {
       .flex()
       .items_center()
       .justify_center()
-      .child(mark),
+      .children(mark),
   )
+}
+
+/// A picked radio item's `h-2 w-2` dot.
+fn radio_dot(color: Hsla) -> gpui::AnyElement {
+  div().size_2().rounded_full().bg(color).into_any_element()
 }
 
 impl Render for PopupView {
@@ -1769,7 +1769,10 @@ mod tests {
         false,
       )
       .debug_selector(|| "row".into());
-      div().w(px(240.)).child(menu_indicator(row, div().size_2()))
+      div().w(px(240.)).child(menu_indicator(
+        row,
+        Some(radio_dot(palette.popover_foreground)),
+      ))
     }
   }
 
