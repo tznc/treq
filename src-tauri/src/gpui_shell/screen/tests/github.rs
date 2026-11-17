@@ -570,6 +570,12 @@ fn github_shows_list_failures_and_retries(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn github_issue_rows_show_the_author(cx: &mut TestAppContext) {
+  let (mut h, _) = harness(cx, issues(), route("issues", None, false));
+  assert!(h.drawn("github-issue-author-1"));
+}
+
+#[gpui::test]
 fn github_pr_detail_shows_the_review_decision(cx: &mut TestAppContext) {
   let mut approved = pr(1, "feat/a", "main");
   approved.review_decision = Some("APPROVED".into());

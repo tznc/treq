@@ -1799,6 +1799,13 @@ impl GithubView {
                   .child(parts::state_chip(&issue.state, false, &p))
                   .child(
                     div()
+                      .debug_selector(move || format!("github-issue-author-{n}"))
+                      .max_w(zpx(160.))
+                      .truncate()
+                      .child(issue.author.login.clone()),
+                  )
+                  .child(
+                    div()
                       .flex_none()
                       .child(crate::gpui_shell::time::date(&issue.created_at)),
                   ),
