@@ -1799,7 +1799,7 @@ impl ChangesView {
     cx.defer(move |cx| popups(request, cx));
   }
 
-  /// Opens the "Copy link" menu for `url` at `at`, for a right-click on
+  /// Opens the copy-link menu for `url` at `at`, for a right-click on
   /// what opens it.
   fn copy_link(&self, url: String, at: gpui::Point<gpui::Pixels>, cx: &mut App) {
     let host = self.host.clone();

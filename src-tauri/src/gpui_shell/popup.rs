@@ -310,23 +310,32 @@ pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
   build(items, &mut next)
 }
 
-/// The menu a right-click on a GitHub link opens at `at`: "Copy link",
-/// which copies `url` and toasts through `notify`.
+/// The menu a right-click on a GitHub link opens at `at`: "Copy GitHub
+/// link", which copies `url`, and for a PR "Copy Treq link", which copies its
+/// treq.dev link. Each toasts through `notify`.
 pub fn copy_link_menu(
   url: String,
   at: Point<Pixels>,
   dark: bool,
   notify: impl Fn(NativeEvent) + 'static,
 ) -> PopupRequest {
-  let item = NativeMenuItem::item("Copy link", move |cx| {
-    cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
-    notify(NativeEvent::from(
-      crate::gpui_shell::native::Toast::success("Link copied"),
-    ));
-  })
-  .icon(MenuIcon::Link);
+  let notify = std::rc::Rc::new(notify);
+  let copy = |label: &str, link: String| {
+    let notify = notify.clone();
+    NativeMenuItem::item(label, move |cx| {
+      cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
+      notify(NativeEvent::from(
+        crate::gpui_shell::native::Toast::success("Link copied"),
+      ));
+    })
+    .icon(MenuIcon::Link)
+  };
+  let mut items = vec![copy("Copy GitHub link", url.clone())];
+  if let Some(treq) = crate::core::pr_link::treq_web_link(&url) {
+    items.push(copy("Copy Treq link", treq));
+  }
   PopupRequest::ShowMenu {
-    entries: native_entries(vec![item]),
+    entries: native_entries(items),
     at,
     dark,
   }
