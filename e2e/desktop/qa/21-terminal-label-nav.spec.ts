@@ -1,6 +1,6 @@
 // An agent header's workspace label: the name goes to that workspace, the
 // `+N -N` counts go to its Changes tab.
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { openTab, openWorkspace, row, settle } from "./helpers.ts";
 
@@ -9,7 +9,7 @@ const OTHER = "feat/alerting-logs";
 
 test.describe.configure({ mode: "serial" });
 
-const selectedRow = (page, branch: string) =>
+const selectedRow = (page: Page, branch: string) =>
   page.getByRole("button", { name: branch, exact: true, selected: true });
 
 test("terminal label: name and diff counts navigate", async ({ page }) => {
@@ -27,7 +27,7 @@ test("terminal label: name and diff counts navigate", async ({ page }) => {
 
   const label = page
     .getByRole("group", { name: "Claude 1 terminal" })
-    .getByRole("button", { name: OTHER, exact: true });
+    .getByRole("button", { name: `Go to ${OTHER}`, exact: true });
   await label.click({ position: { x: 8, y: 6 } });
   await expect(selectedRow(page, OTHER)).toBeVisible();
   await settle(page);
@@ -38,7 +38,7 @@ test("terminal label: name and diff counts navigate", async ({ page }) => {
   });
 
   // The counts show only for the workspace on screen.
-  await page.getByRole("button", { name: "Open Changes" }).first().click();
+  await page.getByRole("button", { name: "Open changes" }).first().click();
   await expect(selectedRow(page, OTHER)).toBeVisible();
   await expect(page.getByRole("tab", { name: "Changes", selected: true })).toBeVisible();
   await settle(page);
