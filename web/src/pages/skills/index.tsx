@@ -111,6 +111,21 @@ export default function SkillsPage() {
             </a>{' '}
             curated from trusted sources.
           </p>
+          <p className={styles.intro}>
+            A skill is a folder with a <code>SKILL.md</code> file: a name, a description and instructions, plus
+            any scripts or reference files it needs. Claude Code and Codex keep only the description in context,
+            and load the full instructions when a task matches it. This library lists {skills.length} skills from{' '}
+            {sources.length} GitHub repositories. Each skill page explains when the skill runs and how to install it
+            in Claude Code, Codex or Treq, and shows its SKILL.md when the license allows.
+          </p>
+          <nav className={styles.authors} aria-label="Skills by author">
+            <span>Browse by author:</span>
+            {rankedSources.filter((s) => s.skillCount > 0).map((s) => (
+              <Link key={s.id} to={`/skills/${s.id}`}>
+                {s.name} skills
+              </Link>
+            ))}
+          </nav>
         </div>
 
         <div className={styles.layout}>
