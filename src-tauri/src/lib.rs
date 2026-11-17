@@ -358,13 +358,12 @@ fn pr_open_deep_link(app: &AppHandle, url: &str) {
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 fn window_label_for_github_repo(app: &AppHandle, repo: &str) -> Option<String> {
-  let windows: Vec<(String, String)> = app
+  // A copy, so the lock is not held while git reads each remote.
+  let windows = app
     .state::<AppState>()
     .window_repo_paths
     .lock_or_recover()
-    .iter()
-    .map(|(label, path)| (label.clone(), path.clone()))
-    .collect();
+    .clone();
   let mut matches = windows.into_iter().filter(|(_, path)| {
     github::get_git_remote_url_impl(path)
       .ok()
