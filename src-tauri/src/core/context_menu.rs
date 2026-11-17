@@ -782,7 +782,7 @@ mod tests {
     };
     let items = home_items(&menu, NO_EDITORS);
     assert_eq!(
-      labels(&items)[3..],
+      labels(&items)[5..],
       ["---", "Repository Settings", "Remove Repository"]
     );
   }
