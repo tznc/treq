@@ -13,7 +13,7 @@ use gpui::{AnyElement, StrikethroughStyle, StyledText, Task};
 use super::*;
 
 /// Comment cards cap their width so lines stay readable on wide screens.
-const CARD_MAX_W: f32 = 820.;
+pub(super) const CARD_MAX_W: f32 = 820.;
 use crate::{
   github::{GhReviewComment, GhReviewThread},
   gpui_shell::screen::{

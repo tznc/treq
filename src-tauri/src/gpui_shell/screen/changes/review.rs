@@ -1443,6 +1443,7 @@ impl ChangesView {
     // Comment text reads at the diff's code size, so it follows zoom with it.
     let box_ = || {
       ui::text(div(), TextSize::Code)
+        .max_w(zpx(super::threads::CARD_MAX_W))
         .rounded(radius::MD)
         .p_3()
         .border_1()
