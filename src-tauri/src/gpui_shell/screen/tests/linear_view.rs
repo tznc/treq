@@ -30,7 +30,7 @@ pub(super) struct Fixture {
 }
 
 impl linear_data::LinearHost for FakeHost {
-  fn linear_oauth_url(&self) -> Result<String, String> {
+  fn linear_connect_url(&self) -> Result<String, String> {
     self.record("read linear oauth url".into());
     Ok("https://linear.app/oauth/authorize".into())
   }

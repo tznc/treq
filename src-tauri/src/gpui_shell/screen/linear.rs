@@ -572,7 +572,7 @@ impl LinearView {
   fn connect_linear(&mut self, cx: &mut Context<Self>) {
     let host = self.host.clone();
     cx.background_spawn(async move {
-      match host.linear_oauth_url() {
+      match host.linear_connect_url() {
         Ok(url) => host.open_url(&url),
         Err(err) => super::workspace_data::WorkspaceHost::notify(
           host.as_ref(),
