@@ -413,7 +413,10 @@ fn selector(form: &Form, inputs: &Inputs, react: &ActionSink, p: &Palette, cx: &
     .map(|probe| {
       let confirm = form.confirm_init;
       div()
+        .id("remote-repo-not-a-repo")
         .debug_selector(|| "remote-repo-not-a-repo".into())
+        .role(tauri_plugin_gpui::gpui::Role::Group)
+        .aria_label("Not a repository")
         .flex()
         .flex_col()
         .gap_2()
@@ -463,12 +466,17 @@ fn selector(form: &Form, inputs: &Inputs, react: &ActionSink, p: &Palette, cx: &
               .on_click(press(react, "remoteRepo.init")),
           ),
         )
+        .test_support()
     });
   let error = form.error.clone().map(|error| {
     ui::text(div(), TextSize::Sm)
+      .id("remote-repo-error")
       .debug_selector(|| "remote-repo-error".into())
+      .role(tauri_plugin_gpui::gpui::Role::Alert)
+      .aria_label(error.clone())
       .text_color(Tone::Danger.text(p))
       .child(error)
+      .test_support()
   });
   div()
     .debug_selector(|| "remote-repository-selector".into())

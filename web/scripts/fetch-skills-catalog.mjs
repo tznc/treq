@@ -1,5 +1,6 @@
-// Regenerates web/src/data/skills.json by cloning curated Agent Skill repos
-// (shallow, to a scratch dir), parsing each SKILL.md's frontmatter, and
+// Generates web/src/data/skills.json by fetching curated Agent Skill repos at
+// the commits pinned in web/skills.lock.json (shallow, to a scratch dir),
+// parsing each SKILL.md's frontmatter, and
 // indexing each skill folder's files (path + size only). It also writes
 // web/src/data/skill-pages.json: the SKILL.md body of every skill whose
 // license permits redistribution, which the skill page renders into static
@@ -7,39 +8,53 @@
 // from GitHub when a user browses a skill. Neither is fed into the sitewide
 // search index.
 //
-// Run manually with `npm run build:skills-catalog`, or automatically by the
-// "Update Skills Catalog" GitHub Action (see .github/workflows).
+// The output is not committed. `npm run build` runs this first; it does
+// nothing when the output already matches the lock and generator code, and
+// reuses each source's extract from web/.cache/skills-catalog when its commit
+// is unchanged. In CI the output comes from an artifact or that cache (see
+// .github/actions/skills-catalog). `--update` pins every source to its branch
+// head and refreshes stars in the lock first; the "Update Skills Catalog"
+// workflow runs it weekly.
 import { execFileSync } from 'child_process';
-import { mkdtempSync, readdirSync, statSync, readFileSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, mkdirSync, readdirSync, statSync, lstatSync, readFileSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { join, relative, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import matter from 'gray-matter';
 import skillPageContent from '../plugins/skillPageContent.js';
+import skillDiscovery from '../plugins/skillDiscovery.js';
+import skillsLock from '../plugins/skillsLock.js';
 
 const { canRedistribute } = skillPageContent;
+const { sourceRoots, discoverSkills, licenseDirs, detectLicense } = skillDiscovery;
+const { lockProblems, nextLock, sourceCacheKey } = skillsLock;
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const webRoot = join(__dirname, '..');
 const outPath = join(webRoot, 'src', 'data', 'skills.json');
 const pagesOutPath = join(webRoot, 'src', 'data', 'skill-pages.json');
+const indexOutPath = join(webRoot, 'src', 'data', 'skills-index.json');
+// Records the hash of the lock and generator code the output was built from.
+const stampPath = join(webRoot, 'src', 'data', 'skills-catalog.stamp');
+const lockPath = join(webRoot, 'skills.lock.json');
+const cacheDir = join(webRoot, '.cache', 'skills-catalog');
+const codeFiles = [
+  fileURLToPath(import.meta.url),
+  join(webRoot, 'plugins', 'skillDiscovery.js'),
+  join(webRoot, 'plugins', 'skillPageContent.js'),
+  join(webRoot, 'plugins', 'skillsLock.js'),
+];
 
-// Reads star counts from the previously-generated catalog so a regen in an
-// environment that can't reach api.github.com (e.g. behind a restrictive
-// egress proxy) preserves them instead of wiping them to null.
-function readPreviousStars() {
-  if (!existsSync(outPath)) return {};
-  try {
-    const prev = JSON.parse(readFileSync(outPath, 'utf8'));
-    return Object.fromEntries((prev.sources ?? []).map((s) => [s.id, s.stars ?? null]));
-  } catch {
-    return {};
-  }
-}
+const sha256 = (...parts) => {
+  const hash = createHash('sha256');
+  for (const part of parts) hash.update(part);
+  return hash.digest('hex');
+};
 
-// Live GitHub star count for a repo. Returns null on any failure (rate limit,
-// network, blocked host) so the build never fails over stars. In CI, set
+// Live GitHub star count for a repo, read only by --update. Returns null on
+// any failure (rate limit, network, blocked host), and the lock keeps the
+// previous count. In CI, set
 // GITHUB_TOKEN to raise the unauthenticated rate limit.
 async function fetchStars(source) {
   const headers = {
@@ -61,7 +76,11 @@ async function fetchStars(source) {
 // provider filter; `org`/`repo` locate the GitHub repo; `skillsRoot` is the
 // path within the repo that holds one `SKILL.md` per skill folder (per the
 // Agent Skills spec https://github.com/anthropics/skills) — use '' when skills
-// live at the repo root.
+// live at the repo root. A repo that keeps skills in several folders lists
+// them in `skillsRoots` instead, in priority order; a `*` segment matches one
+// folder (e.g. 'plugins/*/skills') and that folder becomes the category. When
+// two roots hold a skill at the same path, the first root wins (see
+// plugins/skillDiscovery.js). A SKILL.md at a root itself is never a skill.
 const SOURCES = [
   {
     id: 'anthropic',
@@ -137,6 +156,266 @@ const SOURCES = [
     skillsRoot: '',
     excludeCategories: [],
   },
+  {
+    id: 'mvanhorn',
+    name: 'Matt Van Horn',
+    org: 'mvanhorn',
+    repo: 'last30days-skill',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'addyosmani',
+    name: 'Addy Osmani',
+    org: 'addyosmani',
+    repo: 'agent-skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'coreyhaines',
+    name: 'Corey Haines',
+    org: 'coreyhaines31',
+    repo: 'marketingskills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'k-dense',
+    name: 'K-Dense AI',
+    org: 'K-Dense-AI',
+    repo: 'scientific-agent-skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'impeccable',
+    name: 'Impeccable',
+    org: 'pbakaus',
+    repo: 'impeccable',
+    branch: 'main',
+    // Impeccable ships the same skill to many agent folders. plugin/skills holds one copy.
+    skillsRoot: 'plugin/skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'taste-skill',
+    name: 'Taste Skill',
+    org: 'Leonxlnx',
+    repo: 'taste-skill',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'emilkowalski',
+    name: 'Emil Kowalski',
+    org: 'emilkowalski',
+    repo: 'skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'cathrynlavery',
+    name: 'Cathryn Lavery',
+    org: 'cathrynlavery',
+    repo: 'diagram-design',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'ponytail',
+    name: 'Ponytail',
+    org: 'DietrichGebert',
+    repo: 'ponytail',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'payload',
+    name: 'Payload',
+    org: 'payloadcms',
+    repo: 'skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'huggingface',
+    name: 'Hugging Face',
+    org: 'huggingface',
+    repo: 'skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'cloudflare',
+    name: 'Cloudflare',
+    org: 'cloudflare',
+    repo: 'skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'supabase',
+    name: 'Supabase',
+    org: 'supabase',
+    repo: 'agent-skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'expo',
+    name: 'Expo',
+    org: 'expo',
+    repo: 'skills',
+    branch: 'main',
+    // Expo's stable skills. plugins/expo-experiments is left out.
+    skillsRoot: 'plugins/expo/skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'gemini',
+    name: 'Google Gemini',
+    org: 'google-gemini',
+    repo: 'gemini-skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'sentry',
+    name: 'Sentry',
+    org: 'getsentry',
+    repo: 'skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'google',
+    name: 'Google',
+    org: 'google',
+    repo: 'skills',
+    branch: 'main',
+    // plugins/cloud holds plugin variants of skills that skills/ already lists.
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'claude-plugins',
+    name: 'Claude Plugins',
+    org: 'anthropics',
+    repo: 'claude-plugins-official',
+    branch: 'main',
+    skillsRoots: ['plugins/*/skills', 'external_plugins/*/skills'],
+    excludeCategories: [],
+  },
+  {
+    id: 'hashicorp',
+    name: 'HashiCorp',
+    org: 'hashicorp',
+    repo: 'agent-skills',
+    branch: 'main',
+    skillsRoot: 'plugins/*/skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'stitch',
+    name: 'Google Stitch',
+    org: 'google-labs-code',
+    repo: 'stitch-skills',
+    branch: 'main',
+    skillsRoot: 'plugins/*/skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'neon',
+    name: 'Neon',
+    org: 'neondatabase',
+    repo: 'agent-skills',
+    branch: 'main',
+    // plugins/neon-postgres/skills is a copy of skills/.
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'firebase',
+    name: 'Firebase',
+    org: 'firebase',
+    repo: 'agent-skills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'obsidian',
+    name: 'Obsidian',
+    org: 'obsidianmd',
+    repo: 'obsidian-skills',
+    branch: 'main',
+    skillsRoot: 'plugins/obsidian/skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'cloudflare-security',
+    name: 'Cloudflare Security',
+    org: 'cloudflare',
+    repo: 'security-audit-skill',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'remotion',
+    name: 'Remotion',
+    org: 'remotion-dev',
+    repo: 'skills',
+    branch: 'main',
+    // No license file, so the catalog lists these without their SKILL.md text.
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
+    id: 'gstack',
+    name: 'gstack',
+    org: 'garrytan',
+    repo: 'gstack',
+    branch: 'main',
+    // Skills are top-level folders. The rest are test fixtures, ports for
+    // other hosts and browser scripts; the root SKILL.md is skipped.
+    skillsRoot: '',
+    excludeCategories: ['test', 'qm', 'capy', 'browser-skills', 'openclaw'],
+  },
+  {
+    id: 'planning-with-files',
+    name: 'Planning with Files',
+    org: 'OthmanAdi',
+    repo: 'planning-with-files',
+    branch: 'master',
+    // skills/i18n holds translations of the one skill.
+    skillsRoot: 'skills',
+    excludeCategories: ['i18n'],
+  },
+  {
+    id: 'hallmark',
+    name: 'Hallmark',
+    org: 'Nutlope',
+    repo: 'hallmark',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
 ];
 
 // Mirrors the isBinaryFile() extension list in src/components/FileBrowser.tsx
@@ -150,32 +429,6 @@ const BINARY_EXTENSIONS = [
 function isBinaryFile(path) {
   const lower = path.toLowerCase();
   return BINARY_EXTENSIONS.some((ext) => lower.endsWith(ext));
-}
-
-// Detects a short SPDX-ish label from license file text. Skill folders often
-// ship a LICENSE.txt whose SKILL.md frontmatter only says "see LICENSE.txt" —
-// this reads the actual text so the UI can show "Apache-2.0" / "MIT" /
-// "Proprietary" instead of that unhelpful pointer.
-function detectLicense(text) {
-  const head = text.slice(0, 3000);
-  if (/Apache License[\s\S]{0,60}Version 2\.0/i.test(head)) return 'Apache-2.0';
-  if (
-    /\bMIT License\b/i.test(head) ||
-    /Permission is hereby granted, free of charge, to any person obtaining a copy/i.test(head)
-  ) return 'MIT';
-  if (/BSD 3-Clause/i.test(head) || (/Redistribution and use in source and binary forms/i.test(head) && /neither the name/i.test(head))) {
-    return 'BSD-3-Clause';
-  }
-  if (/BSD 2-Clause/i.test(head)) return 'BSD-2-Clause';
-  if (/GNU GENERAL PUBLIC LICENSE[\s\S]{0,60}Version 3/i.test(head)) return 'GPL-3.0';
-  if (/GNU GENERAL PUBLIC LICENSE[\s\S]{0,60}Version 2/i.test(head)) return 'GPL-2.0';
-  if (/Mozilla Public License/i.test(head)) return 'MPL-2.0';
-  if (/\bISC License\b/i.test(head)) return 'ISC';
-  if (/\bThe Unlicense\b/i.test(head)) return 'Unlicense';
-  if (/all rights reserved/i.test(head) && /(commercial terms|consumer terms|additional restrictions|proprietary)/i.test(head)) {
-    return 'Proprietary';
-  }
-  return 'Custom';
 }
 
 function findLicenseFile(dir) {
@@ -201,10 +454,13 @@ function slugifySegment(segment) {
   return segment.replace(/^\./, '');
 }
 
+// Symlinked folders are not followed: repos link one skill folder under a
+// second name (gstack's connect-chrome), which would list it twice.
 function findSkillFiles(dir, results = []) {
   for (const entry of readdirSync(dir)) {
     if (entry === '.git') continue;
     const full = join(dir, entry);
+    if (lstatSync(full).isSymbolicLink()) continue;
     if (statSync(full).isDirectory()) {
       findSkillFiles(full, results);
     } else if (entry === 'SKILL.md') {
@@ -233,13 +489,23 @@ function walkFiles(dir, base, results = []) {
   return results;
 }
 
-function cloneSource(source, scratchDir) {
+const repoUrl = (source) => `https://github.com/${source.org}/${source.repo}.git`;
+
+// The commit at the head of a source's branch.
+function branchHead(source) {
+  const out = execFileSync('git', ['ls-remote', repoUrl(source), `refs/heads/${source.branch}`], { encoding: 'utf8' });
+  const commit = out.split(/\s/)[0];
+  if (!commit) throw new Error(`${source.org}/${source.repo} has no branch ${source.branch}`);
+  return commit;
+}
+
+function cloneSource(source, commit, scratchDir) {
   const dest = join(scratchDir, source.id);
-  execFileSync(
-    'git',
-    ['clone', '--depth', '1', '--branch', source.branch, `https://github.com/${source.org}/${source.repo}.git`, dest],
-    { stdio: 'inherit' },
-  );
+  const git = (...args) => execFileSync('git', ['-C', dest, ...args], { stdio: 'inherit' });
+  mkdirSync(dest);
+  git('init', '--quiet');
+  git('fetch', '--quiet', '--depth', '1', repoUrl(source), commit);
+  git('checkout', '--quiet', 'FETCH_HEAD');
   return dest;
 }
 
@@ -272,15 +538,28 @@ function buildFileManifest(source, skillDir, repoRelPath) {
     });
 }
 
-function extractSkills(source, cloneDir, rootLicense, pages) {
-  const skillsRoot = join(cloneDir, source.skillsRoot);
+// The nearest license file to a skill folder: its own, else a parent's.
+function findLicense(cloneDir, repoRelDir, cache) {
+  for (const dir of licenseDirs(repoRelDir)) {
+    if (!cache.has(dir)) cache.set(dir, detectDirLicense(join(cloneDir, dir)));
+    if (cache.get(dir)) return cache.get(dir);
+  }
+  return null;
+}
+
+function extractSkills(source, cloneDir, pages) {
   const skills = [];
+  const licenseCache = new Map();
   const blobUrl = (file) =>
     `https://github.com/${source.org}/${source.repo}/blob/${source.branch}/${relative(cloneDir, file).replace(/\\/g, '/')}`;
 
-  for (const skillFile of findSkillFiles(skillsRoot)) {
+  const skillFiles = findSkillFiles(cloneDir).map((file) => relative(cloneDir, file));
+  const found = discoverSkills(skillFiles, sourceRoots(source));
+  for (const { file, relDir } of found.skipped) console.warn(`  skipping ${file}: ${relDir} is already listed`);
+
+  for (const { file, relDir } of found.skills) {
+    const skillFile = join(cloneDir, file);
     const skillDir = dirname(skillFile);
-    const relDir = relative(skillsRoot, skillDir).replace(/\\/g, '/');
     const segments = relDir.split('/');
     const category = segments.length > 1 ? segments[0] : null;
 
@@ -300,7 +579,7 @@ function extractSkills(source, cloneDir, rootLicense, pages) {
 
     const repoRelPath = relative(cloneDir, skillDir).replace(/\\/g, '/');
     const routeSlug = segments.map(slugifySegment).join('/');
-    const licenseInfo = detectDirLicense(skillDir) ?? rootLicense;
+    const licenseInfo = findLicense(cloneDir, repoRelPath, licenseCache);
     const license = licenseInfo?.license ?? null;
 
     // Proprietary/source-available skills (e.g. Anthropic's docx/pdf/pptx/xlsx)
@@ -338,32 +617,79 @@ function extractSkills(source, cloneDir, rootLicense, pages) {
   return skills;
 }
 
+async function updateLock(prev) {
+  const heads = {};
+  const stars = {};
+  for (const source of SOURCES) {
+    heads[source.id] = branchHead(source);
+    stars[source.id] = await fetchStars(source);
+  }
+  const lock = nextLock(SOURCES, prev, heads, stars);
+  writeFileSync(lockPath, JSON.stringify(lock, null, 2) + '\n');
+  return lock;
+}
+
+// One source's skills and pages: the cached extract for its pinned commit, or
+// a fresh fetch, which is then cached.
+function sourceSkills(source, commit, codeHash, scratchDir) {
+  const cachePath = join(cacheDir, `${sourceCacheKey(source, commit, codeHash)}.json`);
+  if (existsSync(cachePath)) {
+    console.log(`Using cached ${source.org}/${source.repo}@${commit.slice(0, 7)}`);
+    return { cachePath, ...JSON.parse(readFileSync(cachePath, 'utf8')) };
+  }
+  console.log(`Fetching ${source.org}/${source.repo}@${commit.slice(0, 7)}...`);
+  const pages = {};
+  const skills = extractSkills(source, cloneSource(source, commit, scratchDir), pages);
+  writeFileSync(cachePath, JSON.stringify({ skills, pages }));
+  return { cachePath, skills, pages };
+}
+
 async function main() {
+  const prev = existsSync(lockPath) ? JSON.parse(readFileSync(lockPath, 'utf8')) : {};
+  const lock = process.argv.includes('--update') ? await updateLock(prev) : prev;
+  const problems = lockProblems(SOURCES, lock);
+  if (problems.length > 0) {
+    throw new Error(`skills.lock.json is out of date; run \`npm run build:skills-catalog -- --update\`:\n  ${problems.join('\n  ')}`);
+  }
+
+  const codeHash = sha256(...codeFiles.map((file) => readFileSync(file)));
+  const stamp = sha256(JSON.stringify(lock), codeHash);
+  const outputs = [outPath, indexOutPath, pagesOutPath, stampPath];
+  if (outputs.every(existsSync) && readFileSync(stampPath, 'utf8').trim() === stamp) {
+    console.log('Skills catalog is up to date with skills.lock.json');
+    return;
+  }
+
+  mkdirSync(cacheDir, { recursive: true });
   const scratchDir = mkdtempSync(join(tmpdir(), 'skills-catalog-'));
-  const previousStars = readPreviousStars();
   const allSkills = [];
   const sourceMeta = [];
   const pages = {};
+  const used = new Set();
 
   try {
     for (const source of SOURCES) {
-      console.log(`Fetching ${source.org}/${source.repo}...`);
-      const cloneDir = cloneSource(source, scratchDir);
-      const rootLicense = detectDirLicense(cloneDir);
-      const skills = extractSkills(source, cloneDir, rootLicense, pages);
-      allSkills.push(...skills);
-      const stars = (await fetchStars(source)) ?? previousStars[source.id] ?? null;
+      const { commit, stars } = lock[source.id];
+      const found = sourceSkills(source, commit, codeHash, scratchDir);
+      used.add(found.cachePath);
+      allSkills.push(...found.skills);
+      Object.assign(pages, found.pages);
       sourceMeta.push({
         id: source.id,
         name: source.name,
         url: `https://github.com/${source.org}/${source.repo}`,
-        skillCount: skills.length,
+        skillCount: found.skills.length,
         stars,
       });
-      console.log(`  found ${skills.length} skills (${stars ?? '?'} stars)`);
+      console.log(`  found ${found.skills.length} skills (${stars ?? '?'} stars)`);
     }
   } finally {
     rmSync(scratchDir, { recursive: true, force: true });
+  }
+  // Drop extracts for commits the lock no longer pins, so the cache stays small.
+  for (const entry of readdirSync(cacheDir)) {
+    const file = join(cacheDir, entry);
+    if (!used.has(file)) rmSync(file);
   }
 
   allSkills.sort((a, b) =>
@@ -379,8 +705,13 @@ async function main() {
   };
 
   writeFileSync(outPath, JSON.stringify(catalog, null, 2) + '\n');
+  // The /skills/ page bundles its data into client JS, so it gets a copy
+  // without the file manifests, which only the skill pages and the app use.
+  const index = { sources: sourceMeta, skills: allSkills.map(({ files, checksum, ...rest }) => rest) };
+  writeFileSync(indexOutPath, JSON.stringify(index, null, 2) + '\n');
   const sortedPages = Object.fromEntries(allSkills.map((skill) => [skill.id, pages[skill.id]]));
   writeFileSync(pagesOutPath, JSON.stringify(sortedPages, null, 2) + '\n');
+  writeFileSync(stampPath, stamp + '\n');
   console.log(`\nWrote ${allSkills.length} skills from ${sourceMeta.length} sources to ${relative(webRoot, outPath)}`);
 }
 

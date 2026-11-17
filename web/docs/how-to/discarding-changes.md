@@ -1,5 +1,6 @@
 ---
 sidebar_position: 3
+description: Discard uncommitted edits in Treq and bring them back with Undo, which restores the working-copy snapshot taken before the discard.
 ---
 
 # Discarding Changes

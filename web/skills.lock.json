@@ -1,0 +1,146 @@
+{
+  "anthropic": {
+    "commit": "e4bb5d960d87126ff3b3a8af1a104b7db67560ba",
+    "stars": 179724
+  },
+  "openai": {
+    "commit": "49f948faa9258a0c61caceaf225e179651397431",
+    "stars": 27882
+  },
+  "mattpocock": {
+    "commit": "5863806dd4e15c63174bee4e7515a4256792ecfa",
+    "stars": 276685
+  },
+  "vercel": {
+    "commit": "b06e2533ba9b3823b8a96c859d455cb55f4d7893",
+    "stars": 43528
+  },
+  "microsoft": {
+    "commit": "65922d293cba61a40d5edf61a9eb4b6b0e799788",
+    "stars": 1538
+  },
+  "superpowers": {
+    "commit": "22f0b463e7a5e579904dd6211a520321035526f7",
+    "stars": 295472
+  },
+  "caveman": {
+    "commit": "9b243662ff98d392bc0a95b865a554583d71be75",
+    "stars": 109924
+  },
+  "prisma": {
+    "commit": "a6f192959cf43b08aa330fe1ffca090267215812",
+    "stars": 67
+  },
+  "mvanhorn": {
+    "commit": "488e50d9ea1f22302601d1bd61696a4532ec73d7",
+    "stars": 67664
+  },
+  "addyosmani": {
+    "commit": "39b723ceebf81474d0557c1fecd01eddab585563",
+    "stars": 117528
+  },
+  "coreyhaines": {
+    "commit": "1f837447b20bb6f0e72d87b80ece1c221c362c7d",
+    "stars": 61009
+  },
+  "k-dense": {
+    "commit": "ec59a29a03d5c40f73ab40878df04860bc00e876",
+    "stars": 57582
+  },
+  "impeccable": {
+    "commit": "d41d9860b0094dcb68030657da63461212835aaa",
+    "stars": 110136
+  },
+  "taste-skill": {
+    "commit": "f6b76575f949707b4e3c37cd86cb44b0b98643e8",
+    "stars": 115567
+  },
+  "emilkowalski": {
+    "commit": "64eb3deb9a5fbfa041faf783e0bc3fd635872e9c",
+    "stars": 56893
+  },
+  "cathrynlavery": {
+    "commit": "f6db0decea96de66b901331a0f79a8d4b147ebae",
+    "stars": 67093
+  },
+  "ponytail": {
+    "commit": "96608e078b2d5ea607c5c3b8b5a54d1c1fba6846",
+    "stars": 190833
+  },
+  "payload": {
+    "commit": "832d5bc4258ae784f08cb7f03a3a674d6b2fa5f1",
+    "stars": 173
+  },
+  "huggingface": {
+    "commit": "5291c2b9365e06b175dc04817610c778623f4836",
+    "stars": 11348
+  },
+  "cloudflare": {
+    "commit": "5108325ecceabc899c761e07aa617b09c02445ee",
+    "stars": 3367
+  },
+  "supabase": {
+    "commit": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+    "stars": 3059
+  },
+  "expo": {
+    "commit": "dfdebcc6c4c1bf7a9471cefd6b6f39c7ba6c884d",
+    "stars": 4152
+  },
+  "gemini": {
+    "commit": "87fb0173d36fea4f87de4c3fbd0678cf929c0588",
+    "stars": 4487
+  },
+  "sentry": {
+    "commit": "a582c51ee29d0f35e6ac321340796f77d43da733",
+    "stars": 1171
+  },
+  "google": {
+    "commit": "2a02c716b69414d6e7d6851db537959a0581bc77",
+    "stars": 24389
+  },
+  "claude-plugins": {
+    "commit": "fd30cee3ecd5a8ee772733c5d20c0f2bae2da2f0",
+    "stars": 47566
+  },
+  "hashicorp": {
+    "commit": "5e30fa5c867ba6777c37e4206babfd08049c396f",
+    "stars": 931
+  },
+  "stitch": {
+    "commit": "0337446dadde6f8c94210444e2aa9d546126480f",
+    "stars": 10028
+  },
+  "neon": {
+    "commit": "067f9fb2df21953b216867d60ec500ddaf3e5647",
+    "stars": 116
+  },
+  "firebase": {
+    "commit": "99954a30898bb5ddc8152ee10e124dc3b4106bf7",
+    "stars": 518
+  },
+  "obsidian": {
+    "commit": "caf3e98cd22d810db164f26c9a442f0a280daa43",
+    "stars": 53059
+  },
+  "cloudflare-security": {
+    "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+    "stars": 74658
+  },
+  "remotion": {
+    "commit": "3e20ac75161bc34468845df714701cc9bf6075f4",
+    "stars": 7422
+  },
+  "gstack": {
+    "commit": "e671a531f4ede3d63b3143c96903466c960aca58",
+    "stars": 141911
+  },
+  "planning-with-files": {
+    "commit": "51bf62def62d1cb317d37936929b4ef97cf862c3",
+    "stars": 28113
+  },
+  "hallmark": {
+    "commit": "04977e15f3dfd6ee4b74c887dac3eb52665d6c92",
+    "stars": 56767
+  }
+}

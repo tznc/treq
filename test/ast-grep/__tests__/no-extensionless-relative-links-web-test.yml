@@ -1,0 +1,15 @@
+id: no-extensionless-relative-links-web
+valid:
+  - "See [stacked PRs](./stacked-prs.md) for more."
+  - "See [stacked PRs](./stacked-prs.mdx#rebasing)."
+  - "See [worktrees](/learn/concepts/git/git-worktrees)."
+  - "See [the parent](../intro.md)."
+  - "Read [the docs](https://treq.dev/docs/)."
+invalid:
+  - "See [stacked PRs](./stacked-prs) for more."
+  - "See [stacked PRs](./stacked-prs/) for more."
+  - "See [rebasing](./stacked-prs#rebasing)."
+  - |
+    <DocCardList />
+
+    Next: [Worktrees vs clones](./git-worktrees-vs-clones).
