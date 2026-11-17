@@ -1115,7 +1115,12 @@ fn a_single_click_on_a_clipped_session_keeps_the_row_still(cx: &mut TestAppConte
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   let mut commands = Vec::new();
   for nonce in 1..=3 {
-    commands.extend(open_remote_command(nonce)["commands"].as_array().cloned().unwrap());
+    commands.extend(
+      open_remote_command(nonce)["commands"]
+        .as_array()
+        .cloned()
+        .unwrap(),
+    );
   }
   set_terminal(&mut h, serde_json::json!({ "commands": commands }));
   let container = h
@@ -1124,7 +1129,10 @@ fn a_single_click_on_a_clipped_session_keeps_the_row_still(cx: &mut TestAppConte
     .expect("container");
   // Drag the row's scrollbar to the end so the first session is clipped
   // by the left edge.
-  let thumb = h.cx.debug_bounds("terminal-row-scrollbar").expect("scrollbar");
+  let thumb = h
+    .cx
+    .debug_bounds("terminal-row-scrollbar")
+    .expect("scrollbar");
   let grab = thumb.center();
   let to = gpui::point(container.right(), grab.y);
   h.cx.simulate_event(gpui::MouseDownEvent {
@@ -1146,8 +1154,14 @@ fn a_single_click_on_a_clipped_session_keeps_the_row_still(cx: &mut TestAppConte
     click_count: 1,
   });
   h.cx.run_until_parked();
-  let before = h.cx.debug_bounds("terminal-row-scrollbar").expect("scrollbar");
-  assert!(before.left() > container.left() + gpui::px(1.), "{before:?}");
+  let before = h
+    .cx
+    .debug_bounds("terminal-row-scrollbar")
+    .expect("scrollbar");
+  assert!(
+    before.left() > container.left() + gpui::px(1.),
+    "{before:?}"
+  );
   let header = h.cx.debug_bounds("remote-terminal-header").expect("header");
   let at = gpui::point(container.left() + gpui::px(8.), header.center().y);
   for click_count in [1] {
@@ -1166,7 +1180,10 @@ fn a_single_click_on_a_clipped_session_keeps_the_row_still(cx: &mut TestAppConte
     });
   }
   h.cx.run_until_parked();
-  let after = h.cx.debug_bounds("terminal-row-scrollbar").expect("scrollbar");
+  let after = h
+    .cx
+    .debug_bounds("terminal-row-scrollbar")
+    .expect("scrollbar");
   assert_eq!(after, before);
 }
 
