@@ -169,9 +169,7 @@ pub fn merge_claude_local_settings(
   let mut settings = existing.unwrap_or_default();
   settings.remove("sandbox");
   settings.insert("filesystem".into(), filesystem);
-  let permissions = settings
-    .entry("permissions")
-    .or_insert_with(|| json!({}));
+  let permissions = settings.entry("permissions").or_insert_with(|| json!({}));
   if let Value::Object(permissions) = permissions {
     let allow = permissions.entry("allow").or_insert_with(|| json!([]));
     if let Value::Array(allow) = allow {
