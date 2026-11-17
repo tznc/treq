@@ -3727,7 +3727,7 @@ impl TerminalPane {
         .role(gpui::Role::Button)
         .aria_label(name.clone())
         .debug_selector(|| "terminal-workspace-label".into())
-        .max_w(zpx(200.))
+        .max_w(zpx(360.))
         .flex()
         .items_center()
         .gap_2()
@@ -4584,6 +4584,7 @@ impl Render for TerminalPane {
     }
     let row_bounds = self.row.clone();
     let row_scroll = self.row_scroll.clone();
+    let measured_scroll = self.row_scroll.clone();
     let scrollbar = self.row_scrollbar(&p, cx);
     let controls = self.controls(&p, cx);
     let maximized = self.maximized;
@@ -4704,7 +4705,14 @@ impl Render for TerminalPane {
               // what `scroll_to_item` counts.
               .child(
                 gpui::canvas(
-                  move |b, _, _| row_bounds.set(Some(b)),
+                  // Inside the scrolled row: undo the scroll so the bounds stay the
+                  // row's own, not its scrolled content's.
+                  move |b, _, _| {
+                    row_bounds.set(Some(Bounds::new(
+                      b.origin - measured_scroll.offset(),
+                      b.size,
+                    )))
+                  },
                   move |b, _, window, _| {
                     // Painted inside the scrolled row: undo the scroll to get
                     // the row's own bounds.
