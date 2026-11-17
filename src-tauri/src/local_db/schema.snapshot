@@ -120,6 +120,7 @@ table sessions
   column created_at|TEXT|1|NULL|0
   column id|INTEGER|0|NULL|1
   column last_accessed|TEXT|1|NULL|0
+  column link_url|TEXT|0|NULL|0
   column model|TEXT|0|NULL|0
   column name|TEXT|1|NULL|0
   column workspace_id|INTEGER|0|NULL|0

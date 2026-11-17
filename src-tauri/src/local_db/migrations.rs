@@ -21,6 +21,8 @@ use rusqlite::Connection;
 mod agent_messages;
 #[path = "migrations/1793162598_baseline.rs"]
 mod baseline;
+#[path = "migrations/1794873600_session_link.rs"]
+mod session_link;
 
 pub(super) struct Migration {
   /// The `user_version` this migration brings a database to.
@@ -43,6 +45,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     version: 1_793_217_483,
     transactional: true,
     apply: agent_messages::apply,
+  },
+  Migration {
+    version: 1_794_873_600,
+    transactional: true,
+    apply: session_link::apply,
   },
 ];
 

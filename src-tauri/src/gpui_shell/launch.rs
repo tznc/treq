@@ -39,6 +39,10 @@ impl LaunchStore for Store<'_> {
       .with_db(|db| crate::core::sessions::create_session(db, &scope, workspace_id, name.into()))
   }
 
+  fn set_session_link(&self, repo: &str, session_id: i64, url: &str) -> Result<(), String> {
+    crate::core::sessions::set_session_link(&self.0.state_scope(repo), session_id, url)
+  }
+
   fn session_names(&self, repo: &str) -> Vec<String> {
     crate::core::sessions::list_sessions(&self.0.state_scope(repo))
       .unwrap_or_default()
@@ -263,6 +267,7 @@ pub fn auto_review(app: &AppHandle, event: crate::auto_review::AutoReviewEvent) 
         mode: Some("acceptEdits".into()),
         agent: launch::agent_kind(agent.as_deref()),
         session_name: Some("AI Review".into()),
+        link: None,
       };
       if let Err(err) = backend.launch_session(&request, true) {
         backend.toast(ToastTone::Error, "Failed to start automatic review", err);
@@ -296,6 +301,7 @@ pub(super) fn start_deep_link(host: &dyn WindowHost, request: &AgentDeepLinkRequ
     mode: Some(request.mode.clone()),
     agent: Some(request.agent.clone()),
     session_name: None,
+    link: None,
   };
   match host.launch(&launched, true) {
     Ok(()) => launch::deep_links()
