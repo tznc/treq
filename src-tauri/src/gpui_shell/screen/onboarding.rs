@@ -1219,10 +1219,14 @@ impl OnboardingView {
         .pb_5()
         .child(
           ui::text(div(), TextSize::Sm)
+            .id("onboarding-projects-heading")
+            .role(tauri_plugin_gpui::gpui::Role::Heading)
+            .aria_label("Projects")
             .px_2()
             .pb_3()
             .font_weight(FontWeight::SEMIBOLD)
-            .child("Projects"),
+            .child("Projects")
+            .test_support(),
         )
         .children(switcher)
         .children(shown.into_iter().map(|project| {

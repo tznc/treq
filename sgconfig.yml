@@ -3,3 +3,7 @@ ruleDirs:
   - test/ast-grep/rules-js
 testConfigs:
   - testDir: test/ast-grep/__tests__
+# ast-grep has no Markdown parser. The HTML parser reads Markdown prose as text
+# nodes, which is enough for rules that match link text.
+languageGlobs:
+  html: ["*.md", "*.mdx"]
