@@ -1008,8 +1008,30 @@ fn double_clicking_a_session_clipped_on_the_left_scrolls_it_into_view(cx: &mut T
     .cx
     .debug_bounds("terminal-scroll-container")
     .expect("container");
-  // The newest session opened in view, so the row is scrolled right and
-  // the one before it is clipped by the left edge.
+  // Drag the row's scrollbar to the end so the first session is clipped
+  // by the left edge.
+  let thumb = h.cx.debug_bounds("terminal-row-scrollbar").expect("scrollbar");
+  let grab = thumb.center();
+  let to = gpui::point(container.right(), grab.y);
+  h.cx.simulate_event(gpui::MouseDownEvent {
+    position: grab,
+    modifiers: Modifiers::none(),
+    button: MouseButton::Left,
+    click_count: 1,
+    first_mouse: false,
+  });
+  h.cx.simulate_event(gpui::MouseMoveEvent {
+    position: to,
+    modifiers: Modifiers::none(),
+    pressed_button: Some(MouseButton::Left),
+  });
+  h.cx.simulate_event(gpui::MouseUpEvent {
+    position: to,
+    modifiers: Modifiers::none(),
+    button: MouseButton::Left,
+    click_count: 1,
+  });
+  h.cx.run_until_parked();
   let before = h.cx.debug_bounds("terminal-row-scrollbar").expect("scrollbar");
   assert!(before.left() > container.left() + gpui::px(1.), "{before:?}");
   let header = h.cx.debug_bounds("remote-terminal-header").expect("header");
