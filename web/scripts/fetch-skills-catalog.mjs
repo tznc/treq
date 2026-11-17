@@ -172,6 +172,15 @@ const SOURCES = [
     excludeCategories: [],
   },
   {
+    id: 'coreyhaines',
+    name: 'Corey Haines',
+    org: 'coreyhaines31',
+    repo: 'marketingskills',
+    branch: 'main',
+    skillsRoot: 'skills',
+    excludeCategories: [],
+  },
+  {
     id: 'impeccable',
     name: 'Impeccable',
     org: 'pbakaus',
