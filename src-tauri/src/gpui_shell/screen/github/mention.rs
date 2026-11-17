@@ -1,7 +1,7 @@
 //! `@` mentions in the comment box: the issue's or pull request's
 //! participants, suggested as a login is typed after `@`.
 
-use gpui_kit::component::input::{Enter, Escape, MoveDown, MoveUp};
+use gpui_kit::component::input::{Enter, Escape, IndentInline, MoveDown, MoveUp};
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, Context, Div, SharedString, Window};
 
 use super::GithubView;
@@ -73,7 +73,7 @@ impl GithubView {
     cx.notify();
   }
 
-  /// Arrow keys, Enter and Escape steer the suggestions while they show.
+  /// Arrow keys, Enter or Tab, and Escape steer the suggestions while they show.
   pub(super) fn mention_keys(&self, box_: Div, cursor: usize, cx: &mut Context<Self>) -> Div {
     let open = move |view: &Self| view.comment_mention(cursor);
     box_
@@ -96,6 +96,13 @@ impl GithubView {
         if action.secondary {
           return;
         }
+        if let Some(m) = open(view) {
+          let login = m.logins[view.mention_index % m.logins.len()].clone();
+          cx.stop_propagation();
+          view.select_mention(m.anchor, &login, window, cx);
+        }
+      }))
+      .capture_action(cx.listener(move |view, _: &IndentInline, window, cx| {
         if let Some(m) = open(view) {
           let login = m.logins[view.mention_index % m.logins.len()].clone();
           cx.stop_propagation();

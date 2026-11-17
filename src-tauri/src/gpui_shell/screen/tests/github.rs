@@ -651,6 +651,12 @@ fn github_comment_suggests_participants_to_mention(cx: &mut TestAppContext) {
   h.cx.simulate_input("@");
   h.cx.simulate_keystrokes("down enter");
   assert_eq!(view(&mut h, |v| v.comment.clone()), "Thanks @ada @ada ");
+  h.cx.simulate_input("@a");
+  h.cx.simulate_keystrokes("tab");
+  assert_eq!(
+    view(&mut h, |v| v.comment.clone()),
+    "Thanks @ada @ada @ada "
+  );
   h.cx.simulate_input("@");
   h.cx.simulate_keystrokes("escape");
   assert!(!h.drawn("github-mentions"));
