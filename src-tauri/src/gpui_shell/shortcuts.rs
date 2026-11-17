@@ -41,6 +41,12 @@ pub fn app_shortcut(
   })
 }
 
+/// Whether a key press archives the sidebar's selected workspaces:
+/// Backspace with no modifier, outside a text field or terminal.
+pub fn archives_selection(key: &str, modified: bool, in_input: bool, in_terminal: bool) -> bool {
+  key == "backspace" && !modified && !in_input && !in_terminal
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -78,6 +84,15 @@ mod tests {
     assert_eq!(term("k", false), Some(AppShortcut::Palette));
     assert_eq!(term("n", true), Some(AppShortcut::Key("N")));
     assert_eq!(term("p", false), Some(AppShortcut::Key("p")));
+  }
+
+  #[test]
+  fn backspace_archives_the_selection_outside_text() {
+    assert!(archives_selection("backspace", false, false, false));
+    assert!(!archives_selection("backspace", true, false, false));
+    assert!(!archives_selection("backspace", false, true, false));
+    assert!(!archives_selection("backspace", false, false, true));
+    assert!(!archives_selection("delete", false, false, false));
   }
 
   #[test]

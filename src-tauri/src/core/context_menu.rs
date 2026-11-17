@@ -5,6 +5,9 @@
 
 use crate::local_db::Workspace;
 
+/// Archives the sidebar's selected workspaces.
+pub const ARCHIVE_SELECTION_KEY: &str = "backspace";
+
 /// The lucide icon beside an item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuIcon {
@@ -82,6 +85,8 @@ pub enum MenuItem {
     text: String,
     icon: Option<MenuIcon>,
     destructive: bool,
+    /// The key that runs the item without the menu, as GPUI binds it.
+    shortcut: Option<String>,
     action: MenuAction,
   },
   Separator,
@@ -98,8 +103,16 @@ impl MenuItem {
       text: text.into(),
       icon: None,
       destructive: false,
+      shortcut: None,
       action,
     }
+  }
+
+  fn shortcut(mut self, key: &str) -> Self {
+    if let MenuItem::Item { shortcut, .. } = &mut self {
+      *shortcut = Some(key.into());
+    }
+    self
   }
 
   fn icon(mut self, value: MenuIcon) -> Self {
@@ -347,11 +360,13 @@ pub fn workspaces_items(
           text,
           icon,
           destructive,
+          shortcut,
           action,
         } => MenuItem::Item {
           text,
           icon,
           destructive,
+          shortcut,
           action: MenuAction::Each(
             full
               .iter()
@@ -382,6 +397,7 @@ pub fn workspaces_items(
       },
     )
     .icon(MenuIcon::Archive)
+    .shortcut(ARCHIVE_SELECTION_KEY)
     .destructive(),
   );
   items
@@ -832,6 +848,10 @@ mod tests {
       MenuItem::Item { action, .. } => action.clone(),
       _ => panic!("not an item"),
     };
+    assert!(matches!(
+      &items[5],
+      MenuItem::Item { shortcut: Some(key), .. } if key == ARCHIVE_SELECTION_KEY
+    ));
     assert_eq!(action(0), MenuAction::Copy("feat/a\nfeat/b".into()));
     assert_eq!(
       action(1),

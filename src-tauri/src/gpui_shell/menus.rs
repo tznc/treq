@@ -49,6 +49,7 @@ fn native(items: Vec<MenuItem>, run: &RunAction) -> Vec<NativeMenuItem> {
         text,
         icon: glyph,
         destructive,
+        shortcut,
         action,
       } => {
         let run = run.clone();
@@ -58,6 +59,9 @@ fn native(items: Vec<MenuItem>, run: &RunAction) -> Vec<NativeMenuItem> {
         }
         if destructive {
           item = item.destructive();
+        }
+        if let Some(key) = shortcut {
+          item = item.shortcut(key);
         }
         item
       }
