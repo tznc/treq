@@ -39,6 +39,16 @@ const sidebars: SidebarsConfig = {
         'jj-vs-git',
       ],
     },
+    {
+      type: 'category',
+      label: 'Models',
+      items: [
+        'best-llms-for-coding-agents',
+        'claude-vs-gpt-for-coding',
+        'claude-vs-gemini-for-coding',
+        'best-open-weight-coding-models',
+      ],
+    },
   ],
 };
 

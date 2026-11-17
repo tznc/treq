@@ -1,0 +1,89 @@
+---
+sidebar_position: 26
+title: Claude vs Gemini for Coding (2026)
+description: Claude vs Gemini for coding in 2026. Claude Fable 5.2 and Opus 5.5 compared with Gemini 4 Carbon, Argon and Hydrogen on price and limits.
+---
+
+# Claude vs Gemini for Coding
+
+_From December 1, 2026, Gemini 4 Carbon and Argon cost the same per token as Claude Opus 5.5. Claude Fable 5.2 costs twice that, and Gemini's introductory price halves it until November 30._
+
+Anthropic and Google both sell a top model for the hardest agent work and cheaper tiers for everyday coding. This page compares them on the properties that drive an agent's cost and behavior: price, caching, context and output limits, and thinking settings. Figures were checked against each provider's official model and pricing pages in November 2026 and will change. Benchmark scores are left out because each vendor reports them with its own agent setup and settings.
+
+## Flagships: Claude Fable 5.2 vs Gemini 4 Carbon
+
+| | Claude Fable 5.2 | Gemini 4 Carbon |
+| --- | --- | --- |
+| Released | Nov 9, 2026 | Nov 10, 2026 |
+| API model ID | `claude-fable-5-2` | `gemini-4-carbon` |
+| Input per 1M tokens | $8 | $2 through Nov 30, then $4 |
+| Output per 1M tokens | $40 | $10 through Nov 30, then $20 |
+| Cached input per 1M tokens | $0.20 | $0.10 through Nov 30, then $0.20 |
+| Caching | Explicit, 5-minute or 1-hour | Implicit only |
+| Context window | 1M tokens | 1,048,576 tokens, shared by input and output |
+| Max output | 128K tokens | 65,536 by default, up to the full window with long decode |
+| Input types | Text, image, PDF | Text, image, audio, video, PDF |
+| Thinking control | Effort `low` to `max`, default `high` | Thinking level `low`, `medium`, `high`, default `medium` |
+
+Gemini 4 Carbon and Argon are paid-tier only. Google publishes the same per-token price for both. The difference is how many thinking tokens each spends per turn. Carbon spends more to explore and verify, so the same task costs more and takes longer on Carbon than on Argon.
+
+## Everyday Tiers
+
+| | Claude Opus 5.5 | Claude Sonnet 5.5 | Gemini 4 Argon | Gemini 4 Hydrogen |
+| --- | --- | --- | --- | --- |
+| Released | Sep 22, 2026 | Sep 28, 2026 | Oct 13, 2026 | Nov 12, 2026 |
+| Input per 1M tokens | $4 | $2 | $2, then $4 | $1.50 |
+| Output per 1M tokens | $20 | $10 | $10, then $20 | $7.50 |
+| Cached input per 1M tokens | $0.20 | $0.10 | $0.10, then $0.20 | $0.075 |
+| Max output | 128K | 128K | 64K, up to 1M | 64K, up to 1M |
+| Default effort or thinking level | `medium` | `high` | `medium` | `high` |
+
+Gemini 4 Hydrogen has a free tier, and Google's terms state that free-tier data is used to improve its products. Paid-tier data is not. Hydrogen also adds an `xhigh` thinking level. For the cheapest Claude tier, Claude Haiku 5.5 costs $0.10 input and $0.50 output for prompts up to 100,000 tokens.
+
+## What One Agent Request Costs
+
+The arithmetic below uses list prices for one request with 200,000 input tokens, of which 180,000 are cache hits, and 4,000 output tokens. It ignores cache-write charges.
+
+| Model | Cost of one request |
+| --- | --- |
+| Claude Fable 5.2 | about $0.36 |
+| Claude Opus 5.5 | about $0.20 |
+| Gemini 4 Carbon or Argon, from Dec 1 | about $0.20 |
+| Gemini 4 Carbon or Argon, through Nov 30 | about $0.10 |
+| Claude Sonnet 5.5 | about $0.10 |
+| Gemini 4 Hydrogen | about $0.07 |
+
+This is the cost of one request, not one task. Google states that Gemini output prices include thinking tokens, and Carbon spends more of them than Argon per turn. Models also differ in step count and tokenizer. Measure cost per finished task on your own repository before you draw a conclusion.
+
+## Caching and Long Context
+
+An agent resends its history every turn, so caching decides much of the bill. Claude lets you mark a cache breakpoint and choose a 5-minute or 1-hour lifetime. Writes cost 1.25x or 2x the input price. Gemini 4 models cache shared prefixes implicitly and do not support explicit caching, so you cannot control what stays cached.
+
+Both vendors bill long prompts at the standard rate on these models. Gemini counts input, thinking and output against one 1,048,576-token window. A request that fills most of the window with input leaves less room for the answer.
+
+## Long Outputs
+
+Claude models cap a response at 128K tokens. Gemini 4 models stop at 65,536 tokens by default, and Google's long decode feature lets one response run toward 1M tokens through background execution or client-side continuation. Long decode matters for agents that write whole files or large generated artifacts in one turn. Most agent steps produce short tool calls, so the cap rarely binds.
+
+## Where You Can Run Them
+
+Claude Code runs Claude models. Google makes Gemini 4 Hydrogen the default model for the Antigravity agent in Gemini Managed Agents. GitHub Copilot lists Claude Fable 5.2, Opus 5.5, Sonnet 5.5 and all three Gemini 4 models as generally available, so a Copilot team can test both vendors in one tool.
+
+Claude models run on the Claude API, Amazon Bedrock, Google Cloud and Microsoft Foundry. Google documents Gemini 4 models on the Gemini API and in Google AI Studio.
+
+## How to Choose
+
+The choice depends on your inputs and your budget. If your agent reads screen recordings, audio or video, Gemini accepts them and Claude does not. If you want control over what stays cached across a long session, Claude's explicit cache gives it to you. On price, Gemini 4 Argon and Claude Opus 5.5 match from December, and Claude Sonnet 5.5 and Gemini 4 Hydrogen are the cheaper everyday options.
+
+Run each candidate on 20 to 50 closed issues from your own repository, each with a failing test. Set effort or thinking level explicitly, then compare pass rate and cost per passing task.
+
+## Related Concepts
+
+A [coding agent](/learn/concepts/ai-engineering/coding-agents) repeats model calls until a task is done, so cached-input price and step count drive cost. [Agent orchestration](/learn/concepts/ai-engineering/agent-orchestration) covers splitting work between an expensive lead model and cheaper workers.
+
+## Next Steps
+
+- [Best LLMs for Coding Agents](./best-llms-for-coding-agents.mdx): every current frontier and open-weight model in one table
+- [Claude vs GPT for Coding](./claude-vs-gpt-for-coding.mdx): the same comparison against OpenAI's models
+- [Best Open-Weight Coding Models](./best-open-weight-coding-models.mdx): models you can host yourself
+- [Quality Gates for Agent Output](/learn/concepts/ai-engineering/quality-gates-for-agent-output): the pass or fail checks that make model comparisons fair
