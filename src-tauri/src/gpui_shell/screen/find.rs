@@ -157,7 +157,7 @@ impl Find {
   }
 }
 
-/// Listens for Cmd+F in the view's window, focused or not.
+/// Listens for Cmd+F (open) and Esc (close) in the view's window, focused or not.
 pub(in crate::gpui_shell::screen) fn watch_key<V: Findable>(
   view: &mut V,
   window: &mut Window,
@@ -178,6 +178,12 @@ pub(in crate::gpui_shell::screen) fn watch_key<V: Findable>(
         && !held.alt
       {
         open(view, cx);
+      } else if window.window_handle().window_id() == id
+        && k.key == "escape"
+        && view.find().open
+      {
+        // Esc closes the bar wherever focus is, not only inside it.
+        close(view, cx);
       }
     }),
   );
