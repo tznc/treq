@@ -4708,7 +4708,10 @@ impl Render for TerminalPane {
                   // Inside the scrolled row: undo the scroll so the bounds stay the
                   // row's own, not its scrolled content's.
                   move |b, _, _| {
-                    row_bounds.set(Some(Bounds::new(b.origin - measured_scroll.offset(), b.size)))
+                    row_bounds.set(Some(Bounds::new(
+                      b.origin - measured_scroll.offset(),
+                      b.size,
+                    )))
                   },
                   move |b, _, window, _| {
                     // Painted inside the scrolled row: undo the scroll to get
