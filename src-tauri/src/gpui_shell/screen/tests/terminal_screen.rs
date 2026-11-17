@@ -1057,6 +1057,66 @@ fn double_clicking_a_session_clipped_on_the_left_scrolls_it_into_view(cx: &mut T
 }
 
 #[gpui::test]
+fn a_single_click_on_a_clipped_session_keeps_the_row_still(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  let mut commands = Vec::new();
+  for nonce in 1..=3 {
+    commands.extend(open_remote_command(nonce)["commands"].as_array().cloned().unwrap());
+  }
+  set_terminal(&mut h, serde_json::json!({ "commands": commands }));
+  let container = h
+    .cx
+    .debug_bounds("terminal-scroll-container")
+    .expect("container");
+  // Drag the row's scrollbar to the end so the first session is clipped
+  // by the left edge.
+  let thumb = h.cx.debug_bounds("terminal-row-scrollbar").expect("scrollbar");
+  let grab = thumb.center();
+  let to = gpui::point(container.right(), grab.y);
+  h.cx.simulate_event(gpui::MouseDownEvent {
+    position: grab,
+    modifiers: Modifiers::none(),
+    button: MouseButton::Left,
+    click_count: 1,
+    first_mouse: false,
+  });
+  h.cx.simulate_event(gpui::MouseMoveEvent {
+    position: to,
+    modifiers: Modifiers::none(),
+    pressed_button: Some(MouseButton::Left),
+  });
+  h.cx.simulate_event(gpui::MouseUpEvent {
+    position: to,
+    modifiers: Modifiers::none(),
+    button: MouseButton::Left,
+    click_count: 1,
+  });
+  h.cx.run_until_parked();
+  let before = h.cx.debug_bounds("terminal-row-scrollbar").expect("scrollbar");
+  assert!(before.left() > container.left() + gpui::px(1.), "{before:?}");
+  let header = h.cx.debug_bounds("remote-terminal-header").expect("header");
+  let at = gpui::point(container.left() + gpui::px(8.), header.center().y);
+  for click_count in [1] {
+    h.cx.simulate_event(gpui::MouseDownEvent {
+      position: at,
+      modifiers: Modifiers::none(),
+      button: MouseButton::Left,
+      click_count,
+      first_mouse: false,
+    });
+    h.cx.simulate_event(gpui::MouseUpEvent {
+      position: at,
+      modifiers: Modifiers::none(),
+      button: MouseButton::Left,
+      click_count,
+    });
+  }
+  h.cx.run_until_parked();
+  let after = h.cx.debug_bounds("terminal-row-scrollbar").expect("scrollbar");
+  assert_eq!(after, before);
+}
+
+#[gpui::test]
 fn a_remote_repository_asks_react_for_new_shells(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(
