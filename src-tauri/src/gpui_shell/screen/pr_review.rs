@@ -637,7 +637,7 @@ impl PrReviewView {
     files
       .into_iter()
       .map(|file| {
-        let (name, _) = split_path(&file.path);
+        let (name, dir) = split_path(&file.path);
         let path = file.path.clone();
         let active = self.active.as_deref() == Some(file.path.as_str());
         let row = ui::Row::new(SharedString::from(format!("pr-file-{}", file.path)), &p)
@@ -646,12 +646,31 @@ impl PrReviewView {
           .w_full()
           .px_3()
           .rounded_none()
-          .leading(ui::icon(theme::ICON_FILE_TEXT, 12., p.muted_foreground).flex_none())
           .child(
-            ui::text(div(), TextSize::Sm)
-              .truncate()
+            div()
               .flex_1()
-              .child(name),
+              .flex()
+              .items_center()
+              .gap_2()
+              .min_w_0()
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .min_w_0()
+                  .truncate()
+                  .font_weight(FontWeight::MEDIUM)
+                  .text_color(p.foreground)
+                  .child(name),
+              )
+              .when_some(dir, |this, dir| {
+                this.child(
+                  ui::text(div(), TextSize::Sm)
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .text_color(p.muted_foreground.opacity(0.6))
+                    .child(dir),
+                )
+              }),
           )
           .trailing(
             div()
