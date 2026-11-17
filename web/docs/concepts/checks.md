@@ -1,5 +1,6 @@
 ---
 sidebar_position: 9
+description: Workspace Checks run your install, lint, typecheck, and test commands from YAML workflows in a Treq workspace and record pass or fail per step.
 ---
 
 # Workspace Checks

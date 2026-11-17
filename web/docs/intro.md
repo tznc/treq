@@ -1,6 +1,7 @@
 ---
 sidebar_position: 1
 slug: /
+description: "Technical overview of Treq: managed workspaces in your Git repository, review, and push through your Git remotes on macOS, Windows, and Linux."
 ---
 
 # Treq

@@ -28,6 +28,17 @@ const sidebars: SidebarsConfig = {
         'sandbox-providers-for-coding-agents',
       ],
     },
+    {
+      type: 'category',
+      label: 'Head-to-Head',
+      items: [
+        'orca-vs-superset',
+        'conductor-vs-superset',
+        'vibe-kanban-vs-claude-squad',
+        'graphite-vs-gitbutler',
+        'jj-vs-git',
+      ],
+    },
   ],
 };
 
