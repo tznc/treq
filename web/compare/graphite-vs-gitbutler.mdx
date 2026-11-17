@@ -1,0 +1,61 @@
+---
+sidebar_position: 33
+title: Graphite vs GitButler for Stacked PRs (2026)
+description: Graphite vs GitButler for stacked pull requests. A hosted review platform with a CLI against a local Git client, compared on stacking, forges and price.
+---
+
+# Graphite vs GitButler
+
+_Graphite owns the review and merge side of a stack on GitHub. GitButler owns the local side, with stacked and parallel branches in one working directory._
+
+Both tools make [stacked PRs](/learn/concepts/git/stacked-prs) practical. They start from opposite ends. Graphite is a code review platform for GitHub, with a CLI that creates and restacks branches. GitButler is a Git client, with a desktop app, a `but` CLI and a terminal UI, that manages branches on your machine and publishes them to a forge. Facts were checked against each project's own site, docs, pricing page and repository in November 2026.
+
+## At a Glance
+
+| | Graphite | GitButler |
+| --- | --- | --- |
+| Product | Review platform, `gt` CLI, VS Code extension and MCP server | Desktop app, `but` CLI and terminal UI |
+| Where stacks live | Ordinary Git branches, one pull request per branch on GitHub | Stacked and parallel branches in one working directory |
+| Restacking | `gt modify` restacks branches above, `gt sync` restacks on trunk | Automatic when you amend or edit a commit |
+| Conflicts | Resolve, then run `gt restack` | Rebases always succeed, and conflicted commits are resolved later in any order |
+| Forges | GitHub, with a GitHub sign-in | GitHub, GitLab and Bitbucket |
+| Review | PR inbox, PR page and AI review, limited on the lower plans | Review happens on your forge |
+| Merge | Stack-aware merge queue on Team and Enterprise | Merge on the forge, bottom up or with GitHub's stack controls |
+| License | Commercial service | FSL-1.1-MIT, which becomes MIT after two years |
+| Price | Hobby free, Starter $20, Team $40 per user per month billed yearly, Enterprise custom | Free |
+
+## How Graphite Works
+
+You create each branch with `gt create`, and `gt submit --stack` pushes the whole stack and opens one pull request per branch. When you change a lower branch with `gt modify`, Graphite restacks the branches above it. `gt sync` pulls trunk, restacks your open branches and offers to delete merged ones.
+
+The rest of the product lives on graphite.com. The PR inbox collects your team's pull requests. The PR page is Graphite's own view of changes, history and comments, with Graphite Chat as an AI assistant on it. The merge queue understands stacks and lands them in order. Cursor agreed to acquire Graphite in December 2025. Graphite said it would keep operating independently with the same team and product, and Cursor Cloud Agents now appear inside Graphite.
+
+## How GitButler Works
+
+GitButler applies several branches to one working directory at once. Each branch is a lane with its own staging area, and you drag changes between lanes. Branches can also stack, and amending a lower commit restacks the ones above it. An operations log records every action, so you can undo any operation, including a commit.
+
+To publish, GitButler opens one pull request per branch. On GitHub it uses GitHub's native stacked PRs when the repository supports them. Elsewhere it stores the stack order in each PR description. The `but` CLI has JSON output and agent skills, so a coding agent can drive it.
+
+## Who Should Choose Which
+
+Choose **Graphite** if you:
+
+- Want a hosted review inbox, AI review and a stack-aware merge queue for a team on GitHub.
+- Prefer plain Git branches and a CLI over a new client.
+- Have budget for a per-seat tool.
+
+Choose **GitButler** if you:
+
+- Want stacking on your own machine with unlimited undo and easy history editing.
+- Use GitLab or Bitbucket as well as GitHub.
+- Want a free client and can accept a fair source license instead of an OSI-approved one.
+
+## Stacking Agent Work
+
+GitButler's parallel branches share one directory, so two local agents running builds at once share files. Graphite manages branches and pull requests, not the local working copies that agents write in. [Treq vs GitButler](./treq-vs-gitbutler.mdx) and [Treq vs Graphite for AI teams](./treq-vs-graphite-for-ai-teams.mdx) cover how Treq gives each agent its own workspace and stacks them.
+
+## Next Steps
+
+- [Best Graphite Alternatives](./best-graphite-alternatives.mdx): every stacked PR tool in one list
+- [Jujutsu vs Git for Stacked PRs](./jj-vs-git.mdx): stacking built into the version control system
+- [Stacked PR Workflow](/learn/workflows/git/stacked-pr): run a stack from first branch to merge

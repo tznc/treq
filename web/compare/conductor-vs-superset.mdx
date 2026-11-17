@@ -1,0 +1,72 @@
+---
+sidebar_position: 31
+title: Conductor vs Superset (Paradev) Compared (2026)
+description: Conductor vs Superset, now Paradev. Two Mac apps for parallel coding agents, compared on agents, review, cloud, license and price.
+---
+
+# Conductor vs Superset
+
+_Both run coding agents in parallel git worktrees on your Mac. Conductor is free and closed source. Superset, now Paradev, is MIT-licensed with paid tiers._
+
+Conductor and Superset solve the same problem in a similar shape. Each task gets its own [git worktree](/learn/concepts/git/git-worktrees) and branch, an agent runs in it, and you review the diff before it ships. Superset is now called Paradev, and its CLI is still `superset`. Facts were checked against each project's own site, docs, changelog and repository in November 2026.
+
+:::note Conductor's status changed twice in November 2026
+On November 4, Conductor announced it was joining Meta, set a shutdown date for Conductor Cloud, and said local app updates would end in early 2027. On November 13, its [changelog](https://conductor.build/changelog) struck those dates out and said "Conductor isn't shutting down." Check the changelog before you plan around Conductor Cloud.
+:::
+
+## At a Glance
+
+| | Conductor | Superset, now Paradev |
+| --- | --- | --- |
+| Desktop platforms | macOS only | macOS, with an experimental Linux AppImage. No Windows build |
+| Mobile | iOS app that controls your Mac's workspaces | iPhone and iPad app, on the Pro plan |
+| Isolation | One git worktree per workspace | One git worktree and branch per task |
+| Agents | Claude Code, Codex, Cursor and OpenCode | Any CLI agent, with 21 fully supported |
+| Review | Diff viewer with line comments sent to the agent, checks tab and todos | Changes pane, PR pane with checks, review threads, stacks and merge |
+| Turn history | Checkpoints that revert a workspace to an earlier turn | Not documented |
+| Issue trackers | Start a workspace from a GitHub or Linear issue | Tasks view for GitHub issues, Linear and Slack integrations on Pro |
+| Cloud | Cloud workspaces on Vercel sandboxes for Pro, Team and Enterprise | Cloud workspaces on Team and above, or your own Linux server |
+| License | Proprietary | MIT |
+| Price | Free. Cloud plan prices not published | Free, Pro $20, Team $60, Ultra $200 per user per month, Enterprise custom |
+
+## What They Share
+
+Both apps use your own agent logins or API keys. Conductor does not resell model usage, and Paradev does not proxy model calls. Both run agents directly on your machine. Conductor's FAQ says agents run without sandboxing and have your user's file access. Paradev's repository says worktrees separate files but do not sandbox processes. If you need a hard boundary, use a VM or a cloud workspace in either app.
+
+Both apps can start a workspace from an issue, open a pull request, and show CI checks next to the diff. Paradev also publishes migration guides for Conductor and Conductor Cloud users.
+
+## Where Conductor Differs
+
+Conductor supports four agents and runs only on macOS, and it adds review tools around them. Checkpoints let you view each agent turn and revert to an earlier one. Todos track work that blocks a merge. Spotlight testing runs your app from the repository root while agents keep working in their own worktrees. That helps when one full dev stack per worktree would use too much memory.
+
+The app is free, and its FAQ says the company plans to charge for collaboration features later. Team plans are invite-only. Conductor is proprietary, with no public source code.
+
+## Where Paradev Differs
+
+Paradev supports more agents, including Gemini and Amp, and any other CLI agent runs without configuration. Automations start agent runs on a schedule or on events such as a new Sentry issue or a Slack message. A CLI, a TypeScript SDK and an MCP server let scripts and other agents drive it.
+
+Its PR pane understands stacks. It shows GitHub's own stacks, merges a whole stack, and offers a restack when a lower layer has already merged. Paradev's code is MIT-licensed, and its pricing page lists every paid tier. Linux support is experimental, so treat Paradev as a Mac app today.
+
+## Who Should Choose Which
+
+Choose **Conductor** if you:
+
+- Use Claude Code, Codex, Cursor or OpenCode and want a free Mac app.
+- Want checkpoints to roll an agent back turn by turn.
+- Run one heavy dev stack and want Spotlight testing.
+
+Choose **Paradev** if you:
+
+- Need an agent Conductor does not support.
+- Want automations, an SDK, or published team and enterprise pricing.
+- Want an MIT-licensed tool you can fork or self-host.
+
+## Stacking Agent Work
+
+Neither app documents rebasing a local worktree when the worktree it builds on changes. [Treq vs Conductor](./treq-vs-conductor.mdx) and [Treq vs Superset](./treq-vs-superset.mdx) cover how Treq stacks dependent workspaces and rebases them automatically.
+
+## Next Steps
+
+- [Orca vs Superset](./orca-vs-superset.mdx): Paradev against a free, cross-platform alternative
+- [Best Tools for Running AI Coding Agents in Parallel](./best-parallel-agent-tools.mdx): the wider field
+- [Agent Orchestration](/learn/concepts/ai-engineering/agent-orchestration): how one person coordinates many agents
