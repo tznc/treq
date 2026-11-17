@@ -157,7 +157,9 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
   let on_screen = model.repo().to_string();
   let multi = !data.supporting().is_empty();
   let order = order(model, data);
-  let labels = multi.then(|| display_labels(&order));
+  // Every window shows the project layout: repositories grouped under
+  // WORKSPACES, a single one included.
+  let labels = display_labels(&order);
   let page_selects = !matches!(
     model.page,
     Page::Github(_) | Page::Linear | Page::Settings { .. } | Page::ProjectHome
@@ -214,26 +216,19 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
       let loaded = data.loaded(path);
       RepoSection {
         path: path.clone(),
-        // The React sidebar shows the branch only for the repository on screen.
         // A group header shows every repository's branch under its name.
-        home_ref: if active || multi {
-          data.home_ref(path)
-        } else {
-          None
-        },
+        home_ref: data.home_ref(path),
         home_selected: page_selects && active && model.selected.is_none(),
         active,
         loading: !missing && !loaded && workspaces.is_empty(),
         workspaces,
         // A GitHub origin names the repository as GitHub does: owner/name.
-        label: labels.as_ref().and_then(|l| {
-          repo
-            .and_then(|r| r.remote.as_ref())
-            .map(|remote| remote.full_name.clone())
-            .or_else(|| l.get(path).cloned())
-        }),
+        label: repo
+          .and_then(|r| r.remote.as_ref())
+          .map(|remote| remote.full_name.clone())
+          .or_else(|| labels.get(path).cloned()),
         missing,
-        collapsed: multi && !missing && model.collapsed.contains(path),
+        collapsed: !missing && model.collapsed.contains(path),
       }
     })
     .collect();
@@ -260,7 +255,7 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
     shell_unavailable: None,
     bulk_archive: (!model.multi.is_empty()).then_some(model.multi.len() as u32),
     project: data.project().map(|p| p.name.clone()),
-    project_home: multi.then_some(matches!(model.page, Page::ProjectHome)),
+    project_home: Some(matches!(model.page, Page::ProjectHome)),
     repos,
     modal: None,
   })
@@ -384,7 +379,12 @@ mod tests {
     assert_eq!(snapshot.width, 280.);
     let repo = &snapshot.repos[0];
     assert!(repo.active && !repo.home_selected && !repo.loading);
-    assert_eq!(repo.label, None, "one repository has no label");
+    assert_eq!(
+      repo.label.as_deref(),
+      Some("repo"),
+      "one repository is grouped under its label too"
+    );
+    assert_eq!(snapshot.project_home, Some(false));
     let rows: Vec<_> = repo
       .workspaces
       .iter()
