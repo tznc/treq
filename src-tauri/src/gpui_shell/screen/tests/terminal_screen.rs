@@ -31,7 +31,7 @@ fn terminal_pane_opens_the_active_agent_session(cx: &mut TestAppContext) {
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   assert!(h.shows(gpui::Role::Group, "Claude 1 terminal"));
   assert_eq!(active_column(&mut h).as_deref(), Some("Claude 1 terminal"));
-  assert!(h.shows(gpui::Role::Button, "Add login"));
+  assert!(h.shows(gpui::Role::Button, "Go to Add login"));
   let pty = agent_pty();
   let calls = host.calls();
   assert!(
