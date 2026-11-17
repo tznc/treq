@@ -15,8 +15,9 @@ module.exports = function jsonLdPlugin() {
               '@context': 'https://schema.org',
               '@type': 'WebSite',
               name: 'Treq',
+              alternateName: ['Treq AI', 'treq.dev'],
               url: SITE_URL,
-              description: 'The Open Source Graphite Alternative',
+              description: 'Isolates each agent and rebases stacked PRs when the base moves',
               potentialAction: {
                 '@type': 'SearchAction',
                 target: {
