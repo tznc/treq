@@ -154,6 +154,7 @@ impl Cache {
 }
 
 thread_local! {
+  static HUNKS: RefCell<HunkCache> = RefCell::new(HunkCache::default());
   static CACHE: RefCell<Cache> = RefCell::new(Cache::default());
   /// What each scope maps to, by whether the file is JavaScript: a scope's
   /// name is built and matched once.
@@ -221,14 +222,79 @@ pub(super) fn spans(language: &'static str, line: &str) -> Spans {
   highlighted(language, line, |l| l.spans.clone())
 }
 
-/// Token spans of each hunk line, past its `+`/`-`/` ` marker.
+/// Hunks longer than this are highlighted line by line, so the first draw
+/// of a huge hunk doesn't parse all of it on the main thread at once.
+const HUNK_MAX_LINES: usize = 2_000;
+
+/// Token spans of each hunk line, past its `+`/`-`/` ` marker. Removed
+/// lines continue the old side and added lines the new one, so a heredoc,
+/// docstring or block comment opened above a line still colors it.
 pub(super) fn hunk_spans(language: &'static str, lines: &[String]) -> Rc<Vec<Spans>> {
-  Rc::new(
+  let per_line = || {
+    Rc::new(
+      lines
+        .iter()
+        .map(|l| spans(language, l.get(1..).unwrap_or("")))
+        .collect(),
+    )
+  };
+  let Some(syntax) = syntax(language).filter(|_| lines.len() <= HUNK_MAX_LINES) else {
+    return per_line();
+  };
+  let key = HUNKS.with(|c| {
+    let c = c.borrow();
+    let key = c.hasher.hash_one((language, lines));
+    c.hunks.get(&key).cloned().ok_or(key)
+  });
+  let key = match key {
+    Ok(hit) => return hit,
+    Err(key) => key,
+  };
+  let (mut old, mut new) = (Side::new(syntax), Side::new(syntax));
+  let out: Rc<Vec<Spans>> = Rc::new(
     lines
       .iter()
-      .map(|l| spans(language, l.get(1..).unwrap_or("")))
+      .map(|line| {
+        let text = line.get(1..).unwrap_or("");
+        if text.len() > LONG_LINE {
+          return Rc::default();
+        }
+        Rc::new(match line.as_bytes().first() {
+          Some(b'-') => old.parse(language, text),
+          Some(b'+') => new.parse(language, text),
+          Some(b' ') | None => {
+            old.parse(language, text);
+            new.parse(language, text)
+          }
+          // `\ No newline at end of file`.
+          _ => Vec::new(),
+        })
+      })
       .collect(),
-  )
+  );
+  HUNKS.with(|c| c.borrow_mut().insert(key, lines, out.clone()));
+  out
+}
+
+/// Hunks' spans by a hash of their language and lines, cleared once they
+/// hold about half of [`CACHE_MAX_BYTES`].
+#[derive(Default)]
+struct HunkCache {
+  hunks: HashMap<u64, Rc<Vec<Spans>>, BuildHasherDefault<Prehashed>>,
+  weight: usize,
+  hasher: RandomState,
+}
+
+impl HunkCache {
+  fn insert(&mut self, key: u64, lines: &[String], spans: Rc<Vec<Spans>>) {
+    if self.weight >= CACHE_MAX_BYTES / 2 {
+      self.hunks.clear();
+      self.weight = 0;
+    }
+    let token = std::mem::size_of::<(Range<usize>, Token)>();
+    self.weight += 64 + spans.iter().map(|s| 16 + s.len() * token).sum::<usize>() + lines.len() * 8;
+    self.hunks.insert(key, spans);
+  }
 }
 
 /// `read` of `line`'s cache entry, highlighting it first on a miss.
@@ -264,8 +330,36 @@ fn highlighted<R>(language: &'static str, line: &str, read: impl Fn(&Line) -> R)
 }
 
 fn parse(language: &str, syntax: &SyntaxReference, line: &str) -> Vec<(Range<usize>, Token)> {
-  let mut state = ParseState::new(syntax);
-  let mut scopes = ScopeStack::new();
+  let mut side = Side::new(syntax);
+  side.parse(language, line)
+}
+
+/// One side of a diff: the parser's state after the lines read so far.
+#[derive(Clone)]
+struct Side {
+  state: ParseState,
+  scopes: ScopeStack,
+}
+
+impl Side {
+  fn new(syntax: &SyntaxReference) -> Self {
+    Side {
+      state: ParseState::new(syntax),
+      scopes: ScopeStack::new(),
+    }
+  }
+
+  fn parse(&mut self, language: &str, line: &str) -> Vec<(Range<usize>, Token)> {
+    parse_from(&mut self.state, &mut self.scopes, language, line)
+  }
+}
+
+fn parse_from(
+  state: &mut ParseState,
+  scopes: &mut ScopeStack,
+  language: &str,
+  line: &str,
+) -> Vec<(Range<usize>, Token)> {
   let mut out: Vec<(Range<usize>, Token)> = Vec::new();
   let text = format!("{line}\n");
   let Ok(ops) = state.parse_line(&text, &SYNTAXES) else {
@@ -287,11 +381,11 @@ fn parse(language: &str, syntax: &SyntaxReference, line: &str) -> Vec<(Range<usi
   };
   let mut cursor = 0;
   for (index, op) in ops {
-    push(cursor..index, &scopes);
+    push(cursor..index, scopes);
     scopes.apply(&op).best_effort();
     cursor = index;
   }
-  push(cursor..text.len(), &scopes);
+  push(cursor..text.len(), scopes);
   out
 }
 
@@ -432,7 +526,33 @@ fn text_and_styles(
     return (SharedString::from(line.to_string()), Vec::new());
   };
   let (text, spans) = highlighted(language, line, |l| (l.text.clone(), l.spans.clone()));
+  (text, styles(&spans, dark))
+}
+
+/// [`styled_marked`] with spans from [`hunk_spans`], which know the lines
+/// above; plain when there are none.
+pub(super) fn styled_spans_marked(
+  line: &str,
+  spans: Option<&Spans>,
+  dark: bool,
+  marks: &[(Range<usize>, Hsla)],
+) -> StyledText {
   let styles = spans
+    .map(|s| {
+      // A line drawn as " " for an empty one has no spans past its end.
+      let s: Vec<_> = s
+        .iter()
+        .filter(|(r, _)| r.end <= line.len())
+        .cloned()
+        .collect();
+      styles(&s, dark)
+    })
+    .unwrap_or_default();
+  StyledText::new(SharedString::from(line.to_string())).with_highlights(overlay(styles, marks))
+}
+
+fn styles(spans: &[(Range<usize>, Token)], dark: bool) -> Vec<(Range<usize>, HighlightStyle)> {
+  spans
     .iter()
     .filter_map(|(range, token)| {
       let italic = *token == Token::Italic || *token == Token::Comment && !dark;
@@ -451,8 +571,7 @@ fn text_and_styles(
         )
       })
     })
-    .collect();
-  (text, styles)
+    .collect()
 }
 
 /// Splits sorted, disjoint `styles` at the `marks`' edges so each piece
@@ -672,7 +791,10 @@ mod tests {
 
   #[test]
   fn each_side_keeps_its_own_state() {
-    let t = hunk_tokens("js", &[" /* a", "-b", "+c", " */ x", "-/* gone", "+let y = 1;"]);
+    let t = hunk_tokens(
+      "js",
+      &[" /* a", "-b", "+c", " */ x", "-/* gone", "+let y = 1;"],
+    );
     assert_eq!(t[1], vec![("b".into(), Token::Comment)]);
     assert_eq!(t[2], vec![("c".into(), Token::Comment)]);
     assert!(t[3].contains(&("*/".into(), Token::Comment)), "{:?}", t[3]);

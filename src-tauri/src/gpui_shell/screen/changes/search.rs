@@ -181,12 +181,12 @@ impl ChangesView {
     &self,
     key: MatchKey,
     text: &str,
-    language: Option<&'static str>,
+    spans: Option<&highlight::Spans>,
     changed: &[(Range<usize>, Hsla)],
     record: Option<RecordLayout>,
   ) -> AnyElement {
     let Some(&(first, _)) = self.matches.index.get(&key) else {
-      let styled = highlight::styled_marked(text, language, self.dark, changed);
+      let styled = highlight::styled_spans_marked(text, spans, self.dark, changed);
       return with_layout(styled, record).into_any_element();
     };
     let current = self.current_in(&key);
@@ -198,7 +198,7 @@ impl ChangesView {
       .into_iter()
       .chain(changed.iter().cloned())
       .collect();
-    let styled: StyledText = highlight::styled_marked(text, language, self.dark, &marks);
+    let styled: StyledText = highlight::styled_spans_marked(text, spans, self.dark, &marks);
     if current.is_none() {
       return with_layout(styled, record).into_any_element();
     }

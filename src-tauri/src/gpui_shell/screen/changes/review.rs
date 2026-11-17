@@ -1206,6 +1206,7 @@ impl ChangesView {
       .is_some_and(|s| s.lines.len() > 1);
     let border = p.border.opacity(0.4);
     let text = line.get(1..).filter(|t| !t.is_empty()).unwrap_or(" ");
+    let spans = language.map(|lang| highlight::hunk_spans(lang, &hunk.lines));
     let at = (h, l);
     let (press, drag, add) = (path.to_string(), path.to_string(), path.to_string());
     let (code_path, layout_path) = (path.to_string(), path.to_string());
@@ -1369,7 +1370,7 @@ impl ChangesView {
           .child(self.marked_text(
             super::search::MatchKey::Line(path.to_string(), h, l),
             text,
-            language,
+            spans.as_ref().and_then(|s| s.get(l)),
             &changed,
             Some(Rc::new(move |layout| {
               layouts
