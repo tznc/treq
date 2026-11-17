@@ -13,6 +13,23 @@ pub fn list_comments(
   local_db::list_agent_review_comments(repo_path, target_type, target_id)
 }
 
+/// The comments on a workspace's diff plus those an AI review left on the
+/// pull request the workspace was opened from, ordered by file and line.
+pub fn workspace_comments(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<Vec<AgentReviewComment>, String> {
+  let id = workspace_id.to_string();
+  let mut comments = list_comments(repo_path, crate::core::agent_launch::REVIEW_TARGET, &id)?;
+  if let Some(pr) = local_db::get_workspace_pr_sync(repo_path, workspace_id)? {
+    comments.extend(list_comments(repo_path, "github_pr", &pr.pr_number.to_string())?);
+    comments.sort_by(|a, b| {
+      (&a.file_path, a.start_line, &a.created_at).cmp(&(&b.file_path, b.start_line, &b.created_at))
+    });
+  }
+  Ok(comments)
+}
+
 pub fn resolve_comment(repo_path: &str, id: &str) -> Result<(), String> {
   local_db::resolve_agent_review_comment(repo_path, id)
 }
@@ -209,6 +226,39 @@ fn write_atomically(path: &Path, contents: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  fn comment(repo: &str, target_type: &str, target_id: &str, file: &str) {
+    local_db::create_agent_review_comment(
+      repo, target_type, target_id, file, None, 1, 1, Some("new"), "Note", None, "local-agent", None,
+    )
+    .unwrap();
+  }
+
+  #[test]
+  fn workspace_comments_include_its_pull_requests_review() {
+    let root = tempfile::TempDir::new().unwrap();
+    let repo = root.path().to_str().unwrap();
+    comment(repo, "workspace_diff", "3", "a.rs");
+    comment(repo, "github_pr", "42", "b.rs");
+    comment(repo, "github_pr", "7", "c.rs");
+    let record = local_db::PrSyncRecord { pr_number: 42, title: None, description: None };
+    local_db::set_workspace_pr_sync(repo, 3, &record).unwrap();
+
+    let files: Vec<String> =
+      workspace_comments(repo, 3).unwrap().into_iter().map(|c| c.file_path).collect();
+    assert_eq!(files, ["a.rs", "b.rs"]);
+  }
+
+  #[test]
+  fn workspace_without_a_pull_request_reads_only_its_own_comments() {
+    let root = tempfile::TempDir::new().unwrap();
+    let repo = root.path().to_str().unwrap();
+    comment(repo, "workspace_diff", "3", "a.rs");
+    comment(repo, "github_pr", "42", "b.rs");
+    let files: Vec<String> =
+      workspace_comments(repo, 3).unwrap().into_iter().map(|c| c.file_path).collect();
+    assert_eq!(files, ["a.rs"]);
+  }
 
   #[test]
   fn applying_a_suggestion_records_it_as_applied() {
