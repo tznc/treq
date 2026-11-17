@@ -618,7 +618,7 @@ impl RenderOnce for Button {
         Size::Xs => text(b.h(zpx(24.)).px_2(), TextSize::Sm),
       })
       .when(self.variant == Variant::Command, |b| {
-        b.gap_3().px_4().rounded(radius::LG)
+        b.justify_start().gap_3().px_4().rounded(radius::LG)
       })
       .when(filled && !disabled, |b| b.shadow_sm())
       .when_some(self.on_click.filter(|_| !disabled), |b, f| {
