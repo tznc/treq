@@ -300,7 +300,7 @@ test("changes: filter menu picks what the lists show", async ({ page }) => {
     title: "The list's filter row",
     expectations: [
       "The funnel button sits in its own right-aligned row above the lists",
-      "The Committed header has no Show button",
+      "The Committed header has a Hide checkbox, unchecked",
     ],
   });
   await page.getByRole("button", { name: "Filter changes" }).click();
@@ -310,7 +310,7 @@ test("changes: filter menu picks what the lists show", async ({ page }) => {
     title: "The list's filter menu",
     screen: true,
     rest: false,
-    expectations: ["The menu lists Generated files and Committed, both checked"],
+    expectations: ["The menu lists only Generated files, checked"],
   });
   await page.keyboard.press("Escape");
   await settle(page, 500);
