@@ -1,5 +1,6 @@
 ---
 sidebar_position: 5
+description: "Review code in a Treq workspace: read the diff, add inline comments, load GitHub review threads, and send feedback to a coding agent."
 ---
 
 # Code Review Workflow

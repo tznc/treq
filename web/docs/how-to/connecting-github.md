@@ -1,5 +1,6 @@
 ---
 sidebar_position: 5
+description: "Set up GitHub access in Treq for pull requests and CI: the gh CLI on Free, or the Treq GitHub App on Pro."
 ---
 
 # Connecting GitHub

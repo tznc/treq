@@ -1,0 +1,85 @@
+---
+sidebar_position: 34
+title: Jujutsu (jj) vs Git for Stacked PRs (2026)
+description: jj vs Git for stacked work. How Jujutsu's automatic rebase, committed conflicts and undo compare with Git's --update-refs, rerere and reflog.
+---
+
+# Jujutsu vs Git for Stacked PRs
+
+_Git can maintain a stack if you ask it to on every rebase. Jujutsu rebases the stack on every change, and you can try it on an existing Git repository._
+
+Jujutsu, or `jj`, is a [version control](/learn/concepts/git/version-control) system that stores its data in a Git repository. `jj git init` and `jj git clone` create a colocated repository by default, so `jj` and `git` share one working copy. Jujutsu imports from and exports to the Git repository on every command, so Git tools and teammates on plain Git see the same commits. Facts were checked against the Jujutsu repository and docs and the Git manual in November 2026.
+
+## At a Glance
+
+| | Git | Jujutsu |
+| --- | --- | --- |
+| Rebasing a stack | `git rebase --update-refs` moves every branch in the range, on request | Rewriting a commit rebases all its descendants automatically |
+| Branch pointers | The current branch advances with each commit | Bookmarks follow rewrites but do not advance on new commits. There is no current bookmark |
+| Conflicts | A rebase stops until you resolve. `git rerere` can replay recorded resolutions | Conflicts are committed and resolved later. A resolution carries to descendants |
+| Undo | The reflog, per ref | The operation log, with `jj undo` for any command |
+| Staging | The index | None. The working copy is a commit |
+| Extra working copies | `git worktree` | `jj workspace` |
+| Pushing a stack | `git push --force-with-lease` per branch | `jj git push`, with a lease-style check built in |
+| Maturity | The default for most projects | Version 0.47, called experimental by its readme, with stable Git compatibility |
+| License | GPL-2.0 | Apache 2.0 |
+
+## Rebasing a Stack
+
+Suppose you have three branches, `part-1` to `part-3`, each built on the one below, and `main` has moved. In Git you rebase from the top and ask Git to move the lower branches too:
+
+```bash
+git fetch origin
+git switch part-3
+git rebase --update-refs origin/main
+git push --force-with-lease origin part-1 part-2 part-3
+```
+
+`--update-refs` arrived in Git 2.38, and `rebase.updateRefs` makes it the default. It skips any branch checked out in another worktree, which matters if each agent or task has its own worktree. [Rebase a whole stack with --update-refs](/learn/answers/rebasing-and-stacks/git-rebase-update-refs) covers the details.
+
+In Jujutsu the same sync is one rebase of the whole branch:
+
+```bash
+jj git fetch
+jj rebase -b part-3 -o main@origin
+jj git push -b 'part-*'
+```
+
+The bigger difference shows when you change a lower layer. In Git, amending `part-1` leaves `part-2` and `part-3` on the old commit until you rebase them. In Jujutsu, `jj edit` on `part-1` makes it the working copy, and every commit above it rebases on the next `jj` command.
+
+## Conflicts
+
+Git treats a conflict as a stopped operation. You fix the files, `git add` them, and continue, one commit at a time. [Git rerere](/learn/concepts/git/git-rerere) records each resolution so the same conflict resolves itself next time.
+
+Jujutsu records the conflict inside the commit and finishes the rebase. You resolve it when you choose, and the resolution propagates to the commits above. Jujutsu's readme describes this as `git rebase --update-refs` combined with `git rerere`, by design. `jj git push` refuses to push conflicted commits unless you pass `--allow-conflicts`.
+
+## What You Give Up With Jujutsu
+
+Jujutsu does not support Git submodules, Git LFS, hooks, `.gitattributes` or partial clones. It can create lightweight tags but not annotated ones. It reads only remote settings and `core.excludesFile` from your Git configuration. Use `jj workspace` in place of `git worktree`.
+
+Bookmarks also take getting used to. A new commit on top of a bookmark does not move it, so you run `jj bookmark move` before you push, or push with `jj git push --change` and let Jujutsu name the bookmark for you.
+
+## Who Should Choose Which
+
+Stay with **Git** if you:
+
+- Depend on submodules, LFS, hooks or `.gitattributes`.
+- Rarely keep more than two dependent branches.
+- Are happy to run `--update-refs` after every change to a lower branch.
+
+Try **Jujutsu** if you:
+
+- Keep long stacks and edit lower layers often.
+- Want conflicts out of the way until you choose to resolve them.
+- Want an undo for every command, not only for ref moves.
+
+## Using Jujutsu Without Learning It
+
+Treq runs colocated Jujutsu [workspaces](/docs/concepts/workspaces) underneath its agent workspaces, so a change to a lower workspace rebases the ones above it. You get that rebasing without running `jj` commands yourself.
+
+## Next Steps
+
+- [Graphite vs GitButler](./graphite-vs-gitbutler.mdx): stacking with tools on top of Git
+- [What are Stacked PRs?](/learn/concepts/git/stacked-prs): why dependent changes need a stack
+- [Git Reflog](/learn/concepts/git/git-reflog): Git's closest match to the operation log
+- [Best Graphite Alternatives](./best-graphite-alternatives.mdx): every stacked PR tool in one list
