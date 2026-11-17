@@ -214,6 +214,13 @@ test("changes: commit box and its split menu", async ({ page }) => {
     title: "Commit box with a message",
     expectations: ["Commit button enabled; message text not clipped"],
   });
+  await message.press(`${mod}+a`);
+  await settle(page, 300);
+  await capture(page, {
+    name: "05-changes-commit-message-selected",
+    title: "Commit message with its text selected",
+    expectations: ["The selected message text has a clearly visible blue highlight behind it"],
+  });
   await page.getByRole("button", { name: "More commit options" }).click();
   await settle(page, 1000);
   await capture(page, {
