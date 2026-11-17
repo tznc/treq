@@ -908,41 +908,25 @@ impl PopupView {
           menu_row(format!("item-{index}"), text, *icon, color, &palette, false)
             .debug_selector(move || format!("menu-item-{id}"))
             .when_some(*radio, |row, checked| {
-              row.relative().pl(zpx(RADIO_INSET)).child(
-                div()
-                  .absolute()
-                  .left(zpx(ITEM_PADDING_X))
-                  .size_4()
-                  .flex()
-                  .items_center()
-                  .justify_center()
-                  .when(checked, |this| {
-                    this.child(div().size_2().rounded_full().bg(color))
-                  }),
+              menu_indicator(
+                row,
+                div().when(checked, |this| this.size_2().rounded_full().bg(color)),
               )
             })
             .when_some(*check, |row, checked| {
-              row
-                .relative()
-                .pl(zpx(RADIO_INSET))
+              let row = row
                 .role(gpui::Role::MenuItemCheckBox)
                 .aria_toggled(if checked {
                   gpui::accesskit::Toggled::True
                 } else {
                   gpui::accesskit::Toggled::False
-                })
-                .child(
-                  div()
-                    .absolute()
-                    .left(zpx(ITEM_PADDING_X))
-                    .size_4()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .when(checked, |this| {
-                      this.child(super::ui::icon(theme::ICON_CHECK, 16., color))
-                    }),
-                )
+                });
+              menu_indicator(
+                row,
+                div().when(checked, |this| {
+                  this.child(super::ui::icon(theme::ICON_CHECK, 16., color))
+                }),
+              )
             })
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
               if *hovered {
@@ -1096,6 +1080,25 @@ fn menu_row(
         .whitespace_nowrap()
         .child(SharedString::from(text.to_string())),
     )
+}
+
+/// Insets `row` to `pl-8` and draws `mark` (a radio dot, a check) in the
+/// `left-2 h-4 w-4` box before its text. An overlay, so the box is placed
+/// against the row rather than its text.
+fn menu_indicator(row: ui::Row, mark: impl IntoElement) -> ui::Row {
+  row.pl(zpx(RADIO_INSET)).overlay(
+    div()
+      .debug_selector(|| "menu-indicator".into())
+      .absolute()
+      .top_0()
+      .bottom_0()
+      .left(zpx(ITEM_PADDING_X))
+      .w_4()
+      .flex()
+      .items_center()
+      .justify_center()
+      .child(mark),
+  )
 }
 
 impl Render for PopupView {
@@ -1750,6 +1753,28 @@ mod tests {
       }
     );
     assert_eq!(entry_top(&entries, 2), 1. + 4. + 32. + 9.);
+  }
+
+  struct IndicatorRow;
+
+  impl Render for IndicatorRow {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+      let palette = theme::palette(true);
+      let row = menu_row("row", "All teams", None, palette.popover_foreground, &palette, false)
+        .debug_selector(|| "row".into());
+      div().w(px(240.)).child(menu_indicator(row, div().size_2()))
+    }
+  }
+
+  #[gpui::test]
+  fn places_a_radio_dot_in_the_row_inset_not_over_its_text(cx: &mut gpui::TestAppContext) {
+    cx.update(theme::init);
+    let (_, cx) = cx.add_window_view(|_, _| IndicatorRow);
+    cx.run_until_parked();
+    let row = cx.debug_bounds("row").expect("row");
+    let dot = cx.debug_bounds("menu-indicator").expect("indicator");
+    assert_eq!(dot.origin.x, row.origin.x + px(ITEM_PADDING_X));
+    assert_eq!(dot.center().y, row.center().y);
   }
 
   #[test]
