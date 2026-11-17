@@ -221,6 +221,16 @@ pub(super) fn spans(language: &'static str, line: &str) -> Spans {
   highlighted(language, line, |l| l.spans.clone())
 }
 
+/// Token spans of each hunk line, past its `+`/`-`/` ` marker.
+pub(super) fn hunk_spans(language: &'static str, lines: &[String]) -> Rc<Vec<Spans>> {
+  Rc::new(
+    lines
+      .iter()
+      .map(|l| spans(language, l.get(1..).unwrap_or("")))
+      .collect(),
+  )
+}
+
 /// `read` of `line`'s cache entry, highlighting it first on a miss.
 fn highlighted<R>(language: &'static str, line: &str, read: impl Fn(&Line) -> R) -> R {
   if line.len() > LONG_LINE {
@@ -621,6 +631,52 @@ mod tests {
     );
     let t = tokens("md", "Call `logout()` now");
     assert!(t.contains(&("`logout()`", Token::Code)), "{t:?}");
+  }
+
+  /// Each hunk line's tokens, with the `+`/`-`/` ` marker dropped.
+  fn hunk_tokens(language: &'static str, lines: &[&str]) -> Vec<Vec<(String, Token)>> {
+    let lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    let spans = hunk_spans(language, &lines);
+    lines
+      .iter()
+      .zip(spans.iter())
+      .map(|(line, spans)| {
+        let text = line.get(1..).unwrap_or("");
+        spans
+          .iter()
+          .map(|(r, t)| (text[r.clone()].to_string(), *t))
+          .collect()
+      })
+      .collect()
+  }
+
+  #[test]
+  fn a_heredoc_spans_the_hunk_lines() {
+    let t = hunk_tokens(
+      "ex",
+      &[
+        "+  @doc \"\"\"",
+        "+  Compares the reconciled tables.",
+        "+  \"\"\"",
+        "+  def compare(repo), do: repo",
+      ],
+    );
+    let body = &t[1];
+    assert_eq!(body.len(), 1, "{body:?}");
+    assert!(body[0].0.contains("Compares"), "{body:?}");
+    let doc = body[0].1;
+    assert!(matches!(doc, Token::String | Token::Comment), "{body:?}");
+    assert!(t[2].iter().all(|(_, k)| *k == doc), "{:?}", t[2]);
+    assert!(t[3].contains(&("def".into(), Token::Keyword)), "{:?}", t[3]);
+  }
+
+  #[test]
+  fn each_side_keeps_its_own_state() {
+    let t = hunk_tokens("js", &[" /* a", "-b", "+c", " */ x", "-/* gone", "+let y = 1;"]);
+    assert_eq!(t[1], vec![("b".into(), Token::Comment)]);
+    assert_eq!(t[2], vec![("c".into(), Token::Comment)]);
+    assert!(t[3].contains(&("*/".into(), Token::Comment)), "{:?}", t[3]);
+    assert!(t[5].contains(&("let".into(), Token::Keyword)), "{:?}", t[5]);
   }
 
   #[test]
