@@ -2007,16 +2007,14 @@ impl ChangesView {
         data.unstaged.push(ix);
       }
     }
-    let committed = match self.options.show_committed {
-      Some(false) => 0,
-      _ => snapshot.committed.len(),
-    };
+    let committed = snapshot.committed.len();
+    let committed_hidden = self.options.show_committed == Some(false);
     let commit_box = SideRow::CommitBox {
       lines: self.message.lines().count().max(1),
       error: self.message_error.is_some(),
       pending: self.pending.is_some(),
     };
-    if listed.is_empty() && committed == 0 && data.conflicted.is_empty() {
+    if listed.is_empty() && (committed == 0 || committed_hidden) && data.conflicted.is_empty() {
       rows.push(SideRow::Empty);
     } else if listed.is_empty() {
       // The filter button shares the "Nothing to commit" row.
@@ -2042,7 +2040,7 @@ impl ChangesView {
     }
     if committed > 0 {
       rows.push(SideRow::CommittedHeader);
-      if !self.committed_collapsed {
+      if !self.committed_collapsed && !committed_hidden {
         data.committed = self.visible_committed_at();
         rows.extend((0..data.committed.len()).map(SideRow::Committed));
       }
@@ -2208,21 +2206,20 @@ impl ChangesView {
     }
   }
 
-  /// The row above the file lists whose filter menu picks what they show:
-  /// generated files and the committed group, when either applies.
+  /// The row above the file lists whose filter menu hides generated files,
+  /// when there are any.
   fn filter_shown(&self) -> bool {
-    let generated = self
+    self
       .snapshot
       .as_ref()
-      .is_some_and(|s| !s.generated.is_empty());
-    generated || self.options.show_committed.is_some()
+      .is_some_and(|s| !s.generated.is_empty())
   }
 
   fn filter_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     if !self.filter_shown() {
       return None;
     }
-    let filtering = self.hide_generated || self.options.show_committed == Some(false);
+    let filtering = self.hide_generated;
     let primary = p.primary;
     let filter = header_button(
       "changes-filter",
@@ -2268,20 +2265,6 @@ impl ChangesView {
             .ignore_closed();
         })
         .check(!self.hide_generated),
-      );
-    }
-    if let Some(show) = self.options.show_committed {
-      let entity = cx.entity().downgrade();
-      items.push(
-        NativeMenuItem::item("Committed", move |cx| {
-          entity
-            .update(cx, |view, cx| {
-              let show = view.options.show_committed.unwrap_or(show);
-              view.field("changes.showCommitted", (!show).into(), cx);
-            })
-            .ignore_closed();
-        })
-        .check(show),
       );
     }
     self.popup(
@@ -2648,18 +2631,36 @@ impl ChangesView {
 
   fn committed_header(&mut self, p: &Palette, cx: &mut Context<Self>) -> Div {
     let total = self.snapshot.as_ref().map_or(0, |s| s.committed.len());
-    div().pt_4().child(
-      ui::SectionHeader::new("committed-section-title", "Committed", p)
-        .collapsible(
-          "committed-section-toggle",
-          self.committed_collapsed,
-          cx.listener(|view, _, _, cx| {
+    let hidden = self.options.show_committed == Some(false);
+    let mut header = ui::SectionHeader::new("committed-section-title", "Committed", p)
+      .collapsible(
+        "committed-section-toggle",
+        self.committed_collapsed || hidden,
+        cx.listener(|view, _, _, cx| {
+          if view.options.show_committed == Some(false) {
+            view.field("changes.showCommitted", true.into(), cx);
+            view.committed_collapsed = false;
+          } else {
             view.committed_collapsed = !view.committed_collapsed;
-            cx.notify();
-          }),
-        )
-        .count(total),
-    )
+          }
+          cx.notify();
+        }),
+      )
+      .count(total);
+    if self.options.show_committed.is_some() {
+      header = header.action(
+        ui::Checkbox::new("committed-hide", p)
+          .checked(hidden)
+          .label("Hide")
+          .gap_1()
+          .text_color(p.muted_foreground)
+          .on_click(cx.listener(move |view, _, _, cx| {
+            cx.stop_propagation();
+            view.field("changes.showCommitted", hidden.into(), cx);
+          })),
+      );
+    }
+    div().pt_4().child(header)
   }
 
   /// The `i`th committed file's row.

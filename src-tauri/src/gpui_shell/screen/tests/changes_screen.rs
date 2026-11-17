@@ -144,11 +144,12 @@ fn changes_host_with_committed() -> FakeHost {
 }
 
 #[gpui::test]
-fn changes_tab_filters_the_committed_group(cx: &mut TestAppContext) {
+fn changes_tab_hides_the_committed_group_from_its_checkbox(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(true));
   assert!(h.drawn("committed-section-toggle"));
   assert!(h.drawn("file-card-c.rs"));
-  filter(&mut h, "Committed");
+  assert!(!h.drawn("changes-filter"), "no filter button for committed");
+  h.click("committed-hide");
   assert_eq!(
     fields(&h, "changes.showCommitted"),
     vec![serde_json::json!(false)]
@@ -159,8 +160,9 @@ fn changes_tab_filters_the_committed_group(cx: &mut TestAppContext) {
 fn changes_tab_hides_the_committed_group_when_filtered_out(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(false));
   assert!(h.drawn("file-row-a.rs"));
-  assert!(h.drawn("changes-filter"));
-  assert!(!h.drawn("committed-section-toggle"));
+  assert!(!h.drawn("changes-filter"));
+  assert!(h.drawn("committed-hide"), "the header stays to unhide");
+  assert!(!h.drawn("committed-row-c.rs"));
   assert!(!h.drawn("file-card-c.rs"));
 }
 
