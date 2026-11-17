@@ -4,13 +4,14 @@ import type {Props} from '@theme/DocItem/Layout';
 import Head from '@docusaurus/Head';
 import {useDoc} from '@docusaurus/plugin-content-docs/client';
 import DownloadCTA from '@site/src/components/DownloadCTA';
+import {withTrailingSlash} from '@site/src/lib/trailingSlash';
 
 const SITE_URL = 'https://treq.dev';
 const ORG = {'@type': 'Organization', name: 'Treq', url: SITE_URL};
 
 function buildSchema(metadata: ReturnType<typeof useDoc>['metadata']) {
   const {title, description, permalink, lastUpdatedAt} = metadata;
-  const url = `${SITE_URL}${permalink}`;
+  const url = withTrailingSlash(`${SITE_URL}${permalink}`);
   const base = {
     '@context': 'https://schema.org',
     ...(description ? {description} : {}),
