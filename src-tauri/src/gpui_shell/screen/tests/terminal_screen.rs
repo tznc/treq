@@ -1000,13 +1000,10 @@ fn double_clicking_a_remote_session_scrolls_it_fully_into_view(cx: &mut TestAppC
 fn double_clicking_a_session_clipped_on_the_left_scrolls_it_into_view(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   let mut commands = Vec::new();
-  for nonce in 1..=3 {
-    commands.extend(
-      open_remote_command(nonce)["commands"]
-        .as_array()
-        .cloned()
-        .unwrap(),
-    );
+  for (nonce, label) in [(1, "shell-a"), (2, "shell-b"), (3, "shell-c")] {
+    let mut command = open_remote_command(nonce);
+    command["commands"][0]["remote"]["label"] = label.into();
+    commands.extend(command["commands"].as_array().cloned().unwrap());
   }
   set_terminal(&mut h, serde_json::json!({ "commands": commands }));
   let container = h
